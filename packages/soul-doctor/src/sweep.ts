@@ -163,10 +163,9 @@ export async function sweepSoul(ports: SweepPorts): Promise<SweepReport> {
       if (outcome === "repaired") repaired += 1;
       if (outcome === "escalated") escalated += 1;
     } catch (error) {
-      await ports.escalate(
-        finding,
-        `the repair attempt itself failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      const because = `the repair attempt itself failed: ${error instanceof Error ? error.message : String(error)}`;
+      await ports.escalate(finding, because);
+      await ports.report({ kind: "escalated", finding, because });
       escalated += 1;
     }
   }

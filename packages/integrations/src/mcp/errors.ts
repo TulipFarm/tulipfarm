@@ -9,6 +9,7 @@ export type McpIntegrationErrorCode =
   | "forbidden"
   | "invalid_definition"
   | "unsupported"
+  | "publication_failed"
   | "unavailable";
 
 export class McpIntegrationError extends Error {

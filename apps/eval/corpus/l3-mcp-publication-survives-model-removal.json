@@ -1,0 +1,153 @@
+{
+  "id": "l3-mcp-publication-survives-model-removal",
+  "tier": "l3",
+  "agent": "support",
+  "input": [
+    {
+      "role": "user",
+      "content": "For this offline fixture, use soul_write with definitionMode canonical to configure Settings with businessName Tulip Supply Co and quick, standard, complex LLM tiers using anthropic model claude-sonnet-5, default preset balanced. Then write a published Routine named support-brief, owned by operations, with one agent State named Brief pointing at support version 1, input {}, end true. Do not execute the Routine."
+    }
+  ],
+  "tools": [
+    {
+      "name": "soul_write",
+      "description": "Commit a Soul definition through the real writer and publisher. For Settings use an empty slug and canonical definitionMode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "slug": { "type": "string" },
+          "content": { "type": "string" },
+          "definitionMode": { "type": "string" }
+        },
+        "required": ["kind", "slug", "content", "definitionMode"]
+      }
+    }
+  ],
+  "platformTools": ["integration_configure", "integration_get"],
+  "script": [
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "configure-model",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Settings",
+            "slug": "",
+            "definitionMode": "canonical",
+            "content": "businessName: Tulip Supply Co\nllm:\n  tiers:\n    quick:\n      providers:\n        - provider: anthropic\n          model: claude-sonnet-5\n    standard:\n      providers:\n        - provider: anthropic\n          model: claude-sonnet-5\n    complex:\n      providers:\n        - provider: anthropic\n          model: claude-sonnet-5\n  presets:\n    default: balanced\n"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "tool_calls",
+      "calls": [
+        {
+          "callId": "create-routine",
+          "name": "soul_write",
+          "arguments": {
+            "kind": "Routine",
+            "slug": "support-brief",
+            "definitionMode": "canonical",
+            "content": "apiVersion: tulipfarm.ai/v1\nkind: Routine\nmetadata:\n  id: 11111111-1111-4111-8111-111111111111\n  slug: support-brief\n  schemaVersion: 1\n  authoredVersion: 1\n  lifecycle: published\nspec:\n  owner: operations\n  start: Brief\n  states:\n    - name: Brief\n      type: agent\n      agentRef:\n        name: support\n        version: '1'\n      input: {}\n      end: true\n"
+          }
+        }
+      ]
+    },
+    { "kind": "text", "text": "Saved support-brief without running it." }
+  ],
+  "journey": [
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Remove the fixture model configuration by writing Settings as exactly businessName: Tulip Supply Co with no llm field. Keep the existing Routine and Agent. Then use integration_configure to save a disabled MCP server named model-independent, label Model Independent, at https://mcp.acme.example/mcp. Do not enable any capabilities."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "remove-model",
+              "name": "soul_write",
+              "arguments": {
+                "kind": "Settings",
+                "slug": "",
+                "definitionMode": "canonical",
+                "content": "businessName: Tulip Supply Co\n"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "configure-integration",
+              "name": "integration_configure",
+              "arguments": {
+                "slug": "model-independent",
+                "configuration": {
+                  "server": {
+                    "id": "model-independent",
+                    "label": "Model Independent",
+                    "transport": {
+                      "type": "streamable-http",
+                      "url": "https://mcp.acme.example/mcp"
+                    }
+                  },
+                  "enabled": false
+                }
+              }
+            }
+          ]
+        },
+        { "kind": "text", "text": "Saved Model Independent without enabling capabilities." }
+      ]
+    },
+    {
+      "input": [
+        {
+          "role": "user",
+          "content": "Use integration_get to read model-independent from the active configuration."
+        }
+      ],
+      "script": [
+        {
+          "kind": "tool_calls",
+          "calls": [
+            {
+              "callId": "read-integration",
+              "name": "integration_get",
+              "arguments": { "slug": "model-independent" }
+            }
+          ]
+        },
+        { "kind": "text", "text": "Model Independent is saved and disabled." }
+      ]
+    }
+  ],
+  "expect": [
+    { "kind": "soul_committed", "path": "soul.yaml" },
+    { "kind": "soul_committed", "path": "routines/support-brief/routine.yaml" },
+    { "kind": "soul_committed", "path": "integrations/model-independent/mcp.yaml" },
+    { "kind": "soul_published", "artifact": "Agent:support", "turnIndex": 2 },
+    { "kind": "soul_published", "artifact": "Routine:support-brief", "turnIndex": 2 },
+    { "kind": "soul_not_published", "artifact": "ModelProfile:balanced", "turnIndex": 2 },
+    { "kind": "soul_published", "artifact": "Integration:model-independent", "turnIndex": 3 },
+    {
+      "kind": "tool_result_field_equals",
+      "name": "integration_get",
+      "argumentPath": "slug",
+      "argumentValue": "model-independent",
+      "status": "succeeded",
+      "turnIndex": 3,
+      "outputPath": "server.enabled",
+      "value": false
+    },
+    { "kind": "run_status", "status": "succeeded" }
+  ]
+}

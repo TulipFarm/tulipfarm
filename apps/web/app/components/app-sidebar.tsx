@@ -23,6 +23,7 @@ import {
 import { CompanionMobileTrigger } from "~/components/onboarding/companion";
 import { PAGE_BAR } from "~/components/page-shell";
 import { ReportBugButton } from "~/components/report-bug-button";
+import { ModelConfigurationWarning } from "~/components/shell/model-configuration-warning";
 import { SidebarCommand } from "~/components/sidebar-command";
 import { ThemeToggle } from "~/components/theme-toggle";
 import { Avatar } from "~/components/ui/avatar";
@@ -1028,6 +1029,7 @@ export function AppShell({ children, user }: { children: ReactNode; user?: Sessi
             </div>
           </div>
         </header>
+        <ModelConfigurationWarning key={`${user?.id}:${pathname}`} user={user} />
         <main id="main-content" tabIndex={-1} className="min-h-0 min-w-0 flex-1 overflow-hidden">
           {children}
         </main>

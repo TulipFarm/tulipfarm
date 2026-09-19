@@ -1,5 +1,6 @@
 import type { SoulWriteRequest, SoulWriter } from "@tulipfarm/soul";
 import { SoulWriteError } from "@tulipfarm/soul";
+import { TaskStoreError } from "@tulipfarm/storage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildSoulDoctor } from "./compose";
 
@@ -66,6 +67,92 @@ spec:
 describe("buildSoulDoctor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  function reportingDoctor(upsertOpen: ReturnType<typeof vi.fn>, modelError?: Error) {
+    const record = vi.fn(async (_event: { action: string }) => undefined);
+    return {
+      record,
+      doctor: buildSoulDoctor({
+        pool: {} as never,
+        businessId: "business-1",
+        soul: { routines: new Map([["quotes", { config: brokenRoutine }]]) },
+        writer: {
+          readWithBase: vi.fn(async () => ({
+            content: "broken authored bytes",
+            baseCommit: "new-commit",
+          })),
+        } as unknown as SoulWriter,
+        actor: {
+          principalId: "system:soul-doctor",
+          email: "system@tulipfarm.local",
+          name: "Soul Doctor",
+        },
+        tasks: { upsertOpen } as never,
+        activity: { record } as never,
+        llm: {
+          isConfigured: modelError !== undefined,
+          effortModel() {
+            throw modelError;
+          },
+        } as never,
+        headSha: async () => "new-commit",
+        activeCommitSha: async () => "published-commit",
+      }),
+    };
+  }
+
+  it("preserves a permanent dismissal and still reports every finding", async () => {
+    const upsertOpen = vi
+      .fn()
+      .mockRejectedValueOnce(new TaskStoreError("dismissed_permanently", "already dismissed"))
+      .mockResolvedValue(undefined);
+    const { doctor, record } = reportingDoctor(upsertOpen);
+
+    await expect(doctor.sweep()).resolves.toMatchObject({
+      found: 2,
+      repaired: 0,
+      escalated: 2,
+    });
+
+    expect(upsertOpen).toHaveBeenCalledTimes(2);
+    const keys = upsertOpen.mock.calls.map(([input]) => input.dedupeKey);
+    expect(new Set(keys).size).toBe(2);
+    expect(storage.settle).toHaveBeenCalledTimes(2);
+    expect(record.mock.calls.map(([event]) => event.action)).toEqual([
+      "soul.doctor.finding",
+      "soul.doctor.escalated",
+      "soul.doctor.finding",
+      "soul.doctor.escalated",
+    ]);
+    expect(storage.resolveUnseen).toHaveBeenCalledOnce();
+  });
+
+  it("still reports a failed repair when its Task was permanently dismissed", async () => {
+    const upsertOpen = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new TaskStoreError("dismissed_permanently", "already dismissed"));
+    const { doctor, record } = reportingDoctor(upsertOpen, new Error("provider unavailable"));
+
+    await expect(doctor.sweep()).resolves.toMatchObject({ found: 2, escalated: 2 });
+    expect(upsertOpen).toHaveBeenCalledTimes(2);
+    expect(record).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: "soul.doctor.escalated",
+        summary: expect.stringContaining("provider unavailable"),
+      })
+    );
+    expect(storage.resolveUnseen).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    new TaskStoreError("not_found", "task missing"),
+    new Error("database unavailable"),
+    Object.assign(new Error("not a TaskStoreError"), { code: "dismissed_permanently" }),
+  ])("does not hide other Task persistence failures: %s", async (error) => {
+    const { doctor } = reportingDoctor(vi.fn().mockRejectedValue(error));
+    await expect(doctor.sweep()).rejects.toBe(error);
   });
 
   it("rejects a repair when a user edits the Routine during the model call", async () => {

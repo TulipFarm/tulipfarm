@@ -62,6 +62,8 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 - A Skill is defined by its `SKILL.md` frontmatter; there is no second definition file. Bundles get
   a canonical Skill document from `skill-documents.ts`, projected on read — never write one to the
   tree. `AGENT.md` works the same way via `agent-documents.ts`.
+- Agents still project without an LLM configuration, omitting `modelProfile`. Unconfigured
+  execution is refused; existing Routine references must not block unrelated publication.
 - Pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown kinds; `temporalClass` means
   which digest to read, not whether the artifact is bundled.
 - `SoulWriter.apply()` is the only authored-tree write path: validate, commit atomically, publish,

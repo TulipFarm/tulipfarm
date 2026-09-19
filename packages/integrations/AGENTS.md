@@ -37,6 +37,7 @@ Owns adapter contracts, event normalization, source ACLs, sync checkpoints, and 
 - Legacy empty reviews need distinct revision-bound standard-access consent; catalog identity is
   not provenance. Provider authentication failures permit same-ID repair only before freezing.
 - Preserving legacy access preserves its provenance. Published setup is not proof of allowed capabilities; return the saved access outcome separately.
+- Setup preserves typed publication failures for explicit retry; unexpected failures report only bounded metadata through the host callback, never thrown text or credentials.
 - Validate destinations through `assertPublicEgressUrl`, send through
   `GuardedEgressHttp`. Neither subsumes the other — a public name can hold an inward A record.
 - `GuardedEgressHttp` passes validated DNS answers to `FetchEgressHttp`, which pins the connection;

@@ -94,6 +94,7 @@ reconciliation, turn execution, projections, and outbox delivery.
   grant can name one Record; a declared target the arguments cannot answer refuses the State.
 - No `authorityLayers` source and no adapter map both park; do not add provider side routes here.
 - Routine `agent` States use the authored Agent version, same AgentLoop, and pinned Context.
+- An Agent with no `modelProfile` parks with `model_not_configured`; never select a fallback model.
 - Routine Agent States run the same Tool loop as Chat: the catalog comes from the control plane
   (`GET /internal/runs/:runId/agent-tools`), so a Routine never sees a wider set than the same
   Agent sees in a conversation. The live effective policy covers input, Tool calls, Tool results,

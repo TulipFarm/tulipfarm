@@ -38,5 +38,7 @@ be repaired automatically or must go to a person. Pure logic: no database, no mo
   expected base so a model response cannot overwrite an interleaved user edit.
 - `doctor:` dedupe keys are refused from Agent-facing Tools (`apps/api/src/tasks/tools.ts`), so a
   Tool call cannot forge or resurrect the Doctor's own escalations.
+- The API escalation adapter respects permanent Task dismissal without suppressing findings or
+  Activity reporting; other persistence failures remain errors.
 - Simulation is not the lint. `simulateRoutine` conflates a missing fixture with an unresolvable
   mapping and stubs holes with `{}`, so it reports defects that are not there.

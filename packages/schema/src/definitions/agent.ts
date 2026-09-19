@@ -54,7 +54,8 @@ const agentSpecSchema = Type.Object(
         { additionalProperties: false }
       )
     ),
-    modelProfile: Type.String({ minLength: 1, maxLength: 256 }),
+    /** Unset preserves an Agent without model configuration; execution must refuse, not default. */
+    modelProfile: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     /**
      * Governance this Agent's turns require of whatever model serves them.
      *

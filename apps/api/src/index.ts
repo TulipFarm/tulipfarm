@@ -1105,6 +1105,7 @@ async function boot() {
       afterDefinitionChange: mcpRuntime.refresh,
       setup: (service) =>
         composeMcpSetup({
+          log: { error: (metadata, message) => app.log.error(metadata, message) },
           db: pool,
           businessId: DEPLOYMENT_BUSINESS_ID,
           service,

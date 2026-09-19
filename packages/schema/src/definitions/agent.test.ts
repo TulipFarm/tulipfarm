@@ -88,8 +88,20 @@ describe("Agent definition schema", () => {
   });
 
   it("rejects a missing required spec field", () => {
-    const { modelProfile: _drop, ...spec } = minimal.spec;
+    const { owner: _drop, ...spec } = minimal.spec;
     expect(() => registry().validate({ ...minimal, spec })).toThrow(SchemaValidationError);
+  });
+
+  it("preserves an unconfigured Agent without a model binding", () => {
+    const { modelProfile: _drop, ...spec } = minimal.spec;
+    const result = registry().validate({ ...minimal, spec });
+    expect(result.document.spec).not.toHaveProperty("modelProfile");
+  });
+
+  it.each(["", null])("rejects an invalid model binding %s", (modelProfile) => {
+    expect(() =>
+      registry().validate({ ...minimal, spec: { ...minimal.spec, modelProfile } })
+    ).toThrow(SchemaValidationError);
   });
 
   it("rejects unknown top-level spec properties", () => {

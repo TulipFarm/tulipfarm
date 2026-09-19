@@ -28,6 +28,7 @@ import {
   mcpIntegrationsFromBundle,
   type RuntimeBundle,
   type SoulIntegration,
+  SoulPublicationError,
   type SoulWriter,
 } from "@tulipfarm/soul";
 import { McpExecutionAuthorizationStore } from "@tulipfarm/storage";
@@ -242,24 +243,30 @@ export async function createMcpIntegrationFeature(deps: McpIntegrationFeatureDep
     soulWriter: deps.soulWriter,
     businessId: deps.businessId,
   });
+  async function changeDefinition(write: () => Promise<void>) {
+    try {
+      await write();
+    } catch (error) {
+      if (error instanceof SoulPublicationError) {
+        throw new McpIntegrationError(
+          "publication_failed",
+          "TulipFarm could not activate the integration settings. An admin must check Operations and Activity before retrying setup."
+        );
+      }
+      throw error;
+    }
+    await refresh();
+    await deps.afterDefinitionChange?.();
+  }
   const service = new McpIntegrationService<CommitActor>(
     {
       ...definitions,
-      put: async (definition, actor, revision) => {
-        await definitions.put(definition, actor, revision);
-        await refresh();
-        await deps.afterDefinitionChange?.();
-      },
-      resumePut: async (definition, actor, revision) => {
-        await definitions.resumePut(definition, actor, revision);
-        await refresh();
-        await deps.afterDefinitionChange?.();
-      },
-      remove: async (id, actor, revision) => {
-        await definitions.remove(id, actor, revision);
-        await refresh();
-        await deps.afterDefinitionChange?.();
-      },
+      put: (definition, actor, revision) =>
+        changeDefinition(() => definitions.put(definition, actor, revision)),
+      resumePut: (definition, actor, revision) =>
+        changeDefinition(() => definitions.resumePut(definition, actor, revision)),
+      remove: (id, actor, revision) =>
+        changeDefinition(() => definitions.remove(id, actor, revision)),
     },
     deps.accounts,
     deps.audit

@@ -59,10 +59,8 @@ const PERSONALITY_MAX = 8192;
 /**
  * The ModelProfile a projected Agent names: the Soul's own default Effort Preset.
  *
- * `undefined` when the Soul configures no LLM, and the caller must then project no Agent at all.
- * `spec.modelProfile` is a required reference, so naming a profile the tree does not derive would
- * turn every Agent into an unresolved reference and fail publication of the whole tree — which is
- * exactly the state a freshly scaffolded Soul is in before its first LLM is configured.
+ * `undefined` when the Soul configures no LLM. The Agent still projects, without a model
+ * binding, so existing Routine references cannot block unrelated configuration publication.
  */
 export function defaultModelProfile(config: LlmConfig | undefined): string | undefined {
   if (config === undefined) return undefined;
@@ -80,7 +78,7 @@ export function defaultModelProfile(config: LlmConfig | undefined): string | und
 export function agentDocumentFromLegacy(
   slug: string,
   content: string,
-  modelProfile: string,
+  modelProfile: string | undefined,
   legacyPath: string
 ): VersionedSchemaDocument | undefined {
   const { frontmatter, body } = parseFrontmatter(content);
@@ -106,7 +104,7 @@ export function agentDocumentFromLegacy(
       ...(ownership === undefined ? {} : { ownership }),
       instructions: { path: legacyPath },
       ...(personality.length === 0 ? {} : { personality: personality.slice(0, PERSONALITY_MAX) }),
-      modelProfile,
+      ...(modelProfile === undefined ? {} : { modelProfile }),
       ...(isRecord(fields.modelPolicy) ? { modelPolicy: fields.modelPolicy } : {}),
       autonomy:
         (autonomy === undefined ? undefined : AUTONOMY_CEILINGS[autonomy]) ?? DEFAULT_AUTONOMY,

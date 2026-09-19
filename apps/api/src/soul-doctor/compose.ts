@@ -16,7 +16,12 @@ import {
   sweepSoul,
 } from "@tulipfarm/soul-doctor";
 import type { Queryable, TaskStore } from "@tulipfarm/storage";
-import { closeSupersededRuns, listUnhealthyRuns, SoulDoctorLedger } from "@tulipfarm/storage";
+import {
+  closeSupersededRuns,
+  listUnhealthyRuns,
+  SoulDoctorLedger,
+  TaskStoreError,
+} from "@tulipfarm/storage";
 import { parse as parseYaml } from "yaml";
 import type { ActivityService } from "../activity/service";
 
@@ -231,19 +236,26 @@ export function buildSoulDoctor(deps: SoulDoctorDeps): { sweep(): Promise<SweepR
     },
     ...(deps.llm.isConfigured ? { repair } : {}),
     async escalate(finding, because) {
-      await deps.tasks.upsertOpen(
-        {
-          businessId,
-          assigneeKind: "role",
-          assigneeId: "admin",
-          dedupeKey: doctorDedupeKey(finding),
-          title: `${finding.subject.kind} \`${finding.subject.id}\` is broken`,
-          detail: `${finding.detail}\n\nNot repaired automatically because ${because}.`,
-          action: { kind: "ack" },
-          subject: { kind: finding.subject.kind, id: finding.subject.id },
-        },
-        new Date()
-      );
+      try {
+        await deps.tasks.upsertOpen(
+          {
+            businessId,
+            assigneeKind: "role",
+            assigneeId: "admin",
+            dedupeKey: doctorDedupeKey(finding),
+            title: `${finding.subject.kind} \`${finding.subject.id}\` is broken`,
+            detail: `${finding.detail}\n\nNot repaired automatically because ${because}.`,
+            action: { kind: "ack" },
+            subject: { kind: finding.subject.kind, id: finding.subject.id },
+          },
+          new Date()
+        );
+      } catch (error) {
+        // Dismissal suppresses the Task, not the finding's ledger or Activity report.
+        if (!(error instanceof TaskStoreError && error.code === "dismissed_permanently")) {
+          throw error;
+        }
+      }
     },
     report(event) {
       const summary =
