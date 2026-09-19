@@ -64,7 +64,7 @@ After creating the admin account, open **Business → About** and save the publi
 `PUBLIC_ORIGINS_LOCKED=true` only when Portainer's environment should remain authoritative.
 
 Open `http://<host>:8080` (or your domain) and create the first admin account through
-[the setup wizard](/docs/self-hosting/install#finish-setup).
+[the setup wizard](/self-hosting/install#finish-setup).
 
 </Step>
 
@@ -86,17 +86,17 @@ with the stack name). All four are visible under **Volumes**.
 
 The Compose file deliberately leaves port `5432` unpublished, which is what makes the
 default password safe. Portainer makes publishing a port a two-click operation, don't. If
-you need external database access, use a [managed database](/docs/self-hosting/managed-database)
+you need external database access, use a [managed database](/self-hosting/managed-database)
 instead.
 
 ## Updating
 
 **Stacks → tulipfarm → Update the stack**, with *Re-pull image* enabled. Read
-[Updating and rollback](/docs/self-hosting/updating) first. Migrations run on boot and do not
+[Updating and rollback](/self-hosting/updating) first. Migrations run on boot and do not
 have a down-path.
 
 ## Do not scale it
 
 Leave `app`, `worker`, and `integration-worker` at **one replica each**. Portainer's scale
 control can corrupt the soul git tree on `app` or duplicate maintenance work on `worker`.
-See [Deploy](/docs/self-hosting#what-every-deployment-needs).
+See [Deploy](/self-hosting#what-every-deployment-needs).

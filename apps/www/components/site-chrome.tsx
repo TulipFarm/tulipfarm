@@ -55,7 +55,7 @@ export function SiteFooter() {
           <a href="/deploy">Start building</a>
           <a href={docsUrl()}>Documentation</a>
           <a href={GITHUB_URL}>GitHub</a>
-          <a href={docsUrl("/docs/security/telemetry")}>Data and telemetry</a>
+          <a href={docsUrl("/security/telemetry")}>Data and telemetry</a>
         </nav>
       </div>
       <div className="site-container footer-note">

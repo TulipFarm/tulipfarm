@@ -40,7 +40,7 @@ curl -fsSLO {{SITE_URL}}/azure-containerapp.yaml
 
 > **Verify.** `azure-containerapp.yaml` is now in the working directory.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#download).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#download).
 
 ## Create a resource group and environment
 
@@ -77,11 +77,11 @@ az postgres flexible-server parameter set \
 
 Then hand the connection string to the app as a secret. Azure requires TLS, so keep
 `sslmode=require`. Provider-by-provider extension notes live in
-[Use a managed database](/docs/self-hosting/managed-database).
+[Use a managed database](/self-hosting/managed-database).
 
 > **Verify.** `az postgres flexible-server parameter show --name azure.extensions --server-name tulipfarm-db --resource-group tulipfarm` succeeds, expect the value includes vector and citext.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#database).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#database).
 
 ## Point at a PostgreSQL you run elsewhere
 
@@ -180,7 +180,7 @@ the generated definition sets a high startup `failureThreshold`.
 
 > **Verify.** `az containerapp show --name tulipfarm-app --resource-group tulipfarm` succeeds, expect runningStatus is Running.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#readyz).
 
 ## Confirm the app is ready
 
@@ -194,7 +194,7 @@ az containerapp show --name tulipfarm-app --resource-group tulipfarm \
 
 > **Check.** The FQDN Azure assigned answers /readyz with 200, allowing several minutes on a fresh database while migrations run.
 
-If that check fails, see [what to do next](/docs/self-hosting/when-install-fails#readyz).
+If that check fails, see [what to do next](/self-hosting/when-install-fails#readyz).
 
 ## Put it on your own domain
 
@@ -215,7 +215,7 @@ configuration, unlike an nginx ingress, which needs buffering turned off explici
 ## Seed the first admin without a browser
 
 Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` together on `app` and the instance seeds
-itself and skips the setup wizard. See [headless seeding](/docs/self-hosting/headless).
+itself and skips the setup wizard. See [headless seeding](/self-hosting/headless).
 
 > **Check.** You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
 
@@ -231,7 +231,7 @@ restoring only one is not enough:
 - **The soul** at `SOUL_PATH` stores your entire configuration. On this platform the soul has no
   durable disk either, so mirror it to a git remote with `SOUL_GIT_REMOTE_URL`.
 
-See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+See [Updating and rollback](/self-hosting/updating) before your first upgrade.
 
 > **Check.** A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
@@ -240,7 +240,7 @@ See [Updating and rollback](/docs/self-hosting/updating) before your first upgra
 Pin one image tag; do not track a moving tag. Each update creates a new revision, and
 migrations apply automatically on boot. There are **no down-migrations**, so a revision
 rollback does not undo a schema change. Read
-[Updating and rollback](/docs/self-hosting/updating) first.
+[Updating and rollback](/self-hosting/updating) first.
 
 ```bash
 az containerapp update --name tulipfarm-app --resource-group tulipfarm \

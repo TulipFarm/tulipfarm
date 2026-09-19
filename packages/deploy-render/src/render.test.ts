@@ -129,6 +129,16 @@ describe("renderDeploymentSurfaces", () => {
     }
   });
 
+  it("links generated pages to clean reading paths while preserving filesystem paths", () => {
+    for (const page of result.pages) {
+      expect(page.content).not.toMatch(/\]\(\/docs(?:\/|[)#?])/);
+      expect(page.path).toMatch(/^(self-hosting|reference)\//);
+    }
+    expect(result.pages.map((page) => page.content).join("\n")).toContain(
+      "[what to do next](/self-hosting/when-install-fails#readyz)"
+    );
+  });
+
   it("keeps the on-disk generated pages current — re-render must be byte-identical", () => {
     for (const page of result.pages) {
       const onDisk = readFileSync(join(CONTENT, page.path), "utf8");
@@ -285,6 +295,51 @@ describe("single-file deployment prompt (/deploy.txt)", () => {
   it("emits plain text — no MDX components survive from a manifest body", () => {
     expect(result.prompt).not.toContain("<Callout");
     expect(result.prompt).not.toContain("</Callout>");
+  });
+
+  it("uses absolute clean reading links in target prose, contract prose, and failure guidance", () => {
+    expect(result.prompt).toContain("[one-line installer]({{DOCS_URL}}/self-hosting/install)");
+    expect(result.prompt).toContain(
+      "[boot modes]({{DOCS_URL}}/self-hosting/how-boot-modes-work#explicit-hosted-configuration)"
+    );
+    expect(result.prompt).toContain("On fail: {{DOCS_URL}}/self-hosting/when-install-fails#readyz");
+    expect(result.prompt).not.toContain("{{DOCS_URL}}/docs");
+    expect(result.prompt).not.toMatch(/\]\(\/self-hosting/);
+    expect(result.prompt).toContain("{{SITE_URL}}/docker-compose.yml");
+  });
+
+  it("resolves only reading links, leaving distribution and machine paths unchanged", () => {
+    const readingPaths = [
+      "/",
+      "/self-hosting",
+      "/self-hosting/install#finish-setup",
+      "/administration/users",
+      "/using-tulipfarm/agents",
+      "/reference/environment-variables",
+      "/security/telemetry?source=deploy",
+    ];
+    const unchangedPaths = [
+      "/install.sh",
+      "/schemas/plan/v1.schema.json",
+      "/llms.mdx/docs/self-hosting/install",
+      "/og/docs/self-hosting/install/image.png",
+    ];
+    const injected = `${input.contract}
+  - name: TEST_DOCUMENTATION_LINKS
+    group: Other
+    zone: set-these
+    consumers: [app]
+    description: Synthetic links proving reading and distribution paths stay distinct.
+    consequence: >
+      ${[...readingPaths, ...unchangedPaths].map((path) => `[Link](${path})`).join(" ")}
+`;
+    const { prompt } = renderDeploymentSurfaces({ contract: injected, targets: input.targets });
+    for (const path of readingPaths) {
+      expect(prompt).toContain(`[Link]({{DOCS_URL}}${path})`);
+    }
+    for (const path of unchangedPaths) {
+      expect(prompt).toContain(`[Link](${path})`);
+    }
   });
 });
 

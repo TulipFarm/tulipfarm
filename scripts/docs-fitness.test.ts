@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { absoluteDocsLinks, docsRoute } from "../apps/docs/lib/shared";
 import { DOCS_URL } from "../packages/constants/src/site";
 
 function repoRoot(): string {
@@ -44,7 +45,7 @@ function parsePage(file: string): Page {
     .replace(/(^|\/)index$/, "");
   return {
     file,
-    url: `/docs${slug ? `/${slug}` : ""}`.replace(/\/$/, ""),
+    url: `/${slug}`,
     frontmatter: match?.[1] ?? "",
     body: match ? raw.slice(match[0].length) : raw,
   };
@@ -54,11 +55,12 @@ const pages = pageFiles.map(parsePage);
 const pageUrls = new Set(pages.map((page) => page.url));
 
 describe("documentation-only application", () => {
-  it("sends the root directly to documentation in development and on Pages", () => {
-    const rootPage = readFileSync(join(ROOT, "apps/docs/app/page.tsx"), "utf8");
+  it("serves documentation at the root and redirects only legacy reading paths", () => {
     const redirects = readFileSync(join(ROOT, "apps/docs/public/_redirects"), "utf8");
-    expect(rootPage).toMatch(/(?:permanentRedirect|redirect)\("\/docs"\)/);
-    expect(redirects).toMatch(/^\/\s+\/docs\s+301$/m);
+    expect(docsRoute).toBe("/");
+    expect(redirects).not.toMatch(/^\/\s+/m);
+    expect(redirects).toMatch(/^\/docs\s+\/\s+301$/m);
+    expect(redirects).toMatch(/^\/docs\/\*\s+\/:splat\s+301$/m);
   });
 
   it("does not retain marketing routes, components, or presentation effects", () => {
@@ -68,6 +70,24 @@ describe("documentation-only application", () => {
     expect(marketingFiles).toEqual([]);
     const styles = readFileSync(join(ROOT, "apps/docs/app/global.css"), "utf8");
     expect(styles).not.toMatch(/\.tf-(?:grain|ambient)|\[data-reveal/);
+  });
+});
+
+describe("machine-readable docs links", () => {
+  it("resolves root and deep links without adding a documentation prefix", () => {
+    expect(
+      absoluteDocsLinks(
+        '[Index](/)\n[Install](/self-hosting/install?from=chat#verify)\n<Card href="/reference/api" />'
+      )
+    ).toBe(
+      `[Index](${DOCS_URL}/)\n[Install](${DOCS_URL}/self-hosting/install?from=chat#verify)\n<Card href="${DOCS_URL}/reference/api" />`
+    );
+  });
+
+  it("leaves external, protocol-relative, and fragment-only links unchanged", () => {
+    const content =
+      '[Section](#verify) [External](https://example.com/docs) [Protocol-relative](//example.com/docs) <a href="https://example.com/docs">External</a>';
+    expect(absoluteDocsLinks(content)).toBe(content);
   });
 });
 
@@ -104,14 +124,12 @@ describe("docs frontmatter", () => {
 describe("docs links", () => {
   it("resolves every internal docs link to a real page", () => {
     const broken: string[] = [];
-    // Markdown `](/docs/…)` and JSX `href="/docs/…"` both ship links; only checking one
-    // let two dead `<Card href>` targets reach the built site.
-    const patterns = [/\]\((\/docs[^)#\s]*)(?:#[^)\s]*)?\)/g, /href="(\/docs[^"#]*)(?:#[^"]*)?"/g];
+    const patterns = [/\]\((\/(?!\/)[^)\s]*)\)/g, /href=["'](\/(?!\/)[^"']*)["']/g];
     for (const page of pages) {
-      const body = page.body.replaceAll("{{DOCS_URL}}", "").replaceAll(`${DOCS_URL}/docs`, "/docs");
+      const body = page.body.replaceAll("{{DOCS_URL}}", "").replaceAll(DOCS_URL, "");
       for (const pattern of patterns) {
         for (const match of body.matchAll(pattern)) {
-          const target = match[1].replace(/\/$/, "");
+          const target = new URL(match[1], DOCS_URL).pathname.replace(/\/$/, "") || "/";
           if (!pageUrls.has(target)) broken.push(`${page.file} → ${match[1]}`);
         }
       }

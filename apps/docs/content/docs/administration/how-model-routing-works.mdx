@@ -46,13 +46,13 @@ binary and uses it as a model.
 They are ordinary providers everywhere else: they appear in the setup wizard and in **Operate →
 Business → Models**, they can be mixed into a chain with API-key providers, and deleting their
 credential prunes them from the config like any other. See
-[Run on a subscription plan](/docs/administration/run-on-a-subscription) for the setup steps.
+[Run on a subscription plan](/administration/run-on-a-subscription) for the setup steps.
 
 Three properties are specific to them and worth understanding:
 
 **The CLI never executes a tool.** TulipFarm's seam is a *model*, not an agent loop: messages go in,
 one completion comes out, and any tool calls come back **unexecuted**. The adapter captures them and
-stops the CLI turn. Every effect still runs through the tool Broker, so [approvals](/docs/using-tulipfarm/approvals),
+stops the CLI turn. Every effect still runs through the tool Broker, so [approvals](/using-tulipfarm/approvals),
 authority checks, and audit apply exactly as they do to an API-key provider. A subscription
 provider is a cheaper way to buy tokens, not a way around governance.
 
@@ -145,7 +145,7 @@ through a plan, so their cost fields stay empty and their capabilities come from
 rather than a catalog lookup.
 
 The full field list, and every reason routing can refuse a model, is in
-[model specs](/docs/reference/model-specs).
+[model specs](/reference/model-specs).
 
 ## Auto selection
 
@@ -181,4 +181,4 @@ agent, skills, Resources, and knowledge pages are carried over so only the effor
 Escalation is always the participant's choice, TulipFarm never silently upgrades a turn.
 
 With no `soul.yaml#llm` configuration, LLM features are disabled until an admin configures providers. Use
-[Configure LLM providers](/docs/administration/configure-llm-providers) for the UI flow.
+[Configure LLM providers](/administration/configure-llm-providers) for the UI flow.

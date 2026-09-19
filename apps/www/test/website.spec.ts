@@ -24,7 +24,7 @@ test("ships the value proposition, prepared example, and primary action in HTML"
     page
       .getByRole("navigation", { name: "Main", exact: true })
       .getByRole("link", { name: "Docs", exact: true })
-  ).toHaveAttribute("href", `${DOCS_URL}/docs`);
+  ).toHaveAttribute("href", `${DOCS_URL}/`);
   await expect(
     demo.getByRole("heading", { name: "Put the first customer in place." })
   ).toBeVisible();
@@ -229,11 +229,20 @@ test("takes Start building to the guided deployment page", async ({ page }) => {
 test("publishes permanent documentation redirects and real machine-readable downloads", async ({
   request,
 }) => {
-  const redirect = await request.get("/docs/using-tulipfarm/agents?source=legacy", {
-    maxRedirects: 0,
-  });
-  expect(redirect.status()).toBe(301);
-  expect(redirect.headers().location).toContain(`${DOCS_URL}/docs/using-tulipfarm/agents`);
+  for (const [legacyPath, docsPath] of [
+    ["/docs", "/"],
+    ["/docs.html", "/"],
+    ["/docs/using-tulipfarm/agents?source=legacy", "/using-tulipfarm/agents?source=legacy"],
+    ["/api/search", "/api/search"],
+    ["/llms.txt", "/llms.txt"],
+    ["/llms-full.txt", "/llms-full.txt"],
+    ["/llms.mdx/docs/self-hosting/install", "/llms.mdx/docs/self-hosting/install"],
+    ["/og/docs/self-hosting/install/image.png", "/og/docs/self-hosting/install/image.png"],
+  ] as const) {
+    const redirect = await request.get(legacyPath, { maxRedirects: 0 });
+    expect(redirect.status(), legacyPath).toBe(301);
+    expect(redirect.headers().location, legacyPath).toBe(`${DOCS_URL}${docsPath}`);
+  }
 
   for (const path of [
     "/install.sh",

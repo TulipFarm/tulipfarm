@@ -3,7 +3,7 @@ title: Docker Compose
 tier: supported
 description: Run TulipFarm from the published Compose file using one file, every default set, no .env and no key generation required.
 summary: |
-  The [one-line installer](/docs/self-hosting/install) is the fastest path on a machine you have a
+  The [one-line installer](/self-hosting/install) is the fastest path on a machine you have a
   shell on. When you deploy through a UI instead (Portainer, Coolify, Dokploy, Unraid), you paste a
   Compose file into a form, and there is no shell to run a script in. TulipFarm's
   `docker-compose.yml` is written for exactly that: **every variable has a default, and no `.env`
@@ -34,8 +34,8 @@ steps:
       the same one CI boots in the `Compose parity` job, so what you run here is what we test.
 
       Deploying through a UI instead? The same file goes straight into
-      [Coolify](/docs/self-hosting/coolify), [Portainer](/docs/self-hosting/portainer), or
-      [Dokploy, Unraid, Synology, and CasaOS](/docs/self-hosting/other-platforms). Those pages
+      [Coolify](/self-hosting/coolify), [Portainer](/self-hosting/portainer), or
+      [Dokploy, Unraid, Synology, and CasaOS](/self-hosting/other-platforms). Those pages
       cover only what differs per platform.
     run: curl -fsSLO {{SITE_URL}}/docker-compose.yml
     verify:
@@ -52,7 +52,7 @@ steps:
       sync, delivery, retries, and reconciliation), and `postgres` (PostgreSQL 17 with pgvector).
 
       Open `http://localhost:8080` and finish the
-      [setup wizard](/docs/self-hosting/install#finish-setup).
+      [setup wizard](/self-hosting/install#finish-setup).
     run: docker compose up -d
     verify:
       kind: http
@@ -73,7 +73,7 @@ steps:
       ```
 
       Full walkthrough, including the extensions your provider must allow:
-      [Use a managed database](/docs/self-hosting/managed-database).
+      [Use a managed database](/self-hosting/managed-database).
     verify:
       kind: http
       url: http://localhost:8080/readyz
@@ -220,7 +220,7 @@ steps:
     title: Update
     body: |
       Migrations apply automatically on boot, and there are **no down-migrations**. Read
-      [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+      [Updating and rollback](/self-hosting/updating) before your first upgrade.
 
       The trailing `image prune` reclaims the image this update replaced. Without it every update
       leaves a whole orphaned image (~4.5 GB) on disk, and a regularly updated instance runs out.

@@ -24,7 +24,7 @@ const questions = [
       "Your instance runs on your infrastructure. Agent actions can send data to the model providers and integrations you authorize. Product telemetry has a separate, documented policy.",
     link: {
       label: "Read the data and telemetry policy",
-      href: docsUrl("/docs/security/telemetry"),
+      href: docsUrl("/security/telemetry"),
     },
   },
   {
@@ -74,7 +74,7 @@ export default function HomePage() {
               Let it read and update tickets. Keep refunds with your team. You set the tools and
               boundaries.
             </p>
-            <a href={docsUrl("/docs/using-tulipfarm/agents")} className="text-link">
+            <a href={docsUrl("/using-tulipfarm/agents")} className="text-link">
               Meet your agents <ArrowRight size={16} />
             </a>
           </div>
@@ -119,7 +119,7 @@ export default function HomePage() {
               should repeat itself.
             </h2>
             <p>Schedule a daily review. Come back to a summary of what needs your attention.</p>
-            <a href={docsUrl("/docs/using-tulipfarm/routines")} className="text-link">
+            <a href={docsUrl("/using-tulipfarm/routines")} className="text-link">
               Make it a routine <ArrowRight size={16} />
             </a>
           </div>
@@ -165,7 +165,7 @@ export default function HomePage() {
             <br />
             <span>On your terms.</span>
           </h2>
-          <a href={docsUrl("/docs/security")} className="text-link">
+          <a href={docsUrl("/security")} className="text-link">
             Read about security <ArrowRight size={17} />
           </a>
         </div>

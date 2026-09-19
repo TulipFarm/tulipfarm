@@ -8,7 +8,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 TulipFarm encrypts the credentials it has to use again later: LLM provider API keys,
 integration tokens, and any secret you store. Encryption is reversible by design: when an
 agent calls a provider, the instance must recover the real key to send it. Values that
-only need to be checked, never read back, are [hashed](/docs/security/hashing) instead.
+only need to be checked, never read back, are [hashed](/security/hashing) instead.
 
 ## AES-256-GCM with a fresh IV per record
 
@@ -70,7 +70,7 @@ In transit, the API is served over TLS in production and sets `Secure`, `HttpOnl
 These operator commands run through the API's `keys` CLI:
 `pnpm --filter @tulipfarm/api keys <command>`.
 
-To add or remove a secret, see [Store a secret](/docs/administration/manage-credentials). For the
+To add or remove a secret, see [Store a secret](/administration/manage-credentials). For the
 variables that configure encryption, see
-[Environment variables](/docs/reference/environment-variables). For where secrets fit in
-the wider instance, see [manage credentials](/docs/administration/manage-credentials).
+[Environment variables](/reference/environment-variables). For where secrets fit in
+the wider instance, see [manage credentials](/administration/manage-credentials).

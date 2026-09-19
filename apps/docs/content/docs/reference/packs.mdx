@@ -105,7 +105,7 @@ agent, presentation component, or routine. Its owning authoring tool performs th
 
 ## Embedded plan
 
-`plan` is a complete [YAML plan](/docs/reference/yaml-plans), not a different step language.
+`plan` is a complete [YAML plan](/reference/yaml-plans), not a different step language.
 Its steps name exact tools, existing versioned agents, or existing versioned routines.
 `needs` lists the prerequisites of each step; the dependency graph must not contain a cycle.
 
@@ -122,7 +122,7 @@ installation graph; reaching the audit is not a completed installation.
 
 This is specific to adaptable packs. An ordinary executable YAML plan still follows the
 unchanged-source publication and durable execution rules in the
-[YAML plan reference](/docs/reference/yaml-plans).
+[YAML plan reference](/reference/yaml-plans).
 
 A plan cannot reference an agent or routine that has not yet been published. When installation
 needs to create one, the confirmed work must publish that prerequisite before publishing a plan

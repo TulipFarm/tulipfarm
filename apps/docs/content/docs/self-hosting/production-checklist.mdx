@@ -15,7 +15,7 @@ data". This is the gap between the two. Work down it before you put anything rea
 A fresh install serves plain HTTP. Credentials, session cookies, and every chat message
 cross the network in the clear until you fix that.
 
-Set up [TLS](/docs/self-hosting/tls) with a reverse proxy and bind the app to loopback
+Set up [TLS](/self-hosting/tls) with a reverse proxy and bind the app to loopback
 (`HOST_BIND=127.0.0.1`) so the plain-HTTP port is not independently reachable.
 
 <Callout type="warn">
@@ -63,7 +63,7 @@ The Compose file defaults to `POSTGRES_PASSWORD=tulipfarm`. That default exists 
 runs with no prior setup, and it is safe **only** because port `5432` is never published.
 
 Set your own, and do not publish the Postgres port. The
-[one-line installer](/docs/self-hosting/install) already generates a strong one.
+[one-line installer](/self-hosting/install) already generates a strong one.
 
 ### 5. Pin an image tag
 
@@ -79,7 +79,7 @@ at a moment you did not choose.
 ### 6. Move to a managed database
 
 Backups, point-in-time restore, and failover stop being yours to build. See
-[Use a managed database](/docs/self-hosting/managed-database).
+[Use a managed database](/self-hosting/managed-database).
 
 ### 7. Give the soul a git remote
 
@@ -99,7 +99,7 @@ Three things, and a provider snapshot only covers the first:
 | `tulipfarm-bucket` (`/var/lib/garage`) | Every uploaded and generated file's bytes. Skip it if you moved storage to an external S3 provider. |
 
 TulipFarm has no built-in scheduled backups. Use your platform's snapshots or your own
-`pg_dump` cron. [Updating and rollback](/docs/self-hosting/updating) covers when to take one.
+`pg_dump` cron. [Updating and rollback](/self-hosting/updating) covers when to take one.
 
 ### 9. Verify a restart
 
@@ -115,7 +115,7 @@ has never been restarted has not been tested.
 - **No down-migrations.** Rolling back to an older image after a migration ran requires a
   database restore, not a tag change.
 - **Kubernetes is untested.** CI exercises the Compose stack only. See
-  [Kubernetes](/docs/self-hosting/kubernetes).
+  [Kubernetes](/self-hosting/kubernetes).
 
 ## Understood tradeoffs
 
@@ -124,5 +124,5 @@ Two things stay true even after this whole list, and are worth stating to whoeve
 - A generated or locally-stored `ENCRYPTION_KEY` sits on the same host as the database
   volume, so a full host compromise yields both. Step 3 is what moves the key out of reach.
 - The setup wizard is unauthenticated until the first admin exists. That window closes the
-  moment an admin is created, and [headless seeding](/docs/self-hosting/headless) closes it before
+  moment an admin is created, and [headless seeding](/self-hosting/headless) closes it before
   the instance ever accepts a browser.

@@ -52,7 +52,9 @@ describe("published deploy.txt", () => {
     expect(onDisk).not.toContain("{{SITE_URL}}");
     expect(onDisk).not.toContain("{{DOCS_URL}}");
     expect(onDisk).toContain(SITE_URL);
-    expect(onDisk).toContain(`${DOCS_URL}/docs/self-hosting`);
+    expect(onDisk).toContain(`${DOCS_URL}/self-hosting`);
+    expect(onDisk).not.toContain(`${DOCS_URL}/docs`);
     expect(onDisk).not.toContain(`${SITE_URL}/docs`);
+    expect(onDisk).not.toMatch(/\]\(\/self-hosting/);
   });
 });

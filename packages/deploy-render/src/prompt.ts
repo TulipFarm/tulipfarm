@@ -27,7 +27,7 @@ import {
  *    shipped weak `POSTGRES_PASSWORD`) renders faithfully, because it is contract data, not a leak.
  */
 
-const SELF_HOSTING_BASE = "{{DOCS_URL}}/docs/self-hosting";
+const SELF_HOSTING_BASE = "{{DOCS_URL}}/self-hosting";
 
 const ZONE_KEY: ReadonlyArray<[DeploymentContractEnvVar["zone"], string]> = [
   ["set-these", "normal configuration; change it to suit the deployment"],
@@ -165,13 +165,12 @@ function branchLabels(target: DeploymentTarget, step: DeploymentTargetStep): str
   });
 }
 
-/** MDX cannot survive as plain text: drop Callout tags to a marker, make doc links absolute. */
+/** MDX cannot survive as plain text: drop Callout tags to a marker. */
 function sanitizeBody(body: string): string {
   return body
     .trimEnd()
     .replace(/<Callout[^>]*>/g, "NOTE:")
-    .replace(/<\/Callout>/g, "")
-    .replace(/\]\(\/docs\//g, "]({{DOCS_URL}}/docs/");
+    .replace(/<\/Callout>/g, "");
 }
 
 function renderOnFail(onFail: string): string {
@@ -249,5 +248,8 @@ export function renderPrompt(contract: DeploymentContract, targets: DeploymentTa
     `TARGETS\n${"=".repeat(60)}`,
     ...ordered.map(renderTarget),
   ];
-  return `${sections.join("\n\n")}\n`;
+  return `${sections.join("\n\n")}\n`.replace(
+    /\]\((\/(?:self-hosting|administration|using-tulipfarm|reference|security)(?=[/#?)])|\/(?=[#?)]))/g,
+    "]({{DOCS_URL}}$1"
+  );
 }

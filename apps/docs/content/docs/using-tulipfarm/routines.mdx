@@ -8,11 +8,11 @@ description: Durable repeatable automations made of triggers, states, waits, and
 A **routine** is repeatable automation. It captures work that should happen the same way each time:
 review an expense, classify an inbound event, wait for approval, update records, or hand a task to
 an agent. You build routines by chat through `routine-forge`; the generated definition lives in the
-[Soul](/docs/using-tulipfarm/what-a-soul-is).
+[Soul](/using-tulipfarm/what-a-soul-is).
 
 ## Triggered into runs
 
-A routine starts a durable [run](/docs/using-tulipfarm/runs). Manual, scheduled, event, webhook, and
+A routine starts a durable [run](/using-tulipfarm/runs). Manual, scheduled, event, webhook, and
 agent-triggered paths all normalize into a run with validated input. Editing a routine later does
 not rewrite a run already in flight; work proceeds from the definition snapshot pinned at start.
 
@@ -83,7 +83,7 @@ that announces the same thing again is refused rather than left to loop.
 
 ## Human gates
 
-A routine state can pause for [approvals](/docs/using-tulipfarm/approvals). The item appears in Inbox and,
+A routine state can pause for [approvals](/using-tulipfarm/approvals). The item appears in Inbox and,
 when Slack is connected, can also be answered from Slack. Approving wakes the run; denying routes
 through the routine's failure handling.
 
@@ -93,4 +93,4 @@ A routine can include hook logic for computations that do not fit cleanly in dec
 Hooks run in the same isolated, time-boxed sandbox family as other authored code paths, and are
 validated before use.
 
-Use [Build and run a routine](/docs/using-tulipfarm/build-a-routine) for the task flow.
+Use [Build and run a routine](/using-tulipfarm/build-a-routine) for the task flow.

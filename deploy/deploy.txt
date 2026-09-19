@@ -250,7 +250,7 @@ honour it is already a mistake.
     zone: installer-sets | required: no | consumers: app, worker, integration-worker
     does: Explicit hosting selection, shared by the API and both workers. Leave unset or empty, or use `independent`, for supported self-hosting.
     default: independent
-    if set wrong: Unknown non-empty values fail startup. `tulipfarm` requires an installation UUID and trusted hosted identity verification, which is unavailable in production in this release; it never falls back to independent setup. A stored hosting association cannot be replaced by changing this value. See [boot modes](/docs/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
+    if set wrong: Unknown non-empty values fail startup. `tulipfarm` requires an installation UUID and trusted hosted identity verification, which is unavailable in production in this release; it never falls back to independent setup. A stored hosting association cannot be replaced by changing this value. See [boot modes](https://docs.tulipfarm.site/self-hosting/how-boot-modes-work#explicit-hosted-configuration).
   SOUL_BUNDLE_RETENTION_DAYS
     zone: set-these | required: no | consumers: app
     does: How long an unreferenced published execution bundle is kept before the nightly sweep may delete it. The floor is 7.
@@ -622,7 +622,7 @@ TARGETS
 Target: Docker Compose  [supported: verified in CI]
 ============================================================
 
-The [one-line installer](https://docs.tulipfarm.site/docs/self-hosting/install) is the fastest path on a machine you have a
+The [one-line installer](https://docs.tulipfarm.site/self-hosting/install) is the fastest path on a machine you have a
 shell on. When you deploy through a UI instead (Portainer, Coolify, Dokploy, Unraid), you paste a
 Compose file into a form, and there is no shell to run a script in. TulipFarm's
 `docker-compose.yml` is written for exactly that: **every variable has a default, and no `.env`
@@ -639,13 +639,13 @@ Fetch the published `docker-compose.yml`. It is the same file the installer down
 the same one CI boots in the `Compose parity` job, so what you run here is what we test.
 
 Deploying through a UI instead? The same file goes straight into
-[Coolify](https://docs.tulipfarm.site/docs/self-hosting/coolify), [Portainer](https://docs.tulipfarm.site/docs/self-hosting/portainer), or
-[Dokploy, Unraid, Synology, and CasaOS](https://docs.tulipfarm.site/docs/self-hosting/other-platforms). Those pages
+[Coolify](https://docs.tulipfarm.site/self-hosting/coolify), [Portainer](https://docs.tulipfarm.site/self-hosting/portainer), or
+[Dokploy, Unraid, Synology, and CasaOS](https://docs.tulipfarm.site/self-hosting/other-platforms). Those pages
 cover only what differs per platform.
 
   run: curl -fsSLO https://tulipfarm.site/docker-compose.yml
   Verify (file): `docker-compose.yml` exists in the working directory.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#download
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#download
 
 Step 2: Start the stack
   Branch (database = bundled → "The bundled Postgres container"), Where does PostgreSQL live?
@@ -655,11 +655,11 @@ outbox, cron, and maintenance consumers), `integration-worker` (Slack and GitHub
 sync, delivery, retries, and reconciliation), and `postgres` (PostgreSQL 17 with pgvector).
 
 Open `http://localhost:8080` and finish the
-[setup wizard](https://docs.tulipfarm.site/docs/self-hosting/install#finish-setup).
+[setup wizard](https://docs.tulipfarm.site/self-hosting/install#finish-setup).
 
   run: docker compose up -d
   Verify (http): GET http://localhost:8080/readyz returns 200 within 120s.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 3: Start against a managed database
   Branch (database = managed → "A managed PostgreSQL 17 I already run"), Where does PostgreSQL live?
@@ -672,10 +672,10 @@ docker compose up -d app worker integration-worker bucket
 ```
 
 Full walkthrough, including the extensions your provider must allow:
-[Use a managed database](https://docs.tulipfarm.site/docs/self-hosting/managed-database).
+[Use a managed database](https://docs.tulipfarm.site/self-hosting/managed-database).
 
   Verify (http): GET http://localhost:8080/readyz returns 200 within 120s.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 4: What happens to your secrets
 
@@ -804,7 +804,7 @@ both workers wait for healthy `app` because they never migrate.
 Step 9: Update
 
 Migrations apply automatically on boot, and there are **no down-migrations**. Read
-[Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) before your first upgrade.
+[Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) before your first upgrade.
 
 The trailing `image prune` reclaims the image this update replaced. Without it every update
 leaves a whole orphaned image (~4.5 GB) on disk, and a regularly updated instance runs out.
@@ -812,7 +812,7 @@ It removes only untagged images, so anything else on the same engine keeps its i
 
   run: docker compose pull && docker compose up -d && docker image prune -f
   Verify (http): GET http://localhost:8080/readyz returns 200 within 120s.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 10: Running more than one business on one machine
 
@@ -882,7 +882,7 @@ stays internal; publishing them exposes health endpoints for no benefit.
 
   run: curl -fsSLO https://tulipfarm.site/azure-containerapp.yaml
   Verify (file): `azure-containerapp.yaml` exists in the working directory.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#download
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#download
 
 Step 2: Create a resource group and environment
 
@@ -918,10 +918,10 @@ az postgres flexible-server parameter set \
 
 Then hand the connection string to the app as a secret. Azure requires TLS, so keep
 `sslmode=require`. Provider-by-provider extension notes live in
-[Use a managed database](https://docs.tulipfarm.site/docs/self-hosting/managed-database).
+[Use a managed database](https://docs.tulipfarm.site/self-hosting/managed-database).
 
   Verify (command): `az postgres flexible-server parameter show --name azure.extensions --server-name tulipfarm-db --resource-group tulipfarm` exits successfully, expect the value includes vector and citext.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#database
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#database
 
 Step 4: Point at a PostgreSQL you run elsewhere
   Branch (database = external → "A PostgreSQL 17 I run somewhere else"), Where does PostgreSQL live?
@@ -1016,7 +1016,7 @@ liveness probe that fires during migration kills the container and loops forever
 the generated definition sets a high startup `failureThreshold`.
 
   Verify (command): `az containerapp show --name tulipfarm-app --resource-group tulipfarm` exits successfully, expect runningStatus is Running.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 9: Confirm the app is ready
 
@@ -1029,7 +1029,7 @@ az containerapp show --name tulipfarm-app --resource-group tulipfarm \
 ```
 
   Check (manual): The FQDN Azure assigned answers /readyz with 200, allowing several minutes on a fresh database while migrations run.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 10: Put it on your own domain
 
@@ -1050,7 +1050,7 @@ configuration, unlike an nginx ingress, which needs buffering turned off explici
 Step 11: Seed the first admin without a browser
 
 Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` together on `app` and the instance seeds
-itself and skips the setup wizard. See [headless seeding](https://docs.tulipfarm.site/docs/self-hosting/headless).
+itself and skips the setup wizard. See [headless seeding](https://docs.tulipfarm.site/self-hosting/headless).
 
   Check (manual): You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
 
@@ -1066,7 +1066,7 @@ restoring only one is not enough:
 - **The soul** at `SOUL_PATH` stores your entire configuration. On this platform the soul has no
   durable disk either, so mirror it to a git remote with `SOUL_GIT_REMOTE_URL`.
 
-See [Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) before your first upgrade.
+See [Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) before your first upgrade.
 
   Check (manual): A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
@@ -1075,7 +1075,7 @@ Step 13: Update
 Pin one image tag; do not track a moving tag. Each update creates a new revision, and
 migrations apply automatically on boot. There are **no down-migrations**, so a revision
 rollback does not undo a schema change. Read
-[Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) first.
+[Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) first.
 
 ```bash
 az containerapp update --name tulipfarm-app --resource-group tulipfarm \
@@ -1094,7 +1094,7 @@ page is deliberately short: it covers only what Coolify does differently, which 
 pick, where its UI wants each value, and how its proxy and backups diverge.
 
 For everything the two share (what the secrets are, why the data volume matters, how updates and
-scale-out behave), follow [Docker Compose](https://docs.tulipfarm.site/docs/self-hosting/docker-compose). Nothing here
+scale-out behave), follow [Docker Compose](https://docs.tulipfarm.site/self-hosting/docker-compose). Nothing here
 repeats it; each step below states the Coolify action and links back for the reasoning.
 
 NOTE:
@@ -1128,7 +1128,7 @@ on the app's `tulipfarm-data` volume:
 | `TULIPFARM_VERSION` | e.g. `v0.1.0` | Optional. Pin a tag instead of tracking `latest`. |
 
 Every other variable and its default lives on
-[Docker Compose → Things worth changing](https://docs.tulipfarm.site/docs/self-hosting/docker-compose#things-worth-changing);
+[Docker Compose → Things worth changing](https://docs.tulipfarm.site/self-hosting/docker-compose#things-worth-changing);
 this table is only the handful Coolify's secret storage should hold.
 
   Check (manual): ENCRYPTION_KEY is set in the Environment Variables tab before the first deploy, not after it.
@@ -1136,7 +1136,7 @@ this table is only the handful Coolify's secret storage should hold.
 Step 3: Attach the domain through Coolify's proxy
 
 Point a domain at the `app` service on port `8080`. Coolify's proxy terminates TLS and
-requests the certificate, so you do not run [the TLS setup](https://docs.tulipfarm.site/docs/self-hosting/tls) yourself.
+requests the certificate, so you do not run [the TLS setup](https://docs.tulipfarm.site/self-hosting/tls) yourself.
 
 Two Coolify-specific things to get right:
 
@@ -1154,7 +1154,7 @@ Step 4: Deploy and finish setup
 Deploy the resource, then watch the logs until the health check on `/readyz` passes. First
 boot runs database migrations, so give it a minute. Open your domain: the app redirects to
 `/setup`, where you create the first admin account. Walk through
-[Finish setup](https://docs.tulipfarm.site/docs/self-hosting/install#finish-setup).
+[Finish setup](https://docs.tulipfarm.site/self-hosting/install#finish-setup).
 
   Check (manual): The app's health check passes in Coolify and your domain opens the /setup wizard.
 
@@ -1162,14 +1162,14 @@ Step 5: Back up the volumes through Coolify
 
 Coolify manages the four Compose file volumes named `tulipfarm-postgres`,
 `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket`. Add all four to Coolify's backup
-configuration, or use a [managed database](https://docs.tulipfarm.site/docs/self-hosting/managed-database) and back up
+configuration, or use a [managed database](https://docs.tulipfarm.site/self-hosting/managed-database) and back up
 `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket` only.
 
 NOTE:
   `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself, and
   `tulipfarm-bucket` holds every uploaded and generated file. The database stores only
   ciphertext, so losing either volume loses the secrets or files it guards. See
-  [what happens to your secrets](https://docs.tulipfarm.site/docs/self-hosting/docker-compose#what-happens-to-your-secrets).
+  [what happens to your secrets](https://docs.tulipfarm.site/self-hosting/docker-compose#what-happens-to-your-secrets).
 
 
   Check (manual): All four named volumes appear in Coolify's backup configuration, or the three non-database volumes do when you use a managed database.
@@ -1178,7 +1178,7 @@ Step 6: Update
 
 Redeploy the resource. With `TULIPFARM_VERSION` unset that pulls the newest `latest`; if you
 pinned a tag, bump it first. Migrations run automatically on boot and have **no down-path**.
-Read [Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) before the first one.
+Read [Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) before the first one.
 
   Check (manual): The redeployed resource comes back healthy on the image tag you expected.
 
@@ -1187,7 +1187,7 @@ Step 7: Keep one replica of each service
 Leave `app`, `worker`, and `integration-worker` at **one replica each**. Coolify's scale
 control will corrupt the soul git worktree on `app` or duplicate maintenance work on
 `worker`. Scale vertically; horizontal scaling is a deliberate design constraint. The
-reasoning is the same everywhere; see [Deploy](https://docs.tulipfarm.site/docs/self-hosting#what-every-deployment-needs).
+reasoning is the same everywhere; see [Deploy](https://docs.tulipfarm.site/self-hosting#what-every-deployment-needs).
 
   Check (manual): Each of app, worker, and integration-worker runs exactly one replica in Coolify.
 
@@ -1222,7 +1222,7 @@ migrations), `worker` (runs, waits, outbox, cron, and maintenance consumers), an
 
   run: curl -fsSLO https://tulipfarm.site/kubernetes-values.yaml
   Verify (file): `kubernetes-values.yaml` exists in the working directory.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#download
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#download
 
 Step 2: Create a namespace
 
@@ -1246,7 +1246,7 @@ kubectl -n tulipfarm create secret generic tulipfarm-database \
 
 A cluster rarely wants a bundled database, which is why the generated values default
 `dependencies.postgres.external` to `true`. Full extension and permission detail:
-[Use a managed database](https://docs.tulipfarm.site/docs/self-hosting/managed-database).
+[Use a managed database](https://docs.tulipfarm.site/self-hosting/managed-database).
 
   Verify (command): `kubectl -n tulipfarm get secret tulipfarm-database` exits successfully, expect the DATABASE_URL secret exists.
 
@@ -1264,7 +1264,7 @@ kubectl -n tulipfarm create secret generic tulipfarm-database \
 ```
 
 The provider-by-provider extension notes live in
-[Use a managed database](https://docs.tulipfarm.site/docs/self-hosting/managed-database).
+[Use a managed database](https://docs.tulipfarm.site/self-hosting/managed-database).
 
   Verify (command): `kubectl -n tulipfarm get secret tulipfarm-database` exits successfully, expect the DATABASE_URL secret exists.
 
@@ -1370,7 +1370,7 @@ helm install tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
 
   run: kubectl -n tulipfarm rollout status deployment/app --timeout=600s
   Verify (command): `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` exits successfully, expect the app deployment finishes rolling out.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 10: Confirm the app is ready
 
@@ -1382,7 +1382,7 @@ kubectl -n tulipfarm port-forward svc/app 8080:8080 &
 ```
 
   Verify (http): GET http://localhost:8080/readyz returns 200 within 300s.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz
 
 Step 11: Expose the app through Ingress
 
@@ -1405,7 +1405,7 @@ the address at boot; you can change it later under **Business → About** withou
 Step 12: Seed the first admin without a browser
 
 Most cluster workflows have no browser at first boot. Use
-[headless seeding](https://docs.tulipfarm.site/docs/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
+[headless seeding](https://docs.tulipfarm.site/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
 `LLM_API_KEY` together on `app`, and the instance seeds itself and skips the setup wizard.
 
   Check (manual): You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
@@ -1420,7 +1420,7 @@ Three things must survive a cluster rebuild, and restoring only one is not enoug
 - **The soul** at `SOUL_PATH` stores your entire configuration, unless it is mirrored to a git
   remote with `SOUL_GIT_REMOTE_URL`.
 
-See [Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) before your first upgrade.
+See [Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) before your first upgrade.
 
   Check (manual): A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
 
@@ -1428,7 +1428,7 @@ Step 14: Update
 
 Pin one image tag in `image.tag`; do not track a moving tag in a cluster. Migrations apply
 automatically on boot and there are **no down-migrations**. Read
-[Updating and rollback](https://docs.tulipfarm.site/docs/self-hosting/updating) before your first upgrade.
+[Updating and rollback](https://docs.tulipfarm.site/self-hosting/updating) before your first upgrade.
 
 ```bash
 helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
@@ -1436,4 +1436,4 @@ helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml
 
   run: kubectl -n tulipfarm rollout status deployment/app --timeout=600s
   Verify (command): `kubectl -n tulipfarm rollout status deployment/app --timeout=600s` exits successfully, expect the app deployment finishes rolling out.
-  On fail: https://docs.tulipfarm.site/docs/self-hosting/when-install-fails#readyz
+  On fail: https://docs.tulipfarm.site/self-hosting/when-install-fails#readyz

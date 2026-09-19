@@ -8,12 +8,12 @@ export const metadata: Metadata = {
 };
 
 const routes = [
-  { label: "documentation index", href: "/docs" },
-  { label: "install tulipfarm", href: "/docs/self-hosting/install" },
-  { label: "get started", href: "/docs/using-tulipfarm/build-your-first-thing" },
-  { label: "using tulipfarm", href: "/docs/using-tulipfarm" },
-  { label: "reference", href: "/docs/reference" },
-  { label: "deploy", href: "/docs/self-hosting" },
+  { label: "documentation index", href: "/" },
+  { label: "install tulipfarm", href: "/self-hosting/install" },
+  { label: "get started", href: "/using-tulipfarm/build-your-first-thing" },
+  { label: "using tulipfarm", href: "/using-tulipfarm" },
+  { label: "reference", href: "/reference" },
+  { label: "deploy", href: "/self-hosting" },
 ];
 
 export default function NotFound() {

@@ -34,6 +34,7 @@ in `deploy/targets/*` go in, every rendered surface comes out.
 - Generated pages carry a header naming their source manifest. A staleness test regenerates in
   memory and compares byte-for-byte, so hand-editing a generated page fails CI rather than
   silently drifting.
+- Reading links omit `/docs`; the prompt resolves them against `{{DOCS_URL}}`, not the download origin.
 
 See [`docs/architecture/deployment-manifest.md`](../../docs/architecture/deployment-manifest.md)
 for the design and the decisions behind it.

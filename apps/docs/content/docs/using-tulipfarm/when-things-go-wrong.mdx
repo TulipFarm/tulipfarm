@@ -10,7 +10,7 @@ It only covers checks you can make in the app.
 
 If the fix needs containers, logs, volumes, or database access, send the symptom to the
 person who manages the instance and include a link to
-[deployment troubleshooting](/docs/self-hosting/when-install-fails).
+[deployment troubleshooting](/self-hosting/when-install-fails).
 
 ## Signing in
 
@@ -22,7 +22,7 @@ The setup wizard only appears while the instance has no users. After the first a
 created, `/setup` locks and the login page opens instead. That keeps a second visitor from
 claiming the instance.
 
-If the instance was created with [headless seeding](/docs/self-hosting/headless), the setup
+If the instance was created with [headless seeding](/self-hosting/headless), the setup
 wizard is skipped. Use the email address that was seeded at boot.
 
 </Accordion>
@@ -33,7 +33,7 @@ The browser accepted the password, but did not keep the Session cookie. A Sessio
 the browser cookie that keeps you signed in.
 
 This usually means the instance URL and cookie settings do not match. Send
-[Login succeeds, then immediately disappears](/docs/self-hosting/when-install-fails#login-succeeds-then-immediately-disappears)
+[Login succeeds, then immediately disappears](/self-hosting/when-install-fails#login-succeeds-then-immediately-disappears)
 to the person who manages the instance.
 
 </Accordion>
@@ -43,7 +43,7 @@ to the person who manages the instance.
 A fresh instance has no email reset flow. Ask another person with account-management access to send an invite or reset your access.
 
 If no one with that access can sign in, restore from a backup. See
-[Back up and restore](/docs/self-hosting/back-up-and-restore).
+[Back up and restore](/self-hosting/back-up-and-restore).
 
 </Accordion>
 
@@ -61,7 +61,7 @@ configured, so TulipFarm cannot produce a chat answer.
 Ask the person who manages model settings to add a provider key and assign the
 Auto/Fast/Balanced/Thorough effort choices.
 
-Send them [Configure LLM providers](/docs/administration/configure-llm-providers).
+Send them [Configure LLM providers](/administration/configure-llm-providers).
 
 </Accordion>
 
@@ -72,7 +72,7 @@ no answer appears, open the run timeline and look for a waiting reason.
 
 If every new message stalls, the worker service may be down or blocked by a database
 migration. The worker service is the background process that produces chat answers.
-Send [A chat message never produces an answer](/docs/self-hosting/when-install-fails#a-chat-message-never-produces-an-answer)
+Send [A chat message never produces an answer](/self-hosting/when-install-fails#a-chat-message-never-produces-an-answer)
 to the person who manages the instance.
 
 </Accordion>
@@ -115,8 +115,8 @@ look like a refusal:
 - An approval is a pause that waits for a human decision before work continues.
 
 Check **Operate → Work → Inbox** first. If nothing is waiting there, the action is probably
-blocked by a guardrail. See [How guardrails work](/docs/administration/how-guardrails-work)
-and [approvals](/docs/using-tulipfarm/approvals).
+blocked by a guardrail. See [How guardrails work](/administration/how-guardrails-work)
+and [approvals](/using-tulipfarm/approvals).
 
 </Accordion>
 
@@ -126,7 +126,7 @@ A record is one entry of a Resource type, the schema for one kind of business da
 as Customer or Ticket. An agent can only use authority it has and authority you have. It can never exceed the person who started
 it.
 
-See [Roles and permissions](/docs/reference/roles-and-permissions).
+See [Roles and permissions](/reference/roles-and-permissions).
 
 </Accordion>
 
@@ -136,7 +136,7 @@ Open the run timeline. A waiting run is usually waiting for something named ther
 approval, a timer, or a child run.
 
 If the page offers a button, you can cancel, pause, resume, or retry the run. See
-[Watch a run](/docs/using-tulipfarm/watch-a-run).
+[Watch a run](/using-tulipfarm/watch-a-run).
 
 </Accordion>
 
@@ -153,7 +153,7 @@ connected in the app while event delivery is stopped outside the browser.
 
 Ask the person who manages the instance to check integration event delivery and the public
 callback URL. Send them
-[Slack or GitHub events never arrive](/docs/self-hosting/when-install-fails#slack-or-github-events-never-arrive).
+[Slack or GitHub events never arrive](/self-hosting/when-install-fails#slack-or-github-events-never-arrive).
 
 </Accordion>
 
@@ -162,14 +162,14 @@ callback URL. Send them
 The GitHub integration needs GitHub App credentials before it can install on repositories.
 The error means that setup has not finished on this instance.
 
-Send [Connect GitHub](/docs/administration/connect-github) to the person who connects shared
+Send [Connect GitHub](/administration/connect-github) to the person who connects shared
 integrations.
 
 </Accordion>
 
 <Accordion title="I want an Integration that is not listed">
 
-See [Bundled integrations](/docs/reference/bundled-integrations) for how to check the catalog in
+See [Bundled integrations](/reference/bundled-integrations) for how to check the catalog in
 your release.
 
 If the provider is missing, ask the person who manages integrations whether it offers an MCP
@@ -185,17 +185,17 @@ documentation alone does not make that provider available.
 <Cards>
   <Card
     title="Deployment troubleshooting"
-    href="/docs/self-hosting/when-install-fails"
+    href="/self-hosting/when-install-fails"
     description="Use this when the fix needs logs, containers, volumes, or the database."
   />
   <Card
     title="Configure LLM providers"
-    href="/docs/administration/configure-llm-providers"
+    href="/administration/configure-llm-providers"
     description="Use this when chat cannot answer because no model or provider key works."
   />
   <Card
     title="Roles and permissions"
-    href="/docs/reference/roles-and-permissions"
+    href="/reference/roles-and-permissions"
     description="Check why a person, agent, or API token can or cannot do something."
   />
   <Card

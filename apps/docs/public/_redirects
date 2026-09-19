@@ -1,5 +1,7 @@
-# Documentation has no second marketing homepage.
-/ /docs 301
+# Keep bookmarks made before documentation moved to the domain root.
+/docs / 301
+/docs/ / 301
+/docs/* /:splat 301
 
 # One owner for deployment and distribution, even on the documentation domain.
 /deploy https://tulipfarm.site/deploy 301

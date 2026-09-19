@@ -111,6 +111,8 @@ Apply this branch when extracting the website or changing public URLs:
 
 - Put public landing pages in `apps/www` at `https://tulipfarm.site`. Keep
   documentation in `apps/docs` at `https://docs.tulipfarm.site`.
+- Documentation reading paths start at that domain's root, without `/docs`. Keep legacy
+  `/docs` URLs as redirects, not canonical links.
 - Read `apps/docs/README.md` and `packages/constants/AGENTS.md` before changing origins.
   Separate the marketing and documentation origins at their shared source of truth.
 - Preserve published installer, uninstall, Compose, environment-example, deployment-guide,

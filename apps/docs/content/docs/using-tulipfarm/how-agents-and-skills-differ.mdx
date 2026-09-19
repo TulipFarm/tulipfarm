@@ -77,7 +77,7 @@ This is the difference with real consequences, and it runs one way only.
 becomes an enforced limit, not a sentence of advice. TulipFarm checks it before the tool runs, so
 the call is refused even when the agent is talked into making it, and the agent cannot pass the work
 to a less restricted helper instead. See
-[Agents](/docs/using-tulipfarm/agents#tools-and-current-limits).
+[Agents](/using-tulipfarm/agents#tools-and-current-limits).
 
 **A skill holds none.** A skill is instructions an agent chooses to follow, so it can never widen
 what that agent may do. Loading one changes which tools the agent is *shown*, to keep it focused on
@@ -89,7 +89,7 @@ Two consequences follow, and both are worth knowing before you ask for either:
 - A risky skill is still risky, because the agent running it may be permitted. That is why every
   skill is checked by **SkillAudit**, a safety review of what a skill would ask agents to do, before
   it is installed. The audit reports risk and never decides for you; the decision to install stays
-  a human one. See [Install a skill](/docs/using-tulipfarm/install-a-skill).
+  a human one. See [Install a skill](/using-tulipfarm/install-a-skill).
 
 ## One agent, many skills
 
@@ -104,7 +104,7 @@ copying into each worker that needs it.
 You can narrow that default when a worker should stay in its lane. Ask in chat for an agent to be
 kept to a named set of skills, and everything outside the set is left out of what the agent is told
 about and refused if it asks anyway — see
-[bounding which skills an agent may use](/docs/using-tulipfarm/agents#bounding-which-skills-an-agent-may-use).
+[bounding which skills an agent may use](/using-tulipfarm/agents#bounding-which-skills-an-agent-may-use).
 Note which direction that runs in: the limit is written on the agent, never on the skill. The skill
 still carries no authority of its own.
 
@@ -153,12 +153,12 @@ Two nearby things get mistaken for these, often enough to be worth naming.
 
 If the work should start on its own — every morning, or whenever a record changes — you want a
 **routine**, repeatable automation that runs without anyone typing. An agent waits to be asked. See
-[Routines](/docs/using-tulipfarm/routines).
+[Routines](/using-tulipfarm/routines).
 
 If it is a fact rather than a procedure — a policy, a price list, a definition — it belongs in
 **knowledge**, the cited material TulipFarm retrieves with access checks, or in **memory**, the
 durable facts kept for one person. A skill tells an agent *how*; knowledge tells it *what is true*.
-See [Knowledge](/docs/using-tulipfarm/knowledge) and [Memory](/docs/using-tulipfarm/memory).
+See [Knowledge](/using-tulipfarm/knowledge) and [Memory](/using-tulipfarm/memory).
 
 ## The four questions
 
@@ -171,6 +171,6 @@ If you are still unsure, answer these in order and stop at the first yes.
 | Do I want someone to talk to, with its own limits? | An agent |
 | Do I want an existing worker to handle one task well? | A skill |
 
-You are not locked in. Both are written into [the soul](/docs/using-tulipfarm/what-a-soul-is), so both can
+You are not locked in. Both are written into [the soul](/using-tulipfarm/what-a-soul-is), so both can
 be changed by asking, and the history of what changed is kept. Building the wrong one costs a
 conversation, not a rebuild.

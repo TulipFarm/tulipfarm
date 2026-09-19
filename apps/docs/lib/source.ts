@@ -1,6 +1,6 @@
 import { docs } from "collections/server";
 import { loader } from "fumadocs-core/source";
-import { DOCS_URL, docsContentRoute, docsImageRoute, docsRoute } from "./shared";
+import { absoluteDocsLinks, DOCS_URL, docsContentRoute, docsImageRoute, docsRoute } from "./shared";
 
 // See https://fumadocs.dev/docs/headless/source-api for more info
 export const source = loader({
@@ -34,9 +34,9 @@ export function getPageMarkdownUrl(page: (typeof source)["$inferPage"]) {
 const MDX_COMMENT = /^[ \t]*\{\/\*[\s\S]*?\*\/\}[ \t]*\r?\n?/gm;
 
 export async function getLLMText(page: (typeof source)["$inferPage"]) {
-  const processed = (await page.data.getText("processed"))
-    .replace(MDX_COMMENT, "")
-    .replace(/(\]\(|href=["'])\/docs(?=[/#)"'\s]|$)/g, `$1${DOCS_URL}/docs`);
+  const processed = absoluteDocsLinks(
+    (await page.data.getText("processed")).replace(MDX_COMMENT, "")
+  );
 
   return `# ${page.data.title} (${new URL(page.url, DOCS_URL).href})
 

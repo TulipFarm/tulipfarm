@@ -6,7 +6,7 @@ description: Add provider credentials, choose a model for each effort, test that
 This guide configures the model providers TulipFarm uses for chat, agents, skills, and
 routines. This is one of the few setup tasks that is UI-first instead of prompt-first:
 provider secrets and model assignments are managed by admins in **Operate**. For how a request
-becomes a model, see [Model routing](/docs/administration/how-model-routing-works).
+becomes a model, see [Model routing](/administration/how-model-routing-works).
 
 ## Outcome
 
@@ -35,7 +35,7 @@ the app.
 
     The last two run on a Claude or ChatGPT **subscription** rather than an API key, and their
     credential is minted in a terminal instead of copied from a dashboard. See
-    [Run on a subscription plan](/docs/administration/run-on-a-subscription).
+    [Run on a subscription plan](/administration/run-on-a-subscription).
   </Step>
   <Step>
     Fill the fields and choose **Save provider**. Secret values are encrypted and
@@ -47,7 +47,7 @@ the app.
     the named levels of work whoever starts a turn can pick from — with the model behind each
     and what it costs per million tokens.
 
-    See [Model routing](/docs/administration/how-model-routing-works) for how effort presets resolve to model profiles.
+    See [Model routing](/administration/how-model-routing-works) for how effort presets resolve to model profiles.
   </Step>
   <Step>
     Choose **Change** on an effort. Pick a provider, then type in **Model** to search the catalog.
@@ -77,7 +77,7 @@ the app.
     The two subscription providers are the exception to the LiteLLM rule above: they have no
     catalog price, so their capability metadata comes from a static table instead and their
     turns are reported as unpriced. See
-    [Model routing](/docs/administration/how-model-routing-works#subscription-providers).
+    [Model routing](/administration/how-model-routing-works#subscription-providers).
   </Step>
   <Step>
     Back in the table, select **Default** on the effort that should run when nobody picks one.

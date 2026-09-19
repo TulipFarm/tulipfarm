@@ -115,7 +115,7 @@ export function DeployWizard({ model }: { model: WizardModel }) {
             {!ready && (
               <p className="setup-fallback">
                 Setup controls need JavaScript. Enable it or reload to try again, or{" "}
-                <a href={docsUrl("/docs/self-hosting")}>Read the setup docs</a>.
+                <a href={docsUrl("/self-hosting")}>Read the setup docs</a>.
               </p>
             )}
             <PlatformChooser

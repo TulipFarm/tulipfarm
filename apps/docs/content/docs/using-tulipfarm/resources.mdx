@@ -7,7 +7,7 @@ description: Schema-driven Resource types, generated UIs, records, links, valida
 
 A **Resource type** is a business data shape, such as customer, ticket, invoice, or asset. A
 **record** is one instance of that type. You create resource types by describing them in chat; the
-assistant writes JSON Schema into the [soul](/docs/using-tulipfarm/what-a-soul-is), and TulipFarm reconciles storage
+assistant writes JSON Schema into the [soul](/using-tulipfarm/what-a-soul-is), and TulipFarm reconciles storage
 and UI from that schema.
 
 ## Schema in the soul, records in Postgres
@@ -74,5 +74,5 @@ carry a small piece of custom logic called a **hook**.
 You ask for a hook in chat like anything else. It runs in a locked-down space with no access to the
 rest of your instance, and TulipFarm refuses to store one that tries to do something it should not.
 
-Use [Define a resource type](/docs/using-tulipfarm/define-a-resource-type) to build a type and
-[Work with records](/docs/using-tulipfarm/work-with-records) to use records.
+Use [Define a resource type](/using-tulipfarm/define-a-resource-type) to build a type and
+[Work with records](/using-tulipfarm/work-with-records) to use records.

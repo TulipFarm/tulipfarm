@@ -1,6 +1,6 @@
 # Docs site
 
-`@tulipfarm/docs` is the static Fumadocs documentation site, retaining `/docs` paths.
+`@tulipfarm/docs` is the static Fumadocs site, serving documentation at the domain root.
 `apps/www` owns marketing, guided deployment, installer distribution, and published schemas.
 
 **Writing or restructuring content? Load `.agents/skills/tulipfarm-docs/` first.**
@@ -29,11 +29,10 @@ Place pages by required access level, not topic: three reader tracks and two sha
 | `source.config.ts`, `components/mdx.tsx` | Fumadocs config, remark plugins, MDX component map. |
 | `components/prompt-block.tsx`, `lib/remark-prompt.ts` | The ` ```prompt ` block and the remark plugin that builds it. |
 | `lib/remark-site-url.ts`, `lib/shared.ts` | `{{DOCS_URL}}` for docs; `{{SITE_URL}}` for marketing/downloads. |
-| `app/page.tsx` | Root redirect to `/docs`, never a marketing homepage. |
-| `app/docs/[[...slug]]/` | Docs page route and per-page SEO metadata. |
+| `app/(docs)/` | Root documentation layout, optional catch-all reading route, and per-page SEO metadata. |
 | `app/sitemap.ts`, `app/robots.ts`, `app/og/` | Sitemap, robots policy, Open Graph images. |
 | `scripts/generate-deploy-docs.ts` | Persists only MDX from `deploy-render`; shared input collection is in `scripts/public-site/`. |
-| `public/_redirects`, `public/_headers` | Cloudflare Pages routing and machine-reader content types. |
+| `public/_redirects`, `public/_headers` | Legacy `/docs` redirects, distribution routing, and machine-reader content types. |
 
 ## Rules
 

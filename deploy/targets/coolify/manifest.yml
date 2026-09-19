@@ -8,7 +8,7 @@ summary: |
   pick, where its UI wants each value, and how its proxy and backups diverge.
 
   For everything the two share (what the secrets are, why the data volume matters, how updates and
-  scale-out behave), follow [Docker Compose](/docs/self-hosting/docker-compose). Nothing here
+  scale-out behave), follow [Docker Compose](/self-hosting/docker-compose). Nothing here
   repeats it; each step below states the Coolify action and links back for the reasoning.
 
   <Callout type="warn">
@@ -46,7 +46,7 @@ steps:
       | `TULIPFARM_VERSION` | e.g. `v0.1.0` | Optional. Pin a tag instead of tracking `latest`. |
 
       Every other variable and its default lives on
-      [Docker Compose → Things worth changing](/docs/self-hosting/docker-compose#things-worth-changing);
+      [Docker Compose → Things worth changing](/self-hosting/docker-compose#things-worth-changing);
       this table is only the handful Coolify's secret storage should hold.
     verify:
       kind: manual
@@ -56,7 +56,7 @@ steps:
     title: Attach the domain through Coolify's proxy
     body: |
       Point a domain at the `app` service on port `8080`. Coolify's proxy terminates TLS and
-      requests the certificate, so you do not run [the TLS setup](/docs/self-hosting/tls) yourself.
+      requests the certificate, so you do not run [the TLS setup](/self-hosting/tls) yourself.
 
       Two Coolify-specific things to get right:
 
@@ -76,7 +76,7 @@ steps:
       Deploy the resource, then watch the logs until the health check on `/readyz` passes. First
       boot runs database migrations, so give it a minute. Open your domain: the app redirects to
       `/setup`, where you create the first admin account. Walk through
-      [Finish setup](/docs/self-hosting/install#finish-setup).
+      [Finish setup](/self-hosting/install#finish-setup).
     verify:
       kind: manual
       look_for: The app's health check passes in Coolify and your domain opens the /setup wizard.
@@ -86,14 +86,14 @@ steps:
     body: |
       Coolify manages the four Compose file volumes named `tulipfarm-postgres`,
       `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket`. Add all four to Coolify's backup
-      configuration, or use a [managed database](/docs/self-hosting/managed-database) and back up
+      configuration, or use a [managed database](/self-hosting/managed-database) and back up
       `tulipfarm-soul`, `tulipfarm-data`, and `tulipfarm-bucket` only.
 
       <Callout type="warn">
         `tulipfarm-data` holds the generated `ENCRYPTION_KEY` unless you set one yourself, and
         `tulipfarm-bucket` holds every uploaded and generated file. The database stores only
         ciphertext, so losing either volume loses the secrets or files it guards. See
-        [what happens to your secrets](/docs/self-hosting/docker-compose#what-happens-to-your-secrets).
+        [what happens to your secrets](/self-hosting/docker-compose#what-happens-to-your-secrets).
       </Callout>
     verify:
       kind: manual
@@ -104,7 +104,7 @@ steps:
     body: |
       Redeploy the resource. With `TULIPFARM_VERSION` unset that pulls the newest `latest`; if you
       pinned a tag, bump it first. Migrations run automatically on boot and have **no down-path**.
-      Read [Updating and rollback](/docs/self-hosting/updating) before the first one.
+      Read [Updating and rollback](/self-hosting/updating) before the first one.
     verify:
       kind: manual
       look_for: The redeployed resource comes back healthy on the image tag you expected.
@@ -115,7 +115,7 @@ steps:
       Leave `app`, `worker`, and `integration-worker` at **one replica each**. Coolify's scale
       control will corrupt the soul git worktree on `app` or duplicate maintenance work on
       `worker`. Scale vertically; horizontal scaling is a deliberate design constraint. The
-      reasoning is the same everywhere; see [Deploy](/docs/self-hosting#what-every-deployment-needs).
+      reasoning is the same everywhere; see [Deploy](/self-hosting#what-every-deployment-needs).
     verify:
       kind: manual
       look_for: Each of app, worker, and integration-worker runs exactly one replica in Coolify.

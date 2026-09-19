@@ -30,7 +30,7 @@ Most tool names fit a small set of jobs.
 | Building new things | Change soul definitions for agents, skills, Resource types, routines, and surface components. A **skill** is an installable capability package. A **routine** is repeatable automation. A **surface** is structured output shown in a channel. |
 | Coordinating work | Transfer to another agent, delegate a task to another agent, trigger a routine, or mark a **state** (one step inside a routine) or delegated task complete. |
 | Showing and asking | Present structured output, update a presentation, or ask for input when the current channel can show it. |
-| Reading the web and calling APIs | Fetch a public page, or call an HTTP or GraphQL API with a stored credential. See [reading the web and calling APIs](/docs/using-tulipfarm/read-the-web-and-call-apis). |
+| Reading the web and calling APIs | Fetch a public page, or call an HTTP or GraphQL API with a stored credential. See [reading the web and calling APIs](/using-tulipfarm/read-the-web-and-call-apis). |
 | Calling integrations | Use reviewed tools from **integrations**, connections to external services through MCP. Native Slack and GitHub channels receive events and deliver replies separately. |
 | Reading turn context | Read the current time, inspect what screen you are on, validate structured data, or move within the app when a tool is browser-only. |
 
@@ -74,7 +74,7 @@ checks, provider access, and credentials can narrow it again. A tool call runs o
 required layer allows it.
 
 So an agent can never do more than the person who set it going. Some capabilities are reserved for
-instance administration; [Decide who can do what](/docs/administration/manage-access) explains that
+instance administration; [Decide who can do what](/administration/manage-access) explains that
 side without making this Using page depend on those controls.
 
 ## What denial looks like
@@ -103,7 +103,7 @@ effects, waits, guardrail decisions, and lineage.
 
 Pending tool approvals appear in the Inbox and in the related run. The approval card includes the
 tool name, and the run links the wait back to the tool call id. See
-[Approvals](/docs/using-tulipfarm/approvals) and [runs](/docs/using-tulipfarm/runs).
+[Approvals](/using-tulipfarm/approvals) and [runs](/using-tulipfarm/runs).
 
 ## Where the live list is
 
@@ -118,6 +118,6 @@ administration.
 
 That is why this page explains the pattern instead of copying the list. For the built-in tools,
 which are the same in every instance, the
-[tool catalog](/docs/reference/tool-catalog) lists each one and what it does. It is generated from
+[tool catalog](/reference/tool-catalog) lists each one and what it does. It is generated from
 the registry rather than typed out, so it cannot fall behind. Only your own instance can tell you
 about the integration tools on top of that.

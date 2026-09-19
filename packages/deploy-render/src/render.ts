@@ -143,7 +143,7 @@ const GROUP_NOTES: Record<string, string> = {
   "Sessions, Secrets, and limits":
     "Model configuration can also reach an environment variable directly, through an `env://<NAME>` reference. That escape hatch is not a variable this contract can enumerate. The name is chosen when the model is configured, and it must already be set at that moment.",
   "File storage":
-    "Unset, files land on disk under `TF_DATA_DIR`, which is correct for development and wrong for anything with more than one replica or a container that restarts. The Compose stack points these at its bundled bucket service; see [where uploaded and generated files go](/docs/self-hosting/docker-compose#where-uploaded-and-generated-files-go).",
+    "Unset, files land on disk under `TF_DATA_DIR`, which is correct for development and wrong for anything with more than one replica or a container that restarts. The Compose stack points these at its bundled bucket service; see [where uploaded and generated files go](/self-hosting/docker-compose#where-uploaded-and-generated-files-go).",
 };
 
 const ENV_TABLE_HEAD = [
@@ -276,7 +276,7 @@ function renderVerify(verify: DeploymentTargetVerify): string {
 
 function renderOnFail(onFail: string): string {
   const [page, anchor] = onFail.split("#", 2);
-  const href = `/docs/${SELF_HOSTING}/${page}${anchor ? `#${anchor}` : ""}`;
+  const href = `/${SELF_HOSTING}/${page}${anchor ? `#${anchor}` : ""}`;
   return `If that check fails, see [what to do next](${href}).`;
 }
 

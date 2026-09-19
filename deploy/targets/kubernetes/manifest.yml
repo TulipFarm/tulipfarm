@@ -82,7 +82,7 @@ steps:
 
       A cluster rarely wants a bundled database, which is why the generated values default
       `dependencies.postgres.external` to `true`. Full extension and permission detail:
-      [Use a managed database](/docs/self-hosting/managed-database).
+      [Use a managed database](/self-hosting/managed-database).
     verify:
       kind: command
       command: kubectl -n tulipfarm get secret tulipfarm-database
@@ -103,7 +103,7 @@ steps:
       ```
 
       The provider-by-provider extension notes live in
-      [Use a managed database](/docs/self-hosting/managed-database).
+      [Use a managed database](/self-hosting/managed-database).
     verify:
       kind: command
       command: kubectl -n tulipfarm get secret tulipfarm-database
@@ -267,7 +267,7 @@ steps:
     title: Seed the first admin without a browser
     body: |
       Most cluster workflows have no browser at first boot. Use
-      [headless seeding](/docs/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
+      [headless seeding](/self-hosting/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
       `LLM_API_KEY` together on `app`, and the instance seeds itself and skips the setup wizard.
     verify:
       kind: manual
@@ -284,7 +284,7 @@ steps:
       - **The soul** at `SOUL_PATH` stores your entire configuration, unless it is mirrored to a git
         remote with `SOUL_GIT_REMOTE_URL`.
 
-      See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+      See [Updating and rollback](/self-hosting/updating) before your first upgrade.
     verify:
       kind: manual
       look_for: A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
@@ -294,7 +294,7 @@ steps:
     body: |
       Pin one image tag in `image.tag`; do not track a moving tag in a cluster. Migrations apply
       automatically on boot and there are **no down-migrations**. Read
-      [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+      [Updating and rollback](/self-hosting/updating) before your first upgrade.
 
       ```bash
       helm upgrade tulipfarm ./your-chart -n tulipfarm -f kubernetes-values.yaml

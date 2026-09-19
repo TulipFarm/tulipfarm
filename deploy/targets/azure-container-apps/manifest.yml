@@ -92,7 +92,7 @@ steps:
 
       Then hand the connection string to the app as a secret. Azure requires TLS, so keep
       `sslmode=require`. Provider-by-provider extension notes live in
-      [Use a managed database](/docs/self-hosting/managed-database).
+      [Use a managed database](/self-hosting/managed-database).
     verify:
       kind: command
       command: az postgres flexible-server parameter show --name azure.extensions --server-name tulipfarm-db --resource-group tulipfarm
@@ -244,7 +244,7 @@ steps:
     title: Seed the first admin without a browser
     body: |
       Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` together on `app` and the instance seeds
-      itself and skips the setup wizard. See [headless seeding](/docs/self-hosting/headless).
+      itself and skips the setup wizard. See [headless seeding](/self-hosting/headless).
     verify:
       kind: manual
       look_for: You can sign in with the ADMIN_EMAIL and ADMIN_PASSWORD you seeded, with no wizard shown.
@@ -262,7 +262,7 @@ steps:
       - **The soul** at `SOUL_PATH` stores your entire configuration. On this platform the soul has no
         durable disk either, so mirror it to a git remote with `SOUL_GIT_REMOTE_URL`.
 
-      See [Updating and rollback](/docs/self-hosting/updating) before your first upgrade.
+      See [Updating and rollback](/self-hosting/updating) before your first upgrade.
     verify:
       kind: manual
       look_for: A restore drill brings the instance back with its secrets decryptable, with the database, encryption key, and soul all restored together.
@@ -273,7 +273,7 @@ steps:
       Pin one image tag; do not track a moving tag. Each update creates a new revision, and
       migrations apply automatically on boot. There are **no down-migrations**, so a revision
       rollback does not undo a schema change. Read
-      [Updating and rollback](/docs/self-hosting/updating) first.
+      [Updating and rollback](/self-hosting/updating) first.
 
       ```bash
       az containerapp update --name tulipfarm-app --resource-group tulipfarm \

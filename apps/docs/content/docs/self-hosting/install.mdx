@@ -78,7 +78,7 @@ Because no admin exists yet, the app sends you to the setup wizard at `/setup`.
 <Callout type="warn">
   Until an admin exists, `/setup` is unauthenticated. On an instance reachable from the internet,
   **whoever arrives first claims it**. Do this now, not later. If the installer detected a public
-  IP it prints a TLS warning for exactly this reason. See [put TLS in front](/docs/self-hosting/tls).
+  IP it prints a TLS warning for exactly this reason. See [put TLS in front](/self-hosting/tls).
 </Callout>
 
 </Step>
@@ -106,12 +106,12 @@ fifteen minutes.
 <Cards>
   <Card
     title="Make it team-ready"
-    href="/docs/administration/make-it-team-ready"
+    href="/administration/make-it-team-ready"
     description="Give it a model, tell it about your business, invite someone, and find the emergency stop."
   />
   <Card
     title="Production checklist"
-    href="/docs/self-hosting/production-checklist"
+    href="/self-hosting/production-checklist"
     description="TLS, your own keys, a pinned tag, and backups, before it holds anything real."
   />
 </Cards>
@@ -119,14 +119,14 @@ fifteen minutes.
 ## Updating and removing
 
 Re-running the installer **is** the upgrade path. It keeps your secrets and database, pulls the
-pinned version, and restarts. See [updating and rollback](/docs/self-hosting/updating).
+pinned version, and restarts. See [updating and rollback](/self-hosting/updating).
 
-To remove the stack and all its local data, use the [uninstaller](/docs/self-hosting/uninstall).
+To remove the stack and all its local data, use the [uninstaller](/self-hosting/uninstall).
 
 ## Before real data
 
 The defaults are tuned for *runs with no setup*, not for production. Work through the
-[production checklist](/docs/self-hosting/production-checklist), TLS, your own `ENCRYPTION_KEY`, a
+[production checklist](/self-hosting/production-checklist), TLS, your own `ENCRYPTION_KEY`, a
 replaced database password, a pinned image tag, and backups.
 
 ## Overrides
@@ -169,7 +169,7 @@ TF_PROJECT_NAME=acme TF_INSTALL_DIR=/opt/acme TF_PORT=8081 \
   bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
 ```
 
-The name is recorded in that install's marker file, so [uninstalling](/docs/self-hosting/uninstall)
+The name is recorded in that install's marker file, so [uninstalling](/self-hosting/uninstall)
 targets the right stack. Keep the same `TF_PROJECT_NAME` for later re-runs and updates.
 
 ### Installing an exact ref
@@ -189,7 +189,7 @@ TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm \
 
 <Callout type="info">
   The installer does not configure TLS. To add it afterwards, edit
-  `/opt/tulipfarm/.env` and follow [Put TLS in front](/docs/self-hosting/tls).
+  `/opt/tulipfarm/.env` and follow [Put TLS in front](/self-hosting/tls).
 </Callout>
 
 ### Windows

@@ -11,14 +11,14 @@ front desk, while agents are business-specific specialists you create, select, t
 delegate work to.
 
 An agent is a *who*. It is the thing you talk to, and the thing that holds authority. A
-[skill](/docs/using-tulipfarm/skills) is a *what*: a procedure an agent loads for one task, which
+[skill](/using-tulipfarm/skills) is a *what*: a procedure an agent loads for one task, which
 carries no authority of its own. One agent uses many skills over time, so a narrower job is usually
 a new skill rather than a new agent. See
-[How agents and skills differ](/docs/using-tulipfarm/how-agents-and-skills-differ).
+[How agents and skills differ](/using-tulipfarm/how-agents-and-skills-differ).
 
 ## What the assistant writes
 
-Agents live in the [soul](/docs/using-tulipfarm/what-a-soul-is) as `agents/{name}/AGENT.md`: frontmatter plus a
+Agents live in the [soul](/using-tulipfarm/what-a-soul-is) as `agents/{name}/AGENT.md`: frontmatter plus a
 markdown instruction body. This is read-only explanation of the generated artifact, not a file a
 reader needs to type.
 
@@ -36,22 +36,22 @@ follow-up is needed.
 ```
 
 The UI lists agents and shows their prompt and governance details. To create one, use chat and the
-`agent-forge` handoff; see [Create an agent](/docs/using-tulipfarm/create-an-agent).
+`agent-forge` handoff; see [Create an agent](/using-tulipfarm/create-an-agent).
 
 ## Autonomy and approvals
 
 Autonomy describes how freely an agent may act. It decides whether runtime actions may pause for
-[Approvals](/docs/using-tulipfarm/approvals). Soul edits remain direct and ungated, but actions on records,
+[Approvals](/using-tulipfarm/approvals). Soul edits remain direct and ungated, but actions on records,
 external systems, or other effects can require a human decision.
 
 Autonomy does **not** influence which model an agent gets. It once did, and backwards. A `full`
 autonomy agent was routed to the *weakest* model. How much oversight an agent has and how much
-capability its work needs are independent; see [Model routing](/docs/administration/how-model-routing-works). The `model`
+capability its work needs are independent; see [Model routing](/administration/how-model-routing-works). The `model`
 field above names an effort preset (`auto`, `fast`, `balanced`, `thorough`) and is the only thing
 that decides capability.
 
-Every agent turn still goes through [guardrails](/docs/administration/how-guardrails-work), and every turn is a
-[Run](/docs/using-tulipfarm/runs).
+Every agent turn still goes through [guardrails](/administration/how-guardrails-work), and every turn is a
+[Run](/using-tulipfarm/runs).
 
 ## Tools and current limits
 
@@ -105,7 +105,7 @@ An excluded skill is left out of the agent's catalogue, so the agent is never to
 loading it is refused at dispatch if the agent asks for it anyway. Pointing at it with `/skill` in
 the composer does not change that: naming a skill asks the agent to look there, it never grants
 the agent something it does not have. See
-[how agents and skills differ](/docs/using-tulipfarm/how-agents-and-skills-differ).
+[how agents and skills differ](/using-tulipfarm/how-agents-and-skills-differ).
 
 Risk is otherwise managed through guardrails, approvals, SkillAudit, and role-based authority.
 
