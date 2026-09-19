@@ -1,5 +1,5 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -99,7 +99,7 @@ test("legacy standard access is one explicit revision-bound action using the exi
   expect(startMcpSetup).not.toHaveBeenCalled();
   expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
   await userEvent.click(button);
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(startMcpSetup).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
     integrationKey: "github-mcp",
     accountId: account.id,
@@ -114,7 +114,7 @@ test("legacy standard access is one explicit revision-bound action using the exi
 test("ordinary Connect still preserves the empty policy when standard access is available", async () => {
   mount();
   await userEvent.click(await screen.findByRole("button", { name: preserve }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(startMcpSetup).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
     integrationKey: "github-mcp",
     accountId: account.id,
@@ -179,7 +179,7 @@ test("credential submission can explicitly choose standard access without a sepa
   mount({ accounts: [] });
   await userEvent.type(screen.getByLabelText("Access token"), "fixture-token");
   await userEvent.click(screen.getByRole("button", { name: standard }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(startMcpSetup).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
     integrationKey: "github-mcp",
     definitionRevision: eligibility.definitionRevision,
@@ -195,7 +195,7 @@ test("credential submission can explicitly choose standard access without a sepa
 test("Enter submits preservation rather than opting into replacing the old empty policy", async () => {
   mount({ accounts: [] });
   await userEvent.type(screen.getByLabelText("Access token"), "fixture-token{Enter}");
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(vi.mocked(startMcpSetup).mock.calls[0]?.[1]).toMatchObject({ initializePolicy: false });
   expect(vi.mocked(startMcpSetup).mock.calls[0]?.[1]).not.toHaveProperty(
     "legacyEmptyPolicyConsent"
@@ -220,7 +220,7 @@ test("a guarded old journal never receives amended consent; explicit standard ac
   expect(startMcpSetup).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Use current settings" }));
   await userEvent.click(await screen.findByRole("button", { name: standard }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(vi.mocked(startMcpSetup).mock.calls[0]?.[0]).not.toBe(oldId);
   expect(vi.mocked(startMcpSetup).mock.calls[0]?.[1]).toMatchObject({
     accountId: account.id,
@@ -237,7 +237,7 @@ test("retrying the same explicit standard consent preserves its operation UUID",
   await userEvent.click(await screen.findByRole("button", { name: standard }));
   await screen.findByRole("alert");
   await userEvent.click(screen.getByRole("button", { name: standard }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(vi.mocked(startMcpSetup).mock.calls[1]?.[0]).toBe(
     vi.mocked(startMcpSetup).mock.calls[0]?.[0]
   );
@@ -250,7 +250,7 @@ test("changing an unsuccessful preservation choice to standard consent uses a ne
   await userEvent.click(await screen.findByRole("button", { name: preserve }));
   await screen.findByRole("alert");
   await userEvent.click(screen.getByRole("button", { name: standard }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(vi.mocked(startMcpSetup).mock.calls[1]?.[0]).not.toBe(
     vi.mocked(startMcpSetup).mock.calls[0]?.[0]
   );

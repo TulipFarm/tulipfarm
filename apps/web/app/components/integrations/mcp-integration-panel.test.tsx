@@ -153,7 +153,7 @@ test("explicitly using current settings does not restore the abandoned consent a
   expect(startMcpSetup).not.toHaveBeenCalled();
   expect(resumeMcpSetup).not.toHaveBeenCalled();
   await userEvent.click(screen.getByRole("button", { name: "Finish connecting" }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(startMcpSetup).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
     integrationKey: "support",
     accountId: account.id,
@@ -209,7 +209,7 @@ test("stale preview rejection clears credentials and explicitly reloads the auth
   expect(startMcpSetup).toHaveBeenCalledOnce();
   expect(screen.queryByText(/Every initial Tool call/)).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(vi.mocked(startMcpSetup).mock.calls[1]?.[1]).toMatchObject({
     definitionRevision: "d".repeat(64),
     initializePolicy: false,
@@ -276,7 +276,7 @@ test("creating an account preserves metadata keys and refreshes the panel and ca
     values: { providerToken: "fake-provider-token" },
     initializePolicy: true,
   });
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(createMcpAccount).not.toHaveBeenCalled();
   expect(changed).toHaveBeenCalledOnce();
   await waitFor(() => expect(getMcpIntegration).toHaveBeenCalledTimes(2));
@@ -312,7 +312,7 @@ test("a failed pending-token probe refreshes its saved state and retries the sam
   });
   await userEvent.type(screen.getByLabelText("providerToken"), "fake-second-token");
   await userEvent.click(screen.getByRole("button", { name: "Continue connecting" }));
-  expect(await screen.findByText("Connected")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(startMcpSetup).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
     integrationKey: "support",

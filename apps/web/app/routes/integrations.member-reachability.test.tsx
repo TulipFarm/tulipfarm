@@ -225,7 +225,9 @@ test.each<{ entry: "settings" | "chat"; authentication: "token" | "oauth" }>([
       ...(authentication === "token" ? { values: { accessToken: "fake-member-token" } } : {}),
       initializePolicy: false,
     });
-    if (authentication === "token") expect(await screen.findByText("Connected")).toBeVisible();
+    if (authentication === "token") {
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/^Connected$/));
+    }
     if (authentication === "oauth") {
       expect(await screen.findByLabelText("OAuth callback URL")).toHaveValue(callbackUrl);
       await userEvent.click(screen.getByRole("button", { name: "Connect account" }));
