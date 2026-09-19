@@ -8,6 +8,7 @@ allowBuilds:
   lefthook: true
   msgpackr-extract: true
   sharp: true
+  workerd: true
 minimumReleaseAgeExclude:
   - pg-boss@12.18.3
   - fumadocs-core@16.10.0

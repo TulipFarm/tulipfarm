@@ -22,7 +22,8 @@ in `deploy/targets/*` go in, every rendered surface comes out.
 - **The renderer is pure.** No filesystem access, no network, no clock, no environment read. It
   takes manifest *strings* and returns *strings*. Every caller — the docs generator, the prompt,
   the guided flow — drives the same call, so a surface that renders differently per caller is a
-  bug. The thin script that persists output lives in `apps/docs/scripts/`.
+  bug. `apps/docs/scripts/` persists MDX; `apps/www/scripts/` persists distribution assets.
+  Both collect build-time input through `scripts/public-site/`; neither imports the other app.
 - Parse only through `parseDeploymentContract` / `parseDeploymentTarget` from `@tulipfarm/schema`.
   Re-parsing the YAML here would let a manifest that fails validation reach a rendered page.
 - **Never generate a published artifact.** `docker-compose.yml` and the example environment file

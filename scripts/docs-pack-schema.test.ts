@@ -1,14 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SITE_URL } from "../apps/docs/lib/shared";
-import { PACK_SCHEMA_PATH, renderPackSchema } from "../apps/docs/scripts/generate-pack-schema";
+import { PACK_SCHEMA_PATH, renderPackSchema } from "../apps/www/scripts/generate-pack-schema";
+import { SITE_URL } from "../packages/constants/src/site";
 import { ajv, parseYamlDocument } from "../packages/schema/src";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const schema = JSON.parse(
-  readFileSync(resolve(ROOT, "apps/docs/public", PACK_SCHEMA_PATH), "utf8")
-);
+const schema = JSON.parse(readFileSync(resolve(ROOT, "apps/www/public", PACK_SCHEMA_PATH), "utf8"));
 const validate = ajv.compile(schema);
 const pack = {
   apiVersion: "tulipfarm.ai/v1",
@@ -37,7 +35,7 @@ const pack = {
 
 describe("public Pack schema", () => {
   it("keeps the committed schema in sync with its TypeBox source", () => {
-    expect(schema, "run pnpm --filter @tulipfarm/docs generate:pack-schema").toEqual(
+    expect(schema, "run pnpm --filter @tulipfarm/www generate:pack-schema").toEqual(
       JSON.parse(renderPackSchema())
     );
   });

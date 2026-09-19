@@ -62,6 +62,9 @@ Every app and package owns an `AGENTS.md` that states what it is, when to read i
 directory map. **Use them instead of grepping the repo.** `CLAUDE.md` files are pointers to the
 sibling `AGENTS.md`.
 
+For public landing-page design, copy, or the website/docs split, load
+[`.agents/skills/tulipfarm-marketing/`](.agents/skills/tulipfarm-marketing/SKILL.md) first.
+
 | Path | Read it when your task touches |
 | --- | --- |
 | [`apps/api`](apps/api/AGENTS.md) | HTTP routes, auth/sessions, migrations, OpenAPI, soul git store |
@@ -69,6 +72,7 @@ sibling `AGENTS.md`.
 | [`apps/worker`](apps/worker/AGENTS.md) | Run dispatch, Agent/Tool States, timers, reconciliation, projections |
 | [`apps/integration-worker`](apps/integration-worker/AGENTS.md) | Integration ingress, sync, delivery, retries |
 | [`apps/docs`](apps/docs/AGENTS.md) | Public Fumadocs site content and conventions |
+| [`apps/www`](apps/www/AGENTS.md) | Static public website, prepared demo, guided deployment, distribution assets |
 | [`apps/eval`](apps/eval/AGENTS.md) | Offline eval Corpus, Expectations, Sweeps, Scorecards, red team |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation |
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State machines, waits, retries, child Runs |
@@ -153,6 +157,7 @@ pnpm install                     # CI: pnpm install --frozen-lockfile
 pnpm dev                         # api :4010, web :4000, worker :4020, integration-worker :4030
 pnpm dev:api | dev:web | dev:worker | dev:integration-worker
 pnpm dev:docs                    # :5000
+pnpm dev:www                     # public website :5100
 pnpm dev:kill                    # free ports 4000/4010/4020/4030 left bound by a dead run
 pnpm lint                        # biome check, turbo-cached
 pnpm typecheck                   # tsc --noEmit, turbo-cached

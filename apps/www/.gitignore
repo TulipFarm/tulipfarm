@@ -1,0 +1,15 @@
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+test-results/
+playwright-report/
+.wrangler/
+public/install.sh
+public/uninstall.sh
+public/install.ps1
+public/docker-compose.yml
+public/env.example
+public/deploy.txt
+public/kubernetes-values.yaml
+public/azure-containerapp.yaml

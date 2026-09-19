@@ -1,15 +1,22 @@
 # TulipFarm Design Language
 
-The source of truth for how TulipFarm looks and behaves, across both surfaces it ships:
+The source of truth for how TulipFarm looks and behaves across its public and product surfaces:
 
 | Surface | Package | Stack | Token file |
 | --- | --- | --- | --- |
 | Product app | `apps/web` | Remix 2 SPA, React 19, Vite, Tailwind v4 | `apps/web/app/tokens.css` |
 | Public docs | `apps/docs` | Next.js static export, Fumadocs, Tailwind v4 | `apps/docs/app/global.css` |
+| Public website | `apps/www` | Next.js static export, React, Tailwind v4 | `apps/www/app/global.css` |
 
 Read this before creating pages, component families, shell navigation, tokens, status treatments,
-or new interaction patterns. Runtime values stay canonical in the two token files above; this
+or new interaction patterns. Runtime values stay canonical in the token files above; this
 document owns the decisions behind them.
+
+**Scope matters.** The work-surface rules in §§1 and 3–12 govern the product and documentation.
+They do not prescribe the public website's composition, control scale, colour accents, depth,
+or storytelling motion. `apps/www` follows the public-website brief in §2 and the marketing
+skill, while retaining the accessibility contract in §8. Do not turn a landing-page draft's
+font, radius, spacing, or alignment into a permanent brand rule.
 
 Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md). UI and URL say
 **Chat**; persistence and domain code say **Conversation**.
@@ -17,7 +24,7 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 ## Contents
 
 1. [Principles](#1-principles)
-2. [Two surfaces, one language](#2-two-surfaces-one-language)
+2. [Three surfaces, one language](#2-three-surfaces-one-language)
 3. [Color and tokens](#3-color-and-tokens)
 4. [The closed color axes](#4-the-closed-color-axes)
 5. [Typography](#5-typography)
@@ -55,14 +62,14 @@ Terminology is binding: [`metadata/terminologies.md`](metadata/terminologies.md)
 - **Accessible in every state.** Keyboard, screen reader, contrast, reduced motion, zoom, long
   text, and touch are part of the component contract, not a later pass.
 
-## 2. Two surfaces, one language
+## 2. Three surfaces, one language
 
-Both surfaces share the typeface, the type scale, the surface ramp, the ruby brand hue, the focus
-treatment, and every rule in §§3–8. They diverge in exactly two places.
+The product and documentation share the typeface, type scale, surface ramp, ruby brand hue,
+focus treatment, and the rules in §§3–8. Their exceptions are below. The public website shares
+the identity but has its own visitor-oriented scale and composition.
 
 | Decision | `apps/web` | `apps/docs` | Why |
 | --- | --- | --- | --- |
-| Material | Grain and ambient wash on full-bleed marketing bands | Not used | Elevation lifts a *control*; a full-bleed band is a ground. Grain gives that ground a material without lifting it. |
 | Theme selector | `[data-theme="dark"]` on `<html>` | `.dark` on `<html>` (fumadocs' convention) | fumadocs owns its own theme switch. Do not fight it. |
 
 **The canvas used to be a third row, and is not any more.** The docs previously ran a warm cream
@@ -75,8 +82,30 @@ docs, note that the cast has to be paid for on every shared token, not just the 
 Everything else must match. When you change a shared value in one, change it in the other:
 `apps/docs/app/global.css` states this in its header comment, and the ruby
 `oklch(0.46 0.17 25)` is byte-identical in both files — `--brand` in the app, the brand primary in
-the docs. The docs site is marketing, where the brand *is* the call to action, so it keeps ruby on
-its CTA; the app is a work surface, where it is not (§3.1).
+the docs. Public actions keep ruby; the product is a work surface, where its committing action
+uses ink (§3.1).
+
+### Public website
+
+`apps/www` is a visitor experience, not an enlarged work surface. Its job is to make a business
+outcome clear, demonstrate how it happens, and lead to guided self-hosted setup.
+
+- Keep the tulip identity, a light canvas, dark text, and ruby for **Start building**. Website
+  typography, illustration, spacing, shape, and depth may differ from the product and docs.
+  Their current values live in the website CSS, not in permanent layout prescriptions here.
+- Give the whole page a visual story. Vary composition and density to match each section's
+  question. Do not repeat headline/paragraph/panel rows or use empty space as the only hierarchy.
+- Compose focused product demonstrations instead of making a full application screenshot the
+  opening's main explanation. Real components supply proof; diagrams explain relationships.
+  A diagram must look and read like a diagram, not a fabricated product screen.
+- Motion may explain a build sequence, a handoff, or a result. It must not imply live Agent
+  activity in a prepared example. Provide replay controls and a useful reduced-motion state.
+- Keep the promise and primary action visible on entry. On phones, recompose the story with
+  readable text and results instead of shrinking desktop UI.
+- Mark fixed data as sample data. Ground claims in shipped behavior; never invent customer
+  proof, live activity, or performance numbers.
+- Preserve working examples, clear failure states, keyboard navigation, and a useful static
+  first frame. Visual freedom does not relax accessibility or the static-hosting contract.
 
 ### Naming
 
@@ -299,9 +328,11 @@ value too, so the ramp reinforces and never carries the fact alone.
 
 ## 5. Typography
 
-**Inter Variable** for headings, controls, navigation, and prose. **JetBrains Mono Variable** for
-code, paths, IDs, logs, timestamps, command output, and dense tabular diagnostics. Both are loaded
-from `@fontsource-variable/*` in each app's root layout.
+**Inter Variable** for product and documentation headings, controls, navigation, and prose.
+**JetBrains Mono Variable** for code, paths, IDs, logs, timestamps, command output, and dense
+tabular diagnostics. Both are loaded from `@fontsource-variable/*` in each app's root layout.
+The public website owns its marketing typography under §2; its current fonts and licences are
+documented in `apps/www/README.md`.
 
 **Import the `opsz` entrypoint, not the default one.**
 
@@ -400,9 +431,8 @@ Reserve larger type for content that says something the bar does not.
 
 ## 6. Shape, depth, and material
 
-The elevation ladder below applies to **both apps** — `apps/docs` mirrors the same four steps onto
-its own tokens. The two docs-only material effects at the end of this section are the one thing the
-marketing surface has that the product app does not.
+The elevation ladder below applies to the product and documentation — `apps/docs` mirrors the
+same four steps onto its own tokens. Public-website depth and material follow §2 instead.
 
 - **Resting chrome carries no shadow at all.** This reverses an earlier rule, which put `shadow-xs`
   on every input, button, card, table and panel. A shadow on something that is not floating is
@@ -442,19 +472,6 @@ marketing surface has that the product app does not.
   `strokeWidth` per icon without a concrete emphasis need. Never emoji.
 - **Hairlines carry more weight on the dark canvas.** Shadows go nearly black there and read as
   absence rather than as lift, so the border does most of the separating.
-
-Two material effects are sanctioned on the docs marketing surface, and only there, because a
-full-bleed section with no shadow and no gradient is otherwise an unbroken fill that reads as dead
-space:
-
-- **`.tf-grain`**: a fixed fractal-noise overlay at 2% opacity (4.2% dark). It restores the sense
-  of a physical material without reintroducing elevation. `pointer-events: none`, and it sits at the
-  named stacking level `--tf-z-grain: 20` so it clears content but stays under fumadocs' portalled
-  dialogs.
-- **`.tf-ambient`**: two very-low-alpha radial washes carrying the brand hue. It describes light in
-  the scene rather than elevation of an element, which is why it is not a shadow.
-
-Neither is available in the product app. Do not port them there.
 
 ## 7. Motion
 
@@ -1271,11 +1288,10 @@ component contract.
 
 `apps/docs` is a Fumadocs site, so most chrome is fumadocs' own. What we own:
 
-- **The visual language mapping** in `global.css`: warm canvas, ruby brand and ruby CTA, and grain
-  and ambient wash on marketing surfaces only. Radius and the elevation ladder now match the app
-  exactly (§6) — the values are duplicated, not imported, because the two apps share no
-  stylesheet, so a change to one is a change to both. The app's near-black `--primary` (§3.1) does
-  **not** cross over: on a marketing page the brand *is* the call to action.
+- **The visual language mapping** in `global.css`: neutral surfaces, ruby links and public
+  actions, and the product's radius and elevation ladder (§6). Values are duplicated, not imported,
+  because the apps share no stylesheet. Marketing composition and guided deployment belong to
+  `apps/www`, not this reading surface.
 - **`PromptBlock`**: the ` ```prompt ` block. Prompts never route through the syntax highlighter.
 - **Page actions**: Copy Markdown and the Open menu. Both carry the failure contract from §8.
 - **Search**: including a real empty state that names the query and offers an exit.
@@ -1284,8 +1300,9 @@ Rules:
 
 - **Put a `##` heading before every `<Steps>` and `<Cards>` block.** Both render `h3` internally, so
   without it the page jumps `h1 → h3`.
-- The docs page shell renders `<main id="nd-page">`. Every other route (home, `/deploy`, 404) must
-  also carry `#nd-page` on its content root so the shared skip link has a target.
+- The docs page shell renders `<main id="nd-page">`. Documentation fallback pages, including 404,
+  also carry `#nd-page` so the shared skip link has a target. The website's separate shell uses
+  `#main-content`, including its `/deploy` route.
 - Where fumadocs owns the markup, prefer its documented slot over a fork. The search empty state
   uses `SearchDialogList`'s `Empty` prop rather than a replaced component.
 - Two known axe items live in fumadocs' own markup: `role="region"` without a name on code-block

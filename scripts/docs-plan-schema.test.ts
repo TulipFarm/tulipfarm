@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SITE_URL } from "../apps/docs/lib/shared";
-import { PLAN_SCHEMA_PATH, renderPlanSchema } from "../apps/docs/scripts/generate-plan-schema";
+import { PLAN_SCHEMA_PATH, renderPlanSchema } from "../apps/www/scripts/generate-plan-schema";
+import { SITE_URL } from "../packages/constants/src/site";
 import { ajv, parseYamlDocument } from "../packages/schema/src";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const schemaPath = resolve(ROOT, "apps/docs/public", PLAN_SCHEMA_PATH);
+const schemaPath = resolve(ROOT, "apps/www/public", PLAN_SCHEMA_PATH);
 const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
 const validate = ajv.compile(schema);
 const plan = {
@@ -19,7 +19,7 @@ const plan = {
 
 describe("public YAML Plan schema", () => {
   it("keeps the committed artifact identical to the TypeBox source", () => {
-    expect(schema, "run pnpm --filter @tulipfarm/docs generate:plan-schema").toEqual(
+    expect(schema, "run pnpm --filter @tulipfarm/www generate:plan-schema").toEqual(
       JSON.parse(renderPlanSchema())
     );
   });

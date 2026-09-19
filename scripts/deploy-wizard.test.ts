@@ -10,8 +10,10 @@ import {
   inputStageId,
   resolveSiteUrl,
   stageOrder,
+  targetDocHref,
   whenMatches,
-} from "../apps/docs/app/deploy/model";
+} from "../apps/www/app/deploy/model";
+import { DOCS_URL } from "../packages/constants/src/site";
 import { renderDeploymentSurfaces, type WizardModel } from "../packages/deploy-render/src/render";
 
 function repoRoot(): string {
@@ -25,7 +27,7 @@ function repoRoot(): string {
 }
 
 const ROOT = repoRoot();
-const DEPLOY_DIR = join(ROOT, "apps/docs/app/deploy");
+const DEPLOY_DIR = join(ROOT, "apps/www/app/deploy");
 
 function buildModel(): WizardModel {
   const targetsDir = join(ROOT, "deploy/targets");
@@ -212,6 +214,17 @@ describe("deploy wizard — the guided flow's model consumption", () => {
 
 describe("deploy wizard — the static-hosting guarantees", () => {
   const model = buildModel();
+
+  it("links full guides and step anchors directly to the documentation origin", () => {
+    for (const target of model.targets) {
+      expect(targetDocHref(target)).toBe(`${DOCS_URL}/docs/self-hosting/${target.name}`);
+      for (const step of target.steps) {
+        const url = new URL(targetDocHref(target, step));
+        expect(url.origin).toBe(DOCS_URL);
+        expect(url.hash.length).toBeGreaterThan(1);
+      }
+    }
+  });
 
   it("renders every input the manifest can declare, so no question is silently dropped", () => {
     // The page draws inputs as radio groups and nothing else. If a manifest ever declares an input

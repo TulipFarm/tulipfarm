@@ -30,6 +30,8 @@ An omitted edge is forbidden.
 | --- | --- |
 | `packages/schema` | No TulipFarm runtime package |
 | `packages/observability` | No TulipFarm runtime package |
+| `packages/constants` | No TulipFarm runtime package |
+| `packages/deploy-render` | `packages/schema` |
 | `packages/storage` | `packages/schema`, `packages/observability`, `packages/surface` |
 | `packages/authz` | `packages/schema`, `packages/observability` |
 | `packages/audit` | `packages/schema`, `packages/storage`, `packages/observability` |
@@ -78,6 +80,14 @@ code must not import it or execute Turns.
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `mcp`, `knowledge`, `storage`, `observability` |
 | `apps/web` | `schema`, `files`, `surface`, `surface-web`, `surface-slack`, `surface-github`, and presentation-only packages such as `ui`/`editor` |
 | `apps/eval` | `agent-runtime`, `turn-executor`, `model-adapter`, `llm`, `schema`, `secrets`, `soul`, `storage`, `run-kernel`, `tool-broker`, `tool-host`, `files`, `integrations`, `mcp` |
+| `apps/docs` | `constants`, `deploy-render` |
+| `apps/www` | `constants`, `deploy-render`, `schema`, `surface`, `surface-web` |
+
+The public sites never import each other. `scripts/public-site/` owns shared build-time manifest
+collection, not domain rendering or browser behavior. `deploy-render` remains pure; docs persists
+documentation pages, while www publishes deployment assets and schemas. Browser origin values come
+only from the import-free `constants/site` leaf. The public sites may not import the environment-aware
+constants barrel or product server, storage, provider, and worker modules.
 
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may

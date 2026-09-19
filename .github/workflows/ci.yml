@@ -19,7 +19,7 @@ permissions:
   packages: read
 
 jobs:
-  # Route docs changes to their focused suite and everything else to the main
+  # Route public-site changes to their focused suites and everything else to the main
   # suite. `code` remains narrower so markdown-only changes skip unit tests.
   # Dependency-free (no marketplace actions).
   changes:
@@ -29,6 +29,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
+      www: ${{ steps.filter.outputs.www }}
       non_docs: ${{ steps.filter.outputs.non_docs }}
     steps:
       - uses: actions/checkout@v7
@@ -49,6 +50,7 @@ jobs:
 
           code=false
           docs=false
+          www=false
           non_docs=false
           changed_files() {
             if git cat-file -e "$base^{commit}" 2>/dev/null; then
@@ -63,8 +65,24 @@ jobs:
               apps/docs/*)
                 docs=true
                 ;;
-              packages/schema/src/*.ts|packages/constants/src/site.ts|scripts/docs-plan-schema.test.ts|scripts/docs-pack-schema.test.ts)
+              apps/www/*)
+                www=true
+                ;;
+              scripts/public-site/*|scripts/site-url.test.ts|scripts/deploy-prompt.test.ts|scripts/deploy-wizard.test.ts|scripts/docs-plan-schema.test.ts|scripts/docs-pack-schema.test.ts)
                 docs=true
+                www=true
+                ;;
+              scripts/docs-*.test.ts|scripts/generate-tool-docs.ts)
+                docs=true
+                ;;
+              packages/schema/*|packages/constants/*|packages/deploy-render/*|packages/tsconfig/*|deploy/*|docker-compose.yml|.env.example|scripts/install.sh|scripts/install.ps1|scripts/uninstall.sh|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|turbo.json|biome.json|.github/workflows/ci.yml)
+                docs=true
+                www=true
+                non_docs=true
+                code=true
+                ;;
+              packages/surface/*|packages/surface-web/*)
+                www=true
                 non_docs=true
                 code=true
                 ;;
@@ -81,6 +99,7 @@ jobs:
           {
             echo "code=$code"
             echo "docs=$docs"
+            echo "www=$www"
             echo "non_docs=$non_docs"
           } >> "$GITHUB_OUTPUT"
 
@@ -98,7 +117,7 @@ jobs:
       - name: Lint
         run: |
           set -o pipefail
-          pnpm exec turbo lint --filter='!@tulipfarm/docs' 2>&1 | tee lint.log
+          pnpm exec turbo lint --filter='!@tulipfarm/docs' --filter='!@tulipfarm/www' 2>&1 | tee lint.log
       # Biome's noRestrictedGlobals cannot match member expressions like `crypto.randomUUID`,
       # so the secure-context guard is a separate grep pass.
       - name: Secure-context API guard
@@ -149,7 +168,7 @@ jobs:
       - name: Typecheck
         run: |
           set -o pipefail
-          pnpm exec turbo typecheck --filter='!@tulipfarm/docs' 2>&1 | tee typecheck.log
+          pnpm exec turbo typecheck --filter='!@tulipfarm/docs' --filter='!@tulipfarm/www' 2>&1 | tee typecheck.log
           pnpm typecheck:e2e 2>&1 | tee -a typecheck.log
       - name: Job summary
         if: always()
@@ -192,10 +211,10 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           turbo-cache-key: build
-      - name: Build (api + web; docs has its own job)
+      - name: Build (product apps; public sites have their own jobs)
         run: |
           set -o pipefail
-          pnpm exec turbo build --filter='!@tulipfarm/docs' 2>&1 | tee build.log
+          pnpm exec turbo build --filter='!@tulipfarm/docs' --filter='!@tulipfarm/www' 2>&1 | tee build.log
       - name: Install Chromium for browser import regression
         run: pnpm exec playwright install --with-deps chromium
       - name: Check Vite browser imports
@@ -393,8 +412,7 @@ jobs:
       - uses: ./.github/actions/setup
       # These guards live at the repo root because `apps/docs` has no test runner, and they
       # scan `apps/**` + `packages/**`, so `architecture:test` also picks them up for non-docs
-      # changes. Without this step a docs-only PR runs neither — and `apps/docs/lib/shared.ts`,
-      # which defines the canonical site URL, sets only the `docs` filter.
+      # changes. Without this step a docs-only PR runs neither.
       - name: Docs guard tests
         run: |
           set -o pipefail
@@ -443,6 +461,51 @@ jobs:
           name: docs-site
           path: apps/docs/out
           if-no-files-found: warn
+          retention-days: 7
+
+  www-build:
+    name: Website checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    if: ${{ needs.changes.outputs.www == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Public-site contracts
+        run: |
+          set -o pipefail
+          pnpm docs:test 2>&1 | tee www-build.log
+      - name: Lint, typecheck, and export website
+        run: |
+          set -o pipefail
+          pnpm --filter @tulipfarm/www lint 2>&1 | tee -a www-build.log
+          pnpm --filter @tulipfarm/www typecheck 2>&1 | tee -a www-build.log
+          pnpm --filter @tulipfarm/www build 2>&1 | tee -a www-build.log
+      - name: Install browser
+        run: pnpm --filter @tulipfarm/www exec playwright install --with-deps chromium
+      - name: Exported website acceptance
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -o pipefail
+          pnpm --filter @tulipfarm/www test 2>&1 | tee -a www-build.log
+          pnpm --filter @tulipfarm/www test:browser 2>&1 | tee -a www-build.log
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-www-build
+          path: www-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload website static export
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: www-site
+          path: apps/www/out
+          if-no-files-found: error
           retention-days: 7
 
   test-api:
@@ -734,6 +797,7 @@ jobs:
         schema-fixtures,
         eval-corpus,
         docs-build,
+        www-build,
         test-api,
         test-packages,
         test-apps,
@@ -764,6 +828,7 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           CODE_CHANGED: ${{ needs.changes.outputs.code }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs }}
+          WWW_CHANGED: ${{ needs.changes.outputs.www }}
           NON_DOCS_CHANGED: ${{ needs.changes.outputs.non_docs }}
           LINT_RESULT: ${{ needs.lint.result }}
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
@@ -772,6 +837,7 @@ jobs:
           SCHEMA_FIXTURES_RESULT: ${{ needs['schema-fixtures'].result }}
           EVAL_CORPUS_RESULT: ${{ needs['eval-corpus'].result }}
           DOCS_BUILD_RESULT: ${{ needs['docs-build'].result }}
+          WWW_BUILD_RESULT: ${{ needs['www-build'].result }}
           TEST_API_RESULT: ${{ needs['test-api'].result }}
           TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
           TEST_APPS_RESULT: ${{ needs['test-apps'].result }}
@@ -784,6 +850,7 @@ jobs:
 
             const codeChanged = process.env.CODE_CHANGED === "true";
             const docsChanged = process.env.DOCS_CHANGED === "true";
+            const wwwChanged = process.env.WWW_CHANGED === "true";
             const nonDocsChanged = process.env.NON_DOCS_CHANGED === "true";
 
             // Fourth tuple field indicates whether this check is required for
@@ -802,6 +869,7 @@ jobs:
               ],
               ["Eval Corpus", "eval-corpus", process.env.EVAL_CORPUS_RESULT, nonDocsChanged],
               ["Docs checks", "docs-build", process.env.DOCS_BUILD_RESULT, docsChanged],
+              ["Website checks", "www-build", process.env.WWW_BUILD_RESULT, wwwChanged],
               ["Test API (4 shards)", "test-api", process.env.TEST_API_RESULT, codeChanged],
               ["Test packages", "test-packages", process.env.TEST_PACKAGES_RESULT, codeChanged],
               ["Test other apps", "test-apps", process.env.TEST_APPS_RESULT, codeChanged],
