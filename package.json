@@ -15,6 +15,7 @@
     "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web --filter=@tulipfarm/worker --filter=@tulipfarm/integration-worker",
     "dev:api": "turbo dev --filter=@tulipfarm/api",
     "dev:docs": "turbo dev --filter=@tulipfarm/docs",
+    "dev:www": "turbo dev --filter=@tulipfarm/www",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "dev:worker": "turbo dev --filter=@tulipfarm/worker",
     "dev:integration-worker": "turbo dev --filter=@tulipfarm/integration-worker",

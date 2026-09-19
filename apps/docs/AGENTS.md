@@ -1,11 +1,9 @@
 # Docs site
 
-`@tulipfarm/docs` is the public Fumadocs site on Next.js, built as a static export.
-It owns docs content, MDX rendering, prompt blocks, install snippets, and site styling.
+`@tulipfarm/docs` is the static Fumadocs documentation site, retaining `/docs` paths.
+`apps/www` owns marketing, guided deployment, installer distribution, and published schemas.
 
-**Writing or restructuring content? Load `.agents/skills/tulipfarm-docs/` first** — it carries the
-voice bar, the Diátaxis quadrant test, and the per-track writing mode. This file is the map and
-the binding local rules only.
+**Writing or restructuring content? Load `.agents/skills/tulipfarm-docs/` first.**
 
 ## Read on / Skip
 
@@ -16,8 +14,7 @@ the binding local rules only.
 
 ## Map
 
-Three reader tracks plus two shared sections. A page belongs to the track whose *access level*
-it needs, never the one whose topic it resembles.
+Place pages by required access level, not topic: three reader tracks and two shared sections.
 
 | Path | Owns |
 | --- | --- |
@@ -31,11 +28,12 @@ it needs, never the one whose topic it resembles.
 | `content/docs/*/meta.json` | Nav order and `---Separator---` group headings. |
 | `source.config.ts`, `components/mdx.tsx` | Fumadocs config, remark plugins, MDX component map. |
 | `components/prompt-block.tsx`, `lib/remark-prompt.ts` | The ` ```prompt ` block and the remark plugin that builds it. |
-| `lib/remark-site-url.ts`, `lib/shared.ts` | `{{SITE_URL}}`, site URL, site description. |
+| `lib/remark-site-url.ts`, `lib/shared.ts` | `{{DOCS_URL}}` for docs; `{{SITE_URL}}` for marketing/downloads. |
+| `app/page.tsx` | Root redirect to `/docs`, never a marketing homepage. |
 | `app/docs/[[...slug]]/` | Docs page route and per-page SEO metadata. |
 | `app/sitemap.ts`, `app/robots.ts`, `app/og/` | Sitemap, robots policy, Open Graph images. |
-| `scripts/generate-plan-schema.ts`, `public/schemas/plan/` | Versioned editor JSON Schema generated from TypeBox; regenerate with `pnpm generate:plan-schema`, never edit JSON by hand. |
-| `scripts/generate-pack-schema.ts`, `public/schemas/pack/` | Pack editor JSON Schema, including its embedded Plan; regenerate with `pnpm generate:pack-schema`. |
+| `scripts/generate-deploy-docs.ts` | Persists only MDX from `deploy-render`; shared input collection is in `scripts/public-site/`. |
+| `public/_redirects`, `public/_headers` | Cloudflare Pages routing and machine-reader content types. |
 
 ## Rules
 
@@ -59,30 +57,24 @@ it needs, never the one whose topic it resembles.
 - Secrets and LLM-provider config are the non-agentic exception: admin UI steps are correct there.
 - Verify every claim against code: tools, env vars, LLM behavior, ports, token prefixes. Pin a
   number with `tf-claim`. Never document unshipped features. One reader need per page.
-- Reader-entered assistant messages use ` ```prompt `, never ` ```text `.
-- ` ```bash `/` ```json `/` ```yaml ` only for real commands or config; ` ```text ` only for
-  diagrams. Never route prompts through the highlighter.
+- Use ` ```prompt ` for reader-entered assistant messages, shell/JSON/YAML fences for real
+  commands or config, and ` ```text ` only for diagrams. Never highlight prompts.
 - **Put a `##` heading before every `<Steps>` and `<Cards>` block.** Both render `h3` internally,
   so without it the page jumps `h1 → h3` and fails accessibility checks.
 - Registered: `Callout`, `Cards`/`Card`, `Steps`/`Step`, `File`/`Folder`/`Files`,
   `Accordion`/`Accordions`, `Banner`, `PromptBlock`. Adding one needs a reason.
 - Frontmatter needs `title` and a 110–160 character `description` — it is the search snippet.
-- The canonical site URL is `https://tulipfarm.site`, set once in `lib/shared.ts`. Never write
-  the domain in MDX/TS/TSX — use `{{SITE_URL}}` or import `SITE_URL`.
+- Origins live only in `packages/constants/src/site.ts`, re-exported by `lib/shared.ts`.
+  `DOCS_URL` is `https://docs.tulipfarm.site`; `SITE_URL` remains `https://tulipfarm.site` for
+  installers, schemas, and marketing. Use the matching token/import, never a literal in MDX/TS/TSX.
 - Imports in `source.config.ts` must be relative. `lib/shared.ts` may re-export the relative,
   import-free `packages/constants/src/site.ts` leaf; keep runtime imports out so Fumadocs can
   evaluate bundled config under plain Node. Restart dev after editing it.
-- Design: Instrument Sans for prose and UI, JetBrains Mono for code and technical surfaces,
-  hairline borders, warm cream/near-black, ruby accent, no gradients except the prompt block
+- Design: Inter for prose and UI, JetBrains Mono for code and technical surfaces,
+  hairline borders, neutral light/dark surfaces, ruby accent, no gradients except the prompt block
   underline; clickable elements need cursor.
 - Radius and the `--shadow-*` ladder in `global.css` mirror `apps/web/app/tokens.css` by hand
   (DESIGN.md §6). Change them in both or in neither. Never a raw `shadow-[…]`.
 
-## Checks
-
-```bash
-pnpm docs:test                        # links, nav, frontmatter, the admin invariant
-pnpm --filter @tulipfarm/docs build   # exercises remark plugins end to end
-```
-
-Deployment notes: [`README.md`](README.md).
+Checks and deployment: [`README.md`](README.md). Run `pnpm docs:test` and
+`pnpm --filter @tulipfarm/docs build` to cover guards and remark processing.

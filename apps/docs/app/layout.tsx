@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Provider } from "@/components/provider";
-import { appName, SITE_URL, siteDescription } from "@/lib/shared";
+import { appName, DOCS_URL, siteDescription } from "@/lib/shared";
 import "@fontsource-variable/inter/opsz.css";
 import "@fontsource-variable/jetbrains-mono";
 import "./global.css";
@@ -9,7 +9,7 @@ import "./global.css";
 // ones. `alternates.canonical` is deliberately NOT set here — metadata is inherited, so a root
 // canonical would point every page at the home page. Each route sets its own.
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
+  metadataBase: new URL(DOCS_URL),
   title: appName,
   description: siteDescription,
   openGraph: {

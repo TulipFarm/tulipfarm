@@ -15,8 +15,8 @@ import {
 /**
  * The single-file deployment guide served at `{{SITE_URL}}/deploy.txt`. It is written for one
  * reader: an LLM with a shell, working top to bottom on a platform that may not be in our
- * CI-tested set. The output keeps `{{SITE_URL}}` placeholders so the pure renderer never carries
- * the domain; the thin generator resolves them before publishing.
+ * CI-tested set. `{{SITE_URL}}` identifies downloads and `{{DOCS_URL}}` identifies reading links;
+ * the thin generator resolves both before publishing, keeping this renderer domain-free.
  *
  * Two properties are load-bearing and asserted in tests:
  *  - **No hidden branch.** A wizard reader sees only the branch a `when:` selected; a linear file
@@ -27,7 +27,7 @@ import {
  *    shipped weak `POSTGRES_PASSWORD`) renders faithfully, because it is contract data, not a leak.
  */
 
-const SELF_HOSTING_BASE = "{{SITE_URL}}/docs/self-hosting";
+const SELF_HOSTING_BASE = "{{DOCS_URL}}/docs/self-hosting";
 
 const ZONE_KEY: ReadonlyArray<[DeploymentContractEnvVar["zone"], string]> = [
   ["set-these", "normal configuration; change it to suit the deployment"],
@@ -171,7 +171,7 @@ function sanitizeBody(body: string): string {
     .trimEnd()
     .replace(/<Callout[^>]*>/g, "NOTE:")
     .replace(/<\/Callout>/g, "")
-    .replace(/\]\(\/docs\//g, "]({{SITE_URL}}/docs/");
+    .replace(/\]\(\/docs\//g, "]({{DOCS_URL}}/docs/");
 }
 
 function renderOnFail(onFail: string): string {

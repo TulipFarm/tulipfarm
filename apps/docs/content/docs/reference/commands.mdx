@@ -10,7 +10,7 @@ TulipFarm ships both a self-hosted Docker Compose lane and a pnpm + Turborepo so
 
 | Command | What it does |
 | --- | --- |
-| `curl -fsSL {{SITE_URL}}/install.sh \| sudo bash` | runs the Linux installer served by the docs site. It writes `/opt/tulipfarm`, generates `.env`, and starts Docker Compose. |
+| `curl -fsSL {{SITE_URL}}/install.sh \| sudo bash` | runs the Linux installer served by the public website. It writes `/opt/tulipfarm`, generates `.env`, and starts Docker Compose. |
 | `curl -fsSL {{SITE_URL}}/uninstall.sh \| sudo bash` | runs the Linux uninstaller. It stops the stack and removes installed files according to the script prompts. |
 | `iwr {{SITE_URL}}/install.ps1 -UseBasicParsing \| iex` | runs the PowerShell installer on Windows hosts with Docker available. |
 | `curl -fsSLO {{SITE_URL}}/docker-compose.yml` | Downloads the production Compose file without running the installer. |

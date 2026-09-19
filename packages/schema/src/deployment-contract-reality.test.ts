@@ -102,6 +102,7 @@ const REVERSE_EXCLUSIONS: Readonly<Record<string, string>> = {
     "An Integration connection secret read from a connection.yaml `env` block, not from process.env.",
   TF_CODEX_BIN:
     "A developer-only override for the local Codex CLI binary; never set in a deployment.",
+  WWW_PREVIEW_URL: "Playwright-only website preview origin; never read by an installed service.",
 };
 
 /**

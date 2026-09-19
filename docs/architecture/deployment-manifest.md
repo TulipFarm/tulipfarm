@@ -245,7 +245,7 @@ Check 5 is the one that makes D2 real. Without it, "officially supported" is an 
 ### 7.3 `deploy.txt`
 
 A flat render of `contract.yml` plus every target, in reading order, with all `when` branches
-present and labelled. Served as a static asset from the docs site, so a one-line prompt works:
+present and labelled. Served as a static asset from the public website, so a one-line prompt works:
 
 ```
 Deploy TulipFarm for me. Follow this guide: {{SITE_URL}}/deploy.txt
@@ -257,7 +257,7 @@ assuming success. Verification is what separates this from a model reading the d
 
 ### 7.4 The `/deploy` wizard
 
-A client-only route in `apps/docs`. Renders `inputs` as steps, `steps` as instructions,
+A client-only route in `apps/www`. Renders `inputs` as steps, `steps` as instructions,
 `artifacts` as a downloadable file. Offers **only** `tier: supported` targets, and routes every
 other platform to `deploy.txt` rather than guessing.
 

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { DOCS_URL } from "../packages/constants/src/site";
 
 function repoRoot(): string {
   let directory = __dirname;
@@ -52,6 +53,24 @@ function parsePage(file: string): Page {
 const pages = pageFiles.map(parsePage);
 const pageUrls = new Set(pages.map((page) => page.url));
 
+describe("documentation-only application", () => {
+  it("sends the root directly to documentation in development and on Pages", () => {
+    const rootPage = readFileSync(join(ROOT, "apps/docs/app/page.tsx"), "utf8");
+    const redirects = readFileSync(join(ROOT, "apps/docs/public/_redirects"), "utf8");
+    expect(rootPage).toMatch(/(?:permanentRedirect|redirect)\("\/docs"\)/);
+    expect(redirects).toMatch(/^\/\s+\/docs\s+301$/m);
+  });
+
+  it("does not retain marketing routes, components, or presentation effects", () => {
+    const marketingFiles = sourceFiles("apps/docs/app", "apps/docs/components").filter((file) =>
+      /apps\/docs\/(?:app\/(?:\(home\)|deploy)|components\/home)\//.test(file)
+    );
+    expect(marketingFiles).toEqual([]);
+    const styles = readFileSync(join(ROOT, "apps/docs/app/global.css"), "utf8");
+    expect(styles).not.toMatch(/\.tf-(?:grain|ambient)|\[data-reveal/);
+  });
+});
+
 function frontmatterValue(page: Page, key: string): string | undefined {
   const match = new RegExp(`^${key}:\\s*(.+)$`, "m").exec(page.frontmatter);
   return match?.[1].trim().replace(/^["']|["']$/g, "");
@@ -89,8 +108,9 @@ describe("docs links", () => {
     // let two dead `<Card href>` targets reach the built site.
     const patterns = [/\]\((\/docs[^)#\s]*)(?:#[^)\s]*)?\)/g, /href="(\/docs[^"#]*)(?:#[^"]*)?"/g];
     for (const page of pages) {
+      const body = page.body.replaceAll("{{DOCS_URL}}", "").replaceAll(`${DOCS_URL}/docs`, "/docs");
       for (const pattern of patterns) {
-        for (const match of page.body.matchAll(pattern)) {
+        for (const match of body.matchAll(pattern)) {
           const target = match[1].replace(/\/$/, "");
           if (!pageUrls.has(target)) broken.push(`${page.file} → ${match[1]}`);
         }

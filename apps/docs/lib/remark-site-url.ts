@@ -1,12 +1,14 @@
-/** Replace `{{SITE_URL}}` at mdast time so fenced commands stay real code blocks. */
+/** Resolve public origins at mdast time so fenced commands stay real code blocks. */
 
 // Must stay a relative import. fumadocs-mdx bundles source.config.ts with esbuild, which
 // inlines relative imports but leaves bare specifiers external; the emitted
 // .source/source.config.mjs is then evaluated by plain Node, outside webpack, where a
 // workspace specifier fails to resolve. Relative keeps the value inlined.
-import { SITE_URL } from "./shared";
+import { DOCS_URL, SITE_URL } from "./shared";
 
-const TOKEN = "{{SITE_URL}}";
+function resolveOrigins(value: string): string {
+  return value.replaceAll("{{SITE_URL}}", SITE_URL).replaceAll("{{DOCS_URL}}", DOCS_URL);
+}
 
 interface MdastNode {
   type: string;
@@ -23,11 +25,11 @@ export function remarkSiteUrl() {
 }
 
 function transform(node: MdastNode): void {
-  if (typeof node.value === "string" && node.value.includes(TOKEN)) {
-    node.value = node.value.replaceAll(TOKEN, SITE_URL);
+  if (typeof node.value === "string") {
+    node.value = resolveOrigins(node.value);
   }
-  if (typeof node.url === "string" && node.url.includes(TOKEN)) {
-    node.url = node.url.replaceAll(TOKEN, SITE_URL);
+  if (typeof node.url === "string") {
+    node.url = resolveOrigins(node.url);
   }
   if (!Array.isArray(node.children)) return;
   for (const child of node.children) transform(child);
