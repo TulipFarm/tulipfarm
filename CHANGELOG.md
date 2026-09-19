@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.36](https://github.com/TulipFarm/tulipfarm/compare/v0.18.35...v0.18.36) (2026-09-19)
+
+### Features
+
+* **files:** use AnyDoc and add owner-controlled Knowledge refresh ([#1047](https://github.com/TulipFarm/tulipfarm/issues/1047)) ([f897b3a](https://github.com/TulipFarm/tulipfarm/commit/f897b3a181be5f6d9605baacd8bb479b31f11748))
+* **integrations:** replace OIM with governed MCP accounts ([fab5351](https://github.com/TulipFarm/tulipfarm/commit/fab535129e4f6edba890b8baf06eaf7ead9a9dcb))
+* **mcp:** add isolated protocol foundation ([#1027](https://github.com/TulipFarm/tulipfarm/issues/1027)) ([b1dea41](https://github.com/TulipFarm/tulipfarm/commit/b1dea41df7c7982025d276f498ac778eea823153))
+* **runtime:** prepare shared deployment and authority foundation ([#1025](https://github.com/TulipFarm/tulipfarm/issues/1025)) ([f3ba259](https://github.com/TulipFarm/tulipfarm/commit/f3ba259d18736b639b8d3876caabe2d22a8ee9ff))
+* **www:** separate public website from documentation ([#1051](https://github.com/TulipFarm/tulipfarm/issues/1051)) ([63dea9a](https://github.com/TulipFarm/tulipfarm/commit/63dea9a8c0ea10ade480e936e4608c27e27a464f))
+
+### Bug Fixes
+
+* **integrations:** simplify MCP setup and repair live workflows ([#1052](https://github.com/TulipFarm/tulipfarm/issues/1052)) ([3bc1af1](https://github.com/TulipFarm/tulipfarm/commit/3bc1af163253d9abeb322830ed5864ec9de0073b))
+
 ## [0.18.35](https://github.com/TulipFarm/tulipfarm/compare/v0.18.34...v0.18.35) (2026-09-18)
 
 ### Features
