@@ -1,0 +1,68 @@
+import { z } from 'zod';
+import { modelProviderSchema } from './model-capabilities.ts';
+import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
+
+/**
+ * The shipped catalog's default-chat family, kept literal so public route contracts never load the catalog JSON. A
+ * server reports its own as `defaultChatFamilyId` in the catalog.
+ */
+export const defaultChatModelFamilyId = 'claude-sonnet';
+
+const family = z.strictObject({
+  id: modelFamilyIdSchema,
+  displayName: z.string().min(1),
+  vendor: modelIdentifierSchema.describe(
+    'Who makes the model, from the catalog entry; clients use it for branding and show a neutral logo when unknown',
+  ),
+  currentVersion: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe('Active registry model ID, including restricted routes; null when no active mapping exists'),
+  provider: modelProviderSchema,
+  inputCreditsPerMillionTokens: z
+    .number()
+    .nonnegative()
+    .nullable()
+    .describe(
+      'Date-effective base-context input rate, before aggregate rounding; null when unknown or the family is unmetered',
+    ),
+  outputCreditsPerMillionTokens: z
+    .number()
+    .nonnegative()
+    .nullable()
+    .describe(
+      'Date-effective base-context output rate, before aggregate rounding; null when unknown or the family is unmetered',
+    ),
+});
+
+export const modelCatalogFamilySchema = z.discriminatedUnion('available', [
+  family.extend({
+    available: z.literal(true),
+    unavailableReason: z.null(),
+    mappingRevision: modelIdentifierSchema,
+    pricingRevision: modelIdentifierSchema,
+    fallbackFor: z.array(modelFamilyIdSchema).describe('Source families for which this family is an eligible fallback'),
+  }),
+  family.extend({
+    available: z.literal(false),
+    unavailableReason: z
+      .enum(['model-family-unavailable', 'workspace-disabled'])
+      .describe(
+        'Platform unavailability takes precedence over workspace disablement. Workspace enabled state is reported by model-policy/availability.',
+      ),
+    mappingRevision: modelIdentifierSchema.nullable(),
+    pricingRevision: modelIdentifierSchema.nullable(),
+    fallbackFor: z.array(modelFamilyIdSchema).max(0),
+  }),
+]);
+
+export const modelCatalogSchema = z.strictObject({
+  families: z.array(modelCatalogFamilySchema),
+  defaultChatFamilyId: modelFamilyIdSchema
+    .nullable()
+    .optional()
+    .describe('Family new chats use unless the person chose one: the server default-chat role; null without models'),
+});
+export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
+export type ModelCatalogFamily = z.infer<typeof modelCatalogFamilySchema>;

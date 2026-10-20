@@ -1,0 +1,57 @@
+.thinking-shimmer {
+  color: var(--muted-foreground);
+  background: linear-gradient(90deg, var(--muted-foreground) 30%, var(--foreground) 50%, var(--muted-foreground) 70%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-shine 2.25s ease-in-out infinite;
+}
+@keyframes thinking-shine {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+.thinking-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: thinking-dot 1.2s ease-in-out infinite;
+}
+.thinking-dots span:nth-child(2) {
+  animation-delay: 150ms;
+}
+.thinking-dots span:nth-child(3) {
+  animation-delay: 300ms;
+}
+@keyframes thinking-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-shimmer {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+  .thinking-dots span {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  .thinking-shimmer {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}

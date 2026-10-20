@@ -1,0 +1,67 @@
+{
+  "note": "Envelopes produced by the pre-@tulipfarm/keyring implementations with test-only keys. Stored data in this format must keep decrypting.",
+  "keys": {
+    "legacy": {
+      "keyId": "legacy-v1",
+      "key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    },
+    "current": {
+      "keyId": "current-v2",
+      "key": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
+    }
+  },
+  "workspaceCredential": {
+    "binding": {
+      "workspaceId": "11111111-1111-4111-8111-111111111111",
+      "capability": "runtime",
+      "generation": 3
+    },
+    "plaintext": "postgres://runtime@db.example.test/workspace",
+    "envelope": {
+      "version": 1,
+      "keyId": "legacy-v1",
+      "nonce": "9xUq+rSTRUsLK7tB",
+      "ciphertext": "u2z86/H0IgS07PBVC+RadzktDNmjdtR6N/rNq+eTOImBJ6RtRjK/hGct29I=",
+      "tag": "4AIVLrHPofZSbHsA2aj0TQ=="
+    }
+  },
+  "emailDelivery": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "payload": {
+      "kind": "invitation",
+      "email": "member@example.com",
+      "url": "https://app.example.test/invite?token=fixture"
+    },
+    "envelope": {
+      "version": 1,
+      "keyId": "legacy-v1",
+      "nonce": "Yq3KjcC1LcTcNvJr",
+      "ciphertext": "evFcsXyms6jEUVSpROcVgF+36EL2oF02kVAgDrPQHLUlJata8PX+kwDlnBqs5AQujv183I5woL6yeTz2dWUbAR1BcHOiLGFPXkLkDDwbyxU1Piz5+jXUmdG1RHSWnn26s1zzBy9FtSY=",
+      "tag": "d0ptRs3DIroT2t4C9xEt5A=="
+    }
+  },
+  "integrationCredential": {
+    "workspaceId": "11111111-1111-4111-8111-111111111111",
+    "integrationId": "22222222-2222-4222-8222-222222222222",
+    "generation": 2,
+    "purpose": "connection",
+    "plaintext": "fixture-access-token",
+    "envelope": {
+      "keyId": "legacy-v1",
+      "nonce": "j9kzZHcBLupIksKe",
+      "tag": "sgN+z8KMcOvmBnfJnoXi1A==",
+      "ciphertext": "vYh65HXo56RdFHdJ6KsYqWTHwFo="
+    }
+  },
+  "encryptedEnvelope": {
+    "associatedData": "fixture-associated-data",
+    "plaintext": "fixture invitation copy",
+    "envelope": {
+      "version": 1,
+      "keyId": "legacy-v1",
+      "nonce": "ImN/60UOcNFBlDrp",
+      "ciphertext": "iLhesrc/0xMMlevkQm4hrBftk+EGsH0=",
+      "tag": "L23+4QUrv0Z3mw3Jt21CIA=="
+    }
+  }
+}

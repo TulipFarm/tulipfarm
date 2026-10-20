@@ -1,0 +1,290 @@
+{
+  "name": "@tulipfarm/agents",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./setup-contracts": {
+      "types": "./dist/setup-contracts.d.ts",
+      "default": "./dist/setup-contracts.js"
+    },
+    "./setup": {
+      "types": "./dist/setup.d.ts",
+      "default": "./dist/setup.js"
+    },
+    "./authoring-assistance-contracts": {
+      "types": "./dist/authoring-assistance-contracts.d.ts",
+      "default": "./dist/authoring-assistance-contracts.js"
+    },
+    "./authoring-assistance": {
+      "types": "./dist/authoring-assistance.d.ts",
+      "default": "./dist/authoring-assistance.js"
+    },
+    "./skill-previews": {
+      "types": "./dist/skill-previews.d.ts",
+      "default": "./dist/skill-previews.js"
+    },
+    "./skill-execution": {
+      "types": "./dist/skill-execution.d.ts",
+      "default": "./dist/skill-execution.js"
+    },
+    "./skill-package-contracts": {
+      "types": "./dist/skill-package-contracts.d.ts",
+      "default": "./dist/skill-package-contracts.js"
+    },
+    "./skill-packages": {
+      "types": "./dist/skill-packages.d.ts",
+      "default": "./dist/skill-packages.js"
+    },
+    "./skill-objects": {
+      "types": "./dist/skill-objects.d.ts",
+      "default": "./dist/skill-objects.js"
+    },
+    "./skill-imports": {
+      "types": "./dist/skill-imports.d.ts",
+      "default": "./dist/skill-imports.js"
+    },
+    "./skill-import-contracts": {
+      "types": "./dist/skill-import-contracts.d.ts",
+      "default": "./dist/skill-import-contracts.js"
+    },
+    "./skill-package-review": {
+      "types": "./dist/skill-package-review.d.ts",
+      "default": "./dist/skill-package-review.js"
+    },
+    "./github-tasks": {
+      "types": "./dist/github-tasks.d.ts",
+      "default": "./dist/github-tasks.js"
+    },
+    "./mcp-authority": {
+      "types": "./dist/mcp-authority.d.ts",
+      "default": "./dist/mcp-authority.js"
+    },
+    "./mcp-runtime": {
+      "types": "./dist/mcp-runtime.d.ts",
+      "default": "./dist/mcp-runtime.js"
+    },
+    "./mcp-contracts": {
+      "types": "./dist/mcp-contracts.d.ts",
+      "default": "./dist/mcp-contracts.js"
+    },
+    "./mcp-catalog": {
+      "types": "./dist/mcp-catalog.d.ts",
+      "default": "./dist/mcp-catalog.js"
+    },
+    "./table-sources": {
+      "types": "./dist/table-sources.d.ts",
+      "default": "./dist/table-sources.js"
+    },
+    "./draft-sources": {
+      "types": "./dist/draft-sources.d.ts",
+      "default": "./dist/draft-sources.js"
+    },
+    "./table-proposals": {
+      "types": "./dist/table-proposals.d.ts",
+      "default": "./dist/table-proposals.js"
+    },
+    "./table-query-translator": {
+      "types": "./dist/table-query-translator.d.ts",
+      "default": "./dist/table-query-translator.js"
+    },
+    "./slack-environment": {
+      "types": "./dist/slack-environment.d.ts",
+      "default": "./dist/slack-environment.js"
+    },
+    "./slack-actions": {
+      "types": "./dist/slack-actions.d.ts",
+      "default": "./dist/slack-actions.js"
+    },
+    "./slack-default": {
+      "types": "./dist/slack-default.d.ts",
+      "default": "./dist/slack-default.js"
+    },
+    "./skills": {
+      "types": "./dist/skills.d.ts",
+      "default": "./dist/skills.js"
+    },
+    "./chat-skills": {
+      "types": "./dist/chat-skills.d.ts",
+      "default": "./dist/chat-skills.js"
+    },
+    "./slack-channels": {
+      "types": "./dist/slack-channels.d.ts",
+      "default": "./dist/slack-channels.js"
+    },
+    "./model-environment": {
+      "types": "./dist/model-environment.d.ts",
+      "default": "./dist/model-environment.js"
+    },
+    "./model-bundles": {
+      "types": "./dist/model-bundles.d.ts",
+      "default": "./dist/model-bundles.js"
+    },
+    "./plans": {
+      "types": "./dist/plans.d.ts",
+      "default": "./dist/plans.js"
+    },
+    "./plan-runtime": {
+      "types": "./dist/plan-runtime.d.ts",
+      "default": "./dist/plan-runtime.js"
+    },
+    "./plan-contracts": {
+      "types": "./dist/plan-contracts.d.ts",
+      "default": "./dist/plan-contracts.js"
+    },
+    "./task-runtime": {
+      "types": "./dist/task-runtime.d.ts",
+      "default": "./dist/task-runtime.js"
+    },
+    "./task-progress": {
+      "types": "./dist/task-progress.d.ts",
+      "default": "./dist/task-progress.js"
+    },
+    "./task-approvals": {
+      "types": "./dist/task-approvals.d.ts",
+      "default": "./dist/task-approvals.js"
+    },
+    "./task-approval-contracts": {
+      "types": "./dist/task-approval-contracts.d.ts",
+      "default": "./dist/task-approval-contracts.js"
+    },
+    "./drafts": {
+      "types": "./dist/drafts.d.ts",
+      "default": "./dist/drafts.js"
+    },
+    "./draft-contracts": {
+      "types": "./dist/draft-contracts.d.ts",
+      "default": "./dist/draft-contracts.js"
+    },
+    "./tasks": {
+      "types": "./dist/tasks.d.ts",
+      "default": "./dist/tasks.js"
+    },
+    "./task-contracts": {
+      "types": "./dist/task-contracts.d.ts",
+      "default": "./dist/task-contracts.js"
+    },
+    "./workspace-skills": {
+      "types": "./dist/workspace-skills.d.ts",
+      "default": "./dist/workspace-skills.js"
+    },
+    "./workspace-skill-contracts": {
+      "types": "./dist/workspace-skill-contracts.d.ts",
+      "default": "./dist/workspace-skill-contracts.js"
+    },
+    "./tools": {
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
+    "./model-policy": {
+      "types": "./dist/model-policy.d.ts",
+      "default": "./dist/model-policy.js"
+    },
+    "./compaction-policy": {
+      "types": "./dist/compaction-policy.d.ts",
+      "default": "./dist/compaction-policy.js"
+    },
+    "./compaction-policy-contracts": {
+      "types": "./dist/compaction-policy-contracts.d.ts",
+      "default": "./dist/compaction-policy-contracts.js"
+    },
+    "./model-policy-contracts": {
+      "types": "./dist/model-policy-contracts.d.ts",
+      "default": "./dist/model-policy-contracts.js"
+    },
+    "./chat": {
+      "types": "./dist/chat.d.ts",
+      "default": "./dist/chat.js"
+    },
+    "./chat-contracts": {
+      "types": "./dist/chat-contracts.d.ts",
+      "default": "./dist/chat-contracts.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./inference": {
+      "types": "./dist/inference.d.ts",
+      "default": "./dist/inference.js"
+    },
+    "./schedules": {
+      "types": "./dist/schedules.d.ts",
+      "default": "./dist/schedules.js"
+    },
+    "./schedule-contracts": {
+      "types": "./dist/schedule-contracts.d.ts",
+      "default": "./dist/schedule-contracts.js"
+    },
+    "./authoring": {
+      "types": "./dist/authoring.d.ts",
+      "default": "./dist/authoring.js"
+    },
+    "./saved-service": {
+      "types": "./dist/saved-service.d.ts",
+      "default": "./dist/saved-service.js"
+    },
+    "./saved-contracts": {
+      "types": "./dist/saved-contracts.d.ts",
+      "default": "./dist/saved-contracts.js"
+    },
+    ".": {
+      "types": "./dist/executor.d.ts",
+      "default": "./dist/executor.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./workflows": {
+      "types": "./dist/workflows.d.ts",
+      "default": "./dist/workflows.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs",
+    "test:integrations": "node --test test/integrations.integration.mjs"
+  },
+  "dependencies": {
+    "@temporalio/workflow": "1.24.0",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/atlassian": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/github": "workspace:*",
+    "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/slack": "workspace:*",
+    "@tulipfarm/tables": "workspace:*",
+    "@tulipfarm/workflow-snippets": "workspace:*",
+    "@tulipfarm/workflows": "workspace:*",
+    "@tulipfarm/workspace-mcp": "workspace:*",
+    "@tulipfarm/workspace-mcp-transport": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "@tulipfarm/workspaces": "workspace:*",
+    "ajv": "8.20.0",
+    "cron-parser": "5.10.1",
+    "htmlparser2": "8.0.2",
+    "pg": "8.23.0",
+    "yaml": "2.9.1",
+    "yauzl": "3.4.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "3.1141.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
+    "@opentelemetry/sdk-node": "0.220.0",
+    "@opentelemetry/sdk-trace-base": "2.9.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1",
+    "@types/yauzl": "3.4.0"
+  }
+}

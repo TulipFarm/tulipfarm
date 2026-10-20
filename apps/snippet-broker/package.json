@@ -1,0 +1,21 @@
+{
+  "name": "@tulipfarm/snippet-broker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@tulipfarm/build-info": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workflow-snippets": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

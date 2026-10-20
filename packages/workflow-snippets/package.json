@@ -1,0 +1,44 @@
+{
+  "name": "@tulipfarm/workflow-snippets",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./canonical": {
+      "types": "./dist/canonical.d.ts",
+      "default": "./dist/canonical.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "default": "./dist/protocol.js"
+    },
+    "./skill-protocol": {
+      "types": "./dist/skill-protocol.d.ts",
+      "default": "./dist/skill-protocol.js"
+    },
+    "./broker": {
+      "types": "./dist/broker.d.ts",
+      "default": "./dist/broker.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

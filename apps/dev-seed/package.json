@@ -1,0 +1,29 @@
+{
+  "name": "@tulipfarm/dev-seed",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/agents": "workspace:*",
+    "@tulipfarm/api": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/github": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/tables": "workspace:*",
+    "@tulipfarm/workflows": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "@tulipfarm/workspaces": "workspace:*",
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

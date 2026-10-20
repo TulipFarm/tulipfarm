@@ -1,0 +1,24 @@
+# One public origin: the web app, plus the API under /v1.
+# TULIPFARM_SITE_ADDRESS is a domain (automatic HTTPS) or :80 for plain HTTP.
+{$TULIPFARM_SITE_ADDRESS} {
+	encode zstd gzip
+
+	@api path /v1/* /.well-known/mcp-client.json
+	handle @api {
+		reverse_proxy api:3001
+	}
+
+	# Hashed assets never fall back to index.html, so a missing chunk is a real 404.
+	@assets path /assets/*
+	handle @assets {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

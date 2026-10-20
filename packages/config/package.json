@@ -1,0 +1,65 @@
+{
+  "name": "@tulipfarm/config",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./model-pricing.json": "./dist/model-pricing.json",
+    "./model-families.json": "./dist/model-families.json",
+    "./model-catalog": {
+      "types": "./dist/model-catalog.d.ts",
+      "default": "./dist/model-catalog.js"
+    },
+    "./model-usage": {
+      "types": "./dist/model-usage.d.ts",
+      "default": "./dist/model-usage.js"
+    },
+    "./model-identifier": {
+      "types": "./dist/model-identifier.d.ts",
+      "default": "./dist/model-identifier.js"
+    },
+    "./compaction": {
+      "types": "./dist/compaction.d.ts",
+      "default": "./dist/compaction.js"
+    },
+    "./timeouts": {
+      "types": "./dist/timeouts.d.ts",
+      "default": "./dist/timeouts.js"
+    },
+    "./feature-flags": {
+      "types": "./dist/feature-flags.d.ts",
+      "default": "./dist/feature-flags.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "default": "./dist/settings.js"
+    },
+    "./settings-docs": {
+      "types": "./dist/settings-docs.d.ts",
+      "default": "./dist/settings-docs.js"
+    },
+    "./secret-files": {
+      "types": "./dist/secret-files.d.ts",
+      "default": "./dist/secret-files.js"
+    },
+    "./load-secret-files": {
+      "types": "./dist/load-secret-files.d.ts",
+      "default": "./dist/load-secret-files.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

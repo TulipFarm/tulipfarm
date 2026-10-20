@@ -1,0 +1,58 @@
+{
+  "name": "@tulipfarm/atlassian",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./account-contracts": {
+      "types": "./dist/account-contracts.d.ts",
+      "default": "./dist/account-contracts.js"
+    },
+    "./callback-contracts": {
+      "types": "./dist/callback-contracts.d.ts",
+      "default": "./dist/callback-contracts.js"
+    },
+    "./operation-contracts": {
+      "types": "./dist/operation-browser-contracts.d.ts",
+      "default": "./dist/operation-browser-contracts.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./accounts": {
+      "types": "./dist/accounts.d.ts",
+      "default": "./dist/accounts.js"
+    },
+    "./operations": {
+      "types": "./dist/operations.d.ts",
+      "default": "./dist/operations.js"
+    },
+    "./operation-approval": {
+      "types": "./dist/operation-approval.d.ts",
+      "default": "./dist/operation-approval.js"
+    },
+    "./corpus": {
+      "types": "./dist/corpus-provider.d.ts",
+      "default": "./dist/corpus-provider.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "@tulipfarm/provider-mcp": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "@tulipfarm/knowledge",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "common"
+  ],
+  "exports": {
+    "./google-contracts": {
+      "types": "./dist/google-contracts.d.ts",
+      "default": "./dist/google-contracts.js"
+    },
+    "./slack-contracts": {
+      "types": "./dist/slack-contracts.d.ts",
+      "default": "./dist/slack-contracts.js"
+    },
+    "./github-contracts": {
+      "types": "./dist/github-contracts.d.ts",
+      "default": "./dist/github-contracts.js"
+    },
+    "./default-contracts": {
+      "types": "./dist/default-contracts.d.ts",
+      "default": "./dist/default-contracts.js"
+    },
+    "./atlassian-contracts": {
+      "types": "./dist/atlassian-contracts.d.ts",
+      "default": "./dist/atlassian-contracts.js"
+    },
+    "./embedding-capacity": {
+      "types": "./dist/embedding-capacity.d.ts",
+      "default": "./dist/embedding-capacity.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "default": "./dist/parser.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs"
+  },
+  "dependencies": {
+    "@firecrawl/anydoc": "0.2.4",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "js-tiktoken": "1.0.21",
+    "pdf-lib": "1.17.1",
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.20.0"
+  }
+}

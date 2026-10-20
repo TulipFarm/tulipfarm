@@ -1,0 +1,69 @@
+name: tulipfarm
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: local-postgres
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.29.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: local-temporal
+      SKIP_DB_CREATE: 'true'
+    ports:
+      - '127.0.0.1:7233:7233'
+    healthcheck:
+      test:
+        ['CMD', 'temporal', 'operator', 'namespace', 'describe', '--namespace', 'default', '--address', 'temporal:7233']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  temporal-ui:
+    image: temporalio/ui:2.39.0
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - '127.0.0.1:8233:8080'
+
+  object-storage:
+    image: rustfs/rustfs:1.0.0
+    environment:
+      RUSTFS_ACCESS_KEY: local-object-storage
+      RUSTFS_SECRET_KEY: local-object-storage-secret
+    ports:
+      - '127.0.0.1:9000:9000'
+    volumes:
+      - object-storage-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fs http://localhost:9000/health || wget -qO- http://localhost:9000/health']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  object-storage-data:

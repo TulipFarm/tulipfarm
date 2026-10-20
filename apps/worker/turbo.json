@@ -1,0 +1,41 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "passThroughEnv": [
+        "$TURBO_EXTENDS$",
+        "MODEL_FAMILIES",
+        "MODEL_DEFAULT_FAMILY",
+        "MODEL_CATALOG_FILE",
+        "MODEL_CATALOG",
+        "MODEL_CATALOG_MODE",
+        "AZURE_FOUNDRY_ENDPOINT",
+        "CHAT_R2_ACCOUNT_ID",
+        "CHAT_R2_BUCKET",
+        "CHAT_R2_ACCESS_KEY_ID",
+        "CHAT_R2_SECRET_ACCESS_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "XAI_API_KEY",
+        "AZURE_FOUNDRY_API_KEY",
+        "GEMINI_API_KEY",
+        "INTEGRATION_CREDENTIAL_KEY_ID",
+        "INTEGRATION_CREDENTIAL_KEY",
+        "INTEGRATION_CREDENTIAL_PREVIOUS_KEYS",
+        "ATLASSIAN_MCP_CLIENT_ID",
+        "ATLASSIAN_MCP_CLIENT_SECRET",
+        "ATLASSIAN_MCP_REDIRECT_URI",
+        "ATLASSIAN_MCP_SCOPES",
+        "ATLASSIAN_MCP_TRUSTED_BINDINGS",
+        "ATLASSIAN_REST_CLIENT_ID",
+        "ATLASSIAN_REST_CLIENT_SECRET",
+        "ATLASSIAN_REST_REDIRECT_URI",
+        "ATLASSIAN_REST_SCOPES",
+        "TRELLO_CLIENT_ID",
+        "TRELLO_CLIENT_SECRET",
+        "TRELLO_REDIRECT_URI",
+        "TRELLO_SCOPES"
+      ]
+    }
+  }
+}

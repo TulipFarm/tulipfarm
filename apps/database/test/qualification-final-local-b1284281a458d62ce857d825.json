@@ -1,0 +1,4959 @@
+[
+  {
+    "timestamp": "2026-09-27T18:22:55.887Z",
+    "target": "local",
+    "event": "sources",
+    "sources": [
+      {
+        "path": "apps/database/test/qualify-workspace-storage.mjs",
+        "sha256": "13c54cfd72a2777ad2038c25949124632dbddae7a8e9296f657fb9c2d9d7135b"
+      },
+      {
+        "path": "apps/worker/src/storage-worker.ts",
+        "sha256": "469025a85fce8453cea38cf64c3537774c2b1ff18e524b30c034ab28753ae324"
+      },
+      {
+        "path": "packages/workspace-storage/src/provisioning.ts",
+        "sha256": "362b5639656f68733e51c95c52436afb0ebbc79c60fb7aefe032b7d8ba494b42"
+      },
+      {
+        "path": "packages/workspace-storage/src/migrations.ts",
+        "sha256": "32e20161cd396f2d5da6acdb47b1349b25530eadf8a5ca184152ab6f7082e844"
+      },
+      {
+        "path": "packages/workspace-storage/src/names.ts",
+        "sha256": "6ba514ff69cb70a8c6819c88011cf76eaf99136442f412158efc191ab3927fb9"
+      },
+      {
+        "path": "packages/workspace-storage/src/transactions.ts",
+        "sha256": "fa44bc1d79024d31d8a7ca58ab08a712738c015c347220ae48a8ae0334631dd0"
+      },
+      {
+        "path": "packages/workspace-storage/dist/provisioning.js",
+        "sha256": "d520b7dd9fa4612adc87d2e01790978486d8711a611cc73aebc976874b72a7ca"
+      },
+      {
+        "path": "packages/workspace-storage/dist/migrations.js",
+        "sha256": "81917e185c52523d09f44f805b74006af86df288b9c32214183ef8681265f56b"
+      },
+      {
+        "path": "packages/workspace-storage/dist/names.js",
+        "sha256": "535a1b01bf021c297b5f942803fed2b8a7e23774a511f9907ab347c0f64bec01"
+      },
+      {
+        "path": "packages/workspace-storage/dist/transactions.js",
+        "sha256": "4aa41b3ba9abc0af5c58d49f437c4d23ab9028a68406cd67e8e4920859d8a89a"
+      },
+      {
+        "path": "packages/workspace-storage/dist/runtime.js",
+        "sha256": "9542414092f54cae6658bbb4a1340b1156ee5f43819bd7922e8dda50ec62c9cd"
+      },
+      {
+        "path": "packages/agents/src/common-migrations.ts",
+        "sha256": "2fa5ae411a38e73e56bb45785ce038f2d17e930393d42c4f2c57f03f9865417a"
+      },
+      {
+        "path": "packages/resources/src/common-migrations.ts",
+        "sha256": "77ab9c1d8805d19179866a6b91f6eee61c7c7fe84b83c77547e806a5961dc758"
+      },
+      {
+        "path": "packages/resources/dist/common-migrations.js",
+        "sha256": "e4b43dbea0a1ac621010254b1e28ffe81cfa8645273567af6eb55fb9ade102dd"
+      },
+      {
+        "path": "packages/workspaces/src/resource-migrations.ts",
+        "sha256": "6793833fea2767857f5f2dddd40e0b87193883d6d520c55ea26be795021438b4"
+      },
+      {
+        "path": "packages/workspaces/src/resource-registry.ts",
+        "sha256": "831a656de0164c043d77c0cff73a6345268bc99dfe86b2cfb572580c6c46c0f0"
+      },
+      {
+        "path": "packages/workspaces/src/credentials.ts",
+        "sha256": "c27c8fd70bf37cdd792d26d4867a0e4fb97ded43293d1e7b5bb687a933759f11"
+      },
+      {
+        "path": "packages/workspaces/src/operators.ts",
+        "sha256": "b69ab5a83eaeae18f131bdcf383040449cc09fa4eb169a7b36ff7872cc89ed78"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:22:55.969Z",
+    "target": "local",
+    "event": "common-stream",
+    "version": 6,
+    "migrations": [
+      {
+        "name": "0001_baseline.sql",
+        "checksum": "e26b94aa57a75bbf01ef583d7fd821458a7e41feb7113e8489bafbff1894fa2a"
+      },
+      {
+        "name": "0002_resource_service.sql",
+        "checksum": "a4ec31cbf2015d497c25df0d4766cd5eacbdbd2b3a9a58f2f2d6cad18dc4e9db"
+      },
+      {
+        "name": "0003_confirmation_history.sql",
+        "checksum": "673a43ba52f06c2ce6df5b82fe849cc600166c656252ecdd74f5d9e4bb6c572a"
+      },
+      {
+        "name": "0005_governance_invitations.sql",
+        "checksum": "77969910cbb8486251dcedebac8e97767b815378514873555e473e213838e22f"
+      },
+      {
+        "name": "0007_agents.sql",
+        "checksum": "0a480aa82f322902a1de1f1559b18f0e299af5a941885743ba29fc9b1ba913b3"
+      },
+      {
+        "name": "0009_governance_retired_teams.sql",
+        "checksum": "b3a66c0aa6239b75487854cf6cbdcf07100e3390f98415fae9e40ea00be71124"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:22:55.969Z",
+    "target": "local",
+    "event": "objects",
+    "database": "storage_qual_b1284281a458d62ce857d825",
+    "provisioner": "storage_qual_b1284281a458d62ce857d825_provisioner",
+    "registries": [
+      {
+        "role": "storage_qual_b1284281a458d62ce857d825_authoring",
+        "capability": "authoring"
+      },
+      {
+        "role": "storage_qual_b1284281a458d62ce857d825_confirmation",
+        "capability": "confirmation"
+      },
+      {
+        "role": "storage_qual_b1284281a458d62ce857d825_migration",
+        "capability": "migration"
+      }
+    ],
+    "workspaces": [
+      {
+        "label": "a",
+        "id": "3117a8e3-2dda-45d1-9836-dad96f52c212",
+        "names": {
+          "workspaceId": "3117a8e3-2dda-45d1-9836-dad96f52c212",
+          "schema": "ws_3117a8e32dda45d19836dad96f52c212",
+          "runtime": "ws_3117a8e32dda45d19836dad96f52c212_runtime",
+          "migration": "ws_3117a8e32dda45d19836dad96f52c212_migration",
+          "confirmation": "ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+          "customOwner": "ws_3117a8e32dda45d19836dad96f52c212_owner"
+        }
+      },
+      {
+        "label": "b",
+        "id": "5eff2e66-4a11-4132-9cf0-b0ef5ecb36c7",
+        "names": {
+          "workspaceId": "5eff2e66-4a11-4132-9cf0-b0ef5ecb36c7",
+          "schema": "ws_5eff2e664a1141329cf0b0ef5ecb36c7",
+          "runtime": "ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+          "migration": "ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+          "confirmation": "ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+          "customOwner": "ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner"
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:22:55.993Z",
+    "target": "local",
+    "event": "server",
+    "version": "PostgreSQL 18.3 (Debian 18.3-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "version_num": 180003,
+    "current_user": "postgres",
+    "database": "postgres"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:55.993Z",
+    "target": "local",
+    "event": "check",
+    "name": "PostgreSQL 18 admin connection",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.019Z",
+    "target": "local",
+    "event": "check",
+    "name": "CREATE ROLE scoped non-superuser provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.028Z",
+    "target": "local",
+    "event": "check",
+    "name": "GRANT scoped provisioner SET membership to admin",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.138Z",
+    "target": "local",
+    "event": "check",
+    "name": "CREATE DATABASE owned by scoped provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.228Z",
+    "target": "local",
+    "event": "check",
+    "name": "direct scoped non-superuser provisioner login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.658Z",
+    "target": "local",
+    "event": "check",
+    "name": "provision workspace a",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.853Z",
+    "target": "local",
+    "event": "check",
+    "name": "provision workspace b",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.860Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.866Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.875Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.892Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.897Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.904Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.919Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.920Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.920Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.921Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.922Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.922Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.923Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.923Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.924Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.925Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.926Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.926Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.928Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.929Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.931Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.932Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.933Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.933Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.935Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.936Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.937Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.938Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.938Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.939Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.939Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.940Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.941Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.943Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.943Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.944Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.945Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.946Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.948Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.948Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.949Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.950Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.952Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.953Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.954Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.954Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.955Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.955Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.956Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.957Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.958Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.959Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.959Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.961Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.964Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.965Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.966Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.967Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.967Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.968Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.969Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.970Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.970Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.972Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.973Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.973Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.975Z",
+    "target": "local",
+    "event": "check",
+    "name": "a custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.977Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.977Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.978Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.979Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:56.979Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.005Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.008Z",
+    "target": "local",
+    "event": "check",
+    "name": "a future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.009Z",
+    "target": "local",
+    "event": "check",
+    "name": "a future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.029Z",
+    "target": "local",
+    "event": "check",
+    "name": "a common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.085Z",
+    "target": "local",
+    "event": "check",
+    "name": "a idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.089Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.089Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.091Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.091Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.092Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.093Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.093Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.094Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.094Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.096Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.096Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.097Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.097Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.098Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.100Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.101Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.101Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.102Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.103Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.103Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.104Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.105Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.106Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.107Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.108Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.110Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.111Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.111Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.112Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.112Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.113Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.114Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.114Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.115Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.117Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.119Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.119Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.120Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.121Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.121Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.122Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.123Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.125Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.125Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.126Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.127Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.128Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.128Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.132Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.132Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.133Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.134Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.134Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.135Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.137Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.138Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.138Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.140Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.140Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.141Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.143Z",
+    "target": "local",
+    "event": "check",
+    "name": "b custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.144Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.145Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.146Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.146Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.147Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.174Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.176Z",
+    "target": "local",
+    "event": "check",
+    "name": "b future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.177Z",
+    "target": "local",
+    "event": "check",
+    "name": "b future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.194Z",
+    "target": "local",
+    "event": "check",
+    "name": "b common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.275Z",
+    "target": "local",
+    "event": "check",
+    "name": "b idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.277Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.280Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.282Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.283Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.285Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.287Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.288Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.291Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.293Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.295Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.298Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.300Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.302Z",
+    "target": "local",
+    "event": "check",
+    "name": "hostile identifiers rejected before SQL",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.308Z",
+    "target": "local",
+    "event": "check",
+    "name": "a six-stream runtime domain writes",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.309Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.311Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.312Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.313Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.314Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.315Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.315Z",
+    "target": "local",
+    "event": "check",
+    "name": "a migration denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.315Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.316Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.317Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.317Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.318Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.319Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.319Z",
+    "target": "local",
+    "event": "check",
+    "name": "a confirmation denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.320Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies control completion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.320Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies execution event forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.321Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies retired-team deletion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.322Z",
+    "target": "local",
+    "event": "check",
+    "name": "a runtime denies agent definition rewrite",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.324Z",
+    "target": "local",
+    "event": "check",
+    "name": "b six-stream runtime domain writes",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.324Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.326Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.327Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.328Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.330Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.330Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.331Z",
+    "target": "local",
+    "event": "check",
+    "name": "b migration denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.331Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.332Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.334Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.334Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.335Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.336Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.336Z",
+    "target": "local",
+    "event": "check",
+    "name": "b confirmation denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.337Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies control completion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.337Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies execution event forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.338Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies retired-team deletion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.339Z",
+    "target": "local",
+    "event": "check",
+    "name": "b runtime denies agent definition rewrite",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.379Z",
+    "target": "local",
+    "event": "check",
+    "name": "provision authoring registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.404Z",
+    "target": "local",
+    "event": "check",
+    "name": "provision confirmation registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.445Z",
+    "target": "local",
+    "event": "check",
+    "name": "provision migration registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.457Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.483Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.484Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.487Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.489Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.491Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.493Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.495Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.497Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.498Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.505Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.510Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.511Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.512Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.514Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.516Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.517Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.518Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.519Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.521Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.523Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.524Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.524Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.525Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.528Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.530Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.531Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.532Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.534Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.535Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.536Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.537Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.538Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.539Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.540Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.542Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.542Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.543Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.544Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.544Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.545Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.546Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry initial denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.596Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.599Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.601Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.603Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.605Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.606Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.608Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.658Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.706Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.755Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.808Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT (migration_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.855Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_authoring_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.902Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_authoring()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.941Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.942Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.961Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.962Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.963Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.964Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.964Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.965Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.966Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.967Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.967Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.969Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.970Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.972Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.974Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.976Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.978Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.979Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.980Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.982Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.984Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.985Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.987Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.988Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.989Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.990Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.991Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.992Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.994Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.995Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.996Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.998Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:57.999Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.000Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.001Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.002Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.004Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.005Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.007Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.008Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.011Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.011Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.012Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.014Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.015Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.016Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.018Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.019Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry initial denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.089Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.095Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.096Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.098Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.100Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.103Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.105Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.162Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.234Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.282Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.333Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT (migration_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.384Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_confirmation_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.432Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_confirmation()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.472Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.474Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.494Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.496Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.497Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.498Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.499Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.501Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.503Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.503Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.504Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.505Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.506Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.507Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.508Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.510Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.511Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.513Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.516Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.517Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.518Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.519Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.519Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.520Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.522Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.523Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.524Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.525Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.527Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.527Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.528Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.529Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.530Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.530Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.531Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.532Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.533Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.534Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.534Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.535Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.536Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.536Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.537Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.538Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.538Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.539Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.540Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.540Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry initial denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.579Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.582Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.583Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.584Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.585Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.585Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.586Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.632Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.674Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.718Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.760Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT (confirmation_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.810Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_migration_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.883Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_migration()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.942Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.988Z",
+    "target": "local",
+    "event": "check",
+    "name": "workspace password rotation receipt and idempotent replay",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:58.994Z",
+    "target": "local",
+    "event": "check",
+    "name": "runtime old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.000Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.005Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.023Z",
+    "target": "local",
+    "event": "check",
+    "name": "stale rotation generation and changed operation replay rejected",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.024Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.044Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.045Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.046Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.047Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.048Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.050Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.053Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.055Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.057Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.059Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.060Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.062Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.064Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.066Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.068Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.069Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.071Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.073Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.074Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.076Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.078Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.080Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.081Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.082Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.084Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.085Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.086Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.087Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.088Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.090Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.091Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.093Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.096Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.098Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.099Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.100Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.102Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.103Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.104Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.105Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.105Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry password-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.106Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.124Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.127Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.128Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.130Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.130Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.131Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.132Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.133Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.134Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.135Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.135Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.136Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.137Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.138Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.138Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.139Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.140Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.141Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.143Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.144Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.146Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.147Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.148Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.149Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.150Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.151Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.152Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.153Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.154Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.155Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.156Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.157Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.159Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.161Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.162Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.162Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.164Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.165Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.166Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.167Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.168Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.169Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.169Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.170Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.171Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.172Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.173Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.190Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.191Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.193Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.193Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.196Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.197Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.197Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.198Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.199Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.199Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.200Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.200Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.201Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.201Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.202Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.204Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.204Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.205Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.206Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.206Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.207Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.208Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.209Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.210Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.211Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.213Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.213Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.214Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.216Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.217Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.218Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.219Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.219Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.220Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.221Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.221Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.223Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.224Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.225Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.226Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.226Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.227Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.228Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.228Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.229Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.230Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry password-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.249Z",
+    "target": "local",
+    "event": "check",
+    "name": "key rotation rewrap and idempotent receipt",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.250Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.264Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.264Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.265Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.266Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.267Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.268Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.269Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.269Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.270Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.272Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.273Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.274Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.274Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.275Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.276Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.277Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.279Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.280Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.281Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.282Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.284Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.286Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.287Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.287Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.288Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.289Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.289Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.292Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.292Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.293Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.294Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.294Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.295Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.296Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.296Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.297Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.298Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.298Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.300Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.302Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.303Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry key-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.304Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.320Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.322Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.323Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.324Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.325Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.326Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.327Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.327Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.328Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.329Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.329Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.330Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.331Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.332Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.333Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.334Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.335Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.336Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.337Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.338Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.339Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.340Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.340Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.342Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.342Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.343Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.344Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.346Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.347Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.348Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.350Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.351Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.353Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.354Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.356Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.357Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.359Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.360Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.361Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.362Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.362Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.363Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.364Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.366Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.367Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.368Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.369Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.389Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.391Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.392Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.394Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.395Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.396Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.398Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.398Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.399Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.401Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.401Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.403Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.404Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.405Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.407Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.408Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.409Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.410Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.411Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.412Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.413Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.414Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.415Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.416Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.416Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.417Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.418Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.419Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.420Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.420Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.421Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.422Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.423Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.424Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.427Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.437Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.439Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.442Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.443Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.444Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.445Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.446Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.447Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.450Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.451Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.452Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry key-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.452Z",
+    "target": "local",
+    "event": "check",
+    "name": "rotation preserves other workspace credentials and receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.488Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup database storage_qual_b1284281a458d62ce857d825",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.490Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_b1284281a458d62ce857d825_authoring",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.491Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_b1284281a458d62ce857d825_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.493Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_b1284281a458d62ce857d825_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.496Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_3117a8e32dda45d19836dad96f52c212_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.499Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_3117a8e32dda45d19836dad96f52c212_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.502Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.503Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_3117a8e32dda45d19836dad96f52c212_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.506Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.507Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.508Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.509Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.510Z",
+    "target": "local",
+    "event": "check",
+    "name": "cleanup role storage_qual_b1284281a458d62ce857d825_provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.511Z",
+    "target": "local",
+    "event": "cleanup",
+    "database": "storage_qual_b1284281a458d62ce857d825",
+    "roles": [
+      "storage_qual_b1284281a458d62ce857d825_provisioner",
+      "storage_qual_b1284281a458d62ce857d825_authoring",
+      "storage_qual_b1284281a458d62ce857d825_confirmation",
+      "storage_qual_b1284281a458d62ce857d825_migration",
+      "ws_3117a8e32dda45d19836dad96f52c212_runtime",
+      "ws_3117a8e32dda45d19836dad96f52c212_migration",
+      "ws_3117a8e32dda45d19836dad96f52c212_confirmation",
+      "ws_3117a8e32dda45d19836dad96f52c212_owner",
+      "ws_5eff2e664a1141329cf0b0ef5ecb36c7_runtime",
+      "ws_5eff2e664a1141329cf0b0ef5ecb36c7_migration",
+      "ws_5eff2e664a1141329cf0b0ef5ecb36c7_confirmation",
+      "ws_5eff2e664a1141329cf0b0ef5ecb36c7_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.511Z",
+    "target": "local",
+    "event": "check",
+    "name": "all qualification objects removed",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:22:59.513Z",
+    "target": "local",
+    "event": "summary",
+    "status": "PASS",
+    "passed": 680,
+    "failed": 0
+  }
+]

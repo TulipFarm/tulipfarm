@@ -1,0 +1,247 @@
+# Self-hosted TulipFarm on one machine. Read docs/self-hosting/docker-compose.md.
+#
+# Operator settings come from Compose interpolation: the shell environment first,
+# then self-host/.env. Any secret store that can export environment variables
+# (doppler run, infisical run, sops exec-env, op run, a CI secret, or a plain .env)
+# works without changes here. Generated secrets live in the generated volume, written
+# by the setup service and read by each service when it starts.
+#
+# Temporal runs in this stack under the `temporal` profile (COMPOSE_PROFILES=temporal in
+# .env.example). To use your own Temporal or Temporal Cloud, leave the profile off and
+# set TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE and TEMPORAL_UI_URL.
+name: tulipfarm-self-host
+
+x-release: &release
+  RELEASE_VERSION: ${TULIPFARM_RELEASE_VERSION:?Set TULIPFARM_RELEASE_VERSION, for example 2026.1.1.1}
+  RELEASE_COMMIT: ${TULIPFARM_RELEASE_COMMIT:?Set TULIPFARM_RELEASE_COMMIT to the 40-character source commit}
+
+x-temporal-client: &temporal-client
+  TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+  TEMPORAL_TASK_QUEUE: tulipfarm
+  TEMPORAL_STORAGE_TASK_QUEUE: tulipfarm-storage-v1
+
+x-models: &models
+  MODEL_FAMILIES: ${MODEL_FAMILIES:-}
+  MODEL_DEFAULT_FAMILY: ${MODEL_DEFAULT_FAMILY:-}
+  MODEL_CATALOG_FILE: ${MODEL_CATALOG_FILE:-}
+  MODEL_CATALOG: ${MODEL_CATALOG:-}
+  MODEL_CATALOG_MODE: ${MODEL_CATALOG_MODE:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  XAI_API_KEY: ${XAI_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  XAI_BASE_URL: ${XAI_BASE_URL:-}
+  GEMINI_BASE_URL: ${GEMINI_BASE_URL:-}
+  MODEL_ENDPOINT_HOSTS: ${MODEL_ENDPOINT_HOSTS:-}
+  AZURE_FOUNDRY_ENDPOINT: ${AZURE_FOUNDRY_ENDPOINT:-}
+  AZURE_FOUNDRY_API_KEY: ${AZURE_FOUNDRY_API_KEY:-}
+  KNOWLEDGE_EMBEDDINGS_ENABLED: ${KNOWLEDGE_EMBEDDINGS_ENABLED:-}
+  KNOWLEDGE_EMBEDDINGS_PROVIDER: ${KNOWLEDGE_EMBEDDINGS_PROVIDER:-}
+  KNOWLEDGE_EMBEDDINGS_BASE_URL: ${KNOWLEDGE_EMBEDDINGS_BASE_URL:-}
+  KNOWLEDGE_EMBEDDINGS_API_KEY: ${KNOWLEDGE_EMBEDDINGS_API_KEY:-}
+  KNOWLEDGE_EMBEDDINGS_MODEL: ${KNOWLEDGE_EMBEDDINGS_MODEL:-}
+  KNOWLEDGE_EMBEDDINGS_DIMENSIONS: ${KNOWLEDGE_EMBEDDINGS_DIMENSIONS:-}
+
+x-flags: &flags
+  FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER: ${FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER:-}
+  FEATURE_FLAG_PUBLIC_TULIPFARM_GUIDE: ${FEATURE_FLAG_PUBLIC_TULIPFARM_GUIDE:-}
+  FEATURE_FLAG_GOOGLE_CALENDAR_CANVAS: ${FEATURE_FLAG_GOOGLE_CALENDAR_CANVAS:-}
+  FEATURE_FLAG_SLACK_APP_SENDER: ${FEATURE_FLAG_SLACK_APP_SENDER:-}
+  FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE: ${FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE:-}
+
+x-telemetry: &telemetry
+  CLOUD_TELEMETRY_ENABLED: ${CLOUD_TELEMETRY_ENABLED:-}
+  CLOUD_TELEMETRY_OTLP_ENDPOINT: ${CLOUD_TELEMETRY_OTLP_ENDPOINT:-}
+  CLOUD_TELEMETRY_OTLP_TRACES_ENDPOINT: ${CLOUD_TELEMETRY_OTLP_TRACES_ENDPOINT:-}
+  CLOUD_TELEMETRY_OTLP_METRICS_ENDPOINT: ${CLOUD_TELEMETRY_OTLP_METRICS_ENDPOINT:-}
+  CLOUD_TELEMETRY_OTLP_LOGS_ENDPOINT: ${CLOUD_TELEMETRY_OTLP_LOGS_ENDPOINT:-}
+  CLOUD_TELEMETRY_OTLP_AUTHORIZATION: ${CLOUD_TELEMETRY_OTLP_AUTHORIZATION:-}
+  CLOUD_TELEMETRY_OTLP_HEADERS: ${CLOUD_TELEMETRY_OTLP_HEADERS:-}
+  CLOUD_TELEMETRY_OTLP_ALLOW_HTTP: ${CLOUD_TELEMETRY_OTLP_ALLOW_HTTP:-}
+  CLOUD_TELEMETRY_TRACES_ENABLED: ${CLOUD_TELEMETRY_TRACES_ENABLED:-}
+  CLOUD_TELEMETRY_METRICS_ENABLED: ${CLOUD_TELEMETRY_METRICS_ENABLED:-}
+  CLOUD_TELEMETRY_LOGS_ENABLED: ${CLOUD_TELEMETRY_LOGS_ENABLED:-}
+  CLOUD_TELEMETRY_SAMPLE_RATIO: ${CLOUD_TELEMETRY_SAMPLE_RATIO:-}
+
+x-runtime: &runtime
+  restart: unless-stopped
+  depends_on:
+    setup:
+      condition: service_completed_successfully
+    # Skipped when the temporal profile is off (needs Compose 2.20 or later).
+    temporal-namespace:
+      condition: service_completed_successfully
+      required: false
+
+x-temporal-env: &temporal-env # Loads the generated Temporal database login, then runs the image's own command.
+  entrypoint: ['/bin/sh', '-c', 'set -a && . /run/tulipfarm/temporal.env && set +a && exec "$$@"', '--']
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  object-storage:
+    image: rustfs/rustfs:1.0.0
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY_ID:?Set OBJECT_STORAGE_ACCESS_KEY_ID}
+      RUSTFS_SECRET_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:?Set OBJECT_STORAGE_SECRET_ACCESS_KEY}
+    volumes:
+      - object-storage-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fs http://localhost:9000/health || wget -qO- http://localhost:9000/health']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Creates roles, databases, extensions, migrations, scoped logins, and the bucket,
+  # then writes the generated volume. Safe to rerun; every start applies new migrations.
+  setup:
+    build: { context: .., dockerfile: apps/database/Dockerfile }
+    depends_on:
+      postgres: { condition: service_healthy }
+      object-storage: { condition: service_healthy }
+    environment:
+      TULIPFARM_DATABASE_ADMIN_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      TULIPFARM_OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
+      TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID}
+      TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY}
+    volumes:
+      - generated:/setup
+
+  temporal-schema:
+    profiles: [temporal]
+    build:
+      context: ../infra/temporal/admin
+      args: { ADMIN_TOOLS_TAG: 1.29.1-tctl-1.18.4-cli-1.5.0 }
+    <<: *temporal-env
+    command: /tulipfarm/schema.sh
+    volumes: [generated:/run/tulipfarm:ro]
+    depends_on:
+      setup: { condition: service_completed_successfully }
+
+  temporal:
+    profiles: [temporal]
+    image: temporalio/server:1.29.1
+    restart: unless-stopped
+    <<: *temporal-env
+    command: /etc/temporal/entrypoint.sh
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      # Fixed when the cluster is created. Changing it later needs a new cluster.
+      NUM_HISTORY_SHARDS: ${TEMPORAL_HISTORY_SHARDS:-128}
+    depends_on:
+      temporal-schema: { condition: service_completed_successfully }
+
+  temporal-namespace:
+    profiles: [temporal]
+    build:
+      context: ../infra/temporal/admin
+      args: { ADMIN_TOOLS_TAG: 1.29.1-tctl-1.18.4-cli-1.5.0 }
+    entrypoint: [/tulipfarm/namespace.sh]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      RETENTION: 720h
+    depends_on:
+      temporal: { condition: service_started }
+
+  temporal-ui:
+    profiles: [temporal]
+    image: temporalio/ui:2.39.0
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - '127.0.0.1:${TEMPORAL_UI_PORT:-8233}:8080'
+    depends_on:
+      temporal-namespace: { condition: service_completed_successfully }
+
+  api:
+    <<: *runtime
+    build: { context: .., dockerfile: apps/api/Dockerfile, target: production, args: *release }
+    command: [node, --env-file=/run/tulipfarm/api.env, dist/server.js]
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      <<: [*temporal-client, *models, *flags, *telemetry]
+      TEMPORAL_UI_URL: ${TEMPORAL_UI_URL-http://temporal-ui:8080}
+      PUBLIC_WEB_ENDPOINT: ${PUBLIC_WEB_ENDPOINT:-}
+      BETTER_AUTH_URL: ${TULIPFARM_PUBLIC_URL:?Set TULIPFARM_PUBLIC_URL}
+      WEB_ORIGIN: ${TULIPFARM_PUBLIC_URL}
+      WEBSITE_ORIGIN: ${TULIPFARM_PUBLIC_URL}
+      API_PROXY_MODE: reverse-proxy
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      AUTH_EMAIL_PASSWORD: ${AUTH_EMAIL_PASSWORD:-false}
+      # Tells the API that the worker can send password reset emails; the ACS secret stays with the worker.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-${ACS_CONNECTION_STRING:+acs}}
+      SMTP_HOST: ${SMTP_HOST:-}
+
+  worker:
+    <<: *runtime
+    build: { context: .., dockerfile: apps/worker/Dockerfile, target: worker, args: *release }
+    command: [node, --env-file=/run/tulipfarm/worker.env, dist/worker.js]
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      <<: [*temporal-client, *models, *flags, *telemetry]
+      PUBLIC_WEB_ENDPOINT: ${PUBLIC_WEB_ENDPOINT:-}
+      ACS_CONNECTION_STRING: ${ACS_CONNECTION_STRING:-}
+      ACS_SENDER_ADDRESS: ${ACS_SENDER_ADDRESS:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+
+  storage-worker:
+    <<: *runtime
+    build: { context: .., dockerfile: apps/worker/Dockerfile, target: storage-maintenance, args: *release }
+    command: [node, --env-file=/run/tulipfarm/storage-worker.env, dist/storage-worker.js]
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      <<: [*temporal-client, *telemetry]
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        <<: *release
+        VITE_API_URL: ${TULIPFARM_PUBLIC_URL}
+        VITE_SUPPORT_EMAIL: ${TULIPFARM_SUPPORT_EMAIL:-}
+        VITE_AGENT_AVATAR_URL: ${TULIPFARM_AGENT_AVATAR_URL:-}
+    restart: unless-stopped
+    environment:
+      TULIPFARM_SITE_ADDRESS: ${TULIPFARM_SITE_ADDRESS:-:80}
+    ports:
+      - '${TULIPFARM_HTTP_PORT:-80}:80'
+      - '${TULIPFARM_HTTPS_PORT:-443}:443'
+    volumes:
+      - caddy-data:/data
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  generated:
+  postgres-data:
+  object-storage-data:
+  caddy-data:

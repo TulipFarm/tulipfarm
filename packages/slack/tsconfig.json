@@ -1,0 +1,10 @@
+{
+  "extends": "@tulipfarm/typescript-config/base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "rewriteRelativeImportExtensions": true,
+    "declaration": true
+  },
+  "include": ["src"]
+}

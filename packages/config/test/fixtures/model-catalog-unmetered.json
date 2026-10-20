@@ -1,0 +1,21 @@
+{
+  "families": [
+    {
+      "id": "local-chat",
+      "name": "Local Chat",
+      "vendor": "local",
+      "currentModelId": "local-chat-1",
+      "modelIds": ["local-chat-1"],
+      "pricing": "unmetered"
+    }
+  ],
+  "models": [
+    {
+      "id": "local-chat-1",
+      "name": "Local Chat 1",
+      "provider": "azure",
+      "providerModelId": "Local-Chat-1",
+      "metadata": { "max_input_tokens": 128000, "max_output_tokens": 16000 }
+    }
+  ]
+}

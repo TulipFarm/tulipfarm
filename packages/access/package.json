@@ -1,0 +1,42 @@
+{
+  "name": "@tulipfarm/access",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./source-dependencies": {
+      "types": "./dist/source-dependencies.d.ts",
+      "default": "./dist/source-dependencies.js"
+    },
+    "./github-read": {
+      "types": "./dist/github-read.d.ts",
+      "default": "./dist/github-read.js"
+    },
+    "./github-investigation": {
+      "types": "./dist/github-investigation.d.ts",
+      "default": "./dist/github-investigation.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

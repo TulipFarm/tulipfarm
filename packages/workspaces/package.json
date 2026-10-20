@@ -1,0 +1,155 @@
+{
+  "name": "@tulipfarm/workspaces",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./qa-accounts": {
+      "types": "./dist/qa-accounts.d.ts",
+      "default": "./dist/qa-accounts.js"
+    },
+    "./soul-explorer": {
+      "types": "./dist/soul-explorer.d.ts",
+      "default": "./dist/soul-explorer.js"
+    },
+    "./soul-explorer-contracts": {
+      "types": "./dist/soul-explorer-contracts.d.ts",
+      "default": "./dist/soul-explorer-contracts.js"
+    },
+    "./onboarding": {
+      "types": "./dist/onboarding.d.ts",
+      "default": "./dist/onboarding.js"
+    },
+    "./onboarding-contracts": {
+      "types": "./dist/onboarding-contracts.d.ts",
+      "default": "./dist/onboarding-contracts.js"
+    },
+    "./agent-document": {
+      "types": "./dist/agent-document.d.ts",
+      "default": "./dist/agent-document.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "default": "./dist/settings.js"
+    },
+    "./settings-contracts": {
+      "types": "./dist/settings-contracts.d.ts",
+      "default": "./dist/settings-contracts.js"
+    },
+    "./chat-objects": {
+      "types": "./dist/chat-objects.d.ts",
+      "default": "./dist/chat-objects.js"
+    },
+    "./invitation-expiry": {
+      "types": "./dist/invitation-expiry.d.ts",
+      "default": "./dist/invitation-expiry.js"
+    },
+    "./canonical-email": {
+      "types": "./dist/canonical-email.d.ts",
+      "default": "./dist/canonical-email.js"
+    },
+    "./email-delivery": {
+      "types": "./dist/email-delivery.d.ts",
+      "default": "./dist/email-delivery.js"
+    },
+    "./table-migrations": {
+      "types": "./dist/table-migrations.d.ts",
+      "default": "./dist/table-migrations.js"
+    },
+    "./table-registry": {
+      "types": "./dist/table-registry.d.ts",
+      "default": "./dist/table-registry.js"
+    },
+    "./table-authoring": {
+      "types": "./dist/table-authoring.d.ts",
+      "default": "./dist/table-authoring.js"
+    },
+    "./table-name-conversion": {
+      "types": "./dist/table-name-conversion.d.ts",
+      "default": "./dist/table-name-conversion.js"
+    },
+    "./table-confirmation": {
+      "types": "./dist/table-confirmation.d.ts",
+      "default": "./dist/table-confirmation.js"
+    },
+    "./operators": {
+      "types": "./dist/operators.d.ts",
+      "default": "./dist/operators.js"
+    },
+    "./capabilities": {
+      "types": "./dist/capabilities.d.ts",
+      "default": "./dist/capabilities.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "default": "./dist/storage.js"
+    },
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "default": "./dist/lifecycle.js"
+    },
+    "./governance": {
+      "types": "./dist/governance.d.ts",
+      "default": "./dist/governance.js"
+    },
+    "./member-profiles": {
+      "types": "./dist/member-profiles.d.ts",
+      "default": "./dist/member-profiles.js"
+    },
+    "./members": {
+      "types": "./dist/members.d.ts",
+      "default": "./dist/members.js"
+    },
+    "./governance-contracts": {
+      "types": "./dist/governance-contracts.d.ts",
+      "default": "./dist/governance-contracts.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "default": "./dist/store.js"
+    },
+    "./soul-revisions": {
+      "types": "./dist/soul-revisions.d.ts",
+      "default": "./dist/soul-revisions.js"
+    },
+    "./soul": {
+      "types": "./dist/soul.d.ts",
+      "default": "./dist/soul.js"
+    }
+  },
+  "scripts": {
+    "qualify:soul-read": "node src/soul-read-qualification.ts",
+    "qualify:soul-read:production": "node src/soul-read-production-qualification.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/keyring": "workspace:*",
+    "@tulipfarm/workspace-mcp": "workspace:*",
+    "@tulipfarm/github": "workspace:*",
+    "@tulipfarm/atlassian": "workspace:*",
+    "@tulipfarm/slack": "workspace:*",
+    "@tulipfarm/workflows": "workspace:*",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "@aws-sdk/client-s3": "3.1141.0",
+    "@tulipfarm/tables": "workspace:*",
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

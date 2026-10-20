@@ -1,0 +1,67 @@
+# Development
+
+## Prerequisites
+
+- Node.js: the version in [`.node-version`](.node-version) (26).
+- pnpm 11.5.3: `npm install --global pnpm@11.5.3`.
+- Docker with Docker Compose, for local dependencies.
+
+## Set up
+
+```sh
+pnpm install --frozen-lockfile
+pnpm lint
+```
+
+## Local dependencies
+
+[`compose.yaml`](compose.yaml) runs the development services, bound to
+`127.0.0.1` with local-only credentials:
+
+| Service                        | Port |
+| ------------------------------ | ---- |
+| PostgreSQL with pgvector       | 5432 |
+| Temporal                       | 7233 |
+| Temporal UI                    | 8233 |
+| RustFS (S3-compatible storage) | 9000 |
+
+[`infra/postgres/init.sql`](infra/postgres/init.sql) creates the `tulipfarm` and
+`temporal` databases on first start.
+
+```sh
+pnpm infra:up     # start and wait for health checks
+pnpm infra:down   # stop
+```
+
+Agent web search and page reads are off unless `PUBLIC_WEB_ENDPOINT` points at a
+Firecrawl-compatible API. Export it before `pnpm dev:setup` to write it to
+`apps/worker/.env.local`. See [`self-host/README.md`](self-host/README.md#public-web).
+
+## Commands
+
+| Command             | What it does                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `pnpm dev`          | Start dependencies, set up the database, and run all apps                            |
+| `pnpm build`        | Build all workspaces                                                                 |
+| `pnpm lint`         | Check formatting, run Oxlint, the `tooling/` tests, and the documentation link check |
+| `pnpm lint:fix`     | Apply Oxlint fixes                                                                   |
+| `pnpm format`       | Format files with Oxfmt                                                              |
+| `pnpm format:check` | Check formatting without writing changes                                             |
+| `pnpm typecheck`    | Type-check all workspaces                                                            |
+| `pnpm test`         | Run tests in all workspaces                                                          |
+| `pnpm check`        | Check only what changed since `origin/main` (`--base=<ref>` to change)               |
+| `pnpm check:full`   | Build, type-check, test, and lint everything, and validate the Compose files         |
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm lint`,
+`pnpm typecheck`, and `pnpm test` on GitHub-hosted runners for every pull request
+and push to `main`. [`.github/workflows/images.yml`](.github/workflows/images.yml)
+builds the container images for GHCR; it stays disabled until the first release.
+
+## Layout
+
+- `apps/`: deployable applications.
+- `packages/`: shared domain code and configuration.
+- `infra/`: local infrastructure configuration.
+- `tooling/`: repository check runner, lint rules, and local verification scripts.

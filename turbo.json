@@ -1,0 +1,143 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "HOST",
+        "PORT",
+        "PUBLIC_WEB_ENDPOINT",
+        "API_PROXY_MODE",
+        "TULIPFARM_EXTENSIONS",
+        "DATABASE_URL",
+        "SLACK_INTAKE_ENABLED",
+        "SLACK_LINK_PROMPTS_ENABLED",
+        "SLACK_DIRECT_MESSAGES_ENABLED",
+        "SLACK_CHANNEL_AGENTS_ENABLED",
+        "SLACK_PUBLIC_DELIVERY_ENABLED",
+        "SLACK_OUTBOUND_ENABLED",
+        "SLACK_CONFIGURATION",
+        "SLACK_CREDENTIAL_KEYS",
+        "EMAIL_DELIVERY_KEY",
+        "EMAIL_DELIVERY_KEY_ID",
+        "EMAIL_DELIVERY_PREVIOUS_KEYS",
+        "EMAIL_DELIVERY_DATABASE_URL",
+        "INTEGRATION_CREDENTIAL_KEY",
+        "INTEGRATION_CREDENTIAL_KEY_ID",
+        "INTEGRATION_CREDENTIAL_PREVIOUS_KEYS",
+        "WORKSPACE_MCP_ADMISSION_ENABLED",
+        "WORKSPACE_MCP_DISPATCH_ENABLED",
+        "GITHUB_OAUTH_CLIENT_ID",
+        "GITHUB_OAUTH_CLIENT_SECRET",
+        "GITHUB_OAUTH_REDIRECT_URI",
+        "GITHUB_OAUTH_SCOPES",
+        "GITHUB_MCP_READ_BINDINGS",
+        "GITHUB_MCP_WRITE_BINDINGS",
+        "WORKSPACE_STORAGE_CAPABILITY",
+        "WORKSPACE_RUNTIME_KEY",
+        "WORKSPACE_RUNTIME_KEY_ID",
+        "WORKSPACE_RUNTIME_PREVIOUS_KEYS",
+        "WORKSPACE_RUNTIME_REPLICAS",
+        "WORKSPACE_DATABASE_CONNECTION_BUDGET",
+        "TEMPORAL_STORAGE_TASK_QUEUE",
+        "TEMPORAL_ADDRESS",
+        "TEMPORAL_NAMESPACE",
+        "TEMPORAL_TASK_QUEUE",
+        "TEMPORAL_UI_URL",
+        "SNIPPET_BROKER_URL",
+        "SNIPPET_BROKER_TOKEN",
+        "SNIPPET_ALLOW_LOCAL_HTTP",
+        "WORKFLOW_CODE_STEPS_ENABLED",
+        "VITE_API_URL",
+        "VITE_TULIPFARM_WEB_EXTENSIONS",
+        "VITE_WEBSITE_URL",
+        "VITE_DOCS_URL",
+        "BETTER_AUTH_URL",
+        "BETTER_AUTH_SECRET",
+        "WEB_ORIGIN",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_WORKSPACE_CLIENT_ID",
+        "GOOGLE_WORKSPACE_CLIENT_SECRET",
+        "GOOGLE_WORKSPACE_REDIRECT_URI",
+        "ACS_CONNECTION_STRING",
+        "ACS_SENDER_ADDRESS",
+        "EMAIL_PROVIDER",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_SECURE",
+        "SMTP_REQUIRE_TLS",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_FROM_ADDRESS",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_SOUL_READ_ACCESS_KEY_ID",
+        "R2_SOUL_READ_SECRET_ACCESS_KEY",
+        "R2_SOUL_BUCKET"
+      ]
+    },
+    "dev:storage": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "build": {
+      "env": [
+        "VITE_API_URL",
+        "VITE_TULIPFARM_WEB_EXTENSIONS",
+        "VITE_WEBSITE_URL",
+        "VITE_DOCS_URL",
+        "TULIPFARM_RELEASE_BUILD"
+      ],
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "//#lint:repo": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/**",
+        "!$TURBO_ROOT$/**/node_modules/**",
+        "!$TURBO_ROOT$/**/.turbo/**",
+        "!$TURBO_ROOT$/**/dist/**",
+        "!$TURBO_ROOT$/**/coverage/**",
+        "!$TURBO_ROOT$/.git/**"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@tulipfarm/atlassian#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "@tulipfarm/conversations#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "@tulipfarm/knowledge#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "@tulipfarm/workspace-mcp#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "@tulipfarm/workspace-mcp-transport#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "@tulipfarm/tables#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    }
+  }
+}

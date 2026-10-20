@@ -1,0 +1,66 @@
+{
+  "name": "@tulipfarm/workflows",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./automation-setup": {
+      "types": "./dist/automation-setup.d.ts",
+      "default": "./dist/automation-setup.js"
+    },
+    "./automation": {
+      "types": "./dist/automation.d.ts",
+      "default": "./dist/automation.js"
+    },
+    "./automation-contracts": {
+      "types": "./dist/automation-contracts.d.ts",
+      "default": "./dist/automation-contracts.js"
+    },
+    ".": {
+      "types": "./dist/service.d.ts",
+      "default": "./dist/service.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./calendar-contracts": {
+      "types": "./dist/calendar-contracts.d.ts",
+      "default": "./dist/calendar-contracts.js"
+    },
+    "./schedule": {
+      "types": "./dist/schedule.d.ts",
+      "default": "./dist/schedule.js"
+    },
+    "./authorization": {
+      "types": "./dist/authorization.d.ts",
+      "default": "./dist/authorization.js"
+    },
+    "./temporal": {
+      "types": "./dist/temporal.d.ts",
+      "default": "./dist/temporal.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/github": "workspace:*",
+    "@tulipfarm/workflow-snippets": "workspace:*",
+    "cron-parser": "5.10.1",
+    "@temporalio/workflow": "1.24.0",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/tables": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@temporalio/client": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}
