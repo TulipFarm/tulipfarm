@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { Client, Connection } from '@temporalio/client';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { z } from 'zod';
 import {
   createSlackRecovery,
@@ -107,7 +108,7 @@ export async function createSlackPromptComposition(
   const installations = createSlackInstallationDiscovery(pool, runtime, settings.config.appId);
   let connection: Connection;
   try {
-    connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
+    connection = await Connection.connect(temporalConnectionOptions());
   } catch (error) {
     await pool.end();
     throw error;

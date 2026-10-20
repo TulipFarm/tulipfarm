@@ -59,3 +59,11 @@ export async function generatedPassword(name: string) {
   await (await secretStore()).write(name, value);
   return value;
 }
+
+export async function rolePasswords() {
+  return {
+    owner: await generatedPassword('database-owner-password'),
+    application: await generatedPassword('database-password'),
+    temporal: await generatedPassword('temporal-database-password'),
+  };
+}

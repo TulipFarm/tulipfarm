@@ -48,6 +48,14 @@
     "./load-secret-files": {
       "types": "./dist/load-secret-files.d.ts",
       "default": "./dist/load-secret-files.js"
+    },
+    "./temporal": {
+      "types": "./dist/temporal.d.ts",
+      "default": "./dist/temporal.js"
+    },
+    "./public-web": {
+      "types": "./dist/public-web.d.ts",
+      "default": "./dist/public-web.js"
     }
   },
   "scripts": {

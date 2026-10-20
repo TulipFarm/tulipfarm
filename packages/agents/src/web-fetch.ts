@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { denyMcpEgress } from '@tulipfarm/access';
+import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { publicWebResultSchema, publicWebUrlSchema, webPageSchema } from '@tulipfarm/conversations/contracts';
 import { z } from 'zod';
 
@@ -69,23 +70,13 @@ const searchResponse = z.object({
 type WebResult = z.infer<typeof publicWebResultSchema>;
 
 async function request(path: string, body: object, signal: AbortSignal): Promise<unknown> {
-  const endpoint = process.env.PUBLIC_WEB_ENDPOINT;
-  if (!endpoint) throw new Error('web-unavailable');
-  const base = new URL(endpoint);
-  if (
-    !['http:', 'https:'].includes(base.protocol) ||
-    base.username ||
-    base.password ||
-    base.search ||
-    base.hash ||
-    base.pathname !== '/'
-  )
-    throw new Error('web-unavailable');
-  const response = await fetch(new URL(path, base), {
+  const config = publicWebConfiguration();
+  if (!config) throw new Error('web-unavailable');
+  const response = await fetch(new URL(path, config.endpoint), {
     method: 'POST',
     redirect: 'error',
     signal,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...config.headers },
     body: JSON.stringify(body),
   });
   if (!response.ok || !response.body) throw new Error('web-unavailable');

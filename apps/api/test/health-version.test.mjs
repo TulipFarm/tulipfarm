@@ -120,3 +120,67 @@ test('health skips the Temporal UI and public-web probes when they are not confi
   assert.deepEqual(Object.keys(response.json().services).sort(), ['api', 'postgres', 'temporal', 'workers']);
   assert.deepEqual(fetched, []);
 });
+
+test('cloud web health authenticates without scraping and optional storage checks follow the capability', async t => {
+  t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
+  const names = ['PUBLIC_WEB_ENDPOINT', 'PUBLIC_WEB_API_KEY', 'TEMPORAL_UI_URL', 'WORKSPACE_STORAGE_CAPABILITY'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  process.env.PUBLIC_WEB_ENDPOINT = 'https://api.firecrawl.dev';
+  process.env.PUBLIC_WEB_API_KEY = 'test-cloud-key';
+  process.env.TEMPORAL_UI_URL = '';
+  delete process.env.WORKSPACE_STORAGE_CAPABILITY;
+  let status = 200;
+  const fetched = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    fetched.push({ url: String(url), options });
+    return new Response('{}', { status });
+  });
+  const executions = [];
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(
+    async app =>
+      registerHealth(app, {
+        namespace: 'test',
+        connection: {
+          withDeadline: (_deadline, callback) => callback(),
+          workflowService: { describeNamespace: async () => ({}) },
+        },
+        client: {
+          workflow: {
+            execute: async name => {
+              executions.push(name);
+              return name === 'storageHealthCheck' ? 'isolated-v1' : 'ok';
+            },
+          },
+        },
+      }),
+    { prefix: '/v1' },
+  );
+  const healthy = await app.inject('/v1/health');
+  assert.equal(healthy.statusCode, 200);
+  assert.equal(healthy.json().services.temporalUi, undefined);
+  assert.equal(healthy.json().services.storageMaintenance, undefined);
+  assert.deepEqual(executions, ['healthCheck']);
+  assert.equal(fetched[0].url, 'https://api.firecrawl.dev/v2/team/credit-usage');
+  assert.deepEqual(fetched[0].options.headers, { authorization: 'Bearer test-cloud-key' });
+  assert.equal(fetched[0].options.method ?? 'GET', 'GET');
+  assert.equal(fetched[0].options.redirect, 'error');
+  assert.equal(fetched[0].options.body, undefined);
+  assert.doesNotMatch(healthy.body, /test-cloud-key|remainingCredits/);
+  process.env.WORKSPACE_STORAGE_CAPABILITY = 'isolated-v1';
+  const withStorage = await app.inject('/v1/health');
+  assert.equal(withStorage.statusCode, 200);
+  assert.equal(withStorage.json().services.storageMaintenance.status, 'ok');
+  for (status of [401, 503]) {
+    const failed = await app.inject('/v1/health');
+    assert.equal(failed.statusCode, 503);
+    assert.equal(failed.json().services.publicWeb.status, 'unavailable');
+  }
+  assert.equal((await app.inject('/health')).statusCode, 404);
+});

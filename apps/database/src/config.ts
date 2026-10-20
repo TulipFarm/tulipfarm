@@ -14,6 +14,13 @@ export const extensions: Extension[] = [{ name: 'vector', schema: 'extensions', 
 
 export class DatabaseError extends Error {}
 
+export function databaseProvider(env: NodeJS.ProcessEnv = process.env) {
+  const provider = env.DATABASE_PROVIDER || 'postgres';
+  if (provider !== 'postgres' && provider !== 'azure')
+    throw new DatabaseError('DATABASE_PROVIDER must be postgres or azure.');
+  return provider;
+}
+
 export function hasStatus(error: unknown, status: number) {
   return typeof error === 'object' && error !== null && 'statusCode' in error && error.statusCode === status;
 }

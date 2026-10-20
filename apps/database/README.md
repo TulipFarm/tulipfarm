@@ -1,5 +1,33 @@
 # Platform grant checks
 
+## Provider-neutral setup and migrations
+
+Use `pnpm self-host:setup --out /private/generated` for a new plain or managed
+Postgres server. Set `TULIPFARM_DATABASE_ADMIN_URL` (or `_FILE`) to the admin/master
+URL and the S3-compatible `TULIPFARM_OBJECT_STORAGE_*` settings from
+`pnpm self-host:setup --help`. It prepares roles, databases, pgvector, application
+and extension migrations, scoped storage and email logins, and a bucket. The
+generated state must be retained for safe reruns. This works without Azure.
+
+For later CLI operations, `DATABASE_PROVIDER` defaults to `postgres`.
+`pnpm db extensions --env production` reads `DATABASE_ADMIN_URL`, and
+`pnpm db migrate --env production` reads `DATABASE_MIGRATION_URL`. Both accept
+`_FILE` secrets. Bootstrap preserves the admin URL's port and TLS parameters
+when deriving login URLs. CLI bootstrap requires a writable
+`TULIPFARM_DATABASE_SECRET_STORE` unless all passwords and output URLs already
+exist; self-host setup writes its generated files instead.
+
+Bootstrap supports an administrator with `CREATEDB` and `CREATEROLE`, without
+changing superuser-only role attributes. Existing elevated application, owner or
+Temporal roles are rejected rather than silently downgraded. Installing pgvector
+still needs the server's extension-installation authority (for example RDS
+`rds_superuser`); the application and scoped worker logins never receive it.
+
+Azure provisioning, firewall rules and extension allowlisting require explicit
+`DATABASE_PROVIDER=azure` and `az login`. The legacy Azure storage-release tools
+also require that selection before managing the server. Merely importing setup
+or migration modules does not instantiate `AzureCliCredential`.
+
 ## Capability state
 
 `src/postgres.ts` records the first successful `isolated-v1` grant installation in

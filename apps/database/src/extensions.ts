@@ -1,13 +1,14 @@
 import { escapeIdentifier } from 'pg';
 import type { Client } from 'pg';
 import { azure, DatabaseError, extensions } from './config.ts';
-import { management } from './azure.ts';
 
-export async function installExtensions(client: Client, remote: boolean) {
+export async function installExtensions(client: Client, azureManaged: boolean) {
   for (const extension of extensions) {
     if (!/^[a-z][a-z0-9_-]*$/.test(extension.name)) throw new DatabaseError('Invalid extension name.');
   }
-  if (remote && extensions.length) {
+  if (azureManaged && extensions.length) {
+    const { azureManagement } = await import('./azure.ts');
+    const management = azureManagement();
     const current = await management.configurations.get(azure.resourceGroup, azure.serverName, 'azure.extensions');
     const allowed = new Set(
       (current.value ?? '')

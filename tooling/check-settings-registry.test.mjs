@@ -35,6 +35,17 @@ const computedReads = {
     names: ['WORKSPACE_MCP_ADMISSION_ENABLED', 'WORKSPACE_MCP_DISPATCH_ENABLED'],
   },
   'apps/database/src/cli.ts': { sites: 1, names: ['DATABASE_MIGRATION_URL', 'DATABASE_ADMIN_URL', 'DATABASE_URL'] },
+  'apps/database/src/dev-setup.ts': {
+    sites: 2,
+    names: [
+      'TEMPORAL_ADDRESS',
+      'TEMPORAL_NAMESPACE',
+      'TEMPORAL_TLS',
+      'TEMPORAL_API_KEY',
+      'PUBLIC_WEB_ENDPOINT',
+      'PUBLIC_WEB_API_KEY',
+    ],
+  },
   // Environment secret store (#14): reads operator-provisioned release secrets by name, which are not app settings.
   'apps/database/src/secrets.ts': { sites: 1, names: [] },
   'apps/database/src/self-host-setup.ts': {

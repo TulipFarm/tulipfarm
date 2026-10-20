@@ -3,6 +3,15 @@ import { inTransaction, type SqlClient } from '@tulipfarm/workspace-storage/prov
 import { grantTableRegistryAccess, modelBundleRoutines } from '@tulipfarm/workspaces/table-registry';
 import { DatabaseError } from './config.ts';
 
+export function loginConnectionUrl(adminUrl: string, database: string, username: string, password: string) {
+  const url = new URL(adminUrl);
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw new DatabaseError('Expected a PostgreSQL URL.');
+  url.pathname = `/${database}`;
+  url.username = username;
+  url.password = password;
+  return url.href;
+}
+
 export function storageCapability() {
   const capability = process.env.WORKSPACE_STORAGE_CAPABILITY;
   if (capability === undefined || capability === '' || capability === 'disabled') return 'disabled';
@@ -182,11 +191,20 @@ export async function bootstrap(adminUrl: string, passwords: { owner: string; ap
       ['temporal', passwords.temporal],
     ]) {
       if (!name || !password) throw new Error('Missing role configuration');
-      const result = await admin.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [name]);
+      const result = await admin.query<{
+        rolsuper: boolean;
+        rolcreatedb: boolean;
+        rolcreaterole: boolean;
+        rolreplication: boolean;
+        rolbypassrls: boolean;
+      }>('SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = $1', [
+        name,
+      ]);
+      const existing = result.rows[0];
+      if (existing && Object.values(existing).some(Boolean))
+        throw new DatabaseError(`Unexpected elevated role ${name}. Reconcile its privileges before setup.`);
       if (!result.rowCount) await admin.query(`CREATE ROLE ${escapeIdentifier(name)} LOGIN`);
-      await admin.query(
-        `ALTER ROLE ${escapeIdentifier(name)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD ${escapeLiteral(password)}`,
-      );
+      await admin.query(`ALTER ROLE ${escapeIdentifier(name)} LOGIN PASSWORD ${escapeLiteral(password)}`);
     }
     const user = await admin.query<{ current_user: string }>('SELECT current_user');
     const administrator = user.rows[0]?.current_user;

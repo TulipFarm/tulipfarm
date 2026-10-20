@@ -1,11 +1,15 @@
 import { isIPv4 } from 'node:net';
 import { PostgreSQLManagementFlexibleServerClient } from '@azure/arm-postgresql-flexible';
 import { AzureCliCredential } from '@azure/identity';
-import { azure, DatabaseError, hasStatus } from './config.ts';
+import { azure, databaseProvider, DatabaseError, hasStatus } from './config.ts';
 import { generatedPassword, readSecret, saveSecret } from './secrets.ts';
 
-const credential = new AzureCliCredential();
-export const management = new PostgreSQLManagementFlexibleServerClient(credential, azure.subscriptionId);
+let management: PostgreSQLManagementFlexibleServerClient | undefined;
+export function azureManagement() {
+  if (databaseProvider() !== 'azure') throw new DatabaseError('Select DATABASE_PROVIDER=azure for Azure management.');
+  management ??= new PostgreSQLManagementFlexibleServerClient(new AzureCliCredential(), azure.subscriptionId);
+  return management;
+}
 
 export function connectionUrl(host: string, database: string, username: string, secret: string) {
   const url = new URL(`postgresql://${host}:5432/${database}`);
@@ -17,6 +21,7 @@ export function connectionUrl(host: string, database: string, username: string, 
 
 export async function allowIp(ip: string) {
   if (!isIPv4(ip) || ip === '0.0.0.0') throw new DatabaseError('Supply one public IPv4 address with --allow-ip.');
+  const management = azureManagement();
   await management.firewallRules.beginCreateOrUpdateAndWait(azure.resourceGroup, azure.serverName, 'developer', {
     startIpAddress: ip,
     endIpAddress: ip,
@@ -26,6 +31,7 @@ export async function allowIp(ip: string) {
 
 export async function provision(ip: string) {
   if (!isIPv4(ip) || ip === '0.0.0.0') throw new DatabaseError('Supply one public IPv4 address with --allow-ip.');
+  const management = azureManagement();
   let server;
   try {
     server = await management.servers.get(azure.resourceGroup, azure.serverName);
@@ -68,12 +74,4 @@ export async function provision(ip: string) {
     ),
   );
   process.stdout.write(`Server ready: ${server.fullyQualifiedDomainName}\n`);
-}
-
-export async function rolePasswords() {
-  return {
-    owner: await generatedPassword('database-owner-password'),
-    application: await generatedPassword('database-password'),
-    temporal: await generatedPassword('temporal-database-password'),
-  };
 }

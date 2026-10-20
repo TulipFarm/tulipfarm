@@ -6,6 +6,7 @@ import { healthSchema, livenessSchema, rootSchema } from './health-schema.ts';
 import { isolatedStorageEnabled } from '@tulipfarm/workspaces/storage';
 import { log, observeCall } from '@tulipfarm/observability';
 import { buildInfo } from './build-info.ts';
+import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 
 type ServiceHealth = { status: 'ok'; latencyMs: number } | { status: 'unavailable'; latencyMs: number };
 
@@ -83,7 +84,13 @@ export function registerHealth(
         : undefined,
       publicWebEndpoint
         ? check('publicWeb', async () => {
-            const response = await fetch(new URL('/health', publicWebEndpoint), { signal: AbortSignal.timeout(2000) });
+            const config = publicWebConfiguration();
+            if (!config) throw new Error('Public web configuration unavailable');
+            const response = await fetch(new URL(config.healthPath, config.endpoint), {
+              headers: config.headers,
+              redirect: 'error',
+              signal: AbortSignal.timeout(2000),
+            });
             await response.body?.cancel();
             if (!response.ok) throw new Error(`Public web gateway returned ${response.status}`);
           })

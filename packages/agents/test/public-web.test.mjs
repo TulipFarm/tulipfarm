@@ -5,6 +5,43 @@ import { searchPublicWeb, fetchPublicText } from '../src/web-fetch.ts';
 import { publicWebReceipt, publicWebUrlSchema } from '../../conversations/src/public-web.ts';
 import { parseToolCall, discoverTools } from '../src/tools.ts';
 
+test('search and scrape use Bearer authentication only when a public web key is configured', async t => {
+  const names = ['PUBLIC_WEB_ENDPOINT', 'PUBLIC_WEB_API_KEY', 'PUBLIC_WEB_API_KEY_FILE'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  process.env.PUBLIC_WEB_ENDPOINT = 'https://api.firecrawl.dev';
+  delete process.env.PUBLIC_WEB_API_KEY_FILE;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ path: new URL(url).pathname, options });
+    return Response.json(
+      String(url).endsWith('/v2/search')
+        ? { success: true, data: { web: [] } }
+        : { success: true, data: { markdown: 'Public page', metadata: {} } },
+    );
+  });
+  for (const key of [undefined, 'test-cloud-key']) {
+    if (key) process.env.PUBLIC_WEB_API_KEY = key;
+    else delete process.env.PUBLIC_WEB_API_KEY;
+    await searchPublicWeb({ query: 'news', limit: 1, window: 'any' });
+    await fetchPublicText('https://example.com/page');
+    const latest = calls.slice(-2);
+    assert.deepEqual(
+      latest.map(call => call.path),
+      ['/v2/search', '/v2/scrape'],
+    );
+    for (const { options } of latest) {
+      assert.equal(options.headers.authorization, key ? `Bearer ${key}` : undefined);
+      assert.equal(options.redirect, 'error');
+      assert.equal(JSON.stringify(JSON.parse(options.body)).includes('test-cloud-key'), false);
+    }
+  }
+});
+
 test('public results retain original URLs, dates, bounded text, and neutral failures', async () => {
   const calls = [];
   const server = createServer(async (req, res) => {

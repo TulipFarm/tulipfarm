@@ -1,4 +1,5 @@
 import '@tulipfarm/config/load-secret-files';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { extname } from 'node:path';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import { captureException, createBackgroundJob, retryError, startTelemetry } from '@tulipfarm/observability';
@@ -62,7 +63,7 @@ async function run() {
   });
   let connection: NativeConnection | undefined;
   try {
-    connection = await NativeConnection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
+    connection = await NativeConnection.connect(temporalConnectionOptions());
     const worker = await Worker.create({
       ...workerTelemetry(telemetry),
       connection,

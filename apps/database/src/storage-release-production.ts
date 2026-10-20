@@ -14,7 +14,7 @@ import {
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { provisionTableRegistry } from '@tulipfarm/workspaces/table-registry';
 import { azure } from './config.ts';
-import { connectionUrl, management } from './azure.ts';
+import { azureManagement, connectionUrl } from './azure.ts';
 import { optionalSecret, readSecret, saveSecret } from './secrets.ts';
 import { connect } from './postgres.ts';
 import { readMigrations as readGlobalMigrations } from './migrations.ts';
@@ -373,11 +373,13 @@ export async function executeProductionStorageRelease(command: StorageReleaseCom
         }
       },
       async retention() {
+        const management = azureManagement();
         const server = await management.servers.get(azure.resourceGroup, azure.serverName);
         if (server.state !== 'Ready') throw new StorageReleaseError('Azure PostgreSQL server must be Ready.');
         return z.number().int().min(7).max(35).parse(server.backup?.backupRetentionDays);
       },
       async setRetention(retentionDays) {
+        const management = azureManagement();
         await management.servers.beginUpdateAndWait(azure.resourceGroup, azure.serverName, {
           backup: { backupRetentionDays: retentionDays },
         });

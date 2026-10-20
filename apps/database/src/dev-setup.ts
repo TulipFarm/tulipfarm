@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { loadSecretFiles } from '@tulipfarm/config/secret-files';
 import { loadDatabaseExtensions, migrate } from './migrations.ts';
 import { connect } from './postgres.ts';
 import { installExtensions } from './extensions.ts';
@@ -45,6 +46,7 @@ async function loadState(): Promise<State> {
 }
 
 async function main() {
+  loadSecretFiles();
   process.env.WORKSPACE_STORAGE_CAPABILITY = 'isolated-v1';
   const state = await loadState();
 
@@ -76,12 +78,27 @@ async function main() {
   });
   const write = (path: string, values: Record<string, string>) =>
     writeEnvFile(new URL(path, root), 'pnpm dev:setup', values);
-  await write('apps/api/.env.local', env.api);
+  const connections = Object.fromEntries(
+    [
+      'TEMPORAL_ADDRESS',
+      'TEMPORAL_NAMESPACE',
+      'TEMPORAL_TLS',
+      'TEMPORAL_API_KEY',
+      'PUBLIC_WEB_ENDPOINT',
+      'PUBLIC_WEB_API_KEY',
+    ]
+      .filter(name => process.env[name] !== undefined)
+      .map(name => [name, process.env[name]!]),
+  );
+  await write('apps/api/.env.local', { ...env.api, ...connections });
   await write('apps/worker/.env.local', {
     ...env.worker,
-    ...(process.env.PUBLIC_WEB_ENDPOINT ? { PUBLIC_WEB_ENDPOINT: process.env.PUBLIC_WEB_ENDPOINT } : {}),
+    ...connections,
   });
-  await write('apps/worker/.env.storage.local', env.storageWorker);
+  await write('apps/worker/.env.storage.local', {
+    ...env.storageWorker,
+    ...Object.fromEntries(Object.entries(connections).filter(([name]) => name.startsWith('TEMPORAL_'))),
+  });
   process.stdout.write('Local isolated storage is ready.\n');
 }
 

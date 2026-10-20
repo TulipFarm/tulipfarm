@@ -8,6 +8,9 @@ import { promisify } from 'node:util';
 import { installExtensions } from '../../src/extensions.ts';
 import { migrate } from '../../src/migrations.ts';
 import { bootstrap, connect } from '../../src/postgres.ts';
+import { configureReleaseLogins, releaseLoginPasswords } from '../../src/setup.ts';
+import { createEmailLogin, inspectEmailLogin } from '../../src/product-release-access.ts';
+import { grantPgvector } from '@tulipfarm/workspace-storage/provisioning';
 
 const exec = promisify(execFile);
 const passwords = {
@@ -16,7 +19,7 @@ const passwords = {
   temporal: 'disposable-temporal-only',
 };
 
-test('an empty isolated-v1 server applies every migration from the start', { timeout: 120000 }, async () => {
+test('a non-superuser admin bootstraps a fresh isolated server and scoped logins', { timeout: 120000 }, async () => {
   const container = `fresh-install-${randomUUID()}`;
   const previousCapability = process.env.WORKSPACE_STORAGE_CAPABILITY;
   const clients = [];
@@ -46,13 +49,27 @@ test('an empty isolated-v1 server applies every migration from the start', { tim
     }
     const admin = database => `postgresql://postgres:disposable-admin-only@127.0.0.1:${port}/${database}`;
     process.env.WORKSPACE_STORAGE_CAPABILITY = 'isolated-v1';
-    await bootstrap(admin('postgres'), passwords);
+    const root = await connect(admin('postgres'));
+    clients.push(root);
+    await root.query("CREATE ROLE setup_master LOGIN CREATEROLE CREATEDB PASSWORD 'disposable-master-only'");
+    const master = database => `postgresql://setup_master:disposable-master-only@127.0.0.1:${port}/${database}`;
+    await root.query('CREATE ROLE tulipfarm_owner CREATEROLE');
+    await assert.rejects(bootstrap(master('postgres'), passwords), /Unexpected elevated role tulipfarm_owner/);
+    await root.query('DROP ROLE tulipfarm_owner');
+    await bootstrap(master('postgres'), passwords);
+    await bootstrap(master('postgres'), passwords);
     const administrator = await connect(admin('tulipfarm'));
     clients.push(administrator);
     await installExtensions(administrator, false);
     const owner = await connect(`postgresql://tulipfarm_owner:${passwords.owner}@127.0.0.1:${port}/tulipfarm`);
     clients.push(owner);
     await migrate(owner, fileURLToPath(new URL('../../migrations/', import.meta.url)));
+    await grantPgvector(administrator, 'setup_master', true);
+    const setup = await connect(master('tulipfarm'));
+    clients.push(setup);
+    await configureReleaseLogins(setup, 'tulipfarm', releaseLoginPasswords());
+    await createEmailLogin(setup, 'disposable-email-password-at-least-24');
+    assert.equal(await inspectEmailLogin(setup), 'retained');
     const icon = await administrator.query(
       "SELECT has_column_privilege('tulipfarm', 'app.workspaces', 'icon', 'SELECT') AS read, has_column_privilege('tulipfarm', 'app.workspaces', 'icon', 'INSERT') AS write",
     );

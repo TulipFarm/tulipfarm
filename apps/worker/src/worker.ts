@@ -2,6 +2,7 @@ import '@tulipfarm/config/load-secret-files';
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { captureException, createBackgroundJob, errorAttributes, log, startTelemetry } from '@tulipfarm/observability';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { workerTelemetry } from './telemetry.ts';
@@ -11,7 +12,7 @@ import * as activities from './activities.ts';
 import { isolatedStorageEnabled } from '@tulipfarm/workspaces/storage';
 import { createTableAuthoringComposition } from './table-authoring-composition.ts';
 import { createAgentComposition } from './agent-composition.ts';
-import { createEmailDeliveryComposition } from './email-delivery-composition.ts';
+import { createEmailDeliveryComposition, emailDeliveryEnabled } from './email-delivery-composition.ts';
 import { createConversationActivities } from './conversation-activities.ts';
 import { createConversationMaintenanceActivities } from './conversation-maintenance-activities.ts';
 import { createGoogleHeartbeatActivities } from './google-heartbeat-activities.ts';
@@ -57,8 +58,7 @@ async function run() {
   }
   for (const warning of modelRoleWarnings(process.env, ['title', 'compaction', 'review', 'plan', 'heartbeat']))
     console.warn(JSON.stringify({ level: 'warn', msg: warning }));
-  if (process.env.NODE_ENV === 'production' && !process.env.EMAIL_DELIVERY_DATABASE_URL)
-    throw new Error('Email delivery database configuration required');
+  const emailEnabled = emailDeliveryEnabled();
   for (const key of [
     'WORKSPACE_PROVISIONING_DATABASE_URL',
     'WORKSPACE_MIGRATION_REGISTRY_DATABASE_URL',
@@ -70,9 +70,7 @@ async function run() {
   ]) {
     if (process.env[key]) throw new Error('Ordinary workers must not receive storage maintenance credentials');
   }
-  const connection = await NativeConnection.connect({
-    address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233',
-  });
+  const connection = await NativeConnection.connect(temporalConnectionOptions());
   let resources: ReturnType<typeof createTableAuthoringComposition> | undefined;
   let email: Awaited<ReturnType<typeof createEmailDeliveryComposition>> | undefined;
   let tasks: ReturnType<typeof createTaskComposition> | undefined;
@@ -89,7 +87,7 @@ async function run() {
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
   try {
-    email = process.env.EMAIL_DELIVERY_DATABASE_URL ? await createEmailDeliveryComposition() : undefined;
+    email = emailEnabled ? await createEmailDeliveryComposition() : undefined;
     resources = isolatedStorageEnabled() ? createTableAuthoringComposition() : undefined;
     if (resources) {
       memberProfiles = createMemberProfileComposition({

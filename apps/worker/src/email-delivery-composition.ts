@@ -1,9 +1,18 @@
 import { Pool } from 'pg';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import { createEmailSender, emailSenderConfigFromEnv, renderEmail } from '@tulipfarm/email';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
+import { createEmailSender, emailSenderConfigured, emailSenderConfigFromEnv, renderEmail } from '@tulipfarm/email';
 import { createEmailDeliveryStore, emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { createBackgroundJob, log } from '@tulipfarm/observability';
 import { z } from 'zod';
+
+export function emailDeliveryEnabled(env: NodeJS.ProcessEnv = process.env) {
+  if (!emailSenderConfigured(env)) return false;
+  emailSenderConfigFromEnv(env);
+  if (env.NODE_ENV === 'production' && !env.EMAIL_DELIVERY_DATABASE_URL)
+    throw new Error('Email delivery database configuration required');
+  return Boolean(env.EMAIL_DELIVERY_DATABASE_URL);
+}
 
 export async function createEmailDeliveryComposition(
   send?: (to: string, message: Awaited<ReturnType<typeof renderEmail>>) => Promise<unknown>,
@@ -26,7 +35,13 @@ export async function createEmailDeliveryComposition(
     throw new Error('Email worker requires a restricted delivery database login');
   }
   const store = createEmailDeliveryStore(pool, keys);
-  const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
+  let connection: Connection;
+  try {
+    connection = await Connection.connect(temporalConnectionOptions());
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
   let sender: ReturnType<typeof createEmailSender> | undefined;
   let running: Promise<void> | undefined;

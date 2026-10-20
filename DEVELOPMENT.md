@@ -35,7 +35,12 @@ pnpm infra:down   # stop
 
 Agent web search and page reads are off unless `PUBLIC_WEB_ENDPOINT` points at a
 Firecrawl-compatible API. Export it before `pnpm dev:setup` to write it to
-`apps/worker/.env.local`. See [`self-host/README.md`](self-host/README.md#public-web).
+the API and worker env files. Authenticated services also take
+`PUBLIC_WEB_API_KEY` or `PUBLIC_WEB_API_KEY_FILE`. Temporal Cloud takes
+`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TLS=true`, and
+`TEMPORAL_API_KEY` or `TEMPORAL_API_KEY_FILE`; setup copies the resolved values
+to the service env files. With these unset, local defaults are unchanged.
+See [`self-host/README.md`](self-host/README.md#public-web).
 
 ## Commands
 

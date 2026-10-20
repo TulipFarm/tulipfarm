@@ -66,10 +66,13 @@ export const selfHostSections = {
     'Temporal. COMPOSE_PROFILES=temporal runs Temporal (server, UI, schema and namespace jobs) in this stack.',
     'For your own Temporal: remove temporal from COMPOSE_PROFILES, set TEMPORAL_ADDRESS and',
     'TEMPORAL_NAMESPACE, and set TEMPORAL_UI_URL to your UI or to empty to skip its health probe.',
+    'For Temporal Cloud, also set TEMPORAL_TLS=true and TEMPORAL_API_KEY (or TEMPORAL_API_KEY_FILE).',
   ],
   'public-web': [
-    'Public web search and page reads for agents. Off unless set. Any keyless Firecrawl-compatible API',
-    '(POST /v2/search, POST /v2/scrape, GET /health) works. It must not be able to reach your internal network.',
+    'Public web search and page reads for agents. Off unless set. Use a Firecrawl-compatible API',
+    '(POST /v2/search, POST /v2/scrape). Set PUBLIC_WEB_API_KEY for authenticated APIs such as Firecrawl Cloud.',
+    'Health uses GET /v2/team/credit-usage with a key, otherwise GET /health; neither spends scrape credits.',
+    'The service must not be able to reach your internal network.',
   ],
   telemetry: [
     'OpenTelemetry export to your own backend over OTLP/HTTP. Off unless CLOUD_TELEMETRY_ENABLED=true.',
@@ -429,8 +432,18 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of a keyless Firecrawl-compatible API used by the agent `web.search` and `web.fetch` tools: `POST /v2/search`, `POST /v2/scrape`. Unset turns public web retrieval off; the tools then report results as unavailable. When set, the API health check needs `GET /health` to return 2xx, and `pnpm dev:setup` copies an exported value into the worker env. The endpoint fetches URLs that agents choose, so it must not be able to reach your internal network.',
+      'Origin (no path or credentials) of a Firecrawl-compatible API used by agent `web.search` and `web.fetch` tools: `POST /v2/search`, `POST /v2/scrape`. Unset disables public web retrieval. Health uses authenticated `GET /v2/team/credit-usage` when PUBLIC_WEB_API_KEY is set, otherwise `GET /health`. Neither probe scrapes pages. The endpoint must not be able to reach your internal network.',
     selfHost: { section: 'public-web', example: 'http://firecrawl.internal:3002', commented: true },
+  },
+  {
+    name: 'PUBLIC_WEB_API_KEY',
+    group: 'Public origins',
+    services: ['api', 'worker', 'database'],
+    requirement: 'optional',
+    secret: true,
+    description:
+      'Bearer token for the public web API. Unset preserves keyless self-hosted behavior. Accepts PUBLIC_WEB_API_KEY_FILE.',
+    selfHost: { section: 'public-web', commented: true },
   },
 
   {
@@ -449,6 +462,16 @@ export const settings: readonly Setting[] = [
     requirement: 'conditional',
     secret: true,
     description: 'Administrator URL for local database tools and migrations.',
+  },
+  {
+    name: 'DATABASE_PROVIDER',
+    group: 'Operator tools',
+    services: ['database'],
+    requirement: 'optional',
+    secret: false,
+    default: 'postgres',
+    description:
+      '`postgres` uses only PostgreSQL URLs (including managed Postgres). Explicitly select `azure` to enable Azure CLI credentials and Azure server management.',
   },
   {
     name: 'DATABASE_MIGRATION_URL',
@@ -471,10 +494,11 @@ export const settings: readonly Setting[] = [
     name: 'EMAIL_DELIVERY_DATABASE_URL',
     group: 'Database',
     services: ['worker'],
-    requirement: 'production',
+    requirement: 'conditional',
     secret: true,
     generated: true,
-    description: 'Least-privilege login that drains the email delivery queue.',
+    description:
+      'Least-privilege login that drains the email delivery queue. Required in production only when an email transport is configured.',
   },
   {
     name: 'RECOMMENDATION_DATABASE_URL',
@@ -669,8 +693,28 @@ export const settings: readonly Setting[] = [
     secret: false,
     default: '127.0.0.1:7233',
     description:
-      'Temporal frontend address (`host:port`). Self-host defaults to the bundled `temporal:7233`; set it when COMPOSE_PROFILES omits `temporal`. No TLS or API-key client options yet.',
+      'Temporal frontend address (`host:port`). Self-host defaults to the bundled `temporal:7233`; set it when COMPOSE_PROFILES omits `temporal`.',
     selfHost: { section: 'temporal', example: 'temporal.example.com:7233', commented: true },
+  },
+  {
+    name: 'TEMPORAL_TLS',
+    group: 'Temporal',
+    services: [...apps, 'database'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      '`true` enables TLS with the system trust roots; `false` disables it. Unset preserves the SDK default (plaintext). Set true for Temporal Cloud.',
+    selfHost: { section: 'temporal', example: 'true', commented: true },
+  },
+  {
+    name: 'TEMPORAL_API_KEY',
+    group: 'Temporal',
+    services: [...apps, 'database'],
+    requirement: 'optional',
+    secret: true,
+    description:
+      'Temporal API key. Set TEMPORAL_TLS=true when using Temporal Cloud. Accepts TEMPORAL_API_KEY_FILE. Unset leaves authentication unchanged.',
+    selfHost: { section: 'temporal', commented: true },
   },
   {
     name: 'TEMPORAL_NAMESPACE',

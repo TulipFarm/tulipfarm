@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { Client, Connection } from '@temporalio/client';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { disposableDatabase } from './workspace-operations-recovery.ts';
 import { teardownDisposableWorkspace, workspaceOperationStatus } from './workspace-operations-lifecycle.ts';
 import { createWorkspaceTeardownLifecycle } from './workspace-operations-adapter.ts';
@@ -46,9 +47,10 @@ async function main() {
     if (command === 'status') result = await workspaceOperationStatus(pool, workspaceId);
     else {
       const operationId = z.uuid().parse(values.operation);
-      const address = process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233';
+      const options = temporalConnectionOptions();
+      const { address } = options;
       if (!/^(localhost|127\.0\.0\.1|\[::1\]):\d+$/.test(address)) throw new Error('local-temporal-required');
-      connection = await Connection.connect({ address });
+      connection = await Connection.connect(options);
       const temporal = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
       result = await teardownDisposableWorkspace({
         connectionString,

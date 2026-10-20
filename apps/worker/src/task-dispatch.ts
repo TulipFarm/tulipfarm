@@ -1,4 +1,5 @@
 import { Client, Connection } from '@temporalio/client';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { createTaskRuntime } from '@tulipfarm/agents/task-runtime';
 import { createTaskProgress } from '@tulipfarm/agents/task-progress';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
@@ -40,7 +41,7 @@ export function createTaskRecovery(options: {
 }
 
 export function createTaskDispatcher(failure: (workspaceId: string, taskId: string) => void) {
-  const connection = Connection.lazy({ address: process.env.TEMPORAL_ADDRESS ?? '127.0.0.1:7233' });
+  const connection = Connection.lazy(temporalConnectionOptions());
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
   const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm';
   const wake = async (workspaceId: string, taskId: string) => {

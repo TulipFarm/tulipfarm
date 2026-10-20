@@ -24,16 +24,71 @@ TEMPORAL_UI_URL=                           # your Temporal UI URL, or empty to s
 ```
 
 The api, worker, and storage-worker then start without waiting for the bundled
-namespace job. TulipFarm connects without TLS or an API key, so Temporal Cloud is
-not supported yet.
+namespace job. For Temporal Cloud, also set `TEMPORAL_TLS=true` and
+`TEMPORAL_API_KEY` to a namespace-scoped key. All Temporal clients and both worker
+connections use these settings. With both unset, local and self-hosted connections
+keep their existing plaintext, unauthenticated behavior. `TEMPORAL_TLS=false`
+explicitly disables TLS; other non-empty values are rejected.
+
+`TEMPORAL_API_KEY_FILE` can read the key from a mounted file instead. The path is
+inside each container; mount the file read-only into api, worker and storage-worker
+using a Compose override. Do not set a direct value and a different file value.
 
 ## Public web
 
 Agent web search and page reads are off unless `PUBLIC_WEB_ENDPOINT` is set. It
-takes the origin of any keyless Firecrawl-compatible API that serves
-`POST /v2/search`, `POST /v2/scrape`, and `GET /health`. That service fetches URLs
+takes the origin of a Firecrawl-compatible API that serves
+`POST /v2/search` and `POST /v2/scrape`. That service fetches URLs
 that agents choose, so it must not be able to reach your internal network: run it
 on an isolated network with egress to the public internet only.
+
+For Firecrawl Cloud, set `PUBLIC_WEB_ENDPOINT=https://api.firecrawl.dev` and
+`PUBLIC_WEB_API_KEY` (or `PUBLIC_WEB_API_KEY_FILE`, mounted into api and worker).
+Requests send the key as a Bearer token, never in the body or URL. Health uses
+authenticated `GET /v2/team/credit-usage`, which reads usage without fetching pages
+or spending scrape credits. Keyless self-hosted services keep the `GET /health`
+probe. Both probes require 2xx and reject redirects.
+
+## Health
+
+The API health route is **`/v1/health`**, not `/health`. It returns 200 only when
+configured dependencies respond, including an ordinary worker workflow.
+`/v1/health/live` is a dependency-free liveness check. Set `TEMPORAL_UI_URL=`
+to omit the Temporal UI check when using a service without a reachable UI.
+`storageMaintenance` is checked only with `WORKSPACE_STORAGE_CAPABILITY=isolated-v1`;
+unset, empty or `disabled` omits it.
+
+## Managed Postgres
+
+`pnpm self-host:setup --out /private/generated` also works outside Compose against
+plain or managed Postgres, including RDS. Set `TULIPFARM_DATABASE_ADMIN_URL`
+(or its `_FILE` form) to the master/admin URL and the
+`TULIPFARM_OBJECT_STORAGE_*` settings shown by `pnpm self-host:setup --help`.
+The admin needs authority to create roles and databases, grant role membership,
+and install pgvector (`vector` >= 0.8.0). The server must provide that extension.
+Setup creates roles, databases, extensions, migrations, restricted storage and
+email logins, and the bucket. Keep the generated state and env files private;
+reruns reuse the same keys and passwords. URL query parameters, including TLS,
+are preserved in scoped login URLs.
+
+This path does not use Azure CLI credentials. Database CLI operations also default
+to `DATABASE_PROVIDER=postgres`; only explicit `DATABASE_PROVIDER=azure` enables
+Azure server management. See [database operations](../apps/database/README.md).
+
+## Email transport
+
+No email provider is required to start the API or worker. Leave `EMAIL_PROVIDER`,
+`ACS_CONNECTION_STRING`, and `SMTP_HOST` unset to disable delivery. A generated
+email database URL alone does not turn delivery on.
+
+For any SMTP service, including Amazon SES SMTP, set `EMAIL_PROVIDER=smtp`,
+`SMTP_HOST`, `SMTP_FROM_ADDRESS`, `SMTP_USER`, and `SMTP_PASSWORD` (or
+`SMTP_PASSWORD_FILE` on the worker). Port 587 with `SMTP_SECURE=false` and
+`SMTP_REQUIRE_TLS=true` uses STARTTLS; port 465 with `SMTP_SECURE=true` uses TLS
+from the start. No ACS credentials are needed. The worker also needs its
+restricted `EMAIL_DELIVERY_DATABASE_URL` and email encryption keys, which setup
+generates. Set `EMAIL_PROVIDER=smtp` on the API as well so password reset email
+is offered; keep the SMTP password only on the worker.
 
 ## Web app
 

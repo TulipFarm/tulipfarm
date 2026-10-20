@@ -13,7 +13,7 @@ export { authConfig, createAuth } from './better-auth.ts';
 export function registerAuth(app: FastifyInstance) {
   const config = authConfig();
   const turnstile = turnstileConfig();
-  if (process.env.NODE_ENV === 'production') emailDeliveryKeys();
+  if (process.env.NODE_ENV === 'production' && emailTransportConfigured()) emailDeliveryKeys();
   // Local development has no mail transport; keep the latest link per email so the login page can offer it.
   const devLinks = devSessionsAllowed() ? new Map<string, string>() : undefined;
   const pool = new Pool({

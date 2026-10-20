@@ -1,11 +1,10 @@
+import '@tulipfarm/config/load-secret-files';
 import { parseArgs } from 'node:util';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import { fileURLToPath } from 'node:url';
-import { setLogLevel } from '@azure/logger';
-import { azure, DatabaseError, hasStatus } from './config.ts';
-import { allowIp, connectionUrl, provision, rolePasswords } from './azure.ts';
-import { readSecret, saveSecret } from './secrets.ts';
-import { bootstrap, connect } from './postgres.ts';
+import { databaseProvider, DatabaseError, hasStatus } from './config.ts';
+import { readSecret, rolePasswords, saveSecret } from './secrets.ts';
+import { bootstrap, connect, loginConnectionUrl } from './postgres.ts';
 import { loadDatabaseExtensions, migrate } from './migrations.ts';
 import { installExtensions } from './extensions.ts';
 import { workspaceStoragePreflight } from './workspace-preflight.ts';
@@ -25,7 +24,9 @@ const help = `Usage: pnpm db <command> --env local|production
   workspace-inventory --env local|production Read aggregate preservation inventory without row contents
   workspace-rollout --env local|production    Apply the common migration stream to every ready workspace
 
-Production administration uses az login. Production secrets come from environment
+Postgres is the default provider, including managed Postgres. Azure management
+(provision, allow-ip, extension allowlisting) requires DATABASE_PROVIDER=azure and az login.
+Production secrets come from environment
 variables (database-admin-url → DATABASE_ADMIN_URL) or the module named by
 TULIPFARM_DATABASE_SECRET_STORE; provision and bootstrap need a writable store. Local commands require DATABASE_MIGRATION_URL
 for migrate and DATABASE_ADMIN_URL for extensions. status uses DATABASE_URL.
@@ -72,10 +73,14 @@ async function main() {
   if (values.env !== 'local' && values.env !== 'production')
     throw new DatabaseError('Select --env local or production.');
   const remote = values.env === 'production';
+  const provider = databaseProvider();
   if (['provision', 'bootstrap', 'allow-ip'].includes(command ?? '') && !remote)
     throw new DatabaseError('This command requires --env production.');
-  setLogLevel(undefined);
   if (command === 'provision' || command === 'allow-ip') {
+    if (provider !== 'azure') throw new DatabaseError('Select DATABASE_PROVIDER=azure for Azure management.');
+    const { setLogLevel } = await import('@azure/logger');
+    setLogLevel(undefined);
+    const { provision, allowIp } = await import('./azure.ts');
     const ip = values['allow-ip'];
     if (!ip) throw new DatabaseError('--allow-ip is required.');
     if (command === 'provision') await provision(ip);
@@ -87,7 +92,6 @@ async function main() {
     const url = await readSecret('database-admin-url');
     const passwords = await rolePasswords();
     await bootstrap(url, passwords);
-    const host = new URL(url).hostname;
     for (const [key, database, role, password] of [
       ['database-url', 'tulipfarm', 'tulipfarm', passwords.application],
       ['database-migration-url', 'tulipfarm', 'tulipfarm_owner', passwords.owner],
@@ -95,7 +99,7 @@ async function main() {
       ['temporal-visibility-database-url', 'temporal_visibility', 'temporal', passwords.temporal],
     ]) {
       if (!key || !database || !role || !password) throw new DatabaseError('Incomplete connection configuration.');
-      const connection = connectionUrl(host, database, role, password);
+      const connection = loginConnectionUrl(url, database, role, password);
       const client = await connect(connection);
       try {
         await client.query('SELECT 1');
@@ -157,7 +161,7 @@ async function main() {
       await loadDatabaseExtensions();
       await migrate(client, fileURLToPath(new URL('../migrations/', import.meta.url)));
     }
-    if (command === 'extensions') await installExtensions(client, remote);
+    if (command === 'extensions') await installExtensions(client, remote && provider === 'azure');
     if (command === 'workspace-preflight')
       process.stdout.write(`${JSON.stringify(await workspaceStoragePreflight(client))}\n`);
     if (command === 'workspace-inventory')
@@ -170,7 +174,7 @@ async function main() {
         'SELECT extname AS name, extversion AS version FROM pg_extension ORDER BY extname',
       );
       process.stdout.write(
-        `${JSON.stringify({ server: remote ? azure.serverName : 'local', ...identity.rows[0], extensions: installed.rows }, null, 2)}\n`,
+        `${JSON.stringify({ server: new URL(url).hostname, ...identity.rows[0], extensions: installed.rows }, null, 2)}\n`,
       );
     }
   } finally {
