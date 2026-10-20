@@ -14,7 +14,7 @@ import { StorageReleaseError } from './storage-release.ts';
 import {
   configureReleaseLogins,
   databaseUrl,
-  ensureBucket,
+  ensureBuckets,
   generateKeys,
   randomHex,
   releaseLoginPasswords,
@@ -39,11 +39,14 @@ Environment:
   TULIPFARM_DATABASE_ADMIN_URL          Superuser URL, for example postgresql://postgres:PASSWORD@postgres:5432/postgres
                                         Query parameters such as ?sslmode=require are copied to generated URLs.
   TULIPFARM_DATABASE_HOST               Optional host:port that services use. Defaults to the admin URL host.
-  TULIPFARM_OBJECT_STORAGE_ENDPOINT     S3-compatible endpoint, for example http://object-storage:9000
+  TULIPFARM_OBJECT_STORAGE_ENDPOINT     S3-compatible endpoint, for example http://object-storage:9000.
+                                        Unset uses AWS S3 in TULIPFARM_OBJECT_STORAGE_REGION.
   TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID
   TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY
-  TULIPFARM_OBJECT_STORAGE_BUCKET       Optional. Defaults to tulipfarm-soul.
-  TULIPFARM_OBJECT_STORAGE_REGION       Optional. Defaults to auto.
+                                        Optional as a pair. Unset uses the default AWS credential chain.
+  TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET  Optional. Defaults to TULIPFARM_OBJECT_STORAGE_BUCKET, then tulipfarm-soul.
+  TULIPFARM_OBJECT_STORAGE_FILES_BUCKET Optional. Defaults to tulipfarm-files.
+  TULIPFARM_OBJECT_STORAGE_REGION       Required without an endpoint. Defaults to auto with one.
 `;
 
 const hex = z.string().regex(/^[a-f0-9]{64}$/);
@@ -58,21 +61,28 @@ const stateSchema = z
   .strict();
 type State = z.infer<typeof stateSchema>;
 
-const envSchema = z.object({
-  TULIPFARM_DATABASE_ADMIN_URL: z.url({ protocol: /^postgres(ql)?$/ }),
-  TULIPFARM_DATABASE_HOST: z
-    .string()
-    .regex(/^[A-Za-z0-9.-]+(:\d+)?$/)
-    .optional(),
-  TULIPFARM_OBJECT_STORAGE_ENDPOINT: z.url({ protocol: /^https?$/ }),
-  TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1),
-  TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1),
-  TULIPFARM_OBJECT_STORAGE_BUCKET: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
-    .default('tulipfarm-soul'),
-  TULIPFARM_OBJECT_STORAGE_REGION: z.string().min(1).default('auto'),
-});
+const bucketName = z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/);
+const envSchema = z
+  .object({
+    TULIPFARM_DATABASE_ADMIN_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+    TULIPFARM_DATABASE_HOST: z
+      .string()
+      .regex(/^[A-Za-z0-9.-]+(:\d+)?$/)
+      .optional(),
+    TULIPFARM_OBJECT_STORAGE_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
+    TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: z.string().min(1).optional(),
+    TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+    TULIPFARM_OBJECT_STORAGE_BUCKET: bucketName.optional(),
+    TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET: bucketName.optional(),
+    TULIPFARM_OBJECT_STORAGE_FILES_BUCKET: bucketName.default('tulipfarm-files'),
+    TULIPFARM_OBJECT_STORAGE_REGION: z.string().min(1).optional(),
+  })
+  .refine(env => !env.TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID === !env.TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY, {
+    path: ['TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY'],
+  })
+  .refine(env => env.TULIPFARM_OBJECT_STORAGE_ENDPOINT || env.TULIPFARM_OBJECT_STORAGE_REGION, {
+    path: ['TULIPFARM_OBJECT_STORAGE_REGION'],
+  });
 
 class SetupError extends Error {}
 
@@ -131,7 +141,8 @@ async function main() {
   const objectStorage: ObjectStorage = {
     endpoint: env.TULIPFARM_OBJECT_STORAGE_ENDPOINT,
     region: env.TULIPFARM_OBJECT_STORAGE_REGION,
-    bucket: env.TULIPFARM_OBJECT_STORAGE_BUCKET,
+    soulBucket: env.TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET ?? env.TULIPFARM_OBJECT_STORAGE_BUCKET ?? 'tulipfarm-soul',
+    filesBucket: env.TULIPFARM_OBJECT_STORAGE_FILES_BUCKET,
     accessKeyId: env.TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID,
     secretAccessKey: env.TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY,
   };
@@ -173,8 +184,8 @@ async function main() {
   });
   await email.end();
 
-  step('Creating the object storage bucket');
-  await ensureBucket(objectStorage);
+  step('Creating the object storage buckets');
+  await ensureBuckets(objectStorage);
 
   step('Writing environment files');
   const services = serviceEnvironments({

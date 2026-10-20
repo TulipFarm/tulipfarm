@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
-import { BucketAlreadyOwnedByYou, BucketAlreadyExists, CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  BucketAlreadyOwnedByYou,
+  BucketAlreadyExists,
+  CreateBucketCommand,
+  HeadBucketCommand,
+  NotFound,
+} from '@aws-sdk/client-s3';
+import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { escapeIdentifier, type Client } from 'pg';
 import { configureStorageReleaseLogin } from './storage-release-production.ts';
 import { releaseLogins } from './storage-release.ts';
@@ -9,12 +16,14 @@ import { releaseLogins } from './storage-release.ts';
 // environment shape; only endpoints, credentials, and output locations differ.
 
 export type SetupKeys = Record<'runtime' | 'migration' | 'confirmation' | 'email' | 'integration', string>;
+// Endpoint and keys are optional so AWS S3 can use its regional endpoint and a task role.
 export type ObjectStorage = {
-  endpoint: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  bucket: string;
+  endpoint?: string | undefined;
+  region?: string | undefined;
+  accessKeyId?: string | undefined;
+  secretAccessKey?: string | undefined;
+  soulBucket: string;
+  filesBucket?: string | undefined;
 };
 export type DatabaseEndpoint = { host: string; database: string; search: string };
 
@@ -47,17 +56,34 @@ export async function configureReleaseLogins(admin: Client, database: string, pa
   for (const login of releaseLogins) await configureStorageReleaseLogin(admin, login, passwords[login.role]!);
 }
 
-export async function ensureBucket(storage: ObjectStorage) {
-  const s3 = new S3Client({
-    region: storage.region,
-    endpoint: storage.endpoint,
-    forcePathStyle: true,
-    credentials: storage,
-  });
+function connection(storage: ObjectStorage): Record<string, string> {
+  const values = {
+    TULIPFARM_OBJECT_STORAGE_ENDPOINT: storage.endpoint,
+    TULIPFARM_OBJECT_STORAGE_REGION: storage.region,
+    TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: storage.accessKeyId,
+    TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: storage.secretAccessKey,
+  };
+  return Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string] => Boolean(entry[1])));
+}
+
+// Checks first so deployments whose buckets are managed elsewhere need no CreateBucket permission.
+export async function ensureBuckets(storage: ObjectStorage) {
+  const s3 = objectStorageClient(connection(storage));
   try {
-    await s3.send(new CreateBucketCommand({ Bucket: storage.bucket }));
-  } catch (error) {
-    if (!(error instanceof BucketAlreadyOwnedByYou || error instanceof BucketAlreadyExists)) throw error;
+    for (const Bucket of [storage.soulBucket, storage.filesBucket]) {
+      if (!Bucket) continue;
+      try {
+        await s3.send(new HeadBucketCommand({ Bucket }));
+        continue;
+      } catch (error) {
+        if (!(error instanceof NotFound)) throw error;
+      }
+      try {
+        await s3.send(new CreateBucketCommand({ Bucket }));
+      } catch (error) {
+        if (!(error instanceof BucketAlreadyOwnedByYou || error instanceof BucketAlreadyExists)) throw error;
+      }
+    }
   } finally {
     s3.destroy();
   }
@@ -78,27 +104,25 @@ export function serviceEnvironments(input: {
     ...key('WORKSPACE_RUNTIME', keys.runtime),
     ...key('EMAIL_DELIVERY', keys.email),
     ...key('INTEGRATION_CREDENTIAL', keys.integration),
-    R2_ENDPOINT: objectStorage.endpoint,
-    R2_SOUL_BUCKET: objectStorage.bucket,
+    ...connection(objectStorage),
+    TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET: objectStorage.soulBucket,
   };
-  const write = { R2_ACCESS_KEY_ID: objectStorage.accessKeyId, R2_SECRET_ACCESS_KEY: objectStorage.secretAccessKey };
+  const files = objectStorage.filesBucket ? { TULIPFARM_OBJECT_STORAGE_FILES_BUCKET: objectStorage.filesBucket } : {};
   return {
     api: {
       ...shared,
       DATABASE_URL: input.databaseUrl,
       ...key('WORKSPACE_CONFIRMATION', keys.confirmation),
       WORKSPACE_CONFIRMATION_REGISTRY_DATABASE_URL: releaseLoginUrl(endpoint, passwords, 'confirmation'),
-      R2_SOUL_READ_ACCESS_KEY_ID: objectStorage.accessKeyId,
-      R2_SOUL_READ_SECRET_ACCESS_KEY: objectStorage.secretAccessKey,
+      ...files,
     },
     worker: {
       ...shared,
-      ...write,
+      ...files,
       WORKSPACE_AUTHORING_DATABASE_URL: releaseLoginUrl(endpoint, passwords, 'authoring'),
     },
     storageWorker: {
       ...shared,
-      ...write,
       ...key('WORKSPACE_MIGRATION', keys.migration),
       ...key('WORKSPACE_CONFIRMATION', keys.confirmation),
       WORKSPACE_PROVISIONING_DATABASE_URL: releaseLoginUrl(endpoint, passwords, 'provisioning'),

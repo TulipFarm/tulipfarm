@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { GetObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { z } from 'zod';
+import { objectStorageClient } from './object-storage.ts';
 
 const execute = promisify(execFile);
 export const soulUuidSchema = z.uuid().toLowerCase();
@@ -121,20 +122,21 @@ export async function verifyStarterBundle(body: Uint8Array, input: Seed) {
   }
 }
 
-export function soulStorageConfig(mode: 'write' | 'read' = 'write') {
-  const accessKeyId = process.env[mode === 'read' ? 'R2_SOUL_READ_ACCESS_KEY_ID' : 'R2_ACCESS_KEY_ID'];
-  const secretAccessKey = process.env[mode === 'read' ? 'R2_SOUL_READ_SECRET_ACCESS_KEY' : 'R2_SECRET_ACCESS_KEY'];
+export function soulStorageConfig(mode: 'write' | 'read' = 'write', env: NodeJS.ProcessEnv = process.env) {
+  const requestHandler = { connectionTimeout: 5000, requestTimeout: 30000 };
+  const bucket = env.TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET;
+  if (bucket) return { bucket, client: objectStorageClient(env, { requestHandler }) };
+  const accessKeyId = env[mode === 'read' ? 'R2_SOUL_READ_ACCESS_KEY_ID' : 'R2_ACCESS_KEY_ID'];
+  const secretAccessKey = env[mode === 'read' ? 'R2_SOUL_READ_SECRET_ACCESS_KEY' : 'R2_SECRET_ACCESS_KEY'];
   if (!accessKeyId || !secretAccessKey) throw new Error(`Soul ${mode} credentials are required`);
   return {
-    bucket:
-      process.env.R2_SOUL_BUCKET ??
-      `tulipfarm-cloud-soul-${process.env.NODE_ENV === 'production' ? 'production' : 'local'}`,
+    bucket: env.R2_SOUL_BUCKET ?? `tulipfarm-cloud-soul-${env.NODE_ENV === 'production' ? 'production' : 'local'}`,
     client: new S3Client({
       region: 'auto',
-      endpoint: process.env.R2_ENDPOINT ?? 'https://8814d00cb5fea3365054df9cee16776b.r2.cloudflarestorage.com',
-      forcePathStyle: Boolean(process.env.R2_ENDPOINT),
+      endpoint: env.R2_ENDPOINT ?? 'https://8814d00cb5fea3365054df9cee16776b.r2.cloudflarestorage.com',
+      forcePathStyle: Boolean(env.R2_ENDPOINT),
       credentials: { accessKeyId, secretAccessKey },
-      requestHandler: { connectionTimeout: 5000, requestTimeout: 30000 },
+      requestHandler,
     }),
   };
 }

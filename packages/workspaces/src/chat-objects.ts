@@ -1,10 +1,25 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { z } from 'zod';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
+import { objectStorageClient } from './object-storage.ts';
+
+const clientSettings = {
+  maxAttempts: 1,
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
+} as const;
 
 export function chatObjectStore(
   env: NodeJS.ProcessEnv = process.env,
 ): (AttachmentBytes & { close: () => void }) | null {
+  if (env.TULIPFARM_OBJECT_STORAGE_FILES_BUCKET) {
+    const bucket = z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/)
+      .safeParse(env.TULIPFARM_OBJECT_STORAGE_FILES_BUCKET);
+    if (!bucket.success) throw new Error('Invalid private chat object configuration');
+    return createChatObjectAdapter(objectStorageClient(env, clientSettings), bucket.data);
+  }
   const keys = ['CHAT_R2_ACCOUNT_ID', 'CHAT_R2_BUCKET', 'CHAT_R2_ACCESS_KEY_ID', 'CHAT_R2_SECRET_ACCESS_KEY'];
   if (keys.every(key => !env[key])) return null;
   const parsed = z
@@ -20,10 +35,8 @@ export function chatObjectStore(
   const client = new S3Client({
     endpoint: `https://${config.CHAT_R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
     region: 'auto',
-    maxAttempts: 1,
     credentials: { accessKeyId: config.CHAT_R2_ACCESS_KEY_ID, secretAccessKey: config.CHAT_R2_SECRET_ACCESS_KEY },
-    requestChecksumCalculation: 'WHEN_REQUIRED',
-    responseChecksumValidation: 'WHEN_REQUIRED',
+    ...clientSettings,
   });
   return createChatObjectAdapter(client, config.CHAT_R2_BUCKET);
 }

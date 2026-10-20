@@ -39,6 +39,10 @@
       "types": "./dist/chat-objects.d.ts",
       "default": "./dist/chat-objects.js"
     },
+    "./object-storage": {
+      "types": "./dist/object-storage.d.ts",
+      "default": "./dist/object-storage.js"
+    },
     "./invitation-expiry": {
       "types": "./dist/invitation-expiry.d.ts",
       "default": "./dist/invitation-expiry.js"

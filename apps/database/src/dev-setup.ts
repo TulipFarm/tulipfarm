@@ -6,7 +6,7 @@ import { connect } from './postgres.ts';
 import { installExtensions } from './extensions.ts';
 import {
   configureReleaseLogins,
-  ensureBucket,
+  ensureBuckets,
   generateKeys,
   releaseLoginPasswords,
   serviceEnvironments,
@@ -21,7 +21,7 @@ const objectStorage = {
   region: 'auto',
   accessKeyId: 'local-object-storage',
   secretAccessKey: 'local-object-storage-secret',
-  bucket: 'tulipfarm-cloud-soul-local',
+  soulBucket: 'tulipfarm-cloud-soul-local',
 };
 
 type State = { keys: SetupKeys; passwords: Record<string, string> };
@@ -66,7 +66,7 @@ async function main() {
     await admin.end();
   }
 
-  await ensureBucket(objectStorage);
+  await ensureBuckets(objectStorage);
 
   const env = serviceEnvironments({
     keys: state.keys,

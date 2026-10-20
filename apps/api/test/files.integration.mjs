@@ -288,6 +288,16 @@ test('personal files conceal metadata and bytes from anonymous, admin, foreign w
     ]);
     assert.equal((await f.call(`/${id}/content`, { cookie: f.signed.admin.cookie })).status, 404);
     assert.deepEqual((await f.call(`/${id}/content`)).bytes, Buffer.from('private contents'));
+    const before = f.object.requests.length;
+    const foreign = await f.call(`/v1/workspaces/${f.other.id}/files${f.uploadPath(randomUUID())}`, {
+      method: 'PUT',
+      body: Buffer.from('foreign contents'),
+      cookie: f.signed.admin.cookie,
+    });
+    assert.equal(foreign.status, 200);
+    const workspaces = requests => new Set(requests.map(({ key }) => key.split('/')[2]));
+    assert.deepEqual(workspaces(f.object.requests.slice(0, before)), new Set([f.workspace.id]));
+    assert.deepEqual(workspaces(f.object.requests.slice(before)), new Set([f.other.id]));
   } finally {
     await f.close();
   }
