@@ -3,11 +3,12 @@ import { z } from 'zod';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
-  denyMcpEgress,
   humanActorSchema,
   type HumanActor,
   type SourceDependency,
-} from '@tulipfarm/access';
+} from '../authorization/contracts.ts';
+import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
+import { createKnowledgeAuthorizer, knowledgeEgressPolicy } from '../authorization/authorizer.ts';
 import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
 import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
 import { qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
@@ -21,7 +22,7 @@ import {
   type KnowledgeRetrievalDocument,
 } from '../retrieval-contracts.ts';
 import { KnowledgeError } from './contracts.ts';
-import { createKnowledgeStore, requireTaskRun, type KnowledgeOptions } from './store.ts';
+import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
 import type { createKnowledgeSearch } from './search.ts';
 import type { KnowledgeToolContext } from './agent-tools.ts';
@@ -145,7 +146,7 @@ export function createKnowledgeRetrieval({
       actor,
       false,
       async (tx, human) => {
-        if (context.runId) await requireTaskRun(tx, human, context.runId);
+        if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
         const table = (name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
         const rows = z.array(seedSchema).parse(
           (
@@ -296,13 +297,13 @@ export function createKnowledgeRetrieval({
     context.signal?.throwIfAborted();
     const branches: KnowledgeRetrievalBranch[] =
       input.action === 'search' ? [{ ...input, reason: 'Initial search' }] : input.branches;
-    if (branches.some(branch => branch.query)) denyMcpEgress();
+    if (branches.some(branch => branch.query)) knowledgeEgressPolicy.deny();
     await store.transaction(
       workspaceId,
       actor,
       false,
       async (tx, human) => {
-        if (context.runId) await requireTaskRun(tx, human, context.runId);
+        if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
       },
       { deadlineAt, signal: context.signal },
     );

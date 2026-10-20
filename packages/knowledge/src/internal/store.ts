@@ -7,22 +7,21 @@ import { z } from 'zod';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
-  actorSchema,
-  currentMember,
-  denyMcpEgress,
-  lockAuthorization,
-  protectedSourceClosure,
-  requireNoMcpDerived,
-  requireProtectedSource,
-  resolveHuman,
   sourceDependenciesSchema,
   uuidSchema,
   type Actor,
   type AuthorizationTransaction,
   type HumanActor,
   type SourceDependency,
-} from '@tulipfarm/access';
-import { requireReadableFile } from '@tulipfarm/files';
+} from '../authorization/contracts.ts';
+import { requireAccess, currentAccessProof } from '@tulipfarm/memory-core/ports/authorizer';
+import {
+  admitKnowledgePrincipal,
+  authorizeKnowledgeDocument,
+  bindKnowledgeAuthorization,
+  createKnowledgeAuthorizer,
+  knowledgeEgressPolicy,
+} from '../authorization/authorizer.ts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   citationSchema,
@@ -36,7 +35,7 @@ import {
   type KnowledgeCitation,
 } from './contracts.ts';
 import { exactIdentifiers } from './identifiers.ts';
-import { requireConversationReader, requireConversationRevision } from './conversation-authority.ts';
+export { requireTaskRun } from '../authorization/authorizer.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type Transaction = AuthorizationTransaction & { workspaceId: string; commonVersion: number };
@@ -71,22 +70,7 @@ const revisionRow = z.object({
   fingerprint: z.string(),
 });
 export type ExternalSource = z.infer<typeof sourceRow>;
-
-export async function requireTaskRun(tx: AuthorizationTransaction, actor: HumanActor, runId: string) {
-  const runs = qualified(tx.schema, 'tf_agent_task_runs');
-  if (
-    !z
-      .object({ installed: z.boolean() })
-      .parse((await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [runs])).rows[0]).installed
-  )
-    throw new AccessDenied();
-  const bound = await tx.client.query(
-    `SELECT 1 FROM ${runs} b JOIN ${qualified(tx.schema, 'tf_agent_tasks')} t ON t.id=b.task_id AND t.generation=b.generation
-    WHERE b.run_id=$1 AND t.owner_membership_id=$2 AND t.owner_user_id=$3`,
-    [uuidSchema.parse(runId), actor.membershipId, actor.userId],
-  );
-  if (!bound.rowCount) throw new AccessDenied();
-}
+export type KnowledgeDocument = z.infer<typeof documentRow>;
 export type KnowledgeOptions = {
   runtime: Runtime;
   requireExternalSource?: (tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) => Promise<void>;
@@ -107,6 +91,11 @@ export function createKnowledgeStore({
   requireExternalProof,
   refreshExternalProof,
 }: KnowledgeOptions) {
+  const authority = (tx: Transaction, actor: HumanActor) =>
+    createKnowledgeAuthorizer(tx, actor, {
+      ...(requireExternalSource ? { requireExternalSource } : {}),
+      ...(requireExternalProof ? { requireExternalProof } : {}),
+    });
   async function transaction<T>(
     workspaceId: string,
     actorInput: Actor | string,
@@ -120,11 +109,7 @@ export function createKnowledgeStore({
       { ...commonCompatibility, ...(options.deadlineAt === undefined ? {} : { deadlineAt: options.deadlineAt }) },
       async tx => {
         options.signal?.throwIfAborted();
-        await lockAuthorization(tx, write ? 'write' : 'read');
-        const actor =
-          typeof actorInput === 'string' ? await resolveHuman(tx, actorInput) : actorSchema.parse(actorInput);
-        if (actor.kind !== 'human') throw new AccessDenied();
-        await currentMember(tx, actor);
+        const actor = requireAccess(await admitKnowledgePrincipal(tx, actorInput, write ? 'write' : 'read'));
         const bound = bind(tx);
         const result = await operation(bound, actor);
         options.signal?.throwIfAborted();
@@ -137,41 +122,24 @@ export function createKnowledgeStore({
     const value = sourceRow
       .optional()
       .parse((await tx.client.query(`SELECT * FROM ${table(tx, 'sources')} WHERE id=$1`, [id])).rows[0]);
-    if (!value || ['removed', 'disconnected'].includes(value.state)) throw new AccessDenied();
-    if (
-      value.provider !== 'conversation' &&
-      (writing || !['google', 'slack', 'github', 'confluence', 'jira'].includes(value.provider)) &&
-      value.owner_membership_id !== actor.membershipId
-    )
-      throw new AccessDenied();
-    if (writing && value.state !== 'active') throw new KnowledgeError('conflict');
-    if (value.provider === 'conversation') await requireConversationReader(tx, actor, value.id);
-    else if (value.provider !== 'note' && value.provider !== 'file') {
-      if (!requireExternalSource) throw new KnowledgeError('adapter-required');
-      await requireExternalSource(tx, actor, value);
-    }
-    return value;
+    return requireAccess(await authority(tx, actor).decide('source', { value, writing }));
   }
 
   async function document(tx: Transaction, id: string) {
     const value = documentRow
       .optional()
       .parse((await tx.client.query(`SELECT * FROM ${table(tx, 'documents')} WHERE id=$1`, [id])).rows[0]);
-    if (!value || value.tombstoned_at) throw new AccessDenied();
-    return value;
+    return requireAccess(await authorizeKnowledgeDocument(value));
   }
 
   async function dependencies(tx: Transaction, actor: HumanActor, revision: z.infer<typeof revisionRow>) {
-    if (revision.original.kind === 'file') {
-      const file = await requireReadableFile(tx, actor, revision.original.fileId);
-      if (file.sha256 !== revision.original.sha256 || file.size !== revision.original.bytes) throw new AccessDenied();
-    }
-    const closure = await protectedSourceClosure(tx, revision.sources);
+    const authorizer = authority(tx, actor);
+    const closure = requireAccess(await authorizer.decide('dependencies', revision));
     for (const dependency of closure) {
       // The closure already contains every dependency. Re-entering eligible's closure
       // here would recurse forever on corrupt/cyclic retained citations.
       if (dependency.kind === 'knowledge-document') await eligible(tx, actor, dependency, false);
-      else await requireProtectedSource(tx, actor, dependency);
+      else requireAccess(await authorizer.decide('protectedSource', dependency));
     }
   }
 
@@ -181,30 +149,14 @@ export function createKnowledgeStore({
     doc: z.infer<typeof documentRow>,
     origin: ExternalSource,
   ) {
-    if (origin.provider === 'note' || origin.provider === 'file') return;
-    if (origin.provider === 'conversation') {
-      if (!doc.observed_revision_id) throw new AccessDenied();
-      await requireConversationRevision(tx, actor, doc.observed_revision_id);
-      return;
-    }
-    if (requireExternalProof) await requireExternalProof(tx, actor, doc.id);
-    const proof = await tx.client.query(
-      `SELECT 1 FROM ${table(tx, 'access_proofs')}
-      WHERE document_id=$1 AND membership_id=$2 AND access_epoch=$3
-        AND acl_checked_at<=clock_timestamp() AND membership_checked_at<=clock_timestamp()
-        AND expires_at>clock_timestamp()`,
-      [doc.id, actor.membershipId, origin.access_epoch],
-    );
-    if (!proof.rowCount) throw new KnowledgeError('permission-expired');
+    requireAccess(await authority(tx, actor).decide('proof', { document: doc, source: origin }));
   }
 
   async function eligible(tx: Transaction, actor: HumanActor, dependency: Dependency, checkDependencies = true) {
-    if (dependency.workspaceId !== tx.workspaceId) throw new AccessDenied();
+    requireAccess(await authority(tx, actor).decide('tenant', dependency.workspaceId));
     const doc = await document(tx, dependency.documentId);
     const origin = await source(tx, actor, doc.source_id);
-    if (origin.id !== dependency.sourceId || origin.access_epoch !== dependency.accessEpoch) throw new AccessDenied();
-    if (doc.observed_revision_id !== dependency.revisionId || doc.lexical_publication_id !== dependency.publicationId)
-      throw new KnowledgeError('superseded');
+    requireAccess(await authority(tx, actor).decide('binding', { document: doc, source: origin, dependency }));
     const revision = revisionRow.parse(
       (
         await tx.client.query(`SELECT * FROM ${table(tx, 'revisions')} WHERE id=$1 AND document_id=$2`, [
@@ -219,38 +171,11 @@ export function createKnowledgeStore({
   }
 
   function bind<X extends Transaction>(tx: X): X {
-    const bound: X = { ...tx };
-    bound.knowledgeSourceDependencies = async dependency => {
-      if (dependency.workspaceId !== tx.workspaceId) throw new AccessDenied();
-      const row = (
-        await tx.client.query(
-          `SELECT r.sources FROM ${table(tx, 'revisions')} r
-        JOIN ${table(tx, 'documents')} d ON d.id=r.document_id
-        JOIN ${table(tx, 'publications')} p ON p.document_id=d.id AND p.revision_id=r.id
-        WHERE r.id=$1 AND d.id=$2 AND d.source_id=$3 AND p.id=$4`,
-          [dependency.revisionId, dependency.documentId, dependency.sourceId, dependency.publicationId],
-        )
-      ).rows[0];
-      if (!row) throw new AccessDenied();
-      return sourceDependenciesSchema.parse(row.sources);
-    };
-    // A run reads with its requester's authority only while bound to that requester's current task.
-    // Public delivery is checked per audience reader by the caller; each reader must be eligible.
-    bound.requireKnowledgeSource = async (actor, dependency, context) => {
-      await currentMember(bound, actor);
-      if (context.runId) await requireTaskRun(bound, actor, context.runId);
-      try {
-        await eligible(bound, actor, dependency);
-      } catch (error) {
-        if (error instanceof KnowledgeError) throw new AccessDenied();
-        throw error;
-      }
-    };
-    return bound;
+    return bindKnowledgeAuthorization(tx, eligible);
   }
 
   async function configureSource(workspaceId: string, actor: Actor, value: unknown) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     const input = sourceInput.parse(value);
     if (input.provider === 'conversation') throw new AccessDenied();
     return transaction(workspaceId, actor, true, async (tx, human) => {
@@ -281,7 +206,7 @@ export function createKnowledgeStore({
   }
 
   async function observeRevision(workspaceId: string, actor: Actor, value: unknown) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     const input = revisionInput.parse(value);
     return transaction(workspaceId, actor, true, (tx, human) => observe(tx, human, input));
   }
@@ -311,20 +236,13 @@ export function createKnowledgeStore({
     const origin = await source(tx, human, input.sourceId, true);
     if ((origin.provider === 'conversation') !== conversation) throw new AccessDenied();
     if ((origin.provider === 'file') !== (input.original.kind === 'file')) throw new KnowledgeError('conflict');
-    await requireNoMcpDerived(tx, input.sources);
-    const closure = await protectedSourceClosure(tx, input.sources);
-    if (
-      !conversation &&
-      closure.some(item =>
-        ['github-personal', 'private-task', 'private-conversation', 'knowledge-document'].includes(item.kind),
-      )
-    )
-      throw new AccessDenied();
-    if (
-      conversation &&
-      closure.some(item => item.kind === 'knowledge-document' && item.documentId === input.documentId)
-    )
-      throw new AccessDenied();
+    requireAccess(
+      await authority(tx, human).decide('observation', {
+        sources: input.sources,
+        conversation,
+        documentId: input.documentId,
+      }),
+    );
     await dependencies(tx, human, {
       ...input,
       document_id: input.documentId,
@@ -397,7 +315,7 @@ export function createKnowledgeStore({
   }
 
   async function publishLexical(workspaceId: string, actor: Actor, value: unknown) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     const input = lexicalInput.parse(value);
     return transaction(workspaceId, actor, true, (tx, human) => publish(tx, human, input));
   }
@@ -414,7 +332,7 @@ export function createKnowledgeStore({
     if (doc.observed_revision_id !== input.revisionId) throw new KnowledgeError('superseded');
     if (origin.provider === 'conversation') {
       if (!local) throw new AccessDenied();
-      await requireConversationRevision(tx, human, input.revisionId, true);
+      requireAccess(await authority(tx, human).decide('conversation', { revisionId: input.revisionId, writing: true }));
     }
     await requireProof(tx, human, doc, origin);
     const revision = revisionRow.parse(
@@ -567,7 +485,7 @@ export function createKnowledgeStore({
       const clock = z
         .object({ now: z.date() })
         .parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
-      if (input.aclCheckedAt > clock || input.membershipCheckedAt > clock || input.expiresAt <= clock)
+      if (!currentAccessProof({ ...input, principalCheckedAt: input.membershipCheckedAt }, clock))
         throw new KnowledgeError('permission-expired');
       const result = await tx.client.query(
         `INSERT INTO ${table(tx, 'access_proofs')} (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at)
@@ -669,7 +587,10 @@ export function createKnowledgeStore({
     return transaction(workspaceId, actor, true, async (tx, human) => {
       const doc = await document(tx, input.documentId);
       const origin = await source(tx, human, doc.source_id, true);
-      if (origin.provider === 'conversation') await requireConversationRevision(tx, human, input.revisionId, true);
+      if (origin.provider === 'conversation')
+        requireAccess(
+          await authority(tx, human).decide('conversation', { revisionId: input.revisionId, writing: true }),
+        );
       if (doc.observed_revision_id !== input.revisionId) throw new KnowledgeError('superseded');
       if (input.axis === 'parsing' && doc.lexical_publication_id) throw new KnowledgeError('conflict');
       const result = await tx.client.query(

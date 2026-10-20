@@ -1,14 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { AccessDenied, uuidSchema, type HumanActor } from '../authorization/contracts.ts';
+import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
 import {
-  AccessDenied,
-  currentMember,
-  denyMcpEgress,
-  lockAuthorization,
-  resolveHuman,
-  uuidSchema,
-  type HumanActor,
-} from '@tulipfarm/access';
+  createKnowledgeAuthorizer,
+  knowledgeEgressPolicy,
+  lockKnowledgeAuthorization,
+  resolveKnowledgeMember,
+} from '../authorization/authorizer.ts';
+import {
+  embeddingDiscoveryCandidate,
+  changedConversationEmbeddingOwners,
+} from '../authorization/embedding-candidates.ts';
 import type { Clock, UsageMeter } from '@tulipfarm/memory-core/ports/runtime';
 import {
   knowledgeHostPolicy,
@@ -38,14 +41,12 @@ import {
   type KnowledgeEmbeddingResult,
 } from './embedding-provider.ts';
 import { knowledgeSearchFiltersSchema, type KnowledgeSearchFilters } from '../contracts.ts';
-import { searchEligibility } from './search-eligibility.ts';
 import type { GoogleKnowledge } from './google.ts';
 import type { SlackKnowledge } from './slack.ts';
 import type { GitHubKnowledge } from './github.ts';
 import { type AtlassianKnowledge } from './atlassian.ts';
 import { externalAuthority } from './external-authority.ts';
 import type { KnowledgeSourceGate } from './rolling.ts';
-import { requireConversationRevision } from './conversation-authority.ts';
 
 export type KnowledgeEmbeddingCapacity = (input: {
   workspaceId: string;
@@ -148,15 +149,13 @@ export function createKnowledgeEmbeddings({
       { ...commonCompatibility, ...(deadlineAt === undefined ? {} : { deadlineAt }) },
       async raw => {
         const tx = store.bind(raw);
-        await lockAuthorization(tx, 'write');
+        requireAccess(await lockKnowledgeAuthorization(tx, 'write'));
         return operation(tx);
       },
     );
   }
   async function member(tx: Transaction, userId: string) {
-    const actor = await resolveHuman(tx, userId);
-    await currentMember(tx, actor);
-    return actor;
+    return requireAccess(await resolveKnowledgeMember(tx, userId));
   }
   async function authorized(
     tx: Transaction,
@@ -164,48 +163,31 @@ export function createKnowledgeEmbeddings({
     actor: HumanActor = { kind: 'human', userId: job.owner_user_id, membershipId: job.owner_membership_id },
     dispatch = false,
   ) {
-    await currentMember(tx, actor);
-    if (job.owner_membership_id !== actor.membershipId || job.owner_user_id !== actor.userId) throw new AccessDenied();
+    const authorizer = createKnowledgeAuthorizer(tx, actor);
+    requireAccess(await authorizer.decide('member', undefined));
+    requireAccess(await authorizer.decide('embeddingOwner', job));
     if (job.purpose === 'query' && dispatch) {
-      {
-        const scope = z
-          .object({ filters: knowledgeSearchFiltersSchema, expires_at: z.date(), cancelled: z.boolean() })
-          .optional()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT filters,expires_at,cancelled FROM ${table(tx, 'search_queries')} WHERE job_id=$1`,
-                [job.id],
-              )
-            ).rows[0],
-          );
-        if (scope) {
-          if (scope.cancelled || scope.expires_at.getTime() <= clock.now()) throw new AccessDenied();
-          const { kinds, sourceIds, documentIds } = scope.filters;
-          if (
-            !(
-              await tx.client.query(
-                `SELECT 1 FROM (${searchEligibility(tx.schema, !!google, !!slack, !!github, !!atlassian, tx.commonVersion >= 1)}) eligible WHERE vector_publication_id IS NOT NULL LIMIT 1`,
-                [actor.membershipId, actor.userId, kinds, sourceIds, documentIds],
-              )
-            ).rowCount
-          )
-            throw new AccessDenied();
-          return scope.expires_at.getTime();
-        }
-      }
+      const expiresAt = requireAccess(
+        await authorizer.decide('queryDispatch', {
+          jobId: job.id,
+          clock,
+          selection: {
+            google: !!google,
+            slack: !!slack,
+            github: !!github,
+            atlassian: !!atlassian,
+            conversation: tx.commonVersion >= 1,
+          },
+        }),
+      );
+      if (expiresAt !== undefined) return expiresAt;
     }
     if (job.purpose === 'ingestion') {
       const doc = await store.document(tx, job.document_id);
       const origin = await store.source(tx, actor, doc.source_id, true);
-      if (
-        origin.provider !== 'note' &&
-        origin.provider !== 'file' &&
-        origin.provider !== 'conversation' &&
-        !externalProviders().includes(origin.provider)
-      )
-        throw new AccessDenied();
-      if (origin.provider === 'conversation') await requireConversationRevision(tx, actor, job.revision_id, true);
+      requireAccess(await authorizer.decide('embeddingProvider', { source: origin, providers: externalProviders() }));
+      if (origin.provider === 'conversation')
+        requireAccess(await authorizer.decide('conversation', { revisionId: job.revision_id, writing: true }));
       await store.eligible(tx, actor, {
         kind: 'knowledge-document',
         workspaceId: tx.workspaceId,
@@ -479,7 +461,7 @@ export function createKnowledgeEmbeddings({
     value: unknown,
     search?: { filters: KnowledgeSearchFilters; deadlineAt: number; retrySemantic: boolean; taskFlowId: string | null },
   ) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     const input = embeddingQuerySchema.parse(value);
     return transaction(
       workspaceId,
@@ -619,7 +601,7 @@ export function createKnowledgeEmbeddings({
     );
   }
   async function retryQuery(workspaceId: string, userId: string, queryCommandId: string, value: unknown) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     queryCommandId = uuidSchema.parse(queryCommandId);
     const input = embeddingRetrySchema.parse(value);
     return transaction(workspaceId, async tx => {
@@ -652,26 +634,13 @@ export function createKnowledgeEmbeddings({
       })
       .optional()
       .parse(
-        (
-          await tx.client.query(
-            `SELECT d.id AS document_id,d.observed_revision_id AS revision_id,d.lexical_publication_id AS publication_id,
-      m.id AS owner_membership_id,m.user_id AS owner_user_id,s.access_epoch,p.chunk_count
-      FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
-      JOIN ${table(tx, 'publications')} p ON p.id=d.lexical_publication_id AND p.revision_id=d.observed_revision_id
-      ${
-        tx.commonVersion >= 1
-          ? `LEFT JOIN ${table(tx, 'conversation_revisions')} cr ON cr.revision_id=d.observed_revision_id
-        LEFT JOIN ${qualified(tx.schema, 'tf_conversation_maintenance')} cm ON cm.conversation_id=cr.conversation_id AND cm.generation=cr.generation`
-          : ''
-      }
-      JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=${tx.commonVersion >= 1 ? 'COALESCE(cm.requester_membership_id,s.owner_membership_id)' : 's.owner_membership_id'}
-      WHERE d.tombstoned_at IS NULL AND s.state='active' AND (s.provider IN ('note','file')${tx.commonVersion >= 1 ? ` OR (s.provider='conversation' AND EXISTS (SELECT 1 FROM ${table(tx, 'conversation_readers')} e JOIN ${qualified(tx.schema, 'tf_conversations')} c ON c.id=e.conversation_id WHERE e.source_id=s.id AND e.conversation_id=cr.conversation_id AND d.native_id=c.id::text AND e.membership_id=m.id AND c.is_closed AND c.activity_generation=cr.generation))` : ''}${google ? ` OR (s.provider='google' AND EXISTS (SELECT 1 FROM ${table(tx, 'google_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${slack ? ` OR (s.provider='slack' AND EXISTS (SELECT 1 FROM ${table(tx, 'slack_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${github ? ` OR (s.provider='github' AND EXISTS (SELECT 1 FROM ${table(tx, 'github_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}${atlassian ? ` OR (s.provider IN ('confluence','jira') AND EXISTS (SELECT 1 FROM ${table(tx, 'atlassian_eligible')} e WHERE e.document_id=d.id AND e.membership_id=m.id))` : ''}) AND m.removed_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'embedding_jobs')} j WHERE j.publication_id=p.id AND j.profile_id=$1)
-      AND ($2::uuid IS NULL OR d.id=$2)
-      ORDER BY p.created_at,p.id LIMIT 1`,
-            [profile.id, documentId ?? null],
-          )
-        ).rows[0],
+        await embeddingDiscoveryCandidate(tx, profile.id, documentId, {
+          google: !!google,
+          slack: !!slack,
+          github: !!github,
+          atlassian: !!atlassian,
+          conversation: tx.commonVersion >= 1,
+        }),
       );
     if (!candidate) return;
     const id = randomUUID();
@@ -731,19 +700,9 @@ export function createKnowledgeEmbeddings({
     return transaction(workspaceId, async tx => {
       await recover(tx);
       if (tx.commonVersion >= 1) {
-        const changed = z.array(z.object({ job: jobSchema, membership_id: uuidSchema, user_id: z.string() })).parse(
-          (
-            await tx.client.query(
-              `SELECT to_jsonb(j) AS job,m.requester_membership_id AS membership_id,m.requester_user_id AS user_id
-            FROM ${table(tx, 'embedding_jobs')} j
-            JOIN ${table(tx, 'conversation_revisions')} r ON r.revision_id=j.revision_id
-            JOIN ${qualified(tx.schema, 'tf_conversation_maintenance')} m ON m.conversation_id=r.conversation_id AND m.generation=r.generation
-            WHERE j.purpose='ingestion' AND j.state<>'busy' AND m.state IN ('publishing','ready')
-              AND (j.owner_membership_id<>m.requester_membership_id OR j.owner_user_id<>m.requester_user_id)
-            ORDER BY j.id LIMIT 100 FOR UPDATE OF j`,
-            )
-          ).rows,
-        );
+        const changed = z
+          .array(z.object({ job: jobSchema, membership_id: uuidSchema, user_id: z.string() }))
+          .parse(await changedConversationEmbeddingOwners(tx));
         for (const row of changed) {
           const rebound = { ...row.job, owner_membership_id: row.membership_id, owner_user_id: row.user_id };
           try {
@@ -838,7 +797,7 @@ export function createKnowledgeEmbeddings({
     });
   }
   async function retryDocument(workspaceId: string, userId: string, documentId: string, value: unknown) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     documentId = uuidSchema.parse(documentId);
     const input = embeddingDocumentRetrySchema.parse(value);
     return transaction(workspaceId, async tx => {
@@ -880,7 +839,7 @@ export function createKnowledgeEmbeddings({
     });
   }
   async function resumeDocument(workspaceId: string, userId: string, documentId: string, commandId: string) {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     documentId = uuidSchema.parse(documentId);
     commandId = uuidSchema.parse(commandId);
     return transaction(workspaceId, async tx => {
@@ -1019,7 +978,7 @@ export function createKnowledgeEmbeddings({
     deadlineAt?: number,
     signal?: AbortSignal,
   ): Promise<{ disposition: EmbeddingState | 'stale' | 'retry' }> {
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     const work = embeddingWorkSchema.parse(value);
     signal?.throwIfAborted();
     const held = gate ? await gate(work.workspaceId) : [];

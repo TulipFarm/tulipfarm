@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { uuidSchema, sourceDependenciesSchema, knowledgeSourceDependencySchema } from '@tulipfarm/access';
+import { uuidSchema, sourceDependenciesSchema, knowledgeSourceDependencySchema } from '../authorization/contracts.ts';
+import { boundedAccessProof } from '@tulipfarm/memory-core/ports/authorizer';
 import { chunkSchema, knowledgeLimits } from '@tulipfarm/memory-core/document-contracts';
 
 export { chunkSchema, knowledgeLimits };
@@ -117,11 +118,8 @@ export const proofInput = z
     membershipCheckedAt: z.coerce.date(),
     expiresAt: z.coerce.date(),
   })
-  .refine(
-    proof =>
-      proof.expiresAt.getTime() > Math.max(proof.aclCheckedAt.getTime(), proof.membershipCheckedAt.getTime()) &&
-      proof.expiresAt.getTime() <=
-        Math.min(proof.aclCheckedAt.getTime(), proof.membershipCheckedAt.getTime()) + knowledgeLimits.permissionAgeMs,
+  .refine(proof =>
+    boundedAccessProof({ ...proof, principalCheckedAt: proof.membershipCheckedAt }, knowledgeLimits.permissionAgeMs),
   );
 export const citationSchema = knowledgeSourceDependencySchema.extend({
   ordinal: z

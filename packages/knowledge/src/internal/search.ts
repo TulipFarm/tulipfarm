@@ -3,13 +3,15 @@ import { z } from 'zod';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
-  currentMember,
-  lockAuthorization,
-  resolveHuman,
   uuidSchema,
   type HumanActor,
-} from '@tulipfarm/access';
-import { requireReadableFile } from '@tulipfarm/files';
+} from '../authorization/contracts.ts';
+import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
+import {
+  admitKnowledgePrincipal,
+  createKnowledgeAuthorizer,
+  selectedKnowledgeReaders,
+} from '../authorization/authorizer.ts';
 import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
 import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
 import { qualified, StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -25,7 +27,7 @@ import type { createKnowledgeEmbeddings } from './embeddings.ts';
 import { KnowledgeError } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { normalizeIdentifier } from './identifiers.ts';
-import { searchEligibility } from './search-eligibility.ts';
+import { createKnowledgeEligibilityFilter } from '../authorization/eligibility.ts';
 import type { GoogleKnowledge } from './google.ts';
 import type { SlackKnowledge } from './slack.ts';
 import type { GitHubKnowledge } from './github.ts';
@@ -178,14 +180,13 @@ export function createKnowledgeSearch({
   const githubReaders = new WeakMap<object, boolean>();
   const atlassianReaders = new WeakMap<object, boolean>();
   const eligibility = (tx: Transaction) =>
-    searchEligibility(
-      tx.schema,
-      !!google,
-      slackReaders.get(tx.client) === true,
-      githubReaders.get(tx.client) === true,
-      atlassianReaders.get(tx.client) === true,
-      tx.commonVersion >= 1,
-    );
+    createKnowledgeEligibilityFilter(tx.schema).predicate({
+      google: !!google,
+      slack: slackReaders.get(tx.client) === true,
+      github: githubReaders.get(tx.client) === true,
+      atlassian: atlassianReaders.get(tx.client) === true,
+      conversation: tx.commonVersion >= 1,
+    });
   const processing = new Set<Promise<unknown>>();
   async function transaction<T>(
     workspaceId: string,
@@ -197,39 +198,15 @@ export function createKnowledgeSearch({
     const compatibility = { ...commonCompatibility, deadlineAt };
     return runtime.transaction(workspaceId, compatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, write ? 'write' : 'read');
-      const actor = await resolveHuman(tx, userId);
-      await currentMember(tx, actor);
-      // Slack SQL is planned only for members selected into at least one Slack source.
-      slackReaders.set(
-        tx.client,
-        !!slack &&
-          !!(
-            await tx.client.query(`SELECT 1 FROM ${table(tx, 'slack_members')} WHERE membership_id=$1 LIMIT 1`, [
-              actor.membershipId,
-            ])
-          ).rowCount,
-      );
-      // GitHub SQL follows the same rule for members selected into at least one GitHub source.
-      githubReaders.set(
-        tx.client,
-        !!github &&
-          !!(
-            await tx.client.query(`SELECT 1 FROM ${table(tx, 'github_members')} WHERE membership_id=$1 LIMIT 1`, [
-              actor.membershipId,
-            ])
-          ).rowCount,
-      );
-      // Atlassian SQL is planned only for members selected into at least one Confluence or Jira source.
-      atlassianReaders.set(
-        tx.client,
-        !!atlassian &&
-          !!(
-            await tx.client.query(`SELECT 1 FROM ${table(tx, 'atlassian_members')} WHERE membership_id=$1 LIMIT 1`, [
-              actor.membershipId,
-            ])
-          ).rowCount,
-      );
+      const actor = requireAccess(await admitKnowledgePrincipal(tx, userId, write ? 'write' : 'read'));
+      const readers = await selectedKnowledgeReaders(tx, actor, {
+        slack: !!slack,
+        github: !!github,
+        atlassian: !!atlassian,
+      });
+      slackReaders.set(tx.client, readers.slack);
+      githubReaders.set(tx.client, readers.github);
+      atlassianReaders.set(tx.client, readers.atlassian);
       return operation(tx, actor);
     });
   }
@@ -601,12 +578,13 @@ export function createKnowledgeSearch({
             )
           ).rows,
         );
-      await currentMember(tx, actor);
+      const authorizer = createKnowledgeAuthorizer(tx, actor);
+      requireAccess(await authorizer.decide('member', undefined));
       // Eligibility SQL cannot follow a generated file's recursive sources, so the Files check runs for each file-backed hit.
       const readable = new Map<string, boolean>();
       for (const fileId of new Set(rows.flatMap(row => (row.file_id ? [row.file_id] : [])))) {
         try {
-          await requireReadableFile(tx, actor, fileId);
+          requireAccess(await authorizer.decide('file', fileId));
           readable.set(fileId, true);
         } catch (error) {
           if (!(error instanceof AccessDenied) || error instanceof SourceAuthorizationUnavailable) throw error;

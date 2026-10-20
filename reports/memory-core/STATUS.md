@@ -1,6 +1,32 @@
 # Memory-core Phase 1 status
 
-**M0 complete in `f276abf`; M1 in `fbb1642`; M2 in `667a34f`. M3 is complete.**
+**M4 complete. PAUSED for the required security review before M5.**
+
+M0 is in `f276abf`; M1 in `fbb1642`; M2 in `667a34f`; M3 in `6159003`.
+M4's review range is `6159003..HEAD` after its local milestone commit.
+M5 has not started, and this worker has not run the security review.
+
+M4 adds explicit allow/deny decisions and a storage-side eligibility port.
+Review the new core decision/proof helpers and Knowledge adapters for
+membership/source access, Files integrity and recursive provenance,
+conversation readers/revision fences, current task-run binding, stored
+and external proofs, embedding dispatch, and search eligibility.
+Locks, SQL order, final evidence checks, and host denial identity remain
+at their original call points. All 144 SQL literals are preserved.
+Access, Files, app code, schema, API responses, ranking, model/dimensions,
+Temporal, and the lockfile are unchanged. See [M4](M4.md) for the full
+authorization-sensitive diff surface and callback receiver correction.
+
+All 34 scoped build/typecheck tasks, lint, and five serial unit suites
+passed: 638 tests, 637 passes, one original skip. All 222 integration
+entry points match the agreed baseline rules: 1,239 tests, 1,131 passes,
+102 observed known failures, six original skips, no cancellations.
+Both frozen ranking snapshots are unchanged. No new M4 comparison
+exception was needed.
+
+Removed the owned Compose project, network and volumes after the final
+integration run. No temporary baseline worktree remains; copied audit
+receipts were verified before removal. See `M4-cleanup.tap`.
 
 M3 introduces the provider, summarizer, clock, telemetry, feature-flag, and
 usage-meter ports. All 34 scoped build/typecheck tasks, the five serial unit

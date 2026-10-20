@@ -1,16 +1,12 @@
 import { z } from 'zod';
 import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
 import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
-import {
-  AccessDenied,
-  denyMcpEgress,
-  humanActorSchema,
-  type HumanActor,
-  type SourceDependency,
-} from '@tulipfarm/access';
+import { AccessDenied, humanActorSchema, type HumanActor, type SourceDependency } from '../authorization/contracts.ts';
+import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
+import { createKnowledgeAuthorizer, knowledgeEgressPolicy } from '../authorization/authorizer.ts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { KnowledgeError, citationSchema } from './contracts.ts';
-import { createKnowledgeStore, requireTaskRun, type KnowledgeOptions } from './store.ts';
+import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
 import type { createKnowledgeSearch } from './search.ts';
 import { knowledgeSearchFiltersSchema } from '../contracts.ts';
@@ -87,7 +83,7 @@ export function createKnowledgeAgentTools({
       false,
       async (tx, human) => {
         if (human.userId !== actor.userId || human.membershipId !== actor.membershipId) throw new AccessDenied();
-        if (context.runId) await requireTaskRun(tx, human, context.runId);
+        if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
       },
       { deadlineAt, signal: context.signal },
     );
@@ -103,7 +99,7 @@ export function createKnowledgeAgentTools({
     const actor = humanActorSchema.parse(actorInput);
     const input = knowledgeToolSearchSchema.parse(value);
     // Query text may be sent to the embedding provider; MCP-derived context cannot leave.
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     await admit(workspaceId, actor, context, deadlineAt);
     const filters = knowledgeSearchFiltersSchema.parse(input.kind ? { kinds: [input.kind] } : {});
     const found = await search.search(
@@ -178,7 +174,7 @@ export function createKnowledgeAgentTools({
         async (tx, human) => {
           if (typeof actor !== 'string' && (human.userId !== actor.userId || human.membershipId !== actor.membershipId))
             throw new AccessDenied();
-          if (context.runId) await requireTaskRun(tx, human, context.runId);
+          if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
           const row = z
             .object({
               document_id: z.uuid(),
