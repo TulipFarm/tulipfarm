@@ -7,6 +7,12 @@
   },
   "overrides": [
     {
+      "files": ["packages/memory-core/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"],
+      "rules": {
+        "tulipfarm/memory-core-boundary": "error"
+      }
+    },
+    {
       "files": ["apps/**/*.{js,jsx,ts,tsx,mjs}", "packages/**/*.{js,jsx,ts,tsx,mjs}"],
       "rules": {
         "tulipfarm/product-copy": "error"

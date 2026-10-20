@@ -57,6 +57,7 @@
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "js-tiktoken": "1.0.21",

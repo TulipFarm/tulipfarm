@@ -792,6 +792,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@tulipfarm/memory-core':
+        specifier: workspace:*
+        version: link:../memory-core
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
@@ -1015,6 +1018,9 @@ importers:
       '@tulipfarm/google-workspace':
         specifier: workspace:*
         version: link:../google-workspace
+      '@tulipfarm/memory-core':
+        specifier: workspace:*
+        version: link:../memory-core
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
@@ -1043,6 +1049,19 @@ importers:
       '@types/pg':
         specifier: 8.20.0
         version: 8.20.0
+
+  packages/memory-core:
+    dependencies:
+      zod:
+        specifier: 4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
 
   packages/observability:
     dependencies:
