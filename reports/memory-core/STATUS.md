@@ -1,7 +1,7 @@
 # Memory-core Phase 1 status
 
-**Stopped again at M0: a different test-environment failure.**
-No extraction milestone is complete.
+**Stopped at M0: platform SQL fails on the requested bare cluster.**
+No extraction milestone is complete. No runtime code or existing test changed.
 
 At source commit `fc6bc0ba4f76226fff1e62c6b155eaabaf8d4559`, before any
 runtime or test changes, `packages/knowledge/test/defaults-gate.integration.mjs`
@@ -14,24 +14,28 @@ The user accepted that original failure as a known squashed-baseline failure
 and authorized resuming M0. It must remain identical at later milestones.
 No test was edited, fixed, weakened, or marked skipped.
 
-On resume, `defaults.integration.mjs` passed all 13 tests. Then
-`packages/knowledge/test/embedding-capacity.integration.mjs:37` failed:
-`Disposable cluster must not contain a pre-existing identity role`.
-Expected role-query row count: `0`. Actual: `1`. Code: `ERR_ASSERTION`.
-The complete evidence is in
-`M0-packages-knowledge-test-embedding-capacity.integration.mjs.tap`.
+The user then classified the Compose capacity failure as an environment
+precondition and required rerunning the whole integration baseline on a
+separate bare PostgreSQL container. That container started healthy on
+`127.0.0.1:55432`, with the same pgvector image, no `init.sql` mount, and only
+the `postgres` non-system role.
 
-The Compose setup creates that role in `infra/postgres/init.sql:1`.
-This is a disposable-cluster precondition failure, not the squashed-baseline
-cause, so it was not added to the accepted-failure list. The user permits
-continuing only for failures with that cause. Execution stopped without
-changing or rerunning the test.
+The first rerun file, `packages/knowledge/test/retrieval-baseline.integration.mjs`,
+failed at line 22 while loading the platform baseline:
+`role "tulipfarm" does not exist`, SQLSTATE `42704`.
+`apps/database/migrations/0001_baseline.sql:734` grants rights to that role
+unconditionally. The capacity test requires the same role to be absent after
+loading that baseline. No test, SQL, or role workaround was applied.
+Full output: `M0-bare-packages-knowledge-test-retrieval-baseline.integration.mjs.tap`.
 
-All four unit suites and both requested benchmarks ran. Remaining integration
-suites and the golden ranking snapshot are incomplete. See [M0](M0.md) for
-commands, counts, benchmark numbers, scope, and the existing API skip.
+This new bare-cluster failure triggers the user's stop rule. It is not on
+the accepted squashed-baseline failure list. The full rerun and the golden
+ranking snapshot remain incomplete. Earlier successful Compose measurements
+are historical only, not a final common-environment M0 baseline.
 
-The original and resumed `memory-core-phase1` Docker containers, volumes, and
-network were removed. No runtime code, schema, permissions, or dependencies
-changed. M1 and later milestones were not started. No GitHub or other remote
-operation was performed.
+See [M0](M0.md) for exact environment commands, earlier counts and benchmark
+numbers, the accepted failure assertion, and the new setup failure.
+
+All containers, volumes, and networks created for the original, resumed,
+and bare-cluster attempts were removed. M1 and later milestones were not
+started. No GitHub or other remote operation was performed.
