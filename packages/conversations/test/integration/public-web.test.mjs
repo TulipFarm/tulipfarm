@@ -207,7 +207,7 @@ test('public web receipts persist pending URLs, results and failures without MCP
 
 test(
   'live blog read passes through the conversation executor and reloads its original source receipt',
-  { skip: !process.env.PUBLIC_WEB_ENDPOINT },
+  { skip: !process.env.FIRECRAWL_ENDPOINT },
   async () => {
     const f = await conversationFixture();
     const chatId = randomUUID();

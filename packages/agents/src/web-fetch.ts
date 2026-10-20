@@ -95,7 +95,7 @@ async function request(path: string, body: object, signal: AbortSignal): Promise
 
 async function readPage(url: string, signal: AbortSignal): Promise<z.infer<typeof webPageSchema>> {
   try {
-    if (!process.env.PUBLIC_WEB_ENDPOINT) throw new Error('web-unavailable');
+    if (!process.env.FIRECRAWL_ENDPOINT) throw new Error('web-unavailable');
     await requirePublicUrl(url, signal);
     const response = scrapeResponse.parse(
       await request(

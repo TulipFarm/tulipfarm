@@ -42,8 +42,8 @@ const computedReads = {
       'TEMPORAL_NAMESPACE',
       'TEMPORAL_TLS',
       'TEMPORAL_API_KEY',
-      'PUBLIC_WEB_ENDPOINT',
-      'PUBLIC_WEB_API_KEY',
+      'FIRECRAWL_ENDPOINT',
+      'FIRECRAWL_API_KEY',
     ],
   },
   // Environment secret store (#14): reads operator-provisioned release secrets by name, which are not app settings.

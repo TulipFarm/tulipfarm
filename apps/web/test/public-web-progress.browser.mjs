@@ -35,8 +35,8 @@ const provider = createServer(async (request, response) => {
   );
 });
 await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
-const previousEndpoint = process.env.PUBLIC_WEB_ENDPOINT;
-process.env.PUBLIC_WEB_ENDPOINT = `http://127.0.0.1:${provider.address().port}/`;
+const previousEndpoint = process.env.FIRECRAWL_ENDPOINT;
+process.env.FIRECRAWL_ENDPOINT = `http://127.0.0.1:${provider.address().port}/`;
 const f = await conversationFixture();
 const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: new URL('..', import.meta.url),
@@ -337,7 +337,7 @@ try {
   server.kill('SIGTERM');
   provider.closeAllConnections();
   await new Promise(resolve => provider.close(resolve));
-  if (previousEndpoint === undefined) delete process.env.PUBLIC_WEB_ENDPOINT;
-  else process.env.PUBLIC_WEB_ENDPOINT = previousEndpoint;
+  if (previousEndpoint === undefined) delete process.env.FIRECRAWL_ENDPOINT;
+  else process.env.FIRECRAWL_ENDPOINT = previousEndpoint;
   await f.close();
 }

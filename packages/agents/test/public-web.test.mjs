@@ -6,15 +6,15 @@ import { publicWebReceipt, publicWebUrlSchema } from '../../conversations/src/pu
 import { parseToolCall, discoverTools } from '../src/tools.ts';
 
 test('search and scrape use Bearer authentication only when a public web key is configured', async t => {
-  const names = ['PUBLIC_WEB_ENDPOINT', 'PUBLIC_WEB_API_KEY', 'PUBLIC_WEB_API_KEY_FILE'];
+  const names = ['FIRECRAWL_ENDPOINT', 'FIRECRAWL_API_KEY', 'FIRECRAWL_API_KEY_FILE'];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
     for (const [name, value] of Object.entries(previous))
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  process.env.PUBLIC_WEB_ENDPOINT = 'https://api.firecrawl.dev';
-  delete process.env.PUBLIC_WEB_API_KEY_FILE;
+  process.env.FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev';
+  delete process.env.FIRECRAWL_API_KEY_FILE;
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls.push({ path: new URL(url).pathname, options });
@@ -25,8 +25,8 @@ test('search and scrape use Bearer authentication only when a public web key is 
     );
   });
   for (const key of [undefined, 'test-cloud-key']) {
-    if (key) process.env.PUBLIC_WEB_API_KEY = key;
-    else delete process.env.PUBLIC_WEB_API_KEY;
+    if (key) process.env.FIRECRAWL_API_KEY = key;
+    else delete process.env.FIRECRAWL_API_KEY;
     await searchPublicWeb({ query: 'news', limit: 1, window: 'any' });
     await fetchPublicText('https://example.com/page');
     const latest = calls.slice(-2);
@@ -78,8 +78,8 @@ test('public results retain original URLs, dates, bounded text, and neutral fail
       );
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const previous = process.env.PUBLIC_WEB_ENDPOINT;
-  process.env.PUBLIC_WEB_ENDPOINT = `http://127.0.0.1:${server.address().port}/`;
+  const previous = process.env.FIRECRAWL_ENDPOINT;
+  process.env.FIRECRAWL_ENDPOINT = `http://127.0.0.1:${server.address().port}/`;
   try {
     const search = await searchPublicWeb({ query: 'news', limit: 5, window: 'day' });
     assert.equal(search.status, 'success');
@@ -115,18 +115,18 @@ test('public results retain original URLs, dates, bounded text, and neutral fail
       widened: false,
     });
   } finally {
-    if (previous === undefined) delete process.env.PUBLIC_WEB_ENDPOINT;
-    else process.env.PUBLIC_WEB_ENDPOINT = previous;
+    if (previous === undefined) delete process.env.FIRECRAWL_ENDPOINT;
+    else process.env.FIRECRAWL_ENDPOINT = previous;
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }
 });
 
-test('public web retrieval is off without PUBLIC_WEB_ENDPOINT and fails neutrally without network', async t => {
-  const previous = process.env.PUBLIC_WEB_ENDPOINT;
-  delete process.env.PUBLIC_WEB_ENDPOINT;
+test('public web retrieval is off without FIRECRAWL_ENDPOINT and fails neutrally without network', async t => {
+  const previous = process.env.FIRECRAWL_ENDPOINT;
+  delete process.env.FIRECRAWL_ENDPOINT;
   t.after(() => {
-    if (previous !== undefined) process.env.PUBLIC_WEB_ENDPOINT = previous;
+    if (previous !== undefined) process.env.FIRECRAWL_ENDPOINT = previous;
   });
   t.mock.method(globalThis, 'fetch', async () => {
     throw new Error('no network expected');
@@ -210,8 +210,8 @@ test('sparse daily results survive failed widening and terminal receipts do not 
       );
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const previous = process.env.PUBLIC_WEB_ENDPOINT;
-  process.env.PUBLIC_WEB_ENDPOINT = `http://127.0.0.1:${server.address().port}`;
+  const previous = process.env.FIRECRAWL_ENDPOINT;
+  process.env.FIRECRAWL_ENDPOINT = `http://127.0.0.1:${server.address().port}`;
   try {
     const result = await searchPublicWeb({ query: 'news', window: 'day', limit: 5 });
     assert.equal(result.status, 'partial');
@@ -229,8 +229,8 @@ test('sparse daily results survive failed widening and terminal receipts do not 
     assert.equal(single.widened, false);
     assert.equal(single.status, 'success');
   } finally {
-    if (previous === undefined) delete process.env.PUBLIC_WEB_ENDPOINT;
-    else process.env.PUBLIC_WEB_ENDPOINT = previous;
+    if (previous === undefined) delete process.env.FIRECRAWL_ENDPOINT;
+    else process.env.FIRECRAWL_ENDPOINT = previous;
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   }

@@ -57,7 +57,7 @@ export function registerHealth(
   });
 
   app.get('/health', { schema: healthSchema }, async (_request, reply) => {
-    const publicWebEndpoint = process.env.PUBLIC_WEB_ENDPOINT;
+    const publicWebEndpoint = process.env.FIRECRAWL_ENDPOINT;
     // Empty skips the probe, for Temporal deployments without a reachable UI.
     const temporalUiUrl = process.env.TEMPORAL_UI_URL ?? 'http://127.0.0.1:8233';
     const [postgres, temporal, workers, temporalUi, publicWeb] = await Promise.all([

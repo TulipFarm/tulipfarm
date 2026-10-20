@@ -4,7 +4,7 @@ import { fetchPublicText } from '../src/web-fetch.ts';
 
 test(
   'requested GitHub articles return content through the configured retrieval gateway',
-  { skip: !process.env.PUBLIC_WEB_ENDPOINT, timeout: 60000 },
+  { skip: !process.env.FIRECRAWL_ENDPOINT, timeout: 60000 },
   async t => {
     const articles = [
       ['https://github.blog/ai-and-ml/github-copilot/reviewbench-an-open-benchmark-for-ai-code-review/', /ReviewBench/],

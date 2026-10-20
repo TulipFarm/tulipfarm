@@ -264,11 +264,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     usage: { kind: 'known', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
   });
   await t.test('parallel task reads use two workers and retain one run record per call', async t => {
-    const previousEndpoint = process.env.PUBLIC_WEB_ENDPOINT;
-    process.env.PUBLIC_WEB_ENDPOINT = 'https://public.example/';
+    const previousEndpoint = process.env.FIRECRAWL_ENDPOINT;
+    process.env.FIRECRAWL_ENDPOINT = 'https://public.example/';
     t.after(() => {
-      if (previousEndpoint === undefined) delete process.env.PUBLIC_WEB_ENDPOINT;
-      else process.env.PUBLIC_WEB_ENDPOINT = previousEndpoint;
+      if (previousEndpoint === undefined) delete process.env.FIRECRAWL_ENDPOINT;
+      else process.env.FIRECRAWL_ENDPOINT = previousEndpoint;
     });
     let active = 0,
       maximum = 0;

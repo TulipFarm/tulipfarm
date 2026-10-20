@@ -70,7 +70,7 @@ export const selfHostSections = {
   ],
   'public-web': [
     'Public web search and page reads for agents. Off unless set. Use a Firecrawl-compatible API',
-    '(POST /v2/search, POST /v2/scrape). Set PUBLIC_WEB_API_KEY for authenticated APIs such as Firecrawl Cloud.',
+    '(POST /v2/search, POST /v2/scrape). Set FIRECRAWL_API_KEY for authenticated APIs such as Firecrawl Cloud.',
     'Health uses GET /v2/team/credit-usage with a key, otherwise GET /health; neither spends scrape credits.',
     'The service must not be able to reach your internal network.',
   ],
@@ -426,23 +426,23 @@ export const settings: readonly Setting[] = [
     description: 'Comma-separated origins allowed to call the public guide API.',
   },
   {
-    name: 'PUBLIC_WEB_ENDPOINT',
+    name: 'FIRECRAWL_ENDPOINT',
     group: 'Public origins',
     services: ['api', 'worker', 'database'],
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of a Firecrawl-compatible API used by agent `web.search` and `web.fetch` tools: `POST /v2/search`, `POST /v2/scrape`. Unset disables public web retrieval. Health uses authenticated `GET /v2/team/credit-usage` when PUBLIC_WEB_API_KEY is set, otherwise `GET /health`. Neither probe scrapes pages. The endpoint must not be able to reach your internal network.',
+      'Origin (no path or credentials) of a Firecrawl-compatible API used by agent `web.search` and `web.fetch` tools: `POST /v2/search`, `POST /v2/scrape`. Unset disables public web retrieval. Health uses authenticated `GET /v2/team/credit-usage` when FIRECRAWL_API_KEY is set, otherwise `GET /health`. Neither probe scrapes pages. The endpoint must not be able to reach your internal network.',
     selfHost: { section: 'public-web', example: 'http://firecrawl.internal:3002', commented: true },
   },
   {
-    name: 'PUBLIC_WEB_API_KEY',
+    name: 'FIRECRAWL_API_KEY',
     group: 'Public origins',
     services: ['api', 'worker', 'database'],
     requirement: 'optional',
     secret: true,
     description:
-      'Bearer token for the public web API. Unset preserves keyless self-hosted behavior. Accepts PUBLIC_WEB_API_KEY_FILE.',
+      'Bearer token for the public web API. Unset preserves keyless self-hosted behavior. Accepts FIRECRAWL_API_KEY_FILE.',
     selfHost: { section: 'public-web', commented: true },
   },
 

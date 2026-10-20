@@ -36,14 +36,14 @@ using a Compose override. Do not set a direct value and a different file value.
 
 ## Public web
 
-Agent web search and page reads are off unless `PUBLIC_WEB_ENDPOINT` is set. It
+Agent web search and page reads are off unless `FIRECRAWL_ENDPOINT` is set. It
 takes the origin of a Firecrawl-compatible API that serves
 `POST /v2/search` and `POST /v2/scrape`. That service fetches URLs
 that agents choose, so it must not be able to reach your internal network: run it
 on an isolated network with egress to the public internet only.
 
-For Firecrawl Cloud, set `PUBLIC_WEB_ENDPOINT=https://api.firecrawl.dev` and
-`PUBLIC_WEB_API_KEY` (or `PUBLIC_WEB_API_KEY_FILE`, mounted into api and worker).
+For Firecrawl Cloud, set `FIRECRAWL_ENDPOINT=https://api.firecrawl.dev` and
+`FIRECRAWL_API_KEY` (or `FIRECRAWL_API_KEY_FILE`, mounted into api and worker).
 Requests send the key as a Bearer token, never in the body or URL. Health uses
 authenticated `GET /v2/team/credit-usage`, which reads usage without fetching pages
 or spending scrape credits. Keyless self-hosted services keep the `GET /health`

@@ -38,11 +38,11 @@ test('connection secrets accept files, reject conflicts, and belong to the secre
     apiKey: 'test-file-key',
   });
   const web = publicWebConfiguration({
-    PUBLIC_WEB_ENDPOINT: 'https://cloud.example.com',
-    PUBLIC_WEB_API_KEY_FILE: file,
+    FIRECRAWL_ENDPOINT: 'https://cloud.example.com',
+    FIRECRAWL_API_KEY_FILE: file,
   });
   assert.deepEqual(web.headers, { authorization: 'Bearer test-file-key' });
-  for (const name of ['TEMPORAL_API_KEY', 'PUBLIC_WEB_API_KEY']) {
+  for (const name of ['TEMPORAL_API_KEY', 'FIRECRAWL_API_KEY']) {
     assert.ok(secretSettingNames.includes(name));
     const config = name === 'TEMPORAL_API_KEY' ? temporalConnectionOptions : publicWebConfiguration;
     assert.throws(() => config({ [name]: 'direct-key', [`${name}_FILE`]: file }), /different values/);
@@ -52,16 +52,16 @@ test('connection secrets accept files, reject conflicts, and belong to the secre
 
 test('public web preserves keyless health and uses a read-only authenticated probe with a key', () => {
   assert.equal(publicWebConfiguration({}), undefined);
-  const keyless = publicWebConfiguration({ PUBLIC_WEB_ENDPOINT: 'http://gateway:3002' });
+  const keyless = publicWebConfiguration({ FIRECRAWL_ENDPOINT: 'http://gateway:3002' });
   assert.equal(keyless.endpoint.href, 'http://gateway:3002/');
   assert.deepEqual(keyless.headers, {});
   assert.equal(keyless.healthPath, '/health');
   const cloud = publicWebConfiguration({
-    PUBLIC_WEB_ENDPOINT: 'https://api.firecrawl.dev',
-    PUBLIC_WEB_API_KEY: 'test-key',
+    FIRECRAWL_ENDPOINT: 'https://api.firecrawl.dev',
+    FIRECRAWL_API_KEY: 'test-key',
   });
   assert.equal(cloud.healthPath, '/v2/team/credit-usage');
   assert.deepEqual(cloud.headers, { authorization: 'Bearer test-key' });
   for (const endpoint of ['https://user:pass@example.com', 'https://example.com/v2', 'file:///tmp/key'])
-    assert.throws(() => publicWebConfiguration({ PUBLIC_WEB_ENDPOINT: endpoint }), /PUBLIC_WEB_ENDPOINT/);
+    assert.throws(() => publicWebConfiguration({ FIRECRAWL_ENDPOINT: endpoint }), /FIRECRAWL_ENDPOINT/);
 });

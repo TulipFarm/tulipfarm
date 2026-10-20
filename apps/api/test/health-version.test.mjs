@@ -22,11 +22,11 @@ test('root describes the API and links to docs and health', async t => {
 
 test('actual health handlers preserve identity across healthy, degraded, and liveness responses', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
-  const previousPublicWebEndpoint = process.env.PUBLIC_WEB_ENDPOINT;
-  process.env.PUBLIC_WEB_ENDPOINT = 'http://web-gateway:3003';
+  const previousPublicWebEndpoint = process.env.FIRECRAWL_ENDPOINT;
+  process.env.FIRECRAWL_ENDPOINT = 'http://web-gateway:3003';
   t.after(() => {
-    if (previousPublicWebEndpoint === undefined) delete process.env.PUBLIC_WEB_ENDPOINT;
-    else process.env.PUBLIC_WEB_ENDPOINT = previousPublicWebEndpoint;
+    if (previousPublicWebEndpoint === undefined) delete process.env.FIRECRAWL_ENDPOINT;
+    else process.env.FIRECRAWL_ENDPOINT = previousPublicWebEndpoint;
   });
   const fetched = [];
   let publicWebUnavailable = false;
@@ -86,10 +86,10 @@ test('actual health handlers preserve identity across healthy, degraded, and liv
 test('health skips the Temporal UI and public-web probes when they are not configured', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
   const previous = {
-    PUBLIC_WEB_ENDPOINT: process.env.PUBLIC_WEB_ENDPOINT,
+    FIRECRAWL_ENDPOINT: process.env.FIRECRAWL_ENDPOINT,
     TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
   };
-  delete process.env.PUBLIC_WEB_ENDPOINT;
+  delete process.env.FIRECRAWL_ENDPOINT;
   process.env.TEMPORAL_UI_URL = '';
   t.after(() => {
     for (const [name, value] of Object.entries(previous))
@@ -123,15 +123,15 @@ test('health skips the Temporal UI and public-web probes when they are not confi
 
 test('cloud web health authenticates without scraping and optional storage checks follow the capability', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
-  const names = ['PUBLIC_WEB_ENDPOINT', 'PUBLIC_WEB_API_KEY', 'TEMPORAL_UI_URL', 'WORKSPACE_STORAGE_CAPABILITY'];
+  const names = ['FIRECRAWL_ENDPOINT', 'FIRECRAWL_API_KEY', 'TEMPORAL_UI_URL', 'WORKSPACE_STORAGE_CAPABILITY'];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
     for (const [name, value] of Object.entries(previous))
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  process.env.PUBLIC_WEB_ENDPOINT = 'https://api.firecrawl.dev';
-  process.env.PUBLIC_WEB_API_KEY = 'test-cloud-key';
+  process.env.FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev';
+  process.env.FIRECRAWL_API_KEY = 'test-cloud-key';
   process.env.TEMPORAL_UI_URL = '';
   delete process.env.WORKSPACE_STORAGE_CAPABILITY;
   let status = 200;

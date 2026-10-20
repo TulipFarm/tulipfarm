@@ -8,9 +8,9 @@
       "passThroughEnv": [
         "HOST",
         "PORT",
-        "PUBLIC_WEB_ENDPOINT",
-        "PUBLIC_WEB_API_KEY",
-        "PUBLIC_WEB_API_KEY_FILE",
+        "FIRECRAWL_ENDPOINT",
+        "FIRECRAWL_API_KEY",
+        "FIRECRAWL_API_KEY_FILE",
         "API_PROXY_MODE",
         "TULIPFARM_EXTENSIONS",
         "DATABASE_URL",

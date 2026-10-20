@@ -84,8 +84,8 @@ async function main() {
       'TEMPORAL_NAMESPACE',
       'TEMPORAL_TLS',
       'TEMPORAL_API_KEY',
-      'PUBLIC_WEB_ENDPOINT',
-      'PUBLIC_WEB_API_KEY',
+      'FIRECRAWL_ENDPOINT',
+      'FIRECRAWL_API_KEY',
     ]
       .filter(name => process.env[name] !== undefined)
       .map(name => [name, process.env[name]!]),
