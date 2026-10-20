@@ -17,20 +17,18 @@ import {
   requireResultSources,
 } from './source-access.ts';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
+import type { ChatMessage, ContextMeasure, ContextMessage, Summarizer } from '@tulipfarm/memory-core/ports/summarizer';
+export type {
+  ChatMessage,
+  ContextMessage,
+  EffectiveCompactionPolicy,
+  ContextMeasure,
+  CompactionPurpose,
+} from '@tulipfarm/memory-core/ports/summarizer';
 
 export const compactionPromptLimit = 2000;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 
-export type ChatMessage = { role: 'user' | 'assistant'; text: string };
-export type ContextMessage = ChatMessage & { id: string; acceptedSequence: number };
-export type EffectiveCompactionPolicy = {
-  automatic: boolean;
-  triggerPercent: number;
-  targetPercent: number;
-  outputPrompt: string | null;
-  revision: number;
-  families: string[];
-};
 export type ReplyCompactionFence = {
   workspaceId: string;
   conversationId: string;
@@ -39,32 +37,9 @@ export type ReplyCompactionFence = {
   epoch: number;
 };
 export type CompactionFence = ReplyCompactionFence | MaintenanceFence;
-export type ContextMeasure = { tokens: number; window: number };
-export type CompactionPurpose = 'summary' | 'handoff' | 'memory';
 
 /** Worker-supplied model access. Conversations owns what is compacted; the compactor owns pricing, routing, and metering. */
-export type ConversationCompactor = {
-  policy(tx: AuthorizationTransaction): Promise<EffectiveCompactionPolicy>;
-  /** Estimated input tokens for the chat responder's first request, or null when the turn model cannot be measured. */
-  measure(input: {
-    fence: ReplyCompactionFence;
-    model: string;
-    messages: readonly ChatMessage[];
-    project?: unknown;
-    generateTitle: boolean;
-    timeZone: string | null;
-  }): Promise<ContextMeasure | null>;
-  /** Smallest input byte budget among the given summary families. */
-  window(families: readonly string[]): Promise<number>;
-  summarize(input: {
-    fence: CompactionFence;
-    purpose: CompactionPurpose;
-    step: number;
-    system: string;
-    messages: readonly ChatMessage[];
-    families: readonly string[];
-  }): Promise<{ text: string; familyId: string; fallbackFrom: string | null }>;
-};
+export type ConversationCompactor = Summarizer<AuthorizationTransaction, CompactionFence, ReplyCompactionFence>;
 
 const line = z.string().trim().max(1000);
 export const workingSummarySchema = z.object({

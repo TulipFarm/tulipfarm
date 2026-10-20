@@ -10,7 +10,8 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from '@tulipfarm/access';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import type { Clock, FeatureFlags } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeFeatureFlags, systemClock } from '../host-ports.ts';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   atlassianTargetKey,
@@ -74,7 +75,7 @@ export async function recordDefaultKnowledgeIntent(tx: Tx, value: DefaultKnowled
 }
 
 export const defaultKnowledgeFlagEnabled = (workspaceId: string, userId: string) =>
-  isFeatureEnabled('default-connection-knowledge', { id: userId }, { id: workspaceId });
+  knowledgeFeatureFlags.enabled('default-connection-knowledge', userId, workspaceId);
 
 async function disabledOwners(
   tx: Tx,
@@ -102,9 +103,11 @@ async function disabledOwners(
  */
 export function createDefaultKnowledgeGate({
   runtime,
-  enabled = defaultKnowledgeFlagEnabled,
+  featureFlags = knowledgeFeatureFlags,
+  enabled = (workspaceId, userId) => featureFlags.enabled('default-connection-knowledge', userId, workspaceId),
 }: {
   runtime: Runtime;
+  featureFlags?: FeatureFlags<'default-connection-knowledge'>;
   enabled?: (workspaceId: string, userId: string) => Promise<boolean>;
 }) {
   return (workspaceId: string) =>
@@ -215,11 +218,15 @@ function isoDay(at: Date, offsetDays = 0) {
 export function createDefaultKnowledge({
   runtime,
   engines,
-  enabled = defaultKnowledgeFlagEnabled,
-  now = () => new Date(),
+  featureFlags = knowledgeFeatureFlags,
+  enabled = (workspaceId, userId) => featureFlags.enabled('default-connection-knowledge', userId, workspaceId),
+  clock = systemClock,
+  now = () => new Date(clock.now()),
 }: {
   runtime: Runtime;
   engines: Engines;
+  featureFlags?: FeatureFlags<'default-connection-knowledge'>;
+  clock?: Clock;
   enabled?: (workspaceId: string, userId: string) => Promise<boolean>;
   now?: () => Date;
 }) {

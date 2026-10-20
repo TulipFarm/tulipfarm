@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -10,19 +9,15 @@ import {
   uuidSchema,
   type HumanActor,
 } from '@tulipfarm/access';
+import type { Clock, UsageMeter } from '@tulipfarm/memory-core/ports/runtime';
 import {
-  calculateKnowledgeEmbeddingCost,
-  knowledgeEmbeddingProfile,
+  knowledgeHostPolicy,
+  knowledgeUsageMeter,
+  systemClock,
   type KnowledgeEmbeddingsConfig,
-} from '@tulipfarm/config';
-import { recordUsage } from '@tulipfarm/extensions';
+} from '../host-ports.ts';
 import { qualified, StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
-import {
-  markKnowledgeDispatched,
-  recordKnowledgeCreditOutcome,
-  reserveKnowledgeCredits,
-} from '@tulipfarm/workspace-storage/knowledge-credits';
 import {
   embeddingDocumentRetrySchema,
   embeddingDocumentStatusSchema,
@@ -63,6 +58,8 @@ export type KnowledgeEmbeddingsOptions = {
   runtime: KnowledgeOptions['runtime'];
   config: KnowledgeEmbeddingsConfig;
   provider?: KnowledgeEmbeddingProvider;
+  clock?: Clock;
+  usageMeter?: UsageMeter<Transaction>;
   capacity?: KnowledgeEmbeddingCapacity;
   google?: GoogleKnowledge;
   slack?: SlackKnowledge;
@@ -72,7 +69,7 @@ export type KnowledgeEmbeddingsOptions = {
   gate?: KnowledgeSourceGate;
 };
 type Transaction = Parameters<ReturnType<typeof createKnowledgeStore>['bind']>[0];
-const profile = knowledgeEmbeddingProfile;
+const profile = knowledgeHostPolicy.embeddingProfile;
 const table = (tx: Transaction, name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
 const fingerprint = (text: string) => createHash('sha256').update(text).digest('hex');
 const vectorSchema = z.array(z.number().finite()).length(profile.dimensions);
@@ -121,6 +118,8 @@ export function createKnowledgeEmbeddings({
   runtime,
   config,
   provider = createKnowledgeEmbeddingProvider(config),
+  clock = systemClock,
+  usageMeter = knowledgeUsageMeter,
   capacity = async () => false,
   google,
   slack,
@@ -181,7 +180,7 @@ export function createKnowledgeEmbeddings({
             ).rows[0],
           );
         if (scope) {
-          if (scope.cancelled || scope.expires_at.getTime() <= Date.now()) throw new AccessDenied();
+          if (scope.cancelled || scope.expires_at.getTime() <= clock.now()) throw new AccessDenied();
           const { kinds, sourceIds, documentIds } = scope.filters;
           if (
             !(
@@ -573,7 +572,7 @@ export function createKnowledgeEmbeddings({
         const job = await queryJob(tx, await member(tx, userId), commandId);
         await tx.client.query(`UPDATE ${table(tx, 'search_queries')} SET cancelled=true WHERE job_id=$1`, [job.id]);
       },
-      Date.now() + 500,
+      clock.now() + 500,
     );
   }
   async function queryStatus(workspaceId: string, userId: string, commandId: string, deadlineAt?: number) {
@@ -720,7 +719,7 @@ export function createKnowledgeEmbeddings({
       );
     for (const row of expired) {
       if (row.state === 'dispatched' && row.attempt_id)
-        await recordKnowledgeCreditOutcome(tx, { kind: 'unknown', attemptId: row.attempt_id });
+        await usageMeter.outcome(tx, { kind: 'unknown', attemptId: row.attempt_id });
       await tx.client.query(
         `UPDATE ${table(tx, 'embedding_cache')} SET state=$3,lease_until=NULL WHERE profile_id=$1 AND input_hash=$2`,
         [row.profile_id, row.input_hash, row.state === 'claimed' ? 'queued' : 'unknown'],
@@ -921,7 +920,7 @@ export function createKnowledgeEmbeddings({
     const providerPicoUsd =
       known === null
         ? null
-        : calculateKnowledgeEmbeddingCost({ inputTokens: known, date: new Date().toISOString().slice(0, 10) })
+        : usageMeter.cost({ inputTokens: known, date: new Date(clock.now()).toISOString().slice(0, 10) })
             .providerPicoUsd;
     const valid =
       result.result.kind === 'success' &&
@@ -935,11 +934,11 @@ export function createKnowledgeEmbeddings({
       try {
         await transaction(workspaceId, async tx => {
           if (result.dispatch === 'undispatched')
-            await recordKnowledgeCreditOutcome(tx, { kind: 'marked-undispatched', attemptId: claim.attemptId });
+            await usageMeter.outcome(tx, { kind: 'marked-undispatched', attemptId: claim.attemptId });
           else if (providerPicoUsd === null)
-            await recordKnowledgeCreditOutcome(tx, { kind: 'unknown', attemptId: claim.attemptId });
+            await usageMeter.outcome(tx, { kind: 'unknown', attemptId: claim.attemptId });
           else
-            await recordKnowledgeCreditOutcome(tx, {
+            await usageMeter.outcome(tx, {
               kind: 'known',
               attemptId: claim.attemptId,
               providerPicoUsd,
@@ -964,7 +963,7 @@ export function createKnowledgeEmbeddings({
           );
         });
         if (result.dispatch !== 'undispatched' && known !== null && providerPicoUsd !== null)
-          void recordUsage({
+          void usageMeter.record({
             workspaceId,
             flowId: claim.job.id,
             modelId: profile.model,
@@ -972,7 +971,7 @@ export function createKnowledgeEmbeddings({
             activity: `knowledge-${claim.job.purpose}`,
             inputTokens: known,
             providerPicoUsd,
-            at: new Date(),
+            at: new Date(clock.now()),
           });
         return;
       } catch (error) {
@@ -1000,7 +999,7 @@ export function createKnowledgeEmbeddings({
                 'EPIPE',
               ].includes(code.data.code);
         if (!transient || attempt >= 2) throw error;
-        await delay(50 * (attempt + 1));
+        await clock.sleep(50 * (attempt + 1));
       }
     }
   }
@@ -1082,7 +1081,8 @@ export function createKnowledgeEmbeddings({
           ).rows[0],
         );
         if (cache.state !== 'queued' || cache.attempts >= 8) return 'failed';
-        if (signal?.aborted || (effectiveDeadlineAt !== undefined && Date.now() >= effectiveDeadlineAt)) return 'stale';
+        if (signal?.aborted || (effectiveDeadlineAt !== undefined && clock.now() >= effectiveDeadlineAt))
+          return 'stale';
         const attemptId = randomUUID();
         await tx.client.query(
           `UPDATE ${table(tx, 'embedding_cache')} SET state='claimed',attempt_id=$3,lease_until=least(clock_timestamp()+interval '2 minutes',COALESCE($4::timestamptz,'infinity')) WHERE profile_id=$1 AND input_hash=$2`,
@@ -1155,11 +1155,11 @@ export function createKnowledgeEmbeddings({
         }
         if (!refusal) {
           try {
-            const cost = calculateKnowledgeEmbeddingCost({
+            const cost = usageMeter.cost({
               inputTokens: claim.item.tokens,
-              date: new Date().toISOString().slice(0, 10),
+              date: new Date(clock.now()).toISOString().slice(0, 10),
             });
-            await reserveKnowledgeCredits(tx, {
+            await usageMeter.reserve(tx, {
               id: claim.attemptId,
               operationId: job.id,
               modelId: profile.model,
@@ -1179,9 +1179,9 @@ export function createKnowledgeEmbeddings({
             refusal = 'credits-blocked';
           }
         }
-        if (signal?.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt)) refusal = 'stale';
+        if (signal?.aborted || (deadlineAt !== undefined && clock.now() >= deadlineAt)) refusal = 'stale';
         if (refusal) {
-          if (reserved) await recordKnowledgeCreditOutcome(tx, { kind: 'undispatched', attemptId: claim.attemptId });
+          if (reserved) await usageMeter.outcome(tx, { kind: 'undispatched', attemptId: claim.attemptId });
           await tx.client.query(
             `UPDATE ${table(tx, 'embedding_cache')} SET state='queued',attempt_id=NULL,lease_until=NULL WHERE profile_id=$1 AND input_hash=$2`,
             [job.profile_id, claim.item.input_hash],
@@ -1192,7 +1192,7 @@ export function createKnowledgeEmbeddings({
           );
           return refusal;
         }
-        if (!(await markKnowledgeDispatched(tx, claim.attemptId))) throw new KnowledgeError('conflict');
+        if (!(await usageMeter.markDispatched(tx, claim.attemptId))) throw new KnowledgeError('conflict');
         await tx.client.query(
           `UPDATE ${table(tx, 'embedding_cache')} SET state='dispatched',attempts=attempts+1,lease_until=clock_timestamp()+interval '5 minutes' WHERE profile_id=$1 AND input_hash=$2`,
           [job.profile_id, claim.item.input_hash],
@@ -1203,7 +1203,7 @@ export function createKnowledgeEmbeddings({
       deadlineAt,
     );
     if (dispatch !== 'dispatch') return { disposition: dispatch };
-    if (signal?.aborted || (deadlineAt !== undefined && Date.now() >= deadlineAt)) {
+    if (signal?.aborted || (deadlineAt !== undefined && clock.now() >= deadlineAt)) {
       await persistOutcome(work.workspaceId, claim, {
         dispatch: 'undispatched',
         inputTokensUpperBound: claim.item.tokens,

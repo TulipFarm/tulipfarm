@@ -33,6 +33,14 @@
     "./parser/*": {
       "types": "./dist/parser/*.d.ts",
       "default": "./dist/parser/*.js"
+    },
+    "./ports/*": {
+      "types": "./dist/ports/*.d.ts",
+      "default": "./dist/ports/*.js"
+    },
+    "./embedding-provider": {
+      "types": "./dist/embeddings/provider.d.ts",
+      "default": "./dist/embeddings/provider.js"
     }
   },
   "scripts": {

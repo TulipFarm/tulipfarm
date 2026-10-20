@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
 import {
   AccessDenied,
   denyMcpEgress,
@@ -67,7 +68,17 @@ export function withKnowledgeSourceAuthorization<T extends Runtime>(runtime: T):
 
 // Model-facing knowledge search and evidence reads. The actor is resolved by the server;
 // a skill, tool grant or citation id never adds read authority.
-export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtime; search: Search }) {
+export function createKnowledgeAgentTools({
+  runtime,
+  search,
+  clock = systemClock,
+  callTimeoutMs = knowledgeHostPolicy.callTimeoutMs,
+}: {
+  runtime: Runtime;
+  search: Search;
+  clock?: Clock;
+  callTimeoutMs?: number;
+}) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
   async function admit(workspaceId: string, actor: HumanActor, context: KnowledgeToolContext, deadlineAt: number) {
     await store.transaction(
@@ -88,7 +99,7 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     value: unknown,
     context: KnowledgeToolContext,
   ) {
-    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = humanActorSchema.parse(actorInput);
     const input = knowledgeToolSearchSchema.parse(value);
     // Query text may be sent to the embedding provider; MCP-derived context cannot leave.
@@ -155,7 +166,7 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     value: unknown,
     context: Omit<KnowledgeToolContext, 'commandId' | 'taskFlowId'> = {},
   ) {
-    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = typeof actorInput === 'string' ? actorInput : humanActorSchema.parse(actorInput);
     const id = knowledgeCitationIdSchema.parse(value);
     const [publicationId = '', ordinal = '0'] = id.split(':');
@@ -234,6 +245,10 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     }
   }
 
-  return { search: searchKnowledge, read: readKnowledge, retrieve: createKnowledgeRetrieval({ runtime, search }) };
+  return {
+    search: searchKnowledge,
+    read: readKnowledge,
+    retrieve: createKnowledgeRetrieval({ runtime, search, clock, callTimeoutMs }),
+  };
 }
 export type KnowledgeAgentTools = ReturnType<typeof createKnowledgeAgentTools>;

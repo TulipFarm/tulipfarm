@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -11,7 +10,8 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { requireReadableFile } from '@tulipfarm/files';
-import { defaultCallTimeoutMs, knowledgeEmbeddingProfile } from '@tulipfarm/config';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
 import { qualified, StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   knowledgeCitationSchema,
@@ -93,6 +93,7 @@ const values = (actor: HumanActor, filters: KnowledgeSearchFilters) => [
   filters.documentIds,
 ];
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const knowledgeEmbeddingProfile = knowledgeHostPolicy.embeddingProfile;
 
 export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidate[]) {
   const ranked = new Map<string, { candidate: Candidate; score: number }>();
@@ -128,7 +129,7 @@ export function fuseKnowledgeCandidates(lexical: Candidate[], semantic: Candidat
     .map(({ candidate }) => candidate);
 }
 
-async function until<T>(promise: Promise<T>, deadlineAt: number): Promise<T> {
+async function until<T>(promise: Promise<T>, deadlineAt: number, clock: Clock): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -136,7 +137,7 @@ async function until<T>(promise: Promise<T>, deadlineAt: number): Promise<T> {
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new StorageUnavailableError('wait_timeout')),
-          Math.max(0, deadlineAt - Date.now()),
+          Math.max(0, deadlineAt - clock.now()),
         );
       }),
     ]);
@@ -152,6 +153,8 @@ export function createKnowledgeSearch({
   slack,
   github,
   atlassian,
+  clock = systemClock,
+  callTimeoutMs = knowledgeHostPolicy.callTimeoutMs,
 }: {
   runtime: KnowledgeOptions['runtime'];
   embeddings: ReturnType<typeof createKnowledgeEmbeddings>;
@@ -159,6 +162,8 @@ export function createKnowledgeSearch({
   slack?: SlackKnowledge;
   github?: GitHubKnowledge;
   atlassian?: AtlassianKnowledge;
+  clock?: Clock;
+  callTimeoutMs?: number;
 }) {
   const store = createKnowledgeStore({
     runtime,
@@ -509,7 +514,7 @@ export function createKnowledgeSearch({
     persist: boolean,
   ): Promise<KnowledgeSearchResult> {
     return transaction(workspaceId, userId, deadlineAt, persist, async (tx, actor) => {
-      if (session.expires_at.getTime() <= Date.now()) throw new KnowledgeError('superseded');
+      if (session.expires_at.getTime() <= clock.now()) throw new KnowledgeError('superseded');
       if (persist) {
         await tx.client.query(
           `DELETE FROM ${table(tx, 'search_sessions')} WHERE id IN (SELECT id FROM ${table(tx, 'search_sessions')} WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100)`,
@@ -633,7 +638,7 @@ export function createKnowledgeSearch({
       const freshRows = rows.filter(
         row =>
           authorized.has(row.document_id) &&
-          (row.expires_at === null || row.expires_at.getTime() > Date.now()) &&
+          (row.expires_at === null || row.expires_at.getTime() > clock.now()) &&
           (row.file_id === null || readable.get(row.file_id)),
       );
       const hits = freshRows.map(row => ({
@@ -668,7 +673,7 @@ export function createKnowledgeSearch({
         validUntil: new Date(
           Math.min(
             session.expires_at.getTime(),
-            Date.now() + 300000,
+            clock.now() + 300000,
             ...freshRows.flatMap(row => (row.expires_at ? [row.expires_at.getTime()] : [])),
           ),
         ).toISOString(),
@@ -679,11 +684,11 @@ export function createKnowledgeSearch({
     workspaceId: string,
     userId: string,
     value: unknown,
-    requestDeadline = Date.now() + defaultCallTimeoutMs,
+    requestDeadline = clock.now() + callTimeoutMs,
     signal?: AbortSignal,
     attribution?: { taskFlowId?: string; allowKeywordFallback?: boolean },
   ): Promise<KnowledgeSearchResult> {
-    const deadlineAt = Math.min(requestDeadline, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(requestDeadline, clock.now() + callTimeoutMs);
     const input = knowledgeSearchRequestSchema.parse(value);
     signal?.throwIfAborted();
     if (input.kind === 'continue') {
@@ -721,7 +726,7 @@ export function createKnowledgeSearch({
     let semanticCandidates: Candidate[] = [];
     let reason: KnowledgeSearchResult['reason'] = input.kind === 'typing' ? 'typing' : 'no-semantic-content';
     let hybrid = false;
-    if (input.kind === 'submitted' && lexicalResult.coverage.semantic > 0 && Date.now() < deadlineAt - 600) {
+    if (input.kind === 'submitted' && lexicalResult.coverage.semantic > 0 && clock.now() < deadlineAt - 600) {
       try {
         signal?.throwIfAborted();
         const prepared = await embeddings.prepareSearchQuery(workspaceId, userId, {
@@ -758,11 +763,11 @@ export function createKnowledgeSearch({
               signal?.removeEventListener('abort', cancel);
             },
           );
-          await until(pending, deadlineAt - 550);
+          await until(pending, deadlineAt - 550, clock);
           status = await embeddings.queryStatus(workspaceId, userId, prepared.commandId, deadlineAt - 500);
         } else signal?.removeEventListener('abort', cancel);
-        while (status.state === 'busy' && Date.now() < deadlineAt - 650) {
-          await delay(25);
+        while (status.state === 'busy' && clock.now() < deadlineAt - 650) {
+          await clock.sleep(25);
           status = await embeddings.queryStatus(workspaceId, userId, prepared.commandId, deadlineAt - 550);
         }
         if (status.state === 'ready' && status.vector?.some(value => value !== 0)) {
@@ -806,7 +811,7 @@ export function createKnowledgeSearch({
             ? 'complete'
             : 'partial'
           : 'keyword-only',
-      expires_at: new Date(Date.now() + 300000),
+      expires_at: new Date(clock.now() + 300000),
     };
     const result = await page(workspaceId, userId, session, 0, deadlineAt, input.kind === 'submitted');
     return input.kind === 'typing' ? { ...result, continuation: null } : result;

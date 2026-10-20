@@ -8,7 +8,8 @@ import {
   type HumanActor,
   type SourceDependency,
 } from '@tulipfarm/access';
-import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
 import { qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { knowledgeSearchFiltersSchema } from '../contracts.ts';
 import {
@@ -75,9 +76,13 @@ function unavailable(error: unknown) {
 export function createKnowledgeRetrieval({
   runtime,
   search,
+  clock = systemClock,
+  callTimeoutMs = knowledgeHostPolicy.callTimeoutMs,
 }: {
   runtime: KnowledgeOptions['runtime'];
   search: Search;
+  clock?: Clock;
+  callTimeoutMs?: number;
 }) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
 
@@ -287,7 +292,7 @@ export function createKnowledgeRetrieval({
     const input = knowledgeRetrieveInputSchema.parse(value);
     const actor = humanActorSchema.parse(actorInput);
     z.string().min(1).max(256).parse(context.commandId);
-    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     context.signal?.throwIfAborted();
     const branches: KnowledgeRetrievalBranch[] =
       input.action === 'search' ? [{ ...input, reason: 'Initial search' }] : input.branches;

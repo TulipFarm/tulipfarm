@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
+import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -94,7 +95,8 @@ const denial = (error: unknown) =>
 export function createGoogleKnowledge({
   runtime,
   provider,
-  now = Date.now,
+  clock = systemClock,
+  now = () => clock.now(),
   gate,
 }: { runtime: Runtime; provider: GoogleCorpusProvider } & EngineClock) {
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
@@ -867,7 +869,7 @@ export function createGoogleKnowledge({
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale';
       if (s.lease_token) return 'busy';
-      if (s.next_attempt_at.getTime() > Date.now()) return 'busy';
+      if (s.next_attempt_at.getTime() > clock.now()) return 'busy';
       await tx.client.query(
         `UPDATE ${table(tx, 'google_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
         [s.source_id, token],

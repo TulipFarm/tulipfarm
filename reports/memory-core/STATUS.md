@@ -1,6 +1,22 @@
 # Memory-core Phase 1 status
 
-**M0 complete in `f276abf`; M1 committed as `fbb1642`. M2 complete; M3 is next.**
+**M0 complete in `f276abf`; M1 in `fbb1642`; M2 in `667a34f`. M3 is complete.**
+
+M3 introduces the provider, summarizer, clock, telemetry, feature-flag, and
+usage-meter ports. All 34 scoped build/typecheck tasks, the five serial unit
+suites (615 tests: 614 passes and one original skip), focused port checks,
+and lint passed. All 222 integration entry points match the refined M0
+policy: 1,239 tests, 1,131 passes, 102 observed known failures, six original
+skips, no cancellations. Both frozen ranking snapshots are unchanged.
+The known Temporal retry assertion passed this run, as its proved flaky
+rule permits.
+
+The audit comparison's generated-label/order variation reproduced in all
+five M3 and all five detached M2 runs. Complete 104-row comparisons preserve
+every field, multiplicity, identity relationship, and timestamp ordering.
+Only the proved random-UUID row ordering varies; the same line-350
+failure remains required. All 78 policy checks pass.
+See [M3](M3.md) and the annotated [M0](M0.md).
 
 M2 moves all parser and chunking implementations into core, retains all old
 Knowledge exports, and removes the Conversations-to-Knowledge runtime edge.
