@@ -21,6 +21,18 @@
     "./compaction-contracts": {
       "types": "./dist/contracts/compaction.d.ts",
       "default": "./dist/contracts/compaction.js"
+    },
+    "./document-contracts": {
+      "types": "./dist/document-contracts.d.ts",
+      "default": "./dist/document-contracts.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "default": "./dist/parser.js"
+    },
+    "./parser/*": {
+      "types": "./dist/parser/*.d.ts",
+      "default": "./dist/parser/*.js"
     }
   },
   "scripts": {
@@ -29,10 +41,14 @@
     "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
+    "@firecrawl/anydoc": "0.2.4",
+    "js-tiktoken": "1.0.21",
+    "pdf-lib": "1.17.1",
     "zod": "4.3.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",
-    "@types/node": "26.6.3"
+    "@types/node": "26.6.3",
+    "jszip": "3.10.1"
   }
 }

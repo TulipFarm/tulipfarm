@@ -51,7 +51,6 @@
     "test:integration": "node --test test/storage.integration.mjs test/local.integration.mjs"
   },
   "dependencies": {
-    "@firecrawl/anydoc": "0.2.4",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
@@ -61,13 +60,14 @@
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "js-tiktoken": "1.0.21",
-    "pdf-lib": "1.17.1",
     "pg": "8.23.0",
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@firecrawl/anydoc": "0.2.4",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",
-    "@types/pg": "8.20.0"
+    "@types/pg": "8.20.0",
+    "pdf-lib": "1.17.1"
   }
 }

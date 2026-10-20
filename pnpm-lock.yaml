@@ -789,9 +789,6 @@ importers:
       '@tulipfarm/google-workspace':
         specifier: workspace:*
         version: link:../google-workspace
-      '@tulipfarm/knowledge':
-        specifier: workspace:*
-        version: link:../knowledge
       '@tulipfarm/memory-core':
         specifier: workspace:*
         version: link:../memory-core
@@ -820,6 +817,9 @@ importers:
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
+      '@tulipfarm/knowledge':
+        specifier: workspace:*
+        version: link:../knowledge
       '@tulipfarm/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
@@ -1000,9 +1000,6 @@ importers:
 
   packages/knowledge:
     dependencies:
-      '@firecrawl/anydoc':
-        specifier: 0.2.4
-        version: 0.2.4
       '@tulipfarm/access':
         specifier: workspace:*
         version: link:../access
@@ -1030,9 +1027,6 @@ importers:
       js-tiktoken:
         specifier: 1.0.21
         version: 1.0.21
-      pdf-lib:
-        specifier: 1.17.1
-        version: 1.17.1
       pg:
         specifier: 8.23.0
         version: 8.23.0
@@ -1040,6 +1034,9 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
+      '@firecrawl/anydoc':
+        specifier: 0.2.4
+        version: 0.2.4
       '@tulipfarm/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
@@ -1049,9 +1046,21 @@ importers:
       '@types/pg':
         specifier: 8.20.0
         version: 8.20.0
+      pdf-lib:
+        specifier: 1.17.1
+        version: 1.17.1
 
   packages/memory-core:
     dependencies:
+      '@firecrawl/anydoc':
+        specifier: 0.2.4
+        version: 0.2.4
+      js-tiktoken:
+        specifier: 1.0.21
+        version: 1.0.21
+      pdf-lib:
+        specifier: 1.17.1
+        version: 1.17.1
       zod:
         specifier: 4.3.6
         version: 4.3.6
@@ -1062,6 +1071,9 @@ importers:
       '@types/node':
         specifier: 26.6.3
         version: 26.6.3
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
 
   packages/observability:
     dependencies:

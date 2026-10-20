@@ -1,6 +1,15 @@
 # Memory-core Phase 1 status
 
-**M0 complete in `f276abf`. M1 complete; M2 is next.**
+**M0 complete in `f276abf`; M1 committed as `fbb1642`. M2 complete; M3 is next.**
+
+M2 moves all parser and chunking implementations into core, retains all old
+Knowledge exports, and removes the Conversations-to-Knowledge runtime edge.
+All 204 moved parser tests run from core with unchanged assertions. Exact
+move checks, all five serial unit suites, scoped build/typecheck, and lint
+pass. All 222 integration entry points match the refined M0 policy:
+1,239 tests, 1,130 passes, 103 observed known failures, six original skips,
+and no cancellations. Both ranking snapshots are unchanged.
+See [M2](M2.md) for changes, benchmarks, and completed receipts.
 
 M1 creates `@tulipfarm/memory-core`, moves the three browser-safe contract
 implementations without changing their definitions, keeps all old export
@@ -42,6 +51,6 @@ Required behavior, schema, permission, or API changes and the M4/M5
 security-review pauses remain hard stops.
 
 The temporary `/tmp/memcore-m0-check` worktree was removed after its evidence
-was copied and verified. The owned Compose project, volumes, and network
-were removed (`M1-final-cleanup.tap`). No remote action was performed and
-no earlier commit was amended.
+was copied and verified. M1's owned Compose project was removed
+(`M1-final-cleanup.tap`); it was restored for M2's integration comparison.
+No remote action was performed and no earlier commit was amended.

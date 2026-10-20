@@ -183,7 +183,6 @@
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
-    "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
@@ -195,6 +194,7 @@
   },
   "devDependencies": {
     "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3"
   }

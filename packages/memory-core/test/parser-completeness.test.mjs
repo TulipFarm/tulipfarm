@@ -13,14 +13,14 @@ import {
   symbolDocx,
   nativeHeading,
 } from './fixtures/parser-completeness.mjs';
-import { pdf, textStream } from '../../conversations/test/knowledge-extraction-fixtures.mjs';
+import { pdf, textStream } from './fixtures/knowledge-extraction-fixtures.mjs';
 import { docx, pptx, officeParts, zip } from './fixtures/parser-documents.mjs';
 import {
   numberedList,
   drawingTextBox,
   strictAdmissionFixtures,
   rewriteDocx,
-} from '../../conversations/test/knowledge-extraction-admission-fixtures.mjs';
+} from './fixtures/knowledge-extraction-admission-fixtures.mjs';
 
 const parse = (bytes, filename) => parseKnowledgeDocument({ bytes, filename, mediaType: 'application/octet-stream' });
 const failure = code => error => error instanceof KnowledgeParseError && error.code === code;

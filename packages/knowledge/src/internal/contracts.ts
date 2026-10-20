@@ -1,24 +1,8 @@
 import { z } from 'zod';
 import { uuidSchema, sourceDependenciesSchema, knowledgeSourceDependencySchema } from '@tulipfarm/access';
+import { chunkSchema, knowledgeLimits } from '@tulipfarm/memory-core/document-contracts';
 
-export const knowledgeLimits = Object.freeze({
-  documents: 10_000,
-  revisionsPerDocument: 32,
-  sources: 100,
-  originalBytes: 10 * 1024 * 1024,
-  normalizedBytes: 10 * 1024 * 1024,
-  retainedBytes: 1024 * 1024 * 1024,
-  pages: 500,
-  tokens: 250_000,
-  chunksPerRevision: 4096,
-  retainedChunks: 150_000,
-  chunkBytes: 32_768,
-  chunkTokens: 8192,
-  publicationsPerRevision: 8,
-  attemptsPerRevision: 8,
-  permissionAgeMs: 300_000,
-  retentionDays: 30,
-});
+export { chunkSchema, knowledgeLimits };
 export const providerCoverage = Object.freeze({
   conversation: {
     content: 'closed chat recap',
@@ -106,18 +90,6 @@ export const revisionInput = z.strictObject({
   original: originalSchema,
   parserProfile: parserProfileSchema,
   sources: sourceDependenciesSchema.refine(value => Buffer.byteLength(JSON.stringify(value)) <= 65536).default([]),
-});
-export const chunkSchema = z.strictObject({
-  heading: z.string().max(2048),
-  text: z
-    .string()
-    .min(1)
-    .refine(text => Buffer.byteLength(text) <= knowledgeLimits.chunkBytes),
-  tokens: z.number().int().min(1).max(knowledgeLimits.chunkTokens),
-  offset: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('passage') }),
-    z.strictObject({ kind: z.literal('page'), page: z.number().int().min(1).max(knowledgeLimits.pages) }),
-  ]),
 });
 export const lexicalInput = z
   .strictObject({

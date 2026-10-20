@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { getEncoding } from 'js-tiktoken';
 import { parseKnowledgeDocument, KnowledgeParseError } from '../dist/parser.js';
-import { chunkMarkdown } from '../dist/internal/parser/chunks.js';
+import { chunkMarkdown } from '../dist/parser/chunks.js';
 import {
   docx,
   xlsx,
@@ -16,10 +16,7 @@ import {
   prefixedPdf,
   officeParts,
 } from './fixtures/parser-documents.mjs';
-import {
-  strictAdmissionFixtures,
-  rewriteDocx,
-} from '../../conversations/test/knowledge-extraction-admission-fixtures.mjs';
+import { strictAdmissionFixtures, rewriteDocx } from './fixtures/knowledge-extraction-admission-fixtures.mjs';
 
 const encoding = getEncoding('cl100k_base');
 const parse = (bytes, filename = 'policy.md', mediaType = 'text/markdown') =>
