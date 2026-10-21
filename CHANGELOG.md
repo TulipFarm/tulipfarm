@@ -10,6 +10,8 @@ One version identifies all apps and images of a release.
 
 ### Added
 
+- The `workspace.created` hook event carries `workspaceName`, the workspace's
+  display name.
 - Leaf workspace packages: typescript-config, build-info, config, keyring,
   content-budget, access, observability, provider-mcp, slack-presentation,
   workflow-snippets, files, workspace-storage, integrations.

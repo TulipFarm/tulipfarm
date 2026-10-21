@@ -344,7 +344,7 @@ test('every lifecycle hook reaches its subscriber, and a failing subscriber is l
   });
   const events = {
     'user.signed-up': { userId: 'u', email: 'a@example.com', name: 'A' },
-    'workspace.created': { workspaceId: 'w', userId: 'u' },
+    'workspace.created': { workspaceId: 'w', workspaceName: 'W', userId: 'u' },
     'member.invited': { workspaceId: 'w', invitationId: 'i', invitedByUserId: 'u', replacesInvitationId: null },
     'task.completed': { workspaceId: 'w', taskId: 't', outcome: 'completed' },
     'usage.recorded': {

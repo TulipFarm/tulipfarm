@@ -182,10 +182,10 @@ test('workspace.created is emitted once, after the workspace becomes ready', { t
   await setup.initialize(workspace.id, setup.baseline);
   assert.deepEqual(await setup.state(workspace), { stage: 'ready', errorCode: null, ready: true });
   await setup.initialize(workspace.id, setup.baseline);
-  const { created_by: userId } = (
-    await setup.db.platform.query('SELECT created_by FROM app.workspaces WHERE id = $1', [workspace.id])
+  const { created_by: userId, name: workspaceName } = (
+    await setup.db.platform.query('SELECT created_by, name FROM app.workspaces WHERE id = $1', [workspace.id])
   ).rows[0];
-  assert.deepEqual(created, [{ workspaceId: workspace.id, userId }]);
+  assert.deepEqual(created, [{ workspaceId: workspace.id, workspaceName, userId }]);
 });
 
 test(

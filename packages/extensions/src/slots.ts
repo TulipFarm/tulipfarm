@@ -121,13 +121,14 @@ export type FlagProvider = {
 
 /**
  * Lifecycle events emitted by TulipFarm, each after its change commits. Payloads carry identifiers,
- * not content; `user.signed-up` alone carries the new user's email and name, for lifecycle email.
+ * not content; `user.signed-up` alone carries the new user's email and name, for lifecycle email, and
+ * `workspace.created` the workspace's display name.
  */
 export type HookEvents = {
   /** A user account was created. */
   'user.signed-up': { readonly userId: string; readonly email: string; readonly name: string };
-  /** A workspace finished setup and is ready. `userId` created it. */
-  'workspace.created': { readonly workspaceId: string; readonly userId: string };
+  /** A workspace finished setup and is ready. `userId` created it; `workspaceName` is its display name. */
+  'workspace.created': { readonly workspaceId: string; readonly workspaceName: string; readonly userId: string };
   /**
    * An email invitation was issued. `invitedByUserId` sent it; `replacesInvitationId` is the
    * revoked invitation when this is a resend.

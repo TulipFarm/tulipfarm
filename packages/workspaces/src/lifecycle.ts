@@ -180,13 +180,14 @@ export function createWorkspaceMaintenance(options: { migrations: readonly Migra
             await assertPublishedTarget(transaction, workspaceId);
             const ready = await transaction.query(
               `UPDATE app.workspaces SET soul_commit = $2, soul_bucket = $3, soul_key = $4, ready_at = CURRENT_TIMESTAMP
-              WHERE id = $1 AND ready_at IS NULL`,
+              WHERE id = $1 AND ready_at IS NULL RETURNING name`,
               [workspaceId, soul.commit, soul.bucket, soul.key],
             );
-            if (ready.rowCount)
+            const workspaceName = (ready.rows[0] as { name: string } | undefined)?.name;
+            if (workspaceName !== undefined)
               afterCommit(
                 transaction,
-                () => void emitHook('workspace.created', { workspaceId, userId: seed.createdBy }),
+                () => void emitHook('workspace.created', { workspaceId, workspaceName, userId: seed.createdBy }),
               );
             await transaction.query(
               `UPDATE app.workspace_storage SET stage = 'ready', error_code = NULL, updated_at = CURRENT_TIMESTAMP

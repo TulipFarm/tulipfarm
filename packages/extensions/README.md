@@ -145,12 +145,13 @@ Each event fires once its change has committed; a rolled-back change fires
 nothing. Emitters do not wait for subscribers, and `emitHook` never rejects: a
 failing subscriber is logged (`extension_hook_failed`) and sent to the error
 reporters. Delivery is in-process and at most once per commit, so a crash right
-after commit can drop an event. Payloads carry ids, not content.
+after commit can drop an event. Payloads carry ids, not content, except the
+names and email noted below.
 
 | Event               | Payload                                                                                                                         | Emitted by                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `user.signed-up`    | `userId`, `email`, `name` (the only PII, for lifecycle email)                                                                   | api, after better-auth creates the user                                                    |
-| `workspace.created` | `workspaceId`, `userId` (creator)                                                                                               | storage worker, when setup marks the workspace ready                                       |
+| `workspace.created` | `workspaceId`, `workspaceName` (display name), `userId` (creator)                                                               | storage worker, when setup marks the workspace ready                                       |
 | `member.invited`    | `workspaceId`, `invitationId`, `invitedByUserId`, `replacesInvitationId` (revoked one on resend, else `null`)                   | api, when an email invitation is issued or resent                                          |
 | `task.completed`    | `workspaceId`, `taskId`, `outcome` (`completed` \| `failed`)                                                                    | worker, on a task's terminal transition; a retried task can complete again                 |
 | `usage.recorded`    | `workspaceId`, `usageId` (attempt id), `flowId` (`null` for workspace knowledge work), `modelId`, `activity`, `providerPicoUsd` | api and worker, when a model attempt's cost settles (chat, agent, table search, knowledge) |
