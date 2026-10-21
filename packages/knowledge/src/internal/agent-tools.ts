@@ -1,15 +1,12 @@
 import { z } from 'zod';
-import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
-import {
-  AccessDenied,
-  denyMcpEgress,
-  humanActorSchema,
-  type HumanActor,
-  type SourceDependency,
-} from '@tulipfarm/access';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeHostPolicy, systemClock } from '../host-ports.ts';
+import { AccessDenied, humanActorSchema, type HumanActor, type SourceDependency } from '../authorization/contracts.ts';
+import { requireAccess } from '@tulipfarm/memory-core/ports/authorizer';
+import { createKnowledgeAuthorizer, knowledgeEgressPolicy } from '../authorization/authorizer.ts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { KnowledgeError, citationSchema } from './contracts.ts';
-import { createKnowledgeStore, requireTaskRun, type KnowledgeOptions } from './store.ts';
+import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
 import type { createKnowledgeSearch } from './search.ts';
 import { knowledgeSearchFiltersSchema } from '../contracts.ts';
@@ -67,7 +64,17 @@ export function withKnowledgeSourceAuthorization<T extends Runtime>(runtime: T):
 
 // Model-facing knowledge search and evidence reads. The actor is resolved by the server;
 // a skill, tool grant or citation id never adds read authority.
-export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtime; search: Search }) {
+export function createKnowledgeAgentTools({
+  runtime,
+  search,
+  clock = systemClock,
+  callTimeoutMs = knowledgeHostPolicy.callTimeoutMs,
+}: {
+  runtime: Runtime;
+  search: Search;
+  clock?: Clock;
+  callTimeoutMs?: number;
+}) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
   async function admit(workspaceId: string, actor: HumanActor, context: KnowledgeToolContext, deadlineAt: number) {
     await store.transaction(
@@ -76,7 +83,7 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
       false,
       async (tx, human) => {
         if (human.userId !== actor.userId || human.membershipId !== actor.membershipId) throw new AccessDenied();
-        if (context.runId) await requireTaskRun(tx, human, context.runId);
+        if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
       },
       { deadlineAt, signal: context.signal },
     );
@@ -88,11 +95,11 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     value: unknown,
     context: KnowledgeToolContext,
   ) {
-    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = humanActorSchema.parse(actorInput);
     const input = knowledgeToolSearchSchema.parse(value);
     // Query text may be sent to the embedding provider; MCP-derived context cannot leave.
-    denyMcpEgress();
+    knowledgeEgressPolicy.deny();
     await admit(workspaceId, actor, context, deadlineAt);
     const filters = knowledgeSearchFiltersSchema.parse(input.kind ? { kinds: [input.kind] } : {});
     const found = await search.search(
@@ -155,7 +162,7 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     value: unknown,
     context: Omit<KnowledgeToolContext, 'commandId' | 'taskFlowId'> = {},
   ) {
-    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, Date.now() + defaultCallTimeoutMs);
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, clock.now() + callTimeoutMs);
     const actor = typeof actorInput === 'string' ? actorInput : humanActorSchema.parse(actorInput);
     const id = knowledgeCitationIdSchema.parse(value);
     const [publicationId = '', ordinal = '0'] = id.split(':');
@@ -167,7 +174,7 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
         async (tx, human) => {
           if (typeof actor !== 'string' && (human.userId !== actor.userId || human.membershipId !== actor.membershipId))
             throw new AccessDenied();
-          if (context.runId) await requireTaskRun(tx, human, context.runId);
+          if (context.runId) requireAccess(await createKnowledgeAuthorizer(tx, human).decide('task', context.runId));
           const row = z
             .object({
               document_id: z.uuid(),
@@ -234,6 +241,10 @@ export function createKnowledgeAgentTools({ runtime, search }: { runtime: Runtim
     }
   }
 
-  return { search: searchKnowledge, read: readKnowledge, retrieve: createKnowledgeRetrieval({ runtime, search }) };
+  return {
+    search: searchKnowledge,
+    read: readKnowledge,
+    retrieve: createKnowledgeRetrieval({ runtime, search, clock, callTimeoutMs }),
+  };
 }
 export type KnowledgeAgentTools = ReturnType<typeof createKnowledgeAgentTools>;

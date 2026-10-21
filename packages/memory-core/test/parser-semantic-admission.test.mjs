@@ -5,7 +5,7 @@ import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { KnowledgeParseError, parseKnowledgeDocument } from '../dist/parser.js';
 import { annotationPdf } from './fixtures/parser-completeness.mjs';
 import { odt, officeParts, zip } from './fixtures/parser-documents.mjs';
-import { formPdf } from '../../conversations/test/knowledge-extraction-admission-fixtures.mjs';
+import { formPdf } from './fixtures/knowledge-extraction-admission-fixtures.mjs';
 
 const parse = (bytes, extension) =>
   parseKnowledgeDocument({ bytes, filename: `qualification.${extension}`, mediaType: 'application/octet-stream' });

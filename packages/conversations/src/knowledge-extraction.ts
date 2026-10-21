@@ -1,4 +1,4 @@
-import { parseKnowledgeDocument } from '@tulipfarm/knowledge/parser';
+import { parseKnowledgeDocument } from '@tulipfarm/memory-core/parser';
 
 export class KnowledgeExtractionError extends Error {
   readonly code: 'unsupported-file' | 'unreadable-file';

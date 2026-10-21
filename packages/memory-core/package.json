@@ -1,0 +1,96 @@
+{
+  "name": "@tulipfarm/memory-core",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist",
+    "testing"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/knowledge.d.ts",
+      "default": "./dist/contracts/knowledge.js"
+    },
+    "./personal-memory-contracts": {
+      "types": "./dist/contracts/personal-memory.d.ts",
+      "default": "./dist/contracts/personal-memory.js"
+    },
+    "./compaction-contracts": {
+      "types": "./dist/contracts/compaction.d.ts",
+      "default": "./dist/contracts/compaction.js"
+    },
+    "./document-contracts": {
+      "types": "./dist/document-contracts.d.ts",
+      "default": "./dist/document-contracts.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "default": "./dist/parser.js"
+    },
+    "./parser/*": {
+      "types": "./dist/parser/*.d.ts",
+      "default": "./dist/parser/*.js"
+    },
+    "./ports/*": {
+      "types": "./dist/ports/*.d.ts",
+      "default": "./dist/ports/*.js"
+    },
+    "./embedding-provider": {
+      "types": "./dist/embeddings/provider.d.ts",
+      "default": "./dist/embeddings/provider.js"
+    },
+    "./embedding-contracts": {
+      "types": "./dist/contracts/embeddings.d.ts",
+      "default": "./dist/contracts/embeddings.js"
+    },
+    "./documents/*": {
+      "types": "./dist/documents/*.d.ts",
+      "default": "./dist/documents/*.js"
+    },
+    "./search": {
+      "types": "./dist/search/search.d.ts",
+      "default": "./dist/search/search.js"
+    },
+    "./retrieval": {
+      "types": "./dist/retrieval/retrieval.d.ts",
+      "default": "./dist/retrieval/retrieval.js"
+    },
+    "./retrieval-contracts": {
+      "types": "./dist/contracts/retrieval.d.ts",
+      "default": "./dist/contracts/retrieval.js"
+    },
+    "./embeddings": {
+      "types": "./dist/embeddings/engine.d.ts",
+      "default": "./dist/embeddings/engine.js"
+    },
+    "./adapters/*": {
+      "types": "./dist/adapters/*.d.ts",
+      "default": "./dist/adapters/*.js"
+    },
+    "./testing/memory-conformance": "./testing/memory-conformance.mjs",
+    "./memory/*": {
+      "types": "./dist/memory/*.d.ts",
+      "default": "./dist/memory/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@firecrawl/anydoc": "0.2.4",
+    "js-tiktoken": "1.0.21",
+    "pdf-lib": "1.17.1",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "jszip": "3.10.1"
+  }
+}

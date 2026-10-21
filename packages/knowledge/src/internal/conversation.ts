@@ -14,6 +14,8 @@ import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { sqlExternalAuthority } from './external-authority.ts';
 import type { createKnowledgeEmbeddings } from './embeddings.ts';
 import { requireConversationReader } from './conversation-authority.ts';
+import type { Clock } from '@tulipfarm/memory-core/ports/runtime';
+import { systemClock } from '../host-ports.ts';
 
 export const conversationKnowledgeInputSchema = z.strictObject({
   workspaceId: z.uuid(),
@@ -45,8 +47,10 @@ const identity = (text: string) => {
 export function createConversationKnowledge({
   runtime,
   embeddings,
+  clock = systemClock,
 }: Pick<KnowledgeOptions, 'runtime'> & {
   embeddings?: Pick<ReturnType<typeof createKnowledgeEmbeddings>, 'due' | 'resumeDocument'>;
+  clock?: Clock;
 }) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
   type Transaction = Parameters<typeof store.bind>[0];
@@ -220,7 +224,7 @@ export function createConversationKnowledge({
         heading: row.heading,
         citation,
         original: { kind: 'conversation' as const, conversationId: row.conversation_id },
-        validUntil: new Date(Date.now() + knowledgeLimits.permissionAgeMs).toISOString(),
+        validUntil: new Date(clock.now() + knowledgeLimits.permissionAgeMs).toISOString(),
       };
     });
   }

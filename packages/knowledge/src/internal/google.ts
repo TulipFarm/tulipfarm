@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
+import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
+import { createGoogleCorpusAdapter } from '../corpus-adapters.ts';
 import {
   AccessDenied,
   currentMember,
@@ -94,9 +96,11 @@ const denial = (error: unknown) =>
 export function createGoogleKnowledge({
   runtime,
   provider,
-  now = Date.now,
+  clock = systemClock,
+  now = () => clock.now(),
   gate,
 }: { runtime: Runtime; provider: GoogleCorpusProvider } & EngineClock) {
+  const corpus = createGoogleCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'google') throw new AccessDenied();
     if (
@@ -431,7 +435,7 @@ export function createGoogleKnowledge({
     });
     let observed: GoogleCorpusObservation;
     try {
-      observed = await provider.check(workspaceId, actor.userId, captured.binding, captured.s.selection, nativeId);
+      observed = await corpus.permissions(workspaceId, actor.userId, captured.binding, captured.s.selection, nativeId);
     } catch (error) {
       if (denial(error))
         await transaction(workspaceId, async tx => {
@@ -668,7 +672,7 @@ export function createGoogleKnowledge({
       }
     }
     try {
-      const read = await provider.read(work.workspaceId, s.owner_user_id, s.binding, s.selection, item.nativeId);
+      const read = await corpus.fetch(work.workspaceId, s.owner_user_id, s.binding, s.selection, item.nativeId);
       if (read.sourceRevision !== item.sourceRevision) throw new GoogleCorpusError('source-changed');
       if (read.title.length > 512 || read.bytes.byteLength > knowledgeLimits.originalBytes)
         throw new KnowledgeError('quota');
@@ -867,7 +871,7 @@ export function createGoogleKnowledge({
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale';
       if (s.lease_token) return 'busy';
-      if (s.next_attempt_at.getTime() > Date.now()) return 'busy';
+      if (s.next_attempt_at.getTime() > clock.now()) return 'busy';
       await tx.client.query(
         `UPDATE ${table(tx, 'google_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
         [s.source_id, token],
@@ -890,7 +894,7 @@ export function createGoogleKnowledge({
             : null;
         let page;
         try {
-          page = await provider.list(
+          page = await corpus.discover(
             work.workspaceId,
             claim.owner_user_id,
             claim.binding,
@@ -941,7 +945,7 @@ export function createGoogleKnowledge({
         );
         for (const row of rows) {
           try {
-            const observed = await provider.check(
+            const observed = await corpus.permissions(
               work.workspaceId,
               claim.owner_user_id,
               claim.binding,

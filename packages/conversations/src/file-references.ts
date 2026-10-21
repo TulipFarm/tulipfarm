@@ -19,7 +19,7 @@ import {
 } from '@tulipfarm/google-workspace/public-contracts';
 import { GoogleLifecycleError } from '@tulipfarm/google-workspace/operations';
 import { FileError, fileRole, requireReadableFile, type createFiles } from '@tulipfarm/files';
-import { KnowledgeParseError, parseKnowledgeDocument } from '@tulipfarm/knowledge/parser';
+import { KnowledgeParseError, parseKnowledgeDocument } from '@tulipfarm/memory-core/parser';
 import { ConversationConflict } from './contracts.ts';
 import { projectReaders } from './project-membership.ts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';

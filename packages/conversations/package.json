@@ -183,7 +183,8 @@
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
-    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/memory-core": "workspace:*",
+    "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "docx": "9.9.0",
@@ -194,6 +195,7 @@
   },
   "devDependencies": {
     "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3"
   }

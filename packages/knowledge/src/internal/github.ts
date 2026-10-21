@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { z } from 'zod';
+import { createGitHubCorpusAdapter } from '../corpus-adapters.ts';
 import {
   AccessDenied,
   currentMember,
@@ -11,7 +12,8 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { recordKnowledgeImport } from '@tulipfarm/observability';
+import type { Telemetry } from '@tulipfarm/memory-core/ports/runtime';
+import { knowledgeTelemetry, systemClock } from '../host-ports.ts';
 import {
   GitHubCorpusError,
   githubCorpusBindingSchema,
@@ -118,14 +120,18 @@ function windowValid(after: string, now: number) {
 export function createGitHubKnowledge({
   runtime,
   provider,
-  now = Date.now,
+  clock = systemClock,
+  now = () => clock.now(),
+  telemetry = knowledgeTelemetry,
   gate,
   parseDocument = parseKnowledgeDocument,
 }: {
   runtime: Runtime;
   provider: GitHubCorpusProvider;
   parseDocument?: typeof parseKnowledgeDocument;
+  telemetry?: Telemetry;
 } & EngineClock) {
+  const corpus = createGitHubCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'github') throw new AccessDenied();
     if (
@@ -548,7 +554,7 @@ export function createGitHubKnowledge({
     let failure: GitHubCorpusError | null = null;
     for (const binding of captured.bindings) {
       try {
-        const observed = await provider.access(workspaceId, actor.userId, binding, repositoryId);
+        const observed = await corpus.permissions(workspaceId, actor.userId, binding, repositoryId);
         if (observed.repositoryId !== repositoryId) throw new GitHubCorpusError('invalid-response');
         if (!observed.readable) {
           failure = new GitHubCorpusError('forbidden');
@@ -796,7 +802,7 @@ export function createGitHubKnowledge({
       return;
     try {
       await ensureOwnerProof(work, token, item.repositoryId);
-      const read = await provider.read(
+      const read = await corpus.fetch(
         work.workspaceId,
         s.owner_user_id,
         s.binding,
@@ -915,7 +921,7 @@ export function createGitHubKnowledge({
           [s.source_id, item.nativeId],
         );
       });
-      recordKnowledgeImport('item', 'ready');
+      telemetry.recordImport('item', 'ready');
     } catch (error) {
       if (error instanceof KnowledgeError && error.code === 'superseded') throw error;
       await fenced(work, token, async tx => {
@@ -949,7 +955,7 @@ export function createGitHubKnowledge({
           ],
         );
       });
-      recordKnowledgeImport(
+      telemetry.recordImport(
         'item',
         'error',
         error instanceof KnowledgeParseError
@@ -976,7 +982,7 @@ export function createGitHubKnowledge({
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
-      if (s.next_attempt_at.getTime() > Date.now()) return 'busy' as const;
+      if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
       await tx.client.query(
         `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
         [s.source_id, token],
@@ -1007,7 +1013,7 @@ export function createGitHubKnowledge({
           }
           if (accessible) {
             try {
-              const page = await provider.list(
+              const page = await corpus.discover(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,
@@ -1098,7 +1104,7 @@ export function createGitHubKnowledge({
                     title: row.native_id,
                     canonicalURL: '',
                     sourceRevision: row.source_revision,
-                    accessedAt: new Date().toISOString(),
+                    accessedAt: new Date(clock.now()).toISOString(),
                     coverage: 'excluded',
                   });
                   await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
@@ -1106,7 +1112,7 @@ export function createGitHubKnowledge({
                   continue;
                 }
               }
-              const observed = await provider.read(
+              const observed = await corpus.fetch(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,
@@ -1140,7 +1146,7 @@ export function createGitHubKnowledge({
               [claim.source_id, initialCursor()],
             );
           });
-          recordKnowledgeImport('source', 'ready');
+          telemetry.recordImport('source', 'ready');
           return { disposition: 'ready' };
         }
       }
@@ -1183,7 +1189,7 @@ export function createGitHubKnowledge({
         return { disposition: 'retry' as const };
       });
       if (result.disposition === 'retry')
-        recordKnowledgeImport(
+        telemetry.recordImport(
           'source',
           'error',
           error instanceof GitHubCorpusError || error instanceof KnowledgeError

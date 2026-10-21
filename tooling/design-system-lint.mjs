@@ -1,3 +1,5 @@
+import { memoryCoreBoundary } from './memory-core-lint.mjs';
+
 const nativeControls = new Map([
   ['button', 'Button'],
   ['input', 'Input or Checkbox'],
@@ -22,6 +24,7 @@ const nativeControls = new Map([
 export default {
   meta: { name: 'tulipfarm' },
   rules: {
+    'memory-core-boundary': memoryCoreBoundary,
     'product-copy': {
       meta: { type: 'problem', schema: [] },
       create(context) {

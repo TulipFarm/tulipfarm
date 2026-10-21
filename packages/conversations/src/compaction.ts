@@ -1,3 +1,5 @@
+import { transcriptSlices as slices, transcriptChunks } from '@tulipfarm/memory-core/memory/transcript';
+export { transcriptChunks } from '@tulipfarm/memory-core/memory/transcript';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -17,20 +19,18 @@ import {
   requireResultSources,
 } from './source-access.ts';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
+import type { ChatMessage, ContextMeasure, ContextMessage, Summarizer } from '@tulipfarm/memory-core/ports/summarizer';
+export type {
+  ChatMessage,
+  ContextMessage,
+  EffectiveCompactionPolicy,
+  ContextMeasure,
+  CompactionPurpose,
+} from '@tulipfarm/memory-core/ports/summarizer';
 
 export const compactionPromptLimit = 2000;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 
-export type ChatMessage = { role: 'user' | 'assistant'; text: string };
-export type ContextMessage = ChatMessage & { id: string; acceptedSequence: number };
-export type EffectiveCompactionPolicy = {
-  automatic: boolean;
-  triggerPercent: number;
-  targetPercent: number;
-  outputPrompt: string | null;
-  revision: number;
-  families: string[];
-};
 export type ReplyCompactionFence = {
   workspaceId: string;
   conversationId: string;
@@ -39,32 +39,9 @@ export type ReplyCompactionFence = {
   epoch: number;
 };
 export type CompactionFence = ReplyCompactionFence | MaintenanceFence;
-export type ContextMeasure = { tokens: number; window: number };
-export type CompactionPurpose = 'summary' | 'handoff' | 'memory';
 
 /** Worker-supplied model access. Conversations owns what is compacted; the compactor owns pricing, routing, and metering. */
-export type ConversationCompactor = {
-  policy(tx: AuthorizationTransaction): Promise<EffectiveCompactionPolicy>;
-  /** Estimated input tokens for the chat responder's first request, or null when the turn model cannot be measured. */
-  measure(input: {
-    fence: ReplyCompactionFence;
-    model: string;
-    messages: readonly ChatMessage[];
-    project?: unknown;
-    generateTitle: boolean;
-    timeZone: string | null;
-  }): Promise<ContextMeasure | null>;
-  /** Smallest input byte budget among the given summary families. */
-  window(families: readonly string[]): Promise<number>;
-  summarize(input: {
-    fence: CompactionFence;
-    purpose: CompactionPurpose;
-    step: number;
-    system: string;
-    messages: readonly ChatMessage[];
-    families: readonly string[];
-  }): Promise<{ text: string; familyId: string; fallbackFrom: string | null }>;
-};
+export type ConversationCompactor = Summarizer<AuthorizationTransaction, CompactionFence, ReplyCompactionFence>;
 
 const line = z.string().trim().max(1000);
 export const workingSummarySchema = z.object({
@@ -160,47 +137,6 @@ export function parseWorkingSummary(
     references: summary.references.filter(item => covered.has(item.messageId)),
     protectedMessageIds: [...new Set(summary.protectedMessageIds.filter(id => requesterMessages.has(id)))],
   };
-}
-
-function slices(text: string, bytes: number) {
-  const parts: string[] = [];
-  let part = '';
-  let size = 0;
-  for (const character of text) {
-    const length = Buffer.byteLength(character);
-    if (size + length > bytes && part) {
-      parts.push(part);
-      part = '';
-      size = 0;
-    }
-    part += character;
-    size += length;
-  }
-  if (part || !parts.length) parts.push(part);
-  return parts;
-}
-
-/** Transcript chunks within a byte budget. Oversized messages split into numbered slices instead of being dropped. */
-export function transcriptChunks(messages: readonly ContextMessage[], budget: number): string[] {
-  const chunks: string[] = [];
-  let current = '';
-  const push = (entry: string) => {
-    if (current && Buffer.byteLength(current) + Buffer.byteLength(entry) > budget) {
-      chunks.push(current);
-      current = '';
-    }
-    current += entry;
-  };
-  for (const message of messages) {
-    const body = slices(message.text, Math.max(1024, budget - 256));
-    body.forEach((text, index) =>
-      push(
-        `<message id="${message.id}" role="${message.role === 'user' ? 'requester' : 'assistant'}"${body.length > 1 ? ` part="${index + 1}/${body.length}"` : ''}>\n${text}\n</message>\n`,
-      ),
-    );
-  }
-  if (current) chunks.push(current);
-  return chunks;
 }
 
 const wordingLimit = 32768;
