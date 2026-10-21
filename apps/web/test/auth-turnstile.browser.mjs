@@ -117,6 +117,7 @@ test(
         optionsFailure = false;
         await page.getByRole('button', { name: 'Retry verification' }).click();
         await page.getByText('Test verification widget').waitFor();
+        assert.equal(await page.evaluate(() => window.challengeAppearance), 'interaction-only');
         assert.equal(await submit.isDisabled(), true);
         await page.evaluate(() => window.challenge.solve());
         await page.getByText('Verification complete.', { exact: true }).waitFor();

@@ -14,7 +14,7 @@ export async function installTurnstileFixture(context) {
       };
       window.turnstile = {
         ready(callback) { callback(); },
-        render(container, params) { options = params; window.challengeAction = params.action; container.textContent = 'Test verification widget'; return 'widget'; },
+        render(container, params) { options = params; window.challengeAction = params.action; window.challengeAppearance = params.appearance; container.textContent = 'Test verification widget'; return 'widget'; },
         reset() { window.challengeResets = (window.challengeResets || 0) + 1; },
         remove() {},
         getResponse() { return ''; },

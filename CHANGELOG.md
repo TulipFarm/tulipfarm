@@ -155,6 +155,11 @@ One version identifies all apps and images of a release.
   setting descriptions and package READMEs link to the published docs instead
   of missing repository files.
 
+### Changed
+
+- Cloudflare Turnstile verification runs in the background. The widget appears
+  only when Cloudflare needs the person to interact, or when verification fails.
+
 ### Removed
 
 - `AUTH_EMAIL_PASSWORD`. Set `AUTH_METHODS=password` (with any other methods)

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
-import { Spinner } from '@tulipfarm/sprout/spinner';
 
 type ChallengeState =
   | { kind: 'loading' | 'interactive' | 'verified' }
@@ -45,37 +44,36 @@ export function TurnstileChallenge({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="min-h-16">
-        <Turnstile
-          ref={widget}
-          siteKey={siteKey}
-          options={{
-            action,
-            size: 'flexible',
-            responseField: false,
-            retry: 'never',
-            refreshExpired: 'manual',
-            refreshTimeout: 'manual',
-          }}
-          onSuccess={token => {
-            onToken(token);
-            setState({ kind: 'verified' });
-          }}
-          onExpire={() => fail('Verification expired. Please verify again.')}
-          onError={() => fail('Could not verify your browser. Please try again.')}
-          onTimeout={() => fail('Verification timed out. Please try again.')}
-          onUnsupported={() => fail('This browser cannot complete verification. Try another browser.', true)}
-          onBeforeInteractive={() => setState({ kind: 'interactive' })}
-          scriptOptions={{
-            onError: () => fail('Could not load verification. Check your connection and reload this page.', true),
-          }}
-        />
-      </div>
+    <div className={state.kind === 'interactive' || state.kind === 'error' ? 'space-y-3' : undefined}>
+      <Turnstile
+        ref={widget}
+        siteKey={siteKey}
+        options={{
+          action,
+          appearance: 'interaction-only',
+          size: 'flexible',
+          responseField: false,
+          retry: 'never',
+          refreshExpired: 'manual',
+          refreshTimeout: 'manual',
+        }}
+        onSuccess={token => {
+          onToken(token);
+          setState({ kind: 'verified' });
+        }}
+        onExpire={() => fail('Verification expired. Please verify again.')}
+        onError={() => fail('Could not verify your browser. Please try again.')}
+        onTimeout={() => fail('Verification timed out. Please try again.')}
+        onUnsupported={() => fail('This browser cannot complete verification. Try another browser.', true)}
+        onBeforeInteractive={() => setState({ kind: 'interactive' })}
+        onAfterInteractive={() => setState(current => (current.kind === 'interactive' ? { kind: 'loading' } : current))}
+        scriptOptions={{
+          onError: () => fail('Could not load verification. Check your connection and reload this page.', true),
+        }}
+      />
       {state.kind === 'loading' && (
-        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner />
-          Loading verification…
+        <p role="status" className="sr-only">
+          Verifying your browser…
         </p>
       )}
       {state.kind === 'interactive' && (
@@ -84,7 +82,7 @@ export function TurnstileChallenge({
         </p>
       )}
       {state.kind === 'verified' && (
-        <p role="status" className="text-sm text-muted-foreground">
+        <p role="status" className="sr-only">
           Verification complete.
         </p>
       )}
