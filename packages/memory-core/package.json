@@ -55,6 +55,14 @@
       "types": "./dist/search/search.d.ts",
       "default": "./dist/search/search.js"
     },
+    "./retrieval": {
+      "types": "./dist/retrieval/retrieval.d.ts",
+      "default": "./dist/retrieval/retrieval.js"
+    },
+    "./retrieval-contracts": {
+      "types": "./dist/contracts/retrieval.d.ts",
+      "default": "./dist/contracts/retrieval.js"
+    },
     "./embeddings": {
       "types": "./dist/embeddings/engine.d.ts",
       "default": "./dist/embeddings/engine.js"
