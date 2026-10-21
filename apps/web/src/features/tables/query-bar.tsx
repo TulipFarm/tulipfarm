@@ -50,7 +50,7 @@ import { SelectionSlot } from '@tulipfarm/sprout/selection-slot';
 import { ToolbarStatus } from '@tulipfarm/sprout/toolbar-status';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { Textarea } from '@tulipfarm/sprout/textarea';
-import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
+import { ViewSwitcher } from '@tulipfarm/sprout/view-switcher';
 import { exportCsv, exportRowCap } from './table-export';
 import { TableRequestError } from './request-state';
 import { useTableCapabilities } from './hooks';
@@ -95,6 +95,8 @@ type Props = {
 type ToolbarProps = Props & {
   layout: Layout;
   changeLayout: (layout: Layout) => void;
+  /** The `id` of the panel that shows the chosen layout. */
+  layoutPanel: string;
   mode: SearchMode | undefined;
   changeMode: (mode: SearchMode) => void;
   actions?: ReactNode;
@@ -104,11 +106,11 @@ type ToolbarProps = Props & {
 const filterable = (definition: Definition) => definition.fields.filter(field => kindQueryOps[field.kind].length > 0);
 const fieldOf = (definition: Definition, id: string) => definition.fields.find(field => field.id === id);
 const tooLong = 'This search is too long to keep in the page link. Remove some conditions and apply it again.';
-const layouts = [
-  { value: 'table', label: 'Table', icon: Grid },
-  { value: 'board', label: 'Board', icon: Kanban },
-  { value: 'list', label: 'List', icon: List },
-] as const;
+const layouts: { id: Layout; label: string; icon: typeof Grid }[] = [
+  { id: 'table', label: 'Table', icon: Grid },
+  { id: 'board', label: 'Board', icon: Kanban },
+  { id: 'list', label: 'List', icon: List },
+];
 
 /** Layout, search, column, summary, and export controls, then the applied filters as chips. Every applied change is written to the URL. */
 export function QueryBar({
@@ -120,6 +122,7 @@ export function QueryBar({
   disabled,
   layout,
   changeLayout,
+  layoutPanel,
   mode,
   changeMode,
   actions,
@@ -129,26 +132,17 @@ export function QueryBar({
   const [advanced, setAdvanced] = useState(false);
   return (
     <div className="@container/queries space-y-3">
+      <ViewSwitcher
+        label="Layout"
+        views={layouts}
+        value={layout}
+        panelId={layoutPanel}
+        onValueChange={id => {
+          const next = layouts.find(item => item.id === id);
+          if (next && !disabled) changeLayout(next.id);
+        }}
+      />
       <div className="flex min-w-0 flex-col gap-2 @3xl/queries:flex-row @3xl/queries:items-center">
-        <ToggleGroup
-          aria-label="Layout"
-          variant="outline"
-          size="sm"
-          spacing={0}
-          value={[layout]}
-          disabled={disabled}
-          onValueChange={value => {
-            const next = layouts.find(item => item.value === value[0]);
-            if (next) changeLayout(next.value);
-          }}
-        >
-          {layouts.map(({ value, label, icon: Icon }) => (
-            <ToggleGroupItem key={value} value={value}>
-              <Icon size={14} aria-hidden="true" />
-              {label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
         <div className="@container/selection min-w-0 flex-1">
           <SelectionSlot active={!!selection} selection={selection}>
             <fieldset

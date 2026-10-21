@@ -18,6 +18,7 @@ test(
     try {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
       const page = await context.newPage();
+      const code = async () => (await page.locator('.sprout-file-explorer-line-text').allTextContents()).join('');
       const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
       page.setDefaultTimeout(15000);
@@ -33,7 +34,7 @@ test(
         };
       });
       await page.getByRole('link', { name: 'Open Soul', exact: true }).click();
-      await page.getByRole('tree', { name: 'Soul files' }).waitFor();
+      await page.getByRole('tree', { name: 'Soul', exact: true }).waitFor();
       assert.deepEqual(await page.evaluate(() => window.soulRequests), [
         '/v1/workspaces/61616161-6161-4161-8161-616161616161/soul/snapshot',
       ]);
@@ -42,37 +43,20 @@ test(
       await page.getByRole('treeitem', { name: file, exact: true }).click();
       await page.getByRole('region', { name: `tables/${file}` }).waitFor();
       assert.match(await page.getByRole('region', { name: `tables/${file}` }).innerText(), /Invoices/);
-      assert.equal(JSON.parse(await page.locator('[data-slot="code-block"] code').textContent()).id, 'invoices');
+      assert.equal(JSON.parse(await code()).id, 'invoices');
       assert.ok(await page.getByRole('tree').evaluate(tree => tree.scrollWidth === tree.clientWidth));
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
-      await page.getByRole('button', { name: `Copy tables/${file}`, exact: true }).click();
-      await page.getByText('Code copied to clipboard.', { exact: true }).waitFor();
-      assert.equal(
-        await page.evaluate(() => navigator.clipboard.readText()),
-        await page.locator('[data-slot="code-block"] code').textContent(),
-      );
-      await page.evaluate(() =>
-        Object.defineProperty(navigator, 'clipboard', {
-          configurable: true,
-          value: {
-            writeText: async () => {
-              throw new Error('Fixture clipboard denied');
-            },
-          },
-        }),
-      );
-      await page.getByRole('button', { name: `Copy tables/${file}`, exact: true }).click();
-      await page.getByRole('alert').filter({ hasText: 'Clipboard unavailable' }).waitFor();
       assert.equal(await page.locator('textarea,[contenteditable="true"]').count(), 0);
       assert.equal(await page.getByRole('button', { name: /^(Save|Delete|Upload|Download)$/ }).count(), 0);
-      await page.getByLabel('Find a file').fill('skills-lock');
-      await page.getByRole('button', { name: 'Search', exact: true }).click();
-      await page.getByRole('treeitem', { name: 'skills-lock.json' }).waitFor();
-      assert.equal(await page.getByRole('treeitem').count(), 1);
-      await page.getByLabel('Find a file').fill('missing-path');
-      await page.getByRole('button', { name: 'Search', exact: true }).click();
-      await page.getByText('No matching paths.').waitFor();
-      await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+      const search = page.getByLabel('Search soul');
+      await search.fill('skills-lock');
+      await page
+        .getByRole('button', { name: /skills-lock\.json/ })
+        .first()
+        .waitFor();
+      assert.match(await page.getByRole('status').filter({ hasText: 'file name' }).innerText(), /^1 file name,/);
+      await search.fill('missing-path');
+      await page.getByText('No files or lines match “missing-path”.', { exact: true }).waitFor();
+      await search.fill('');
       await page.getByRole('treeitem', { name: 'agents', exact: true }).focus();
       await page.keyboard.press('ArrowRight');
       await page.getByRole('treeitem', { name: '72727272-7272-4272-8272-727272727272.json' }).waitFor();
@@ -100,14 +84,10 @@ test(
           await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
           `page overflow at ${width}`,
         );
-        if (width < 768) {
-          await page.getByRole('button', { name: 'Back', exact: true }).click();
-          await page.getByRole('tree', { name: 'Soul files' }).waitFor();
-        }
       }
       await page.getByRole('link', { name: 'Settings', exact: true }).click();
       await page.getByRole('link', { name: 'Open Soul', exact: true }).click();
-      await page.getByRole('tree', { name: 'Soul files' }).waitFor();
+      await page.getByRole('tree', { name: 'Soul', exact: true }).waitFor();
       assert.equal(
         await page.evaluate(() => window.soulRequests.length),
         ++reads,
@@ -117,9 +97,9 @@ test(
       await page.getByRole('treeitem', { name: 'tables', exact: true }).click();
       await page.getByRole('treeitem', { name: 'café_東京.json', exact: true }).click();
       await page.getByRole('region', { name: 'tables/café_東京.json', exact: true }).waitFor();
-      assert.equal(JSON.parse(await page.locator('[data-slot="code-block"] code').textContent()).id, 'café_東京');
+      assert.equal(JSON.parse(await code()).id, 'café_東京');
       await page.goto(`${url}?soulScenario=many`);
-      await page.getByRole('tree', { name: 'Soul files' }).waitFor();
+      await page.getByRole('tree', { name: 'Soul', exact: true }).waitFor();
       await page.evaluate(() => {
         const fetch = window.fetch.bind(window);
         window.fetch = (input, init) => {
@@ -128,13 +108,14 @@ test(
         };
       });
       await page.getByRole('treeitem', { name: 'tables', exact: true }).click();
-      assert.equal(await page.getByRole('treeitem', { name: 'page-119.json', exact: true }).count(), 0);
-      await page.getByRole('button', { name: 'Load more files', exact: true }).click();
       await page.getByRole('treeitem', { name: 'page-119.json', exact: true }).click();
       await page.getByRole('region', { name: 'tables/page-119.json', exact: true }).waitFor();
-      await page.getByLabel('Find a file').fill('page-119');
-      await page.getByRole('button', { name: 'Search', exact: true }).click();
-      assert.equal(await page.getByRole('treeitem').count(), 1);
+      await page.getByLabel('Search soul').fill('page-119');
+      await page
+        .getByRole('button', { name: /page-119\.json/ })
+        .first()
+        .waitFor();
+      assert.match(await page.getByRole('status').filter({ hasText: 'file name' }).innerText(), /^1 file name,/);
       await page.goto(`${url}?soulScenario=error`);
       await page.getByRole('button', { name: 'Retry read' }).click();
       await page.getByRole('treeitem', { name: 'soul.json', exact: true }).waitFor();
@@ -150,7 +131,7 @@ test(
         await page.getByRole('heading', { name: 'File cannot be displayed', exact: true }).waitFor();
       }
       await page.goto(`${url}?soulScenario=empty`);
-      await page.getByText('This folder is empty.', { exact: true }).waitFor();
+      await page.getByText('No files yet.', { exact: true }).waitFor();
       await page.goto(`${url}?soulScenario=slow`);
       await page.getByRole('heading', { name: 'Loading Soul', exact: true }).waitFor();
       await page.getByRole('treeitem', { name: 'soul.json', exact: true }).waitFor();
@@ -163,7 +144,7 @@ test(
       await page.getByRole('button', { name: 'Refresh', exact: true }).click();
       await page.getByRole('heading', { name: 'Soul is unavailable', exact: true }).waitFor();
       assert.equal(
-        await page.locator('[data-slot="code-block"]').count(),
+        await page.locator('[data-slot="file-explorer"]').count(),
         0,
         'refresh revocation discards the entire loaded snapshot',
       );

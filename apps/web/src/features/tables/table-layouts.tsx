@@ -1,11 +1,10 @@
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Kanban } from 'reicon-react/icons/Kanban';
-import type { TableQueryResult } from '@tulipfarm/tables/query';
-import { Badge } from '@tulipfarm/sprout/badge';
+import type { TableQueryResult, TableQueryRequest } from '@tulipfarm/tables/query';
+import { Board, type BoardColumn, type BoardItem } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
-import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/item';
+import { RecordList, type RecordListValue } from '@tulipfarm/sprout/record-list';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
-import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { TableApi, TableDataRow, TableDefinition } from './api';
 import { useLinkedRows, useTableQueryResult } from './hooks';
@@ -49,18 +48,9 @@ function parts(columns: Fields, skip?: string) {
 }
 
 const filled = (record: TableDataRow) => (field: Fields[number]) => record.values[field.id] != null;
-
-/** Secondary values carry their field name, because a bare "No" or "3" means nothing out of its column. */
-function Labeled({ record, field, values }: { record: TableDataRow; field: Fields[number]; values: Values }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      <span className="shrink-0">{field.label}</span>
-      <span className="min-w-0 text-foreground">
-        <Value record={record} fieldId={field.id} values={values} />
-      </span>
-    </span>
-  );
-}
+const plain = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? String(value) : undefined);
+const titleText = (record: TableDataRow, title: Fields[number] | undefined) =>
+  (title && plain(record.values[title.id])) || `Row ${record.id.slice(0, 8)}`;
 
 function Value({ record, fieldId, values }: { record: TableDataRow; fieldId: string; values: Values }) {
   return (
@@ -79,49 +69,52 @@ function Value({ record, fieldId, values }: { record: TableDataRow; fieldId: str
   );
 }
 
-/** Stacked rows: title and a muted line of other values, with choice badges and row actions on the right. */
+/** Secondary values carry their field name, because a bare "No" or "3" means nothing out of its column. */
+const labeled = (record: TableDataRow, fields: Fields, values: Values): RecordListValue[] =>
+  fields.filter(filled(record)).map(field => ({
+    label: field.label,
+    value: <Value record={record} fieldId={field.id} values={values} />,
+    text: plain(record.values[field.id]),
+  }));
+
+function Badges({ record, fields, values }: { record: TableDataRow; fields: Fields; values: Values }) {
+  return fields
+    .filter(filled(record))
+    .map(field => <Value key={field.id} record={record} fieldId={field.id} values={values} />);
+}
+
+type ListRecord = TableDataRow & { title: string };
+
+/** Stacked rows: title and up to four labelled values, with choice badges and row actions on the right. */
 export function ListView({
+  label,
   records,
   columns,
   values,
   actions,
+  open,
 }: {
+  label: string;
   records: TableDataRow[];
   columns: Fields;
   values: Values;
   actions: (record: TableDataRow) => ReactNode;
+  open?: ((record: TableDataRow) => void) | undefined;
 }) {
   const { title, badges, meta } = parts(columns);
+  const items: ListRecord[] = records.map(record => ({ ...record, title: titleText(record, title) }));
   return (
-    <ItemGroup>
-      {records.map(record => {
-        const shown = meta.filter(filled(record)).slice(0, 4);
-        return (
-          <Item key={record.id} role="listitem" variant="outline" size="xs">
-            <ItemContent>
-              <ItemTitle>
-                {title ? <Value record={record} fieldId={title.id} values={values} /> : `Row ${record.id.slice(0, 8)}`}
-              </ItemTitle>
-              {shown.length > 0 && (
-                <ItemDescription>
-                  <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    {shown.map(field => (
-                      <Labeled key={field.id} record={record} field={field} values={values} />
-                    ))}
-                  </span>
-                </ItemDescription>
-              )}
-            </ItemContent>
-            <ItemActions>
-              {badges.filter(filled(record)).map(field => (
-                <Value key={field.id} record={record} fieldId={field.id} values={values} />
-              ))}
-              {actions(record)}
-            </ItemActions>
-          </Item>
-        );
-      })}
-    </ItemGroup>
+    <RecordList
+      items={items}
+      label={label}
+      renderTitle={record =>
+        title ? <Value record={record} fieldId={title.id} values={values} /> : `Row ${record.id.slice(0, 8)}`
+      }
+      values={record => labeled(record, meta, values)}
+      badges={record => <Badges record={record} fields={badges} values={values} />}
+      renderActions={actions}
+      onItemOpen={open}
+    />
   );
 }
 
@@ -134,8 +127,48 @@ type BoardProps = {
   changeField: (fieldId: string) => void;
   openColumn: (where: string) => void;
   workspace: TableWorkspace;
-  actions: (record: TableDataRow) => ReactNode;
+  menu?: ((record: TableDataRow) => ReactNode) | undefined;
+  open?: ((record: TableDataRow) => void) | undefined;
 };
+type Lane = { key: string; id: string | null; label: string };
+type LaneRead = { state: ReturnType<typeof useTableQueryResult>['state']; refresh: () => void };
+type Card = BoardItem & { record: TableDataRow };
+
+const none = '\u0000none';
+
+/** Read states are rebuilt every render, so compare what they hold rather than the object. */
+function sameState(a: LaneRead['state'] | undefined, b: LaneRead['state']) {
+  if (!a || a.kind !== b.kind) return false;
+  if (a.kind === 'ready' && b.kind === 'ready')
+    return a.data === b.data && a.refreshing === b.refreshing && a.error === b.error;
+  if (a.kind === 'error' && b.kind === 'error') return a.message === b.message && a.busy === b.busy;
+  if (a.kind === 'unavailable' && b.kind === 'unavailable') return a.status === b.status;
+  return true;
+}
+
+/** Loads one column on its own, so a slow or failed column never holds back the others. */
+function LaneLoader({
+  api,
+  table,
+  request,
+  lane,
+  report,
+}: {
+  api: TableApi;
+  table: TableDefinition;
+  request: TableQueryRequest;
+  lane: string;
+  report: (lane: string, read: LaneRead) => void;
+}) {
+  const read = useTableQueryResult(api, table, request);
+  const refresh = useRef(read.refresh);
+  refresh.current = read.refresh;
+  useEffect(
+    () => report(lane, { state: read.state, refresh: () => void refresh.current() }),
+    [lane, read.state, report],
+  );
+  return null;
+}
 
 /** One column per option of a single-select field, plus rows with no value. Columns load separately and show their first 20 rows. */
 export function BoardView({
@@ -147,12 +180,53 @@ export function BoardView({
   changeField,
   openColumn,
   workspace,
-  actions,
+  menu,
+  open,
 }: BoardProps) {
   const definition = queryDefinition(table.definition);
   const field = boardField(definition, fieldId);
   const counts = useTableQueryResult(api, table, boardCountRequest(view, field?.id ?? ''), !!field);
-  if (!field || field.kind !== 'single-select')
+  const [reads, setReads] = useState<Record<string, LaneRead>>({});
+  const report = useCallback(
+    (lane: string, read: LaneRead) =>
+      setReads(current => (sameState(current[lane]?.state, read.state) ? current : { ...current, [lane]: read })),
+    [],
+  );
+  const singleSelect = field?.kind === 'single-select' ? field : null;
+  const data = counts.state.kind === 'ready' && counts.state.data.mode === 'summary' ? counts.state.data : null;
+  const count = (optionId: string | null) =>
+    data
+      ? data.groups
+          .filter(group => (group.keys[0] ?? null) === optionId)
+          .reduce((sum, group) => sum + Number(group.values[0] ?? 0), 0)
+      : null;
+  const lanes: Lane[] = singleSelect
+    ? [
+        ...singleSelect.options
+          .filter(option => !option.retired || (count(option.id) ?? 0) > 0)
+          .map(option => ({
+            key: `${singleSelect.id}:${option.id}`,
+            id: option.id as string | null,
+            label: option.label,
+          })),
+        { key: `${singleSelect.id}:${none}`, id: null, label: `No ${singleSelect.label.toLowerCase()}` },
+      ]
+    : [];
+  const ready = (lane: Lane) => {
+    const state = reads[lane.key]?.state;
+    return state?.kind === 'ready' && state.data.mode === 'rows' ? state.data.records.map(dataRow) : [];
+  };
+  const records = lanes.flatMap(ready);
+  const linked = useLinkedRows(
+    api,
+    records.map(record => record.values),
+  );
+  const files = useFileNames(
+    workspace.id,
+    fileIdsOf(records.map(record => record.values)),
+    records.flatMap(record => record.unavailableFileIds),
+  );
+  if (!singleSelect)
     return (
       <StatePanel
         kind="empty"
@@ -162,34 +236,65 @@ export function BoardView({
         description={`Boards group rows by a single-choice field, such as Status. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
       />
     );
-  const data = counts.state.kind === 'ready' && counts.state.data.mode === 'summary' ? counts.state.data : null;
-  const count = (optionId: string | null) =>
-    data
-      ? data.groups
-          .filter(group => (group.keys[0] ?? null) === optionId)
-          .reduce((sum, group) => sum + Number(group.values[0] ?? 0), 0)
-      : null;
-  const options = field.options.filter(option => !option.retired || (count(option.id) ?? 0) > 0);
-  const lanes = [
-    ...options.map(option => ({ id: option.id as string | null, label: option.label })),
-    { id: null, label: `No ${field.label.toLowerCase()}` },
-  ];
-  const fields = boardFields(definition);
+  const values: Values = {
+    linked: linked.state,
+    files: files.state,
+    workspace,
+    definition: table.definition,
+    systemKind: table.systemKind,
+  };
+  const { title, badges, meta } = parts(columns, singleSelect.id);
+  const boardColumns: BoardColumn[] = lanes.map(lane => {
+    const state = reads[lane.key]?.state ?? { kind: 'loading' };
+    const total = count(lane.id);
+    const status =
+      state.kind === 'loading'
+        ? ('loading' as const)
+        : state.kind === 'unavailable'
+          ? ('unavailable' as const)
+          : state.kind === 'error' || state.data.mode !== 'rows'
+            ? ('error' as const)
+            : undefined;
+    return {
+      id: lane.key,
+      title: lane.label,
+      tone: lane.id ? optionTone(lane.label) : 'ghost',
+      ...(total !== null && { total }),
+      ...(status && {
+        status,
+        error: status === 'unavailable' ? 'Rows are unavailable.' : 'Couldn’t load this column.',
+      }),
+    };
+  });
+  const items: Card[] = lanes.flatMap(lane =>
+    ready(lane).map(record => ({ id: record.id, columnId: lane.key, title: titleText(record, title), record })),
+  );
+  const laneOf = (column: BoardColumn) => lanes.find(lane => lane.key === column.id);
   return (
     <div className="space-y-3">
+      {lanes.map(lane => (
+        <LaneLoader
+          key={lane.key}
+          api={api}
+          table={table}
+          request={boardColumnRequest(definition, view, singleSelect.id, lane.id)}
+          lane={lane.key}
+          report={report}
+        />
+      ))}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-muted-foreground">Columns by</span>
         <Select
-          value={field.id}
+          value={singleSelect.id}
           onValueChange={value => {
             if (value) changeField(value);
           }}
         >
           <SelectTrigger size="sm" aria-label="Board columns by">
-            <SelectValue>{field.label}</SelectValue>
+            <SelectValue>{singleSelect.label}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {fields.map(item => (
+            {boardFields(definition).map(item => (
               <SelectItem key={item.id} value={item.id}>
                 {item.label}
               </SelectItem>
@@ -207,148 +312,45 @@ export function BoardView({
           </>
         )}
       </div>
-      <div role="list" aria-label={`Board by ${field.label}`} className="flex gap-3 overflow-x-auto pb-2">
-        {lanes.map(lane => (
-          <BoardColumn
-            key={lane.id ?? 'empty'}
-            api={api}
-            table={table}
-            view={view}
-            columns={columns}
-            fieldId={field.id}
-            lane={lane}
-            total={count(lane.id)}
-            openColumn={() => openColumn(columnWhere(definition, view.where, field.id, lane.id))}
-            workspace={workspace}
-            actions={actions}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function BoardColumn({
-  api,
-  table,
-  view,
-  columns,
-  fieldId,
-  lane,
-  total,
-  openColumn,
-  workspace,
-  actions,
-}: Omit<BoardProps, 'fieldId' | 'changeField' | 'openColumn'> & {
-  fieldId: string;
-  lane: { id: string | null; label: string };
-  total: number | null;
-  openColumn: () => void;
-}) {
-  const read = useTableQueryResult(
-    api,
-    table,
-    boardColumnRequest(queryDefinition(table.definition), view, fieldId, lane.id),
-  );
-  const result = read.state.kind === 'ready' && read.state.data.mode === 'rows' ? read.state.data : null;
-  const records = result ? result.records.map(dataRow) : [];
-  const linked = useLinkedRows(
-    api,
-    records.map(record => record.values),
-  );
-  const files = useFileNames(
-    workspace.id,
-    fileIdsOf(records.map(record => record.values)),
-    records.flatMap(record => record.unavailableFileIds),
-  );
-  const values: Values = {
-    linked: linked.state,
-    files: files.state,
-    workspace,
-    definition: table.definition,
-    systemKind: table.systemKind,
-  };
-  const { title, badges, meta } = parts(columns, fieldId);
-  const more = total !== null && total > records.length;
-  return (
-    <section
-      role="listitem"
-      aria-label={`${lane.label}${total !== null ? `, ${total} rows` : ''}`}
-      className="flex w-72 shrink-0 flex-col gap-2 rounded-xl bg-muted/50 p-2"
-    >
-      <header className="flex items-center justify-between gap-2 px-1 py-0.5">
-        <span title={lane.label} className="flex min-w-0">
-          <Badge variant={lane.id ? optionTone(lane.label) : 'ghost'}>
-            <span className="min-w-0 truncate">{lane.label}</span>
-          </Badge>
-        </span>
-        {total !== null && (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{total.toLocaleString('en-US')}</span>
-        )}
-      </header>
-      {read.state.kind === 'loading' ? (
-        <p role="status" className="flex items-center gap-2 px-1 py-4 text-sm text-muted-foreground">
-          <Spinner />
-          Loading rows…
-        </p>
-      ) : read.state.kind === 'error' || (read.state.kind === 'ready' && read.state.data.mode === 'invalid') ? (
-        <div className="space-y-2 px-1 py-2">
-          <p role="alert" className="text-sm text-destructive">
-            Couldn’t load this column.
-          </p>
-          <Button variant="outline" size="sm" onClick={() => void read.refresh()}>
-            Try again
-          </Button>
-        </div>
-      ) : read.state.kind === 'unavailable' ? (
-        <p className="px-1 py-4 text-sm text-muted-foreground">Rows are unavailable.</p>
-      ) : !records.length ? (
-        <p className="px-1 py-4 text-sm text-muted-foreground">No rows</p>
-      ) : (
-        <ItemGroup>
-          {records.map(record => {
-            const shown = meta.filter(filled(record)).slice(0, 2),
-              chips = badges.filter(filled(record)).slice(0, 2);
-            return (
-              <Item key={record.id} role="listitem" variant="card" size="xs">
-                <ItemContent>
-                  <div className="flex items-start justify-between gap-2">
-                    <ItemTitle>
-                      {title ? (
-                        <Value record={record} fieldId={title.id} values={values} />
-                      ) : (
-                        `Row ${record.id.slice(0, 8)}`
-                      )}
-                    </ItemTitle>
-                    <div className="-mt-1 -mr-1 shrink-0">{actions(record)}</div>
-                  </div>
-                  {shown.length > 0 && (
-                    <ItemDescription>
-                      <span className="flex flex-col gap-0.5">
-                        {shown.map(field => (
-                          <Labeled key={field.id} record={record} field={field} values={values} />
-                        ))}
-                      </span>
-                    </ItemDescription>
-                  )}
-                  {chips.length > 0 && (
-                    <span className="flex flex-wrap gap-1 pt-1">
-                      {chips.map(field => (
-                        <Value key={field.id} record={record} fieldId={field.id} values={values} />
-                      ))}
+      <Board
+        label={`Board by ${singleSelect.label}`}
+        columns={boardColumns}
+        items={items}
+        columnText={{ empty: 'No rows', showAll: total => `Show all ${total.toLocaleString('en-US')} in table` }}
+        onColumnRetry={column => reads[column.id]?.refresh()}
+        onColumnShowAll={column => {
+          const lane = laneOf(column);
+          if (lane) openColumn(columnWhere(definition, view.where, singleSelect.id, lane.id));
+        }}
+        renderTitle={({ record }) =>
+          title ? <Value record={record} fieldId={title.id} values={values} /> : `Row ${record.id.slice(0, 8)}`
+        }
+        renderBody={({ record }) => {
+          const shown = labeled(record, meta, values).slice(0, 2);
+          const chips = badges.filter(filled(record)).slice(0, 2);
+          return (
+            <>
+              {shown.length > 0 && (
+                <span className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                  {shown.map(item => (
+                    <span key={item.label} className="flex min-w-0 items-center gap-1">
+                      <span className="shrink-0">{item.label}</span>
+                      <span className="min-w-0 text-foreground">{item.value}</span>
                     </span>
-                  )}
-                </ItemContent>
-              </Item>
-            );
-          })}
-        </ItemGroup>
-      )}
-      {more && (
-        <Button variant="ghost" size="sm" onClick={openColumn}>
-          Show all {total!.toLocaleString('en-US')} in table
-        </Button>
-      )}
-    </section>
+                  ))}
+                </span>
+              )}
+              {chips.length > 0 && (
+                <span className="flex flex-wrap gap-1 pt-1">
+                  <Badges record={record} fields={chips} values={values} />
+                </span>
+              )}
+            </>
+          );
+        }}
+        itemActions={menu && (({ record }) => menu(record))}
+        onItemOpen={open && (({ record }) => open(record))}
+      />
+    </div>
   );
 }

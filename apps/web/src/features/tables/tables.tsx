@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
 import { Database } from 'reicon-react/icons/Database';
@@ -71,6 +71,7 @@ import {
 } from './table-view';
 import { QueryBar } from './query-bar';
 import { BoardView, ListView } from './table-layouts';
+import { viewSwitcherTabId } from '@tulipfarm/sprout/view-switcher';
 import { SummaryTable } from './summary-table';
 import type { TableQueryResult } from '@tulipfarm/tables/query';
 import { RecordEditor } from './record-editor';
@@ -380,6 +381,7 @@ export function Records({
     [tableId, applied.revision, applied.definition, systemKind],
   );
   const view = tableView(search, queryDefinition(table.definition));
+  const layoutPanel = useId();
   const [layout, setLayout] = useState<Layout>(() => search.view ?? storedLayout(tableId) ?? 'table');
   useEffect(() => {
     if (search.view) setLayout(search.view);
@@ -620,6 +622,14 @@ export function Records({
       />
     </div>
   );
+  const openRow =
+    permissions.update && !locked && !editing ? (record: TableDataRow) => select({ kind: 'edit', record }) : undefined;
+  const rowMenu =
+    locked || editing
+      ? undefined
+      : (record: TableDataRow) => (
+          <RowActionItems record={record} permissions={permissions} select={select} systemKind={systemKind} />
+        );
   const values = { linked: linked.state, files: files.state, workspace, definition: table.definition, systemKind };
   const sortOf = (fieldId: string) => (view.sort[0]?.fieldId === fieldId ? view.sort[0].direction : null);
   const cycleSort = (fieldId: string) => {
@@ -815,7 +825,14 @@ export function Records({
         </StatePanel>
       )
     ) : layout === 'list' ? (
-      <ListView records={current.records.map(dataRow)} columns={columns} values={values} actions={actions} />
+      <ListView
+        label={`${table.definition.label} rows`}
+        records={current.records.map(dataRow)}
+        columns={columns}
+        values={values}
+        actions={actions}
+        open={openRow}
+      />
     ) : (
       rowTable(current.records.map(dataRow))
     );
@@ -845,6 +862,7 @@ export function Records({
             disabled={editing}
             layout={layout}
             changeLayout={changeLayout}
+            layoutPanel={layoutPanel}
             mode={search.find}
             changeMode={find => changeSearch({ find })}
             actions={headerAdd && addRow}
@@ -871,117 +889,146 @@ export function Records({
             {notice}
           </p>
         )}
-        <ReferenceRetry linked={linked} files={files} />
-        {layout === 'board' && !firstUse && read.state.kind !== 'unavailable' ? (
-          <BoardView
-            api={api}
-            table={table}
-            view={view}
-            columns={columns}
-            fieldId={search.board}
-            changeField={board => changeSearch({ board })}
-            openColumn={where => {
-              changeLayout('table');
-              apply({ ...view, where });
-            }}
-            workspace={workspace}
-            actions={actions}
-          />
-        ) : read.state.kind === 'error' && last.current ? (
-          <div className="space-y-3">
-            <Alert variant="destructive">
-              <AlertDescription>{`These rows could not load. ${read.state.message}`}</AlertDescription>
-            </Alert>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => void read.refresh()}>
-                Try again
-              </Button>
-            </div>
-            <div className="space-y-2 opacity-60">
-              <p className="text-sm text-muted-foreground">
-                Showing the last results that loaded. They may be out of date.
-              </p>
-              {output(last.current.result)}
-            </div>
-          </div>
-        ) : (
-          <TableRead
-            state={read.state}
-            refresh={read.refresh}
-            loading={read.state.kind === 'loading' && layout === 'table' && !summary ? rowTable([], true) : undefined}
-          >
-            {current =>
-              current.mode === 'invalid' ? (
-                <div className="space-y-3">
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      {pages.after
-                        ? 'This page is no longer valid. The rows may have changed since it loaded.'
-                        : `This search can’t run. ${current.issues.map(issue => issue.message).join(' ')}`}
-                    </AlertDescription>
-                  </Alert>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" disabled={editing} onClick={pages.after ? pages.first : clear}>
-                      {pages.after ? 'Back to first rows' : 'Clear filters'}
-                    </Button>
-                  </div>
-                  {last.current && (
-                    <div className="space-y-2 opacity-60">
-                      <p className="text-sm text-muted-foreground">Showing the last results that loaded.</p>
-                      {output(last.current.result)}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                output(current)
-              )
-            }
-          </TableRead>
-        )}
-        {layout !== 'board' && !firstUse && (read.state.kind === 'loading' || result) && (
-          <div className="contents" style={noControlShadow}>
-            <TablePagination
-              page={pages.page}
-              pageSize={limit}
-              count={result?.mode === 'rows' ? result.records.length : (result?.groups.length ?? 0)}
-              total={pageTotal.current.total}
-              hasNext={!!result?.nextCursor}
-              disabled={locked || editing}
-              loading={read.state.kind === 'loading'}
-              groups={summary}
-              unknownStart={!!initialAfter && !!pages.after && pageTotal.current.total === null}
-              onFirst={pages.first}
-              onPrevious={pages.previous}
-              onNext={() => {
-                if (result?.nextCursor) pages.next(result.nextCursor);
+        <div
+          id={layoutPanel}
+          className="space-y-4"
+          {...(!firstUse && read.state.kind !== 'unavailable'
+            ? { role: 'tabpanel', 'aria-labelledby': viewSwitcherTabId(layoutPanel, layout) }
+            : {})}
+        >
+          <ReferenceRetry linked={linked} files={files} />
+          {layout === 'board' && !firstUse && read.state.kind !== 'unavailable' ? (
+            <BoardView
+              api={api}
+              table={table}
+              view={view}
+              columns={columns}
+              fieldId={search.board}
+              changeField={board => changeSearch({ board })}
+              openColumn={where => {
+                changeLayout('table');
+                apply({ ...view, where });
               }}
-              onPageSize={size => {
-                pages.first();
-                setLimit(size);
-              }}
+              workspace={workspace}
+              menu={rowMenu}
+              open={openRow}
             />
-          </div>
-        )}
+          ) : read.state.kind === 'error' && last.current ? (
+            <div className="space-y-3">
+              <Alert variant="destructive">
+                <AlertDescription>{`These rows could not load. ${read.state.message}`}</AlertDescription>
+              </Alert>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => void read.refresh()}>
+                  Try again
+                </Button>
+              </div>
+              <div className="space-y-2 opacity-60">
+                <p className="text-sm text-muted-foreground">
+                  Showing the last results that loaded. They may be out of date.
+                </p>
+                {output(last.current.result)}
+              </div>
+            </div>
+          ) : (
+            <TableRead
+              state={read.state}
+              refresh={read.refresh}
+              loading={read.state.kind === 'loading' && layout === 'table' && !summary ? rowTable([], true) : undefined}
+            >
+              {current =>
+                current.mode === 'invalid' ? (
+                  <div className="space-y-3">
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        {pages.after
+                          ? 'This page is no longer valid. The rows may have changed since it loaded.'
+                          : `This search can’t run. ${current.issues.map(issue => issue.message).join(' ')}`}
+                      </AlertDescription>
+                    </Alert>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" disabled={editing} onClick={pages.after ? pages.first : clear}>
+                        {pages.after ? 'Back to first rows' : 'Clear filters'}
+                      </Button>
+                    </div>
+                    {last.current && (
+                      <div className="space-y-2 opacity-60">
+                        <p className="text-sm text-muted-foreground">Showing the last results that loaded.</p>
+                        {output(last.current.result)}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  output(current)
+                )
+              }
+            </TableRead>
+          )}
+          {layout !== 'board' && !firstUse && (read.state.kind === 'loading' || result) && (
+            <div className="contents" style={noControlShadow}>
+              <TablePagination
+                page={pages.page}
+                pageSize={limit}
+                count={result?.mode === 'rows' ? result.records.length : (result?.groups.length ?? 0)}
+                total={pageTotal.current.total}
+                hasNext={!!result?.nextCursor}
+                disabled={locked || editing}
+                loading={read.state.kind === 'loading'}
+                groups={summary}
+                unknownStart={!!initialAfter && !!pages.after && pageTotal.current.total === null}
+                onFirst={pages.first}
+                onPrevious={pages.previous}
+                onNext={() => {
+                  if (result?.nextCursor) pages.next(result.nextCursor);
+                }}
+                onPageSize={size => {
+                  pages.first();
+                  setLimit(size);
+                }}
+              />
+            </div>
+          )}
+        </div>
       </section>
       {panel}
     </>
   );
 }
 
-/** One menu per row keeps the grid compact. The trigger names the row so screen readers can tell rows apart. */
-function RowActions({
-  record,
-  permissions,
-  disabled,
-  select,
-  systemKind,
-}: {
+type RowActionProps = {
   record: TableDataRow;
   permissions: RowPermissions;
-  disabled: boolean;
   select: (next: RowSelection) => void;
   systemKind?: TableDefinition['systemKind'];
-}) {
+};
+
+/** The row menu's items, shared by the table and list menu button and the board card menu. */
+function RowActionItems({ record, permissions, select, systemKind }: RowActionProps) {
+  return (
+    <>
+      <DropdownMenuGroup>
+        {permissions.update && (
+          <DropdownMenuItem onClick={() => select({ kind: 'edit', record })}>Edit row</DropdownMenuItem>
+        )}
+        {systemKind === 'workspace-members' && (
+          <DropdownMenuItem onClick={() => select({ kind: 'profile', record })}>Profile and photo</DropdownMenuItem>
+        )}
+        <DropdownMenuItem onClick={() => select({ kind: 'history', record })}>History</DropdownMenuItem>
+      </DropdownMenuGroup>
+      {permissions.delete && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={() => select({ kind: 'delete', record })}>
+            Delete row
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+/** One menu per row keeps the grid compact. The trigger names the row so screen readers can tell rows apart. */
+function RowActions({ disabled, record, permissions, select, systemKind }: RowActionProps & { disabled: boolean }) {
   const id = record.id.slice(0, 8);
   return (
     <DropdownMenu>
@@ -991,23 +1038,7 @@ function RowActions({
         <MoreH size={16} aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          {permissions.update && (
-            <DropdownMenuItem onClick={() => select({ kind: 'edit', record })}>Edit row</DropdownMenuItem>
-          )}
-          {systemKind === 'workspace-members' && (
-            <DropdownMenuItem onClick={() => select({ kind: 'profile', record })}>Profile and photo</DropdownMenuItem>
-          )}
-          <DropdownMenuItem onClick={() => select({ kind: 'history', record })}>History</DropdownMenuItem>
-        </DropdownMenuGroup>
-        {permissions.delete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => select({ kind: 'delete', record })}>
-              Delete row
-            </DropdownMenuItem>
-          </>
-        )}
+        <RowActionItems record={record} permissions={permissions} select={select} systemKind={systemKind} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

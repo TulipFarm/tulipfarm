@@ -320,6 +320,16 @@ across the art from 44rem. The float and pointer drag are decorative. Their colo
 stay in the scoped `--glass-*` stylesheet tokens, separate from the action palette.
 Third-party marks use `BrandIcon` (`@tulipfarm/sprout/brand-icon`).
 
+Table layouts sit under a `ViewSwitcher` (`@tulipfarm/sprout/view-switcher`)
+tab bar labelled **Layout**, whose tabs control the layout panel. Board uses
+`Board` (`@tulipfarm/sprout/board`), with one read-only column per option of a
+single-choice field plus a "No …" column. Each column loads its first 20 rows on
+its own, with its own retry and a **Show all N in table** link. List uses
+`RecordList` (`@tulipfarm/sprout/record-list`). In both layouts, clicking a row
+opens the row editor when the user can edit. The Soul repository browser is a
+`FileExplorer` (`@tulipfarm/sprout/file-explorer`), with a tree, live search over
+names and text, and a read-only viewer. It stacks on narrow screens.
+
 `ChatSplit` and `CanvasPanel` (`@tulipfarm/sprout/canvas`) give a chat a second
 column, the Canvas, for tables, charts, to-dos, files, code, and pages. From 768px
 the Canvas is a resizable panel (55/45 default, chat at least 40%, Canvas at least

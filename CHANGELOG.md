@@ -154,6 +154,12 @@ One version identifies all apps and images of a release.
   happens to running work after a catalog change. `self-host/.env.example`,
   setting descriptions and package READMEs link to the published docs instead
   of missing repository files.
+- Web app on `@tulipfarm/sprout` 0.4.0. Table Board and List layouts use
+  Sprout's `Board` and `RecordList`. Board columns still load and retry on
+  their own, and clicking a card or list row opens it. The Table, Board and List
+  switch is a `ViewSwitcher` tab bar. The Soul repository browser uses
+  `FileExplorer`, which searches file names and text as you type. Tiptap
+  packages move to 3.32.0 to match Sprout.
 
 ### Changed
 

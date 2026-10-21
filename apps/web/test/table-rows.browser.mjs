@@ -1460,7 +1460,9 @@ try {
     await page.evaluate(() => document.activeElement?.blur());
     await settleScroll();
     const flat = await rows
-      .locator('[data-slot="toggle-group-item"], [data-slot="select-trigger"], [data-slot="button"].border-input')
+      .locator(
+        '[data-slot="select-trigger"], [data-slot="button"].border-input, [data-slot="button"][data-variant="outline"]',
+      )
       .evaluateAll(nodes =>
         nodes.map(node => ({
           border: getComputedStyle(node).borderTopColor,
@@ -1469,7 +1471,7 @@ try {
       );
     assert.ok(flat.length > 3);
     for (const control of flat) {
-      assert.equal(control.border, flat[0].border, 'Table controls share the toggle group edge');
+      assert.equal(control.border, flat[0].border, 'Table controls share one edge');
       assert.equal(control.shadow, 'none', 'Table controls have no idle shadow');
     }
   }
