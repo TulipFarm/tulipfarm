@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "testing"
   ],
   "exports": {
     ".": {
@@ -58,6 +59,11 @@
       "types": "./dist/embeddings/engine.d.ts",
       "default": "./dist/embeddings/engine.js"
     },
+    "./adapters/*": {
+      "types": "./dist/adapters/*.d.ts",
+      "default": "./dist/adapters/*.js"
+    },
+    "./testing/memory-conformance": "./testing/memory-conformance.mjs",
     "./memory/*": {
       "types": "./dist/memory/*.d.ts",
       "default": "./dist/memory/*.js"

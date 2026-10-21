@@ -1,5 +1,21 @@
 # Memory-core Phase 1 status
 
+**M8 reference adapters and shared conformance are complete. Continuing to M9.**
+
+The new in-memory module implements complete personal-memory, reconciliation,
+and transcript ports with tenant-scoped transactional state. The same storage
+conformance suites also run against the real Postgres adapters. Production
+composition, all existing implementations and tests, and frozen baselines
+remain unchanged. All 36 build/typecheck tasks, lint (28 tooling cases),
+91 comparison-policy cases, 749 unit tests (748 passes/one original skip),
+and 24 real Postgres conformance cases pass. All 222 original integration
+files match: 1,239 tests, 1,131 passes, 102 observed accepted failures, six
+original skips, no cancellations. Frozen snapshots and manifest are unchanged.
+The required five-versus-five retry check proved one precise Google timeout
+on M7; the unproved GitHub/Slack timeout variants remain strict and their
+final file passes. All copied receipts were verified before baseline cleanup.
+See [M8](M8.md).
+
 **M7 provider adapters are complete. Continuing to M8.**
 
 Four host adapters expose the shared discover/fetch/permissions interface.
