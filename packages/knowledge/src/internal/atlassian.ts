@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
+import { createAtlassianCorpusAdapter } from '../corpus-adapters.ts';
 import {
   AccessDenied,
   currentMember,
@@ -130,6 +131,7 @@ export function createAtlassianKnowledge({
   now = () => clock.now(),
   gate,
 }: { runtime: Runtime; provider: AtlassianCorpusProvider } & EngineClock) {
+  const corpus = createAtlassianCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'confluence' && source.provider !== 'jira') throw new AccessDenied();
     if (
@@ -567,7 +569,7 @@ export function createAtlassianKnowledge({
     if (!captured.fences.length) return { visible: 0, denied: 0 };
     let observed;
     try {
-      observed = await provider.access(
+      observed = await corpus.permissions(
         workspaceId,
         actor.userId,
         captured.binding,
@@ -825,8 +827,7 @@ export function createAtlassianKnowledge({
       return;
     try {
       const read =
-        prefetched ??
-        (await provider.read(work.workspaceId, s.owner_user_id, s.binding, selected(target), item.itemId));
+        prefetched ?? (await corpus.fetch(work.workspaceId, s.owner_user_id, s.binding, selected(target), item.itemId));
       if (read.sourceRevision !== item.sourceRevision || read.nativeId !== item.nativeId)
         throw new AtlassianCorpusError('source-changed');
       const bytes = Buffer.from(read.markdown);
@@ -1021,7 +1022,7 @@ export function createAtlassianKnowledge({
           cursor.page = null;
         } else {
           try {
-            const page = await provider.list(
+            const page = await corpus.discover(
               work.workspaceId,
               claim.owner_user_id,
               claim.binding,
@@ -1078,7 +1079,7 @@ export function createAtlassianKnowledge({
           const target = all.find(t => t.target_id === row.target_id);
           if (target)
             try {
-              const read = await provider.read(
+              const read = await corpus.fetch(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,

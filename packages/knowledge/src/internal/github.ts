@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { z } from 'zod';
+import { createGitHubCorpusAdapter } from '../corpus-adapters.ts';
 import {
   AccessDenied,
   currentMember,
@@ -130,6 +131,7 @@ export function createGitHubKnowledge({
   parseDocument?: typeof parseKnowledgeDocument;
   telemetry?: Telemetry;
 } & EngineClock) {
+  const corpus = createGitHubCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'github') throw new AccessDenied();
     if (
@@ -552,7 +554,7 @@ export function createGitHubKnowledge({
     let failure: GitHubCorpusError | null = null;
     for (const binding of captured.bindings) {
       try {
-        const observed = await provider.access(workspaceId, actor.userId, binding, repositoryId);
+        const observed = await corpus.permissions(workspaceId, actor.userId, binding, repositoryId);
         if (observed.repositoryId !== repositoryId) throw new GitHubCorpusError('invalid-response');
         if (!observed.readable) {
           failure = new GitHubCorpusError('forbidden');
@@ -800,7 +802,7 @@ export function createGitHubKnowledge({
       return;
     try {
       await ensureOwnerProof(work, token, item.repositoryId);
-      const read = await provider.read(
+      const read = await corpus.fetch(
         work.workspaceId,
         s.owner_user_id,
         s.binding,
@@ -1011,7 +1013,7 @@ export function createGitHubKnowledge({
           }
           if (accessible) {
             try {
-              const page = await provider.list(
+              const page = await corpus.discover(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,
@@ -1110,7 +1112,7 @@ export function createGitHubKnowledge({
                   continue;
                 }
               }
-              const observed = await provider.read(
+              const observed = await corpus.fetch(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
+import { createSlackCorpusAdapter } from '../corpus-adapters.ts';
 import {
   AccessDenied,
   currentMember,
@@ -128,6 +129,7 @@ export function createSlackKnowledge({
   now = () => clock.now(),
   gate,
 }: { runtime: Runtime; provider: SlackCorpusProvider } & EngineClock) {
+  const corpus = createSlackCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'slack') throw new AccessDenied();
     if (
@@ -544,7 +546,7 @@ export function createSlackKnowledge({
     if (!owner && captured.c.state !== 'active') return false;
     let observed;
     try {
-      observed = await provider.access(workspaceId, actor.userId, captured.binding, conversationId);
+      observed = await corpus.permissions(workspaceId, actor.userId, captured.binding, conversationId);
       if (observed.conversationId !== conversationId) throw new SlackCorpusError('invalid-response');
       if (observed.archived) throw new SlackCorpusError('archived');
       if (!observed.member) throw new SlackCorpusError('not-member');
@@ -762,7 +764,7 @@ export function createSlackKnowledge({
     )
       return;
     try {
-      const read = await provider.read(
+      const read = await corpus.fetch(
         work.workspaceId,
         s.owner_user_id,
         s.binding,
@@ -959,7 +961,7 @@ export function createSlackKnowledge({
           }
           if (accessible) {
             try {
-              const page = await provider.list(
+              const page = await corpus.discover(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,
@@ -1017,7 +1019,7 @@ export function createSlackKnowledge({
           }
           if (accessible)
             try {
-              const observed = await provider.read(
+              const observed = await corpus.fetch(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,

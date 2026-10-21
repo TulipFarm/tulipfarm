@@ -1,5 +1,24 @@
 # Memory-core Phase 1 status
 
+**M7 provider adapters are complete. Continuing to M8.**
+
+Four host adapters expose the shared discover/fetch/permissions interface.
+All 16 call sites preserve their existing transport and access semantics;
+the complete host-algorithm proof passes. Defaults selection and recap push
+publication remain host-owned and unchanged. All 36 scoped build/typecheck
+tasks, lint (27 tooling tests), 78 comparison-policy checks, and six serial
+unit suites pass: 716 tests, 715 passes, one original skip.
+The required five-versus-five check proved a new Turbo dry-output buffer
+overflow. The correction excludes uncompiled tests from six compiler build
+cache inputs, not from test execution or test-task hashing. A new regression
+test failed before the fix and passes now; original tests are unchanged.
+No new baseline exception was added. See [M7](M7.md).
+All 222 integration entry points match: 1,239 tests, 1,131 passes, 102
+observed known failures, six original skips, no cancellations. Both frozen
+ranking snapshots and the M0 manifest are unchanged. The temporary M6
+checkout was removed after all 30 diagnostic receipts were verified and
+hashed. Only the owned Compose project remains for M8.
+
 **M6 personal-memory extraction is complete. Continuing to M7.**
 
 Personal-memory reads/replacement, preference evidence parsing, reconciliation,
