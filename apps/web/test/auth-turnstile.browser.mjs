@@ -19,7 +19,8 @@ test(
       await context.route('**/v1/auth/**', async route => {
         const pathname = new URL(route.request().url()).pathname;
         if (pathname.endsWith('/get-session')) return route.fulfill({ json: null });
-        if (pathname.endsWith('/options')) return route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key' } });
+        if (pathname.endsWith('/options'))
+          return route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true } });
         throw new Error(`Unexpected auth request: ${pathname}`);
       });
       await page.goto(`${origin}/register?redirect=%2F`);
@@ -84,7 +85,7 @@ test(
           if (pathname.endsWith('/options'))
             return route.fulfill({
               status: optionsFailure ? 503 : 200,
-              json: optionsFailure ? {} : { turnstileSiteKey: 'fixture-site-key' },
+              json: optionsFailure ? {} : { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true },
             });
           if (pathname.endsWith('/sign-in/magic-link')) {
             sends.push({
@@ -174,7 +175,7 @@ test(
       const page = await context.newPage();
       await context.route('**/v1/auth/get-session', route => route.fulfill({ json: null }));
       await context.route('**/v1/auth/options', route =>
-        route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key' } }),
+        route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true } }),
       );
       await context.route('https://challenges.cloudflare.com/**', route => route.abort());
       await page.goto(origin + '/login');

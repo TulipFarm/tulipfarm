@@ -187,14 +187,23 @@ test('HTTP options expose only the public key and preflight permits challenge to
     NODE_ENV: 'test',
     TURNSTILE_SITE_KEY: config.siteKey,
     TURNSTILE_SECRET_KEY: config.secretKey,
+    HOST: '127.0.0.1',
   });
+  for (const name of [
+    'EMAIL_PROVIDER',
+    'ACS_CONNECTION_STRING',
+    'SMTP_HOST',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+  ])
+    delete process.env[name];
   t.after(() => {
     process.env = oldEnv;
   });
   const app = buildApp();
   try {
     const options = await app.inject('/v1/auth/options');
-    assert.deepEqual(options.json(), { turnstileSiteKey: config.siteKey });
+    assert.deepEqual(options.json(), { turnstileSiteKey: config.siteKey, google: false, magicLink: true });
     assert.equal(options.headers['cache-control'], 'no-store');
     const preflight = await app.inject({
       method: 'OPTIONS',

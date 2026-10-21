@@ -53,7 +53,9 @@ test('email links continue automatically and invalid links offer recovery', { ti
       });
       page.on('pageerror', error => errors.push(error.message));
       await context.route('**/v1/auth/get-session', route => route.fulfill({ json: null }));
-      await context.route('**/v1/auth/options', route => route.fulfill({ json: { turnstileSiteKey: null } }));
+      await context.route('**/v1/auth/options', route =>
+        route.fulfill({ json: { turnstileSiteKey: null, google: true, magicLink: true } }),
+      );
       const destination = '/acme/settings?tab=general#members';
       const callbackURL = origin + destination;
       let releaseVerification;

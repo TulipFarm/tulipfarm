@@ -40,7 +40,8 @@ try {
     }
     if (path === '/v1/dev/sign-in-link') return route.fulfill({ status: 404, json: { error: 'Not found' } });
     if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
-    if (path === '/v1/auth/options') return route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key' } });
+    if (path === '/v1/auth/options')
+      return route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true } });
     if (path.endsWith('/governance/me')) return route.fulfill({ json: ownMembership });
     if (path.startsWith('/v1/workspace-setups/')) {
       checks++;

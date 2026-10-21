@@ -60,7 +60,9 @@ try {
       if (path === '/v1/auth/options')
         return route.fulfill({
           status: verification ? 200 : 503,
-          json: verification ? { turnstileSiteKey: 'fixture-site-key' } : { error: 'controlled-unavailable' },
+          json: verification
+            ? { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true }
+            : { error: 'controlled-unavailable' },
         });
       if (verification && path === '/v1/auth/sign-in/magic-link') {
         sends.push(route.request().postDataJSON());

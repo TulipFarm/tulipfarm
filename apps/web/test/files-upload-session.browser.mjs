@@ -104,7 +104,8 @@ async function profile(t) {
         await context.clearCookies();
         return await route.fulfill({ json: { success: true }, headers: cors });
       }
-      if (path === '/v1/auth/options') return await route.fulfill({ json: { turnstileSiteKey: null }, headers: cors });
+      if (path === '/v1/auth/options')
+        return await route.fulfill({ json: { turnstileSiteKey: null, google: true, magicLink: true }, headers: cors });
       if (path.startsWith(files)) {
         const upload =
           method === 'PUT' && path.endsWith('/content')

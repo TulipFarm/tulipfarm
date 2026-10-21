@@ -45,7 +45,7 @@ test(
         if (path === '/v1/auth/options')
           return route.fulfill({
             status: optionsFailure ? 503 : 200,
-            json: optionsFailure ? {} : { turnstileSiteKey: 'fixture-site' },
+            json: optionsFailure ? {} : { turnstileSiteKey: 'fixture-site', google: true, magicLink: true },
           });
         if (path === '/v1/workspaces' && route.request().method() === 'POST') {
           sends.push(route.request().postDataJSON());

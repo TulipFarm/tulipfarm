@@ -43,6 +43,8 @@ test('production auth starts with disabled email and with SMTP without any ACS c
       'EMAIL_DELIVERY_KEY',
       'EMAIL_DELIVERY_KEY_ID',
       'EMAIL_DELIVERY_PREVIOUS_KEYS',
+      'GOOGLE_CLIENT_ID',
+      'GOOGLE_CLIENT_SECRET',
     ])
       delete process.env[name];
     for (const enabled of [false, true]) {
@@ -57,6 +59,17 @@ test('production auth starts with disabled email and with SMTP without any ACS c
         const response = await app.inject('/auth/options');
         assert.equal(response.statusCode, 200);
         assert.equal(response.json().passwordResetEmail, enabled);
+        assert.equal(response.json().magicLink, enabled);
+        assert.equal(response.json().google, false);
+        if (!enabled) {
+          const link = await app.inject({
+            method: 'POST',
+            url: '/auth/sign-in/magic-link',
+            payload: { email: 'person@example.com' },
+          });
+          assert.equal(link.statusCode, 404);
+          assert.equal(link.json().code, 'MAGIC_LINK_DISABLED');
+        }
       } finally {
         await app.close();
       }

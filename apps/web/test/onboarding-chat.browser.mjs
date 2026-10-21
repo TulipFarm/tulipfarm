@@ -60,7 +60,8 @@ test('website chat resumes in Cloud and preserves history through setup recovery
           pathname = new URL(request.url()).pathname;
         if (pathname === '/v1/auth/get-session')
           return route.fulfill({ json: authenticated && statusMode !== 'unauthorized' ? session : null });
-        if (pathname === '/v1/auth/options') return route.fulfill({ json: { turnstileSiteKey: 'fixture-site' } });
+        if (pathname === '/v1/auth/options')
+          return route.fulfill({ json: { turnstileSiteKey: 'fixture-site', google: true, magicLink: true } });
         if (pathname === '/v1/workspaces') return route.fulfill({ json: [] });
         if (pathname === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
         if (pathname === '/v1/dev/sign-in-link') return route.fulfill({ status: 404, json: {} });

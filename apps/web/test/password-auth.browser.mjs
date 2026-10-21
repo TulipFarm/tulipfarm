@@ -91,7 +91,11 @@ async function open(browser, colorScheme, options) {
 
 test('without password sign-in the login page offers only email links and Google', { timeout: 120000 }, async () => {
   await withServer(async (origin, browser) => {
-    const { context, page, errors, calls } = await open(browser, 'light', { turnstileSiteKey: null });
+    const { context, page, errors, calls } = await open(browser, 'light', {
+      turnstileSiteKey: null,
+      google: true,
+      magicLink: true,
+    });
     await page.goto(`${origin}/login`);
     await page.getByText('We will email you a magic link to sign in.').waitFor();
     await page.getByRole('button', { name: 'Email me a sign-in link' }).waitFor();
@@ -115,10 +119,71 @@ test('without password sign-in the login page offers only email links and Google
   });
 });
 
+test('sign-in methods without server credentials stay hidden', { timeout: 120000 }, async () => {
+  await withServer(async (origin, browser) => {
+    const google = { name: 'Sign in with Google' };
+    const emailLink = { name: 'Email me a sign-in link' };
+    const cases = [
+      {
+        options: { google: false, magicLink: true },
+        subtitle: 'We will email you a magic link to sign in.',
+        google: 0,
+        emailLink: 1,
+      },
+      {
+        options: { google: true, magicLink: false },
+        subtitle: 'Continue with your Google account.',
+        google: 1,
+        emailLink: 0,
+      },
+      {
+        options: { emailPassword: true, google: false, magicLink: false },
+        subtitle: 'Sign in with your email and password.',
+        google: 0,
+        emailLink: 0,
+      },
+    ];
+    for (const expected of cases) {
+      const { context, page, errors } = await open(browser, 'light', { turnstileSiteKey: null, ...expected.options });
+      await page.goto(`${origin}/login`);
+      await page.getByText(expected.subtitle).waitFor();
+      assert.equal(await page.getByRole('button', google).count(), expected.google, JSON.stringify(expected));
+      assert.equal(await page.getByRole('button', emailLink).count(), expected.emailLink, JSON.stringify(expected));
+      assert.equal(await page.getByText('or', { exact: true }).count(), 0);
+      if (expected.options.emailPassword) await page.getByRole('button', { name: 'Log in' }).waitFor();
+      if (!expected.emailLink && !expected.options.emailPassword)
+        assert.equal(await page.getByLabel('Email').count(), 0);
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+
+    const { context, page, errors } = await open(browser, 'light', {
+      turnstileSiteKey: null,
+      google: false,
+      magicLink: false,
+    });
+    await page.goto(`${origin}/login`);
+    await page.getByText('No sign-in method is set up on this server.', { exact: false }).waitFor();
+    await page.getByText('Sign-in is not set up on this server yet.').waitFor();
+    assert.equal(await page.getByLabel('Email').count(), 0);
+    assert.equal(await page.getByRole('button', google).count(), 0);
+    await page.goto(`${origin}/register`);
+    await page.getByText('No sign-in method is set up on this server.', { exact: false }).waitFor();
+    assert.deepEqual(errors, []);
+    await context.close();
+  });
+});
+
 test('password sign-in, sign-up, forgot and reset screens', { timeout: 240000 }, async () => {
   await withServer(async (origin, browser) => {
     for (const colorScheme of ['light', 'dark']) {
-      const options = { turnstileSiteKey: null, emailPassword: true, passwordResetEmail: false };
+      const options = {
+        turnstileSiteKey: null,
+        emailPassword: true,
+        passwordResetEmail: false,
+        google: true,
+        magicLink: true,
+      };
       const { context, page, errors, calls } = await open(browser, colorScheme, options);
       const redirect = encodeURIComponent(destination);
 

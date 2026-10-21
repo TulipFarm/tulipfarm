@@ -121,7 +121,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       }
       if (request.method === 'GET') {
         if (path === '/v1/feature-flags') return send({});
-        if (path === '/v1/auth/options') return send({ turnstileSiteKey: null });
+        if (path === '/v1/auth/options') return send({ turnstileSiteKey: null, google: true, magicLink: true });
         // The workspace shell's background reads, answered as cloud's own mock does (cloud 866ec800 #1080, features/tables/workspace-members-mock-api.ts:267-273).
         if (path === '/v1/google-workspace/availability') return send({ configured: false });
         if (path === `${base}/google-workspace`) return send({ status: 'disconnected' });

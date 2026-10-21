@@ -58,7 +58,13 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     }
     if (passwordScenario) {
       if (path === '/v1/auth/options')
-        return Response.json({ turnstileSiteKey: null, emailPassword: true, passwordResetEmail: true });
+        return Response.json({
+          turnstileSiteKey: null,
+          emailPassword: true,
+          passwordResetEmail: true,
+          google: true,
+          magicLink: true,
+        });
       if (path === '/v1/auth/list-accounts')
         return Response.json(passwordScenario === 'credential' ? [{ id: 'credential', providerId: 'credential' }] : []);
       if (path === '/v1/account/sign-in-methods') return Response.json({ methods: ['email-link'] });

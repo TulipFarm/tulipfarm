@@ -248,9 +248,14 @@ async function loadDevSignInLink(email: string) {
   }
 }
 
-/** Picks the subtitle by whether password sign-in is on; render it inside AuthLayout. */
+/** Picks the subtitle by the sign-in methods the server offers; render it inside AuthLayout. */
 export function AuthSubtitle({ password, link }: { password: string; link: string }) {
-  return useAuthOptions().data?.emailPassword ? password : link;
+  const options = useAuthOptions().data;
+  if (!options) return null;
+  if (options.emailPassword) return options.magicLink ? password : 'Sign in with your email and password.';
+  if (options.magicLink) return link;
+  if (options.google) return 'Continue with your Google account.';
+  return 'Sign-in is not set up on this server yet.';
 }
 
 export function AuthForm({
@@ -273,6 +278,10 @@ export function AuthForm({
 }) {
   const options = useAuthOptions();
   const passwordSignIn = options.data?.emailPassword === true;
+  const emailLink = options.data?.magicLink === true;
+  const googleSignIn = options.data?.google === true;
+  // Keep the email form while options load so typed input survives; verification blocks submits until then.
+  const emailForm = !options.data || passwordSignIn || emailLink;
   const [passwordInput, setPasswordInput] = useState('');
   // The magic-link button submits the same form; this marks that submit as a link request.
   const linkRequested = useRef(false);
@@ -445,7 +454,12 @@ export function AuthForm({
         newUserCallbackURL,
         errorCallbackURL,
       });
-      if (result.error) setError('Google sign-in is unavailable. Please use an email link or try again later.');
+      if (result.error)
+        setError(
+          emailLink
+            ? 'Google sign-in is unavailable. Please use an email link or try again later.'
+            : 'Google sign-in is unavailable. Please try again later.',
+        );
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not reach Google sign-in. Please try again.');
     } finally {
@@ -516,99 +530,121 @@ export function AuthForm({
     );
   }
 
+  if (!emailForm && !googleSignIn)
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>
+          No sign-in method is set up on this server. Ask your administrator to configure email delivery or Google
+          sign-in.
+        </AlertDescription>
+      </Alert>
+    );
+
   return (
     <div className={workspace ? 'space-y-4 lg:space-y-3' : 'space-y-6'}>
-      <Form onSubmit={submit} disabled={pending}>
-        <div className={workspace ? 'space-y-4 lg:space-y-3' : 'space-y-5'}>
-          {workspace?.fields}
-          {withName && (
-            <Field id="name" label="Name" required error={nameError}>
+      {!emailForm && workspace?.fields}
+      {!emailForm && error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {emailForm && (
+        <Form onSubmit={submit} disabled={pending}>
+          <div className={workspace ? 'space-y-4 lg:space-y-3' : 'space-y-5'}>
+            {workspace?.fields}
+            {withName && (
+              <Field id="name" label="Name" required error={nameError}>
+                <Input
+                  name="name"
+                  scale="lg"
+                  placeholder="Ada Lovelace"
+                  autoComplete="name"
+                  maxLength={80}
+                  value={nameInput}
+                  onChange={event => setNameInput(event.target.value)}
+                />
+              </Field>
+            )}
+            <Field id="email" label="Email" required error={emailError}>
               <Input
-                name="name"
+                name="email"
+                type="email"
                 scale="lg"
-                placeholder="Ada Lovelace"
-                autoComplete="name"
-                maxLength={80}
-                value={nameInput}
-                onChange={event => setNameInput(event.target.value)}
+                placeholder="you@company.com"
+                autoComplete="email"
+                value={emailInput}
+                onChange={event => setEmailInput(event.target.value)}
               />
             </Field>
-          )}
-          <Field id="email" label="Email" required error={emailError}>
-            <Input
-              name="email"
-              type="email"
-              scale="lg"
-              placeholder="you@company.com"
-              autoComplete="email"
-              value={emailInput}
-              onChange={event => setEmailInput(event.target.value)}
-            />
-          </Field>
-          {passwordSignIn && (
-            <Field
-              id="password"
-              label="Password"
-              required
-              error={passwordError}
-              helper={
-                withName ? (
-                  `${passwordLength.min} to ${passwordLength.max} characters.`
-                ) : (
-                  <span className="underline underline-offset-4">
-                    <Link to="/login/forgot-password" search={{ redirect: destination }}>
-                      Forgot password?
-                    </Link>
-                  </span>
-                )
+            {passwordSignIn && (
+              <Field
+                id="password"
+                label="Password"
+                required
+                error={passwordError}
+                helper={
+                  withName ? (
+                    `${passwordLength.min} to ${passwordLength.max} characters.`
+                  ) : (
+                    <span className="underline underline-offset-4">
+                      <Link to="/login/forgot-password" search={{ redirect: destination }}>
+                        Forgot password?
+                      </Link>
+                    </span>
+                  )
+                }
+              >
+                <Input
+                  name="password"
+                  type="password"
+                  scale="lg"
+                  autoComplete={withName ? 'new-password' : 'current-password'}
+                  maxLength={passwordLength.max}
+                  value={passwordInput}
+                  onChange={event => setPasswordInput(event.target.value)}
+                />
+              </Field>
+            )}
+            <AuthVerification key={challengeAttempt} onToken={setChallengeToken} />
+            <FormFooter
+              dirty={false}
+              layout="stack"
+              error={error || undefined}
+              submit={{
+                label: passwordSignIn ? (passwordLabel ?? submitLabel) : submitLabel,
+                pendingLabel: passwordSignIn && submittedMode === 'password' ? 'Signing in…' : 'Sending email…',
+                state: pending
+                  ? { kind: 'busy' }
+                  : challengeToken === null
+                    ? { kind: 'blocked', reason: 'Complete verification to continue.' }
+                    : { kind: 'ready' },
+              }}
+              secondarySubmit={
+                passwordSignIn && emailLink
+                  ? {
+                      label: submitLabel,
+                      disabled: pending || challengeToken === null,
+                      onSelect: () => {
+                        linkRequested.current = true;
+                      },
+                    }
+                  : undefined
               }
-            >
-              <Input
-                name="password"
-                type="password"
-                scale="lg"
-                autoComplete={withName ? 'new-password' : 'current-password'}
-                maxLength={passwordLength.max}
-                value={passwordInput}
-                onChange={event => setPasswordInput(event.target.value)}
-              />
-            </Field>
-          )}
-          <AuthVerification key={challengeAttempt} onToken={setChallengeToken} />
-          <FormFooter
-            dirty={false}
-            layout="stack"
-            error={error || undefined}
-            submit={{
-              label: passwordSignIn ? (passwordLabel ?? submitLabel) : submitLabel,
-              pendingLabel: passwordSignIn && submittedMode === 'password' ? 'Signing in…' : 'Sending email…',
-              state: pending
-                ? { kind: 'busy' }
-                : challengeToken === null
-                  ? { kind: 'blocked', reason: 'Complete verification to continue.' }
-                  : { kind: 'ready' },
-            }}
-            secondarySubmit={
-              passwordSignIn
-                ? {
-                    label: submitLabel,
-                    disabled: pending || challengeToken === null,
-                    onSelect: () => {
-                      linkRequested.current = true;
-                    },
-                  }
-                : undefined
-            }
-          />
+            />
+          </div>
+        </Form>
+      )}
+      {emailForm && googleSignIn && (
+        <div className="py-2">
+          <FieldSeparator>or</FieldSeparator>
         </div>
-      </Form>
-      <div className="py-2">
-        <FieldSeparator>or</FieldSeparator>
-      </div>
-      <Button variant="outline" size="onboarding" disabled={pending} onClick={signInWithGoogle}>
-        <GoogleLogo />
-        {googleLabel}
-      </Button>
+      )}
+      {googleSignIn && (
+        <Button variant="outline" size="onboarding" disabled={pending} onClick={signInWithGoogle}>
+          <GoogleLogo />
+          {googleLabel}
+        </Button>
+      )}
     </div>
   );
 }

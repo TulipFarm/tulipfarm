@@ -71,7 +71,8 @@ try {
     let status = 200,
       json;
     if (path === '/v1/auth/get-session') json = anonymous ? null : session;
-    else if (path === '/v1/auth/options') json = { turnstileSiteKey: 'fixture-site-key' };
+    else if (path === '/v1/auth/options')
+      json = { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true };
     else if (path === '/v1/workspaces') json = [workspace];
     else if (path === `/v1/workspaces/${workspace.slug}`) json = workspace;
     else if (path.endsWith('/governance/me'))

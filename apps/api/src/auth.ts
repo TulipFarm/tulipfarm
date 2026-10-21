@@ -16,6 +16,7 @@ export function registerAuth(app: FastifyInstance) {
   if (process.env.NODE_ENV === 'production' && emailTransportConfigured()) emailDeliveryKeys();
   // Local development has no mail transport; keep the latest link per email so the login page can offer it.
   const devLinks = devSessionsAllowed() ? new Map<string, string>() : undefined;
+  const magicLink = Boolean(devLinks) || emailTransportConfigured();
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
     options: '-c search_path=app',
@@ -51,6 +52,8 @@ export function registerAuth(app: FastifyInstance) {
   app.get('/auth/options', { schema: { hide: true } }, async (_request, reply) => {
     return reply.header('Cache-Control', 'no-store').send({
       turnstileSiteKey: turnstile?.siteKey ?? null,
+      google: Boolean(config.google),
+      magicLink,
       ...(config.emailPassword && { emailPassword: true, passwordResetEmail }),
     });
   });
@@ -88,6 +91,12 @@ export function registerAuth(app: FastifyInstance) {
     schema: { hide: true },
     logLevel: 'silent',
     async handler(request, reply) {
+      // Without a mail transport the link would sit in the outbox and never arrive.
+      if (!magicLink && request.url.split('?')[0]?.endsWith('/auth/sign-in/magic-link'))
+        return reply
+          .code(404)
+          .header('Cache-Control', 'no-store')
+          .send({ code: 'MAGIC_LINK_DISABLED', message: 'Email sign-in links are not configured.' });
       const headers = fromNodeHeaders(request.headers);
       headers.set('x-tulipfarm-client-ip', request.ip);
       const response = await auth.handler(

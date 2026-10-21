@@ -8,6 +8,9 @@ const optionsSchema = z.object({
   // Self-hosted email and password sign-in (AUTH_EMAIL_PASSWORD), and whether reset links go out by email.
   emailPassword: z.boolean().default(false),
   passwordResetEmail: z.boolean().default(false),
+  // Sign-in methods the server has credentials for; hidden unless the API reports them.
+  google: z.boolean().default(false),
+  magicLink: z.boolean().default(false),
 });
 const PublicQueryContext = createContext<QueryClient | null>(null);
 

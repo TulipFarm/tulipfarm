@@ -46,7 +46,8 @@ test(
         await context.route('**/v1/**', async route => {
           const path = new URL(route.request().url()).pathname;
           if (path === '/v1/auth/get-session') return route.fulfill({ json: authenticated ? session : null });
-          if (path === '/v1/auth/options') return route.fulfill({ json: { turnstileSiteKey: 'fixture-site' } });
+          if (path === '/v1/auth/options')
+            return route.fulfill({ json: { turnstileSiteKey: 'fixture-site', google: true, magicLink: true } });
           if (path === '/v1/dev/sign-in-link') return route.fulfill({ status: 404, json: {} });
           if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
           if (path === '/v1/workspaces') return route.fulfill({ json: [] });

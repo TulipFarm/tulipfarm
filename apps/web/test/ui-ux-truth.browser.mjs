@@ -114,7 +114,7 @@ function fixture(state) {
           ? null
           : { session: { id: 'fixture', userId: 'ada' }, user: { id: 'ada', name: 'Ada', email: 'ada@example.com' } },
       );
-    if (p === '/v1/auth/options') return send({ turnstileSiteKey: null });
+    if (p === '/v1/auth/options') return send({ turnstileSiteKey: null, google: true, magicLink: true });
     if (p === '/v1/user/visit') return send({ firstSession: false });
     if (p === '/v1/workspaces') return send([workspace]);
     if (p === '/v1/workspaces/acme') return send(workspace);
