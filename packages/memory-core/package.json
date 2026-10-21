@@ -41,6 +41,22 @@
     "./embedding-provider": {
       "types": "./dist/embeddings/provider.d.ts",
       "default": "./dist/embeddings/provider.js"
+    },
+    "./embedding-contracts": {
+      "types": "./dist/contracts/embeddings.d.ts",
+      "default": "./dist/contracts/embeddings.js"
+    },
+    "./documents/*": {
+      "types": "./dist/documents/*.d.ts",
+      "default": "./dist/documents/*.js"
+    },
+    "./search": {
+      "types": "./dist/search/search.d.ts",
+      "default": "./dist/search/search.js"
+    },
+    "./embeddings": {
+      "types": "./dist/embeddings/engine.d.ts",
+      "default": "./dist/embeddings/engine.js"
     }
   },
   "scripts": {

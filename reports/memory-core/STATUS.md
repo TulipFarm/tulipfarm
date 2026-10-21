@@ -1,10 +1,43 @@
 # Memory-core Phase 1 status
 
-**M4 complete. PAUSED for the required security review before M5.**
+**M5 complete. Paused for its required security review before M6.**
 
 M0 is in `f276abf`; M1 in `fbb1642`; M2 in `667a34f`; M3 in `6159003`.
-M4's review range is `6159003..HEAD` after its local milestone commit.
-M5 has not started, and this worker has not run the security review.
+M4 is in `3d5f606`. The user accepted its authorization equivalence and
+the stricter invalid-Date guard. This worker did not run that review.
+M5 moves Store, Search, and Embeddings into core behind opaque
+tenant-runtime, typed repository, lexical-index, vector-index, and session
+ports. `memory-postgres` owns their SQL; host permission decisions and
+eligibility predicates remain in Knowledge. Old constructors and exports
+forward unchanged. This worker has not run the M5 security review.
+
+All 36 scoped build/typecheck tasks, lint (26 tooling tests), 78 strict
+comparison-policy checks, and six serial unit suites passed: 666 tests,
+665 passes, one original skip. All 222 integration entry points match the
+agreed rules: 1,239 tests, 1,131 passes, 102 observed known failures,
+six original skips, no cancellations. Both ranking snapshots are unchanged.
+The proof preserves all 112 extracted SQL operations and bound arguments,
+four host availability queries, fusion, and external lock resolutions.
+
+The interrupted API dispatch timeout did not recur in five M5 or five
+detached M4 runs. A later Slack progress assertion also did not recur in
+its five-versus-five check. Original failed receipts and all 20 experiment
+runs are retained; neither failure has an accepted exception. Both final
+files meet the strict baseline. Their causes remain unproved, not claimed
+as known baseline flakes.
+
+For the M5 review, inspect tenant/schema mapping, admission and lock order,
+eligibility SQL on candidate/page reads, revision/publication/epoch/proof
+binding and final evidence checks, embedding pre-dispatch and publication
+authorization, and transaction/rollback/error behavior. Schema, API
+responses, ranking, embedding model/dimensions, existing tests, Access,
+Files, and Temporal are unchanged. See [M5](M5.md) for the full surface,
+commands, counts, preserved diagnostics, and benchmarks.
+
+The temporary M4 checkout was removed after all copied evidence was
+verified byte-for-byte. The owned Compose containers, network, and volumes
+were removed; see `M5-cleanup.tap`. M6 has not started. All commits remain
+local and no earlier commit was amended.
 
 M4 adds explicit allow/deny decisions and a storage-side eligibility port.
 Review the new core decision/proof helpers and Knowledge adapters for

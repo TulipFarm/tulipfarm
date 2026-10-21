@@ -42,9 +42,14 @@ export const memoryCoreBoundary = {
       context.report({
         node,
         message:
-          'Keep memory-core independent of host packages, Postgres, Temporal, and environment variables. Use a port instead.',
+          'Keep memory-core independent of host packages, SQL, Postgres, Temporal, and environment variables. Use a port instead.',
       });
     const processModule = source => ['process', 'node:process'].includes(source);
+    const sql = value =>
+      typeof value === 'string' &&
+      /^\s*(?:(?:SELECT|WITH)\s|INSERT\s+INTO\b|UPDATE\s+\S+\s+SET\b|DELETE\s+FROM\b|(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|SCHEMA)\b)/i.test(
+        value,
+      );
 
     function checkSource(node, source) {
       const name = text(source);
@@ -84,6 +89,12 @@ export const memoryCoreBoundary = {
     }
 
     return {
+      Literal(node) {
+        if (sql(node.value)) report(node);
+      },
+      TemplateLiteral(node) {
+        if (sql(node.quasis[0]?.value.cooked)) report(node);
+      },
       ImportDeclaration(node) {
         checkSource(node, node.source);
         for (const specifier of node.specifiers) {
@@ -129,6 +140,7 @@ export const memoryCoreBoundary = {
       },
       CallExpression(node) {
         calls.push(node);
+        if (node.callee.type === 'Identifier' && node.callee.name === 'qualified') report(node);
       },
       'Program:exit'() {
         for (const node of declarations) {
