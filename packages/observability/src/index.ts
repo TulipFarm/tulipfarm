@@ -490,7 +490,8 @@ export function startTelemetry(build: BuildInfo) {
     ? [
         new PeriodicExportingMetricReader({
           exporter: new MetricExporter(transport(config.metrics)),
-          exportIntervalMillis: 30000,
+          // One point per series per minute: Grafana Cloud bills faster exports as extra series.
+          exportIntervalMillis: 60000,
           exportTimeoutMillis: 3000,
         }),
       ]
