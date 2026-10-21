@@ -792,6 +792,9 @@ importers:
       '@tulipfarm/memory-core':
         specifier: workspace:*
         version: link:../memory-core
+      '@tulipfarm/memory-postgres':
+        specifier: workspace:*
+        version: link:../memory-postgres
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability

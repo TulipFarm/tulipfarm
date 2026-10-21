@@ -57,6 +57,10 @@
     "./embeddings": {
       "types": "./dist/embeddings/engine.d.ts",
       "default": "./dist/embeddings/engine.js"
+    },
+    "./memory/*": {
+      "types": "./dist/memory/*.d.ts",
+      "default": "./dist/memory/*.js"
     }
   },
   "scripts": {

@@ -5,6 +5,10 @@ export type Clock = {
   sleep(milliseconds: number): Promise<void>;
 };
 
+export type EgressPolicy = {
+  deny(): void;
+};
+
 export type FeatureFlags<Name extends string = string> = {
   enabled(name: Name, principalId: string, tenantId: string): Promise<boolean>;
 };

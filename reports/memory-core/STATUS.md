@@ -1,6 +1,23 @@
 # Memory-core Phase 1 status
 
-**M5 security review and UUID compatibility follow-up complete. Ready for M6.**
+**M6 personal-memory extraction is complete. Continuing to M7.**
+
+Personal-memory reads/replacement, preference evidence parsing, reconciliation,
+and transcript splitting now run in core with opaque transaction contexts.
+Three Postgres adapters own the moved SQL. Host transactions, membership checks,
+maintenance fences, Bud cleanup, and recommendation invalidation remain in place.
+The mechanical proof preserves 18 query occurrences, their parameters and order,
+the complete moved control flow, prompts, and transcript helpers against
+`737e0d3`. All 36 scoped build/typecheck tasks, lint, 78 comparison-policy
+checks, and six serial unit suites passed: 692 tests, 691 passes, one
+original skip. All 222 integration entry points match: 1,239 tests, 1,130
+passes, 103 observed known failures, six original skips, no cancellations.
+Both frozen ranking snapshots and the M0 manifest are unchanged.
+The initial GitHub sync stop and five-versus-five check are documented in
+M6; no flaky exception was added, and its strict rerun passes.
+No new comparison exception was added. The temporary baseline checkout was
+removed after its copied evidence was verified byte-for-byte.
+The owned Compose project is retained for M7. See [M6](M6.md).
 
 The user verified M5's SQL/parameters, access order, transaction scoping
 and leases equivalent to `3d5f606`, with no exploitable findings.
@@ -52,8 +69,9 @@ commands, counts, preserved diagnostics, and benchmarks.
 
 The temporary M4 checkout was removed after all copied evidence was
 verified byte-for-byte. The owned Compose containers, network, and volumes
-were removed; see `M5-cleanup.tap`. M6 has not started. All commits remain
-local and no earlier commit was amended.
+were removed; see `M5-cleanup.tap`. The UUID follow-up later restored this
+owned environment; M6 reused it. All commits remain local and no earlier
+commit was amended.
 
 M4 adds explicit allow/deny decisions and a storage-side eligibility port.
 Review the new core decision/proof helpers and Knowledge adapters for

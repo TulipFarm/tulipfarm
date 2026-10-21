@@ -184,6 +184,7 @@
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/memory-core": "workspace:*",
+    "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "docx": "9.9.0",
