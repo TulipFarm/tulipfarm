@@ -126,6 +126,11 @@ export const proofInput = z
     boundedAccessProof({ ...proof, principalCheckedAt: proof.membershipCheckedAt }, knowledgeLimits.permissionAgeMs),
   );
 export const citationSchema = knowledgeCitationSchema.extend({
+  workspaceId: uuidSchema,
+  sourceId: uuidSchema,
+  documentId: uuidSchema,
+  revisionId: uuidSchema,
+  publicationId: uuidSchema,
   ordinal: z
     .number()
     .int()

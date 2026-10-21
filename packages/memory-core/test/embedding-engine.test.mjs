@@ -214,6 +214,7 @@ function fixture({
     cache,
     sleeps,
     job,
+    tenant,
     transient,
     run: () => engine.process({ workspaceId: tenant, jobId: job.id, generation: 1 }, 20000),
   };
@@ -278,4 +279,12 @@ test('outcome persistence stops at three attempts with the exact original error'
   assert.deepEqual(f.sleeps, [50, 100]);
   assert.equal(f.trace.filter(value => value === 'provider').length, 1);
   assert.equal(f.trace.filter(value => value === 'settleClaim').length, 3);
+});
+
+test('embedding transactions normalize uppercase workspace UUIDs before invoking the host runtime', async () => {
+  const f = fixture();
+  assert.deepEqual(
+    await f.engine.process({ workspaceId: f.tenant.toUpperCase(), jobId: f.job.id, generation: 1 }, 20000),
+    { disposition: 'ready' },
+  );
 });

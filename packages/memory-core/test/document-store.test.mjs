@@ -310,3 +310,9 @@ test('access proofs use the repository clock, preserve bare callback invocation,
   );
   assert.ok(!f.trace.includes('recordProof'));
 });
+
+test('document transactions normalize uppercase workspace UUIDs before invoking the host runtime', async () => {
+  const f = fixture();
+  const value = await f.store.api.observeRevision(f.tenantId.toUpperCase(), f.principal, f.observation);
+  assert.equal(value.revisionId, f.revisionId);
+});

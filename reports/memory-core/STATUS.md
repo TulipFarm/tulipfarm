@@ -1,6 +1,22 @@
 # Memory-core Phase 1 status
 
-**M5 complete. Paused for its required security review before M6.**
+**M5 security review and UUID compatibility follow-up complete. Ready for M6.**
+
+The user verified M5's SQL/parameters, access order, transaction scoping
+and leases equivalent to `3d5f606`, with no exploitable findings.
+The approved follow-up restores Access's former lowercase transform for
+all moved internal UUIDs, including internal citations and workspace IDs,
+without changing the earlier browser contracts or importing Access into
+core. Five regression tests were added; affected units, lint and all
+36 scoped build/typecheck tasks passed. All 28 Knowledge integration files
+match strictly: 257 tests, 254 passes, three exact known failures.
+Original M5 receipts are preserved; see the follow-up section in [M5](M5.md).
+
+The Google repair failure did not reproduce in five current/five baseline
+runs. Hybrid session constraint errors were proved to arise from app/DB
+clock skew, not changed timestamp code; after restarting the owned test
+Postgres, final checks pass. No new flaky exception or SQL/schema/test
+change was introduced. The owned Compose project is retained for M6.
 
 M0 is in `f276abf`; M1 in `fbb1642`; M2 in `667a34f`; M3 in `6159003`.
 M4 is in `3d5f606`. The user accepted its authorization equivalence and

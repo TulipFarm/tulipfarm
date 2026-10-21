@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const uuidSchema = z.uuid();
+export const uuidSchema = z.uuid().transform(value => value.toLowerCase());
 export const sourceRow = z.object({
   id: uuidSchema,
   provider: z.enum(['note', 'file', 'google', 'slack', 'github', 'confluence', 'jira', 'conversation']),
