@@ -48,7 +48,15 @@ function clientAddress() {
 
 function setup(t, env) {
   const saved = { ...process.env };
-  for (const name of ['AUTH_EMAIL_PASSWORD', 'EMAIL_PROVIDER', 'SMTP_HOST', 'ACS_CONNECTION_STRING']) {
+  for (const name of [
+    'AUTH_METHODS',
+    'AUTH_EMAIL_PASSWORD',
+    'EMAIL_PROVIDER',
+    'SMTP_HOST',
+    'ACS_CONNECTION_STRING',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+  ]) {
     delete process.env[name];
   }
   Object.assign(process.env, { TURNSTILE_SITE_KEY: 'fixture-site', TURNSTILE_SECRET_KEY: 'fixture-secret', ...env });
@@ -83,9 +91,13 @@ function cookieOf(response) {
   return cookies.map(value => value.split(';')[0]).join('; ');
 }
 
-test('without AUTH_EMAIL_PASSWORD the options are unchanged and password routes are rejected', async t => {
+test('without password in AUTH_METHODS the options omit it and password routes are rejected', async t => {
   const { get, post } = setup(t, {});
-  assert.deepEqual((await get('/options')).json(), { turnstileSiteKey: 'fixture-site' });
+  assert.deepEqual((await get('/options')).json(), {
+    turnstileSiteKey: 'fixture-site',
+    google: false,
+    magicLink: true,
+  });
   const email = `off-${randomUUID()}@example.com`;
   const signUp = await post('/sign-up/email', { email, name: 'Off', password: 'correct horse battery' });
   assert.equal(signUp.statusCode, 400);
@@ -96,26 +108,63 @@ test('without AUTH_EMAIL_PASSWORD the options are unchanged and password routes 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, options: '-c search_path=app' });
   try {
     assert.equal((await pool.query('SELECT id FROM users WHERE email = $1', [email])).rowCount, 0);
-    await assert.rejects(issuePasswordResetLink(pool, email), /AUTH_EMAIL_PASSWORD=true/);
+    await assert.rejects(issuePasswordResetLink(pool, email), /AUTH_METHODS/);
   } finally {
     await pool.end();
   }
 });
 
-test('AUTH_EMAIL_PASSWORD must be true or false', async t => {
-  const saved = process.env.AUTH_EMAIL_PASSWORD;
+test('AUTH_METHODS rejects unknown methods and the removed AUTH_EMAIL_PASSWORD', async t => {
+  const saved = { ...process.env };
   t.after(() => {
-    if (saved === undefined) delete process.env.AUTH_EMAIL_PASSWORD;
-    else process.env.AUTH_EMAIL_PASSWORD = saved;
+    process.env = saved;
   });
-  process.env.AUTH_EMAIL_PASSWORD = 'yes';
-  assert.throws(() => buildApp(), /AUTH_EMAIL_PASSWORD/);
+  delete process.env.AUTH_EMAIL_PASSWORD;
+  process.env.AUTH_METHODS = 'password,sso';
+  assert.throws(() => buildApp(), /AUTH_METHODS accepts password, magic-link, google; "sso"/);
+  delete process.env.AUTH_METHODS;
+  process.env.AUTH_EMAIL_PASSWORD = 'true';
+  assert.throws(() => buildApp(), /AUTH_EMAIL_PASSWORD was removed/);
+});
+
+const googleKeys = { GOOGLE_CLIENT_ID: 'fixture-id', GOOGLE_CLIENT_SECRET: 'fixture-secret' };
+
+test('AUTH_METHODS turns off methods it does not list, even with their credentials', async t => {
+  const { get, post } = setup(t, { ...googleKeys, AUTH_METHODS: 'password' });
+  assert.deepEqual((await get('/options')).json(), {
+    turnstileSiteKey: 'fixture-site',
+    google: false,
+    magicLink: false,
+    emailPassword: true,
+    passwordResetEmail: false,
+  });
+  const link = await post('/sign-in/magic-link', { email: `nolink-${randomUUID()}@example.com` });
+  assert.equal(link.statusCode, 404);
+  assert.equal(link.json().code, 'MAGIC_LINK_DISABLED');
+  const social = await post('/sign-in/social', { provider: 'google', callbackURL: origin });
+  assert.notEqual(social.statusCode, 200);
+});
+
+test('AUTH_METHODS keeps listed methods off when their credentials are missing', async t => {
+  const { get } = setup(t, { HOST: '0.0.0.0', AUTH_METHODS: 'magic-link, Google' });
+  assert.deepEqual((await get('/options')).json(), {
+    turnstileSiteKey: 'fixture-site',
+    google: false,
+    magicLink: false,
+  });
+});
+
+test('without AUTH_METHODS, email links and Google follow their credentials', async t => {
+  const { get } = setup(t, googleKeys);
+  assert.deepEqual((await get('/options')).json(), { turnstileSiteKey: 'fixture-site', google: true, magicLink: true });
 });
 
 test('password sign-up, sign-out, sign-in, change password and Turnstile without an email transport', async t => {
-  const { get, post, challenge } = setup(t, { AUTH_EMAIL_PASSWORD: 'true' });
+  const { get, post, challenge } = setup(t, { AUTH_METHODS: 'password,magic-link' });
   assert.deepEqual((await get('/options')).json(), {
     turnstileSiteKey: 'fixture-site',
+    google: false,
+    magicLink: true,
     emailPassword: true,
     passwordResetEmail: false,
   });
@@ -193,7 +242,7 @@ test('password sign-up, sign-out, sign-in, change password and Turnstile without
 });
 
 test('repeated password attempts for one address are rate limited, even with the right password', async t => {
-  const { post } = setup(t, { AUTH_EMAIL_PASSWORD: 'true' });
+  const { post } = setup(t, { AUTH_METHODS: 'password,magic-link' });
   const email = `limited-${randomUUID()}@example.com`;
   const password = 'correct horse battery';
   assert.equal((await post('/sign-up/email', { email, name: 'Limited', password })).statusCode, 200);
@@ -216,7 +265,7 @@ test('repeated password attempts for one address are rate limited, even with the
 });
 
 test('the admin CLI link sets a password once, also for magic-link users, and signs out old sessions', async t => {
-  const { post, get } = setup(t, { AUTH_EMAIL_PASSWORD: 'true' });
+  const { post, get } = setup(t, { AUTH_METHODS: 'password,magic-link' });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, options: '-c search_path=app' });
   t.after(() => pool.end());
   const email = `reset-${randomUUID()}@example.com`;
@@ -267,7 +316,7 @@ test('the admin CLI link sets a password once, also for magic-link users, and si
 test('with an email transport, forgot password queues an encrypted reset email whose link resets once', async t => {
   const keys = { keyId: 'password-test', key: randomBytes(32), previous: new Map() };
   const { get, post } = setup(t, {
-    AUTH_EMAIL_PASSWORD: 'true',
+    AUTH_METHODS: 'password,magic-link',
     SMTP_HOST: 'mail.example.test',
     EMAIL_DELIVERY_KEY_ID: keys.keyId,
     EMAIL_DELIVERY_KEY: keys.key.toString('hex'),

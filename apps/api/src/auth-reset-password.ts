@@ -10,10 +10,10 @@ import { authConfig, createAuth } from './better-auth.ts';
 const usage = `Usage: pnpm auth:reset-password <email>
 
 Prints a one-time link that sets a new password for <email>. It expires in 1 hour.
-Send it to the person privately. Requires AUTH_EMAIL_PASSWORD=true and DATABASE_URL.`;
+Send it to the person privately. Requires password in AUTH_METHODS and DATABASE_URL.`;
 
 export async function issuePasswordResetLink(pool: Pool, email: string) {
-  if (!authConfig().emailPassword) throw new Error('Password sign-in is off. Set AUTH_EMAIL_PASSWORD=true.');
+  if (!authConfig().emailPassword) throw new Error('Password sign-in is off. Add password to AUTH_METHODS.');
   const address = z.email().parse(email.trim().toLowerCase(), { error: () => 'Enter a valid email address.' });
   const known = await pool.query('SELECT 1 FROM app.users WHERE lower(email) = $1', [address]);
   if (!known.rowCount) throw new Error(`No account uses ${address}.`);

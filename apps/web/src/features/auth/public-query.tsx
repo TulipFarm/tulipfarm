@@ -5,7 +5,7 @@ import { apiOrigin } from '@/lib/auth';
 
 const optionsSchema = z.object({
   turnstileSiteKey: z.string().trim().min(1).nullable(),
-  // Self-hosted email and password sign-in (AUTH_EMAIL_PASSWORD), and whether reset links go out by email.
+  // Email and password sign-in (password in AUTH_METHODS), and whether reset links go out by email.
   emailPassword: z.boolean().default(false),
   passwordResetEmail: z.boolean().default(false),
   // Sign-in methods the server has credentials for; hidden unless the API reports them.

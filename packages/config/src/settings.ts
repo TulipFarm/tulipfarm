@@ -1140,20 +1140,19 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'turnstile', commented: true },
   },
   {
-    name: 'AUTH_EMAIL_PASSWORD',
+    name: 'AUTH_METHODS',
     group: 'Sign-in',
     services: ['api'],
     requirement: 'optional',
     secret: false,
-    default: 'false',
     description:
-      '`true` adds email and password sign-in next to email links and Google, for instances without an email transport. Without one, an admin runs `pnpm auth:reset-password <email>` for a reset link. See [password sign-in](https://docs.tulipfarm.ai/self-hosting/sign-in/#password-sign-in).',
+      'Comma-separated sign-in methods to allow: `password`, `magic-link`, `google`. Unset allows `magic-link` when an email transport is configured and `google` when its client ID and secret are set; `password` must be listed. A listed method without its credentials logs a warning and stays off. Without email, an admin runs `pnpm auth:reset-password <email>` for a password reset link. See [sign-in methods](https://docs.tulipfarm.ai/self-hosting/sign-in/).',
     selfHost: {
       section: 'sign-in',
-      example: 'true',
+      example: 'password,magic-link,google',
       commented: true,
       comment:
-        'Email and password sign-in, for instances without email. Admin reset links: see README.md#password-sign-in.',
+        'Sign-in methods to allow. Unset: email links with email, Google with its keys. Password: see README.md#sign-in-methods.',
     },
   },
 

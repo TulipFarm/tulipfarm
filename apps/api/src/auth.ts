@@ -16,7 +16,9 @@ export function registerAuth(app: FastifyInstance) {
   if (process.env.NODE_ENV === 'production' && emailTransportConfigured()) emailDeliveryKeys();
   // Local development has no mail transport; keep the latest link per email so the login page can offer it.
   const devLinks = devSessionsAllowed() ? new Map<string, string>() : undefined;
-  const magicLink = Boolean(devLinks) || emailTransportConfigured();
+  const { magicLink } = config;
+  for (const method of config.unavailableMethods)
+    app.log.warn({ method }, `AUTH_METHODS lists ${method}, but its credentials are missing; it stays off`);
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
     options: '-c search_path=app',

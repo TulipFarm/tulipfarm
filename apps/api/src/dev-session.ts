@@ -1,20 +1,9 @@
 import type { Pool } from 'pg';
 import { authConfig, createAuth } from './better-auth.ts';
 
+export { devSessionsAllowed } from './better-auth.ts';
+
 export type DevSession = { user: { id: string; email: string; name: string }; cookies: string[]; cookieHeader: string };
-
-const loopbackHosts = ['127.0.0.1', 'localhost', '::1'];
-
-// Matches the development sign-in link gate: never in production, with real email, or off loopback.
-export function devSessionsAllowed(env: NodeJS.ProcessEnv = process.env) {
-  return (
-    env.NODE_ENV !== 'production' &&
-    !env.EMAIL_PROVIDER &&
-    !env.ACS_CONNECTION_STRING &&
-    !env.SMTP_HOST &&
-    loopbackHosts.includes(env.HOST ?? '127.0.0.1')
-  );
-}
 
 export function safeRedirectPath(value: unknown) {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';

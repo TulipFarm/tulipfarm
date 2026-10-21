@@ -10,7 +10,42 @@ import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { publicGuideOrigins } from './public-guide-config.ts';
 import { isQaEmail } from '@tulipfarm/workspaces/qa-accounts';
 
+export const authMethods = ['password', 'magic-link', 'google'] as const;
+export type AuthMethod = (typeof authMethods)[number];
+
+const loopbackHosts = ['127.0.0.1', 'localhost', '::1'];
+
+// Matches the development sign-in link gate: never in production, with real email, or off loopback.
+export function devSessionsAllowed(env: NodeJS.ProcessEnv = process.env) {
+  return (
+    env.NODE_ENV !== 'production' &&
+    !env.EMAIL_PROVIDER &&
+    !env.ACS_CONNECTION_STRING &&
+    !env.SMTP_HOST &&
+    loopbackHosts.includes(env.HOST ?? '127.0.0.1')
+  );
+}
+
+/** The methods AUTH_METHODS allows, or undefined when unset so each method follows its credentials. */
+function allowedAuthMethods(value = process.env.AUTH_METHODS) {
+  if (!value?.trim()) return undefined;
+  const methods = new Set<AuthMethod>();
+  for (const entry of value.split(',')) {
+    const method = entry.trim().toLowerCase();
+    if (!method) continue;
+    if (!authMethods.includes(method as AuthMethod))
+      throw new Error(`AUTH_METHODS accepts ${authMethods.join(', ')}; "${method}" is not one of them`);
+    methods.add(method as AuthMethod);
+  }
+  return methods;
+}
+
 export function authConfig() {
+  // Read by presence only: the setting is retired, so the registry no longer declares it.
+  if ('AUTH_EMAIL_PASSWORD' in process.env)
+    throw new Error(
+      'AUTH_EMAIL_PASSWORD was removed. Set AUTH_METHODS instead, for example AUTH_METHODS=password,google',
+    );
   const production = process.env.NODE_ENV === 'production';
   const secret = process.env.BETTER_AUTH_SECRET;
   if (production && (!secret || secret.length < 32))
@@ -22,17 +57,24 @@ export function authConfig() {
   if (production && (!process.env.BETTER_AUTH_URL || !process.env.WEB_ORIGIN))
     throw new Error('Set BETTER_AUTH_URL and WEB_ORIGIN in production');
   const webOrigin = new URL(process.env.WEB_ORIGIN ?? 'http://localhost:5173').origin;
-  const emailPassword = process.env.AUTH_EMAIL_PASSWORD?.trim().toLowerCase();
-  if (emailPassword && emailPassword !== 'true' && emailPassword !== 'false')
-    throw new Error('AUTH_EMAIL_PASSWORD must be true or false');
+  const allowed = allowedAuthMethods();
+  const mailReady = emailTransportConfigured() || devSessionsAllowed();
+  const googleReady = Boolean(googleId && googleSecret);
+  const allows = (method: AuthMethod) => allowed?.has(method) ?? method !== 'password';
   return {
-    emailPassword: emailPassword === 'true',
+    emailPassword: allows('password'),
+    magicLink: allows('magic-link') && mailReady,
+    /** Methods AUTH_METHODS lists whose credentials are missing; they stay off. */
+    unavailableMethods: [
+      ...(allowed?.has('magic-link') && !mailReady ? (['magic-link'] as const) : []),
+      ...(allowed?.has('google') && !googleReady ? (['google'] as const) : []),
+    ],
     baseURL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3001',
     webOrigin,
     websiteOrigin: new URL(process.env.WEBSITE_ORIGIN ?? (production ? webOrigin : 'http://localhost:5100')).origin,
     secret: secret ?? 'local-development-only-tulipfarm-auth-secret',
     google:
-      googleId && googleSecret
+      googleId && googleSecret && allows('google')
         ? {
             clientId: googleId,
             clientSecret: googleSecret,

@@ -124,14 +124,16 @@ One version identifies all apps and images of a release.
   works. The role settings still override, the new `PUBLIC_GUIDE_MODEL_FAMILY`
   picks the guide's family, and the api and worker warn at startup when no
   enabled family has a role. The guide is priced from the effective catalog.
-- Optional email and password sign-in for self-hosting (`AUTH_EMAIL_PASSWORD=true`,
-  off by default). The login and sign-up pages ask for a password next to email
-  links and Google, people change it under Account, and **Forgot password?**
+- `AUTH_METHODS` chooses the sign-in methods: `password`, `magic-link`, `google`.
+  Unset, email links follow the email transport and Google follows its client ID
+  and secret; a listed method without credentials logs a warning and stays off.
+  The login and sign-up pages show only the methods the API reports, and say so
+  when none is configured. Email and password sign-in is off unless listed. People change it under Account, and **Forgot password?**
   emails a one-hour reset link when an email transport is configured. Without
   one, `pnpm auth:reset-password <email>` prints the link for an administrator.
   Password attempts are limited per client and per address, and Turnstile
-  applies when configured. `GET /v1/auth/options` reports the flag to the login
-  page, and migration `0003` lets email deliveries carry password reset emails.
+  applies when configured. `GET /v1/auth/options` reports the methods to the
+  login page, and migration `0003` lets email deliveries carry password reset emails.
 - OpenTelemetry export to any OTLP/HTTP backend (your own Collector, Grafana
   Cloud, Honeycomb, New Relic, SigNoz, Jaeger, a Datadog Agent): any `https`
   endpoint, `http` for local and private hosts, optional `Authorization`,
@@ -153,6 +155,8 @@ One version identifies all apps and images of a release.
 
 ### Removed
 
+- `AUTH_EMAIL_PASSWORD`. Set `AUTH_METHODS=password` (with any other methods)
+  instead; the api refuses to start while the old variable is set.
 - The unused `AGENT_MODEL_ENDPOINT`, `AGENT_MODEL_DEPLOYMENT`, `AGENT_MODEL_AUTH`,
   `AGENT_MODEL_API_KEY` and `OPENAI_CUSTOM_HEADERS` settings and the uncalled
   Azure SDK agent model that read them; configure models through the model

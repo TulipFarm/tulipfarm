@@ -33,9 +33,10 @@ test('production auth starts with disabled email and with SMTP without any ACS c
       BETTER_AUTH_SECRET: 'test-only-auth-secret-at-least-32-characters',
       BETTER_AUTH_URL: 'https://app.example.com',
       WEB_ORIGIN: 'https://app.example.com',
-      AUTH_EMAIL_PASSWORD: 'true',
+      AUTH_METHODS: 'password,magic-link',
     });
     for (const name of [
+      'AUTH_EMAIL_PASSWORD',
       'EMAIL_PROVIDER',
       'ACS_CONNECTION_STRING',
       'ACS_SENDER_ADDRESS',

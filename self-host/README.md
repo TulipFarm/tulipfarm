@@ -102,12 +102,27 @@ no API URL of its own. Two optional build settings in `self-host/.env` change it
 
 Rebuild the web image after changing them: `docker compose up -d --build web`.
 
-## Password sign-in
+## Sign-in methods
 
-Sign-in uses email links and Google by default. An instance without an email
-transport can add email and password sign-in instead: set `AUTH_EMAIL_PASSWORD=true`
-in `self-host/.env` and restart the api (`docker compose up -d api`). The login and
-sign-up pages then ask for a password next to the email link and Google buttons.
+`AUTH_METHODS` lists the sign-in methods to allow, separated by commas:
+
+| Method       | Needs                                                      |
+| ------------ | ---------------------------------------------------------- |
+| `password`   | Nothing. Email and password.                               |
+| `magic-link` | An email transport (SMTP or Azure Communication Services). |
+| `google`     | `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.             |
+
+Leave it unset to allow email links when an email transport is configured and
+Google when its keys are set. Password sign-in is off unless listed. A listed method
+whose credentials are missing stays off, and the api logs a warning at startup. The
+login and sign-up pages show only the allowed methods, and say so when none is set up.
+Restart the api after changing it: `docker compose up -d api`.
+
+### Password sign-in
+
+An instance without an email transport can use email and password sign-in: set
+`AUTH_METHODS=password` (add `google` to keep Google) in `self-host/.env` and
+restart the api. The login and sign-up pages then ask for a password.
 
 - Anyone who can reach the instance can create an account, as with email links.
   Workspaces still join by invitation. Without email, invitations show a link to
@@ -128,8 +143,6 @@ sign-up pages then ask for a password next to the email link and Google buttons.
 - People who signed up with an email link or Google have no password. They set one
   with a reset link. An email link sign-in proves the address, so it removes a
   password set by someone whose address was never confirmed.
-
-Leave `AUTH_EMAIL_PASSWORD` unset to keep email links and Google only.
 
 ## Telemetry
 

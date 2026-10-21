@@ -108,7 +108,7 @@ function SignInMethods() {
 
 type PasswordAccount = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; hasPassword: boolean };
 
-// Shown only when the instance turns on email and password sign-in (AUTH_EMAIL_PASSWORD).
+// Shown only when the instance allows email and password sign-in (password in AUTH_METHODS).
 function PasswordSettings() {
   const options = useAuthOptions();
   if (!options.data?.emailPassword) return null;

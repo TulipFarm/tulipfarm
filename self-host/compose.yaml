@@ -193,7 +193,7 @@ services:
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      AUTH_EMAIL_PASSWORD: ${AUTH_EMAIL_PASSWORD:-false}
+      AUTH_METHODS: ${AUTH_METHODS:-}
       # Tells the API that the worker can send email; transport secrets stay with the worker.
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-${ACS_CONNECTION_STRING:+acs}}
       SMTP_HOST: ${SMTP_HOST:-}
