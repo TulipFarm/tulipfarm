@@ -520,7 +520,8 @@ export function startTelemetry(build: BuildInfo) {
         instrumentName,
         aggregation: {
           type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-          options: { boundaries: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120] },
+          // Each bucket is a billed series per label set; keep the list short.
+          options: { boundaries: [0.05, 0.25, 0.5, 1, 2.5, 10, 60] },
         },
       })),
       {
@@ -753,6 +754,8 @@ function callMetrics(
   const labels = { ...dimensions, category, operation, outcome, ...attributes };
   const meter = metrics.getMeter(scope);
   meter.createCounter('call_count', { description: 'Completed calls, including failures' }).add(1, labels);
+  // HTTP latency is already in cloud_http_request_duration; a second histogram would double its series.
+  if (category === 'http') return;
   meter.createHistogram('call_time', { unit: 's', description: 'End-to-end call latency' }).record(seconds, labels);
 }
 

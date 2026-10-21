@@ -769,6 +769,9 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     const latency = data.find(metric => metric.descriptor.name === 'call_time');
     assert.equal(latency.descriptor.unit, 's');
     assert.ok(latency.dataPoints.every(point => point.value.sum >= 0 && point.value.sum < 10));
+    assert.ok(latency.dataPoints.every(point => point.attributes.category !== 'http'));
+    const calls = data.find(metric => metric.descriptor.name === 'call_count');
+    assert.ok(calls.dataPoints.some(point => point.attributes.category === 'http'));
     assert.equal(
       data.find(metric => metric.descriptor.name === 'cloud_chat_latency_window_count').dataPoints[0].value,
       1,
