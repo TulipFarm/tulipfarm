@@ -3,10 +3,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./qa-accounts": {
-      "types": "./dist/qa-accounts.d.ts",
-      "default": "./dist/qa-accounts.js"
-    },
     "./soul-explorer": {
       "types": "./dist/soul-explorer.d.ts",
       "default": "./dist/soul-explorer.js"

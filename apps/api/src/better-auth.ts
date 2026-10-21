@@ -8,7 +8,6 @@ import { modelFamilyIdSchema, selectableModelFamilies } from '@tulipfarm/config'
 import { emitHook } from '@tulipfarm/extensions';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { publicGuideOrigins } from './public-guide-config.ts';
-import { isQaEmail } from '@tulipfarm/workspaces/qa-accounts';
 
 export const authMethods = ['password', 'magic-link', 'google'] as const;
 export type AuthMethod = (typeof authMethods)[number];
@@ -87,8 +86,6 @@ export function authConfig() {
 
 const accountExists = () =>
   new APIError('CONFLICT', { code: 'ACCOUNT_EXISTS', message: 'An account already exists for this address.' });
-const automationOnly = () =>
-  new APIError('FORBIDDEN', { code: 'AUTOMATION_ONLY', message: 'This account requires a QA credential.' });
 
 /** Whether this process can hand mail to the worker's transport; the same settings the worker reads. */
 export function emailTransportConfigured(env: NodeJS.ProcessEnv = process.env) {
@@ -116,10 +113,6 @@ export function createAuth(
   sendResetPassword?: (data: { email: string; url: string }) => Promise<void>,
 ) {
   const config = authConfig();
-  async function qaUser(userId: string) {
-    const user = (await pool.query<{ email: string }>('SELECT email FROM app.users WHERE id=$1', [userId])).rows[0];
-    return user !== undefined && isQaEmail(user.email);
-  }
   // True when another user owns this address's canonical form, such as a@gmail.com for a+1@gmail.com.
   async function aliasOfAnotherUser(email: string) {
     const address = email.trim().toLowerCase();
@@ -157,30 +150,14 @@ export function createAuth(
         if (ctx.path === '/request-password-reset' && !ctx.request) return;
         await verifyChallenge(ctx.headers?.get('x-captcha-response') ?? null, ctx.headers?.get('origin') ?? undefined);
         const email: unknown = ctx.body?.email;
-        if (typeof email === 'string' && isQaEmail(email)) throw automationOnly();
         if (ctx.path === '/sign-in/email' || ctx.path === '/request-password-reset') return;
         if (typeof email === 'string' && (await aliasOfAnotherUser(email))) throw accountExists();
       }),
     },
     databaseHooks: {
-      session: {
-        create: {
-          before: async session => {
-            if (await qaUser(session.userId)) throw automationOnly();
-          },
-        },
-      },
-      account: {
-        create: {
-          before: async account => {
-            if (await qaUser(account.userId)) throw automationOnly();
-          },
-        },
-      },
       user: {
         create: {
           before: async user => {
-            if (isQaEmail(user.email)) throw automationOnly();
             if (await aliasOfAnotherUser(user.email)) throw accountExists();
             return { data: { ...user, name: user.name.trim(), canonicalEmail: canonicalEmail(user.email) } };
           },
