@@ -31,8 +31,16 @@ for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure']
       const recovery = createConversationExecutor(f.runtime, async () => 'Recovered by the current owner.');
       let replacement;
       let requests = 0;
+      const usage = {
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      };
       t.mock.method(globalThis, 'fetch', async () => {
-        assert.equal(++requests, 1, 'old attempt must not dispatch the independent check');
+        // The reply checks its fence at its start, checkpoints, top-ups and lease renewals, not before every call. A fenced
+        // attempt may finish the independent check already in its round, but it never runs the tool or delivers.
+        if (++requests > 1) return Response.json({ error: { type: 'overloaded_error' }, usage }, { status: 529 });
         if (mode === 'expired' || mode === 'takeover') {
           await f.db.platform.query(
             `UPDATE ${f.table('tf_conversation_turns')} SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`,
@@ -47,12 +55,6 @@ for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure']
             [sent.turnId],
           );
         }
-        const usage = {
-          input_tokens: 100,
-          output_tokens: 20,
-          cache_read_input_tokens: 0,
-          cache_creation_input_tokens: 0,
-        };
         if (mode === 'failure') return Response.json({ error: { type: 'overloaded_error' }, usage }, { status: 529 });
         return Response.json(
           anthropicChat(
@@ -78,12 +80,13 @@ for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure']
       );
       assert.equal(await executor.process(work), mode === 'failure' ? 'retry' : 'stale');
       const credits = (
-        await f.db.platform.query(`SELECT provider_pico_usd FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`, [
-          chatId,
-        ])
+        await f.db.platform.query(
+          `SELECT provider_pico_usd, charged IS NOT NULL AS settled FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`,
+          [chatId],
+        )
       ).rows;
-      assert.deepEqual(credits, [{ provider_pico_usd: '400000000' }]);
-      assert.equal(requests, 1);
+      assert.ok(requests <= 2);
+      assert.deepEqual(credits, Array(requests).fill({ provider_pico_usd: '400000000', settled: true }));
       if (mode === 'expired') {
         const row = (
           await f.db.platform.query(

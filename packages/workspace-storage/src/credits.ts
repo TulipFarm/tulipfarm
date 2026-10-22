@@ -149,6 +149,167 @@ export async function settleCreditsAtReservation(tx: Transaction, id: string) {
   return settleCredits(tx, id, (BigInt(previous.reserved) / creditPricing().unitsPerPicoUsd).toString());
 }
 
+/** The provider cost whose charge, under the registered pricing, equals `units`: the unknown-usage policy of {@link settleCreditsAtReservation}. */
+export function providerCostAtUnits(units: bigint) {
+  return (units / creditPricing().unitsPerPicoUsd).toString();
+}
+
+/**
+ * Holds credits for a whole reply in one row: up to `preferred` units, never more than the gate has, and at least
+ * `minimum`. The hold row becomes the usage row of the first call it funds. Returns the held units, or null when
+ * the row already exists (the attempt was already dispatched).
+ */
+export async function holdReplyCredits(
+  tx: Transaction,
+  input: {
+    id: string;
+    flowId: string;
+    modelId: string;
+    activity: 'chat' | 'agent' | 'other';
+    pricingRevision: string;
+    minimum: bigint;
+    preferred: bigint;
+    planAttemptId: string | null;
+  },
+) {
+  const available = await lockCredits(tx);
+  if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_credit_usage')} WHERE id=$1`, [input.id])).rowCount)
+    return null;
+  if (available !== null && (available <= 0n || available < input.minimum)) throw new CreditsExhausted();
+  const preferred = input.preferred > input.minimum ? input.preferred : input.minimum;
+  const reserved = available === null || available > preferred ? preferred : available;
+  await creditGate().debit(tx, reserved, { id: input.id, activity: input.activity });
+  await tx.client.query(
+    `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,pricing_revision,plan_attempt_id) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7)`,
+    [
+      input.id,
+      input.flowId,
+      input.modelId,
+      input.activity,
+      reserved.toString(),
+      input.pricingRevision,
+      input.planAttemptId,
+    ],
+  );
+  return reserved;
+}
+
+export type ReplyCreditCall = {
+  id: string;
+  modelId: string;
+  pricingRevision: string;
+  providerPicoUsd: string;
+  planMilliseconds: number | null;
+};
+
+/**
+ * Settles a reply hold with every call it funded, in call order, exactly as one settlement per call would: each
+ * charge rounds the flow's running provider cost. The first call reuses the hold row when it has the hold's id;
+ * every other call gets its own row. The gate is debited once for the difference from the hold. Returns the
+ * charges, or null when the hold was missing or already settled (for example by crash recovery).
+ */
+export async function settleReplyCredits(
+  tx: Transaction,
+  holdId: string,
+  calls: readonly ReplyCreditCall[],
+  committed?: () => void,
+) {
+  await lockCredits(tx);
+  const hold = row
+    .extend({ plan_attempt_id: z.string().nullable() })
+    .optional()
+    .parse(
+      (
+        await observeChatDetail('credit-usage-lock', () =>
+          tx.client.query(
+            `SELECT flow_id,model_id,agent_id,activity,reserved,charged,plan_attempt_id FROM ${table(tx, 'tf_credit_usage')} WHERE id=$1 FOR UPDATE`,
+            [holdId],
+          ),
+        )
+      ).rows[0],
+    );
+  if (!hold || hold.charged !== null) return null;
+  const total = z
+    .object({ cost: units, charged: units })
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT COALESCE(sum(provider_pico_usd),0)::text AS cost, COALESCE(sum(charged),0)::text AS charged FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
+          [hold.flow_id],
+        )
+      ).rows[0],
+    );
+  let cost = BigInt(total.cost);
+  let charged = BigInt(total.charged);
+  const charges = calls.map(call => {
+    cost += BigInt(units.parse(call.providerPicoUsd));
+    const charge = creditUnitsForProviderCost(cost) - charged;
+    charged += charge;
+    return { ...call, charged: charge };
+  });
+  const sum = charges.reduce((n, call) => n + call.charged, 0n);
+  if (sum > BigInt(hold.reserved)) throw new Error('credit-reservation-exceeded');
+  const first = charges[0]?.id === holdId ? charges[0] : undefined;
+  const rest = first ? charges.slice(1) : charges;
+  await tx.client.query(
+    `UPDATE ${table(tx, 'tf_credit_usage')} SET charged=$2,provider_pico_usd=$3,plan_milliseconds=COALESCE($4,plan_milliseconds) WHERE id=$1`,
+    [holdId, (first?.charged ?? 0n).toString(), first?.providerPicoUsd ?? '0', first?.planMilliseconds ?? null],
+  );
+  for (const call of rest)
+    await tx.client.query(
+      `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,provider_pico_usd,pricing_revision,plan_attempt_id,plan_milliseconds) VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10)`,
+      [
+        call.id,
+        hold.flow_id,
+        call.modelId,
+        hold.agent_id,
+        hold.activity,
+        call.charged.toString(),
+        call.providerPicoUsd,
+        call.pricingRevision,
+        hold.plan_attempt_id,
+        call.planMilliseconds,
+      ],
+    );
+  await creditGate().debit(tx, sum - BigInt(hold.reserved), { id: holdId, activity: hold.activity });
+  const workspaceId = workspaceIdFromSchema(tx.schema);
+  for (const call of charges)
+    afterCommit(
+      tx.client,
+      () =>
+        void emitHook('usage.recorded', {
+          workspaceId,
+          usageId: call.id,
+          flowId: hold.flow_id,
+          modelId: call.modelId,
+          activity: hold.activity,
+          providerPicoUsd: call.providerPicoUsd,
+        }),
+    );
+  if (committed) afterCommit(tx.client, committed);
+  return charges.map(({ id, charged }) => ({ id, charged }));
+}
+
+/**
+ * Finalizes reply holds that an earlier attempt in this flow left open (a crashed or abandoned worker), under the
+ * unknown-usage policy: each settles at its whole reservation. `current` is the live attempt's id prefix, whose rows
+ * are never touched. Only one attempt of a conversation holds its lease, so any other open chat row is abandoned.
+ */
+export async function recoverReplyHolds(tx: Transaction, flowId: string, current: string) {
+  const open = z
+    .array(z.object({ id: z.string() }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT id FROM ${table(tx, 'tf_credit_usage')} WHERE flow_id=$1 AND charged IS NULL AND activity='chat' AND id LIKE 'chat:%' AND left(id,length($2))<>$2 ORDER BY created_at,id`,
+          [flowId, current],
+        )
+      ).rows,
+    );
+  for (const { id } of open) await settleCreditsAtReservation(tx, id);
+  return open.length;
+}
+
 // Balances stay workspace-wide. A workspace view covers all usage. A personal view covers
 // only the given flows: its totals and rows exclude every other flow and workspace knowledge spend.
 // Without a view, the ledger is returned unchanged.

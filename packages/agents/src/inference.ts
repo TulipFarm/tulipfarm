@@ -989,6 +989,11 @@ export type ToolInferenceContext = {
   titleRoute?: InferenceRoute | undefined;
   /** Instructions of the chat's project. They follow the platform prompt as a second system block. */
   projectInstructions?: string | undefined;
+  /**
+   * Runs before each round reads the catalog, memory and inventory, so the runtime can save the previous tool round
+   * and refresh only what that round changed. The reads themselves may then return cached values.
+   */
+  beforeRound?: (() => Promise<void>) | undefined;
 };
 
 type ToolResult = { id: string; name: string; output: string; error: boolean; providerId: boolean };
@@ -1633,6 +1638,7 @@ export async function inferWithTools(
       'reply',
       async () => {
         const mcp = await observeChatDetail('round-prepare', async () => {
+          await tools?.beforeRound?.();
           const mcp = await observeChatDetail('catalog', async () => tools?.catalog?.());
           const catalogKey = observeChatDetailSync('serialize', () => JSON.stringify([mcp ?? null, loaded.size]));
           const personalMemory =
