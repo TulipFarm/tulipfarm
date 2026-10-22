@@ -4,8 +4,7 @@ import { File } from 'reicon-react/icons/File';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasPanel, CanvasToggle, ChatSplit } from '@tulipfarm/sprout/canvas';
 import { ResultAppActions, ResultCard, type ResultApp, type ResultCardProps } from '@tulipfarm/sprout/result-card';
-import { Message, MessageContent } from '@tulipfarm/sprout/message';
-import { Bubble, BubbleContent } from '@/components/bubble';
+import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { ChatHeaderContext } from './header-context';
 import { Composer } from './composer';
 import { models } from './composer-options';
@@ -149,11 +148,9 @@ export default function ResultCardsMock() {
               <div className="mx-auto max-w-3xl space-y-7 py-6">
                 <Message align="end">
                   <MessageContent>
-                    <Bubble variant="secondary" align="end">
-                      <BubbleContent>
-                        Show me the results for the pitch, investor update, and weekly workflow.
-                      </BubbleContent>
-                    </Bubble>
+                    <MessageBubble variant="secondary">
+                      Show me the results for the pitch, investor update, and weekly workflow.
+                    </MessageBubble>
                   </MessageContent>
                 </Message>
                 <p className="text-base">Your work is ready. Open a result to see the details.</p>

@@ -412,7 +412,7 @@ try {
   });
   await page.getByText('🌱 olleH', { exact: true }).waitFor();
   const messageList = page.getByRole('list', { name: 'Messages', exact: true });
-  assert.deepEqual(await messageList.locator('[data-slot="bubble-content"]').allTextContents(), [
+  assert.deepEqual(await messageList.locator('[data-slot="message-bubble"]').allTextContents(), [
     'Hello 🌱',
     'Second',
     '🌱 olleH',

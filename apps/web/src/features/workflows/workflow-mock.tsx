@@ -12,8 +12,7 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
-import { Bubble, BubbleContent } from '@/components/bubble';
-import { Message, MessageContent } from '@tulipfarm/sprout/message';
+import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { ChatHeaderContext } from '@/features/chat/header-context';
@@ -300,13 +299,11 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
               <div className="mx-auto max-w-3xl space-y-7">
                 <Message align="end">
                   <MessageContent>
-                    <Bubble variant="secondary" align="end">
-                      <BubbleContent>
-                        {scenario === 'pr'
-                          ? 'Notify #engineering whenever a pull request is opened. Include its title, author, and link.'
-                          : `Help me set up ${view.definition.name.toLowerCase()}. Show me how it will run.`}
-                      </BubbleContent>
-                    </Bubble>
+                    <MessageBubble variant="secondary">
+                      {scenario === 'pr'
+                        ? 'Notify #engineering whenever a pull request is opened. Include its title, author, and link.'
+                        : `Help me set up ${view.definition.name.toLowerCase()}. Show me how it will run.`}
+                    </MessageBubble>
                   </MessageContent>
                 </Message>
                 <p className="text-base text-foreground">

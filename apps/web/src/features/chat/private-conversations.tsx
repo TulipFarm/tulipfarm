@@ -46,7 +46,7 @@ import {
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { Label } from '@tulipfarm/sprout/label';
-import { Message, MessageContent, MessageFooter } from '@tulipfarm/sprout/message';
+import { Message, MessageBubble, MessageContent, MessageFooter } from '@tulipfarm/sprout/message';
 import { GitHubChatResponse } from './github-download';
 import { MessageActions } from '@tulipfarm/sprout/message-actions';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
@@ -56,7 +56,6 @@ import { ActivityResultCard } from './activity-result-card';
 import { newestTools, reconcileLiveTools, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, type OutgoingMessage } from './current-reply';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
-import { Bubble, BubbleContent } from '@/components/bubble';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import {
   draftConversationApi,
@@ -1010,36 +1009,34 @@ function ConversationDetail({
                           <Message align="end">
                             <MessageContent>
                               {pending.skill && <SentSkill skill={pending.skill} />}
-                              <Bubble variant="secondary" align="end">
-                                <BubbleContent>
-                                  <RichMessage
-                                    content={pending.content}
-                                    file={reference =>
-                                      reference.source === 'tulipfarm' ? (
-                                        <ConversationFileReference
-                                          workspaceId={workspace.id}
-                                          slug={workspaceSlug}
-                                          fileId={reference.id}
-                                        />
-                                      ) : (
-                                        (() => {
-                                          const item = pending.references.find(
-                                            candidate => candidate.source === 'google' && candidate.id === reference.id,
-                                          );
-                                          return item?.source === 'google' ? (
-                                            <ConversationGoogleFileReference
-                                              slug={workspaceSlug}
-                                              fileId={item.id}
-                                              name={item.name}
-                                              mimeType={item.mediaType}
-                                            />
-                                          ) : null;
-                                        })()
-                                      )
-                                    }
-                                  />
-                                </BubbleContent>
-                              </Bubble>
+                              <MessageBubble variant="secondary">
+                                <RichMessage
+                                  content={pending.content}
+                                  file={reference =>
+                                    reference.source === 'tulipfarm' ? (
+                                      <ConversationFileReference
+                                        workspaceId={workspace.id}
+                                        slug={workspaceSlug}
+                                        fileId={reference.id}
+                                      />
+                                    ) : (
+                                      (() => {
+                                        const item = pending.references.find(
+                                          candidate => candidate.source === 'google' && candidate.id === reference.id,
+                                        );
+                                        return item?.source === 'google' ? (
+                                          <ConversationGoogleFileReference
+                                            slug={workspaceSlug}
+                                            fileId={item.id}
+                                            name={item.name}
+                                            mimeType={item.mediaType}
+                                          />
+                                        ) : null;
+                                      })()
+                                    )
+                                  }
+                                />
+                              </MessageBubble>
                             </MessageContent>
                           </Message>
                         </li>
@@ -1408,15 +1405,13 @@ function AssistantText({
   rowViews?: RowView[];
 }) {
   return (
-    <Bubble variant="ghost" align="start">
-      <BubbleContent>
-        <RowViewResponse references={rowViews}>
-          <GitHubChatResponse workspaceId={workspaceId} chatId={chatId}>
-            {text}
-          </GitHubChatResponse>
-        </RowViewResponse>
-      </BubbleContent>
-    </Bubble>
+    <MessageBubble variant="ghost">
+      <RowViewResponse references={rowViews}>
+        <GitHubChatResponse workspaceId={workspaceId} chatId={chatId}>
+          {text}
+        </GitHubChatResponse>
+      </RowViewResponse>
+    </MessageBubble>
   );
 }
 
@@ -1439,7 +1434,7 @@ const EntryActions = memo(function EntryActions({
       createdAt={createdAt}
       hover
       html={() => {
-        const parts = entry.current?.querySelectorAll('[data-slot=bubble-content]');
+        const parts = entry.current?.querySelectorAll('[data-slot=message-bubble]');
         return parts?.length ? [...parts].map(part => part.innerHTML).join('') : undefined;
       }}
     />
@@ -1546,34 +1541,32 @@ function ConversationEntry({
                     rowViews={rowViews}
                   />
                 ) : (
-                  <Bubble key={index} variant="secondary" align="end">
-                    <BubbleContent>
-                      {part.content ? (
-                        <RichMessage
-                          content={part.content}
-                          file={reference =>
-                            reference.source === 'tulipfarm' ? (
-                              <ConversationFileReference workspaceId={workspace.id} slug={slug} fileId={reference.id} />
-                            ) : (
-                              (() => {
-                                const google = googleParts.get(reference.id);
-                                return google ? (
-                                  <ConversationGoogleFileReference
-                                    slug={slug}
-                                    fileId={google.fileId}
-                                    name={google.name}
-                                    mimeType={google.mimeType}
-                                  />
-                                ) : null;
-                              })()
-                            )
-                          }
-                        />
-                      ) : (
-                        <p className="whitespace-pre-wrap text-base break-words">{part.text}</p>
-                      )}
-                    </BubbleContent>
-                  </Bubble>
+                  <MessageBubble key={index} variant="secondary">
+                    {part.content ? (
+                      <RichMessage
+                        content={part.content}
+                        file={reference =>
+                          reference.source === 'tulipfarm' ? (
+                            <ConversationFileReference workspaceId={workspace.id} slug={slug} fileId={reference.id} />
+                          ) : (
+                            (() => {
+                              const google = googleParts.get(reference.id);
+                              return google ? (
+                                <ConversationGoogleFileReference
+                                  slug={slug}
+                                  fileId={google.fileId}
+                                  name={google.name}
+                                  mimeType={google.mimeType}
+                                />
+                              ) : null;
+                            })()
+                          )
+                        }
+                      />
+                    ) : (
+                      <p className="whitespace-pre-wrap text-base break-words">{part.text}</p>
+                    )}
+                  </MessageBubble>
                 );
               default: {
                 const exhaustive: never = part;

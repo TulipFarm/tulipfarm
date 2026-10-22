@@ -12,8 +12,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { CanvasPanel, CanvasToggle, ChatSplit } from '@tulipfarm/sprout/canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
-import { Bubble, BubbleContent } from '@/components/bubble';
-import { Message, MessageContent } from '@tulipfarm/sprout/message';
+import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { ChatHeaderContext } from './header-context';
 import { Composer } from './composer';
 import { models } from './composer-options';
@@ -202,11 +201,9 @@ export default function ApprovalPreview() {
               <div className="mx-auto max-w-3xl space-y-7 py-8">
                 <Message align="end">
                   <MessageContent>
-                    <Bubble variant="secondary" align="end">
-                      <BubbleContent>
-                        Create a Customers table with Name, Email, Company, Phone, and Status.
-                      </BubbleContent>
-                    </Bubble>
+                    <MessageBubble variant="secondary">
+                      Create a Customers table with Name, Email, Company, Phone, and Status.
+                    </MessageBubble>
                   </MessageContent>
                 </Message>
                 <div className="space-y-4">
@@ -238,9 +235,7 @@ export default function ApprovalPreview() {
                 {messages.map((text, index) => (
                   <Message key={index} align="end">
                     <MessageContent>
-                      <Bubble variant="secondary" align="end">
-                        <BubbleContent>{text}</BubbleContent>
-                      </Bubble>
+                      <MessageBubble variant="secondary">{text}</MessageBubble>
                     </MessageContent>
                   </Message>
                 ))}
