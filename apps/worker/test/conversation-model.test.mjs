@@ -5,8 +5,6 @@ import { initialModelMapping, legacyModels, shippedModelCatalogPath } from '@tul
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
-import { meteredSkillReviewer } from '../src/skill-activities.ts';
-import { heartbeatProcessor } from '../src/google-heartbeat-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
 const keys = {

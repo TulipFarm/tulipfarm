@@ -42,7 +42,17 @@ type BundleModel = z.infer<typeof bundleModelSchema>;
 export const initialBundleModels = z
   .array(bundleModelSchema)
   .readonly()
-  .parse(legacyModels.map(({ providerModelId: _, ...model }) => model));
+  .parse(
+    legacyModels.map(model => ({
+      id: model.id,
+      familyId: model.familyId,
+      vendor: model.vendor,
+      provider: model.provider,
+      maxInputTokens: model.maxInputTokens,
+      maxOutputTokens: model.maxOutputTokens,
+      rates: model.rates,
+    })),
+  );
 
 export const modelBundleSchema = z
   .strictObject({

@@ -22,7 +22,6 @@ const azure = {
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: credential,
 };
-const invalid = { message: 'Invalid server model configuration' };
 const input = {
   prompt: 'Local proof',
   definition: { name: 'Local agent', instructions: 'Return an answer.', tools: [] },

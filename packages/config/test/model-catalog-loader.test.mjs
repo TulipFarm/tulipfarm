@@ -2,17 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import {
-  loadModelCatalog,
-  readModelCatalog,
-  removedModelSettings,
-  shippedModelCatalogPath,
-} from '../src/model-catalog-loader.ts';
+import { loadModelCatalog, readModelCatalog, removedModelSettings } from '../src/model-catalog-loader.ts';
 import { servedModelBundle, verifyServerModelBundle } from '../src/model-bundle.ts';
 import { initialBundleModels } from '../src/model-bundle.ts';
 
 const fixture = name => fileURLToPath(new URL(`fixtures/${name}`, import.meta.url));
-const shipped = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
 const scratch = fileURLToPath(new URL('../.test-model-catalogs/', import.meta.url));
 let written = 0;
 const file = catalog => {
