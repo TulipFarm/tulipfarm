@@ -127,7 +127,7 @@
           },
           "roles": {
             "default": [],
-            "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation. Each role on at most one model.",
+            "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation, fallback. Each role on at most one model.",
             "type": "array",
             "items": {
               "type": "string",
@@ -139,7 +139,8 @@
                 "heartbeat",
                 "public-guide",
                 "table-search",
-                "recommendation"
+                "recommendation",
+                "fallback"
               ]
             }
           },

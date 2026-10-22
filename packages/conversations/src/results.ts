@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { sourceDependencySchema, type SourceDependency } from '@tulipfarm/access';
 import { chatTitleSchema } from './contracts.ts';
 import { avatarSnapshotSchema } from './avatar.ts';
+import { modelFamilyIdSchema } from '@tulipfarm/config/model-identifier';
 export {
   avatarStates,
   avatarStateSchema,
@@ -22,6 +23,8 @@ export const conversationResultSchema = z.strictObject({
   titleSource: z.literal('user-message').optional(),
   sources: z.array(sourceDependencySchema).max(1000),
   avatar: avatarSnapshotSchema.optional(),
+  /** The configured fallback model family that answered after the chat model failed. */
+  fallback: modelFamilyIdSchema.optional(),
 });
 export type ConversationResult = z.infer<typeof conversationResultSchema>;
 

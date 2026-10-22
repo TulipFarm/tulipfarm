@@ -51,10 +51,30 @@ import {
   safeErrorType,
   telemetryErrorCode,
 } from './error-codes.ts';
+import {
+  modelCallDiagnostics,
+  modelFallbackOutcomes,
+  providerMessageLimit,
+  safeProviderCode,
+  type ModelFallbackOutcome,
+} from './model-errors.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
 export { errorAttributes, telemetryErrorCode };
 export { withErrorStage, type ErrorStage } from './error-codes.ts';
+export {
+  fallbackEligibleClasses,
+  ModelCallError,
+  modelCallDiagnostics,
+  modelErrorClass,
+  modelErrorClasses,
+  modelFailureClasses,
+  modelFallbackOutcomes,
+  sanitizeProviderMessage,
+  type ModelCallDiagnostics,
+  type ModelErrorClass,
+  type ModelFallbackOutcome,
+} from './model-errors.ts';
 
 const scope = 'tulipfarm';
 const spanAttributes = new Set([
@@ -120,7 +140,13 @@ const spanAttributes = new Set([
   'parser.rssBytes',
   'parser.outputBytes',
   'parser.diagnosticBytes',
+  'output_started',
+  'model_fallback',
+  'fallback.provider',
+  'fallback.model',
 ]);
+// Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
+const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message']);
 
 const dependencyEndpoints = [
   'github-repository',
@@ -137,8 +163,14 @@ const dependencyEndpoints = [
 export type DependencyEndpoint = (typeof dependencyEndpoints)[number];
 const endpoints = new Set<string>(dependencyEndpoints);
 
-function safeAttribute(key: string, value: unknown): boolean {
+function safeAttribute(key: string, value: unknown, logLine = false): boolean {
+  if (logLine && logOnlyAttributes.has(key)) {
+    if (key === 'provider.error_code') return safeProviderCode(value) === value;
+    return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
+  }
   if (!spanAttributes.has(key)) return false;
+  if (key === 'output_started') return typeof value === 'boolean';
+  if (key === 'model_fallback') return (modelFallbackOutcomes as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
@@ -743,7 +775,7 @@ export function createKnowledgeSyncMetrics() {
 }
 
 export function log(level: Level, category: Category, event: Event, attributes: Attributes = {}) {
-  const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value)));
+  const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value, true)));
   const active = trace.getSpan(context.active())?.spanContext();
   const fields = { ...dimensions, ...backgroundContext.getStore(), ...safe, category, commit: buildCommit };
   process.stdout.write(
@@ -1828,6 +1860,34 @@ export async function featureFlagSnapshot(
   return Object.fromEntries(featureFlagNames.map((flag, index) => [flag, values[index]])) as FeatureFlagSnapshot;
 }
 
+/** Counts and logs what an optional fallback model did for one failed primary model call. */
+export function recordModelFallback(
+  outcome: ModelFallbackOutcome,
+  primary: { provider: string; model: string; errorClass: string },
+  fallback?: { provider: string; model: string },
+) {
+  const labels = {
+    ...dimensions,
+    'gen_ai.provider.name': primary.provider,
+    'gen_ai.request.model': primary.model,
+    ...(telemetryErrorCode(primary.errorClass) ? { 'error.type': primary.errorClass } : {}),
+    model_fallback: outcome,
+  };
+  try {
+    metrics
+      .getMeter(scope)
+      .createCounter('gen_ai_model_fallback', { description: 'Fallback decisions after a failed model call' })
+      .add(1, labels);
+  } catch {
+    /* Telemetry must not change the reply. */
+  }
+  log(outcome === 'used' ? 'warn' : outcome === 'failed' ? 'error' : 'info', 'inference', 'call_completed', {
+    operation: 'chat.model-fallback',
+    ...labels,
+    ...(fallback ? { 'fallback.provider': fallback.provider, 'fallback.model': fallback.model } : {}),
+  });
+}
+
 export function withTelemetryContext<T>(parent: Context, call: () => T): T {
   return context.with(parent, call);
 }
@@ -1837,7 +1897,8 @@ export async function observeInference<T>(
   call: (report: {
     firstToken: () => void;
     usage: (input: number, output: number) => void;
-    error: () => void;
+    /** Marks the call failed; pass the failure so its classification and provider details are logged. */
+    error: (error?: unknown) => void;
   }) => Promise<T>,
 ): Promise<T> {
   const attributes = {
@@ -1856,13 +1917,37 @@ export async function observeInference<T>(
         let firstToken = false;
         let usage: { input: number; output: number } | undefined;
         const meter = metrics.getMeter(scope);
+        // A stream can report an error before the call throws its classified failure, so the failure is logged once, at the end.
+        let failure: unknown;
         const fail = (error?: unknown) => {
-          if (outcome === 'error') return;
           outcome = 'error';
-          const details = error === undefined ? {} : errorAttributes(error);
-          span.setAttributes(details);
+          if (error !== undefined && failure === undefined) failure = error;
+        };
+        let errorType: string | undefined;
+        const finishFailure = () => {
+          if (outcome !== 'error') return;
+          const details = failure === undefined ? { 'error.type': 'unknown' } : errorAttributes(failure);
+          const diagnostics = modelCallDiagnostics(failure);
+          const spanDetails: Attributes = {
+            ...details,
+            ...(diagnostics
+              ? {
+                  'error.code': diagnostics.errorClass,
+                  'error.type': diagnostics.errorClass,
+                  output_started: diagnostics.outputStarted,
+                  ...(diagnostics.status === undefined ? {} : { 'http.response.status_code': diagnostics.status }),
+                }
+              : {}),
+          };
+          errorType = String(spanDetails['error.code'] ?? spanDetails['error.type']);
+          span.setAttributes(spanDetails);
           span.setStatus({ code: SpanStatusCode.ERROR });
-          log('error', 'inference', 'call_failed', { ...attributes, ...details });
+          log('error', 'inference', 'call_failed', {
+            ...attributes,
+            ...spanDetails,
+            ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
+            ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
+          });
         };
         try {
           return await call({
@@ -1884,7 +1969,13 @@ export async function observeInference<T>(
           throw error;
         } finally {
           const seconds = (performance.now() - start) / 1000;
-          const labels = { ...dimensions, ...attributes, outcome };
+          finishFailure();
+          const labels = {
+            ...dimensions,
+            ...attributes,
+            outcome,
+            ...(errorType && telemetryErrorCode(errorType) ? { 'error.type': errorType } : {}),
+          };
           callMetrics('inference', model.operation, outcome, seconds, attributes);
           meter.createHistogram('gen_ai_client_operation_duration', { unit: 's' }).record(seconds, labels);
           if (usage) {

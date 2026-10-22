@@ -1,5 +1,7 @@
+import { modelErrorClass, modelErrorClasses } from './model-errors.ts';
+
 // Only reviewed machine codes may become labels; provider text and user data must not.
-const codes = new Set([
+const codes = new Set<string>([
   'closed',
   'queue_full',
   'wait_timeout',
@@ -202,6 +204,7 @@ const reasons: Record<string, string> = {
   'table-name-unavailable': 'A referenced table has no permanent name',
 };
 for (const code of Object.keys(reasons)) codes.add(code);
+for (const code of modelErrorClasses) codes.add(code);
 
 const types = new Set([
   'Error',
@@ -393,6 +396,8 @@ function grpcCode(value: object): string | undefined {
   return typeof item.code === 'number' && Object.hasOwn(grpcCodes, item.code) ? grpcCodes[item.code] : undefined;
 }
 
+/** A reviewed code, or the bounded class of a `model-<reason>` failure so model errors never collapse into `Error`. */
 export function telemetryErrorCode(value: unknown): string | undefined {
-  return typeof value === 'string' && codes.has(value) ? value : undefined;
+  if (typeof value !== 'string') return undefined;
+  return codes.has(value) ? value : modelErrorClass(value);
 }

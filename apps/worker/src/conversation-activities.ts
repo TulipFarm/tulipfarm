@@ -21,6 +21,7 @@ import { mergeSources } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import {
+  chatFallbackModel,
   chatReplyModel,
   conversationFamilyPaused,
   conversationModel,
@@ -119,6 +120,7 @@ export function meteredReply(
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const title = generateTitle ? chatTitleModel() : undefined;
     const titleRoute = title?.route;
+    const fallback = chatFallbackModel(chat.price.familyId);
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
     const session = await observeChatDetail('reply-start', () =>
@@ -127,6 +129,7 @@ export function meteredReply(
         fence,
         chat,
         title,
+        fallback,
         externalContext,
         slack,
         mcp,
@@ -264,6 +267,14 @@ export function meteredReply(
               ...(answerText ? { answerText } : {}),
               progress,
               titleRoute,
+              ...(fallback
+                ? {
+                    fallback: {
+                      route: { ...fallback.route, maxOutputTokens: fallback.price.maxOutputTokens },
+                      label: fallback.price.familyId,
+                    },
+                  }
+                : {}),
               readPersonalMemory: personalMemory ?? readPersonalMemory,
               readWorkspaceInventory: session.readWorkspaceInventory,
               projectInstructions: project?.instructions,
@@ -279,6 +290,14 @@ export function meteredReply(
               ...(answerText ? { answerText } : {}),
               progress,
               titleRoute,
+              ...(fallback
+                ? {
+                    fallback: {
+                      route: { ...fallback.route, maxOutputTokens: fallback.price.maxOutputTokens },
+                      label: fallback.price.familyId,
+                    },
+                  }
+                : {}),
               readPersonalMemory: externalContext ? undefined : (personalMemory ?? readPersonalMemory),
               readWorkspaceInventory: session.readWorkspaceInventory,
               projectInstructions: project?.instructions,

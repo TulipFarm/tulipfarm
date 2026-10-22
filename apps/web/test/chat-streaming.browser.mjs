@@ -377,6 +377,34 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
     );
 
     await scenario(
+      'a reply whose model is unavailable ends with a clear error and a retry, not a spinner',
+      async ({ page, state, workspace, chatId, history, open }) => {
+        await open();
+        await page.getByRole('button', { name: 'Stop reply' }).waitFor();
+        history[0].turn = { ...history[0].turn, status: 'failed', errorCode: 'model-configuration' };
+        await notifyChange(page, workspace.id, 'ada', 'detail', chatId);
+        await page.getByRole('alert').filter({ hasText: "This model isn't available." }).waitFor();
+        await page.getByRole('button', { name: 'Stop reply' }).waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Retry reply', exact: true }).waitFor();
+        assert.equal(state.commands.length, 0, 'a failed reply is not retried without the person asking');
+        await screenshot(page, 'model-unavailable-reply');
+      },
+    );
+
+    await scenario(
+      'a reply answered by the fallback model shows which model answered',
+      async ({ page, history, complete, open }) => {
+        complete('Hello from the fallback model.');
+        history[0].turn.errorCode = 'model-fallback:kimi';
+        await open();
+        await page.getByText('Hello from the fallback model.', { exact: true }).waitFor();
+        await page.getByText('Answered by kimi because the chat model was unavailable.', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('alert').count(), 0);
+        await screenshot(page, 'fallback-model-reply');
+      },
+    );
+
+    await scenario(
       'an unavailable stream falls back to polling that shows the reply without user action',
       async ({ page, state, complete, open }) => {
         state.events = { status: 503, body: '' };

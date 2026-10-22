@@ -406,7 +406,7 @@ export function prepareAgentAuthoringInference(
           signal.throwIfAborted();
           return { text: answer, actualModel: actualModel! };
         } catch (error) {
-          report.error();
+          report.error(error);
           if (signal.aborted)
             throw new AgentAuthoringError(
               signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'

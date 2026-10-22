@@ -8,9 +8,13 @@ import {
 } from '@tulipfarm/config';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 import {
+  fallbackEligibleClasses,
   log,
+  ModelCallError,
+  modelCallDiagnostics,
   observeInference,
   observeChatDetail,
+  recordModelFallback,
   observeChatDetailSync,
   recordChatCompletionCheck,
   recordChatDiscovery,
@@ -512,7 +516,37 @@ function googleQuotaSignal(body: unknown, message: string): boolean {
   });
 }
 
-function httpFailure(
+/** The provider's own error code and message, when the body has them. Callers sanitise the message before logging it. */
+export function providerErrorDetail(body: unknown): { code?: string; message?: string } {
+  const error = errorSchema.safeParse(body);
+  if (!error.success) return {};
+  const { code, type, status, message } = error.data.error;
+  const named = [code, type, status].find(value => value !== undefined && value !== '');
+  return {
+    ...(named === undefined ? {} : { code: String(named) }),
+    ...(message ? { message } : {}),
+  };
+}
+
+/** A provider's HTTP rejection as a classified model error carrying the provider's own code and message for logs. */
+export function modelHttpError(
+  response: { status: number; headers: Headers },
+  body: unknown,
+  provider: InferenceRoute['provider'],
+  outputStarted = false,
+  request?: string,
+) {
+  const detail = providerErrorDetail(body);
+  return new ModelCallError(httpFailure(response.status, body, provider, headerRetryAfterMs(response.headers)), {
+    status: response.status,
+    providerCode: detail.code,
+    providerMessage: detail.message,
+    outputStarted,
+    request,
+  });
+}
+
+export function httpFailure(
   status: number,
   body: unknown,
   provider: InferenceRoute['provider'],
@@ -526,7 +560,7 @@ function httpFailure(
     : [];
   const has = (...values: string[]) => values.some(value => codes.includes(value));
   const message = error.success ? (error.data.error.message ?? '') : '';
-  if (status === 401 || has('authentication_error', 'unauthenticated')) return 'authentication';
+  if (status === 401 || has('authentication_error', 'unauthenticated', 'invalid_api_key')) return 'authentication';
   // xAI answers a wrong key with 400 "Incorrect API key provided".
   if (provider === 'xai' && status === 400 && /api key/i.test(message)) return 'authentication';
   if (has('insufficient_quota', 'billing_hard_limit_reached', 'billing_error', 'quota_exceeded') || status === 402)
@@ -541,7 +575,12 @@ function httpFailure(
   if (has('content_filter', 'content_policy_violation')) return 'refusal';
   if (has('context_length_exceeded', 'model_context_window_exceeded')) return 'context-overflow';
   if (status === 403) return 'permission';
-  if ([301, 302, 303, 307, 308, 404].includes(status)) return 'configuration';
+  // A missing deployment or model, whatever status the provider sends with it.
+  if (
+    [301, 302, 303, 307, 308, 404].includes(status) ||
+    has('deploymentnotfound', 'model_not_found', 'not_found_error', 'notfound', 'not_found')
+  )
+    return 'configuration';
   if (
     status === 400 &&
     /prompt is too long|maximum context length|input token count .*exceeds|exceeds the maximum number of tokens/i.test(
@@ -763,6 +802,9 @@ export async function inferDecision(
     return observeInference(
       { provider: config.data.provider, model: config.data.model, operation: 'chat' },
       async report => {
+        let thrown: unknown;
+        let errorBody: unknown;
+        let request: string | undefined;
         const result = await (async (): Promise<InferenceResult> => {
           const timeout = AbortSignal.timeout(config.data.timeoutMs);
           const controller = new AbortController();
@@ -782,6 +824,7 @@ export async function inferDecision(
           let retryAfterMs: number | null = null;
           try {
             const serialized = serializeChatRequest(wire.body);
+            request = serialized;
             const received = await observeProviderResponse(
               async () => {
                 const response = await fetch(wire.url, {
@@ -852,6 +895,7 @@ export async function inferDecision(
               };
             });
             if (!response.ok) {
+              errorBody = body;
               if (config.data.provider === 'google') retryAfterMs = googleRetryAfterMs(body, retryAfterMs);
               return failure(
                 httpFailure(response.status, body, config.data.provider, retryAfterMs),
@@ -873,7 +917,8 @@ export async function inferDecision(
                 return failure('invalid-decision', status, attribution);
               }
             });
-          } catch {
+          } catch (error) {
+            thrown = error;
             if (abortState.reason === 'cancelled') return failure('cancelled', status, attribution);
             if (status !== null && (status < 200 || status >= 300))
               return failure(
@@ -889,7 +934,22 @@ export async function inferDecision(
           }
         })();
         reportUsage(report, result.usage);
-        if (result.kind === 'failure') report.error();
+        if (result.kind === 'failure') {
+          const detail = providerErrorDetail(errorBody);
+          report.error(
+            new ModelCallError(
+              result.reason,
+              {
+                status: result.status ?? undefined,
+                providerCode: detail.code,
+                providerMessage: detail.message,
+                outputStarted: false,
+                request,
+              },
+              thrown === undefined ? undefined : { cause: thrown },
+            ),
+          );
+        }
         return result;
       },
     );
@@ -959,14 +1019,18 @@ function chatRequest(
       };
   }
 }
-/** `provider` and `model` name the route of this request; the title request may use a different route from the chat steps. */
+/**
+ * `provider` and `model` name the route of this request; the title request and a fallback retry may use a different route
+ * from the chat steps. The settlement's `rejected` is true when the provider refused the request with an HTTP error and
+ * reported no usage, so nothing was generated.
+ */
 export type ToolModelMeter = (attempt: {
   step: number;
   inputBytes: number;
   maxOutputTokens: number;
   provider: string;
   model: string;
-}) => Promise<(usage: InferenceUsage) => Promise<void>>;
+}) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   avatar?: { update: (update: { step: number; avatar: AvatarSnapshot }) => void };
   readWorkspaceInventory?: (() => Promise<WorkspaceInventory | undefined>) | undefined;
@@ -995,6 +1059,11 @@ export type ToolInferenceContext = {
    * and refresh only what that round changed. The reads themselves may then return cached values.
    */
   beforeRound?: (() => Promise<void>) | undefined;
+  /**
+   * A model that retries a reply step once when the chat model fails before the turn produced any output, with a failure
+   * another model can fix. `label` names it in the result. Absent, failures are not retried on another model.
+   */
+  fallback?: { route: InferenceRoute; label: string } | undefined;
 };
 
 type ToolResult = { id: string; name: string; output: string; error: boolean; providerId: boolean };
@@ -1448,6 +1517,10 @@ function serializeChatRequest(body: object): string {
   });
 }
 
+function timedOut(error: unknown) {
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+}
+
 async function observeProviderResponse<T>(call: () => Promise<T>, failed: (result: T) => boolean): Promise<T> {
   const marker = new Error('model-provider-response-failed');
   let rejected: T;
@@ -1476,8 +1549,12 @@ export async function inferWithTools(
   timeZone: string | null = null,
   tools?: ToolInferenceContext,
   sourceMessages: readonly ChatTurn[] = messages,
-): Promise<{ text: string; title?: string; avatar?: AvatarSnapshot }> {
-  const config = inferenceRouteSchema.parse(route);
+): Promise<{ text: string; title?: string; avatar?: AvatarSnapshot; fallback?: string }> {
+  // After a fallback answers a step, the rest of the turn uses its route.
+  let config = inferenceRouteSchema.parse(route);
+  let answeredBy: string | undefined;
+  // Any model output in this turn, streamed or stepped, makes a later fallback unsafe: its history is provider-native.
+  let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   let calls = z
     .number()
@@ -1507,7 +1584,12 @@ export async function inferWithTools(
   const finish = async (text: string, checked = false) => {
     report(checked ? 'done' : 'finishing');
     const generatedTitle = generateTitle ? await title() : undefined;
-    return { text, ...(generatedTitle ? { title: generatedTitle } : {}), ...(tools?.avatar ? { avatar } : {}) };
+    return {
+      text,
+      ...(generatedTitle ? { title: generatedTitle } : {}),
+      ...(tools?.avatar ? { avatar } : {}),
+      ...(answeredBy ? { fallback: answeredBy } : {}),
+    };
   };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
   if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
@@ -1518,7 +1600,7 @@ export async function inferWithTools(
     log('warn', 'activity', 'call_failed', { operation: 'chat.tool-budget', 'error.type': reason });
   };
   const calendarBindings = new Map<string, CalendarTextBinding>();
-  const titleConfig = tools?.titleRoute ? inferenceRouteSchema.parse(tools.titleRoute) : config;
+  const titleRoute = tools?.titleRoute ? inferenceRouteSchema.parse(tools.titleRoute) : undefined;
   async function send<T>(
     wire: { url: string; headers: Record<string, string>; body: object },
     select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
@@ -1542,10 +1624,15 @@ export async function inferWithTools(
     return observeInference({ provider: target.provider, model: target.model, operation: 'chat' }, async report => {
       // The streamed answer is a preview; a failing consumer must not affect the turn.
       let held = false;
+      let published = false;
       let previousText: string | undefined;
       const publish = (text: string) => {
         if (previousText === text) return;
         previousText = text;
+        if (text) {
+          published = true;
+          outputProduced = true;
+        }
         try {
           answerText?.({ step, text });
         } catch {
@@ -1571,12 +1658,24 @@ export async function inferWithTools(
             body: serialized,
             redirect: 'manual',
             signal: AbortSignal.timeout(target.timeoutMs),
+          }).catch((error: unknown) => {
+            throw new ModelCallError(
+              timedOut(error) ? 'timeout' : 'transport',
+              { outputStarted: false },
+              { cause: error },
+            );
           });
           const result = await readModelResponse(response, streamFormat, {
             onText,
             onFirstToken: report.firstToken,
-          }).catch(() => {
-            report.error();
+          }).catch((error: unknown) => {
+            report.error(
+              new ModelCallError(
+                timedOut(error) ? 'timeout' : 'transport',
+                { status: response.status, outputStarted: published },
+                { cause: error },
+              ),
+            );
             return { body: null, error: null };
           });
           return { response, ...result };
@@ -1585,18 +1684,19 @@ export async function inferWithTools(
       );
       const value = observeChatDetailSync('response-parse', () => usage(target, json));
       reportUsage(report, value);
-      await observeChatDetail('settle', async () => onUsage?.(value));
-      if (!response.ok || error)
-        throw new Error(
-          `model-${httpFailure(response.status, error ?? json, target.provider, headerRetryAfterMs(response.headers))}`,
-        );
+      await observeChatDetail('settle', async () =>
+        onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
+      );
+      if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
       const selected = observeChatDetailSync('decision-parse', () => select(json));
-      if (selected.failed) report.error();
+      if (selected.failed)
+        report.error(new ModelCallError('invalid-decision', { status: response.status, outputStarted: published }));
       if (!selected.failed && held && selected.finalText !== undefined) publish(selected.finalText);
       return selected.value;
     });
   }
   async function title(): Promise<string | undefined> {
+    const titleConfig = titleRoute ?? config;
     const request = sourceMessages.filter(message => message.role === 'user').at(-1);
     if (!request) return undefined;
     try {
@@ -1624,8 +1724,50 @@ export async function inferWithTools(
       return undefined;
     }
   }
+  /**
+   * Runs a reply step on the chat route and, when it fails before the turn produced any output with a failure another model
+   * can fix, once more on the configured fallback, which then answers the rest of the turn. The chat model's failure is
+   * rethrown when no fallback answers, so the turn reports what happened to the model the person chose.
+   */
+  async function withFallback<T>(call: (target: typeof config) => Promise<T>): Promise<T> {
+    try {
+      return await call(config);
+    } catch (error) {
+      const diagnostics = modelCallDiagnostics(error);
+      if (!diagnostics) throw error;
+      const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
+      if (!tools?.fallback) {
+        recordModelFallback('not_configured', primary);
+        throw error;
+      }
+      const fallback = inferenceRouteSchema.parse(tools.fallback.route);
+      const target = { provider: fallback.provider, model: fallback.model };
+      if (
+        answeredBy !== undefined ||
+        outputProduced ||
+        diagnostics.outputStarted ||
+        !fallbackEligibleClasses.has(diagnostics.errorClass) ||
+        (fallback.provider === config.provider && fallback.model === config.model)
+      ) {
+        recordModelFallback('not_eligible', primary, target);
+        throw error;
+      }
+      let result: T;
+      try {
+        result = await call(fallback);
+      } catch (second) {
+        recordModelFallback('failed', primary, target);
+        // Credit and admission failures of the retry are the turn's real outcome; another model failure is secondary.
+        throw modelCallDiagnostics(second) ? error : second;
+      }
+      config = fallback;
+      answeredBy = tools.fallback.label;
+      recordModelFallback('used', primary, target);
+      return result;
+    }
+  }
   const reject = (results: ToolResult[]) => {
-    if (corrections++ >= 2) throw new Error('model-invalid-decision');
+    if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: outputProduced });
     items.push({ kind: 'results', results });
   };
   let previousCatalog: string | undefined;
@@ -1689,7 +1831,7 @@ export async function inferWithTools(
           });
         decisionAt = { step: requestStep, round: step + 1 };
         report('thinking');
-        const answerStep = requestStep;
+        let answerStep = requestStep;
         const currentReminder = reminder;
         const activeCatalog = catalog;
         observeChatDetailSync('serialize', () =>
@@ -1698,26 +1840,33 @@ export async function inferWithTools(
             history: Buffer.byteLength(JSON.stringify(items)),
           }),
         );
-        const selected = await send(
-          observeChatDetailSync('serialize', () =>
-            nativeRequest(
-              config,
-              [...chatSystemBlocks(tools?.projectInstructions), ...(tools?.avatar ? [budReminder(avatar)] : [])],
-              [{ kind: 'turn', turn: currentReminder }, ...items],
-              finalizing ? [] : [...activeCatalog.tools, ...(tools?.avatar && expressionCalls < 6 ? [budTool] : [])],
+        const selected = await withFallback(target => {
+          answerStep = requestStep;
+          return send(
+            observeChatDetailSync('serialize', () =>
+              nativeRequest(
+                target,
+                [...chatSystemBlocks(tools?.projectInstructions), ...(tools?.avatar ? [budReminder(avatar)] : [])],
+                [{ kind: 'turn', turn: currentReminder }, ...items],
+                finalizing ? [] : [...activeCatalog.tools, ...(tools?.avatar && expressionCalls < 6 ? [budTool] : [])],
+              ),
             ),
-          ),
-          body => {
-            const selected = nativeStep(config, body);
-            const envelope = selected.kind === 'step' && containsToolEnvelope(selected.text);
-            return {
-              value: selected,
-              failed: selected.kind === 'failure' || envelope,
-              ...(selected.kind === 'step' && !selected.calls.length && !envelope ? { finalText: selected.text } : {}),
-            };
-          },
-          tools?.answerText,
-        );
+            body => {
+              const selected = nativeStep(target, body);
+              const envelope = selected.kind === 'step' && containsToolEnvelope(selected.text);
+              return {
+                value: selected,
+                failed: selected.kind === 'failure' || envelope,
+                ...(selected.kind === 'step' && !selected.calls.length && !envelope
+                  ? { finalText: selected.text }
+                  : {}),
+              };
+            },
+            tools?.answerText,
+            target,
+          );
+        });
+        outputProduced = true;
         return {
           selected: tools?.avatar ? selected : withoutBudOnlyCalls(selected),
           mcp,
@@ -1728,7 +1877,8 @@ export async function inferWithTools(
       },
     );
     if (selected.kind === 'failure') {
-      if (selected.reason !== 'invalid-decision' || corrections++ >= 2) throw new Error(`model-${selected.reason}`);
+      if (selected.reason !== 'invalid-decision' || corrections++ >= 2)
+        throw new ModelCallError(selected.reason, { outputStarted: outputProduced });
       items.push({
         kind: 'turn',
         turn: {
@@ -1741,7 +1891,7 @@ export async function inferWithTools(
     if (containsToolEnvelope(selected.text)) {
       // After the budget is spent, a textual tool request means more work remained, not a broken reply.
       if (finalizing) return finish(stoppingReply);
-      if (corrections++ >= 2) throw new Error('model-invalid-decision');
+      if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: outputProduced });
       if (selected.calls.length)
         items.push(
           { kind: 'model', text: '', calls: selected.calls, raw: selected.raw },
@@ -1817,7 +1967,9 @@ export async function inferWithTools(
               const parsed =
                 selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
               if (!parsed?.success)
-                throw new Error(`model-${selected.kind === 'failure' ? selected.reason : 'invalid-decision'}`);
+                throw new ModelCallError(selected.kind === 'failure' ? selected.reason : 'invalid-decision', {
+                  outputStarted: false,
+                });
               return { value: parsed.data.decision, failed: false };
             },
           );
@@ -2105,7 +2257,7 @@ export async function inferSpecialist(
   let calls = resume?.spentCalls ?? 0;
   let corrections = 0;
   const correct = () => {
-    if (corrections++ >= 2) throw new Error('model-invalid-decision');
+    if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: false });
   };
   for (let step = resume?.nextStep ?? 0; step <= maxCalls + 3; step++) {
     const selected = await withChatModelRequest('reply', async () => {
@@ -2138,17 +2290,15 @@ export async function inferSpecialist(
         const value = observeChatDetailSync('response-parse', () => usage(config, json));
         reportUsage(report, value);
         await observeChatDetail('settle', () => onUsage(value));
-        if (!response.ok)
-          throw new Error(
-            `model-${httpFailure(response.status, json, config.provider, headerRetryAfterMs(response.headers))}`,
-          );
+        if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
         const step = observeChatDetailSync('decision-parse', () => nativeStep(config, json));
-        if (step.kind === 'failure') report.error();
+        if (step.kind === 'failure')
+          report.error(new ModelCallError(step.reason, { status: response.status, outputStarted: false }));
         return step;
       });
     });
     if (selected.kind === 'failure') {
-      if (selected.reason !== 'invalid-decision') throw new Error(`model-${selected.reason}`);
+      if (selected.reason !== 'invalid-decision') throw new ModelCallError(selected.reason, { outputStarted: false });
       correct();
       items.push({
         kind: 'turn',
@@ -2320,12 +2470,11 @@ export async function inferWithSystem(
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
       reportUsage(report, value);
       await observeChatDetail('settle', async () => onUsage?.(value));
-      if (!response.ok)
-        throw new Error(
-          `model-${httpFailure(response.status, json, config.provider, headerRetryAfterMs(response.headers))}`,
-        );
+      if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {
-        if (nativeStep(config, json).kind === 'failure') report.error();
+        const parsed = nativeStep(config, json);
+        if (parsed.kind === 'failure')
+          report.error(new ModelCallError(parsed.reason, { status: response.status, outputStarted: false }));
         const text = textResponseSchema.safeParse(json);
         if (!text.success) throw new Error('model-invalid-response');
         return text.data;
@@ -2373,12 +2522,11 @@ export async function inferText(
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
       reportUsage(report, value);
       await observeChatDetail('settle', async () => onUsage?.(value));
-      if (!response.ok)
-        throw new Error(
-          `model-${httpFailure(response.status, json, config.provider, headerRetryAfterMs(response.headers))}`,
-        );
+      if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {
-        if (nativeStep(config, json).kind === 'failure') report.error();
+        const parsed = nativeStep(config, json);
+        if (parsed.kind === 'failure')
+          report.error(new ModelCallError(parsed.reason, { status: response.status, outputStarted: false }));
         const text = textResponseSchema.safeParse(json);
         if (!text.success) throw new Error('model-invalid-response');
         return text.data;
