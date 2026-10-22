@@ -124,21 +124,24 @@ test(
             commands.push(command);
             if (command.kind === 'bootstrap' && !state) {
               state = {
-                conversationId: chatId,
+                conversationId: null,
                 onboarding: 'active',
                 bubblesEnabled: true,
                 snoozedUntil: null,
                 nudge: null,
                 preferences: [],
               };
-              history.push({
-                id: randomUUID(),
-                sequence: 1,
-                author: 'assistant',
-                createdAt: new Date().toISOString(),
-                parts: [{ kind: 'text', text: budGreeting }],
-                turn: null,
-              });
+            } else if (command.kind === 'open' && !state.conversationId) {
+              state.conversationId = chatId;
+              if (state.onboarding === 'active')
+                history.push({
+                  id: randomUUID(),
+                  sequence: 1,
+                  author: 'assistant',
+                  createdAt: new Date().toISOString(),
+                  parts: [{ kind: 'text', text: budGreeting }],
+                  turn: null,
+                });
             } else if (command.kind === 'skip') state.onboarding = 'skipped';
             else if (command.kind === 'settings') {
               state.bubblesEnabled = command.enabled ?? state.bubblesEnabled;
@@ -264,15 +267,19 @@ test(
         );
       };
       await page.goto(`${origin}/acme`);
-      await page.waitForURL(`**/acme/chat/${chatId}`);
-      await page.getByText(budGreeting, { exact: true }).waitFor();
-      assert.equal(history.length, 1);
-      await shot('bud-onboarding');
-      await page.getByRole('button', { name: 'Skip setup', exact: true }).click();
-      await page.waitForURL('**/acme');
+      await page.getByRole('button', { name: 'Open Bud', exact: true }).waitFor();
+      while (!commands.some(command => command.kind === 'bootstrap')) await delay(50);
+      await delay(1000);
+      assert.equal(new URL(page.url()).pathname, '/acme', 'a new member is not sent to a Bud chat');
+      assert.equal(history.length, 0, 'no greeting before the member opens Bud');
+      assert.equal(state?.conversationId, null, 'no Bud thread before the member opens Bud');
       await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
       await popup.waitFor();
-      await page.getByText(budGreeting, { exact: true }).waitFor();
+      await popup.getByText(budGreeting, { exact: true }).waitFor();
+      assert.equal(history.length, 1);
+      await shot('bud-onboarding');
+      await popup.getByRole('button', { name: 'Skip setup', exact: true }).click();
+      await popup.getByRole('button', { name: 'Skip setup', exact: true }).waitFor({ state: 'hidden' });
       assert.equal(await popup.getByRole('combobox').count(), 0, 'no position selector');
       assert.equal(
         await popup.getByRole('button', { name: /canvas|Model:|Add a file|Use a skill|Chat actions/i }).count(),

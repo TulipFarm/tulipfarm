@@ -24,15 +24,6 @@ export function budState(
   return turn.status === 'queued' || turn.status === 'processing' ? 'Thinking' : 'Idle';
 }
 
-export function shouldOpenBudOnboarding(input: {
-  onboarding: string;
-  conversationId: string | null | undefined;
-  search: string;
-  navigated: boolean;
-}) {
-  return input.onboarding === 'active' && !!input.conversationId && !input.search && !input.navigated;
-}
-
 export function emptyChatIntro(draft: boolean, sharedChat: boolean) {
   if (!draft) return 'Turn a business task into a clear next step.';
   return sharedChat

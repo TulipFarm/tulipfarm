@@ -43,8 +43,14 @@ test(
         bud.command(w.id, w.userId, { kind: 'bootstrap' }),
       ]);
       assert.equal(results[0].onboarding, 'active');
-      assert.equal(results[0].conversationId, results[1].conversationId);
-      const chatId = results[0].conversationId;
+      assert.equal(results[0].conversationId, null, 'bootstrap does not start a Bud chat');
+      assert.equal(results[1].conversationId, null);
+      const threads = await Promise.all([
+        bud.command(w.id, w.userId, { kind: 'open' }),
+        bud.command(w.id, w.userId, { kind: 'open' }),
+      ]);
+      assert.equal(threads[0].conversationId, threads[1].conversationId);
+      const chatId = threads[0].conversationId;
       assert.equal((await chats.history(w.id, w.userId, chatId)).messages[0].parts[0].text, budGreeting);
       assert.equal((await chats.history(w.id, w.userId, chatId)).messages.length, 1);
       await assert.rejects(bud.read(other.id, w.userId), AccessDenied);
@@ -55,7 +61,8 @@ test(
         memberId,
         userId,
       ]);
-      const memberChat = (await bud.command(w.id, userId, { kind: 'bootstrap' })).conversationId;
+      assert.equal((await bud.command(w.id, userId, { kind: 'bootstrap' })).conversationId, null);
+      const memberChat = (await bud.command(w.id, userId, { kind: 'open' })).conversationId;
       assert.notEqual(memberChat, chatId);
       const integrationId = randomUUID(),
         memberMessage = randomUUID(),

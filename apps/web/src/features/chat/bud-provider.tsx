@@ -1,4 +1,3 @@
-import { shouldOpenBudOnboarding } from './bud-state';
 import {
   lazy,
   Suspense,
@@ -110,15 +109,6 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
       : null);
   const writing = useRef(false);
   const mounted = useRef(true);
-  const redirected = useRef(false);
-  const navigated = useRef(false);
-  useEffect(
-    () =>
-      router.history.subscribe(() => {
-        navigated.current = true;
-      }),
-    [router],
-  );
   const returnKey = `bud-return:${workspace.id}:${scope.kind === 'workspace' ? scope.membershipId : scope.userId}`;
   const returnFromSetup = useCallback(() => {
     const destination = sessionStorage.getItem(returnKey);
@@ -206,26 +196,6 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     }, 30 * 60_000);
     return () => clearInterval(timer);
   }, [data?.nudge?.fingerprint, read.refresh]);
-  useEffect(() => {
-    if (!data || redirected.current) return;
-    redirected.current = true;
-    if (
-      data.conversationId &&
-      shouldOpenBudOnboarding({
-        onboarding: data.onboarding,
-        conversationId: data.conversationId,
-        search: window.location.search,
-        navigated: navigated.current,
-      })
-    ) {
-      if (!full) sessionStorage.setItem(returnKey, `${pathname}${window.location.hash}`);
-      void navigate({
-        to: '/$workspaceSlug/chat/$chatId',
-        params: { workspaceSlug: workspace.slug, chatId: data.conversationId },
-        replace: true,
-      });
-    }
-  }, [data, navigate, workspace.slug, full, pathname, returnKey]);
   useEffect(() => {
     if (full && data?.onboarding === 'skipped' && sessionStorage.getItem(returnKey)) returnFromSetup();
   }, [full, data?.onboarding, returnFromSetup, returnKey]);
