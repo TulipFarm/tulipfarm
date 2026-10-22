@@ -34,6 +34,18 @@
     "./testing/fake": {
       "types": "./dist/platforms/fake.d.ts",
       "default": "./dist/platforms/fake.js"
+    },
+    "./platform-apps": {
+      "types": "./dist/platform-apps.d.ts",
+      "default": "./dist/platform-apps.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "default": "./dist/credentials.js"
+    },
+    "./accounts": {
+      "types": "./dist/accounts.d.ts",
+      "default": "./dist/accounts.js"
     }
   },
   "scripts": {
@@ -45,7 +57,10 @@
   "dependencies": {
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
     "zod": "4.3.6"
   },
   "devDependencies": {

@@ -159,6 +159,7 @@ export const accountIdentitySchema = z.strictObject({
   handle: z.string().min(1).max(256).nullable(),
   displayName: z.string().max(200),
 });
+export type AccountIdentity = z.infer<typeof accountIdentitySchema>;
 const scopeSchema = z.string().min(1).max(256);
 export const socialAccountMetadataSchema = z
   .strictObject({

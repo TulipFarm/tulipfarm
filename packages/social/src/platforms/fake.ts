@@ -1,5 +1,6 @@
 import type {
   AccessTier,
+  AccountIdentity,
   AnalyticsRead,
   AuthorizationInput,
   AwaitStep,
@@ -17,6 +18,7 @@ import type {
   MetricResult,
   MutateStep,
   Platform,
+  PlatformAppCredentials,
   ReconcileInput,
   ReconcileResult,
   RefreshPolicy,
@@ -53,6 +55,7 @@ export type FakeOutcome<T> = T | FakeFailure;
 
 type Results = {
   exchangeCode: TokenSet;
+  identity: AccountIdentity;
   refresh: TokenSet;
   revoke: 'revoked' | 'failed';
   listChannels: DiscoveredChannel[];
@@ -148,8 +151,9 @@ export function createFakeAdapter(options: FakeAdapterOptions = {}): FakeAdapter
       return url;
     },
     exchangeCode: (input: CodeExchangeInput) => next('exchangeCode', [input]),
-    refresh: (token: TokenSet) => next('refresh', [token]),
-    revoke: (token: TokenSet) => next('revoke', [token]),
+    identity: (token: TokenSet) => next('identity', [token]),
+    refresh: (token: TokenSet, app: PlatformAppCredentials) => next('refresh', [token, app]),
+    revoke: (token: TokenSet, app: PlatformAppCredentials) => next('revoke', [token, app]),
     listChannels: (token: TokenSet) => next('listChannels', [token]),
     validate(variant, channel, tier) {
       calls.push({ method: 'validate', args: [variant, channel, tier] });

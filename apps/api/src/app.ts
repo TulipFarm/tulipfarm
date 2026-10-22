@@ -19,6 +19,8 @@ import { defaultKnowledgeStarter } from './knowledge-defaults-dispatch.ts';
 import { slackDependencies } from './slack-composition.ts';
 import { registerAtlassianAccounts } from './atlassian-accounts.ts';
 import { atlassianAccounts } from './atlassian-composition.ts';
+import { registerSocialAccounts } from './social-accounts.ts';
+import { socialAccounts } from './social-composition.ts';
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
@@ -113,6 +115,7 @@ export function buildApp(
         const slack = slackDependencies(auth.pool, runtime, defaultKnowledge.hook);
         registerSlack(business, auth.auth, slack);
         registerAtlassianAccounts(business, auth.auth, atlassianAccounts(runtime, process.env, defaultKnowledge.hook));
+        registerSocialAccounts(business, auth.auth, socialAccounts(runtime));
         const github = githubAccounts(runtime, process.env, defaultKnowledge.hook);
         registerGitHubAccounts(
           business,
