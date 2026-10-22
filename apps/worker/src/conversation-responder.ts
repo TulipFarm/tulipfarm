@@ -22,7 +22,7 @@ export async function respondToConversation(
   execute: (call: FrameworkCall, sources: SourceDependency[], activity: string) => Promise<unknown>,
   meter?: Parameters<typeof inferWithTools>[3],
   authorizeSources?: (sources: SourceDependency[]) => Promise<void>,
-  generateTitle = false,
+  _generateTitle = false,
   timeZone: string | null = null,
   tools?: ToolInferenceContext & { sources: () => SourceDependency[] },
   retainedSources: SourceDependency[] = [],
@@ -58,16 +58,14 @@ export async function respondToConversation(
       await observeChatDetail('authorize', async () => authorizeSources?.(sources));
       return meter ? meter(input) : async () => {};
     },
-    generateTitle,
+    false,
     timeZone,
     tools,
     sourceMessages,
   );
   const text = widenedWebSearch ? `${answer.text}\n\nSearch coverage was widened to the past seven days.` : answer.text;
-  // Only the executor's original messages establish a title independent of enriched reply context.
   return {
     ...answer,
-    ...(answer.title && sourceMessages ? { titleSource: 'user-message' as const } : {}),
     text,
     sources: mergeSources([...sources, ...(tools?.sources() ?? [])]),
   };

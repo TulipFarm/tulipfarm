@@ -1,23 +1,39 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createConversationExecutor } from '../../src/runtime.ts';
+import { createConversationTitles } from '../../src/titles.ts';
+import { conversationEventChannel, conversationNotificationSchema } from '../../src/events.ts';
 import { conversationFixture } from '../fixture.mjs';
 
-test('first-turn titles persist separately, survive retry, and never overwrite manual or later titles', async () => {
+const { Client } = createRequire(new URL('../../../workspace-storage/package.json', import.meta.url))('pg');
+const placeholder = 'Help me track customer follow-ups';
+
+test('a first reply is delivered before its title, which then saves once and never overwrites a manual title', async () => {
   const f = await conversationFixture();
+  const listener = new Client({ connectionString: f.db.connectionString });
   try {
     const { workspace: w, store } = f;
+    const titles = createConversationTitles(f.runtime);
+    const received = [];
+    await listener.connect();
+    listener.on('notification', message => {
+      if (message.channel === conversationEventChannel)
+        received.push(conversationNotificationSchema.parse(JSON.parse(message.payload)));
+    });
+    await listener.query(`LISTEN ${conversationEventChannel}`);
     async function create() {
       const id = randomUUID();
       await store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });
       return id;
     }
-    async function send(id) {
+    async function send(id, text = placeholder) {
       const sent = await store.send(w.id, w.userId, id, {
         commandId: randomUUID(),
         messageId: randomUUID(),
-        parts: [{ kind: 'text', text: 'Help me track customer follow-ups' }],
+        parts: [{ kind: 'text', text }],
       });
       return { workspaceId: w.id, conversationId: id, turnId: sent.turnId, generation: 0 };
     }
@@ -29,17 +45,16 @@ test('first-turn titles persist separately, survive retry, and never overwrite m
         title: 'My chosen title',
       });
     }
+    const delivered = async (id, turnId) =>
+      (await store.history(w.id, w.userId, id)).messages.find(message => message.turn?.id === turnId)?.turn.status;
+
     const id = await create();
     const work = await send(id);
-    const later = await send(id);
+    const later = await send(id, 'And the overdue ones?');
     const inputs = [];
     const executor = createConversationExecutor(f.runtime, async input => {
-      inputs.push(input.generateTitle);
-      return {
-        text: 'Your follow-up plan is ready.',
-        title: inputs.length === 1 ? 'Customer follow-ups' : 'Do not replace the title',
-        sources: [],
-      };
+      inputs.push(input);
+      return { text: 'Your follow-up plan is ready.', sources: [] };
     });
     const stale = await executor.claim(work);
     await f.db.platform.query(
@@ -48,46 +63,78 @@ test('first-turn titles persist separately, survive retry, and never overwrite m
     );
     const retry = await executor.claim(work);
     assert.equal(await executor.complete(stale), 'stale');
-    assert.equal((await store.read(w.id, w.userId, id)).title, 'Help me track customer follow-ups');
     assert.equal(await executor.complete(retry), 'completed');
-    assert.equal(await executor.process(work), 'idle');
-    assert.equal((await store.read(w.id, w.userId, id)).title, 'Customer follow-ups');
-    assert.equal((await store.read(w.id, w.userId, id)).titleRevision, 2);
-    assert.equal((await store.list(w.id, w.userId)).chats[0].title, 'Customer follow-ups');
-    assert.equal(await executor.process(later), 'completed');
-    assert.deepEqual(inputs, [true, false]);
-    assert.equal((await store.read(w.id, w.userId, id)).title, 'Customer follow-ups');
-    assert.deepEqual(
-      (await store.history(w.id, w.userId, id)).messages
-        .filter(message => message.author === 'assistant')
-        .map(message => message.parts),
-      [
-        [{ kind: 'text', text: 'Your follow-up plan is ready.' }],
-        [{ kind: 'text', text: 'Your follow-up plan is ready.' }],
-      ],
-    );
+    assert.deepEqual(await executor.processReply(work), { outcome: 'idle' });
 
-    for (const timing of ['before', 'during']) {
-      const manual = await create();
-      const first = await send(manual);
-      if (timing === 'before') await rename(manual);
-      const racing = createConversationExecutor(f.runtime, async input => {
-        assert.equal(input.generateTitle, timing === 'during');
-        if (timing === 'during') await rename(manual);
-        return { text: 'Useful answer', title: 'Model title', sources: [] };
-      });
-      assert.equal(await racing.process(first), 'completed');
-      const saved = await store.read(w.id, w.userId, manual);
-      assert.equal(saved.title, 'My chosen title');
-      assert.equal(saved.titleManual, true);
-    }
-    const missing = await create();
+    const first = await createConversationExecutor(f.runtime, async () => ({
+      text: 'Done.',
+      sources: [],
+    })).processReply(await send(await create()));
+    assert.deepEqual(first, { outcome: 'completed', title: { titleRevision: 1 } });
+
+    const titled = await create();
+    const firstWork = await send(titled);
+    assert.deepEqual(await executor.processReply(firstWork), { outcome: 'completed', title: { titleRevision: 1 } });
+    assert.ok(inputs.every(input => !('generateTitle' in input)));
+    // The reply is complete and visible while the chat still has its placeholder title.
+    assert.equal(await delivered(titled, firstWork.turnId), 'completed');
+    assert.equal((await store.read(w.id, w.userId, titled)).title, placeholder);
+    const titleWork = { ...firstWork, titleRevision: 1 };
+    assert.deepEqual(await titles.request(titleWork), { text: placeholder, model: inputs.at(-1).model });
+    const before = received.length;
+    assert.equal(await titles.save(titleWork, 'Customer follow-ups'), 'generated');
+    const saved = await store.read(w.id, w.userId, titled);
+    assert.equal(saved.title, 'Customer follow-ups');
+    assert.equal(saved.titleRevision, 2);
+    assert.equal(saved.titleManual, false);
     assert.equal(
-      await createConversationExecutor(f.runtime, async () => 'Answer without title').process(await send(missing)),
-      'completed',
+      (await store.list(w.id, w.userId)).chats.find(chat => chat.id === titled).title,
+      'Customer follow-ups',
     );
-    assert.equal((await store.read(w.id, w.userId, missing)).title, 'Help me track customer follow-ups');
+    for (let wait = 0; wait < 100 && !received.slice(before).some(item => item.conversationId === titled); wait++)
+      await delay(20);
+    assert.deepEqual(
+      received.slice(before).filter(item => item.conversationId === titled),
+      [{ kind: 'changed', workspaceId: w.id, conversationId: titled }],
+    );
+    assert.equal(await titles.request(titleWork), null);
+    assert.equal(await titles.save(titleWork, 'A second title'), 'skipped');
+
+    const followUp = await send(titled, 'And the overdue ones?');
+    assert.deepEqual(await executor.processReply(followUp), { outcome: 'completed' });
+    assert.deepEqual(await executor.processReply(later), { outcome: 'completed' });
+    assert.equal((await store.read(w.id, w.userId, titled)).title, 'Customer follow-ups');
+
+    for (const timing of ['before-reply', 'during-reply', 'before-request', 'before-save']) {
+      const manual = await create();
+      const reply = await send(manual);
+      if (timing === 'before-reply') await rename(manual);
+      const racing = createConversationExecutor(f.runtime, async () => {
+        if (timing === 'during-reply') await rename(manual);
+        return { text: 'Useful answer', sources: [] };
+      });
+      const result = await racing.processReply(reply);
+      assert.equal(result.outcome, 'completed');
+      if (timing === 'before-reply' || timing === 'during-reply') assert.equal(result.title, undefined);
+      else {
+        const titleWork = { ...reply, ...result.title };
+        if (timing === 'before-save') assert.ok(await titles.request(titleWork));
+        await rename(manual);
+        assert.equal(await titles.request(titleWork), null);
+        assert.equal(await titles.save(titleWork, 'Model title'), 'skipped');
+      }
+      const chat = await store.read(w.id, w.userId, manual);
+      assert.equal(chat.title, 'My chosen title', timing);
+      assert.equal(chat.titleManual, true);
+    }
+
+    const attachmentOnly = await create();
+    const silent = await send(attachmentOnly, '   ');
+    const result = await executor.processReply(silent);
+    assert.equal(result.outcome, 'completed');
+    if (result.title) assert.equal(await titles.request({ ...silent, ...result.title }), null);
   } finally {
+    await listener.end();
     await f.close();
   }
 });

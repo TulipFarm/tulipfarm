@@ -3,11 +3,14 @@ import {
   renewConversationReplyLease,
   replyWorkSchema,
   type ConversationReply,
+  type ReplyWork,
   type ConversationRuntime,
   type ExternalConversationContext,
 } from '@tulipfarm/conversations/runtime';
 import { inferenceRouteSchema, type InferenceRoute } from '@tulipfarm/agents/inference';
 import { respondToConversation } from './conversation-responder.ts';
+import { conversationTitleActivity } from './conversation-title.ts';
+import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationPlanning, createChatTools, isExternalTool, toolObservation } from '@tulipfarm/agents/tools';
 import {
   observeChatStage,
@@ -107,7 +110,6 @@ export function meteredReply(
     executeTool,
     readPersonalMemory,
     fence,
-    generateTitle,
     timeZone,
     priorCalls = 0,
     priorToolCalls = [],
@@ -125,8 +127,6 @@ export function meteredReply(
     const chat = conversationModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
-    const title = generateTitle ? chatTitleModel() : undefined;
-    const titleRoute = title?.route;
     // A Slack turn linked to a member is that member's request. Every step's admission requires the same requester, so a sender
     // removed mid-turn fails the turn here, as admission would, instead of answering without their destinations and tools.
     const { requester, destinations } = await observeChatDetail('requester', async () => {
@@ -266,9 +266,8 @@ export function meteredReply(
             activity,
           ),
         async ({ step, inputBytes, maxOutputTokens, provider, model: providerModel }) => {
-          const priced = [chat, title].find(
-            candidate => candidate?.route.provider === provider && candidate.route.model === providerModel,
-          )?.price;
+          const priced =
+            chat.route.provider === provider && chat.route.model === providerModel ? chat.price : undefined;
           if (!priced) throw new Error('conversation-model-unpriced');
           const maxInputTokens = inputBytes + 4096;
           if (maxInputTokens > priced.maxInputTokens) throw new Error('conversation-context-overflow');
@@ -373,7 +372,7 @@ export function meteredReply(
             await externalContext?.(tx, fence, sources);
           });
         },
-        generateTitle,
+        false,
         timeZone,
         mcp && requester && !externalContext
           ? {
@@ -383,7 +382,6 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              titleRoute,
               readPersonalMemory,
               readWorkspaceInventory,
               projectInstructions: project?.instructions,
@@ -413,7 +411,6 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              titleRoute,
               readPersonalMemory: externalContext ? undefined : readPersonalMemory,
               readWorkspaceInventory,
               projectInstructions: project?.instructions,
@@ -445,50 +442,63 @@ export function createConversationActivities(
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
   };
-  return {
-    processConversationReply: async (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
-      withChatMeasurements(async () => {
-        const parsed = replyWorkSchema.parse(work);
-        if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
-        const execution = mcp ?? null;
-        const executor = createConversationExecutor(
-          runtime,
-          conversationReply ??
-            meteredReply(runtime, {
-              objects,
-              mcp: execution,
-              knowledge: knowledge ?? createKnowledgeTools({ runtime: storage }),
-              outputs: files,
-              skillExecution,
-              wakePlan,
-            }),
-          undefined,
-          slack?.resumeConversation,
-          execution
-            ? (context, call) =>
-                execution(context.runtime).execute(
-                  {
-                    workspaceId: context.workspaceId,
-                    actor: context.actor,
-                    origin: {
-                      kind: 'private-chat',
-                      conversationId: context.origin.conversationId,
-                      turnId: context.origin.turnId,
-                      stepId: context.callId,
-                    },
+  const generateTitle = conversationTitleActivity(storage);
+  const run = <T>(
+    work: unknown,
+    process: (executor: ReturnType<typeof createConversationExecutor>, work: ReplyWork) => Promise<T>,
+  ) =>
+    withChatMeasurements(async () => {
+      const parsed = replyWorkSchema.parse(work);
+      if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
+      const execution = mcp ?? null;
+      const executor = createConversationExecutor(
+        runtime,
+        conversationReply ??
+          meteredReply(runtime, {
+            objects,
+            mcp: execution,
+            knowledge: knowledge ?? createKnowledgeTools({ runtime: storage }),
+            outputs: files,
+            skillExecution,
+            wakePlan,
+          }),
+        undefined,
+        slack?.resumeConversation,
+        execution
+          ? (context, call) =>
+              execution(context.runtime).execute(
+                {
+                  workspaceId: context.workspaceId,
+                  actor: context.actor,
+                  origin: {
+                    kind: 'private-chat',
+                    conversationId: context.origin.conversationId,
+                    turnId: context.origin.turnId,
+                    stepId: context.callId,
                   },
-                  context.callId,
-                  mcpCallSchema.parse(call),
-                )
-            : undefined,
-          files,
-          googleFiles,
-          chatSkills,
-          compactor ?? conversationCompactor(runtime, family => conversationModel(family)),
-          conversationPlanning,
-        );
-        return executor.process(parsed);
-      }),
+                },
+                context.callId,
+                mcpCallSchema.parse(call),
+              )
+          : undefined,
+        files,
+        googleFiles,
+        chatSkills,
+        compactor ?? conversationCompactor(runtime, family => conversationModel(family)),
+        conversationPlanning,
+      );
+      return process(executor, parsed);
+    });
+  return {
+    processConversationReply: (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
+      run(work, (executor, parsed) => executor.process(parsed)),
+    /** Delivers the reply and reports, without waiting on it, whether the chat still needs its first generated title. */
+    deliverConversationReply: (work: ReplyWork) => run(work, (executor, parsed) => executor.processReply(parsed)),
+    generateConversationTitle: ({
+      attempt,
+      final,
+      ...work
+    }: ConversationTitleWork & { attempt: number; final: boolean }) => generateTitle(work, attempt, final),
   };
 }
 import type { SkillExecutionFactory } from '@tulipfarm/agents/skill-execution';

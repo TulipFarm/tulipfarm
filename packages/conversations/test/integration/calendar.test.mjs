@@ -6,6 +6,8 @@ import { createGoogleOperations } from '../../../google-workspace/src/operations
 import { createChatTools } from '../../../agents/src/tools.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { createConversations } from '../../src/index.ts';
+import { createConversationTitles } from '../../src/titles.ts';
+import { inferChatTitle } from '../../../agents/src/inference.ts';
 import { respondToConversation } from '../../../../apps/worker/src/conversation-responder.ts';
 import {
   completionReply,
@@ -156,14 +158,21 @@ test('a user-message title persists after a Google read without exposing provide
           input.executeTool(call.tool, true, context => f.invoke(context, call.operation), sources, call, activity),
         undefined,
         undefined,
-        input.generateTitle,
+        false,
         input.timeZone,
         undefined,
         input.retainedSources,
         input.sourceMessages,
       ),
     );
-    assert.equal(await executor.process(await f.send('Read my calendar')), 'completed');
+    const work = await f.send('Read my calendar');
+    const delivered = await executor.processReply(work);
+    assert.deepEqual(delivered, { outcome: 'completed', title: { titleRevision: 1 } });
+    assert.equal(titleCalls, 0);
+    const titles = createConversationTitles(f.runtime);
+    const titleWork = { ...work, ...delivered.title };
+    const request = await titles.request(titleWork);
+    assert.equal(await titles.save(titleWork, await inferChatTitle(nativeRoutes.anthropic, request.text)), 'generated');
     assert.equal(titleCalls, 1);
     const saved = await f.store.read(f.workspace.id, f.member.userId, f.chatId);
     assert.equal(saved.title, 'Calendar review');
@@ -193,7 +202,7 @@ test('real Google reads persist without MCP, reload exact cards, and revoke card
           operation,
         });
       }
-      return { text: 'Private provider meeting is on Monday.', title: 'Private provider meeting', sources: [] };
+      return { text: 'Private provider meeting is on Monday.', sources: [] };
     });
     assert.equal(await executor.process(await f.send('Read my calendar')), 'completed');
     const restarted = f.createRuntime();
@@ -361,7 +370,7 @@ test('revocation between a completed calendar tool and final answer blocks publi
         operation,
       });
       await f.service.disconnect(f.workspace.id, f.member.userId);
-      return { text: 'Private provider meeting', title: 'Private provider meeting', sources: [] };
+      return { text: 'Private provider meeting', sources: [] };
     });
     assert.equal(await executor.process(await f.send('Read calendar')), 'failed');
     const history = await f.history();

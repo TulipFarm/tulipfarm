@@ -8,6 +8,7 @@ import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { conversationModel } from '../src/conversation-model.ts';
 import { chatTitleModel } from '../src/conversation-activities.ts';
 import { respondToConversation } from '../src/conversation-responder.ts';
+import { inferChatTitle } from '@tulipfarm/agents/inference';
 import { isCompletionRequest } from './native-chat-fixture.mjs';
 
 // One provider credential at a time: its families must run chat (streamed), titles and tasks against that provider's own API,
@@ -307,31 +308,36 @@ for (const [provider, { env, origin }] of Object.entries(providers))
       assert.equal(chat.route.provider, provider, family);
       assert.equal(modelPricing.models.find(model => model.id === chat.price.modelId).provider, provider, family);
 
-      // Chat with a first-turn title, metered as the worker meters it: by the priced model of the dispatched route.
+      // Chat, then its first-turn title, metered as the worker meters them: by the priced model of the dispatched route.
       const settled = [];
       const published = [];
+      const meter = async ({ provider: routeProvider, model }) => {
+        const price = [chat, title].find(
+          candidate => candidate?.route.provider === routeProvider && candidate.route.model === model,
+        )?.price;
+        assert.ok(price, `${family} request is priced`);
+        return async usage => settled.push({ modelId: price.modelId, picoUsd: cost(price, usage) });
+      };
       const result = await respondToConversation(
         { ...chat.route, maxOutputTokens: chat.price.maxOutputTokens },
         [{ role: 'user', text: 'Review my quarterly plan.' }],
         () => assert.fail('No tool expected'),
-        async ({ provider: routeProvider, model }) => {
-          const price = [chat, title].find(
-            candidate => candidate?.route.provider === routeProvider && candidate.route.model === model,
-          )?.price;
-          assert.ok(price, `${family} request is priced`);
-          return async usage => settled.push({ modelId: price.modelId, picoUsd: cost(price, usage) });
-        },
+        meter,
         async () => {},
         true,
         null,
         {
           answerText: ({ text }) => published.push(text),
-          titleRoute: title?.route,
           sources: () => [],
         },
       );
       assert.equal(result.text, answerFragments.join(''), family);
-      assert.equal(result.title, titleText, family);
+      assert.equal(
+        received.some(request => request.kind === 'title'),
+        false,
+        `${family} reply never waits for a title`,
+      );
+      assert.equal(await inferChatTitle((title ?? chat).route, 'Review my quarterly plan.', meter), titleText, family);
       assert.ok(published.length >= 2 && published.at(-1) === answerFragments.join(''), `${family} streams the answer`);
       const chatRequest = received.find(request => request.kind === 'chat');
       assert.ok(chatRequest?.streamed, `${family} chat is streamed`);

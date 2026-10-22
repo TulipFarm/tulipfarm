@@ -238,12 +238,8 @@ test('completion evidence excludes raw provider replay fields but retains tool r
   assert.match(JSON.stringify(requests[2]), /workflows_list/);
 });
 
-test('the separate title follows accepted completion and never leaks into streamed answers', async t => {
-  const replies = [
-    nativeReply('azure', { text: 'The answer is 42.' }),
-    selectReply('azure', verdict()),
-    nativeReply('azure', { text: 'A short title' }),
-  ];
+test('an accepted completion ends the reply without a title request', async t => {
+  const replies = [nativeReply('azure', { text: 'The answer is 42.' }), selectReply('azure', verdict())];
   const previews = [],
     steps = [];
   t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
@@ -259,7 +255,7 @@ test('the separate title follows accepted completion and never leaks into stream
     null,
     { answerText: update => previews.push(update) },
   );
-  assert.deepEqual(result, { text: 'The answer is 42.', title: 'A short title' });
-  assert.deepEqual(steps, [0, 1, 2]);
-  assert.ok(!previews.some(update => update.text.includes('title')));
+  assert.deepEqual(result, { text: 'The answer is 42.' });
+  assert.deepEqual(steps, [0, 1]);
+  assert.equal(replies.length, 0);
 });

@@ -364,7 +364,7 @@ test('a throwing answer consumer does not affect the turn', async t => {
   assert.deepEqual(result, { text: 'Still fine' });
 });
 
-test('Azure chat completions assemble tool call deltas, blank streamed text, and never stream the separate title', async t => {
+test('Azure chat completions assemble tool call deltas, and blank streamed text', async t => {
   const base = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: 'actual-azure' };
   const usage = {
     prompt_tokens: 13,
@@ -420,7 +420,6 @@ test('Azure chat completions assemble tool call deltas, blank streamed text, and
         ]),
       ),
     () => streamed(lines([...content(['Rea', 'dy now']), ...finish('stop')])),
-    () => streamed(lines([...content(['Secret ', 'title']), ...finish('stop')])),
   ]);
   const { updates, answerText } = recorder();
   const metered = [];
@@ -429,18 +428,18 @@ test('Azure chat completions assemble tool call deltas, blank streamed text, and
     [{ role: 'user', text: 'Hi' }],
     async () => ({ text: 'page' }),
     async () => async usage => metered.push(usage),
-    true,
+    false,
     null,
     { answerText },
   );
-  assert.deepEqual(result, { text: 'Ready now', title: 'Secret title' });
+  assert.deepEqual(result, { text: 'Ready now' });
   assert.deepEqual(updates, [
     { step: 0, text: 'Checking' },
     { step: 0, text: '' },
     { step: 1, text: 'Rea' },
     { step: 1, text: 'Ready now' },
   ]);
-  assert.deepEqual(metered, [known, known, known, known]);
+  assert.deepEqual(metered, [known, known, known]);
   for (const request of requests) {
     assert.equal(request.body.stream, true);
     assert.deepEqual(request.body.stream_options, { include_usage: true });
@@ -455,7 +454,7 @@ test('Azure chat completions assemble tool call deltas, blank streamed text, and
     tool_call_id: 'call_1',
     content: 'Untrusted tool result for web.fetch: {"text":"page"}',
   });
-  assert.equal(requests[2].body.tools, undefined);
+  assert.equal(requests.length, 2);
 });
 
 test('the Responses API streams output text deltas and uses the completed response', async t => {

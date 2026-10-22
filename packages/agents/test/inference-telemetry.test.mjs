@@ -7,7 +7,7 @@ import {
   PeriodicExportingMetricReader,
   AggregationTemporality,
 } from '@opentelemetry/sdk-metrics';
-import { inferDecision, inferText, inferWithSystem, inferWithTools } from '../dist/inference.js';
+import { inferChatTitle, inferDecision, inferText, inferWithSystem, inferWithTools } from '../dist/inference.js';
 import { readModelResponse } from '../dist/inference-stream.js';
 import { calendarTextRecovery } from '../dist/calendar-text-check.js';
 import { withChatMeasurements } from '../../observability/dist/index.js';
@@ -241,17 +241,12 @@ test('provider inference telemetry covers body consumption, usage, returned erro
       t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
       const count = finished().length;
       assert.deepEqual(
-        await inferWithTools(
-          nativeRoutes.azure,
-          [{ role: 'user', text: 'Create calendar "QA."' }],
-          async () => ({ id: 'review' }),
-          undefined,
-          true,
-          null,
-          { titleRoute: nativeRoutes.anthropic },
-        ),
-        { text: 'Ready.', title: 'Calendar title' },
+        await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Create calendar "QA."' }], async () => ({
+          id: 'review',
+        })),
+        { text: 'Ready.' },
       );
+      assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Create calendar "QA."'), 'Calendar title');
       assert.equal(finished().length, count + 5);
       assert.equal(finished().at(-1).attributes['gen_ai.provider.name'], 'anthropic');
       assert.equal(finished().at(-1).attributes['gen_ai.usage.input_tokens'], 13);
@@ -319,12 +314,8 @@ test('provider inference telemetry covers body consumption, usage, returned erro
       const truncated = { ...nativeReply('anthropic', { text: 'Partial title' }), stop_reason: 'max_tokens' };
       const replies = [nativeReply('azure', { text: 'Ready.' }), completionReply('azure'), truncated];
       t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
-      assert.deepEqual(
-        await inferWithTools(nativeRoutes.azure, messages, noTools, undefined, true, null, {
-          titleRoute: nativeRoutes.anthropic,
-        }),
-        { text: 'Ready.', title: 'Partial title' },
-      );
+      assert.deepEqual(await inferWithTools(nativeRoutes.azure, messages, noTools), { text: 'Ready.' });
+      assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Hello'), 'Partial title');
       assert.equal(finished().at(-2).attributes.outcome, 'success');
       assert.equal(finished().at(-1).attributes.outcome, 'error');
       assert.equal(finished().at(-1).attributes['gen_ai.usage.input_tokens'], 13);
@@ -719,17 +710,17 @@ test('provider inference telemetry covers body consumption, usage, returned erro
               [{ role: 'user', text: 'Create calendar "QA."' }],
               async () => ({ id: 'PRIVATE REVIEW' }),
               undefined,
-              true,
+              false,
               null,
               {
-                titleRoute: nativeRoutes.anthropic,
                 readPersonalMemory: async () => undefined,
                 readWorkspaceInventory: async () => undefined,
                 catalog: async () => undefined,
               },
             ),
-            { text: answer.text, title: 'Calendar title' },
+            { text: answer.text },
           );
+          assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Create calendar "QA."'), 'Calendar title');
           assert.equal(await inferWithSystem(nativeRoutes.azure, 'PRIVATE SYSTEM', messages), 'PRIVATE SUMMARY');
         });
         const requests = finished()

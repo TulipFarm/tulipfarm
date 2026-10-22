@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { sourceDependencySchema, type SourceDependency } from '@tulipfarm/access';
-import { chatTitleSchema } from './contracts.ts';
 import { avatarSnapshotSchema } from './avatar.ts';
 export {
   avatarStates,
@@ -18,8 +17,6 @@ export {
 } from '@tulipfarm/access';
 export const conversationResultSchema = z.strictObject({
   text: z.string().max(2097152),
-  title: chatTitleSchema.optional(),
-  titleSource: z.literal('user-message').optional(),
   sources: z.array(sourceDependencySchema).max(1000),
   avatar: avatarSnapshotSchema.optional(),
 });

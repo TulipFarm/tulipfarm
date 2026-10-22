@@ -167,6 +167,10 @@
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
     },
+    "./titles": {
+      "types": "./dist/titles.d.ts",
+      "default": "./dist/titles.js"
+    },
     "./dispatch": {
       "types": "./dist/dispatch.d.ts",
       "default": "./dist/dispatch.js"

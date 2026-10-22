@@ -78,7 +78,7 @@ test(
       let body = '';
       for await (const chunk of req) body += chunk;
       const request = JSON.parse(body);
-      assert.equal(request.model, 'claude-sonnet-5');
+      assert.equal(request.model, isTitleRequest(request) ? 'claude-haiku-4-5' : 'claude-sonnet-5');
       res.writeHead(200, { 'content-type': 'application/json' });
       if (isTitleRequest(request)) {
         titles++;
@@ -122,15 +122,37 @@ test(
         return { workspaceId: w.id, conversationId: chatId, turnId: turn.turnId, generation: 0 };
       };
       const summary = () => f.runtime.transaction(w.id, commonCompatibility, creditSummary);
-      const activity = createConversationActivities(f.runtime).processConversationReply;
+      const activities = createConversationActivities(f.runtime);
+      const activity = activities.processConversationReply;
       const work = await send();
-      assert.equal(await activity(work), 'completed');
+      const delivered = await activities.deliverConversationReply(work);
+      assert.deepEqual(delivered, { outcome: 'completed', title: { titleRevision: 1 } });
+      assert.equal(titles, 0, 'the reply is delivered without a title request');
+      const replied = await summary();
+      assert.deepEqual(
+        replied.breakdown.map(entry => [entry.modelId, entry.activity, entry.calls]),
+        [['claude-sonnet-5', 'chat', 2]],
+      );
       assert.equal(await activity(work), 'idle');
+      assert.equal(
+        await activities.generateConversationTitle({ ...work, ...delivered.title, attempt: 1, final: true }),
+        'generated',
+      );
       assert.equal(calls, 2);
       assert.equal(titles, 1);
-      assert.equal((await summary()).used, 1);
-      assert.equal((await summary()).available, 999);
-      assert.equal((await summary()).held, 0);
+      assert.equal((await f.store.read(w.id, w.userId, chatId)).titleRevision, 2);
+      const titled = await summary();
+      assert.deepEqual(
+        titled.breakdown.map(entry => [entry.modelId, entry.activity, entry.calls]).sort(),
+        [
+          ['claude-haiku-4-5', 'chat', 1],
+          ['claude-sonnet-5', 'chat', 2],
+        ],
+        'the title is billed as its own chat call',
+      );
+      assert.ok(titled.used > replied.used);
+      assert.equal(titled.available, titled.granted - titled.used);
+      assert.equal(titled.held, 0);
       assert.equal((await f.store.history(w.id, w.userId, chatId)).messages.at(-1).parts[0].text, 'A metered answer.');
       assert.deepEqual(
         (
@@ -159,7 +181,7 @@ test(
         'completed',
       );
       assert.ok((await summary()).held > 0);
-      assert.equal((await summary()).used, 1);
+      assert.equal((await summary()).used, titled.used);
       const blocked = await send();
       await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=1`);
       assert.equal(await activity(blocked), 'failed');
@@ -171,6 +193,99 @@ test(
       else process.env.ANTHROPIC_API_KEY = old;
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
+      await f.close();
+    }
+  },
+);
+
+test(
+  'a first title runs after delivery in its own billing, and its failures keep the reply and placeholder',
+  { timeout: 60000 },
+  async t => {
+    const f = await conversationFixture();
+    let titleMode = 'ok';
+    let titles = 0;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      assert.equal(new URL(url).hostname, 'api.anthropic.com');
+      const request = JSON.parse(options.body);
+      if (isTitleRequest(request)) {
+        titles++;
+        if (titleMode === 'unavailable') return new Response('{}', { status: 503 });
+        if (titleMode === 'timeout') throw new DOMException('The operation timed out.', 'TimeoutError');
+        return Response.json(anthropicText('Quarterly plan review'));
+      }
+      if (isCompletionRequest(request)) return Response.json(completionReply('anthropic'));
+      return Response.json(anthropicChat({ kind: 'answer', text: 'Here is the plan.' }));
+    });
+    const old = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'synthetic-only';
+    t.after(useModelFamilies());
+    try {
+      const w = f.workspace;
+      const activities = createConversationActivities(f.runtime);
+      const summary = () => f.runtime.transaction(w.id, commonCompatibility, creditSummary);
+      const first = async () => {
+        const chatId = randomUUID();
+        await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+        const turn = await f.store.send(w.id, w.userId, chatId, {
+          commandId: randomUUID(),
+          messageId: randomUUID(),
+          model: 'claude-sonnet',
+          parts: [{ kind: 'text', text: 'Review my quarterly plan' }],
+        });
+        const work = { workspaceId: w.id, conversationId: chatId, turnId: turn.turnId, generation: 0 };
+        const delivered = await activities.deliverConversationReply(work);
+        assert.deepEqual(delivered, { outcome: 'completed', title: { titleRevision: 1 } });
+        const history = await f.store.history(w.id, w.userId, chatId);
+        assert.equal(history.messages.at(-1).parts[0].text, 'Here is the plan.');
+        assert.equal(history.messages.find(message => message.turn?.id === turn.turnId).turn.status, 'completed');
+        return {
+          chatId,
+          title: (attempt, final) =>
+            activities.generateConversationTitle({ ...work, ...delivered.title, attempt, final }),
+        };
+      };
+      const placeholder = async chatId => {
+        const chat = await f.store.read(w.id, w.userId, chatId);
+        assert.equal(chat.title, 'Review my quarterly plan');
+        assert.equal(chat.titleRevision, 1);
+      };
+
+      const before = await summary();
+      const generated = await first();
+      const replied = await summary();
+      assert.equal(titles, 0);
+      assert.equal(await generated.title(1, false), 'generated');
+      assert.equal(titles, 1);
+      assert.equal((await f.store.read(w.id, w.userId, generated.chatId)).title, 'Quarterly plan review');
+      const titled = await summary();
+      assert.equal(titled.held, 0, 'the title settles its own reservation');
+      assert.ok(titled.breakdown.length >= replied.breakdown.length && replied.used >= before.used);
+      assert.equal(await generated.title(2, true), 'skipped', 'a retried title never writes twice');
+
+      titleMode = 'unavailable';
+      const unavailable = await first();
+      assert.equal(await unavailable.title(1, false), 'retry');
+      assert.equal(await unavailable.title(2, true), 'failed');
+      await placeholder(unavailable.chatId);
+
+      titleMode = 'timeout';
+      const slow = await first();
+      assert.equal(await slow.title(1, false), 'retry');
+      assert.equal(await slow.title(2, true), 'timeout');
+      await placeholder(slow.chatId);
+
+      titleMode = 'ok';
+      const exhausted = await first();
+      const calls = titles;
+      await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=0`);
+      assert.equal(await exhausted.title(1, false), 'failed', 'insufficient credits is final');
+      assert.equal(titles, calls, 'no provider call without credits');
+      await placeholder(exhausted.chatId);
+      assert.equal((await f.store.history(w.id, w.userId, exhausted.chatId)).messages.at(-1).author, 'assistant');
+    } finally {
+      if (old === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = old;
       await f.close();
     }
   },
