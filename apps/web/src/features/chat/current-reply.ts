@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ChatDocument } from '@tulipfarm/conversations/rich-content';
+import type { StreamProgress } from '@tulipfarm/conversations/events';
 import type { SpinnerActivity } from '@tulipfarm/sprout/spinner';
 import type { ConversationMessage, SkillReference } from './conversation-api';
 import type { useConversationCommand } from './conversation-state';
@@ -41,6 +42,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const narration =
     previewText && (running || (progress && preview && preview.identity.step < progress.step)) ? previewText : '';
   const answerText = narration ? '' : previewText;
+  // A final answer on screen ends the progress UI even while the turn still saves or names the chat.
+  const delivered = progress?.status === 'done' && !!answerText;
   const activity = thinkingOf(running, tools.length > 0, progress);
   const queuedKey = turn?.status === 'queued' ? `${turn.id}:${turn.generation}` : null;
   const processingKey =
@@ -49,6 +52,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
           turn.id,
           turn.generation,
           progress?.step,
+          progress?.status,
+          progress?.toolRounds,
           tools.map(tool => tool.activityStatus ?? tool.status).join(','),
           previewText.length,
         ].join(':')
@@ -56,28 +61,51 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   return {
     pending,
     turn,
-    thinking: !!pending || !!replying,
+    thinking: (!!pending || !!replying) && !delivered,
     since: replying?.createdAt ?? pending?.at,
     narration,
     answerText,
     activity,
+    /** The worker's reported status. Without one, labels fall back to rounds and saved tools. */
+    status: progress?.status,
     queuedKey,
     processingKey,
   };
 }
 
+type Activity = { activity: SpinnerActivity; label: string };
+
+function runningActivity(tool: string): Activity {
+  return /\.(draft|propose)$/.test(tool)
+    ? { activity: 'shaping', label: 'Drafting' }
+    : /\.(execute|send|reply|add|create|update|delete|save)$/.test(tool)
+      ? { activity: 'connecting', label: 'Working' }
+      : { activity: 'searching', label: 'Searching' };
+}
+
 function thinkingOf(
   running: ConversationMessage['tools'][number] | undefined,
   hasTools: boolean,
-  progress?: { round: number },
-) {
-  const state: { activity: SpinnerActivity; label: string } = !running
-    ? { activity: 'working', label: hasTools || (progress?.round ?? 1) > 1 ? 'Planning next step' : 'Thinking' }
-    : /\.(draft|propose)$/.test(running.tool)
-      ? { activity: 'shaping', label: 'Drafting' }
-      : /\.(execute|send|reply|add|create|update|delete|save)$/.test(running.tool)
-        ? { activity: 'connecting', label: 'Working' }
-        : { activity: 'searching', label: 'Searching' };
+  progress?: Pick<StreamProgress, 'round' | 'status' | 'tool' | 'toolRounds'>,
+): Activity {
+  if (progress?.status) {
+    const rounds = progress.toolRounds ?? 0;
+    const step = rounds > 0 ? ` · Step ${rounds + 1}` : '';
+    switch (progress.status) {
+      case 'thinking':
+        return { activity: 'working', label: rounds > 0 ? `Planning next step${step}` : 'Thinking' };
+      case 'tool':
+        return {
+          activity: running ? runningActivity(running.tool).activity : 'working',
+          label: `Using ${progress.tool ?? 'a tool'}…${step}`,
+        };
+      default:
+        return { activity: 'working', label: 'Finishing up' };
+    }
+  }
+  const state: Activity = running
+    ? runningActivity(running.tool)
+    : { activity: 'working', label: hasTools || (progress?.round ?? 1) > 1 ? 'Planning next step' : 'Thinking' };
   return progress && progress.round > 1 ? { ...state, label: `${state.label} · Step ${progress.round}` } : state;
 }
 
