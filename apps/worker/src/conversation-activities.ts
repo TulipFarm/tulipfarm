@@ -130,6 +130,7 @@ export function meteredReply(
         slack,
         mcp,
         outputs: Boolean(outputs),
+        requester: !externalContext && !project,
         inventory: !externalContext && !project,
         inventoryRead: inventory?.take(fence),
         retainedSources,
@@ -158,15 +159,7 @@ export function meteredReply(
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
     // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
-    const budUser =
-      externalContext || project
-        ? null
-        : (requester ??
-          (await runtime
-            .transaction(fence.workspaceId, commonCompatibility, tx =>
-              turnRequester(tx, fence.conversationId, fence.turnId),
-            )
-            .catch(() => null)));
+    const budUser = externalContext || project ? null : requester;
     const budAvatar =
       !!budUser && (await isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }));
     const avatar = budAvatar

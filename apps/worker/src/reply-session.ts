@@ -104,6 +104,8 @@ export async function beginReplySession(input: {
   slack: SlackActionsFactory | undefined;
   mcp: McpExecutionFactory | null | undefined;
   outputs: boolean;
+  /** Whether a caller needs the requester for something other than Slack, MCP or outputs (the bud-avatar flag). */
+  requester: boolean;
   inventory: boolean;
   /** This attempt's inventory read from context measurement. Without one, the start transaction reads it. */
   inventoryRead?: Promise<ConversationInventory> | undefined;
@@ -305,7 +307,9 @@ export async function beginReplySession(input: {
     const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
     await renewConversationReplyLease(tx, fence);
     requester =
-      input.slack || input.mcp || input.outputs ? await turnRequester(tx, fence.conversationId, fence.turnId) : null;
+      input.slack || input.mcp || input.outputs || input.requester
+        ? await turnRequester(tx, fence.conversationId, fence.turnId)
+        : null;
     const destinations =
       requester && input.slack ? await input.slack(local(tx)).destinations(fence.workspaceId, requester.userId) : null;
     const read = readsInventory
@@ -409,7 +413,7 @@ export async function beginReplySession(input: {
   };
 
   return {
-    requester,
+    requester: requester as Actor | null,
     destinations: started.destinations,
     meter,
     sources: contextSources,
