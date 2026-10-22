@@ -12,5 +12,6 @@ export * from './model-bundle.ts';
 export * from './knowledge-embeddings.ts';
 export * from './compaction.ts';
 export * from './model-roles.ts';
+export * from './model-catalog-file.ts';
 export * from './model-role-defaults.ts';
 export * from './timeouts.ts';

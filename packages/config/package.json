@@ -13,6 +13,11 @@
       "types": "./dist/model-catalog.d.ts",
       "default": "./dist/model-catalog.js"
     },
+    "./model-catalog-file": {
+      "types": "./dist/model-catalog-file.d.ts",
+      "default": "./dist/model-catalog-file.js"
+    },
+    "./model-catalog.v1.schema.json": "./schemas/model-catalog.v1.json",
     "./model-usage": {
       "types": "./dist/model-usage.d.ts",
       "default": "./dist/model-usage.js"
