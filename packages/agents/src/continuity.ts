@@ -43,6 +43,8 @@ export type ModelContinuity = {
   infer: (resolution: ResolvedModel, input: Input, timeoutMs: number, signal: AbortSignal) => Promise<InferenceResult>;
   budgetPicoUsd: (workspaceId: string) => string | Promise<string>;
   legacyFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
+  /** True for a family the operator paused: closed to new agents and chats, still served for existing ones. */
+  paused?: (familyId: string) => boolean;
 };
 const amount = z.string().regex(/^(0|[1-9]\d{0,29})$/);
 const bindingSchema = z.object({
@@ -113,18 +115,41 @@ export async function admitGeneration(
   const requested = family ?? config.legacyFamily?.(workspaceId, agentId, revision);
   if (!requested) throw new AgentError('legacy-model-binding-required', 503);
   const availability = await modelAvailability(tx);
-  const primaryAvailability = availability.find(row => row.familyId === requested);
+  let primaryAvailability = availability.find(row => row.familyId === requested);
   if (!primaryAvailability?.enabled) throw new AgentError('workspace-disabled', 400);
   const active = await config.activeBundle(workspaceId);
   const bundle = modelBundleSchema.parse(active.bundle);
   const activationRevision = z.number().int().nonnegative().parse(active.activationRevision);
   const restrictions = await config.restrictions(workspaceId);
   const resolve = (familyId: string) => resolveModelBundle({ bundle, familyId, ...restrictions });
-  const primary = resolve(requested);
+  let primary = resolve(requested);
   if (primary.familyId !== requested || !(await config.allowed(workspaceId, primary)))
     throw new AgentError('model-route-unavailable', 503);
   const policy = await rule(tx, requested);
-  const fallbackAvailability = availability.find(row => row.familyId === policy.target_family_id);
+  // A paused family hands an existing agent to its workspace fallback, when that family can run it, for the whole run.
+  const replacementAvailability = config.paused?.(requested)
+    ? availability.find(
+        row => row.familyId === policy.target_family_id && row.enabled && !config.paused?.(row.familyId),
+      )
+    : undefined;
+  if (replacementAvailability) {
+    const replacement = (() => {
+      try {
+        return resolve(replacementAvailability.familyId);
+      } catch {
+        return null;
+      }
+    })();
+    if (
+      replacement?.familyId === replacementAvailability.familyId &&
+      (await config.allowed(workspaceId, replacement))
+    ) {
+      primary = replacement;
+      primaryAvailability = replacementAvailability;
+    }
+  }
+  const fallbackAvailability =
+    primary.familyId === requested ? availability.find(row => row.familyId === policy.target_family_id) : undefined;
   const fallback = fallbackAvailability?.enabled ? resolve(fallbackAvailability.familyId) : null;
   if (
     fallback &&

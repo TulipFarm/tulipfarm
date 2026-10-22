@@ -28,6 +28,7 @@ export type ModelCatalogEligibility = (input: {
   workspaceId: string;
   modelFamilyId: string;
   fallbackFor?: string;
+  existing?: boolean;
 }) => boolean;
 
 export type ModelCatalogResolution = Pick<
@@ -43,6 +44,8 @@ export type ModelFamilyResolution = (input: {
 export type ModelCatalogSnapshot = {
   modelFamilyEligibility: ModelCatalogEligibility;
   modelFamilyResolution: ModelFamilyResolution;
+  /** Families the operator paused: listed, but not offered for new chats, agents or fallback targets. */
+  modelFamilyPaused?: (familyId: string) => boolean;
 };
 
 const projectionResolutionSchema = z.object({
@@ -75,13 +78,14 @@ function projectCatalog(
   date: string,
   eligible: ModelCatalogEligibility,
   resolve: ModelFamilyResolution,
+  paused: (familyId: string) => boolean,
   disabled: Set<string>,
   defaultChatFamilyId: string | null,
 ): ModelCatalog {
   const resolutions = new Map(
     modelFamilies.map(family => {
       const input = { workspaceId, modelFamilyId: family.id };
-      const resolution = eligible(input) === true ? resolve(input) : null;
+      const resolution = eligible({ ...input, existing: true }) === true ? resolve(input) : null;
       const parsed = resolution === null ? null : projectionResolutionSchema.parse(resolution);
       if (parsed && (parsed.familyId !== family.id || parsed.route.modelId !== parsed.modelId))
         throw new Error('Catalog resolution mismatch');
@@ -91,7 +95,7 @@ function projectCatalog(
   return {
     families: modelFamilies.map((family): ModelCatalogFamily => {
       const platformResolution = resolutions.get(family.id);
-      const resolution = disabled.has(family.id) ? null : platformResolution;
+      const resolution = disabled.has(family.id) || paused(family.id) ? null : platformResolution;
       const model = modelPricing.models.find(candidate => candidate.id === family.currentModelId);
       const rates = (resolution?.rates ?? model?.rates)?.filter(
         rate =>
@@ -126,6 +130,7 @@ function projectCatalog(
                   source =>
                     source.id !== family.id &&
                     !disabled.has(source.id) &&
+                    // A paused source keeps its fallback options, so admins can move its existing agents.
                     resolutions.get(source.id) &&
                     eligible({ workspaceId, modelFamilyId: family.id, fallbackFor: source.id }) === true,
                 )
@@ -134,14 +139,18 @@ function projectCatalog(
           : {
               ...entry,
               available: false,
-              unavailableReason: platformResolution ? 'workspace-disabled' : 'model-family-unavailable',
+              unavailableReason: !platformResolution
+                ? 'model-family-unavailable'
+                : paused(family.id)
+                  ? 'model-family-paused'
+                  : 'workspace-disabled',
               mappingRevision: null,
               pricingRevision: null,
               fallbackFor: [],
             },
       );
     }),
-    defaultChatFamilyId,
+    defaultChatFamilyId: defaultChatFamilyId !== null && paused(defaultChatFamilyId) ? null : defaultChatFamilyId,
   };
 }
 
@@ -191,6 +200,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             new Date().toISOString().slice(0, 10),
             snapshot.modelFamilyEligibility,
             snapshot.modelFamilyResolution,
+            snapshot.modelFamilyPaused ?? (() => false),
             disabled,
             defaultChatFamilyId,
           );

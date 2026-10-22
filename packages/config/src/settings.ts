@@ -906,6 +906,16 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', example: 'claude-haiku,claude-sonnet', commented: true },
   },
   {
+    name: 'MODEL_PAUSED_FAMILIES',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Comma-separated `MODEL_FAMILIES` families to pause. A paused family stays listed but cannot be chosen for new chats, new agents or a changed agent model. Existing agents and chats switch to the workspace fallback rule of the family when one is set, otherwise keep using it. Must not include `MODEL_DEFAULT_FAMILY`.',
+    selfHost: { section: 'models', example: 'claude-opus', commented: true },
+  },
+  {
     name: 'MODEL_DEFAULT_FAMILY',
     group: 'Models',
     services: apps,

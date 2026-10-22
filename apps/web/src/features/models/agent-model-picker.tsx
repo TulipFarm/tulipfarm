@@ -48,9 +48,11 @@ export function AgentModelPicker({
                 optional
                 disabled={catalog.state.kind !== 'ready' || catalog.state.refreshing || !!catalog.state.error}
                 helper={
-                  value && (!selected || !selected.available)
-                    ? 'Your saved preference is unavailable and has not been replaced. Choose an available family or clear it.'
-                    : 'Leave empty to let the workspace choose.'
+                  selected?.unavailableReason === 'model-family-paused'
+                    ? `${selected.displayName} is temporarily unavailable for new choices. This agent keeps it and runs on its fallback rule's model when one is set.`
+                    : value && (!selected || !selected.available)
+                      ? 'Your saved preference is unavailable and has not been replaced. Choose an available family or clear it.'
+                      : 'Leave empty to let the workspace choose.'
                 }
               >
                 <Select

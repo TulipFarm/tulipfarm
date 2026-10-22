@@ -24,10 +24,13 @@ export function createModelConfiguration(input: { pool: Pool; env?: NodeJS.Proce
       },
     };
   };
+  const modelFamilyPaused = (familyId: string) => environment?.paused(familyId) ?? false;
   const snapshot: ModelCatalogSnapshot = {
     modelFamilyResolution,
+    modelFamilyPaused,
     modelFamilyEligibility: request => {
       if (!modelFamilyResolution(request)) return false;
+      if (!request.existing && modelFamilyPaused(request.modelFamilyId)) return false;
       if (request.fallbackFor === undefined) return true;
       return (
         request.fallbackFor !== request.modelFamilyId &&
