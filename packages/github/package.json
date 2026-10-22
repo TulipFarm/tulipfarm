@@ -1,0 +1,125 @@
+{
+  "name": "@tulipfarm/github",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./event-inbox": {
+      "types": "./dist/event-inbox.d.ts",
+      "default": "./dist/event-inbox.js"
+    },
+    "./app-provider": {
+      "types": "./dist/app-provider.d.ts",
+      "default": "./dist/app-provider.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./event-signature": {
+      "types": "./dist/event-signature.d.ts",
+      "default": "./dist/event-signature.js"
+    },
+    "./event-contracts": {
+      "types": "./dist/event-contracts.d.ts",
+      "default": "./dist/event-contracts.js"
+    },
+    "./team-reads": {
+      "types": "./dist/team-reads.d.ts",
+      "default": "./dist/team-reads.js"
+    },
+    "./team-read-contracts": {
+      "types": "./dist/team-read-contracts.d.ts",
+      "default": "./dist/team-read-contracts.js"
+    },
+    "./investigation": {
+      "types": "./dist/investigation.d.ts",
+      "default": "./dist/investigation.js"
+    },
+    "./investigation-contracts": {
+      "types": "./dist/investigation-contracts.d.ts",
+      "default": "./dist/investigation-contracts.js"
+    },
+    "./device-qualification": {
+      "types": "./dist/device-qualification.d.ts",
+      "default": "./dist/device-qualification.js"
+    },
+    "./qualification": {
+      "types": "./dist/qualification.d.ts",
+      "default": "./dist/qualification.js"
+    },
+    "./configuration": {
+      "types": "./dist/configuration.d.ts",
+      "default": "./dist/configuration.js"
+    },
+    "./file-contracts": {
+      "types": "./dist/file-contracts.d.ts",
+      "default": "./dist/file-contracts.js"
+    },
+    "./batches": {
+      "types": "./dist/batches.d.ts",
+      "default": "./dist/batches.js"
+    },
+    "./batch-approval": {
+      "types": "./dist/batch-approval.d.ts",
+      "default": "./dist/batch-approval.js"
+    },
+    "./batch-contracts": {
+      "types": "./dist/batch-contracts.d.ts",
+      "default": "./dist/batch-contracts.js"
+    },
+    "./write-provider": {
+      "types": "./dist/write-provider.d.ts",
+      "default": "./dist/write-provider.js"
+    },
+    "./source-runtime": {
+      "types": "./dist/source-runtime.d.ts",
+      "default": "./dist/source-runtime.js"
+    },
+    "./corpus": {
+      "types": "./dist/corpus-provider.d.ts",
+      "default": "./dist/corpus-provider.js"
+    },
+    "./reads": {
+      "types": "./dist/reads.d.ts",
+      "default": "./dist/reads.js"
+    },
+    "./read-contracts": {
+      "types": "./dist/read-contracts.d.ts",
+      "default": "./dist/read-contracts.js"
+    },
+    "./read-provider": {
+      "types": "./dist/read-provider.d.ts",
+      "default": "./dist/read-provider.js"
+    },
+    ".": {
+      "types": "./dist/accounts.d.ts",
+      "default": "./dist/accounts.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/provider-mcp": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@octokit/graphql-schema": "15.26.1",
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "graphql": "16.14.2",
+    "pg": "8.23.0"
+  }
+}

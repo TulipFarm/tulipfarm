@@ -1,0 +1,202 @@
+{
+  "name": "@tulipfarm/conversations",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./personal-memory-contracts": {
+      "types": "./dist/personal-memory-contracts.d.ts",
+      "default": "./dist/personal-memory-contracts.js"
+    },
+    "./latency": {
+      "types": "./dist/latency.d.ts",
+      "default": "./dist/latency.js"
+    },
+    "./activity": {
+      "types": "./dist/activity.d.ts",
+      "default": "./dist/activity.js"
+    },
+    "./maintenance": {
+      "types": "./dist/maintenance.d.ts",
+      "default": "./dist/maintenance.js"
+    },
+    "./maintenance-contracts": {
+      "types": "./dist/maintenance-contracts.d.ts",
+      "default": "./dist/maintenance-contracts.js"
+    },
+    "./bud-contracts": {
+      "types": "./dist/bud-contracts.d.ts",
+      "default": "./dist/bud-contracts.js"
+    },
+    "./bud-assistant": {
+      "types": "./dist/bud-assistant.d.ts",
+      "default": "./dist/bud-assistant.js"
+    },
+    "./avatar": {
+      "types": "./dist/avatar.d.ts",
+      "default": "./dist/avatar.js"
+    },
+    "./row-view": {
+      "types": "./dist/row-view.d.ts",
+      "default": "./dist/row-view.js"
+    },
+    "./personal-memory": {
+      "types": "./dist/personal-memory.d.ts",
+      "default": "./dist/personal-memory.js"
+    },
+    "./tool-activity": {
+      "types": "./dist/tool-activity.d.ts",
+      "default": "./dist/tool-activity.js"
+    },
+    "./tool-activity-history": {
+      "types": "./dist/tool-activity-history.d.ts",
+      "default": "./dist/tool-activity-history.js"
+    },
+    "./public-web": {
+      "types": "./dist/public-web.d.ts",
+      "default": "./dist/public-web.js"
+    },
+    "./knowledge-activity": {
+      "types": "./dist/knowledge-activity.d.ts",
+      "default": "./dist/knowledge-activity.js"
+    },
+    "./turn-requester": {
+      "types": "./dist/turn-requester.d.ts",
+      "default": "./dist/turn-requester.js"
+    },
+    "./source-access": {
+      "types": "./dist/source-access.d.ts",
+      "default": "./dist/source-access.js"
+    },
+    "./provenance": {
+      "types": "./dist/provenance.d.ts",
+      "default": "./dist/provenance.js"
+    },
+    "./provenance-migrations": {
+      "types": "./dist/provenance-migrations.d.ts",
+      "default": "./dist/provenance-migrations.js"
+    },
+    "./chat-access": {
+      "types": "./dist/chat-access.d.ts",
+      "default": "./dist/chat-access.js"
+    },
+    "./project-membership": {
+      "types": "./dist/project-membership.d.ts",
+      "default": "./dist/project-membership.js"
+    },
+    "./project-context": {
+      "types": "./dist/project-context.d.ts",
+      "default": "./dist/project-context.js"
+    },
+    "./projects": {
+      "types": "./dist/projects.d.ts",
+      "default": "./dist/projects.js"
+    },
+    "./results": {
+      "types": "./dist/results.d.ts",
+      "default": "./dist/results.js"
+    },
+    "./knowledge-extraction": {
+      "types": "./dist/knowledge-extraction.d.ts",
+      "default": "./dist/knowledge-extraction.js"
+    },
+    "./approval-contracts": {
+      "types": "./dist/approval-contracts.d.ts",
+      "default": "./dist/approval-contracts.js"
+    },
+    "./requests": {
+      "types": "./dist/requests.d.ts",
+      "default": "./dist/requests.js"
+    },
+    "./request-contracts": {
+      "types": "./dist/request-contracts.d.ts",
+      "default": "./dist/request-contracts.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    },
+    "./office-documents": {
+      "types": "./dist/office-documents.d.ts",
+      "default": "./dist/office-documents.js"
+    },
+    "./file-outputs": {
+      "types": "./dist/file-outputs.d.ts",
+      "default": "./dist/file-outputs.js"
+    },
+    "./file-references": {
+      "types": "./dist/file-references.d.ts",
+      "default": "./dist/file-references.js"
+    },
+    "./skill-invocations": {
+      "types": "./dist/skill-invocations.d.ts",
+      "default": "./dist/skill-invocations.js"
+    },
+    "./attachments": {
+      "types": "./dist/attachments.d.ts",
+      "default": "./dist/attachments.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./event-publisher": {
+      "types": "./dist/event-publisher.d.ts",
+      "default": "./dist/event-publisher.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./rich-content": {
+      "types": "./dist/rich-content.d.ts",
+      "default": "./dist/rich-content.js"
+    },
+    "./compaction": {
+      "types": "./dist/compaction.d.ts",
+      "default": "./dist/compaction.js"
+    },
+    "./compaction-contracts": {
+      "types": "./dist/compaction-contracts.d.ts",
+      "default": "./dist/compaction-contracts.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./dispatch": {
+      "types": "./dist/dispatch.d.ts",
+      "default": "./dist/dispatch.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/memory-core": "workspace:*",
+    "@tulipfarm/memory-postgres": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "docx": "9.9.0",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1",
+    "pptxgenjs": "4.0.1",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

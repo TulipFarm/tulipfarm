@@ -1,0 +1,41 @@
+{
+  "name": "@tulipfarm/integrations",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./authorization": {
+      "types": "./dist/authorization.d.ts",
+      "default": "./dist/authorization.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "default": "./dist/credentials.js"
+    },
+    ".": {
+      "types": "./dist/service.d.ts",
+      "default": "./dist/service.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/keyring": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

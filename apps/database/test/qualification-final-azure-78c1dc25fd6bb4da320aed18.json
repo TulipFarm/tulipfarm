@@ -1,0 +1,4959 @@
+[
+  {
+    "timestamp": "2026-09-27T18:26:04.873Z",
+    "target": "azure",
+    "event": "sources",
+    "sources": [
+      {
+        "path": "apps/database/test/qualify-workspace-storage.mjs",
+        "sha256": "13c54cfd72a2777ad2038c25949124632dbddae7a8e9296f657fb9c2d9d7135b"
+      },
+      {
+        "path": "apps/worker/src/storage-worker.ts",
+        "sha256": "469025a85fce8453cea38cf64c3537774c2b1ff18e524b30c034ab28753ae324"
+      },
+      {
+        "path": "packages/workspace-storage/src/provisioning.ts",
+        "sha256": "362b5639656f68733e51c95c52436afb0ebbc79c60fb7aefe032b7d8ba494b42"
+      },
+      {
+        "path": "packages/workspace-storage/src/migrations.ts",
+        "sha256": "32e20161cd396f2d5da6acdb47b1349b25530eadf8a5ca184152ab6f7082e844"
+      },
+      {
+        "path": "packages/workspace-storage/src/names.ts",
+        "sha256": "6ba514ff69cb70a8c6819c88011cf76eaf99136442f412158efc191ab3927fb9"
+      },
+      {
+        "path": "packages/workspace-storage/src/transactions.ts",
+        "sha256": "fa44bc1d79024d31d8a7ca58ab08a712738c015c347220ae48a8ae0334631dd0"
+      },
+      {
+        "path": "packages/workspace-storage/dist/provisioning.js",
+        "sha256": "d520b7dd9fa4612adc87d2e01790978486d8711a611cc73aebc976874b72a7ca"
+      },
+      {
+        "path": "packages/workspace-storage/dist/migrations.js",
+        "sha256": "81917e185c52523d09f44f805b74006af86df288b9c32214183ef8681265f56b"
+      },
+      {
+        "path": "packages/workspace-storage/dist/names.js",
+        "sha256": "535a1b01bf021c297b5f942803fed2b8a7e23774a511f9907ab347c0f64bec01"
+      },
+      {
+        "path": "packages/workspace-storage/dist/transactions.js",
+        "sha256": "4aa41b3ba9abc0af5c58d49f437c4d23ab9028a68406cd67e8e4920859d8a89a"
+      },
+      {
+        "path": "packages/workspace-storage/dist/runtime.js",
+        "sha256": "9542414092f54cae6658bbb4a1340b1156ee5f43819bd7922e8dda50ec62c9cd"
+      },
+      {
+        "path": "packages/agents/src/common-migrations.ts",
+        "sha256": "2fa5ae411a38e73e56bb45785ce038f2d17e930393d42c4f2c57f03f9865417a"
+      },
+      {
+        "path": "packages/resources/src/common-migrations.ts",
+        "sha256": "77ab9c1d8805d19179866a6b91f6eee61c7c7fe84b83c77547e806a5961dc758"
+      },
+      {
+        "path": "packages/resources/dist/common-migrations.js",
+        "sha256": "e4b43dbea0a1ac621010254b1e28ffe81cfa8645273567af6eb55fb9ade102dd"
+      },
+      {
+        "path": "packages/workspaces/src/resource-migrations.ts",
+        "sha256": "6793833fea2767857f5f2dddd40e0b87193883d6d520c55ea26be795021438b4"
+      },
+      {
+        "path": "packages/workspaces/src/resource-registry.ts",
+        "sha256": "831a656de0164c043d77c0cff73a6345268bc99dfe86b2cfb572580c6c46c0f0"
+      },
+      {
+        "path": "packages/workspaces/src/credentials.ts",
+        "sha256": "c27c8fd70bf37cdd792d26d4867a0e4fb97ded43293d1e7b5bb687a933759f11"
+      },
+      {
+        "path": "packages/workspaces/src/operators.ts",
+        "sha256": "b69ab5a83eaeae18f131bdcf383040449cc09fa4eb169a7b36ff7872cc89ed78"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:26:04.884Z",
+    "target": "azure",
+    "event": "common-stream",
+    "version": 6,
+    "migrations": [
+      {
+        "name": "0001_baseline.sql",
+        "checksum": "e26b94aa57a75bbf01ef583d7fd821458a7e41feb7113e8489bafbff1894fa2a"
+      },
+      {
+        "name": "0002_resource_service.sql",
+        "checksum": "a4ec31cbf2015d497c25df0d4766cd5eacbdbd2b3a9a58f2f2d6cad18dc4e9db"
+      },
+      {
+        "name": "0003_confirmation_history.sql",
+        "checksum": "673a43ba52f06c2ce6df5b82fe849cc600166c656252ecdd74f5d9e4bb6c572a"
+      },
+      {
+        "name": "0005_governance_invitations.sql",
+        "checksum": "77969910cbb8486251dcedebac8e97767b815378514873555e473e213838e22f"
+      },
+      {
+        "name": "0007_agents.sql",
+        "checksum": "0a480aa82f322902a1de1f1559b18f0e299af5a941885743ba29fc9b1ba913b3"
+      },
+      {
+        "name": "0009_governance_retired_teams.sql",
+        "checksum": "b3a66c0aa6239b75487854cf6cbdcf07100e3390f98415fae9e40ea00be71124"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:26:04.884Z",
+    "target": "azure",
+    "event": "objects",
+    "database": "storage_qual_78c1dc25fd6bb4da320aed18",
+    "provisioner": "storage_qual_78c1dc25fd6bb4da320aed18_provisioner",
+    "registries": [
+      {
+        "role": "storage_qual_78c1dc25fd6bb4da320aed18_authoring",
+        "capability": "authoring"
+      },
+      {
+        "role": "storage_qual_78c1dc25fd6bb4da320aed18_confirmation",
+        "capability": "confirmation"
+      },
+      {
+        "role": "storage_qual_78c1dc25fd6bb4da320aed18_migration",
+        "capability": "migration"
+      }
+    ],
+    "workspaces": [
+      {
+        "label": "a",
+        "id": "0519500e-14a7-4796-90f2-b216a3aecc69",
+        "names": {
+          "workspaceId": "0519500e-14a7-4796-90f2-b216a3aecc69",
+          "schema": "ws_0519500e14a7479690f2b216a3aecc69",
+          "runtime": "ws_0519500e14a7479690f2b216a3aecc69_runtime",
+          "migration": "ws_0519500e14a7479690f2b216a3aecc69_migration",
+          "confirmation": "ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+          "customOwner": "ws_0519500e14a7479690f2b216a3aecc69_owner"
+        }
+      },
+      {
+        "label": "b",
+        "id": "51cea11e-9eda-45b7-ac4b-67250778341d",
+        "names": {
+          "workspaceId": "51cea11e-9eda-45b7-ac4b-67250778341d",
+          "schema": "ws_51cea11e9eda45b7ac4b67250778341d",
+          "runtime": "ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+          "migration": "ws_51cea11e9eda45b7ac4b67250778341d_migration",
+          "confirmation": "ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+          "customOwner": "ws_51cea11e9eda45b7ac4b67250778341d_owner"
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T18:26:06.963Z",
+    "target": "azure",
+    "event": "server",
+    "version": "PostgreSQL 18.6 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 13.2.0, 64-bit",
+    "version_num": 180006,
+    "current_user": "tfadmin",
+    "database": "postgres"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:06.964Z",
+    "target": "azure",
+    "event": "check",
+    "name": "PostgreSQL 18 admin connection",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:08.003Z",
+    "target": "azure",
+    "event": "check",
+    "name": "CREATE ROLE scoped non-superuser provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:08.263Z",
+    "target": "azure",
+    "event": "check",
+    "name": "GRANT scoped provisioner SET membership to admin",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:08.878Z",
+    "target": "azure",
+    "event": "check",
+    "name": "CREATE DATABASE owned by scoped provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:13.323Z",
+    "target": "azure",
+    "event": "check",
+    "name": "direct scoped non-superuser provisioner login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:26:58.629Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision workspace a",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:27:44.634Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision workspace b",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:27:47.269Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:27:49.844Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:27:52.285Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:27:58.526Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:01.121Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:03.768Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:09.031Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:09.851Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:10.630Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:11.408Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:12.183Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:12.959Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:13.737Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:14.530Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:15.304Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:16.078Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:16.853Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:17.625Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:18.402Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:19.161Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:19.921Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:20.684Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:21.444Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:22.205Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:22.964Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:23.723Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:24.483Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:25.246Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:26.004Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:26.765Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:27.526Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:28.298Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:29.067Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:29.839Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:30.609Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:31.378Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:32.157Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:32.927Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:33.698Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:34.489Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:35.267Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:36.040Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:36.813Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:37.588Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:38.363Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:39.166Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:39.940Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:40.716Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:41.532Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:42.316Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:43.096Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:43.874Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:44.656Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:45.427Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:46.790Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:47.552Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:48.314Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:49.079Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:49.844Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:50.611Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:51.371Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:52.135Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:52.893Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:53.653Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:54.414Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:55.175Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:55.945Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:56.975Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:57.744Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:58.517Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:28:59.288Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:00.059Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:10.726Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:11.766Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:12.541Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:17.012Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:43.939Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:45.357Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:46.155Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:46.915Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:47.679Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:48.447Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:49.210Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:49.966Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:50.724Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:51.481Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:52.239Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:52.996Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:53.752Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:54.512Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:55.286Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:56.059Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:56.857Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:57.632Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:58.409Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:59.202Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:29:59.970Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:00.757Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:01.542Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:02.315Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:03.096Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:03.880Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:04.684Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:05.593Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:06.464Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:07.252Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:08.056Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:08.860Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:09.647Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:10.440Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:11.233Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:12.021Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:12.812Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:13.625Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:14.489Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:15.246Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:16.014Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:16.784Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:17.555Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:18.314Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:19.072Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:19.919Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:20.674Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:21.452Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:22.231Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:23.528Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:24.302Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:25.078Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:25.857Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:26.633Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:27.414Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:28.189Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:28.965Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:29.744Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:30.523Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:31.300Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:32.090Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:32.952Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:33.969Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:34.755Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:35.545Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:36.334Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:37.122Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:47.607Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:48.642Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:49.400Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:30:53.863Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:19.268Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:20.090Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:20.929Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:21.710Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:22.474Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:23.269Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:24.095Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:24.870Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:25.631Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:26.455Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:27.274Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:28.171Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:28.962Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:29.227Z",
+    "target": "azure",
+    "event": "check",
+    "name": "hostile identifiers rejected before SQL",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:31.040Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a six-stream runtime domain writes",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:31.294Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:32.057Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:32.815Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:33.574Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:34.341Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:35.111Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:35.885Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:36.151Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:36.979Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:37.751Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:38.522Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:39.291Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:40.067Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:40.843Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:41.620Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies control completion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:42.397Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies execution event forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:43.173Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies retired-team deletion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:43.947Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies agent definition rewrite",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:45.730Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b six-stream runtime domain writes",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:45.988Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:46.764Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:47.539Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:48.318Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:49.092Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:49.867Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:50.642Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:50.904Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation agent authorization read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:51.744Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:52.533Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_invitation_redemptions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:53.323Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:54.113Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_agent_definitions",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:55.001Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies private domain tf_agent_tool_calls",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:55.792Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies agent enablement",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:56.552Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies control completion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:57.315Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies execution event forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:58.072Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies retired-team deletion",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:31:58.833Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies agent definition rewrite",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:13.770Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision authoring registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:28.899Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision confirmation registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:44.216Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision migration registry",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:46.440Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:52.568Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:52.832Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:53.626Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:54.418Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:55.213Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:56.006Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:56.801Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:57.603Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:58.398Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:32:59.202Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:00.008Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:00.813Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:01.613Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:02.420Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:03.221Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:04.029Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:04.846Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:05.641Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:06.447Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:07.240Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:08.044Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:08.841Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:09.633Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:10.426Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:11.269Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:12.066Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:12.857Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:13.652Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:14.442Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:15.237Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:16.040Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:16.840Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:17.636Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:18.432Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:19.229Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:20.021Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:20.816Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:21.654Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:22.449Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:23.250Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:24.044Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry initial denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:51.586Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:52.641Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:53.433Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:54.228Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:55.020Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:55.811Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:33:56.605Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:34:24.107Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:34:51.630Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:35:19.371Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:35:46.879Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC SELECT (migration_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:36:14.282Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_authoring_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:36:41.675Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_authoring()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:01.532Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:02.045Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:08.017Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:08.777Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:09.534Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:10.299Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:11.059Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:11.819Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:12.579Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:13.341Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:14.103Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:14.863Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:15.686Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:16.448Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:17.205Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:18.080Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:18.930Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:19.693Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:20.454Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:21.214Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:21.976Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:22.739Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:23.501Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:24.259Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:25.018Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:25.816Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:26.713Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:27.475Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:28.234Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:28.994Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:29.760Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:30.554Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:31.384Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:32.233Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:33.025Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:33.783Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:34.542Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:35.306Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:36.068Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:36.825Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:37.583Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:38.343Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:39.099Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:39.881Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:40.639Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:41.465Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:42.228Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:37:42.993Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry initial denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:11.310Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:12.337Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:13.098Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:13.862Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:14.772Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:15.533Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:16.312Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:38:44.305Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:39:12.690Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:39:40.657Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:40:08.502Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC SELECT (migration_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:40:36.184Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_confirmation_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:03.897Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_confirmation()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:23.945Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:24.464Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:30.251Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:31.025Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:31.802Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:32.575Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:33.349Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:34.124Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:34.899Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:35.673Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:36.448Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:37.248Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:38.021Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:38.796Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:39.571Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:40.353Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:41.143Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:41.921Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:42.697Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:43.474Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:44.247Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:45.020Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:45.797Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:46.582Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:47.355Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:48.132Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:48.906Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:49.678Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:50.453Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:51.229Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:52.006Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:52.780Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:53.558Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:54.334Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:55.111Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:55.886Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:56.664Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:57.440Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:58.217Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:58.991Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:41:59.765Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:00.541Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:01.315Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:02.088Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:02.862Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:03.634Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:04.408Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:05.182Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry initial denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:34.255Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry replay repairs table column and future defaults",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:35.335Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies repaired account read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:36.121Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies repaired workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:36.916Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:37.691Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies future sequence read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:38.486Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies future sequence use",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:42:39.261Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry denies future routine execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:43:08.223Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:43:37.004Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT (secret) ON app.accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:44:06.084Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC UPDATE (generation) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:44:35.242Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC SELECT (confirmation_credential) ON app.workspace_storage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:45:04.912Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC USAGE ON SEQUENCE app.future_migration_id_seq",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:45:34.078Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry rejects ambient PUBLIC EXECUTE ON FUNCTION app.future_migration()",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:45:54.778Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password rotation rejects old login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:03.399Z",
+    "target": "azure",
+    "event": "check",
+    "name": "workspace password rotation receipt and idempotent replay",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:07.207Z",
+    "target": "azure",
+    "event": "check",
+    "name": "runtime old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:11.042Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:14.908Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation old workspace password rejected after rotation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:21.609Z",
+    "target": "azure",
+    "event": "check",
+    "name": "stale rotation generation and changed operation replay rejected",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:22.119Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:28.225Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:28.481Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:29.250Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:30.015Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:30.785Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:31.550Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:32.319Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:33.083Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:33.848Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:34.613Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:35.381Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:36.149Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:36.916Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:37.684Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:38.455Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:39.225Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:39.993Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:40.761Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:41.530Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:42.328Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:43.096Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:43.865Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:44.638Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:45.403Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:46.172Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:46.942Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:47.806Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:48.613Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:49.380Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:50.148Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:50.914Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:51.681Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:52.450Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:53.220Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:53.988Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:54.764Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:55.532Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:56.298Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:57.074Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:57.844Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:58.630Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry password-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:46:59.184Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:05.200Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:05.979Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:06.759Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:07.535Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:08.315Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:09.094Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:09.876Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:10.654Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:11.432Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:12.208Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:12.988Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:13.771Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:14.551Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:15.329Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:16.110Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:16.894Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:17.677Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:18.457Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:19.242Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:20.025Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:20.805Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:21.588Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:22.368Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:23.146Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:23.952Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:24.730Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:25.510Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:26.288Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:27.065Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:27.847Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:28.628Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:29.408Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:30.186Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:30.964Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:31.745Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:32.614Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:33.394Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:34.174Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:34.950Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:35.731Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:36.511Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:37.292Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:38.074Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:38.854Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:39.765Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:40.555Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry password-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:41.093Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:47.478Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:48.247Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:49.014Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:49.865Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:50.632Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:51.405Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:52.172Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:52.940Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:53.705Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:54.468Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:55.233Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:55.998Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:56.761Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:57.542Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:58.304Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:59.065Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:47:59.833Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:00.596Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:01.363Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:02.173Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:02.937Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:03.729Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:04.491Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:05.255Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:06.035Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:06.933Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:07.806Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:08.628Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:09.397Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:10.164Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:10.957Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:11.721Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:12.488Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:13.254Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:14.104Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:14.972Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:15.739Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:16.508Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:17.430Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:18.255Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:19.017Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:19.785Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:20.551Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:21.423Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:22.188Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:22.954Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry password-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:31.016Z",
+    "target": "azure",
+    "event": "check",
+    "name": "key rotation rewrap and idempotent receipt",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:31.530Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:37.378Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:37.632Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated permitted authoring metadata",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:38.400Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:39.167Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:39.931Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:40.696Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:41.461Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:42.229Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:43.029Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:43.798Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:44.562Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:45.329Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:46.096Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:46.863Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:47.632Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:48.402Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:49.167Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:49.934Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:50.700Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:51.467Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:52.236Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:53.011Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:53.938Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:54.705Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:55.471Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:56.239Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:57.020Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:57.791Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:58.621Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:48:59.387Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:00.234Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:01.005Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:01.773Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:02.547Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:03.310Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:04.077Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:04.871Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:05.636Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:06.427Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:07.294Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:08.064Z",
+    "target": "azure",
+    "event": "check",
+    "name": "authoring registry key-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:08.583Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:14.698Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:15.552Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:16.334Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:17.126Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:17.924Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:18.731Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:19.520Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:20.313Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:21.101Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies migration ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:21.893Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:22.681Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:23.596Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:24.382Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:25.170Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:25.959Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:26.740Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:27.523Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:28.307Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:29.100Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:29.883Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:30.662Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:31.450Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:32.259Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:33.046Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:33.847Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:34.635Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:35.416Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:36.204Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:36.994Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:37.781Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:38.612Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:39.406Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:40.757Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:41.547Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:42.345Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:43.136Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:43.912Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:44.689Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:45.484Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:46.306Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:47.089Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:47.867Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:48.661Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:49.447Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:50.373Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:51.188Z",
+    "target": "azure",
+    "event": "check",
+    "name": "confirmation registry key-rotated denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:51.726Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:58.157Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated only own ciphertext resolves to direct workspace login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:58.930Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring id",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:49:59.697Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring created_by",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:00.462Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring created_at",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:01.227Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_commit",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:02.008Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_bucket",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:02.773Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring soul_key",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:03.542Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies runtime ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:04.311Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies confirmation ciphertext",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:05.077Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies whole registry read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:05.852Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies workspace name",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:06.631Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies accounts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:07.408Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies operator receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:08.190Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry generation write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:08.968Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies own credential write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:09.817Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry insert",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:10.679Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies registry delete",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:11.544Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:12.364Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies app CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:13.305Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:14.087Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:14.869Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies schema CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:15.664Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:16.435Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:17.217Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:18.017Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:18.795Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:19.577Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:20.364Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:21.191Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies a future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:21.979Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:22.759Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:23.537Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:24.527Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:25.308Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_memberships",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:26.082Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_agents",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:26.865Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_invitations",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:27.711Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b tf_retired_teams",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:28.512Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:29.365Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies b future_invoices",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:30.139Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:31.025Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:31.791Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:32.570Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies SET ROLE ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:33.361Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies authoring SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:34.160Z",
+    "target": "azure",
+    "event": "check",
+    "name": "migration registry key-rotated denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:34.817Z",
+    "target": "azure",
+    "event": "check",
+    "name": "rotation preserves other workspace credentials and receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:39.217Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup database storage_qual_78c1dc25fd6bb4da320aed18",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:40.506Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_78c1dc25fd6bb4da320aed18_authoring",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:41.788Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_78c1dc25fd6bb4da320aed18_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:43.075Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup registry role storage_qual_78c1dc25fd6bb4da320aed18_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:44.378Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_0519500e14a7479690f2b216a3aecc69_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:45.653Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_0519500e14a7479690f2b216a3aecc69_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:47.008Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:48.389Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_0519500e14a7479690f2b216a3aecc69_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:49.846Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:51.150Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_51cea11e9eda45b7ac4b67250778341d_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:52.503Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:53.797Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_51cea11e9eda45b7ac4b67250778341d_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:54.599Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role storage_qual_78c1dc25fd6bb4da320aed18_provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:55.173Z",
+    "target": "azure",
+    "event": "cleanup",
+    "database": "storage_qual_78c1dc25fd6bb4da320aed18",
+    "roles": [
+      "storage_qual_78c1dc25fd6bb4da320aed18_provisioner",
+      "storage_qual_78c1dc25fd6bb4da320aed18_authoring",
+      "storage_qual_78c1dc25fd6bb4da320aed18_confirmation",
+      "storage_qual_78c1dc25fd6bb4da320aed18_migration",
+      "ws_0519500e14a7479690f2b216a3aecc69_runtime",
+      "ws_0519500e14a7479690f2b216a3aecc69_migration",
+      "ws_0519500e14a7479690f2b216a3aecc69_confirmation",
+      "ws_0519500e14a7479690f2b216a3aecc69_owner",
+      "ws_51cea11e9eda45b7ac4b67250778341d_runtime",
+      "ws_51cea11e9eda45b7ac4b67250778341d_migration",
+      "ws_51cea11e9eda45b7ac4b67250778341d_confirmation",
+      "ws_51cea11e9eda45b7ac4b67250778341d_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  },
+  {
+    "timestamp": "2026-09-27T18:50:55.202Z",
+    "target": "azure",
+    "event": "check",
+    "name": "all qualification objects removed",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T18:50:55.526Z",
+    "target": "azure",
+    "event": "summary",
+    "status": "PASS",
+    "passed": 680,
+    "failed": 0
+  }
+]

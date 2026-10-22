@@ -1,0 +1,61 @@
+{
+  "name": "@tulipfarm/workspace-storage",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./knowledge-retrieval": {
+      "types": "./dist/knowledge-retrieval.d.ts",
+      "default": "./dist/knowledge-retrieval.js"
+    },
+    "./encrypted-envelope": {
+      "types": "./dist/encrypted-envelope.d.ts",
+      "default": "./dist/encrypted-envelope.js"
+    },
+    "./recommendations": {
+      "types": "./dist/recommendations.d.ts",
+      "default": "./dist/recommendations.js"
+    },
+    "./knowledge-credits": {
+      "types": "./dist/knowledge-credits.d.ts",
+      "default": "./dist/knowledge-credits.js"
+    },
+    "./credit-account": {
+      "types": "./dist/credit-account.d.ts",
+      "default": "./dist/credit-account.js"
+    },
+    "./credits": {
+      "types": "./dist/credits.d.ts",
+      "default": "./dist/credits.js"
+    },
+    "./credits-contracts": {
+      "types": "./dist/credits-contracts.d.ts",
+      "default": "./dist/credits-contracts.js"
+    },
+    "./provisioning": {
+      "types": "./dist/provisioning.d.ts",
+      "default": "./dist/provisioning.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/integration/*.test.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/keyring": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "pg": "8.23.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

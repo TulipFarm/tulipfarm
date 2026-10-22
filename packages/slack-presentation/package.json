@@ -1,0 +1,27 @@
+{
+  "name": "@tulipfarm/slack-presentation",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-schema.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@slack/types": "3.1.0",
+    "entities": "8.1.0",
+    "marked": "18.0.14"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "ajv": "8.20.0",
+    "ts-json-schema-generator": "2.9.0"
+  }
+}

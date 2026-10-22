@@ -1,0 +1,1324 @@
+[
+  {
+    "timestamp": "2026-09-27T15:13:35.092Z",
+    "target": "azure",
+    "event": "objects",
+    "database": "storage_qual_1de3698712c2ccf1640ae1fe",
+    "provisioner": "storage_qual_1de3698712c2ccf1640ae1fe_provisioner",
+    "workspaces": [
+      {
+        "label": "a",
+        "id": "f2c66f90-3e59-4c32-ac66-eb286e087742",
+        "names": {
+          "workspaceId": "f2c66f90-3e59-4c32-ac66-eb286e087742",
+          "schema": "ws_f2c66f903e594c32ac66eb286e087742",
+          "runtime": "ws_f2c66f903e594c32ac66eb286e087742_runtime",
+          "migration": "ws_f2c66f903e594c32ac66eb286e087742_migration",
+          "confirmation": "ws_f2c66f903e594c32ac66eb286e087742_confirmation",
+          "customOwner": "ws_f2c66f903e594c32ac66eb286e087742_owner"
+        }
+      },
+      {
+        "label": "b",
+        "id": "f137d28b-0ea5-4eff-bc80-a78533b257d1",
+        "names": {
+          "workspaceId": "f137d28b-0ea5-4eff-bc80-a78533b257d1",
+          "schema": "ws_f137d28b0ea54effbc80a78533b257d1",
+          "runtime": "ws_f137d28b0ea54effbc80a78533b257d1_runtime",
+          "migration": "ws_f137d28b0ea54effbc80a78533b257d1_migration",
+          "confirmation": "ws_f137d28b0ea54effbc80a78533b257d1_confirmation",
+          "customOwner": "ws_f137d28b0ea54effbc80a78533b257d1_owner"
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T15:13:37.166Z",
+    "target": "azure",
+    "event": "server",
+    "version": "PostgreSQL 18.6 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 13.2.0, 64-bit",
+    "version_num": 180006,
+    "current_user": "tfadmin",
+    "database": "postgres"
+  },
+  {
+    "timestamp": "2026-09-27T15:13:37.166Z",
+    "target": "azure",
+    "event": "check",
+    "name": "PostgreSQL 18 admin connection",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:13:38.188Z",
+    "target": "azure",
+    "event": "check",
+    "name": "CREATE ROLE scoped non-superuser provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:13:38.444Z",
+    "target": "azure",
+    "event": "check",
+    "name": "GRANT scoped provisioner SET membership to admin",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:13:39.056Z",
+    "target": "azure",
+    "event": "check",
+    "name": "CREATE DATABASE owned by scoped provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:13:43.334Z",
+    "target": "azure",
+    "event": "check",
+    "name": "direct scoped non-superuser provisioner login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:14:24.000Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision workspace a",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:05.023Z",
+    "target": "azure",
+    "event": "check",
+    "name": "provision workspace b",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:07.352Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:09.669Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:12.016Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:18.170Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:20.572Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:22.986Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation direct restricted login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:28.165Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:28.927Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:29.682Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:30.440Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:31.196Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:31.954Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:32.713Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:33.472Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:34.240Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:34.999Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:35.759Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:36.521Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:37.277Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:38.029Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:38.782Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:39.535Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:40.284Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:41.035Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:41.809Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:42.700Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:43.530Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:44.277Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:45.035Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:45.782Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:46.533Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:47.288Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:48.045Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:48.924Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:49.680Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:50.432Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:51.225Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:51.981Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:52.737Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:53.491Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:54.246Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:55.003Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:55.763Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:56.524Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:57.285Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:58.048Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:58.808Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:15:59.592Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:00.358Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:01.121Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:01.879Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:02.693Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:03.463Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:04.245Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:05.563Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:06.338Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:07.105Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:07.867Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:08.632Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:09.413Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:10.176Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:10.939Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:11.701Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:12.468Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:13.230Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:13.997Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:14.786Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:15.802Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:16.557Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:17.385Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:18.153Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:18.920Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:29.635Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:30.666Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:31.427Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:16:34.346Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:12.934Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:14.321Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime own CRUD and sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:15.104Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:15.889Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:16.668Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:17.447Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:18.226Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:19.020Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:19.811Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:20.591Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:21.367Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:22.142Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:22.915Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:23.691Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:24.462Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:25.225Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:25.989Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:26.757Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:27.523Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:28.289Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:29.051Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:29.815Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:30.576Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:31.339Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:32.105Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:32.875Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:33.629Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other common read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:34.383Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other custom read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:35.143Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other custom write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:35.899Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:36.672Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:37.429Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies platform write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:38.189Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:38.948Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies provisioner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:39.703Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:40.457Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:41.217Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies temporary CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:41.975Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies public CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:42.755Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies own owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:43.531Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies migration SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:44.313Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies confirmation SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:45.093Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies session authorization",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:45.873Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies own CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:46.652Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:47.429Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:48.209Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies applied revision forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:48.986Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies applied job forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:49.766Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies role self-grant",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:50.535Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration requires explicit owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:51.831Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration own custom ALTER and future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:52.598Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:53.363Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:54.129Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies other sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:54.895Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies platform read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:55.665Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common ALTER",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:56.446Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies schema DROP",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:57.211Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies policy write",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:57.977Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies confirmation forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:58.755Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:17:59.519Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies platform dependency",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:00.281Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom owner denies common inheritance",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:01.053Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b custom view DROP preserves common table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:02.095Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies future function execution",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:02.853Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies ledger forgery",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:03.605Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies receipt consumption",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:04.355Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies custom CREATE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:05.110Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies owner SET ROLE",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:15.629Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation receipt and migration activation transaction",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:16.677Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b future common table has no ambient read",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:17.456Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b future common sequence has no ambient usage",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:20.395Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b common ownership and isolation verifier",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:59.198Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b idempotent provisioning",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:18:59.959Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:00.720Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:01.472Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:02.232Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:03.002Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:03.767Z",
+    "target": "azure",
+    "event": "check",
+    "name": "a confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:04.550Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:05.334Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b runtime denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:06.105Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:06.871Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b migration denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:07.621Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other future table",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:08.377Z",
+    "target": "azure",
+    "event": "check",
+    "name": "b confirmation denies other future sequence",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:08.656Z",
+    "target": "azure",
+    "event": "check",
+    "name": "hostile identifiers rejected before SQL",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:11.671Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup database storage_qual_1de3698712c2ccf1640ae1fe",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:12.944Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f2c66f903e594c32ac66eb286e087742_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:14.225Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f2c66f903e594c32ac66eb286e087742_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:15.510Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f2c66f903e594c32ac66eb286e087742_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:16.798Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f2c66f903e594c32ac66eb286e087742_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:18.110Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f137d28b0ea54effbc80a78533b257d1_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:19.419Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f137d28b0ea54effbc80a78533b257d1_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:20.706Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f137d28b0ea54effbc80a78533b257d1_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:22.003Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_f137d28b0ea54effbc80a78533b257d1_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:22.799Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role storage_qual_1de3698712c2ccf1640ae1fe_provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:23.332Z",
+    "target": "azure",
+    "event": "cleanup",
+    "database": "storage_qual_1de3698712c2ccf1640ae1fe",
+    "roles": [
+      "storage_qual_1de3698712c2ccf1640ae1fe_provisioner",
+      "ws_f2c66f903e594c32ac66eb286e087742_runtime",
+      "ws_f2c66f903e594c32ac66eb286e087742_migration",
+      "ws_f2c66f903e594c32ac66eb286e087742_confirmation",
+      "ws_f2c66f903e594c32ac66eb286e087742_owner",
+      "ws_f137d28b0ea54effbc80a78533b257d1_runtime",
+      "ws_f137d28b0ea54effbc80a78533b257d1_migration",
+      "ws_f137d28b0ea54effbc80a78533b257d1_confirmation",
+      "ws_f137d28b0ea54effbc80a78533b257d1_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  },
+  {
+    "timestamp": "2026-09-27T15:19:23.336Z",
+    "target": "azure",
+    "event": "check",
+    "name": "all qualification objects removed",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:19:23.605Z",
+    "target": "azure",
+    "event": "summary",
+    "status": "PASS",
+    "passed": 179,
+    "failed": 0
+  }
+]

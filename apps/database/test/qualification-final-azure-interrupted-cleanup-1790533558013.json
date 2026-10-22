@@ -1,0 +1,24 @@
+[
+  {
+    "timestamp": "2026-09-27T18:25:57.733Z",
+    "event": "cleanup",
+    "status": "PASS",
+    "database": "storage_qual_d65925e9ed5573a44695b379",
+    "roles": [
+      "storage_qual_d65925e9ed5573a44695b379_provisioner",
+      "storage_qual_d65925e9ed5573a44695b379_authoring",
+      "storage_qual_d65925e9ed5573a44695b379_confirmation",
+      "storage_qual_d65925e9ed5573a44695b379_migration",
+      "ws_9df59c5a426f4b979a910e5b0290af42_runtime",
+      "ws_9df59c5a426f4b979a910e5b0290af42_migration",
+      "ws_9df59c5a426f4b979a910e5b0290af42_confirmation",
+      "ws_9df59c5a426f4b979a910e5b0290af42_owner",
+      "ws_75861b6317ad431e9613369ed5934d19_runtime",
+      "ws_75861b6317ad431e9613369ed5934d19_migration",
+      "ws_75861b6317ad431e9613369ed5934d19_confirmation",
+      "ws_75861b6317ad431e9613369ed5934d19_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  }
+]

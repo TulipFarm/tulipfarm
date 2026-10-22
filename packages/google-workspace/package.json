@@ -1,0 +1,81 @@
+{
+  "name": "@tulipfarm/google-workspace",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./corpus": {
+      "types": "./dist/corpus.d.ts",
+      "default": "./dist/corpus.js"
+    },
+    "./corpus-contracts": {
+      "types": "./dist/corpus-contracts.d.ts",
+      "default": "./dist/corpus-contracts.js"
+    },
+    "./corpus-provider": {
+      "types": "./dist/corpus-provider.d.ts",
+      "default": "./dist/corpus-provider.js"
+    },
+    "./calendar-events": {
+      "types": "./dist/calendar-events.d.ts",
+      "default": "./dist/calendar-events.js"
+    },
+    "./heartbeat": {
+      "types": "./dist/heartbeat.d.ts",
+      "default": "./dist/heartbeat.js"
+    },
+    "./heartbeat-contracts": {
+      "types": "./dist/heartbeat-contracts.d.ts",
+      "default": "./dist/heartbeat-contracts.js"
+    },
+    ".": {
+      "types": "./dist/service.d.ts",
+      "default": "./dist/service.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./public-contracts": {
+      "types": "./dist/public-contracts.d.ts",
+      "default": "./dist/public-contracts.js"
+    },
+    "./callback-contracts": {
+      "types": "./dist/callback-contracts.d.ts",
+      "default": "./dist/callback-contracts.js"
+    },
+    "./operation-contracts": {
+      "types": "./dist/operation-contracts.d.ts",
+      "default": "./dist/operation-contracts.js"
+    },
+    "./operation-provider": {
+      "types": "./dist/operation-provider.d.ts",
+      "default": "./dist/operation-provider.js"
+    },
+    "./operations": {
+      "types": "./dist/operations.d.ts",
+      "default": "./dist/operations.js"
+    },
+    "./operation-approval": {
+      "types": "./dist/operation-approval.d.ts",
+      "default": "./dist/operation-approval.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test test/*.integration.mjs"
+  },
+  "dependencies": {
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "pg": "8.23.0"
+  }
+}
