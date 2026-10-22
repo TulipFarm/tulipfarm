@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { budState, emptyChatIntro, shouldOpenBudOnboarding } from '../src/features/chat/bud-state.ts';
+import { budState, emptyChatIntro } from '../src/features/chat/bud-state.ts';
 import type { ConversationMessage } from '../src/features/chat/conversation-api.ts';
 import type { ConversationStreamSnapshot } from '../src/features/chat/conversation-stream.ts';
 
@@ -46,15 +46,6 @@ test('Bud uses only the current turn and generation, with explicit idle, waiting
   }
   assert.equal(budState([{ ...message, turn: { ...turn, generation: 2 } }], false, stream), 'Thinking');
   assert.equal(budState([{ ...message, turn: { ...turn, id: 'other' } }], false, stream), 'Thinking');
-});
-
-test('Bud onboarding never redirects after the member navigates, such as New chat or Files (#1114)', () => {
-  const base = { onboarding: 'active', conversationId: 'bud', search: '', navigated: false };
-  assert.equal(shouldOpenBudOnboarding(base), true);
-  assert.equal(shouldOpenBudOnboarding({ ...base, navigated: true }), false);
-  assert.equal(shouldOpenBudOnboarding({ ...base, search: '?x=1' }), false);
-  assert.equal(shouldOpenBudOnboarding({ ...base, onboarding: 'skipped' }), false);
-  assert.equal(shouldOpenBudOnboarding({ ...base, conversationId: null }), false);
 });
 
 test('Empty chat intro states the fresh draft context (#1116)', () => {

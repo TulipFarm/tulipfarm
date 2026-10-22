@@ -368,7 +368,7 @@ export function createBudAssistant(runtime: ConversationRuntime) {
       const input = budCommandSchema.parse(value);
       return human(workspaceId, userId, true, async (tx, actor) => {
         if (input.kind === 'bootstrap') {
-          const inserted = await tx.client.query(
+          await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_bud_state')}(membership_id,onboarding,initial_integrations)
             SELECT $1,CASE WHEN EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversations')} WHERE owner_membership_id=$1)
               OR EXISTS(SELECT 1 FROM ${table(tx, 'tf_conversation_messages')} WHERE membership_id=$1)
@@ -378,13 +378,12 @@ export function createBudAssistant(runtime: ConversationRuntime) {
                 UNION ALL SELECT 'github:'||id||':'||generation FROM ${table(tx, 'tf_github_accounts')} WHERE owner_membership_id=$1 AND state='active'
                 UNION ALL SELECT 'slack:'||id||':'||generation FROM ${table(tx, 'tf_slack_identities')} WHERE membership_id=$1 AND state='authorized'
               ) integrations)
-            ON CONFLICT(membership_id) DO NOTHING RETURNING onboarding`,
+            ON CONFLICT(membership_id) DO NOTHING`,
             [actor.membershipId],
           );
-          if (inserted.rows[0]?.onboarding === 'active') await ensureThread(tx, actor, true);
         } else {
-          await state(tx, actor);
-          if (input.kind === 'open') await ensureThread(tx, actor, false);
+          const row = await state(tx, actor);
+          if (input.kind === 'open') await ensureThread(tx, actor, row.onboarding === 'active');
           else if (input.kind === 'skip')
             await tx.client.query(
               `UPDATE ${table(tx, 'tf_bud_state')} SET onboarding='skipped' WHERE membership_id=$1 AND onboarding='active'`,
