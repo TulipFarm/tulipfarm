@@ -157,6 +157,33 @@ export type HookEvents = {
 export type HookEvent = keyof HookEvents;
 export type HookSubscriber = { readonly [E in HookEvent]?: (payload: HookEvents[E]) => void | Promise<void> };
 
+/** A platform app TulipFarm offers for social publishing. `accessTier` is one of the platform's tiers. */
+export type SocialPlatformApp = {
+  readonly clientId: string;
+  readonly clientSecret: string;
+  readonly accessTier: string;
+  /** Increases when the app is replaced; every connection made with an older generation must reconnect. */
+  readonly generation: number;
+  /** Defaults to TulipFarm's own social OAuth callback. */
+  readonly redirectUri?: string;
+};
+
+export type SocialPlatformAppResolution =
+  | { readonly kind: 'app'; readonly app: SocialPlatformApp }
+  | { readonly kind: 'workspace-app-required' }
+  | { readonly kind: 'unavailable' };
+
+/**
+ * Supplies the hosted platform apps. While it is registered, operator `SOCIAL_<PLATFORM>_*`
+ * settings are never read, and X and Reddit always need a workspace's own app.
+ */
+export type SocialPlatformApps = {
+  resolve(
+    platform: string,
+    context: { readonly workspaceId: string },
+  ): SocialPlatformAppResolution | Promise<SocialPlatformAppResolution>;
+};
+
 export type ExtensionMigration = { readonly name: string; readonly sql: string };
 
 /**
@@ -175,6 +202,8 @@ export type ExtensionRegistrar = {
   creditPricing(pricing: CreditPricing): void;
   /** Single slot: a second extension setting it fails startup. */
   flagProvider(provider: FlagProvider): void;
+  /** Single slot: a second extension setting it fails startup. */
+  socialPlatformApps(resolver: SocialPlatformApps): void;
   usageSink(sink: UsageSink): void;
   analytics(analytics: ProductAnalytics): void;
   errorReporter(reporter: ErrorReporter): void;

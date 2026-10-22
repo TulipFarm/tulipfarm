@@ -39,16 +39,17 @@ export default defineExtension({
 });
 ```
 
-| Slot            | Kind            | Default                                                                              | Read by                                                                                                       |
-| --------------- | --------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `creditGate`    | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                                    |
-| `creditPricing` | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge-embedding credits, the model catalog's credit rates |
-| `flagProvider`  | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                       |
-| `usageSink`     | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
-| `analytics`     | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
-| `errorReporter` | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
-| `hooks`         | many            | none                                                                                 | `emitHook(event, payload)`                                                                                    |
-| `migrations`    | many            | none                                                                                 | `extensionMigrations()`                                                                                       |
+| Slot                 | Kind            | Default                                                                              | Read by                                                                                                       |
+| -------------------- | --------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `creditGate`         | one per process | `unlimitedCredits`: funds all work, stores no balance                                | the credit meter in `@tulipfarm/workspace-storage/credits`                                                    |
+| `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge-embedding credits, the model catalog's credit rates |
+| `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                       |
+| `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app      |
+| `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
+| `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
+| `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
+| `hooks`              | many            | none                                                                                 | `emitHook(event, payload)`                                                                                    |
+| `migrations`         | many            | none                                                                                 | `extensionMigrations()`                                                                                       |
 
 A second extension setting a single slot fails startup. Failures inside
 analytics, error reporters, usage sinks, and hook subscribers never reach the

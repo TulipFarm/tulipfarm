@@ -16,6 +16,7 @@ export {
   reportError,
   resetExtensions,
   shutdownExtensions,
+  socialPlatformApps,
   unlimitedCredits,
 } from './registry.ts';
 export {

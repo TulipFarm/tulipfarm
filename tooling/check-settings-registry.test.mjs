@@ -140,6 +140,13 @@ const computedReads = {
   // Reads <PREFIX>_KEY_ID, <PREFIX>_KEY, and <PREFIX>_PREVIOUS_KEYS for its callers below.
   'packages/keyring/src/index.ts': { sites: 6, names: [] },
   'packages/recommendations/src/configuration.ts': { sites: 1, names: [] },
+  'packages/social/src/platform-apps.ts': {
+    sites: 4,
+    names: ['LINKEDIN', 'YOUTUBE', 'FACEBOOK', 'INSTAGRAM', 'THREADS', 'PINTEREST', 'TIKTOK', 'X', 'REDDIT'].flatMap(
+      platform =>
+        ['CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI', 'ACCESS_TIER'].map(suffix => `SOCIAL_${platform}_${suffix}`),
+    ),
+  },
   'packages/workspaces/src/chat-objects.ts': {
     sites: 2,
     names: ['CHAT_R2_ACCOUNT_ID', 'CHAT_R2_BUCKET', 'CHAT_R2_ACCESS_KEY_ID', 'CHAT_R2_SECRET_ACCESS_KEY'],

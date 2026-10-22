@@ -82,6 +82,7 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/slack/link/consent',
         '/v1/slack/link/identity',
         '/v1/slack/oauth/callback',
+        '/v1/social/oauth/callback',
         '/v1/workspace-setups/{id}',
         '/v1/workspaces',
         '/v1/workspaces/{slug}',
@@ -128,6 +129,14 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/workspaces/{workspaceId}/slack/link/{eventId}',
         '/v1/workspaces/{workspaceId}/slack/status',
         '/v1/workspaces/{workspaceId}/slack/unlink',
+        '/v1/workspaces/{workspaceId}/social/accounts',
+        '/v1/workspaces/{workspaceId}/social/accounts/begin',
+        '/v1/workspaces/{workspaceId}/social/accounts/{accountId}',
+        '/v1/workspaces/{workspaceId}/social/accounts/{accountId}/disconnect',
+        '/v1/workspaces/{workspaceId}/social/accounts/{accountId}/reconnect',
+        '/v1/workspaces/{workspaceId}/social/availability',
+        '/v1/workspaces/{workspaceId}/social/platform-apps',
+        '/v1/workspaces/{workspaceId}/social/platform-apps/{platformAppId}/replace-secret',
       ].sort(),
     );
     const flags = spec.paths['/v1/feature-flags'].get;

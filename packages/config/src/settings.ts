@@ -33,6 +33,7 @@ export const settingGroups = [
   'GitHub',
   'Google Workspace',
   'Atlassian',
+  'Social publishing',
   'Slack',
   'Workspace MCP',
   'Skills and code steps',
@@ -143,6 +144,20 @@ function keyring(prefix: string, protects: string, services: readonly SettingSer
       requirement: 'optional',
       secret: true,
       description: `JSON map of retired key IDs to keys for ${protects}. Used only to decrypt.`,
+    },
+  ];
+}
+
+function socialPlatformApp(prefix: string, product: string, tiers: readonly string[]): Setting[] {
+  return [
+    ...oauthClient(prefix, product, 'Social publishing', apiWorker, false),
+    {
+      name: `${prefix}_ACCESS_TIER`,
+      group: 'Social publishing',
+      services: apiWorker,
+      requirement: 'conditional',
+      secret: false,
+      description: `${product} access tier the app is approved for: ${tiers.map(tier => `\`${tier}\``).join(' or ')}. Limits the offered actions.`,
     },
   ];
 }
@@ -1250,6 +1265,15 @@ export const settings: readonly Setting[] = [
     secret: false,
     description: 'JSON list of trusted Atlassian MCP operations and contract digests.',
   },
+  ...socialPlatformApp('SOCIAL_LINKEDIN', 'LinkedIn', ['share', 'community-management']),
+  ...socialPlatformApp('SOCIAL_YOUTUBE', 'YouTube', ['unverified', 'verified']),
+  ...socialPlatformApp('SOCIAL_FACEBOOK', 'Facebook', ['standard', 'advanced']),
+  ...socialPlatformApp('SOCIAL_INSTAGRAM', 'Instagram', ['standard', 'advanced']),
+  ...socialPlatformApp('SOCIAL_THREADS', 'Threads', ['standard', 'advanced']),
+  ...socialPlatformApp('SOCIAL_PINTEREST', 'Pinterest', ['trial', 'standard']),
+  ...socialPlatformApp('SOCIAL_TIKTOK', 'TikTok', ['unaudited', 'audited']),
+  ...socialPlatformApp('SOCIAL_X', 'X', ['paid']),
+  ...socialPlatformApp('SOCIAL_REDDIT', 'Reddit', ['paid']),
 
   {
     name: 'SLACK_CONFIGURATION',
