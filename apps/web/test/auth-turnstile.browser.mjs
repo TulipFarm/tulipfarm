@@ -25,26 +25,33 @@ test(
       });
       await page.goto(`${origin}/register?redirect=%2F`);
       await page.getByLabel('Workspace name', { exact: true }).fill('Acme Partners');
-      await page.getByText(`${origin}/acme-partners`, { exact: true }).waitFor();
-      await page.getByLabel('Workspace URL', { exact: true }).fill('acme-team');
-      await page.getByText(`${origin}/acme-team`, { exact: true }).waitFor();
-      await page.getByText('It cannot be changed after creation.', { exact: true }).waitFor();
-      const name = await page.getByLabel('Workspace name', { exact: true }).boundingBox();
-      const url = await page.getByLabel('Workspace URL', { exact: true }).boundingBox();
+      const url = page.getByLabel('Workspace URL', { exact: true });
+      assert.equal(await url.inputValue(), 'acme-partners');
+      await url.fill('acme-team');
+      await page.getByText('You can’t change this later.', { exact: true }).waitFor();
+      const continueBox = await page.getByRole('button', { name: 'Continue' }).boundingBox();
+      assert.ok(
+        continueBox && continueBox.y + continueBox.height <= 720,
+        `Continue ends at ${continueBox ? continueBox.y + continueBox.height : 'an unknown position'}px`,
+      );
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await page
+        .getByRole('main')
+        .getByText(`${new URL(origin).host}/acme-team`, { exact: true })
+        .waitFor();
       const submit = await page.getByRole('button', { name: 'Create workspace with email' }).boundingBox();
-      assert.equal(name?.y, url?.y);
       assert.ok(
         submit && submit.y + submit.height <= 720,
         `Primary action ends at ${submit ? submit.y + submit.height : 'an unknown position'}px`,
       );
       assert.equal(await page.getByRole('link', { name: 'log in' }).getAttribute('href'), '/login?redirect=%2F');
       const demo = page.locator('aside[aria-hidden="true"]');
-      const before = (await demo.boundingBox())?.height ?? 0;
       await demo.evaluate(async aside => {
         document.documentElement.dataset.analyticsConsent = 'open';
         void getComputedStyle(aside).paddingBottom;
         await Promise.all(aside.getAnimations().map(animation => animation.finished));
       });
+      const before = (await demo.boundingBox())?.height ?? 0;
       const after = (await demo.locator(':scope > *').boundingBox())?.height ?? 0;
       assert.ok(before - after >= 256, `Demo keeps ${after}px of ${before}px beside the consent notice`);
     } finally {

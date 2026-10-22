@@ -131,6 +131,10 @@ try {
     for (const width of [320, 375, 1280]) {
       await page.setViewportSize({ width, height: 850 });
       await page.goto(`${origin}/${route}`);
+      if (route === 'register') {
+        await page.getByLabel('Workspace name', { exact: true }).fill('Acme Partners');
+        await page.getByRole('button', { name: 'Continue' }).click();
+      }
       await page.getByText('Test verification widget', { exact: true }).waitFor();
       await page.evaluate(() => window.challenge.interact());
       const bounds = await page.evaluate(() => ({

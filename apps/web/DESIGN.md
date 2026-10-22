@@ -412,6 +412,29 @@ Inspected 13 October 2026 in
 [`workspace-chats.tsx`](src/pages/workspace-chats.tsx) and
 [`data-list.tsx`](src/components/data-list.tsx).
 
+### Workspace signup
+
+Signed-out workspace creation is two steps, each with a "Step k of 2" label.
+Step 1 asks only for the workspace: name and URL (host prefix inside the
+input, with the permanence helper), then one **Continue** button. Every new
+workspace is a business workspace; do not ask for a type. Auth fields are all
+required, so the auth panel hides Sprout's "Required" tag. While the name is
+empty, the URL shows its helper rather than a second error. Step 2 is
+the account: a summary card with an **Edit** button that goes back, Google
+first, then the email form with one primary submit; the email link is the
+secondary action. The workspace details stay in memory until the draft is
+saved, so a sign-in error that reloads the page returns to step 1 with an
+alert.
+
+Every auth page keeps the animated agent gradient in the aside. Moving between
+steps focuses the page title, which is underlined only for keyboard focus.
+
+Login uses the same layout: Google first, then email and password with
+**Forgot password?** on the password label row, **Log in** as the only primary
+button and the email link as the secondary action.
+Inspected 22 October 2026 in [`auth.tsx`](src/pages/auth.tsx) and
+[`form.tsx`](src/features/auth/form.tsx).
+
 ### Workflow conversations
 
 Inspected 13 October 2026: the real conversation and workflow viewer share the

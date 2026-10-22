@@ -106,6 +106,8 @@ test('without password sign-in the login page offers only email links and Google
     await page.getByRole('button', { name: 'Email me a sign-up link' }).waitFor();
     assert.equal(await page.getByLabel('Password').count(), 0);
     await page.goto(`${origin}/register`);
+    await page.getByLabel('Workspace name', { exact: true }).fill('Acme Partners');
+    await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('button', { name: 'Create workspace with email' }).waitFor();
     assert.equal(await page.getByLabel('Password').count(), 0);
     await page.goto(`${origin}/login/forgot-password`);
@@ -121,7 +123,7 @@ test('without password sign-in the login page offers only email links and Google
 
 test('sign-in methods without server credentials stay hidden', { timeout: 120000 }, async () => {
   await withServer(async (origin, browser) => {
-    const google = { name: 'Sign in with Google' };
+    const google = { name: 'Continue with Google' };
     const emailLink = { name: 'Email me a sign-in link' };
     const cases = [
       {
@@ -193,7 +195,7 @@ test('password sign-in, sign-up, forgot and reset screens', { timeout: 240000 },
       await password.waitFor();
       assert.equal(await password.getAttribute('autocomplete'), 'current-password');
       assert.equal(await page.getByRole('button', { name: 'Email me a sign-in link' }).count(), 1);
-      assert.equal(await page.getByRole('button', { name: 'Sign in with Google' }).count(), 1);
+      assert.equal(await page.getByRole('button', { name: 'Continue with Google' }).count(), 1);
       await shot(page, 'login', colorScheme);
 
       await page.getByLabel('Email', { exact: true }).fill('pat@example.test');

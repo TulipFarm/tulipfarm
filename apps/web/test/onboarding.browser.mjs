@@ -110,9 +110,12 @@ test(
       };
       await page.goto(`${origin}/register`);
       await page.getByLabel('Workspace name', { exact: true }).fill(workspace.name);
+      assert.equal(await page.getByLabel('Workspace URL', { exact: true }).inputValue(), workspace.slug);
+      await screenshot('signup-workspace-desktop');
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await page.getByRole('heading', { name: 'Create your account' }).waitFor();
       await page.getByLabel('Name', { exact: true }).fill('Sample user');
       await page.getByLabel('Email', { exact: true }).fill('sample@example.test');
-      assert.equal(await page.getByLabel('Workspace URL', { exact: true }).inputValue(), workspace.slug);
       await page.getByText('Test verification widget').waitFor();
       await page.evaluate(() => window.challenge.solve());
       await page.getByText('Verification complete.', { exact: true }).waitFor();
@@ -140,7 +143,10 @@ test(
       await page.getByRole('button', { name: 'Create workspace with email' }).click();
       await page.getByText('Could not save the draft. Try again.').waitFor();
       assert.equal(emails.length, 0, 'Do not start auth before the draft is durable');
-      assert.equal(await page.getByLabel('Workspace name', { exact: true }).inputValue(), workspace.name);
+      await page
+        .getByRole('main')
+        .getByText(`${new URL(origin).host}/${workspace.slug}`, { exact: true })
+        .waitFor();
       saveFailure = false;
       await page.getByText('Test verification widget').waitFor();
       await page.evaluate(() => window.challenge.solve());

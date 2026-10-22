@@ -372,10 +372,20 @@
     box-shadow: none;
   }
 
+  /* Every auth field is required, so the per-field "Required" tag is noise; aria-required still announces it. */
+  [data-slot='auth-panel'] [data-slot='requirement'][aria-hidden='true'] {
+    display: none;
+  }
+
   /* Focus moved to a page title after navigation has no outline; the underline keeps it visible. */
   :is(h1, h2, h3, h4)[tabindex='-1']:focus {
     text-decoration-line: underline;
     text-underline-offset: 4px;
+  }
+
+  /* A pointer click on an auth step's button already shows where the visitor is; keep the underline for keyboards. */
+  [data-slot='auth-panel'] h1[tabindex='-1']:focus:not(:focus-visible) {
+    text-decoration-line: none;
   }
 
   [data-slot='gradient-banner'] {

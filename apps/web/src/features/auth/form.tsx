@@ -21,6 +21,8 @@ import { AuthVerification } from '@/features/auth/verification';
 import { PublicAuthQueryProvider, useAuthOptions } from '@/features/auth/public-query';
 import type { useOnboardingFields } from './onboarding-fields';
 
+type WorkspaceDraft = Pick<ReturnType<typeof useOnboardingFields>, 'prepare' | 'validate'>;
+
 export const accountExistsMessage =
   'An account already exists for this address. Sign in with the address you used before.';
 
@@ -198,17 +200,20 @@ export function AuthLayout({
   children,
   footer,
   compact,
+  step,
 }: {
   title: string;
   subtitle: ReactNode;
   children: ReactNode;
   footer: ReactNode;
   compact?: boolean;
+  /** Position in a multi-step flow, such as "Step 1 of 2". */
+  step?: string;
 }) {
   return (
     <PublicAuthQueryProvider>
       <div className="grid min-h-svh lg:grid-cols-2">
-        <div className="flex flex-col">
+        <div className="flex min-w-0 flex-col">
           <header className={`px-6 py-6 sm:px-10${compact ? ' lg:py-2' : ''}`}>
             <img src="/logo-ink.svg" alt="TulipFarm" className="h-8 dark:hidden" />
             <img src="/logo-white.svg" alt="TulipFarm" className="hidden h-8 dark:block" />
@@ -218,10 +223,16 @@ export function AuthLayout({
           >
             <section
               aria-labelledby="auth-title"
+              data-slot="auth-panel"
               className={`w-full max-w-sm space-y-8${compact ? ' lg:space-y-4' : ''}`}
             >
               <header className="space-y-2">
-                <h1 id="auth-title" className="text-2xl font-medium tracking-tight">
+                {step && <p className="text-sm font-medium text-muted-foreground">{step}</p>}
+                <h1
+                  id="auth-title"
+                  tabIndex={-1}
+                  className="text-2xl font-medium tracking-tight text-balance outline-none"
+                >
                   {title}
                 </h1>
                 <p className="text-lg text-muted-foreground">{subtitle}</p>
@@ -258,6 +269,24 @@ export function AuthSubtitle({ password, link }: { password: string; link: strin
   return 'Sign-in is not set up on this server yet.';
 }
 
+function NoSignInMethod() {
+  return (
+    <Alert variant="destructive">
+      <AlertDescription>
+        No sign-in method is set up on this server. Ask your administrator to configure email delivery or Google
+        sign-in.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/** Shows the setup alert instead of `children` when the server offers no way to sign in. */
+export function SignInAvailable({ children }: { children: ReactNode }) {
+  const options = useAuthOptions().data;
+  if (options && !options.emailPassword && !options.magicLink && !options.google) return <NoSignInMethod />;
+  return children;
+}
+
 export function AuthForm({
   withName,
   submitLabel,
@@ -266,6 +295,8 @@ export function AuthForm({
   pending,
   onPendingChange: setPending,
   workspace,
+  linkLabel,
+  providersFirst,
 }: {
   withName?: boolean;
   submitLabel: string;
@@ -274,7 +305,11 @@ export function AuthForm({
   googleLabel: string;
   pending: boolean;
   onPendingChange: (pending: boolean) => void;
-  workspace?: ReturnType<typeof useOnboardingFields>;
+  workspace?: WorkspaceDraft;
+  /** The email-link action when it sits under a password submit; defaults to `submitLabel`. */
+  linkLabel?: string;
+  /** Puts Google above the email form, for flows where it is the fastest path. */
+  providersFirst?: boolean;
 }) {
   const options = useAuthOptions();
   const passwordSignIn = options.data?.emailPassword === true;
@@ -536,28 +571,34 @@ export function AuthForm({
     );
   }
 
-  if (!emailForm && !googleSignIn)
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>
-          No sign-in method is set up on this server. Ask your administrator to configure email delivery or Google
-          sign-in.
-        </AlertDescription>
-      </Alert>
-    );
+  const google = googleSignIn && (
+    <div className="grid">
+      <Button variant="outline" size="lg" disabled={pending} onClick={signInWithGoogle}>
+        <GoogleLogo />
+        {googleLabel}
+      </Button>
+    </div>
+  );
+  const separator = emailForm && googleSignIn && (
+    <div className="py-2">
+      <FieldSeparator>or</FieldSeparator>
+    </div>
+  );
+
+  if (!emailForm && !googleSignIn) return <NoSignInMethod />;
 
   return (
-    <div className={workspace ? 'space-y-4 lg:space-y-3' : 'space-y-6'}>
-      {!emailForm && workspace?.fields}
+    <div className="space-y-6">
       {!emailForm && error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {providersFirst && google}
+      {providersFirst && separator}
       {emailForm && (
         <Form onSubmit={submit} disabled={pending}>
-          <div className={workspace ? 'space-y-4 lg:space-y-3' : 'space-y-5'}>
-            {workspace?.fields}
+          <div className="space-y-5">
             {withName && (
               <Field id="name" label="Name" required error={nameError}>
                 <Input
@@ -583,33 +624,32 @@ export function AuthForm({
               />
             </Field>
             {passwordSignIn && (
-              <Field
-                id="password"
-                label="Password"
-                required
-                error={passwordError}
-                helper={
-                  withName ? (
-                    `${passwordLength.min} to ${passwordLength.max} characters.`
-                  ) : (
-                    <span className="underline underline-offset-4">
-                      <Link to="/login/forgot-password" search={{ redirect: destination }}>
-                        Forgot password?
-                      </Link>
-                    </span>
-                  )
-                }
-              >
-                <Input
-                  name="password"
-                  type="password"
-                  scale="lg"
-                  autoComplete={withName ? 'new-password' : 'current-password'}
-                  maxLength={passwordLength.max}
-                  value={passwordInput}
-                  onChange={event => setPasswordInput(event.target.value)}
-                />
-              </Field>
+              <div className="relative">
+                <Field
+                  id="password"
+                  label="Password"
+                  required
+                  error={passwordError}
+                  helper={withName ? `${passwordLength.min} to ${passwordLength.max} characters.` : undefined}
+                >
+                  <Input
+                    name="password"
+                    type="password"
+                    scale="lg"
+                    autoComplete={withName ? 'new-password' : 'current-password'}
+                    maxLength={passwordLength.max}
+                    value={passwordInput}
+                    onChange={event => setPasswordInput(event.target.value)}
+                  />
+                </Field>
+                {!withName && (
+                  <span className="absolute top-0 right-0 text-sm leading-4 text-muted-foreground underline underline-offset-4 hover:text-foreground">
+                    <Link to="/login/forgot-password" search={{ redirect: destination }}>
+                      Forgot password?
+                    </Link>
+                  </span>
+                )}
+              </div>
             )}
             <AuthVerification key={challengeAttempt} onToken={setChallengeToken} />
             <FormFooter
@@ -628,7 +668,7 @@ export function AuthForm({
               secondarySubmit={
                 passwordSignIn && emailLink
                   ? {
-                      label: submitLabel,
+                      label: linkLabel ?? submitLabel,
                       disabled: pending || challengeToken === null,
                       onSelect: () => {
                         linkRequested.current = true;
@@ -640,19 +680,8 @@ export function AuthForm({
           </div>
         </Form>
       )}
-      {emailForm && googleSignIn && (
-        <div className="py-2">
-          <FieldSeparator>or</FieldSeparator>
-        </div>
-      )}
-      {googleSignIn && (
-        <div className="grid">
-          <Button variant="outline" size="lg" disabled={pending} onClick={signInWithGoogle}>
-            <GoogleLogo />
-            {googleLabel}
-          </Button>
-        </div>
-      )}
+      {!providersFirst && separator}
+      {!providersFirst && google}
     </div>
   );
 }
