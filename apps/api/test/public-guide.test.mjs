@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import Fastify from 'fastify';
+import { shippedModelCatalogPath } from '@tulipfarm/config';
 import { registerSecurity, securityServerOptions } from '../src/security.ts';
 import { registerPublicGuideRoutes } from '../src/public-guide.ts';
 import { guideTokens, GuideUnavailable } from '../src/public-guide-access.ts';
@@ -299,7 +301,6 @@ test('disconnect cancels provider work and releases the shared admission slot', 
 });
 
 const env = {
-  MODEL_FAMILIES: 'gpt-luna',
   AZURE_FOUNDRY_ENDPOINT: 'https://fixture.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: 'fixture-private-key',
 };
@@ -383,12 +384,12 @@ test('off-topic requests return a fixed refusal without writer work; malformed a
     );
     await assert.rejects(model([], 'What are tables?', () => {}, new AbortController().signal));
   }
-  assert.equal(publicGuideModel({}), null);
+  assert.equal(publicGuideModel({ ANTHROPIC_API_KEY: 'fixture-key' }), null, 'the default model is not on Azure');
 });
 
 test('the guide family comes from the public-guide role and needs an Azure chat-completions route', async () => {
   const requests = [];
-  const shipped = { ...env, MODEL_FAMILIES: 'claude-haiku,gpt-sol,gpt-luna', ANTHROPIC_API_KEY: 'fixture-key' };
+  const shipped = { ...env, ANTHROPIC_API_KEY: 'fixture-key' };
   const model = publicGuideModel(shipped, async (_url, init) => {
     requests.push(JSON.parse(init.body).model);
     return Response.json({ choices: [{ finish_reason: 'stop', message: { content: '{"topic":"refuse"}' } }] });
@@ -396,9 +397,16 @@ test('the guide family comes from the public-guide role and needs an Azure chat-
   await model([], 'Write a poem', () => {}, new AbortController().signal);
   assert.deepEqual(requests, ['gpt-6-luna']);
   assert.deepEqual(publicGuideWarnings(shipped), []);
-  const anthropic = { ...shipped, PUBLIC_GUIDE_MODEL_FAMILY: 'claude-haiku' };
-  assert.equal(publicGuideModel(anthropic), null);
-  assert.deepEqual(publicGuideWarnings(anthropic), [
-    'Public guide family claude-haiku is not on an Azure chat-completions route; the guide is unavailable.',
+  const catalog = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+  for (const model of catalog.models)
+    model.roles =
+      model.id === 'claude-haiku' ? ['public-guide'] : (model.roles ?? []).filter(role => role !== 'public-guide');
+  assert.throws(() => publicGuideModel({ ...shipped, MODEL_CATALOG: JSON.stringify(catalog) }), {
+    message: /models\.0\.roles: The public-guide model needs an Azure route/,
+  });
+  const openai = { OPENAI_API_KEY: 'fixture-key' };
+  assert.equal(publicGuideModel(openai), null);
+  assert.deepEqual(publicGuideWarnings(openai), [
+    'Public guide model gpt-luna is not served on an Azure chat-completions route; the guide is unavailable.',
   ]);
 });

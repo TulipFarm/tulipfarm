@@ -13,7 +13,12 @@ const quote = {
       validFrom: null,
       validUntilExclusive: null,
       promptTokensAbove: null,
-      usdPerMillionTokens: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 3 },
+      usdPerMillionTokens: {
+        input: 2,
+        output: 10,
+        cacheRead: 0.2,
+        cacheWrite: 3,
+      },
     },
   ],
 };
@@ -24,7 +29,14 @@ test('reservation bounds cache costs and exact usage never rounds individual req
       ...quote,
       usage: {
         kind: 'known',
-        tokens: { input: 10, output: 2, cacheRead: 10, cacheWrite: 5, cacheWrite5m: 0, cacheWrite1h: 0 },
+        tokens: {
+          input: 10,
+          output: 2,
+          cacheRead: 10,
+          cacheWrite: 5,
+          cacheWrite5m: 0,
+          cacheWrite1h: 0,
+        },
       },
     }),
     {
@@ -36,8 +48,14 @@ test('reservation bounds cache costs and exact usage never rounds individual req
       promptTokensAbove: null,
     },
   );
-  assert.deepEqual(calculateUsageCost({ ...quote, usage: { kind: 'unknown', reason: 'missing' } }), {
-    kind: 'unknown',
-    reason: 'missing',
-  });
+  assert.deepEqual(
+    calculateUsageCost({
+      ...quote,
+      usage: { kind: 'unknown', reason: 'missing' },
+    }),
+    {
+      kind: 'unknown',
+      reason: 'missing',
+    },
+  );
 });

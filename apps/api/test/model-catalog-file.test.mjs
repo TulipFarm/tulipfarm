@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const fixture = name => fileURLToPath(new URL(`../../../packages/config/test/fixtures/${name}`, import.meta.url));
-process.env.MODEL_CATALOG_FILE = fixture(process.env.TEST_MODEL_CATALOG_FIXTURE ?? 'model-catalog-extend.json');
-process.env.MODEL_CATALOG_MODE = process.env.TEST_MODEL_CATALOG_MODE ?? 'extend';
+process.env.MODEL_CATALOG_FILE = fixture('model-catalog-acme.json');
 
 const Fastify = (await import('fastify')).default;
 const { createMemoryRouteHealth } = await import('@tulipfarm/agents/chat');
@@ -20,8 +19,8 @@ const { modelEnvironment } = await import('../src/model-environment.ts');
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const credential = 'synthetic-private-credential';
 const env = {
-  MODEL_FAMILIES: 'acme-chat, gpt-luna',
-  MODEL_DEFAULT_FAMILY: 'acme-chat',
+  MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
+  ANTHROPIC_API_KEY: credential,
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: credential,
 };
@@ -66,11 +65,12 @@ async function catalog(t, configuration) {
     headers: { cookie: 'session=test' },
   });
   assert.equal(response.statusCode, 200);
-  return modelCatalogSchema.parse(response.json()).families;
+  return modelCatalogSchema.parse(response.json());
 }
 
-test('a family added by MODEL_CATALOG_FILE is listed and available in the workspace model catalog', async t => {
-  const families = await catalog(t, createModelConfiguration({ pool, env }));
+test('MODEL_CATALOG_FILE replaces the shipped catalog in the workspace model catalog', async t => {
+  const { families, defaultChatFamilyId } = await catalog(t, createModelConfiguration({ pool, env }));
+  assert.equal(defaultChatFamilyId, 'acme-chat');
   const acme = families.find(family => family.id === 'acme-chat');
   assert.deepEqual(
     { ...acme, mappingRevision: undefined, pricingRevision: undefined },
@@ -84,15 +84,21 @@ test('a family added by MODEL_CATALOG_FILE is listed and available in the worksp
       unavailableReason: null,
       inputCreditsPerMillionTokens: 50,
       outputCreditsPerMillionTokens: 150,
-      fallbackFor: ['gpt-luna'],
+      fallbackFor: ['claude-haiku'],
       mappingRevision: undefined,
       pricingRevision: undefined,
     },
   );
   assert.match(acme.pricingRevision, /^prices-[0-9a-f]{32}$/);
   assert.equal(families.find(family => family.id === 'claude-haiku').displayName, 'Claude Haiku (operator)');
-  assert.equal(families.find(family => family.id === 'claude-haiku').available, false);
-  assert.equal(families.length, 16);
+  assert.deepEqual(
+    families.map(family => [family.id, family.available]),
+    [
+      ['acme-chat', true],
+      ['claude-haiku', true],
+    ],
+    'shipped models are gone',
+  );
 });
 
 test('a task turn on the operator family uses its declared capabilities and is priced from the file', async t => {
@@ -133,8 +139,8 @@ test('a task turn on the operator family uses its declared capabilities and is p
   const { calculateModelCost } = await import('@tulipfarm/config');
   const environment = modelEnvironment(env);
   const continuity = environment.continuity(createMemoryRouteHealth);
-  assert.equal(continuity.legacyFamily(), 'acme-chat');
-  const resolution = environment.resolve(continuity.legacyFamily());
+  assert.equal(continuity.defaultFamily(), 'acme-chat');
+  const resolution = environment.resolve(continuity.defaultFamily());
   assert.equal(resolution.modelId, 'acme-chat-1');
   assert.equal(continuity.allowed(workspaceId, resolution), true);
   const result = await continuity.infer(
@@ -155,6 +161,7 @@ test('a task turn on the operator family uses its declared capabilities and is p
   assert.equal(requests[0].headers['api-key'], credential);
   const cost = calculateModelCost({
     resolution,
+    trustedBundle: environment.bundle,
     date: '2026-10-19',
     usage: {
       kind: 'known',
@@ -164,41 +171,28 @@ test('a task turn on the operator family uses its declared capabilities and is p
   assert.equal(cost.providerPicoUsd, '2000000000');
 });
 
-test(
-  'in replace mode only the file families exist',
-  { skip: process.env.TEST_MODEL_CATALOG_MODE === 'replace' },
-  () => {
-    const result = spawnSync(
-      process.execPath,
-      ['--test', '--test-reporter=tap', '--test-name-pattern=replace mode lists', fileURLToPath(import.meta.url)],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          NODE_TEST_CONTEXT: undefined,
-          TEST_MODEL_CATALOG_FIXTURE: 'model-catalog-replace.json',
-          TEST_MODEL_CATALOG_MODE: 'replace',
-        },
-      },
-    );
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /# pass 1\b/);
-  },
-);
+test('models without a key are left out, and the catalog never offers non-selectable models', async t => {
+  const { AZURE_FOUNDRY_API_KEY: _, ...anthropicOnly } = env;
+  const skipped = await catalog(t, createModelConfiguration({ pool, env: anthropicOnly }));
+  assert.deepEqual(
+    skipped.families.map(family => family.id),
+    ['claude-haiku'],
+  );
+  assert.equal(skipped.defaultChatFamilyId, 'claude-haiku', 'the skipped default passes to the next model');
 
-test(
-  'replace mode lists only the operator families',
-  { skip: process.env.TEST_MODEL_CATALOG_MODE !== 'replace' },
-  async t => {
-    const families = await catalog(t, createModelConfiguration({ pool, env: { ...env, MODEL_FAMILIES: 'acme-chat' } }));
-    assert.deepEqual(
-      families.map(family => [family.id, family.available]),
-      [['acme-chat', true]],
-    );
-    assert.throws(
-      () => modelEnvironment(env),
-      { message: 'Invalid server model configuration' },
-      'shipped families are gone',
-    );
-  },
-);
+  const file = JSON.parse(readFileSync(env.MODEL_CATALOG_FILE, 'utf8'));
+  file.models[1] = { ...file.models[1], selectable: false, roles: ['title'] };
+  const inline = { ...env, MODEL_CATALOG_FILE: undefined, MODEL_CATALOG: JSON.stringify(file) };
+  const configuration = createModelConfiguration({ pool, env: inline });
+  const hidden = await catalog(t, configuration);
+  assert.deepEqual(
+    hidden.families.map(family => family.id),
+    ['acme-chat'],
+  );
+  assert.deepEqual(hidden.families[0].fallbackFor, []);
+  const snapshot = await configuration.modelCatalogSnapshot(workspaceId);
+  const haiku = { workspaceId, modelFamilyId: 'claude-haiku' };
+  assert.equal(snapshot.modelFamilyEligibility(haiku), false, 'not choosable for new chats or agents');
+  assert.equal(snapshot.modelFamilyEligibility({ ...haiku, existing: true }), true, 'existing chats keep it');
+  assert.equal(modelEnvironment(inline).catalog.role('title').id, 'claude-haiku');
+});

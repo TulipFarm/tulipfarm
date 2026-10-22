@@ -1,0 +1,1478 @@
+[
+  {
+    "format": 1,
+    "id": "server-8f5cfc715bbe6c233be7f45f0c602fce9b67cfc1c02844c48d4b2a5c5e8b7398",
+    "mapping": {
+      "format": 1,
+      "revision": "server-8f5cfc715bbe6c233be7f45f0c602fce9b67cfc1c02844c48d4b2a5c5e8b7398",
+      "pricingRevision": "prices-2026-10-19.1",
+      "families": [
+        {
+          "id": "claude-haiku",
+          "modelId": "claude-haiku-4-5"
+        },
+        {
+          "id": "claude-sonnet",
+          "modelId": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-opus",
+          "modelId": "claude-opus-5-5"
+        },
+        {
+          "id": "claude-fable",
+          "modelId": "claude-fable-5-1"
+        },
+        {
+          "id": "gpt-luna",
+          "modelId": "gpt-6-luna"
+        },
+        {
+          "id": "gpt-sol",
+          "modelId": "gpt-6-sol"
+        },
+        {
+          "id": "gpt-astra",
+          "modelId": "gpt-6-astra"
+        },
+        {
+          "id": "deepseek-pro",
+          "modelId": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-flash",
+          "modelId": "deepseek-v4-flash"
+        },
+        {
+          "id": "grok",
+          "modelId": "grok-4-6"
+        },
+        {
+          "id": "grok-fast",
+          "modelId": "grok-4.3"
+        },
+        {
+          "id": "kimi",
+          "modelId": "kimi-k2-6"
+        },
+        {
+          "id": "kimi-code",
+          "modelId": "kimi-k2-7-code"
+        },
+        {
+          "id": "gemini-flash",
+          "modelId": "gemini-3-8-flash"
+        },
+        {
+          "id": "gemini-pro",
+          "modelId": "gemini-3-1-pro-preview"
+        }
+      ]
+    },
+    "models": [
+      {
+        "id": "claude-haiku-4-5",
+        "familyId": "claude-haiku",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1,
+              "output": 5,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 1.25,
+              "cacheWrite1h": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-5",
+        "familyId": "claude-sonnet",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-opus-5-5",
+        "familyId": "claude-opus",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-fable-5-1",
+        "familyId": "claude-fable",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 0.25,
+              "cacheWrite5m": 12.5,
+              "cacheWrite1h": 20
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-luna",
+        "familyId": "gpt-luna",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite": 0.125
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 0.2,
+              "output": 0.75,
+              "cacheRead": 0.02,
+              "cacheWrite": 0.25
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-sol",
+        "familyId": "gpt-sol",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.2,
+              "cacheWrite": 2.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 15,
+              "cacheRead": 0.4,
+              "cacheWrite": 5
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-astra",
+        "familyId": "gpt-astra",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 20,
+              "output": 75,
+              "cacheRead": 2,
+              "cacheWrite": 25
+            }
+          }
+        ]
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "familyId": "deepseek-pro",
+        "vendor": "deepseek",
+        "provider": "azure",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 384000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.74,
+              "output": 3.48,
+              "cacheRead": 0.145
+            }
+          }
+        ]
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "familyId": "deepseek-flash",
+        "vendor": "deepseek",
+        "provider": "azure",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 384000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.19,
+              "output": 0.51,
+              "cacheRead": 0.028
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4-6",
+        "familyId": "grok",
+        "vendor": "xai",
+        "provider": "azure",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 6,
+              "cacheRead": 0.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 200000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 12,
+              "cacheRead": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4.3",
+        "familyId": "grok-fast",
+        "vendor": "xai",
+        "provider": "azure",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 8192,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.25,
+              "output": 2.5,
+              "cacheRead": 0.2
+            }
+          }
+        ]
+      },
+      {
+        "id": "kimi-k2-6",
+        "familyId": "kimi",
+        "vendor": "moonshot",
+        "provider": "azure",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.95,
+              "output": 4,
+              "cacheRead": 0.16
+            }
+          }
+        ]
+      },
+      {
+        "id": "kimi-k2-7-code",
+        "familyId": "kimi-code",
+        "vendor": "moonshot",
+        "provider": "azure",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.95,
+              "output": 4,
+              "cacheRead": 0.19
+            }
+          }
+        ]
+      },
+      {
+        "id": "gemini-3-8-flash",
+        "familyId": "gemini-flash",
+        "vendor": "google",
+        "provider": "google",
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": "2027-01-01",
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.75,
+              "output": 3.75,
+              "cacheRead": 0.075
+            }
+          },
+          {
+            "validFrom": "2027-01-01",
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.5,
+              "output": 7.5,
+              "cacheRead": 0.15
+            }
+          }
+        ]
+      },
+      {
+        "id": "gemini-3-1-pro-preview",
+        "familyId": "gemini-pro",
+        "vendor": "google",
+        "provider": "google",
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 65536,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 12,
+              "cacheRead": 0.2
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 200000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 18,
+              "cacheRead": 0.4
+            }
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "id": "server-claude-haiku-4-5",
+        "modelId": "claude-haiku-4-5",
+        "provider": "anthropic",
+        "deployment": "claude-haiku-4-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-sonnet-5",
+        "modelId": "claude-sonnet-5",
+        "provider": "anthropic",
+        "deployment": "claude-sonnet-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-opus-5-5",
+        "modelId": "claude-opus-5-5",
+        "provider": "anthropic",
+        "deployment": "claude-opus-5-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-fable-5-1",
+        "modelId": "claude-fable-5-1",
+        "provider": "anthropic",
+        "deployment": "claude-fable-5-1",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-luna",
+        "modelId": "gpt-6-luna",
+        "provider": "azure",
+        "deployment": "gpt-6-luna",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-sol",
+        "modelId": "gpt-6-sol",
+        "provider": "azure",
+        "deployment": "gpt-6-sol",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-astra",
+        "modelId": "gpt-6-astra",
+        "provider": "azure",
+        "deployment": "gpt-6-astra",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-deepseek-v4-pro",
+        "modelId": "deepseek-v4-pro",
+        "provider": "azure",
+        "deployment": "DeepSeek-V4-Pro",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-deepseek-v4-flash",
+        "modelId": "deepseek-v4-flash",
+        "provider": "azure",
+        "deployment": "DeepSeek-V4-Flash",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4-6",
+        "modelId": "grok-4-6",
+        "provider": "azure",
+        "deployment": "grok-4.6",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4.3",
+        "modelId": "grok-4.3",
+        "provider": "azure",
+        "deployment": "grok-4.3",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-kimi-k2-6",
+        "modelId": "kimi-k2-6",
+        "provider": "azure",
+        "deployment": "Kimi-K2.6",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-kimi-k2-7-code",
+        "modelId": "kimi-k2-7-code",
+        "provider": "azure",
+        "deployment": "Kimi-K2.7-Code",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gemini-3-8-flash",
+        "modelId": "gemini-3-8-flash",
+        "provider": "google",
+        "deployment": "gemini-3.8-flash",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gemini-3-1-pro-preview",
+        "modelId": "gemini-3-1-pro-preview",
+        "provider": "google",
+        "deployment": "gemini-3.1-pro-preview",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      }
+    ]
+  },
+  {
+    "format": 1,
+    "id": "server-f81c2d7415f2bcbb1d340f4b33abf1f80d0d3bf9e7cad78a33970180dc831caa",
+    "mapping": {
+      "format": 1,
+      "revision": "server-f81c2d7415f2bcbb1d340f4b33abf1f80d0d3bf9e7cad78a33970180dc831caa",
+      "pricingRevision": "prices-2026-10-19.1",
+      "families": [
+        {
+          "id": "gpt-luna",
+          "modelId": "gpt-6-luna-openai"
+        },
+        {
+          "id": "gpt-sol",
+          "modelId": "gpt-6-sol-openai"
+        },
+        {
+          "id": "gpt-astra",
+          "modelId": "gpt-6-astra-openai"
+        },
+        {
+          "id": "grok",
+          "modelId": "grok-4-6-xai"
+        },
+        {
+          "id": "grok-fast",
+          "modelId": "grok-4.3-xai"
+        }
+      ]
+    },
+    "models": [
+      {
+        "id": "gpt-6-luna-openai",
+        "familyId": "gpt-luna",
+        "vendor": "openai",
+        "provider": "openai",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite": 0.125
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 0.2,
+              "output": 0.75,
+              "cacheRead": 0.02,
+              "cacheWrite": 0.25
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-sol-openai",
+        "familyId": "gpt-sol",
+        "vendor": "openai",
+        "provider": "openai",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.2,
+              "cacheWrite": 2.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 15,
+              "cacheRead": 0.4,
+              "cacheWrite": 5
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-astra-openai",
+        "familyId": "gpt-astra",
+        "vendor": "openai",
+        "provider": "openai",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 20,
+              "output": 75,
+              "cacheRead": 2,
+              "cacheWrite": 25
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4-6-xai",
+        "familyId": "grok",
+        "vendor": "xai",
+        "provider": "xai",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 6,
+              "cacheRead": 0.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 200000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 12,
+              "cacheRead": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4.3-xai",
+        "familyId": "grok-fast",
+        "vendor": "xai",
+        "provider": "xai",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 8192,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.25,
+              "output": 2.5,
+              "cacheRead": 0.2
+            }
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "id": "server-gpt-6-luna-openai",
+        "modelId": "gpt-6-luna-openai",
+        "provider": "openai",
+        "deployment": "gpt-6-luna",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-sol-openai",
+        "modelId": "gpt-6-sol-openai",
+        "provider": "openai",
+        "deployment": "gpt-6-sol",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-astra-openai",
+        "modelId": "gpt-6-astra-openai",
+        "provider": "openai",
+        "deployment": "gpt-6-astra",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4-6-xai",
+        "modelId": "grok-4-6-xai",
+        "provider": "xai",
+        "deployment": "grok-4.6",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4.3-xai",
+        "modelId": "grok-4.3-xai",
+        "provider": "xai",
+        "deployment": "grok-4.3",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      }
+    ]
+  },
+  {
+    "format": 1,
+    "id": "server-e10d32a06409c74bda48081cd2621bf64ea8897c79467cc50e4fbc0d83553bd1",
+    "mapping": {
+      "format": 1,
+      "revision": "server-e10d32a06409c74bda48081cd2621bf64ea8897c79467cc50e4fbc0d83553bd1",
+      "pricingRevision": "prices-57d28537e1dbd7cdeaba34f847ccabde",
+      "families": [
+        {
+          "id": "claude-haiku",
+          "modelId": "claude-haiku-4-5"
+        },
+        {
+          "id": "claude-sonnet",
+          "modelId": "claude-sonnet-5"
+        },
+        {
+          "id": "claude-opus",
+          "modelId": "claude-opus-5-5"
+        },
+        {
+          "id": "claude-fable",
+          "modelId": "claude-fable-5-1"
+        },
+        {
+          "id": "gpt-luna",
+          "modelId": "gpt-6-luna"
+        },
+        {
+          "id": "gpt-sol",
+          "modelId": "gpt-6-sol"
+        },
+        {
+          "id": "gpt-astra",
+          "modelId": "gpt-6-astra"
+        },
+        {
+          "id": "deepseek-pro",
+          "modelId": "deepseek-v4-pro"
+        },
+        {
+          "id": "deepseek-flash",
+          "modelId": "deepseek-v4-flash"
+        },
+        {
+          "id": "grok",
+          "modelId": "grok-4-6"
+        },
+        {
+          "id": "grok-fast",
+          "modelId": "grok-4.3"
+        },
+        {
+          "id": "kimi",
+          "modelId": "kimi-k2-6"
+        },
+        {
+          "id": "kimi-code",
+          "modelId": "kimi-k2-7-code"
+        },
+        {
+          "id": "acme-chat",
+          "modelId": "acme-chat-1"
+        }
+      ]
+    },
+    "models": [
+      {
+        "id": "claude-haiku-4-5",
+        "familyId": "claude-haiku",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1,
+              "output": 5,
+              "cacheRead": 0.1,
+              "cacheWrite5m": 1.25,
+              "cacheWrite1h": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-sonnet-5",
+        "familyId": "claude-sonnet",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 2.5,
+              "cacheWrite1h": 4
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-opus-5-5",
+        "familyId": "claude-opus",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 20,
+              "cacheRead": 0.2,
+              "cacheWrite5m": 5,
+              "cacheWrite1h": 8
+            }
+          }
+        ]
+      },
+      {
+        "id": "claude-fable-5-1",
+        "familyId": "claude-fable",
+        "vendor": "anthropic",
+        "provider": "anthropic",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 0.25,
+              "cacheWrite5m": 12.5,
+              "cacheWrite1h": 20
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-luna",
+        "familyId": "gpt-luna",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.1,
+              "output": 0.5,
+              "cacheRead": 0.01,
+              "cacheWrite": 0.125
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 0.2,
+              "output": 0.75,
+              "cacheRead": 0.02,
+              "cacheWrite": 0.25
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-sol",
+        "familyId": "gpt-sol",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 10,
+              "cacheRead": 0.2,
+              "cacheWrite": 2.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 15,
+              "cacheRead": 0.4,
+              "cacheWrite": 5
+            }
+          }
+        ]
+      },
+      {
+        "id": "gpt-6-astra",
+        "familyId": "gpt-astra",
+        "vendor": "openai",
+        "provider": "azure",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 272000,
+            "usdPerMillionTokens": {
+              "input": 20,
+              "output": 75,
+              "cacheRead": 2,
+              "cacheWrite": 25
+            }
+          }
+        ]
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "familyId": "deepseek-pro",
+        "vendor": "deepseek",
+        "provider": "azure",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 384000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.74,
+              "output": 3.48,
+              "cacheRead": 0.145
+            }
+          }
+        ]
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "familyId": "deepseek-flash",
+        "vendor": "deepseek",
+        "provider": "azure",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 384000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.19,
+              "output": 0.51,
+              "cacheRead": 0.028
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4-6",
+        "familyId": "grok",
+        "vendor": "xai",
+        "provider": "azure",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 128000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 2,
+              "output": 6,
+              "cacheRead": 0.5
+            }
+          },
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": 200000,
+            "usdPerMillionTokens": {
+              "input": 4,
+              "output": 12,
+              "cacheRead": 1
+            }
+          }
+        ]
+      },
+      {
+        "id": "grok-4.3",
+        "familyId": "grok-fast",
+        "vendor": "xai",
+        "provider": "azure",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 8192,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 1.25,
+              "output": 2.5,
+              "cacheRead": 0.2
+            }
+          }
+        ]
+      },
+      {
+        "id": "kimi-k2-6",
+        "familyId": "kimi",
+        "vendor": "moonshot",
+        "provider": "azure",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.95,
+              "output": 4,
+              "cacheRead": 0.16
+            }
+          }
+        ]
+      },
+      {
+        "id": "kimi-k2-7-code",
+        "familyId": "kimi-code",
+        "vendor": "moonshot",
+        "provider": "azure",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 262144,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.95,
+              "output": 4,
+              "cacheRead": 0.19
+            }
+          }
+        ]
+      },
+      {
+        "id": "acme-chat-1",
+        "familyId": "acme-chat",
+        "vendor": "acme",
+        "provider": "azure",
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000,
+        "rates": [
+          {
+            "validFrom": null,
+            "validUntilExclusive": null,
+            "promptTokensAbove": null,
+            "usdPerMillionTokens": {
+              "input": 0.5,
+              "output": 1.5
+            }
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "id": "server-claude-haiku-4-5",
+        "modelId": "claude-haiku-4-5",
+        "provider": "anthropic",
+        "deployment": "claude-haiku-4-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-sonnet-5",
+        "modelId": "claude-sonnet-5",
+        "provider": "anthropic",
+        "deployment": "claude-sonnet-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-opus-5-5",
+        "modelId": "claude-opus-5-5",
+        "provider": "anthropic",
+        "deployment": "claude-opus-5-5",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-claude-fable-5-1",
+        "modelId": "claude-fable-5-1",
+        "provider": "anthropic",
+        "deployment": "claude-fable-5-1",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-luna",
+        "modelId": "gpt-6-luna",
+        "provider": "azure",
+        "deployment": "gpt-6-luna",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-sol",
+        "modelId": "gpt-6-sol",
+        "provider": "azure",
+        "deployment": "gpt-6-sol",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-gpt-6-astra",
+        "modelId": "gpt-6-astra",
+        "provider": "azure",
+        "deployment": "gpt-6-astra",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-deepseek-v4-pro",
+        "modelId": "deepseek-v4-pro",
+        "provider": "azure",
+        "deployment": "DeepSeek-V4-Pro",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-deepseek-v4-flash",
+        "modelId": "deepseek-v4-flash",
+        "provider": "azure",
+        "deployment": "DeepSeek-V4-Flash",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4-6",
+        "modelId": "grok-4-6",
+        "provider": "azure",
+        "deployment": "grok-4.6",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-grok-4.3",
+        "modelId": "grok-4.3",
+        "provider": "azure",
+        "deployment": "grok-4.3",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-kimi-k2-6",
+        "modelId": "kimi-k2-6",
+        "provider": "azure",
+        "deployment": "Kimi-K2.6",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-kimi-k2-7-code",
+        "modelId": "kimi-k2-7-code",
+        "provider": "azure",
+        "deployment": "Kimi-K2.7-Code",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 262144,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      },
+      {
+        "id": "server-acme-chat-1",
+        "modelId": "acme-chat-1",
+        "provider": "azure",
+        "deployment": "Acme-Chat-1",
+        "location": "server",
+        "adapterVersion": 1,
+        "qualification": "server-configuration",
+        "lifecycle": "current",
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 4096,
+        "boundedDecision": true
+      }
+    ]
+  }
+]

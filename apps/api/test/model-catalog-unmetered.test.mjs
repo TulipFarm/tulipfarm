@@ -8,7 +8,6 @@ process.env.MODEL_CATALOG_FILE = fileURLToPath(
   new URL('../../../packages/config/test/fixtures/model-catalog-unmetered.json', import.meta.url),
 );
 delete process.env.MODEL_CATALOG;
-delete process.env.MODEL_CATALOG_MODE;
 
 const Fastify = (await import('fastify')).default;
 const { createMemoryRouteHealth } = await import('@tulipfarm/agents/chat');
@@ -23,8 +22,7 @@ const { modelEnvironment } = await import('../src/model-environment.ts');
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const env = {
-  MODEL_FAMILIES: 'local-chat, gpt-luna',
-  MODEL_DEFAULT_FAMILY: 'local-chat',
+  MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: 'synthetic-private-credential',
 };
@@ -75,9 +73,9 @@ test('the workspace catalog lists an unmetered family as available with no credi
   assert.equal(local.currentVersion, 'local-chat-1');
   assert.equal(local.inputCreditsPerMillionTokens, null);
   assert.equal(local.outputCreditsPerMillionTokens, null);
-  const luna = families.find(family => family.id === 'gpt-luna');
-  assert.equal(typeof luna.inputCreditsPerMillionTokens, 'number', 'metered families keep their rates');
-  assert.equal(typeof luna.outputCreditsPerMillionTokens, 'number');
+  const metered = families.find(family => family.id === 'metered-chat');
+  assert.equal(typeof metered.inputCreditsPerMillionTokens, 'number', 'metered families keep their rates');
+  assert.equal(typeof metered.outputCreditsPerMillionTokens, 'number');
 });
 
 // The credit meter tables of one workspace, enough for reserveCredits and settleCredits.

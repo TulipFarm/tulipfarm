@@ -27,6 +27,7 @@ import { provisionTableRegistry } from '../../workspaces/dist/table-registry.js'
 import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { modelCatalogOf } from '../../../apps/worker/test/model-catalog-fixture.mjs';
 
 const change = { kind: 'issue.create', owner: 'octocat', repo: 'private', title: 'Task issue', body: 'Reviewed body' };
 const repositoryRead = {
@@ -67,7 +68,7 @@ const scripted = decide => ({
   actualModelIds: () => [route.modelId],
   health: createMemoryRouteHealth(() => route.id),
   budgetPicoUsd: () => '10000000000000',
-  legacyFamily: () => 'claude-opus',
+  defaultFamily: () => 'claude-opus',
   infer: async (_resolution, input) => ({
     kind: 'success',
     decision: decide(JSON.parse(input.prompt)),
@@ -1086,8 +1087,7 @@ test(
       R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
       R2_SOUL_BUCKET: process.env.R2_SOUL_BUCKET,
       TEST_PROVIDER_ORIGIN: `http://127.0.0.1:${server.address().port}`,
-      MODEL_FAMILIES: 'claude-opus',
-      MODEL_DEFAULT_FAMILY: 'claude-opus',
+      MODEL_CATALOG: modelCatalogOf(['claude-opus']),
       ANTHROPIC_API_KEY: 'synthetic-model-key',
       INTEGRATION_CREDENTIAL_KEY_ID: 'test',
       INTEGRATION_CREDENTIAL_KEY: f.keyring.keys.test,

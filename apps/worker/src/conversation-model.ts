@@ -1,6 +1,6 @@
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { InferenceRoute } from '@tulipfarm/agents/inference';
-import { modelRoleDefault, type ModelRole, type ResolvedModel } from '@tulipfarm/config';
+import { loadModelCatalog, type ModelCatalogRole, type ResolvedModel } from '@tulipfarm/config';
 
 /** The resolved model a call is metered as, with the limits of its qualified route. */
 export type ModelPrice = {
@@ -15,12 +15,12 @@ export type ConversationModel = { route: InferenceRoute; price: ModelPrice };
 
 /**
  * Resolves a family for chat, titles, compaction, skill review, the plan specialist and the Gmail heartbeat through the same
- * effective model environment as tasks and the catalog. A family outside `MODEL_FAMILIES` has no model.
+ * model environment as tasks and the catalog. A family the model catalog does not serve has no model.
  */
 export function conversationModel(family: string, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
   const environment = modelEnvironment(env);
-  const resolution = environment?.resolve(family);
-  const route = resolution && environment?.inference(resolution);
+  const resolution = environment.resolve(family);
+  const route = resolution && environment.inference(resolution);
   if (!resolution || !route) return null;
   const {
     familyId,
@@ -32,13 +32,22 @@ export function conversationModel(family: string, env: NodeJS.ProcessEnv = proce
   return { route, price: { familyId, modelId, pricingRevision, rates, maxInputTokens, maxOutputTokens } };
 }
 
-/** Whether the operator paused `family` (`MODEL_PAUSED_FAMILIES`). */
+/** Whether the model catalog pauses `family`. */
 export function conversationFamilyPaused(family: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  return modelEnvironment(env)?.paused(family) ?? false;
+  return modelEnvironment(env).paused(family);
 }
 
-/** The model of the family that fills `role` (its setting, else the effective catalog), or null when it has none. */
-export function roleModel(role: ModelRole, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
-  const family = modelRoleDefault(role, env)?.familyId;
-  return family ? conversationModel(family, env) : null;
+/** The model a chat reply runs on: its family, or the default model once the catalog no longer serves that family. */
+export function chatReplyModel(family: string, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
+  return conversationModel(family, env) ?? conversationModel(loadModelCatalog(env).defaultModel.id, env);
+}
+
+/**
+ * The model with `role` in the model catalog. Without one, the title role has no model (the chat's own model titles the
+ * chat) and every other role uses the default model.
+ */
+export function roleModel(role: ModelCatalogRole, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
+  const catalog = loadModelCatalog(env);
+  const model = catalog.role(role) ?? (role === 'title' ? null : catalog.defaultModel);
+  return model ? conversationModel(model.id, env) : null;
 }

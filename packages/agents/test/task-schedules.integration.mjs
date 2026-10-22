@@ -183,7 +183,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           health: createModelRouteHealth(db.platform, () => 'schedule-test'),
           infer,
           budgetPicoUsd: () => '10000000000000',
-          legacyFamily: () => 'claude-opus',
+          defaultFamily: () => 'claude-opus',
         };
         const engine = createTaskRuntime(runtime, model);
         for (let step = 0; step < 5 && (await tasks.read(w.id, user, first.id)).status === 'pending'; step++)

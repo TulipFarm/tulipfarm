@@ -5,9 +5,12 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 test('health executes work and detects a stopped worker', { timeout: 30000 }, async () => {
   process.env.TEMPORAL_TASK_QUEUE = `health-test-${randomUUID()}`;
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   const worker = spawn(process.execPath, [new URL('../../worker/src/worker.ts', import.meta.url).pathname], {
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],

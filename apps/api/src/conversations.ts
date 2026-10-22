@@ -17,11 +17,10 @@ import {
   fileAudienceQuerySchema,
   historySchema,
   conversationModelSchema,
-  defaultConversationModel,
   renameChatSchema,
   sendMessageSchema,
 } from '@tulipfarm/conversations/contracts';
-import { modelRoleDefault } from '@tulipfarm/config';
+import { loadModelCatalog } from '@tulipfarm/config';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
@@ -66,8 +65,8 @@ const compactionParams = chatParams.extend({ compactionId: z.uuid() });
 const commandBody = z.strictObject({ commandId: z.uuid() });
 const createBody = commandBody.extend({ projectId: z.uuid().optional() });
 const moveBody = moveChatSchema;
-// A message without a model uses the server's default-chat role.
-const sendBody = (model = modelRoleDefault('default-chat')?.familyId ?? defaultConversationModel) =>
+// A message without a model uses the catalog's default model.
+const sendBody = (model = loadModelCatalog().defaultModel.id) =>
   sendMessageSchema.omit({ messageId: true }).extend({ model: conversationModelSchema.default(model) });
 const patchBody = z.union([renameChatSchema, archiveChatSchema]);
 const listQuery = z.strictObject({

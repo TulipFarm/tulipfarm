@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import {
   chatTitleSchema,
-  defaultConversationModel,
   displayPartSchema,
   initialTitle,
   sendMessageSchema,
@@ -186,15 +185,14 @@ test('ordered exact text stays unchanged while titles collapse whitespace and pr
   assert.equal(initialTitle([{ kind: 'text', text: ' \n ' }]), 'New chat');
 });
 
-test('messages without a selected model use Claude Sonnet', () => {
-  assert.equal(defaultConversationModel, 'claude-sonnet');
+test('messages without a selected model leave the choice to the server default', () => {
   assert.equal(
     sendMessageSchema.parse({
       commandId: randomUUID(),
       messageId: randomUUID(),
       parts: [{ kind: 'text', text: 'Hello' }],
     }).model,
-    'claude-sonnet',
+    undefined,
   );
 });
 

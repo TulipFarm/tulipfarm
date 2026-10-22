@@ -4,11 +4,14 @@ import { buildApp } from '../src/app.ts';
 import Fastify from 'fastify';
 import { registerAuth } from '../src/auth.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 async function lookup(env) {
   const saved = { ...process.env };
   Object.assign(process.env, { NODE_ENV: 'test', HOST: '127.0.0.1' }, env);
   for (const key of ['ACS_CONNECTION_STRING', 'SMTP_HOST', 'EMAIL_PROVIDER']) if (!env[key]) delete process.env[key];
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   try {
     return (await app.inject('/v1/dev/sign-in-link?email=nobody@tulipfarm.test')).json();
   } finally {

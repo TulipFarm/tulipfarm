@@ -1342,6 +1342,7 @@ const turnLabels = {
   blocked: 'Reply blocked',
 };
 const replyFailures: Record<string, string> = {
+  'model-configuration': "This model isn't available. Select another model and send your message again.",
   'model-incomplete-response':
     'The agent stopped without finishing your request. Completed tool results are kept. Review them, then retry the reply to continue.',
   'model-invalid-decision':

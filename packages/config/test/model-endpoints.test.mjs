@@ -6,15 +6,20 @@ import {
   modelEndpointShapeProblem,
   normalizeModelEndpoint,
 } from '../src/model-endpoints.ts';
-import { modelPricingEntrySchema } from '../src/model-continuity.ts';
 
-const dev = { NODE_ENV: 'development', MODEL_ENDPOINT_HOSTS: 'localhost,127.0.0.1,::1,gateway.example.com' };
+const dev = {
+  NODE_ENV: 'development',
+  MODEL_ENDPOINT_HOSTS: 'localhost,127.0.0.1,::1,gateway.example.com',
+};
 
 test('http is allowed only for allowlisted loopback hosts outside production', () => {
   for (const endpoint of ['http://localhost:11434/v1/', 'http://127.0.0.1:8000/', 'http://[::1]:8000/v1/'])
     assert.equal(modelEndpointProblem('openai-compatible', endpoint, dev), null, endpoint);
   assert.equal(
-    modelEndpointProblem('openai-compatible', 'http://localhost:11434/v1/', { ...dev, NODE_ENV: 'production' }),
+    modelEndpointProblem('openai-compatible', 'http://localhost:11434/v1/', {
+      ...dev,
+      NODE_ENV: 'production',
+    }),
     'must use https in production',
   );
   assert.equal(
@@ -22,7 +27,9 @@ test('http is allowed only for allowlisted loopback hosts outside production', (
     'must use https (http is allowed only for localhost)',
   );
   assert.equal(
-    modelEndpointProblem('openai-compatible', 'http://localhost:11434/v1/', { NODE_ENV: 'development' }),
+    modelEndpointProblem('openai-compatible', 'http://localhost:11434/v1/', {
+      NODE_ENV: 'development',
+    }),
     'host localhost is not in MODEL_ENDPOINT_HOSTS',
   );
 });
@@ -91,7 +98,11 @@ test('endpoints normalize to origin plus a slash-terminated path', () => {
 
 test('MODEL_ENDPOINT_HOSTS takes bare host names', () => {
   assert.deepEqual(
-    [...modelEndpointHosts({ MODEL_ENDPOINT_HOSTS: ' A.example.com, [::1] ,,b.example' })],
+    [
+      ...modelEndpointHosts({
+        MODEL_ENDPOINT_HOSTS: ' A.example.com, [::1] ,,b.example',
+      }),
+    ],
     ['a.example.com', '::1', 'b.example'],
   );
   assert.equal(modelEndpointHosts({}).size, 0);
@@ -100,32 +111,4 @@ test('MODEL_ENDPOINT_HOSTS takes bare host names', () => {
       () => modelEndpointHosts({ MODEL_ENDPOINT_HOSTS: value }),
       /MODEL_ENDPOINT_HOSTS: .* is not a host name/,
     );
-});
-
-test('catalog models declare endpoint and credentialEnv exactly for openai-compatible', () => {
-  const model = {
-    id: 'llama-local',
-    name: 'Llama',
-    provider: 'openai-compatible',
-    providerModelId: 'llama3.3',
-    endpoint: 'http://localhost:11434/v1',
-    credentialEnv: 'OLLAMA_API_KEY',
-    metadata: { max_input_tokens: 128000, max_output_tokens: 4096 },
-  };
-  assert.equal(modelPricingEntrySchema.parse(model).endpoint, 'http://localhost:11434/v1');
-  const fails = (value, pattern) => {
-    const result = modelPricingEntrySchema.safeParse(value);
-    assert.equal(result.success, false, JSON.stringify(value));
-    assert.match(JSON.stringify(result.error.issues), pattern);
-  };
-  const { endpoint, credentialEnv, ...bare } = model;
-  fails({ ...model, endpoint: undefined }, /endpoint/);
-  fails({ ...model, credentialEnv: undefined }, /credentialEnv/);
-  fails({ ...model, endpoint: 'https://u:p@gateway.example.com/' }, /must not contain credentials/);
-  fails({ ...model, endpoint: 'https://gateway.example.com/?k=1' }, /query or fragment/);
-  for (const name of ['OLLAMA_TOKEN', 'ollama_api_key', 'VITE_OLLAMA_API_KEY', 'NEXT_PUBLIC_X_API_KEY'])
-    fails({ ...model, credentialEnv: name }, /credentialEnv/);
-  fails({ ...bare, provider: 'openai', endpoint }, /endpoint/);
-  fails({ ...bare, provider: 'openai', credentialEnv }, /credentialEnv/);
-  assert.equal(modelPricingEntrySchema.safeParse({ ...bare, provider: 'openai' }).success, true);
 });

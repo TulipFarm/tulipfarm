@@ -7,7 +7,7 @@ import { createChatTools } from '../src/tools.ts';
 import { googleRuntimeFixture } from './google-fixture.mjs';
 import { meteredReply } from '../../../apps/worker/src/conversation-activities.ts';
 import { anthropicChat, anthropicText, isTitleRequest } from '../../../apps/worker/test/native-chat-fixture.mjs';
-import { useModelFamilies } from '../../../apps/worker/test/model-families-fixture.mjs';
+import { useModelCatalog } from '../../../apps/worker/test/model-catalog-fixture.mjs';
 
 for (const mode of ['lease', 'omitted-rewrite'])
   test(`Calendar request boundary: ${mode}`, { timeout: 100000 }, async t => {
@@ -18,7 +18,7 @@ for (const mode of ['lease', 'omitted-rewrite'])
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previous;
     });
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace.id,
         chatId = randomUUID();

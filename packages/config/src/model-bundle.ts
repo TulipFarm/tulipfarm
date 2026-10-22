@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { canonical } from './model-catalog-source.ts';
 import {
-  familyProviderModels,
   initialModelMapping,
-  modelCatalogModels,
-  modelFamilies,
+  legacyModels,
   modelMappingSchema,
   modelPriceSchema,
   qualifiedModelRouteSchema,
@@ -14,6 +11,19 @@ import {
   ModelResolutionError,
 } from './model-continuity.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema as identifier } from './model-identifier.ts';
+import type { ServedModel, ServedModelCatalog } from './model-catalog-loader.ts';
+
+/** `value` with object keys sorted recursively, so its JSON is independent of key order. */
+export function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  return value;
+}
 
 const bundleModelSchema = z
   .strictObject({
@@ -26,28 +36,22 @@ const bundleModelSchema = z
     rates: z.array(modelPriceSchema).min(1).readonly(),
   })
   .readonly();
+type BundleModel = z.infer<typeof bundleModelSchema>;
 
+/** Bundle models of the frozen record (`legacyModels`), the ones `initialModelMapping` maps to. */
 export const initialBundleModels = z
   .array(bundleModelSchema)
   .readonly()
   .parse(
-    modelCatalogModels.map(model => {
-      const family = modelFamilies.find(candidate => candidate.modelIds.includes(model.id));
-      return {
-        id: model.id,
-        familyId: family?.id,
-        vendor: family?.vendor,
-        provider: model.provider,
-        maxInputTokens: model.metadata.max_input_tokens,
-        maxOutputTokens: model.metadata.max_output_tokens,
-        rates: model.rates.map(({ validFrom, validUntilExclusive, promptTokensAbove, usdPerMillionTokens }) => ({
-          validFrom,
-          validUntilExclusive,
-          promptTokensAbove,
-          usdPerMillionTokens,
-        })),
-      };
-    }),
+    legacyModels.map(model => ({
+      id: model.id,
+      familyId: model.familyId,
+      vendor: model.vendor,
+      provider: model.provider,
+      maxInputTokens: model.maxInputTokens,
+      maxOutputTokens: model.maxOutputTokens,
+      rates: model.rates,
+    })),
   );
 
 export const modelBundleSchema = z
@@ -71,16 +75,13 @@ export const modelBundleSchema = z
     )
       fail('Initial mapping is immutable');
     for (const model of bundle.models) {
+      // Bundle model IDs of the frozen record keep their family, vendor and provider, and its prices keep their rates.
       const original = initialBundleModels.find(item => item.id === model.id);
-      const family = modelFamilies.find(item => item.id === model.familyId);
       if (
-        !family ||
-        family.vendor !== model.vendor ||
-        !familyProviderModels(family.id).some(item => item.provider === model.provider) ||
-        (original &&
-          (original.familyId !== model.familyId ||
-            original.vendor !== model.vendor ||
-            original.provider !== model.provider))
+        original &&
+        (original.familyId !== model.familyId ||
+          original.vendor !== model.vendor ||
+          original.provider !== model.provider)
       )
         fail('Family and vendor identity is immutable');
       if (
@@ -156,6 +157,90 @@ export function serverModelBundle(content: ServerBundleContent): ModelBundle {
     routes,
     mapping: { format: 1, revision: id, pricingRevision, families },
   });
+}
+
+const bundleModelIdPattern = /^[a-z0-9][a-z0-9._-]{0,99}$/;
+
+/**
+ * Bundle model ID of a served model. A model the frozen record has (same family, vendor, provider and deployment) keeps
+ * its ID, so an unchanged catalog keeps its bundle and prices; others get an ID from their deployment name.
+ */
+function bundleModelIds(models: readonly ServedModel[]) {
+  const used = new Set<string>();
+  return models.map(model => {
+    const legacy = legacyModels.find(
+      item =>
+        item.familyId === model.id &&
+        item.vendor === model.vendor &&
+        item.provider === model.route.type &&
+        item.providerModelId === model.route.model,
+    );
+    const base =
+      model.route.model
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/^[^a-z0-9]+/, '')
+        .slice(0, 80) || model.id;
+    const taken = (id: string) => used.has(id) || legacyModels.some(item => item.id === id);
+    let id = legacy?.id ?? (bundleModelIdPattern.test(base) && !taken(base) ? base : `${base}-${model.route.provider}`);
+    for (let suffix = 2; !legacy && taken(id); suffix += 1) id = `${base}-${model.route.provider}-${suffix}`;
+    used.add(id);
+    return id;
+  });
+}
+
+/** Routes of server bundles are this deployment's own configuration. */
+export const serverRouteLocation = 'server';
+
+/**
+ * The server bundle of the served models, in catalog order, with the bundle route of each. Prices keep the frozen
+ * record's revision while every model matches it; other prices get a revision derived from their content.
+ */
+export function servedModelBundle(served: Pick<ServedModelCatalog, 'models'>) {
+  const ids = bundleModelIds(served.models);
+  const entries = served.models.map((model, index) => {
+    const bundleModel: BundleModel = {
+      id: ids[index]!,
+      familyId: model.id,
+      vendor: model.vendor,
+      provider: model.route.type,
+      maxInputTokens: model.limits.maxInputTokens,
+      maxOutputTokens: model.limits.maxOutputTokens,
+      rates: model.rates,
+    };
+    const route = {
+      id: `server-${bundleModel.id}`,
+      modelId: bundleModel.id,
+      provider: bundleModel.provider,
+      deployment: model.route.model,
+      location: serverRouteLocation,
+      adapterVersion: 1 as const,
+      qualification: 'server-configuration',
+      lifecycle: 'current' as const,
+      maxInputTokens: bundleModel.maxInputTokens,
+      maxOutputTokens: Math.min(4096, bundleModel.maxOutputTokens),
+      boundedDecision: true as const,
+    };
+    return { model, bundleModel, route };
+  });
+  const models = entries.map(entry => entry.bundleModel);
+  const legacyPrices = models.every(model => {
+    const original = initialBundleModels.find(item => item.id === model.id);
+    return original && JSON.stringify(original.rates) === JSON.stringify(model.rates);
+  });
+  const pricingRevision = legacyPrices
+    ? initialModelMapping.pricingRevision
+    : `prices-${createHash('sha256')
+        .update(JSON.stringify(canonical([...models].sort((a, b) => (a.id < b.id ? -1 : 1)))))
+        .digest('hex')
+        .slice(0, 32)}`;
+  const bundle = serverModelBundle({
+    models,
+    routes: entries.map(entry => entry.route),
+    pricingRevision,
+    families: entries.map(entry => ({ id: entry.model.id, modelId: entry.bundleModel.id })),
+  });
+  return { bundle, entries };
 }
 
 /** Parses a stored server bundle and returns it only when its content hashes to `bundleId`. */

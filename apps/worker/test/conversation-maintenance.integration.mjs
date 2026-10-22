@@ -8,7 +8,7 @@ import { conversationCompactor } from '../src/conversation-compactor.ts';
 import { conversationModel } from '../src/conversation-model.ts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { anthropicText, azureChat } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test(
   'real worker compactor meters durable steps once and resumes saved publication without model calls',
@@ -21,7 +21,7 @@ test(
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previous;
     });
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       let calls = 0;
       t.mock.method(globalThis, 'fetch', async () => {
@@ -116,7 +116,7 @@ test('maintenance retains returned model answers across bounded save retries', {
       else process.env[key] = value;
     }
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   const w = f.workspace;
   const summary = JSON.stringify({ goal: 'Launch next week', openWork: ['Invite customers'] });
   const recap = '## Goal\nLaunch next week\n## Open work\nInvite customers';

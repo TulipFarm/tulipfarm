@@ -4,7 +4,7 @@ import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { magicLink } from 'better-auth/plugins';
 import type { Pool } from 'pg';
-import { modelFamilyIdSchema, selectableModelFamilies } from '@tulipfarm/config';
+import { loadModelCatalog, modelFamilyIdSchema } from '@tulipfarm/config';
 import { emitHook } from '@tulipfarm/extensions';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { publicGuideOrigins } from './public-guide-config.ts';
@@ -200,7 +200,10 @@ export function createAuth(
           required: false,
           fieldName: 'last_model_family_id',
           validator: {
-            input: modelFamilyIdSchema.refine(id => selectableModelFamilies.some(family => family.id === id)),
+            input: modelFamilyIdSchema.refine(id => {
+              const model = loadModelCatalog().model(id);
+              return !!model?.selectable && !model.paused;
+            }),
           },
         },
       },

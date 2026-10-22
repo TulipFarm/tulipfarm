@@ -1,4 +1,3 @@
-import { modelRoleDefault } from '@tulipfarm/config';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
@@ -32,15 +31,12 @@ export function registerAgentAuthoringAssistance(
     fetcher?: typeof fetch;
   },
 ) {
-  const defaultFamilyId =
-    dependencies.defaultFamilyId ??
-    (dependencies.environment === undefined
-      ? process.env.MODEL_DEFAULT_FAMILY || modelRoleDefault('default-chat')?.familyId
-      : undefined);
+  const environment = dependencies.environment === undefined ? modelEnvironment() : dependencies.environment;
+  const defaultFamilyId = dependencies.defaultFamilyId ?? environment?.defaultFamily;
   const service = createAgentAuthoringAssistance({
     runtime: dependencies.runtime,
     eligible: dependencies.modelFamilyEligibility,
-    environment: dependencies.environment === undefined ? modelEnvironment() : dependencies.environment,
+    environment,
     ...(defaultFamilyId ? { defaultFamilyId } : {}),
     ...(dependencies.fetcher ? { fetcher: dependencies.fetcher } : {}),
   });

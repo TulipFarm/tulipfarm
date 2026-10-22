@@ -7,7 +7,7 @@ import { Client, Connection } from '@temporalio/client';
 import { heartbeatFixture } from '../../../packages/google-workspace/test/heartbeat-fixture.mjs';
 import { createGoogleHeartbeatActivities, heartbeatProcessor } from '../dist/google-heartbeat-activities.js';
 import { dispatchGmailHeartbeat } from '../../api/dist/google-heartbeat-dispatch.js';
-import { initialModelMapping, modelFamilies, modelPricing } from '@tulipfarm/config';
+import { initialModelMapping, legacyModels } from '@tulipfarm/config';
 
 test(
   'compiled Gmail Temporal workflow survives worker restart and never puts private email or answers in history',
@@ -39,19 +39,19 @@ test(
         model: 'gemini-3.8-flash',
         apiKey: 'fixture-only',
       };
-      // Google families are not selectable server families, so this proof prices the route from the shipped catalog directly.
-      const priced = modelPricing.models.find(
+      // This proof prices the route from the frozen model record directly, without a served catalog.
+      const priced = legacyModels.find(
         candidate => candidate.provider === 'google' && candidate.providerModelId === route.model,
       );
       const model = {
         route,
         price: {
-          familyId: modelFamilies.find(family => family.modelIds.includes(priced.id)).id,
+          familyId: priced.familyId,
           modelId: priced.id,
           pricingRevision: initialModelMapping.pricingRevision,
           rates: priced.rates,
-          maxInputTokens: priced.metadata.max_input_tokens,
-          maxOutputTokens: Math.min(4096, priced.metadata.max_output_tokens),
+          maxInputTokens: priced.maxInputTokens,
+          maxOutputTokens: Math.min(4096, priced.maxOutputTokens),
         },
       };
       const startWorker = async () => {

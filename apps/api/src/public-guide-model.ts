@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { observeInference } from '@tulipfarm/observability';
-import { modelRoleDefault } from '@tulipfarm/config';
+import { loadModelCatalog } from '@tulipfarm/config';
 import {
   inferenceRouteSchema,
   routeCapabilities,
@@ -108,19 +108,25 @@ export function publicGuideRouteSupported(route: InferenceRoute) {
   return config.provider === 'azure' && routeCapabilities(config).api === 'chat-completions';
 }
 
-/** The public-guide role's configured route, or null when it has none or the guide cannot use it. */
+/** The guide's model: the model with the public-guide role, else the default model. */
+function publicGuideFamily(env: NodeJS.ProcessEnv) {
+  const catalog = loadModelCatalog(env);
+  return (catalog.role('public-guide') ?? catalog.defaultModel).id;
+}
+
+/** The route of the guide's model, or null when the guide cannot use it. */
 export function publicGuideRoute(env: NodeJS.ProcessEnv = process.env) {
-  const family = modelRoleDefault('public-guide', env)?.familyId;
-  const route = family ? modelEnvironment(env)?.route(family) : null;
-  return route && publicGuideRouteSupported(route) ? { family: family!, route } : null;
+  const family = publicGuideFamily(env);
+  const route = modelEnvironment(env).route(family);
+  return route && publicGuideRouteSupported(route) ? { family, route } : null;
 }
 
 /** Why the guide will answer 503 with these settings, if it will. */
 export function publicGuideWarnings(env: NodeJS.ProcessEnv = process.env) {
-  const family = modelRoleDefault('public-guide', env)?.familyId;
-  const route = family ? modelEnvironment(env)?.route(family) : null;
-  return family && route && !publicGuideRouteSupported(route)
-    ? [`Public guide family ${family} is not on an Azure chat-completions route; the guide is unavailable.`]
+  const family = publicGuideFamily(env);
+  const route = modelEnvironment(env).route(family);
+  return route && !publicGuideRouteSupported(route)
+    ? [`Public guide model ${family} is not served on an Azure chat-completions route; the guide is unavailable.`]
     : [];
 }
 

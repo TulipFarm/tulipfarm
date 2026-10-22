@@ -8,6 +8,37 @@ One version identifies all apps and images of a release.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** one model catalog file configures every model. The shipped
+  catalog is `packages/config/catalog/models.json`, in the
+  [model catalog format](https://tulipfarm.ai/schemas/model-catalog.v1.json).
+  `MODEL_CATALOG_FILE` (a path) or `MODEL_CATALOG` (the same JSON inline)
+  replaces it entirely; setting both fails. It lists each model's provider
+  routes, limits, capabilities and prices, the default model for new chats and
+  agents, paused and hidden (`"selectable": false`) models, and the model of
+  each role. A listed model whose provider key is unset stops startup, or is
+  left out with `"missingKeys": "skip"`. Chats and agents on a model the
+  catalog no longer lists move to the default model, and the web app says so.
+  Without a `table-search` or `recommendation` model, that feature is off.
+- **Breaking:** `MODEL_FAMILIES`, `MODEL_PAUSED_FAMILIES`,
+  `MODEL_DEFAULT_FAMILY`, `MODEL_CATALOG_MODE`, `CHAT_TITLE_MODEL_FAMILY`,
+  `SKILL_REVIEW_MODEL_FAMILY`, `PLAN_SPECIALIST_MODEL_FAMILY`,
+  `GMAIL_HEARTBEAT_MODEL_FAMILY`, `PUBLIC_GUIDE_MODEL_FAMILY`,
+  `TABLE_SEARCH_MODEL_FAMILY` and `RECOMMENDATION_MODEL_FAMILY` are removed.
+  Startup fails while any is set, naming what replaces it in the catalog. The
+  api and worker need at least one served model to start.
+- Bundles, runs and receipts stored by earlier releases still verify, and an
+  unchanged catalog keeps the earlier server bundle ids and price revision.
+
+### Fixed
+
+- New chats use the configured default model; the default model setting was
+  previously ignored for them.
+- A reply on a model that can't serve it, for example a deployment that
+  doesn't exist, a rejected key or no quota, now fails at once instead of
+  retrying for over a minute. Busy or unavailable providers still retry.
+
 ### Added
 
 - `MODEL_PAUSED_FAMILIES` pauses model families for new work. A paused family

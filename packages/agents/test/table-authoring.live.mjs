@@ -14,7 +14,7 @@ test(
   { skip: !family, timeout: 240000 },
   async t => {
     const route = modelEnvironment()?.route(family);
-    assert.ok(route, 'Configure TABLE_QA_MODEL, MODEL_FAMILIES and its server credentials');
+    assert.ok(route, 'Configure TABLE_QA_MODEL, the model catalog and its server credentials');
     const f = await conversationFixture();
     t.after(() => f.close());
     const w = f.workspace,

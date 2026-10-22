@@ -64,7 +64,14 @@ test('trusted bundle admits a reviewed successor and authenticates historical pr
   assert.deepEqual(parseModelResolution(JSON.parse(JSON.stringify(resolution)), trustedBundle), resolution);
   const usage = {
     kind: 'known',
-    tokens: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
+    tokens: {
+      input: 1000000,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+    },
   };
   assert.equal(
     calculateModelCost({ resolution, trustedBundle, usage, date: '2026-09-28' }).providerPicoUsd,
@@ -73,7 +80,15 @@ test('trusted bundle admits a reviewed successor and authenticates historical pr
   assert.throws(() => calculateModelCost({ resolution, usage, date: '2026-09-28' }));
   assert.throws(() =>
     parseModelResolution(
-      { ...resolution, rates: [{ ...resolution.rates[0], usdPerMillionTokens: { input: 1, output: 1 } }] },
+      {
+        ...resolution,
+        rates: [
+          {
+            ...resolution.rates[0],
+            usdPerMillionTokens: { input: 1, output: 1 },
+          },
+        ],
+      },
       trustedBundle,
     ),
   );
@@ -89,16 +104,13 @@ test('trusted bundle admits a reviewed successor and authenticates historical pr
   });
 });
 
-test('bundle rejects unsupported formats, adapters, identity redefinitions, and forged initial prices', () => {
+test('bundle rejects unsupported formats, adapters, frozen identity redefinitions, and forged initial prices', () => {
   for (const mutate of [
     b => {
       b.format = 2;
     },
     b => {
       b.routes[0].adapterVersion = 2;
-    },
-    b => {
-      b.models[0].vendor = 'openai';
     },
     b => {
       b.models[0].familyId = 'gpt-astra';
@@ -117,14 +129,6 @@ test('bundle rejects unsupported formats, adapters, identity redefinitions, and 
     },
     b => {
       b.models[0].rates[0].usdPerMillionTokens.input = 0.0000001;
-    },
-    b => {
-      b.models[0].provider = 'azure';
-      b.routes[0].provider = 'azure';
-    },
-    b => {
-      b.models[0].familyId = 'unknown';
-      b.mapping.families[0].id = 'unknown';
     },
     b => {
       b.routes[0].qualification = '';
@@ -159,7 +163,12 @@ test('unknown usage and old prices survive successor resolution and rollback', (
   const after = fixtureBundle('after');
   after.models[0].rates[0].usdPerMillionTokens.input = 9;
   const resolve = bundle =>
-    resolveModelBundle({ bundle, familyId: 'claude-opus', allowedProviders: ['anthropic'], allowedLocations: ['us'] });
+    resolveModelBundle({
+      bundle,
+      familyId: 'claude-opus',
+      allowedProviders: ['anthropic'],
+      allowedLocations: ['us'],
+    });
   const historical = JSON.parse(JSON.stringify(resolve(before)));
   assert.equal(resolve(after).rates[0].usdPerMillionTokens.input, 9);
   assert.deepEqual(resolve(before), historical);
@@ -177,14 +186,31 @@ test('unknown usage and old prices survive successor resolution and rollback', (
   }
   const usage = {
     kind: 'known',
-    tokens: { input: 1000000, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
+    tokens: {
+      input: 1000000,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+    },
   };
   assert.equal(
-    calculateModelCost({ resolution: historical, trustedBundle: before, usage, date: '2026-09-28' }).providerPicoUsd,
+    calculateModelCost({
+      resolution: historical,
+      trustedBundle: before,
+      usage,
+      date: '2026-09-28',
+    }).providerPicoUsd,
     '7000000000000',
   );
   assert.equal(
-    calculateModelCost({ resolution: resolve(after), trustedBundle: after, usage, date: '2026-09-28' }).providerPicoUsd,
+    calculateModelCost({
+      resolution: resolve(after),
+      trustedBundle: after,
+      usage,
+      date: '2026-09-28',
+    }).providerPicoUsd,
     '9000000000000',
   );
   assert.equal(historical.rates[0].usdPerMillionTokens.input, 7);
@@ -207,7 +233,11 @@ test('bundle resolution preserves location and provider restrictions without cat
 test('adjacent dated prices are accepted but overlapping prices are not', () => {
   const bundle = fixtureBundle();
   bundle.models[0].rates[0].validUntilExclusive = '2027-01-01';
-  bundle.models[0].rates.push({ ...bundle.models[0].rates[0], validFrom: '2027-01-01', validUntilExclusive: null });
+  bundle.models[0].rates.push({
+    ...bundle.models[0].rates[0],
+    validFrom: '2027-01-01',
+    validUntilExclusive: null,
+  });
   assert.equal(modelBundleSchema.parse(bundle).models[0].rates.length, 2);
   bundle.models[0].rates[1].validFrom = '2026-12-31';
   assert.throws(() => modelBundleSchema.parse(bundle), /Ambiguous price schedule/);
@@ -219,7 +249,12 @@ test('server bundle id is the hash of its content and stored copies verify again
     routes,
     mapping: { pricingRevision, families },
   } = fixtureBundle();
-  const bundle = serverModelBundle({ models, routes, pricingRevision, families });
+  const bundle = serverModelBundle({
+    models,
+    routes,
+    pricingRevision,
+    families,
+  });
   assert.match(bundle.id, /^server-[0-9a-f]{64}$/);
   assert.equal(bundle.mapping.revision, bundle.id);
   const reordered = JSON.parse(JSON.stringify(models[0]), (key, value) =>
@@ -227,7 +262,15 @@ test('server bundle id is the hash of its content and stored copies verify again
       ? Object.fromEntries(Object.entries(value).reverse())
       : value,
   );
-  assert.equal(serverModelBundle({ families, pricingRevision, routes, models: [reordered] }).id, bundle.id);
+  assert.equal(
+    serverModelBundle({
+      families,
+      pricingRevision,
+      routes,
+      models: [reordered],
+    }).id,
+    bundle.id,
+  );
   const stored = JSON.parse(JSON.stringify(bundle), (key, value) =>
     value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).reverse())
@@ -238,7 +281,12 @@ test('server bundle id is the hash of its content and stored copies verify again
   const repriced = structuredClone(stored);
   repriced.models[0].rates[0].usdPerMillionTokens.input = 1;
   assert.throws(() => verifyServerModelBundle(bundle.id, repriced), /Untrusted model bundle/);
-  const rehashed = serverModelBundle({ models: repriced.models, routes, pricingRevision, families });
+  const rehashed = serverModelBundle({
+    models: repriced.models,
+    routes,
+    pricingRevision,
+    families,
+  });
   assert.notEqual(rehashed.id, bundle.id);
   assert.throws(() => verifyServerModelBundle(bundle.id, rehashed), /Untrusted model bundle/);
   assert.throws(() => verifyServerModelBundle(rehashed.id, { ...repriced, id: rehashed.id }), /Untrusted model bundle/);

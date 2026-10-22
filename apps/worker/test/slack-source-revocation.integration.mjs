@@ -12,14 +12,14 @@ import { createConversationActivities } from '../dist/conversation-activities.js
 import { createTableWithRows, tableDefinition, textField, textValues } from '../../../packages/tables/test/fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { anthropicChat } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 for (const decisionKind of ['tool', 'answer'])
   test(`revoked current-turn read fences dependent ${decisionKind} after model dispatch`, async () => {
     const f = await promptFixture(),
       nativeFetch = fetch,
       oldKey = process.env.ANTHROPIC_API_KEY;
-    let restoreFamilies;
+    let restoreCatalog;
     let calls = 0,
       resource,
       revision;
@@ -73,7 +73,7 @@ for (const decisionKind of ['tool', 'answer'])
       await createSlackDirectMessages({ ...f.options, modelFamilyId: 'claude-sonnet' }).discover(f.workspace.id);
       const [work] = await createConversationExecutor(f.runtime).due(f.workspace.id);
       process.env.ANTHROPIC_API_KEY = 'synthetic';
-      restoreFamilies = useModelFamilies();
+      restoreCatalog = useModelCatalog();
       globalThis.fetch = (url, init) =>
         String(url).startsWith('https://api.anthropic.com/')
           ? nativeFetch(`http://127.0.0.1:${server.address().port}`, init)
@@ -105,7 +105,7 @@ for (const decisionKind of ['tool', 'answer'])
       );
     } finally {
       release.resolve();
-      restoreFamilies?.();
+      restoreCatalog?.();
       globalThis.fetch = nativeFetch;
       if (oldKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = oldKey;

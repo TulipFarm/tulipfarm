@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { z } from 'zod';
+import { loadModelCatalog } from '@tulipfarm/config';
 
 const positivePicoUsd = z.string().regex(/^[1-9]\d{0,29}$/);
 const configurationSchema = z.object({
@@ -15,11 +16,14 @@ const configurationSchema = z.object({
   periodSeconds: z.coerce.number().int().min(1).max(31_536_000),
 });
 
+/** Recommendations run when a RECOMMENDATION_ setting is set and the model catalog has a recommendation model. */
 export function recommendationConfiguration(env: NodeJS.ProcessEnv = process.env) {
   if (!Object.keys(env).some(key => key.startsWith('RECOMMENDATION_') && env[key])) return null;
+  const family = loadModelCatalog(env).role('recommendation')?.id;
+  if (!family) return null;
   const result = configurationSchema.safeParse({
     databaseUrl: env.RECOMMENDATION_DATABASE_URL,
-    family: env.RECOMMENDATION_MODEL_FAMILY,
+    family,
     inputBytes: env.RECOMMENDATION_MAX_INPUT_BYTES,
     outputTokens: env.RECOMMENDATION_MAX_OUTPUT_TOKENS,
     timeoutMs: env.RECOMMENDATION_TIMEOUT_MS,

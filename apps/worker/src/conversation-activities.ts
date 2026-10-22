@@ -21,6 +21,7 @@ import { mergeSources } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import {
+  chatReplyModel,
   conversationFamilyPaused,
   conversationModel,
   roleModel,
@@ -113,7 +114,7 @@ export function meteredReply(
           pausedFamilyReplacement(tx, model, conversationFamilyPaused),
         )
       : null;
-    const chat = conversationModel(replacement ?? model);
+    const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const title = generateTitle ? chatTitleModel() : undefined;

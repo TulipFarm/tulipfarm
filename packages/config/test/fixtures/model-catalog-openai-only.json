@@ -1,39 +1,26 @@
 {
-  "families": [
+  "$schema": "https://tulipfarm.ai/schemas/model-catalog.v1.json",
+  "version": 1,
+  "models": [
     {
       "id": "openai-mini",
       "name": "OpenAI Mini",
       "vendor": "openai",
-      "currentModelId": "openai-mini-1",
-      "modelIds": ["openai-mini-1"],
+      "routes": [
+        {
+          "provider": "azure",
+          "model": "gpt-6-luna"
+        }
+      ],
       "roles": ["title", "heartbeat", "public-guide"],
-      "capabilities": {
-        "reasoningOffForTools": true
-      }
-    },
-    {
-      "id": "openai-main",
-      "name": "OpenAI Main",
-      "vendor": "openai",
-      "currentModelId": "openai-main-1",
-      "modelIds": ["openai-main-1"],
-      "roles": ["default-chat", "review", "plan"],
-      "capabilities": {
-        "reasoningOffForTools": true
-      }
-    }
-  ],
-  "models": [
-    {
-      "id": "openai-mini-1",
-      "name": "OpenAI Mini 1",
-      "provider": "azure",
-      "providerModelId": "gpt-6-luna",
-      "metadata": {
-        "max_input_tokens": 922000,
-        "max_output_tokens": 128000
+      "limits": {
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000
       },
-      "rates": [
+      "capabilities": {
+        "reasoningOffForTools": true
+      },
+      "pricing": [
         {
           "validFrom": null,
           "validUntilExclusive": null,
@@ -59,15 +46,25 @@
       ]
     },
     {
-      "id": "openai-main-1",
-      "name": "OpenAI Main 1",
-      "provider": "azure",
-      "providerModelId": "gpt-6-sol",
-      "metadata": {
-        "max_input_tokens": 922000,
-        "max_output_tokens": 128000
+      "id": "openai-main",
+      "name": "OpenAI Main",
+      "vendor": "openai",
+      "routes": [
+        {
+          "provider": "azure",
+          "model": "gpt-6-sol"
+        }
+      ],
+      "default": true,
+      "roles": ["review", "plan"],
+      "limits": {
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000
       },
-      "rates": [
+      "capabilities": {
+        "reasoningOffForTools": true
+      },
+      "pricing": [
         {
           "validFrom": null,
           "validUntilExclusive": null,

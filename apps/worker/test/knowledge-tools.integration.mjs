@@ -14,7 +14,7 @@ import {
   anthropicText,
   isTitleRequest,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 const respond = decision => Response.json(anthropicChat(decision));
 
@@ -26,7 +26,7 @@ async function knowledgeFixture(t) {
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   const bytes = new Map();
   const local = createLocalKnowledge({
     runtime: f.runtime,

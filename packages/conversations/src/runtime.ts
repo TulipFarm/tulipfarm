@@ -1,3 +1,4 @@
+import { loadModelCatalog } from '@tulipfarm/config';
 import { randomUUID } from 'node:crypto';
 import { recordConversationActivity } from './activity.ts';
 import { createConversationRequests } from './requests.ts';
@@ -22,13 +23,7 @@ import {
   type createWorkspaceRuntime,
   commonCompatibility,
 } from '@tulipfarm/workspace-storage/runtime';
-import {
-  chatToolCallLimit,
-  defaultConversationModel,
-  toolReceiptSchema,
-  turnStatusSchema,
-  timeZoneSchema,
-} from './contracts.ts';
+import { chatToolCallLimit, toolReceiptSchema, turnStatusSchema, timeZoneSchema } from './contracts.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
 import { notifyConversationChange, notifyConversationTool } from './event-publisher.ts';
 import {
@@ -277,6 +272,21 @@ const modelFailureSchema = z.enum([
   'model-transport',
   'model-provider-error',
 ]);
+type ModelFailure = z.infer<typeof modelFailureSchema>;
+// A retry repeats the same request, so failures caused by the model's setup or the request itself end the turn.
+const terminalModelFailures = new Set<ModelFailure>([
+  'model-configuration',
+  'model-authentication',
+  'model-permission',
+  'model-quota',
+  'model-invalid-request',
+  'model-refusal',
+  'model-incomplete-response',
+]);
+export const modelFailureEndsTurn = (failure: string) => {
+  const parsed = modelFailureSchema.safeParse(failure);
+  return parsed.success && terminalModelFailures.has(parsed.data);
+};
 
 export async function renewConversationReplyLease(
   tx: AuthorizationTransaction,
@@ -1343,7 +1353,7 @@ export function createConversationExecutor(
                 );
           return {
             personalMemory,
-            model: turn.responder === 'reverse-text-v1' ? defaultConversationModel : turn.responder,
+            model: turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder,
             currentMessage,
             messages,
             fileReferences: loadedReferences,
@@ -2139,7 +2149,7 @@ export function createConversationExecutor(
   async function fail(
     value: unknown,
     creditFailure = false,
-    modelFailure?: z.infer<typeof modelFailureSchema>,
+    modelFailure?: ModelFailure,
     denied = false,
     planningFailure?: 'plan-budget',
   ): Promise<'retry' | 'failed' | 'stale'> {
@@ -2161,7 +2171,7 @@ export function createConversationExecutor(
         creditFailure ||
         denied ||
         planningFailure !== undefined ||
-        modelFailure === 'model-incomplete-response' ||
+        (modelFailure !== undefined && terminalModelFailures.has(modelFailure)) ||
         turn.attempts >= 5;
       await tx.client.query(
         `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, lease_until = NULL, error_code = $3, generation = generation + 1, retry_at = CASE WHEN $2 = 'queued' THEN clock_timestamp() + $4 * interval '1 second' ELSE NULL END WHERE id = $1`,

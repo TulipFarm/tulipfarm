@@ -12,6 +12,9 @@ import { registerViewer } from '../src/viewer.ts';
 import { registerSecurity } from '../src/security.ts';
 import { authConfig } from '../src/auth.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 const originalDatabaseURL = process.env.DATABASE_URL;
 const database = `auth_test_${randomUUID().replaceAll('-', '')}`;
 const adminURL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgresql://postgres:local-postgres@127.0.0.1:5432/postgres';
@@ -51,7 +54,7 @@ test('direct auth and HTTP reject unverified challenges without storing or deliv
   const sent = [];
   const auth = createAuth(pool, async message => sent.push(message));
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json({ success: false }));
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   const email = `rejected-${randomUUID()}@example.com`;
   try {
     for (const token of [null, 'invalid-token']) {
@@ -253,7 +256,7 @@ test('HTTP auth durably queues encrypted email and enforces origin checks', asyn
   const keys = { keyId: 'auth-test', key: randomBytes(32), previous: new Map() };
   process.env.EMAIL_DELIVERY_KEY_ID = keys.keyId;
   process.env.EMAIL_DELIVERY_KEY = keys.key.toString('hex');
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
   });
@@ -396,7 +399,7 @@ test('the per-recipient auth email limit is shared by Gmail aliases', async t =>
   t.mock.method(globalThis, 'fetch', async () =>
     Response.json({ success: true, hostname: 'localhost', action: 'sign_in' }),
   );
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   const local = `lim${randomUUID().replaceAll('-', '').slice(0, 12)}`;
   try {
     const addresses = [

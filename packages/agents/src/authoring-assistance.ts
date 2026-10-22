@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { currentMember, lockAuthorization, resolveHuman, uuidSchema, type HumanActor } from '@tulipfarm/access';
 import { calculateUsageCost, reserveModelCost, usageTokenCounts, type ResolvedModel } from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
-import { defaultChatModelFamilyId } from '@tulipfarm/config/model-catalog';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import {
   CreditsExhausted,
@@ -167,7 +166,8 @@ export function createAgentAuthoringAssistance(dependencies: {
     const familyId =
       (input.kind === 'improve' ? undefined : input.request.definition.modelFamilyId) ??
       dependencies.defaultFamilyId ??
-      defaultChatModelFamilyId;
+      environment?.defaultFamily;
+    if (!familyId) throw new AgentAuthoringError('model-family-unavailable');
     const authorized = await transaction(workspaceId, tx => authorize(workspaceId, tx, user, familyId, input));
     checkSignal(signal);
     const snapshotId = snapshot(input, authorized.resolution, authorized.procedures);

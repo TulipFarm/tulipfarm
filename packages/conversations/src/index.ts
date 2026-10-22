@@ -1,3 +1,4 @@
+import { loadModelCatalog } from '@tulipfarm/config';
 import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
@@ -393,7 +394,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
           );
         } else if (skill) await insertSkillPart(tx, chatId, input.messageId, ordinal, 'skill', skill);
       }
-      const responder = input.model;
+      const responder = input.model ?? loadModelCatalog().defaultModel.id;
       const turnId = randomUUID();
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''})`,

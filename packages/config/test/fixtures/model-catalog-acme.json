@@ -1,0 +1,70 @@
+{
+  "$schema": "https://tulipfarm.ai/schemas/model-catalog.v1.json",
+  "version": 1,
+  "missingKeys": "skip",
+  "models": [
+    {
+      "id": "acme-chat",
+      "name": "Acme Chat",
+      "vendor": "acme",
+      "routes": [
+        {
+          "provider": "azure",
+          "model": "Acme-Chat-1"
+        }
+      ],
+      "default": true,
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      },
+      "capabilities": {
+        "api": "responses",
+        "toolChoice": "auto",
+        "responseModelAliases": ["Acme-Chat-1-2026-10-01"]
+      },
+      "pricing": [
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": null,
+          "usdPerMillionTokens": {
+            "input": 0.5,
+            "output": 1.5,
+            "cacheRead": 0.05,
+            "cacheWrite5m": 0.625
+          }
+        }
+      ]
+    },
+    {
+      "id": "claude-haiku",
+      "name": "Claude Haiku (operator)",
+      "vendor": "anthropic",
+      "routes": [
+        {
+          "provider": "anthropic",
+          "model": "claude-haiku-4-5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "pricing": [
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": null,
+          "usdPerMillionTokens": {
+            "input": 1,
+            "output": 5,
+            "cacheRead": 0.1,
+            "cacheWrite5m": 1.25,
+            "cacheWrite1h": 2
+          }
+        }
+      ]
+    }
+  ]
+}
