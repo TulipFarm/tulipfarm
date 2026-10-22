@@ -1225,6 +1225,16 @@ export function recordChatRequestSizes(sizes: Partial<Record<(typeof chatRequest
   log('info', 'inference', 'call_completed', { operation: 'chat.request-size', ...attributes });
 }
 
+export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error';
+/** One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran. */
+export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_completion_checks')
+    .add(1, { ...dimensions, outcome });
+  log('info', 'inference', 'call_completed', { operation: 'chat.completion-check', outcome });
+}
+
 export function recordChatDiscovery(counts: { offered: number; loaded: number; added: number; matched: number }) {
   const state = chatMeasurement.getStore();
   if (!state) return;

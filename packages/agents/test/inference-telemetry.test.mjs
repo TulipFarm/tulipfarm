@@ -67,7 +67,7 @@ test('provider inference telemetry covers body consumption, usage, returned erro
         assert.equal(await inferText(nativeRoutes[format], messages), answer.text);
         assert.equal(await inferWithSystem(nativeRoutes[format], 'PRIVATE SYSTEM', messages), answer.text);
         assert.deepEqual(await inferWithTools(nativeRoutes[format], messages, noTools), { text: answer.text });
-        for (const span of finished().slice(-5)) {
+        for (const span of finished().slice(-4)) {
           assert.equal(span.attributes['gen_ai.provider.name'], nativeRoutes[format].provider);
           assert.equal(span.attributes['gen_ai.request.model'], nativeRoutes[format].model);
           assert.equal(span.attributes['gen_ai.usage.input_tokens'], 13);
@@ -317,7 +317,7 @@ test('provider inference telemetry covers body consumption, usage, returned erro
     });
     await t.test('a truncated title marks an error without changing the existing partial-title result', async t => {
       const truncated = { ...nativeReply('anthropic', { text: 'Partial title' }), stop_reason: 'max_tokens' };
-      const replies = [nativeReply('azure', { text: 'Ready.' }), completionReply('azure'), truncated];
+      const replies = [nativeReply('azure', { text: 'Ready.' }), truncated];
       t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
       assert.deepEqual(
         await inferWithTools(nativeRoutes.azure, messages, noTools, undefined, true, null, {
@@ -447,7 +447,6 @@ test('provider inference telemetry covers body consumption, usage, returned erro
       const sent = [];
       t.mock.method(globalThis, 'fetch', async (_url, init) => {
         sent.push(init.body);
-        if (sent.length > 1) return Response.json(completionReply('azure'));
         fetching.release();
         await headers.promise;
         return { ok: true, status: 200, headers: new Headers(), json: () => body.promise };
@@ -497,18 +496,20 @@ test('provider inference telemetry covers body consumption, usage, returned erro
       );
       settlement.release();
       assert.deepEqual(await pending, { text: answer.text });
-      assert.equal(details('provider').length, 2);
-      assert.equal(details('settle').length, 2);
+      assert.equal(sent.length, 1, 'a tool-free answer skips the completion check');
+      assert.equal(details('provider').length, 1);
+      assert.equal(details('settle').length, 1);
       assert.deepEqual(
         details('request').map(span => [span.attributes['chat.purpose'], span.attributes['chat.request.sequence']]),
-        [
-          ['reply', 1],
-          ['completion', 2],
-        ],
+        [['reply', 1]],
+      );
+      assert.equal(
+        detailLogs.filter(record => record.operation === 'chat.completion-check').at(-1).outcome,
+        'skipped_no_tools',
       );
       const sizes = detailLogs
         .filter(record => record.operation === 'chat.request-size' && record['chat.request.wire_bytes'] !== undefined)
-        .slice(-2);
+        .slice(-1);
       assert.deepEqual(
         sizes.map(record => record['chat.request.wire_bytes']),
         sent.map(value => Buffer.byteLength(value)),

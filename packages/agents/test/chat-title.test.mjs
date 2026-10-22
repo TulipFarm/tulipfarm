@@ -66,11 +66,11 @@ for (const format of formats)
     assert.doesNotMatch(context, /Hello|Hi\.|Here are your resources/);
 
     requests.length = 0;
-    replies.push(nativeReply(format, { text: 'Here are your resources.' }), completionReply(format));
+    replies.push(nativeReply(format, { text: 'Here are your resources.' }));
     assert.deepEqual(await inferWithTools(route, messages, () => assert.fail('No tool expected')), {
       text: 'Here are your resources.',
     });
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 1, 'a tool-free answer skips the completion check and the title');
   });
 
 for (const format of formats)
@@ -182,14 +182,13 @@ test('a separate title route sends and meters the title request with that model'
     attempts.map(({ step, provider, model, maxOutputTokens }) => ({ step, provider, model, maxOutputTokens })),
     [
       { step: 0, provider: 'azure', model: 'gpt-6-astra', maxOutputTokens: 4096 },
-      { step: 1, provider: 'azure', model: 'gpt-6-astra', maxOutputTokens: 4096 },
-      { step: 2, provider: 'anthropic', model: 'claude-haiku-synthetic', maxOutputTokens: 256 },
+      { step: 1, provider: 'anthropic', model: 'claude-haiku-synthetic', maxOutputTokens: 256 },
     ],
   );
-  assert.match(requests[2].url, /api\.anthropic\.com/);
-  assert.equal(requests[2].body.model, 'claude-haiku-synthetic');
-  assert.equal(requests[2].body.max_tokens, 256);
-  assert.ok(JSON.stringify(requests[2].body.system).includes(JSON.stringify(titleSystemPrompt).slice(1, -1)));
+  assert.match(requests[1].url, /api\.anthropic\.com/);
+  assert.equal(requests[1].body.model, 'claude-haiku-synthetic');
+  assert.equal(requests[1].body.max_tokens, 256);
+  assert.ok(JSON.stringify(requests[1].body.system).includes(JSON.stringify(titleSystemPrompt).slice(1, -1)));
 });
 
 test('title mistakes do not discard the answer and long Unicode titles truncate at whole characters', async t => {
