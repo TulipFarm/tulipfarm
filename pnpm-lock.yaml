@@ -404,9 +404,6 @@ importers:
       reicon-react:
         specifier: 1.2.5
         version: 1.2.5(react@19.3.0)
-      thinking-orbs:
-        specifier: 0.3.2
-        version: 0.3.2(react@19.3.0)
       three:
         specifier: 0.186.1
         version: 0.186.1
