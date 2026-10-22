@@ -104,22 +104,19 @@ test('invite chips add members and invite them without sending real mail', { tim
       'jenny@example.test',
     ]);
     assert.equal(await dialog.getByRole('combobox', { name: 'Workspace member' }).count(), 0, 'no member picker');
-    assert.equal(await dialog.getByRole('button', { name: 'Pause movement' }).count(), 0, 'reduced motion hides pause');
+    assert.equal(await dialog.getByRole('button', { name: /movement/ }).count(), 0, 'no pause control');
     const still = await transform();
     await delay(1800);
     assert.equal(await transform(), still, 'reduced motion stays still');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await dialog.getByRole('button', { name: 'Pause movement' }).waitFor();
     await page.waitForFunction(start => {
       const cursor = document.querySelector('.invite-canvas [data-slot="presence-cursor"]');
       return getComputedStyle(cursor).transform !== start;
     }, still);
-    await dialog.getByRole('button', { name: 'Pause movement' }).click();
-    await delay(400);
-    const paused = await transform();
+    await delay(5000);
+    const settled = await transform();
     await delay(1800);
-    assert.equal(await transform(), paused, 'pause stops motion');
-    await dialog.getByRole('button', { name: 'Resume movement' }).click();
+    assert.equal(await transform(), settled, 'motion stops within five seconds');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const positions = await cursors.evaluateAll(people => people.map(person => person.getBoundingClientRect().x));
     assert.ok(new Set(positions).size > 3, 'people are scattered');

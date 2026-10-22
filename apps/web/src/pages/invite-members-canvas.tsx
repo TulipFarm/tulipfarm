@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Pause, Play } from 'lucide-react';
 import type { GovernanceSnapshot } from '@tulipfarm/workspaces/governance-contracts';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
-import { Button } from '@tulipfarm/sprout/button';
 import { PresenceCursor } from '@tulipfarm/sprout/presence-cursor';
 import { hash } from '@/lib/hash';
 import type { RecipientRow } from '@/lib/invitation-batch';
@@ -17,8 +15,10 @@ const visible = 12;
 /** Room kept free right of and below each arrow tip for its tag. */
 const tag = { width: 200, height: 44 };
 const drift = 20;
+/** Motion stops before 5s (WCAG 2.2.2), so the board needs no pause control. */
+const wanderFor = 4800;
 
-function useMotionAllowed(paused: boolean) {
+function useMotionAllowed() {
   const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [hidden, setHidden] = useState(() => document.hidden);
   useEffect(() => {
@@ -32,10 +32,10 @@ function useMotionAllowed(paused: boolean) {
       document.removeEventListener('visibilitychange', visibility);
     };
   }, []);
-  return { reduced, moving: !paused && !reduced && !hidden };
+  return !reduced && !hidden;
 }
 
-/** Nudges every cursor to a nearby spot every 1.6s while motion is allowed. */
+/** Nudges every cursor to a nearby spot every 1.6s for a short burst whenever the people change. */
 function useWander(ids: string[], moving: boolean) {
   const [offsets, setOffsets] = useState<Record<string, { x: number; y: number }>>({});
   const key = ids.join('\0');
@@ -60,7 +60,11 @@ function useWander(ids: string[], moving: boolean) {
         ),
       1600,
     );
-    return () => window.clearInterval(id);
+    const stop = window.setTimeout(() => window.clearInterval(id), wanderFor);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(stop);
+    };
   }, [key, moving]);
   return offsets;
 }
@@ -99,7 +103,6 @@ export function InviteMembersCanvas({
   recipients: string[];
   rows: RecipientRow[];
 }) {
-  const [paused, setPaused] = useState(false);
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const sample = useMemo(
     () =>
@@ -113,7 +116,7 @@ export function InviteMembersCanvas({
   const emails = [...new Set([...recipients, ...rows.map(row => row.email)])];
   const shown = emails.slice(0, visible - sample.length);
   const count = sample.length + shown.length;
-  const { reduced, moving } = useMotionAllowed(paused);
+  const moving = useMotionAllowed();
   const offsets = useWander([...sample.map(member => member.id), ...shown], moving && count > 0);
   const place = (id: string, index: number) => {
     const base = spot(id, index, count, size);
@@ -132,19 +135,7 @@ export function InviteMembersCanvas({
   const invited = shown.map((email, index) => ({ id: email, name: email, ...place(email, sample.length + index) }));
   return (
     <aside className="invite-canvas" aria-label="Member canvas">
-      <header className="flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium">Your workspace, together</h3>
-        {count > 0 && !reduced && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={paused ? 'Resume movement' : 'Pause movement'}
-            onClick={() => setPaused(value => !value)}
-          >
-            {paused ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
-          </Button>
-        )}
-      </header>
+      <h3 className="text-sm font-medium">Your workspace, together</h3>
       <p className="sr-only">An illustration of your team, not live online activity.</p>
       <div
         className="invite-board"
