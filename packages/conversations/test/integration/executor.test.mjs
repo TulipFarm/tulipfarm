@@ -164,6 +164,32 @@ test('exhausted provider failures retain a safe diagnostic reason in history', a
   }
 });
 
+test('a deployment that does not exist ends the turn on its first failure', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Hello' }],
+    });
+    let calls = 0;
+    const executor = createConversationExecutor(f.runtime, async () => {
+      calls++;
+      throw new Error('model-configuration');
+    });
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    assert.equal(await executor.process(work), 'failed');
+    assert.deepEqual(await executor.due(w.id), []);
+    assert.equal(calls, 1);
+    assert.equal((await f.store.history(w.id, w.userId, chatId)).messages[0].turn.errorCode, 'model-configuration');
+  } finally {
+    await f.close();
+  }
+});
+
 test('unfinished replies stop automatic retries and permit explicit recovery with the same turn', async () => {
   const f = await conversationFixture();
   try {

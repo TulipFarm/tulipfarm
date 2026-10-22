@@ -139,6 +139,7 @@ try {
       'model-quota',
       'The model provider has no available quota. Select another model and send a new message, or contact your workspace administrator.',
     ],
+    ['model-configuration', "This model isn't available. Select another model and send your message again."],
     [
       'model-provider-error',
       'The model provider could not complete the reply. Retry uses the original model. To use another model, select it and send a new message. Check any tool activity before requesting another action.',

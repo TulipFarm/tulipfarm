@@ -35,6 +35,9 @@ One version identifies all apps and images of a release.
 
 - New chats use the configured default model; the default model setting was
   previously ignored for them.
+- A reply on a model that can't serve it, for example a deployment that
+  doesn't exist, a rejected key or no quota, now fails at once instead of
+  retrying for over a minute. Busy or unavailable providers still retry.
 
 ### Added
 
