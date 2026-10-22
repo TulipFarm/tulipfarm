@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { observeChatDetail, observeWorkspaceConnection } from '@tulipfarm/observability';
+import { observeChatDetail, observeChatTransaction, observeWorkspaceConnection } from '@tulipfarm/observability';
 import { commonTables, qualified, workspaceIdSchema, workspaceNames } from './names.ts';
 import { inTransaction, resetClient, type SqlClient } from './transactions.ts';
 
@@ -302,7 +302,20 @@ export function createWorkspaceRuntime(
     entry.idleSince = Date.now();
   }
 
-  async function transaction<T>(
+  function transaction<T>(
+    workspaceIdInput: string,
+    compatibility: { minimum: number; maximum: number; access?: 'exclusive'; deadlineAt?: number },
+    operation: (transaction: {
+      client: SqlClient;
+      schema: string;
+      workspaceId: string;
+      commonVersion: number;
+    }) => Promise<T>,
+  ): Promise<T> {
+    return observeChatTransaction(() => runTransaction(workspaceIdInput, compatibility, operation));
+  }
+
+  async function runTransaction<T>(
     workspaceIdInput: string,
     compatibility: { minimum: number; maximum: number; access?: 'exclusive'; deadlineAt?: number },
     operation: (transaction: {

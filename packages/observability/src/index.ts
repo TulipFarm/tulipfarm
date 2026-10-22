@@ -1065,6 +1065,9 @@ export type ChatDetailPhase =
   | 'request'
   | 'resume'
   | 'requester'
+  | 'reply-start'
+  | 'checkpoint'
+  | 'credit-top-up'
   | 'publisher-close'
   | 'history'
   | 'render'
@@ -1098,12 +1101,51 @@ export type ChatDetailPhase =
   | 'storage-reset'
   | 'credit-account-lock'
   | 'credit-usage-lock';
-type ChatMeasurement = { counter: { value: number }; purpose: ChatModelPurpose | 'turn'; sequence?: number };
+type ChatDatabase = { transactions: number; milliseconds: number };
+type ChatMeasurement = {
+  counter: { value: number };
+  database: ChatDatabase;
+  purpose: ChatModelPurpose | 'turn';
+  sequence?: number;
+};
 const chatMeasurement = new AsyncLocalStorage<ChatMeasurement>();
 
+/** Measures one reply attempt. When it ends, it records how many database transactions it ran and their total time. */
 export function withChatMeasurements<T>(call: () => Promise<T>): Promise<T> {
   if (chatMeasurement.getStore()) return call();
-  return chatMeasurement.run({ counter: { value: 0 }, purpose: 'turn' }, call);
+  const database: ChatDatabase = { transactions: 0, milliseconds: 0 };
+  return chatMeasurement.run({ counter: { value: 0 }, database, purpose: 'turn' }, async () => {
+    try {
+      return await call();
+    } finally {
+      recordChatDatabase(database);
+    }
+  });
+}
+
+function recordChatDatabase(database: ChatDatabase) {
+  if (!database.transactions) return;
+  const meter = metrics.getMeter(scope);
+  meter.createHistogram('cloud_chat_db_transactions').record(database.transactions, dimensions);
+  meter.createHistogram('cloud_chat_db_duration', { unit: 's' }).record(database.milliseconds / 1000, dimensions);
+  log('info', 'activity', 'call_completed', {
+    operation: 'chat.database',
+    'db.transactions': database.transactions,
+    duration_ms: database.milliseconds,
+  });
+}
+
+/** Counts one database transaction, including its wait for a connection, toward the current reply's totals. */
+export async function observeChatTransaction<T>(call: () => Promise<T>): Promise<T> {
+  const state = chatMeasurement.getStore();
+  if (!state) return call();
+  const start = performance.now();
+  try {
+    return await call();
+  } finally {
+    state.database.transactions++;
+    state.database.milliseconds += performance.now() - start;
+  }
 }
 
 function chatDetailAttributes(state: ChatMeasurement): Attributes {
@@ -1182,20 +1224,23 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
 export function withChatModelRequest<T>(purpose: ChatModelPurpose, call: () => Promise<T>): Promise<T> {
   const state = chatMeasurement.getStore();
   if (!state) return call();
-  return chatMeasurement.run({ counter: state.counter, purpose, sequence: ++state.counter.value }, async () => {
-    let outcome = 'success';
-    try {
-      return await observeChatDetail('request', call);
-    } catch (error) {
-      outcome = 'error';
-      throw error;
-    } finally {
-      metrics
-        .getMeter(scope)
-        .createCounter('cloud_chat_model_requests')
-        .add(1, { ...dimensions, purpose, outcome });
-    }
-  });
+  return chatMeasurement.run(
+    { counter: state.counter, database: state.database, purpose, sequence: ++state.counter.value },
+    async () => {
+      let outcome = 'success';
+      try {
+        return await observeChatDetail('request', call);
+      } catch (error) {
+        outcome = 'error';
+        throw error;
+      } finally {
+        metrics
+          .getMeter(scope)
+          .createCounter('cloud_chat_model_requests')
+          .add(1, { ...dimensions, purpose, outcome });
+      }
+    },
+  );
 }
 
 const chatRequestComponents = [
