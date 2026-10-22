@@ -28,6 +28,30 @@ const systemVariables = new Set(['PATH', 'HOME']);
 // Reads whose variable name is computed. Each entry lists every name the file can read,
 // and the number of computed reads, so a new computed read needs review here.
 const computedReads = {
+  // Startup log: checks whether any provider setting is present, to tell missing from invalid.
+  'apps/api/src/integration-status.ts': {
+    sites: 1,
+    names: [
+      'GOOGLE_WORKSPACE_CLIENT_ID',
+      'GOOGLE_WORKSPACE_CLIENT_SECRET',
+      'GOOGLE_WORKSPACE_REDIRECT_URI',
+      'GITHUB_OAUTH_CLIENT_ID',
+      'GITHUB_OAUTH_CLIENT_SECRET',
+      'GITHUB_OAUTH_REDIRECT_URI',
+      'GITHUB_OAUTH_SCOPES',
+      'ATLASSIAN_MCP_CLIENT_ID',
+      'ATLASSIAN_MCP_CLIENT_SECRET',
+      'ATLASSIAN_MCP_REDIRECT_URI',
+      'ATLASSIAN_REST_CLIENT_ID',
+      'ATLASSIAN_REST_CLIENT_SECRET',
+      'ATLASSIAN_REST_REDIRECT_URI',
+      'TRELLO_CLIENT_ID',
+      'TRELLO_CLIENT_SECRET',
+      'TRELLO_REDIRECT_URI',
+      'SLACK_CONFIGURATION',
+      'SLACK_CREDENTIAL_KEYS',
+    ],
+  },
   // Guards that refuse maintenance credentials name declared variables but read none.
   'apps/api/src/storage-composition.ts': { sites: 1, names: [] },
   'apps/api/src/workspace-mcp-composition.ts': {
