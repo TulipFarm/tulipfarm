@@ -75,6 +75,11 @@ import {
   observeChatDetail,
   observeChatDetailSync,
   withChatMeasurements,
+  chatReplyFinal,
+  chatReplyMeasured,
+  guardChatReplyFinal,
+  noteChatReplyFinal,
+  observeChatTool,
   telemetryErrorCode,
   toolFailureLogged,
 } from '@tulipfarm/observability';
@@ -306,13 +311,62 @@ export async function renewConversationReplyLease(
   if (!renewed.rowCount) throw new AccessDenied();
 }
 
-const changed = (tx: AuthorizationTransaction, work: ReplyWork, settled = false) =>
-  notifyConversationChange(tx, {
+const replyTimingSchema = z.object({
+  status: z.enum(['completed', 'failed', 'blocked', 'cancelled']),
+  timing_started_at: z.date(),
+  timing_claimed_at: z.date().nullable(),
+  timing_finished_at: z.date(),
+  timing_first_text_seconds: z.number().nullable(),
+  timing_human_wait_seconds: z.number(),
+  timing_external_wait_seconds: z.number(),
+  timing_inactive_seconds: z.number(),
+  timing_attempts: z.number().int(),
+});
+
+/** Notes the reply's final timing for `cloud_chat_reply_duration`; the timing trigger has already run in this transaction. */
+async function noteReplyTiming(
+  tx: AuthorizationTransaction,
+  turnId: string,
+  statuses: readonly string[] = ['completed', 'failed', 'blocked', 'cancelled'],
+) {
+  if (!chatReplyMeasured()) return;
+  const row = replyTimingSchema.optional().parse(
+    (
+      await tx.client.query(
+        `SELECT status,timing_started_at,timing_claimed_at,timing_finished_at,timing_first_text_seconds,
+          timing_human_wait_seconds,timing_external_wait_seconds,timing_inactive_seconds,timing_attempts
+        FROM ${table(tx, 'tf_conversation_turns')}
+        WHERE id=$1 AND status=ANY($2::text[])
+          AND timing_started_at IS NOT NULL AND timing_finished_at IS NOT NULL`,
+        [turnId, statuses],
+      )
+    ).rows[0],
+  );
+  if (!row) return;
+  noteChatReplyFinal(
+    chatReplyFinal({
+      status: row.status,
+      startedAt: row.timing_started_at,
+      claimedAt: row.timing_claimed_at,
+      finishedAt: row.timing_finished_at,
+      firstTextSeconds: row.timing_first_text_seconds,
+      humanWaitSeconds: row.timing_human_wait_seconds,
+      externalWaitSeconds: row.timing_external_wait_seconds,
+      inactiveSeconds: row.timing_inactive_seconds,
+      attempts: row.timing_attempts,
+    }),
+  );
+}
+
+async function changed(tx: AuthorizationTransaction, work: ReplyWork, settled = false) {
+  await notifyConversationChange(tx, {
     workspaceId: work.workspaceId,
     conversationId: work.conversationId,
     turnId: work.turnId,
     settled,
   });
+  if (settled) await noteReplyTiming(tx, work.turnId);
+}
 
 async function failTurn(tx: AuthorizationTransaction, work: ReplyWork, code: string) {
   await tx.client.query(
@@ -349,10 +403,12 @@ export function createConversationExecutor(
   planning?: ConversationPlanning,
 ) {
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
-    return runtime.transaction(workspaceId, { minimum: 1, maximum: commonCompatibility.maximum }, async tx => {
-      await lockAuthorization(tx, resumeMcp ? 'write' : 'read');
-      return operation(bindFileSources(tx));
-    });
+    return guardChatReplyFinal(() =>
+      runtime.transaction(workspaceId, { minimum: 1, maximum: commonCompatibility.maximum }, async tx => {
+        await lockAuthorization(tx, resumeMcp ? 'write' : 'read');
+        return operation(bindFileSources(tx));
+      }),
+    );
   }
 
   const settlements = new Map<string, ReplySettlement>();
@@ -418,8 +474,10 @@ export function createConversationExecutor(
           [conversationId],
         );
         for (const row of blocked.rows) await interruptToolReceipts(tx, uuidSchema.parse(row.id), 'blocked');
-        if (blocked.rowCount)
+        if (blocked.rowCount) {
           await notifyConversationChange(tx, { workspaceId: work.workspaceId, conversationId, settled: true });
+          await noteReplyTiming(tx, turnId);
+        }
         return null;
       }
     try {
@@ -1756,7 +1814,7 @@ export function createConversationExecutor(
               };
               return { ...context, runtime: guardedRuntime };
             });
-            const result = await operation(context);
+            const result = await observeChatTool(() => operation(context));
             const mcp = mcpWaitSchema.safeParse(result);
             if (mcp.success) {
               if (!source.durable || mcp.data.result.actionId !== callId || name !== 'mcp.call')
@@ -1792,7 +1850,7 @@ export function createConversationExecutor(
           await guarded(tx => receipt(tx, 'running'));
           return await guarded(async (tx, context) => {
             await planning?.authorizeTool?.(tx, fence, name, callId);
-            const result = await operation(context);
+            const result = await observeChatTool(() => operation(context));
             await receipt(tx, 'completed');
             await saveOutput(tx, result);
             return result;
@@ -2195,211 +2253,228 @@ export function createConversationExecutor(
     });
   }
 
+  /** Only the API cancels a turn, so a run that lost its fence to a cancellation records it here. */
+  async function noteCancelled(fence: ReplyFence | null, result: string) {
+    if (!fence || result !== 'stale' || !chatReplyMeasured()) return;
+    await transaction(fence.workspaceId, tx => noteReplyTiming(tx, fence.turnId, ['cancelled'])).catch(() => undefined);
+  }
+
   async function process(value: unknown): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> {
-    return withChatMeasurements(() =>
-      observeChatDetail('turn', async (): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> => {
-        let fence: ReplyFence | null = null;
-        let stage: ReplyStage = 'resume';
-        try {
-          const work = replyWorkSchema.parse(value);
-          const resumed = await observeChatDetail(
-            'resume',
-            async (): Promise<'idle' | { finish: () => Promise<'completed' | 'stale' | 'retry'> } | undefined> => {
-              if (resumeMcp) {
-                const pending = await transaction(work.workspaceId, async tx => {
-                  const chat = await root(tx, work);
-                  if (!chat || chat.slack || chat.context) return null;
-                  const turn = await head(tx, work.conversationId);
-                  if (
-                    !turn ||
-                    turn.id !== work.turnId ||
-                    turn.generation !== work.generation ||
-                    turn.status !== 'waiting'
-                  )
-                    return null;
-                  return executionStepSchema
-                    .optional()
-                    .parse(
-                      (
-                        await tx.client.query(
-                          `SELECT s.*,c.tool,c.status FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=s.call_id WHERE s.turn_id=$1 AND c.tool='mcp.call' AND c.status='running'`,
-                          [work.turnId],
-                        )
-                      ).rows[0],
-                    );
-                });
-                if (pending) {
-                  const actor = await transaction(work.workspaceId, tx =>
-                    turnRequester(tx, work.conversationId, work.turnId),
-                  );
-                  const response = await resumeMcp(
-                    {
-                      runtime,
-                      workspaceId: work.workspaceId,
-                      actor,
-                      callId: pending.call_id,
-                      origin: { conversationId: work.conversationId, turnId: work.turnId, sources: pending.sources },
-                    },
-                    pending.call,
-                  );
-                  if (response.result.kind === 'waiting') return 'idle';
-                  await transaction(work.workspaceId, async tx => {
+    const reply = replyWorkSchema.safeParse(value);
+    return withChatMeasurements(
+      () =>
+        observeChatDetail('turn', async (): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> => {
+          let fence: ReplyFence | null = null;
+          let stage: ReplyStage = 'resume';
+          try {
+            const work = replyWorkSchema.parse(value);
+            const resumed = await observeChatDetail(
+              'resume',
+              async (): Promise<'idle' | { finish: () => Promise<'completed' | 'stale' | 'retry'> } | undefined> => {
+                if (resumeMcp) {
+                  const pending = await transaction(work.workspaceId, async tx => {
                     const chat = await root(tx, work);
+                    if (!chat || chat.slack || chat.context) return null;
                     const turn = await head(tx, work.conversationId);
                     if (
-                      !chat ||
                       !turn ||
                       turn.id !== work.turnId ||
                       turn.generation !== work.generation ||
                       turn.status !== 'waiting'
                     )
-                      throw new AccessDenied();
-                    await requireMcpSources(tx, actor, work.conversationId, [...pending.sources, ...response.sources]);
-                    await tx.client.query(
-                      `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
-                      [pending.call_id, JSON.stringify(response)],
-                    );
-                    await tx.client.query(
-                      `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
-                      [pending.call_id],
-                    );
-                    await tx.client.query(
-                      `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
-                      [work.turnId],
-                    );
-                    await changed(tx, work);
+                      return null;
+                    return executionStepSchema
+                      .optional()
+                      .parse(
+                        (
+                          await tx.client.query(
+                            `SELECT s.*,c.tool,c.status FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=s.call_id WHERE s.turn_id=$1 AND c.tool='mcp.call' AND c.status='running'`,
+                            [work.turnId],
+                          )
+                        ).rows[0],
+                      );
                   });
-                }
-              }
-              const waiting = await transaction(work.workspaceId, async tx => {
-                if (!(await root(tx, work))) return false;
-                return Boolean(
-                  (
-                    await tx.client.query(
-                      `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1 AND generation=$2 AND status='waiting' AND error_code='slack-action-waiting'`,
-                      [work.turnId, work.generation],
-                    )
-                  ).rowCount,
-                );
-              });
-              if (waiting) {
-                if (!resumeExternal) return 'idle';
-                const action = await resumeExternal(work.workspaceId, work.turnId);
-                if (['pending', 'retry', 'sending', 'approved'].includes(action.status)) return 'idle';
-                return {
-                  finish: () =>
-                    transaction(work.workspaceId, async tx => {
+                  if (pending) {
+                    const actor = await transaction(work.workspaceId, tx =>
+                      turnRequester(tx, work.conversationId, work.turnId),
+                    );
+                    const response = await resumeMcp(
+                      {
+                        runtime,
+                        workspaceId: work.workspaceId,
+                        actor,
+                        callId: pending.call_id,
+                        origin: { conversationId: work.conversationId, turnId: work.turnId, sources: pending.sources },
+                      },
+                      pending.call,
+                    );
+                    if (response.result.kind === 'waiting') return 'idle';
+                    await transaction(work.workspaceId, async tx => {
                       const chat = await root(tx, work);
-                      if (!chat) return 'stale';
                       const turn = await head(tx, work.conversationId);
                       if (
+                        !chat ||
                         !turn ||
                         turn.id !== work.turnId ||
-                        turn.status !== 'waiting' ||
-                        turn.generation !== work.generation
+                        turn.generation !== work.generation ||
+                        turn.status !== 'waiting'
                       )
-                        return 'stale';
+                        throw new AccessDenied();
+                      await requireMcpSources(tx, actor, work.conversationId, [
+                        ...pending.sources,
+                        ...response.sources,
+                      ]);
                       await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status=$2 WHERE id=$1 AND status='running'`,
-                        [action.id, action.status === 'sent' ? 'completed' : 'failed'],
+                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                        [pending.call_id, JSON.stringify(response)],
                       );
                       await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=jsonb_build_object('result',$2::jsonb,'sources',sources)
-            WHERE call_id=$1 AND output IS NULL`,
-                        [action.id, JSON.stringify({ provider: 'slack', id: action.id, status: action.status })],
-                      );
-                      const nextPlan = await planning?.finish?.(tx, { ...work, epoch: turn.attempt_epoch });
-                      if (nextPlan?.kind === 'continue') {
-                        await changed(tx, work, true);
-                        return 'retry';
-                      }
-                      const id = randomUUID();
-                      const text =
-                        nextPlan?.text ??
-                        (action.status === 'sent'
-                          ? 'Slack confirmed the requested action.'
-                          : `Slack action ${action.status}. No automatic resend will occur.`);
-                      await tx.client.query(
-                        `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id,conversation_id,sequence,author_kind) VALUES ($1,$2,$3,'assistant')`,
-                        [id, work.conversationId, chat.next_message_sequence],
+                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                        [pending.call_id],
                       );
                       await tx.client.query(
-                        `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id,message_id,ordinal,kind,text) VALUES ($1,$2,0,'text',$3)`,
-                        [work.conversationId, id, text],
+                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                        [work.turnId],
                       );
+                      await changed(tx, work);
+                    });
+                  }
+                }
+                const waiting = await transaction(work.workspaceId, async tx => {
+                  if (!(await root(tx, work))) return false;
+                  return Boolean(
+                    (
                       await tx.client.query(
-                        `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id,turn_id,message_id,sources) VALUES ($1,$2,$3,$4)`,
-                        [
-                          work.conversationId,
-                          work.turnId,
-                          id,
-                          JSON.stringify([{ kind: 'private-conversation', conversationId: work.conversationId }]),
-                        ],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2,error_code=NULL WHERE id=$1`,
-                        [work.turnId, id],
-                      );
-                      await tx.client.query(
-                        `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence=next_message_sequence+1,activity_at=clock_timestamp() WHERE id=$1`,
-                        [work.conversationId],
-                      );
-                      await recordConversationActivity(tx, work.conversationId);
-                      await changed(tx, work, true);
-                      const next = await head(tx, work.conversationId);
-                      if (next)
+                        `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1 AND generation=$2 AND status='waiting' AND error_code='slack-action-waiting'`,
+                        [work.turnId, work.generation],
+                      )
+                    ).rowCount,
+                  );
+                });
+                if (waiting) {
+                  if (!resumeExternal) return 'idle';
+                  const action = await resumeExternal(work.workspaceId, work.turnId);
+                  if (['pending', 'retry', 'sending', 'approved'].includes(action.status)) return 'idle';
+                  return {
+                    finish: () =>
+                      transaction(work.workspaceId, async tx => {
+                        const chat = await root(tx, work);
+                        if (!chat) return 'stale';
+                        const turn = await head(tx, work.conversationId);
+                        if (
+                          !turn ||
+                          turn.id !== work.turnId ||
+                          turn.status !== 'waiting' ||
+                          turn.generation !== work.generation
+                        )
+                          return 'stale';
                         await tx.client.query(
-                          `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id,conversation_id,generation) VALUES ($1,$2,$3) ON CONFLICT (turn_id,generation) DO UPDATE SET next_attempt_at=clock_timestamp(),dispatched_at=NULL`,
-                          [next.id, work.conversationId, next.generation],
+                          `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status=$2 WHERE id=$1 AND status='running'`,
+                          [action.id, action.status === 'sent' ? 'completed' : 'failed'],
                         );
-                      return 'completed';
-                    }),
-                };
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=jsonb_build_object('result',$2::jsonb,'sources',sources)
+            WHERE call_id=$1 AND output IS NULL`,
+                          [action.id, JSON.stringify({ provider: 'slack', id: action.id, status: action.status })],
+                        );
+                        const nextPlan = await planning?.finish?.(tx, { ...work, epoch: turn.attempt_epoch });
+                        if (nextPlan?.kind === 'continue') {
+                          await changed(tx, work, true);
+                          return 'retry';
+                        }
+                        const id = randomUUID();
+                        const text =
+                          nextPlan?.text ??
+                          (action.status === 'sent'
+                            ? 'Slack confirmed the requested action.'
+                            : `Slack action ${action.status}. No automatic resend will occur.`);
+                        await tx.client.query(
+                          `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id,conversation_id,sequence,author_kind) VALUES ($1,$2,$3,'assistant')`,
+                          [id, work.conversationId, chat.next_message_sequence],
+                        );
+                        await tx.client.query(
+                          `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id,message_id,ordinal,kind,text) VALUES ($1,$2,0,'text',$3)`,
+                          [work.conversationId, id, text],
+                        );
+                        await tx.client.query(
+                          `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id,turn_id,message_id,sources) VALUES ($1,$2,$3,$4)`,
+                          [
+                            work.conversationId,
+                            work.turnId,
+                            id,
+                            JSON.stringify([{ kind: 'private-conversation', conversationId: work.conversationId }]),
+                          ],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2,error_code=NULL WHERE id=$1`,
+                          [work.turnId, id],
+                        );
+                        await tx.client.query(
+                          `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence=next_message_sequence+1,activity_at=clock_timestamp() WHERE id=$1`,
+                          [work.conversationId],
+                        );
+                        await recordConversationActivity(tx, work.conversationId);
+                        await changed(tx, work, true);
+                        const next = await head(tx, work.conversationId);
+                        if (next)
+                          await tx.client.query(
+                            `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id,conversation_id,generation) VALUES ($1,$2,$3) ON CONFLICT (turn_id,generation) DO UPDATE SET next_attempt_at=clock_timestamp(),dispatched_at=NULL`,
+                            [next.id, work.conversationId, next.generation],
+                          );
+                        return 'completed';
+                      }),
+                  };
+                }
+                return undefined;
+              },
+            );
+            // Terminal Slack delivery already returned its transaction without entering the reply-recovery catch.
+            if (resumed !== undefined)
+              return typeof resumed === 'object' ? observeChatDetail('resume', resumed.finish) : resumed;
+            fence = await staged('claim', () => claim(value));
+            stage = 'prepare';
+            const result = fence ? await complete(fence) : 'idle';
+            await noteCancelled(fence, result);
+            return result;
+          } catch (error) {
+            if (error instanceof ExternalActionWaiting) return 'idle';
+            if (error instanceof CreditAttemptAlreadyDispatched) return 'stale';
+            const code = telemetryErrorCode(
+              typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined,
+            );
+            log('error', 'activity', 'call_failed', {
+              operation: 'conversation.reply',
+              'error.type': errorType(error),
+              ...(code ? { 'error.code': code } : {}),
+              'error.stage':
+                (typeof error === 'object' && error !== null ? failedStages.get(error) : undefined) ?? stage,
+              ...(error instanceof z.ZodError
+                ? { 'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`) }
+                : {}),
+            });
+            const modelFailure = modelFailureSchema.safeParse(error instanceof Error ? error.message : null);
+            const denied = error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable);
+            if (fence) {
+              try {
+                const result = await fail(
+                  fence,
+                  error instanceof CreditsExhausted,
+                  modelFailure.success ? modelFailure.data : undefined,
+                  denied,
+                  planning?.failure?.(error)?.code,
+                );
+                await noteCancelled(fence, result);
+                return result;
+              } catch {
+                throw new Error('conversation-reply-unavailable');
               }
-              return undefined;
-            },
-          );
-          // Terminal Slack delivery already returned its transaction without entering the reply-recovery catch.
-          if (resumed !== undefined)
-            return typeof resumed === 'object' ? observeChatDetail('resume', resumed.finish) : resumed;
-          fence = await staged('claim', () => claim(value));
-          stage = 'prepare';
-          return fence ? await complete(fence) : 'idle';
-        } catch (error) {
-          if (error instanceof ExternalActionWaiting) return 'idle';
-          if (error instanceof CreditAttemptAlreadyDispatched) return 'stale';
-          const code = telemetryErrorCode(
-            typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined,
-          );
-          log('error', 'activity', 'call_failed', {
-            operation: 'conversation.reply',
-            'error.type': errorType(error),
-            ...(code ? { 'error.code': code } : {}),
-            'error.stage': (typeof error === 'object' && error !== null ? failedStages.get(error) : undefined) ?? stage,
-            ...(error instanceof z.ZodError
-              ? { 'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`) }
-              : {}),
-          });
-          const modelFailure = modelFailureSchema.safeParse(error instanceof Error ? error.message : null);
-          const denied = error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable);
-          if (fence) {
-            try {
-              return await fail(
-                fence,
-                error instanceof CreditsExhausted,
-                modelFailure.success ? modelFailure.data : undefined,
-                denied,
-                planning?.failure?.(error)?.code,
-              );
-            } catch {
-              throw new Error('conversation-reply-unavailable');
             }
+            throw new Error('conversation-reply-unavailable');
+          } finally {
+            if (fence) await settleUnfinished(fence);
           }
-          throw new Error('conversation-reply-unavailable');
-        } finally {
-          if (fence) await settleUnfinished(fence);
-        }
-      }),
+        }),
+      reply.success ? reply.data.turnId : undefined,
     );
   }
 
