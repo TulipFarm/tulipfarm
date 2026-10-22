@@ -6,15 +6,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import { GlassBanner, GlassChip } from '@tulipfarm/sprout/glass-banner';
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemOverlayButton,
-  ItemTitle,
-} from '@/components/item';
+import { Card, CardAction, CardDescription, CardHeader, CardTitle } from '@tulipfarm/sprout/card';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -294,24 +286,24 @@ function Row({ app, statuses, onOpen }: { app: Integration; statuses: Statuses; 
         ? 'Set up'
         : null;
   return (
-    <Item variant="interactive">
-      <ItemMedia>
-        <BrandIcon brand={app.brand} />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>
-          <ItemOverlayButton onClick={onOpen}>{app.name}</ItemOverlayButton>
-        </ItemTitle>
-        <ItemDescription>{app.blurb}</ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <StatusBadge status={status} soon={app.provider === 'soon'} />
-        {label && (
-          <Button variant="outline" size="sm" aria-label={`${label} ${app.name}`} onClick={onOpen}>
-            {label}
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle>
+          <BrandIcon brand={app.brand} />{' '}
+          <Button variant="link" onClick={onOpen}>
+            {app.name}
           </Button>
-        )}
-      </ItemActions>
-    </Item>
+        </CardTitle>
+        <CardDescription>{app.blurb}</CardDescription>
+        <CardAction>
+          <StatusBadge status={status} soon={app.provider === 'soon'} />{' '}
+          {label && (
+            <Button variant="outline" size="sm" aria-label={`${label} ${app.name}`} onClick={onOpen}>
+              {label}
+            </Button>
+          )}
+        </CardAction>
+      </CardHeader>
+    </Card>
   );
 }
