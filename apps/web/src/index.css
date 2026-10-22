@@ -3,6 +3,7 @@
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/inter';
 @import '@tulipfarm/sprout/styles.css';
+@import '@tulipfarm/sprout/themes/tulipfarm.css';
 
 @custom-variant dark {
   &:where(.dark, .dark *) {
@@ -39,7 +40,7 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--sprout-font);
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
   --font-heading: var(--font-sans);
   --color-background: var(--background);
@@ -142,61 +143,60 @@
 
 :root {
   color-scheme: light dark;
-  --radius: 0.5rem;
-  --primary: #188038;
-  --primary-foreground: #ffffff;
-  --primary-hover: #146c2f;
-  --primary-active: #105825;
-  --background: light-dark(#f9f9fa, #101113);
-  --foreground: light-dark(#1b1b1b, #ffffff);
-  --foreground-secondary: light-dark(#2f2f31, #e3e4e6);
-  --faint-foreground: light-dark(#9c9d9f, #565759);
-  --card: light-dark(#ffffff, #16171a);
-  --card-raised: light-dark(#fafafb, #303134);
-  --popover: light-dark(#ffffff, #28292b);
-  --sidebar: light-dark(#efeff0, #09090b);
-  --sidebar-muted-foreground: light-dark(#58595f, #a5a6af);
-  --secondary: light-dark(#f0f0f2, #28292e);
-  --muted: light-dark(#f5f5f7, #202125);
-  --muted-foreground: light-dark(#65666e, #a5a6af);
-  --accent: light-dark(#ebebed, #222327);
-  --border: light-dark(#f1f1f1, #1a1b1d);
-  --input: light-dark(#dedee0, #26272b);
-  --field: light-dark(#89898e, #727277);
-  --ring: light-dark(#188038, #75ce8e);
-  --primary-text: light-dark(#146c2f, #75ce8e);
-  --primary-subtle: light-dark(#e9f5ec, #1b3323);
-  --destructive: light-dark(#b42332, #ff929d);
-  --destructive-subtle: light-dark(#fff0f1, #3b2228);
-  --success: light-dark(#146c2f, #75ce8e);
-  --success-subtle: light-dark(#e9f5ec, #1b3323);
-  --warning: light-dark(#8a4b08, #edc17c);
-  --warning-subtle: light-dark(#fff4df, #352b1e);
-  --info: light-dark(#245cba, #9cbdff);
-  --info-subtle: light-dark(#edf3ff, #202e48);
+  /* Every TulipFarm color comes from Sprout's tulipfarm theme. Change colors there, not here. */
+  --radius: var(--sprout-radius-control);
+  --primary: var(--sprout-primary);
+  --primary-foreground: var(--sprout-on-primary);
+  --primary-hover: var(--sprout-primary-hover);
+  --primary-active: var(--sprout-primary-active);
+  --background: var(--sprout-canvas);
+  --foreground: var(--sprout-text);
+  --foreground-secondary: var(--sprout-body);
+  --faint-foreground: var(--sprout-faint);
+  --card: var(--sprout-surface);
+  --card-raised: var(--sprout-card-raised);
+  --popover: var(--sprout-popover);
+  --sidebar: var(--sprout-sidebar);
+  --sidebar-muted-foreground: var(--sprout-muted);
+  --secondary: var(--sprout-secondary);
+  --muted: var(--sprout-hover);
+  --muted-foreground: var(--sprout-muted);
+  --accent: var(--sprout-hover);
+  --border: var(--sprout-line);
+  --input: var(--sprout-input);
+  --field: var(--sprout-border);
+  --ring: var(--sprout-focus);
+  --primary-text: var(--sprout-primary-text);
+  --primary-subtle: var(--sprout-primary-subtle);
+  --destructive: var(--sprout-danger);
+  --destructive-subtle: var(--sprout-danger-subtle);
+  --success: var(--sprout-success);
+  --success-subtle: var(--sprout-success-subtle);
+  --warning: var(--sprout-warning);
+  --warning-subtle: var(--sprout-warning-subtle);
+  --info: var(--sprout-info);
+  --info-subtle: var(--sprout-info-subtle);
   --brand-google-blue: #4285f4;
   --brand-google-green: #34a853;
   --brand-google-red: #ea4335;
   --brand-google-yellow: #fbbc05;
-  --file-paper: light-dark(#ffffff, #2a2b30);
-  --file-edge: light-dark(#d4d4da, #4a4b52);
-  --file-generic: light-dark(#8e8f97, #8e8f97);
-  --file-pdf: #e2463f;
-  --file-sheet: #1f8f4a;
-  --file-document: #2b67d1;
-  --file-slides: #d9622b;
-  --file-image: light-dark(#a8d4f7, #4d7ea8);
-  --chart-1: light-dark(#188038, #75ce8e);
-  --chart-2: light-dark(#245cba, #9cbdff);
-  --chart-3: light-dark(#8a4b08, #edc17c);
-  --chart-4: light-dark(#7c4eb0, #c6a4ed);
-  --chart-5: light-dark(#b42332, #ff929d);
-  --overlay: light-dark(#20212440, #00000080);
-  --elevation-control: 0 3px 6px -2px light-dark(#00000005, #0000000a), 0 1px 1px light-dark(#0000000a, #00000014);
-  --elevation-popover:
-    0 6px 18px light-dark(#00000005, #00000020), 0 3px 9px light-dark(#0000000a, #00000020),
-    0 1px 1px light-dark(#0000000a, #00000020);
-  --elevation-dialog: 0 16px 48px light-dark(#20212426, #00000066), 0 2px 8px light-dark(#2021240f, #00000033);
+  --file-paper: var(--sprout-file-paper);
+  --file-edge: var(--sprout-file-edge);
+  --file-generic: var(--sprout-file-generic);
+  --file-pdf: var(--sprout-file-pdf);
+  --file-sheet: var(--sprout-file-sheet);
+  --file-document: var(--sprout-file-document);
+  --file-slides: var(--sprout-file-slides);
+  --file-image: var(--sprout-file-image);
+  --chart-1: var(--sprout-chart-1);
+  --chart-2: var(--sprout-chart-2);
+  --chart-3: var(--sprout-chart-3);
+  --chart-4: var(--sprout-chart-4);
+  --chart-5: var(--sprout-chart-5);
+  --overlay: var(--sprout-overlay);
+  --elevation-control: var(--sprout-shadow-control);
+  --elevation-popover: var(--sprout-shadow-overlay);
+  --elevation-dialog: var(--sprout-shadow-overlay);
 }
 
 .light {
@@ -204,66 +204,6 @@
 }
 .dark {
   color-scheme: dark;
-}
-
-/* Sprout reads --sprout-* tokens. These unlayered values point them at the app's own tokens so sprout components match the local ones in light and dark. */
-:root {
-  --sprout-font: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
-  --sprout-text-xs: 0.75rem;
-  --sprout-text-sm: 0.8125rem;
-  --sprout-text-base: 0.9375rem;
-  --sprout-radius-control: var(--radius);
-  --sprout-radius-panel: 0.75rem;
-  --sprout-motion-fast: 150ms;
-  --sprout-motion-normal: 150ms;
-  --sprout-motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --sprout-sidebar-width: 15.25rem;
-  --sprout-sidebar-icon-width: 3rem;
-  --sprout-shadow-control: var(--elevation-control);
-  --sprout-shadow-panel: var(--elevation-control);
-  --sprout-shadow-overlay: var(--elevation-dialog);
-  --sprout-canvas: var(--background);
-  --sprout-surface: var(--card);
-  --sprout-hover: var(--accent);
-  --sprout-active: light-dark(#e3e3e6, #2b2c31);
-  --sprout-text: var(--foreground);
-  --sprout-muted: var(--muted-foreground);
-  --sprout-line: var(--border);
-  --sprout-border: var(--field);
-  --sprout-border-strong: light-dark(#6e6e73, #8e8e93);
-  --sprout-input: var(--input);
-  --sprout-primary: var(--primary);
-  --sprout-primary-hover: var(--primary-hover);
-  --sprout-primary-active: var(--primary-active);
-  --sprout-on-primary: var(--primary-foreground);
-  --sprout-focus: var(--ring);
-  --sprout-danger: var(--destructive);
-  --sprout-danger-hover: light-dark(#98252b, #ffadb1);
-  --sprout-on-danger: light-dark(#fff8f8, #3c1014);
-  --sprout-danger-subtle: var(--destructive-subtle);
-  --sprout-info: var(--info);
-  --sprout-info-subtle: var(--info-subtle);
-  --sprout-primary-subtle: var(--primary-subtle);
-  --sprout-secondary: var(--secondary);
-  --sprout-success: var(--success);
-  --sprout-success-subtle: var(--success-subtle);
-  --sprout-warning: var(--warning);
-  --sprout-warning-subtle: var(--warning-subtle);
-  --sprout-overlay: var(--overlay);
-  --sprout-chart-1: var(--chart-1);
-  --sprout-chart-2: var(--chart-2);
-  --sprout-chart-3: var(--chart-3);
-  --sprout-chart-4: var(--chart-4);
-  --sprout-chart-5: var(--chart-5);
-  --sprout-card-raised: var(--card-raised);
-  --sprout-file-paper: var(--file-paper);
-  --sprout-file-edge: var(--file-edge);
-  --sprout-file-generic: var(--file-generic);
-  --sprout-file-pdf: var(--file-pdf);
-  --sprout-file-sheet: var(--file-sheet);
-  --sprout-file-document: var(--file-document);
-  --sprout-file-slides: var(--file-slides);
-  --sprout-file-image: var(--file-image);
 }
 
 @layer base {

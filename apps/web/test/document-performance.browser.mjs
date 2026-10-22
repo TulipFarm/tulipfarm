@@ -22,7 +22,7 @@ try {
         transformIndexHtml: {
           order: 'pre',
           handler: () =>
-            '<!doctype html><html lang="en"><head><meta charset="UTF-8"><title>Rendering verification</title></head><body><div id="root"></div><script type="module" src="/test/rendering-fixture.tsx"></script></body></html>',
+            '<!doctype html><html lang="en" data-sprout-theme="tulipfarm"><head><meta charset="UTF-8"><title>Rendering verification</title></head><body><div id="root"></div><script type="module" src="/test/rendering-fixture.tsx"></script></body></html>',
         },
       },
     ],

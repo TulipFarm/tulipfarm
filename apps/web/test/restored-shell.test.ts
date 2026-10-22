@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { themeColor } from './sprout-theme.ts';
 
 const source = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
@@ -45,12 +46,7 @@ const blend = (top: string, bottom: string, alpha: number) =>
     .join('');
 
 test('small grey shell text meets WCAG AA in light and dark themes', () => {
-  const css = source('index.css');
-  const token = (name: string) => {
-    const match = css.match(new RegExp(`--${name}: light-dark\\((#[0-9a-f]{6}), (#[0-9a-f]{6})\\)`));
-    assert.ok(match, name);
-    return [match[1], match[2]];
-  };
+  const token = themeColor;
   const pairs: [string, string[]][] = [
     ['sidebar-muted-foreground', ['sidebar', 'accent']],
     ['muted-foreground', ['background', 'card', 'muted']],

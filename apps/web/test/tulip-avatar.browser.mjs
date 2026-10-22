@@ -25,7 +25,7 @@ test('controlled avatars preserve the approved designs without app integration',
             response.end(
               await server.transformIndexHtml(
                 '/avatar-test',
-                '<html><head><title>Tulip avatars</title></head><body><div id="root"></div></body></html>',
+                '<html data-sprout-theme="tulipfarm"><head><title>Tulip avatars</title></head><body><div id="root"></div></body></html>',
               ),
             );
           });
