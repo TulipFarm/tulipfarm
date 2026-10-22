@@ -128,6 +128,7 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
               user: { id: 'demo', name: 'Local demo', email: 'demo@example.test', lastModelFamilyId: 'claude-haiku' },
             });
           if (path === '/v1/user/visit') return json({ firstSession: false });
+          if (path === '/v1/feature-flags') return json({ 'bud-avatar': true });
           if (path === '/v1/workspaces') return json([workspace]);
           if (path === '/v1/workspaces/bud-demo') return json(workspace);
           if (path.endsWith('/governance/me')) return json(membership);

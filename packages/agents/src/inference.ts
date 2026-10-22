@@ -993,6 +993,15 @@ type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure };
 
+// Without Bud, bud_state is never offered. A request for it alone is dropped so avatar state cannot cost a round:
+// any text is the answer, and an otherwise empty reply is malformed.
+function withoutBudOnlyCalls(step: NativeStep): NativeStep {
+  if (step.kind !== 'step' || !step.calls.length || step.calls.some(call => call.name !== budToolName)) return step;
+  return step.text.trim()
+    ? { kind: 'step', text: step.text, calls: [], raw: step.raw }
+    : { kind: 'failure', reason: 'invalid-decision' };
+}
+
 const anthropicNativeSchema = z.object({
   stop_reason: z.string(),
   content: z.array(
@@ -1684,7 +1693,13 @@ export async function inferWithTools(
           },
           tools?.answerText,
         );
-        return { selected, mcp, answerStep, activeCatalog, currentReminder };
+        return {
+          selected: tools?.avatar ? selected : withoutBudOnlyCalls(selected),
+          mcp,
+          answerStep,
+          activeCatalog,
+          currentReminder,
+        };
       },
     );
     if (selected.kind === 'failure') {

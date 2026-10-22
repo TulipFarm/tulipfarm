@@ -176,6 +176,11 @@ One version identifies all apps and images of a release.
   that say whether the app is connected and link to its setup. Task status
   badges show Sprout's `Status` indicator, and chat plans draw their steps as a
   `TaskTree`.
+- Bud's animated chat expressions are off by default behind the new
+  `bud-avatar` feature flag (`FEATURE_FLAG_BUD_AVATAR`). Without it the model
+  is not offered the `bud_state` tool or told to set expressions, so a greeting
+  no longer spends extra model rounds on the avatar, and the chat shows Bud as
+  a still, idle pose. Set the flag to `true` to restore the animated avatar.
 
 ### Removed
 

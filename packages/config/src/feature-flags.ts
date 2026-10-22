@@ -41,6 +41,12 @@ export const featureFlags = {
     default: 'development',
     env: 'FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE',
   },
+  'bud-avatar': {
+    description:
+      'Animated Bud expressions in personal chats. The model sets them with the bud_state tool, which costs extra model rounds.',
+    default: false,
+    env: 'FEATURE_FLAG_BUD_AVATAR',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

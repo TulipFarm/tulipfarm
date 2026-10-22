@@ -60,6 +60,7 @@ import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { readConversationInventory } from './conversation-inventory.ts';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
 import { recordCoordinatorModelTime, reserveCoordinatorModel } from '@tulipfarm/agents/plan-runtime';
 
@@ -167,18 +168,29 @@ export function meteredReply(
       ? undefined
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress = ({ step, round }: { step: number; round: number }) => publisher.progress(step, round);
-    const avatar =
-      !externalContext && !project
-        ? {
-            update: ({
-              step,
-              avatar,
-            }: {
-              step: number;
-              avatar: import('@tulipfarm/conversations/results').AvatarSnapshot;
-            }) => publisher.avatar(step, avatar),
-          }
-        : undefined;
+    // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
+    const budUser =
+      externalContext || project
+        ? null
+        : (requester ??
+          (await runtime
+            .transaction(fence.workspaceId, commonCompatibility, tx =>
+              turnRequester(tx, fence.conversationId, fence.turnId),
+            )
+            .catch(() => null)));
+    const budAvatar =
+      !!budUser && (await isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }));
+    const avatar = budAvatar
+      ? {
+          update: ({
+            step,
+            avatar,
+          }: {
+            step: number;
+            avatar: import('@tulipfarm/conversations/results').AvatarSnapshot;
+          }) => publisher.avatar(step, avatar),
+        }
+      : undefined;
     try {
       return await respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
