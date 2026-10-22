@@ -180,7 +180,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         owner,
         resolution => `${resolution.route.provider}/${resolution.route.deployment}`,
       );
-      const config = infer => ({
+      const config = (infer, paused) => ({
+        ...(paused ? { paused } : {}),
         activeBundle: () => ({ bundle, activationRevision: 1 }),
         restrictions: () => ({ allowedProviders: ['anthropic', 'azure'], allowedLocations: ['test'] }),
         trustedBundle: id => {
@@ -835,6 +836,31 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           assert.equal((await attempts(next)).length, 1);
         },
       );
+      await t.test('a paused family runs on its fallback rule target, or keeps itself without one', async () => {
+        const called = [];
+        const chat = createAgentChat(
+          runtime,
+          config(
+            async resolution => {
+              called.push(resolution.familyId);
+              return answer;
+            },
+            familyId => familyId === 'claude-opus',
+          ),
+        );
+        await rule('gpt-astra');
+        const replaced = await submit(chat);
+        await clearWait();
+        await chat.processTurn(workspaceId, replaced);
+        assert.deepEqual(called, ['gpt-astra']);
+        assert.equal((await chat.read(workspaceId, ownerUserId, agentId, replaced)).status, 'answered');
+        await rule(null);
+        const kept = await submit(chat);
+        await clearWait();
+        await chat.processTurn(workspaceId, kept);
+        assert.deepEqual(called, ['gpt-astra', 'claude-opus']);
+        await rule('gpt-astra');
+      });
       await t.test('both routes failing terminate at three attempts and replay does not resume', async () => {
         const chat = createAgentChat(
           runtime,

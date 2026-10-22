@@ -23,7 +23,7 @@ import { modelAvailability, modelFamilyEnabled } from './model-availability.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { activeRecommendationMembers, recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
 
-export { modelAvailability } from './model-availability.ts';
+export { modelAvailability, pausedFamilyReplacement } from './model-availability.ts';
 
 export type { ModelFamilyEligibility } from './model-policy-contracts.ts';
 
@@ -93,7 +93,7 @@ export function createModelPolicyService(runtime: AgentStorage, eligible: ModelF
         )
           throw new AgentError('workspace-disabled', 400);
         if (
-          !(await eligible({ workspaceId, modelFamilyId: input.sourceFamilyId })) ||
+          !(await eligible({ workspaceId, modelFamilyId: input.sourceFamilyId, existing: true })) ||
           !(await eligible({ workspaceId, modelFamilyId: input.targetFamilyId, fallbackFor: input.sourceFamilyId }))
         )
           throw new AgentError('model-family-unavailable', 400);

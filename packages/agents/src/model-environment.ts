@@ -10,6 +10,7 @@ import {
   modelPricing,
   ModelResolutionError,
   normalizeModelEndpoint,
+  pausedModelFamilies,
   resolveModelBundle,
   serverModelBundle,
   type ModelProvider,
@@ -150,6 +151,12 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
   });
   const defaultFamily = env.MODEL_DEFAULT_FAMILY || undefined;
   if (defaultFamily && !familyIds.includes(defaultFamily)) throw invalid();
+  const pausedFamilies = pausedModelFamilies(env);
+  for (const familyId of pausedFamilies)
+    if (!familyIds.includes(familyId)) throw invalid(`MODEL_PAUSED_FAMILIES names ${familyId}, which is not enabled`);
+  if (defaultFamily && pausedFamilies.has(defaultFamily))
+    throw invalid('MODEL_PAUSED_FAMILIES must not include MODEL_DEFAULT_FAMILY');
+  const paused = (familyId: string) => pausedFamilies.has(familyId);
   const binding = (resolution: ResolvedModel) =>
     configured.find(
       item => item.route.id === resolution.route.id && JSON.stringify(item.route) === JSON.stringify(resolution.route),
@@ -169,6 +176,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
     bundle,
     restrictions,
     inference,
+    paused,
     route: (familyId: string) => configured.find(item => item.familyId === familyId)?.inference ?? null,
     resolve(familyId: string) {
       try {
@@ -202,6 +210,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
         },
         budgetPicoUsd: () => runBudgetPicoUsd,
         legacyFamily: () => defaultFamily,
+        paused,
         health: health(deploymentKey),
         infer: (resolution, input, timeoutMs, signal) => {
           const route = inference(resolution);

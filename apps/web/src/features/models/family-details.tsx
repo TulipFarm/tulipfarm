@@ -35,14 +35,18 @@ export function FamilyDetails({ family, expanded = false }: { family: ModelCatal
           ? 'Available for permitted workspace use.'
           : family.unavailableReason === 'workspace-disabled'
             ? 'Disabled in this workspace.'
-            : 'Temporarily unavailable from the platform.'}
+            : family.unavailableReason === 'model-family-paused'
+              ? 'Temporarily unavailable for new chats and agents.'
+              : 'Temporarily unavailable from the platform.'}
       </p>
       {expanded ? rates : <Disclosure title="Rates and model version">{rates}</Disclosure>}
       {!family.available && (
         <p className="text-muted-foreground">
           {family.unavailableReason === 'workspace-disabled'
             ? 'An admin can enable it in model access. Saved preferences are retained.'
-            : 'Choose an available model or check again later. Saved preferences are retained.'}
+            : family.unavailableReason === 'model-family-paused'
+              ? "Existing agents and chats keep it, or use its fallback rule's model when one is set. Choose another model for new work."
+              : 'Choose an available model or check again later. Saved preferences are retained.'}
         </p>
       )}
     </div>

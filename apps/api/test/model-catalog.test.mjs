@@ -558,3 +558,26 @@ test('a single provider credential makes exactly that provider’s families avai
     }
   }
 });
+
+test('paused families stay listed as temporarily unavailable and keep fallback options as a source', async t => {
+  const eligibleFamilies = ['claude-opus', 'gpt-astra'];
+  const { request } = fixture(t, undefined, undefined, async () => ({
+    modelFamilyEligibility(input) {
+      if (input.fallbackFor) return input.modelFamilyId === 'gpt-astra' && input.fallbackFor === 'claude-opus';
+      return (
+        eligibleFamilies.includes(input.modelFamilyId) && (input.existing || input.modelFamilyId !== 'claude-opus')
+      );
+    },
+    modelFamilyResolution: input => trustedResolution(input),
+    modelFamilyPaused: familyId => familyId === 'claude-opus',
+  }));
+  const response = await request();
+  assert.equal(response.statusCode, 200);
+  const families = modelCatalogSchema.parse(response.json()).families;
+  const opus = families.find(family => family.id === 'claude-opus');
+  assert.equal(opus.displayName, 'Claude Opus');
+  assert.equal(opus.available, false);
+  assert.equal(opus.unavailableReason, 'model-family-paused');
+  assert.deepEqual(opus.fallbackFor, []);
+  assert.deepEqual(families.find(family => family.id === 'gpt-astra').fallbackFor, ['claude-opus']);
+});

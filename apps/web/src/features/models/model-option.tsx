@@ -10,7 +10,8 @@ export function ModelOption({ family, details = false }: { family: ModelCatalogF
       <span className="grid min-w-0 gap-0.5">
         <span className="truncate">
           {family.displayName}
-          {!family.available && ' (unavailable)'}
+          {!family.available &&
+            (family.unavailableReason === 'model-family-paused' ? ' (temporarily unavailable)' : ' (unavailable)')}
         </span>
         {details && (
           <span className="text-xs font-normal text-muted-foreground">

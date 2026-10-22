@@ -11,6 +11,7 @@ import {
   modelRoleDefault,
   modelRoles,
   modelRoleWarnings,
+  pausedModelFamilies,
 } from '../src/index.ts';
 import { defaultChatModelFamilyId, modelCatalogSchema } from '../src/model-catalog.ts';
 import { buildModelCatalog, modelCatalogRevision } from '../src/model-catalog-source.ts';
@@ -168,4 +169,13 @@ test('a catalog of only OpenAI-model families fills every role from its own fami
   // The browser constant names the shipped default; the server reports its own as `defaultChatFamilyId`.
   assert.equal(output.defaultChatModelFamilyId, 'claude-sonnet');
   assert.ok(JSON.parse(readFileSync(openaiOnly, 'utf8')).families.every(family => family.vendor === 'openai'));
+});
+
+test('a paused family cannot become the default chat family but keeps background roles', () => {
+  const env = { MODEL_FAMILIES: 'gpt-luna,gpt-sol', MODEL_PAUSED_FAMILIES: ' gpt-sol , ' };
+  assert.deepEqual([...pausedModelFamilies(env)], ['gpt-sol']);
+  assert.deepEqual(modelRoleDefault('default-chat', env), { familyId: 'gpt-luna', source: 'fallback' });
+  assert.equal(modelRoleDefault('review', { MODEL_FAMILIES: 'gpt-luna,gpt-sol' }).familyId, 'gpt-sol');
+  assert.equal(modelRoleDefault('review', env).familyId, 'gpt-sol');
+  assert.equal(modelRoleDefault('default-chat', { ...env, MODEL_PAUSED_FAMILIES: 'gpt-luna,gpt-sol' }), null);
 });
