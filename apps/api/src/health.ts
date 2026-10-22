@@ -33,6 +33,8 @@ export function registerHealth(
     query_timeout: 2000,
     statement_timeout: 2000,
     max: 3,
+    // Health checks arrive minutes apart; keep one connection so latencyMs measures a query, not a TLS handshake.
+    min: 1,
   });
   pool.on('error', () => log('error', 'dependency', 'database_connection_failed'));
 
