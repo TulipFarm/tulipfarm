@@ -86,13 +86,8 @@ const rateSchema = z
 
 const tokenLimit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
-const modelSchema = z
+const routeSchema = z
   .strictObject({
-    id: modelFamilyIdSchema.describe(
-      'Stable ID chats, agents and settings store. Keep it when the underlying model version changes.',
-    ),
-    name: z.string().min(1).max(100).describe('Name people see in the model picker'),
-    vendor: modelIdentifierSchema.describe('Who makes the model, for branding, such as anthropic or openai'),
     provider: z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,49}$/)
@@ -104,14 +99,36 @@ const modelSchema = z
       .min(1)
       .max(200)
       .describe('Model or deployment name sent to the provider, such as an Azure Foundry deployment name'),
+  })
+  .describe('One provider that serves the model');
+
+const modelSchema = z
+  .strictObject({
+    id: modelFamilyIdSchema.describe(
+      'Stable ID chats, agents and settings store. Keep it when the underlying model version changes.',
+    ),
+    name: z.string().min(1).max(100).describe('Name people see in the model picker'),
+    vendor: modelIdentifierSchema.describe('Who makes the model, for branding, such as anthropic or openai'),
+    routes: z
+      .array(routeSchema)
+      .min(1)
+      .describe(
+        'Where the model runs, in order of preference. The first route whose provider has its API key set serves it; startup fails when none has.',
+      ),
     default: z
       .boolean()
       .default(false)
-      .describe('New chats and agents use this model. Exactly one model is the default.'),
+      .describe('New chats and agents use this model. Exactly one model is the default; it must be selectable.'),
     paused: z
       .boolean()
       .default(false)
       .describe('Still serves existing chats and agents, but cannot be chosen for new ones'),
+    selectable: z
+      .boolean()
+      .default(true)
+      .describe(
+        'Shown in the model picker. False keeps the model for its roles only, such as a cheap model that titles chats.',
+      ),
     roles: z
       .array(z.enum(modelCatalogRoles))
       .default([])
@@ -173,6 +190,9 @@ function rateProblems(rates: readonly z.infer<typeof rateSchema>[]): Issue[] {
   return issues;
 }
 
+const providerType = (catalog: CatalogShape, key: string) =>
+  catalog.providers[key]?.type ?? builtInProviders.find(name => name === key);
+
 /** Rules across entries that JSON Schema cannot state. */
 function catalogProblems(catalog: CatalogShape): Issue[] {
   const issues: Issue[] = [];
@@ -190,13 +210,34 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
     const at = (...path: (string | number)[]) => ['models', index, ...path];
     if (seen.has(model.id)) issues.push({ path: at('id'), message: `Duplicate model id "${model.id}"` });
     seen.add(model.id);
-    const type = catalog.providers[model.provider]?.type ?? builtInProviders.find(name => name === model.provider);
-    if (!type)
-      issues.push({ path: at('provider'), message: `Unknown provider "${model.provider}"; declare it in providers` });
-    else if (!modelApiSupported(type, model.capabilities?.api))
-      issues.push({ path: at('capabilities', 'api'), message: `Provider type ${type} does not support this API` });
+    const types = model.routes.map((route, routeIndex) => {
+      const type = providerType(catalog, route.provider);
+      if (!type)
+        issues.push({
+          path: at('routes', routeIndex, 'provider'),
+          message: `Unknown provider "${route.provider}"; declare it in providers`,
+        });
+      else if (!modelApiSupported(type, model.capabilities?.api))
+        issues.push({ path: at('capabilities', 'api'), message: `Provider type ${type} does not support this API` });
+      if (model.routes.findIndex(other => other.provider === route.provider) !== routeIndex)
+        issues.push({
+          path: at('routes', routeIndex, 'provider'),
+          message: `Duplicate route provider "${route.provider}"`,
+        });
+      return type;
+    });
     if (model.default && model.paused)
       issues.push({ path: at('paused'), message: 'The default model cannot be paused' });
+    if (model.default && !model.selectable)
+      issues.push({ path: at('selectable'), message: 'The default model must be selectable' });
+    if (
+      model.roles.includes('public-guide') &&
+      (types.some(type => type !== 'azure') || (model.capabilities?.api ?? 'chat-completions') !== 'chat-completions')
+    )
+      issues.push({
+        path: at('roles'),
+        message: 'The public-guide model needs only Azure routes using the chat-completions API',
+      });
     for (const [roleIndex, role] of model.roles.entries()) {
       if (model.roles.indexOf(role) !== roleIndex)
         issues.push({ path: at('roles', roleIndex), message: `Duplicate role "${role}"` });
@@ -221,7 +262,7 @@ export const modelCatalogFileSchema = catalogShape.superRefine((catalog, ctx) =>
 export type ModelCatalogFile = z.infer<typeof modelCatalogFileSchema>;
 export type ModelCatalogFileModel = ModelCatalogFile['models'][number];
 
-/** The published JSON Schema. Cross-entry rules (one default, unique ids and roles, known providers) are enforced only at startup. */
+/** The published JSON Schema. Cross-entry rules, such as one default and unique roles, are enforced only by the validator. */
 export function modelCatalogJsonSchema() {
   return {
     ...z.toJSONSchema(catalogShape, { target: 'draft-2020-12', io: 'input' }),

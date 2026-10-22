@@ -74,25 +74,46 @@
             "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
             "description": "Who makes the model, for branding, such as anthropic or openai"
           },
-          "provider": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{0,49}$",
-            "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
-          },
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "description": "Model or deployment name sent to the provider, such as an Azure Foundry deployment name"
+          "routes": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,49}$",
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "Model or deployment name sent to the provider, such as an Azure Foundry deployment name"
+                }
+              },
+              "required": [
+                "provider",
+                "model"
+              ],
+              "additionalProperties": false,
+              "description": "One provider that serves the model"
+            },
+            "description": "Where the model runs, in order of preference. The first route whose provider has its API key set serves it; startup fails when none has."
           },
           "default": {
             "default": false,
-            "description": "New chats and agents use this model. Exactly one model is the default.",
+            "description": "New chats and agents use this model. Exactly one model is the default; it must be selectable.",
             "type": "boolean"
           },
           "paused": {
             "default": false,
             "description": "Still serves existing chats and agents, but cannot be chosen for new ones",
+            "type": "boolean"
+          },
+          "selectable": {
+            "default": true,
+            "description": "Shown in the model picker. False keeps the model for its roles only, such as a cheap model that titles chats.",
             "type": "boolean"
           },
           "roles": {
@@ -293,8 +314,7 @@
           "id",
           "name",
           "vendor",
-          "provider",
-          "model",
+          "routes",
           "limits",
           "pricing"
         ],

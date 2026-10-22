@@ -10,8 +10,7 @@ const model = (overrides = {}) => ({
   id: 'claude-sonnet',
   name: 'Claude Sonnet',
   vendor: 'anthropic',
-  provider: 'anthropic',
-  model: 'claude-sonnet-5',
+  routes: [{ provider: 'anthropic', model: 'claude-sonnet-5' }],
   default: true,
   limits: { maxInputTokens: 200000, maxOutputTokens: 64000 },
   pricing: [{ usdPerMillionTokens: { input: 3, output: 15 } }],
@@ -37,10 +36,10 @@ test('omitted fields take their defaults', () => {
   const parsed = modelCatalogFileSchema.parse(catalog([model(), model({ id: 'claude-opus', default: undefined })]));
   assert.deepEqual(parsed.providers, {});
   assert.deepEqual(
-    parsed.models.map(entry => [entry.default, entry.paused, entry.roles]),
+    parsed.models.map(entry => [entry.default, entry.paused, entry.selectable, entry.roles]),
     [
-      [true, false, []],
-      [false, false, []],
+      [true, false, true, []],
+      [false, false, true, []],
     ],
   );
   assert.deepEqual(parsed.models[0].pricing[0], {
@@ -55,6 +54,8 @@ test('exactly one model is the default, and it is not paused', () => {
   rejects(catalog([model({ default: false })]), /^models: .*found 0/);
   rejects(catalog([model(), model({ id: 'claude-opus' })]), /^models: .*found 2/);
   rejects(catalog([model({ paused: true })]), /^models\.0\.paused: The default model cannot be paused/);
+  rejects(catalog([model({ selectable: false })]), /^models\.0\.selectable: The default model must be selectable/);
+  assert.deepEqual(problems(catalog([model(), model({ id: 'claude-haiku', default: false, selectable: false })])), []);
 });
 
 test('ids are unique and each role is on one model', () => {
@@ -67,23 +68,45 @@ test('ids are unique and each role is on one model', () => {
   rejects(catalog([model({ roles: ['default-chat'] })]), /^models\.0\.roles\.0:/);
 });
 
-test('models name a built-in or declared provider', () => {
-  rejects(catalog([model({ provider: 'foundry' })]), /^models\.0\.provider: Unknown provider "foundry"/);
+const routes = (...providers) => ({ routes: providers.map(provider => ({ provider, model: 'm' })) });
+
+test('model routes name built-in or declared providers, in order of preference', () => {
+  rejects(catalog([model(routes('foundry'))]), /^models\.0\.routes\.0\.provider: Unknown provider "foundry"/);
   assert.deepEqual(
-    problems(catalog([model({ provider: 'foundry' })], { providers: { foundry: { type: 'azure' } } })),
+    problems(catalog([model(routes('foundry', 'anthropic'))], { providers: { foundry: { type: 'azure' } } })),
     [],
   );
+  rejects(
+    catalog([model(routes('anthropic', 'anthropic'))]),
+    /^models\.0\.routes\.1\.provider: Duplicate route provider/,
+  );
+  rejects(catalog([model({ routes: [] })]), /^models\.0\.routes: /);
   rejects(
     catalog([model()], { providers: { azure: { type: 'openai' } } }),
     /^providers\.azure\.type: Provider "azure" must have type "azure"/,
   );
   rejects(
-    catalog([model({ provider: 'gateway' })], { providers: { gateway: { type: 'openai-compatible' } } }),
+    catalog([model(routes('gateway'))], { providers: { gateway: { type: 'openai-compatible' } } }),
     /^providers\.gateway\.apiKeyEnv: Required/,
   );
   rejects(
     catalog([model({ capabilities: { api: 'responses' } })]),
     /^models\.0\.capabilities\.api: Provider type anthropic does not support this API/,
+  );
+  rejects(
+    catalog([model({ ...routes('openai', 'anthropic'), capabilities: { api: 'responses' } })]),
+    /^models\.0\.capabilities\.api: Provider type anthropic/,
+  );
+});
+
+test('the public-guide model runs only on Azure chat completions', () => {
+  const guide = overrides => catalog([model({ roles: ['public-guide'], ...overrides })]);
+  assert.deepEqual(problems(guide(routes('azure'))), []);
+  rejects(guide(routes('anthropic')), /^models\.0\.roles: The public-guide model needs only Azure routes/);
+  rejects(guide(routes('azure', 'openai')), /^models\.0\.roles: The public-guide model/);
+  rejects(
+    guide({ ...routes('azure'), capabilities: { api: 'responses' } }),
+    /^models\.0\.roles: The public-guide model/,
   );
 });
 
