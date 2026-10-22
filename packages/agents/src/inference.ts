@@ -12,6 +12,7 @@ import {
   observeInference,
   observeChatDetail,
   observeChatDetailSync,
+  recordChatCompletionCheck,
   recordChatDiscovery,
   recordChatRequestSizes,
   withChatModelRequest,
@@ -1487,6 +1488,8 @@ export async function inferWithTools(
   const guard = createChatToolGuard(tools?.priorToolCalls);
   let corrections = 0;
   let completionCorrections = 0;
+  // Receipts from an earlier attempt of this same turn count as work in this reply.
+  let workToolUsed = calls > 0 || Boolean(tools?.priorToolCalls?.length);
   let requestStep = 0;
   let budgetSpent = false;
   let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
@@ -1770,6 +1773,18 @@ export async function inferWithTools(
           /* Progress is a preview. */
         }
       };
+      const accept = () => {
+        if (tools?.avatar && avatar.state === 'Thinking') {
+          avatar = { name: 'Bud', state: 'Idle' };
+          updateAvatar();
+        }
+        return finish(selected.text, true);
+      };
+      // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch.
+      if (!workToolUsed && !corrections && !completionCorrections && !finalizing) {
+        recordChatCompletionCheck('skipped_no_tools');
+        return accept();
+      }
       let checked: z.infer<typeof completionCheckSchema>['decision'];
       report('finishing');
       try {
@@ -1808,16 +1823,12 @@ export async function inferWithTools(
           );
         });
       } catch (error) {
+        recordChatCompletionCheck('error');
         preview('');
         throw error;
       }
-      if (checked.status !== 'continue') {
-        if (tools?.avatar && avatar.state === 'Thinking') {
-          avatar = { name: 'Bud', state: 'Idle' };
-          updateAvatar();
-        }
-        return finish(selected.text, true);
-      }
+      recordChatCompletionCheck(checked.status === 'continue' ? 'continue' : 'done');
+      if (checked.status !== 'continue') return accept();
       preview('');
       if (finalizing) return finish(stoppingReply);
       if (completionCorrections++ >= 2) throw new Error('model-incomplete-response');
@@ -1834,6 +1845,7 @@ export async function inferWithTools(
       continue;
     }
     if (finalizing) return finish(stoppingReply);
+    if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
     const result = (call: NativeCall, output: string, error: boolean): ToolResult => ({
       id: call.id,
