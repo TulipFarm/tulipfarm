@@ -112,7 +112,8 @@ function TableSortHead({
     <TableHead align={align} aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}>
       <Button
         variant={sorted ? 'secondary' : 'ghost'}
-        size={align === 'right' ? 'column-header-end' : 'column-header'}
+        size="sm"
+        className={align === 'right' ? 'sprout-table-sort sprout-table-sort-end' : 'sprout-table-sort'}
         aria-label={`Sort by ${children}${hint}`}
         title={sorted ? undefined : 'Sort ascending'}
         disabled={disabled}

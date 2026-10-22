@@ -102,10 +102,10 @@ export function FolderBrowser({
     list = folders.length ? (
       <ul aria-label="Folders" className="space-y-0.5">
         {folders.map(folder => (
-          <li key={folder.id}>
-            <Button variant="ghost" size="nav" disabled={disabled} onClick={() => open(folder.id)}>
+          <li key={folder.id} className="grid">
+            <Button variant="ghost" size="md" disabled={disabled} onClick={() => open(folder.id)}>
               <Folder size={16} aria-hidden="true" />
-              <span className="min-w-0 truncate" title={folder.name}>
+              <span className="min-w-0 flex-1 truncate text-start" title={folder.name}>
                 {folder.name}
               </span>
               {folder.role === 'viewer' && (
@@ -149,7 +149,7 @@ export function FolderBrowser({
               <BreadcrumbPage>{sections[place.section]}</BreadcrumbPage>
             ) : (
               <BreadcrumbLink
-                render={<Button variant="ghost" size="xs" disabled={disabled} onClick={() => open(null)} />}
+                render={<Button variant="ghost" size="sm" disabled={disabled} onClick={() => open(null)} />}
               >
                 {sections[place.section]}
               </BreadcrumbLink>
@@ -167,7 +167,7 @@ export function FolderBrowser({
                   </BreadcrumbPage>
                 ) : (
                   <BreadcrumbLink
-                    render={<Button variant="ghost" size="xs" disabled={disabled} onClick={() => open(crumb.id)} />}
+                    render={<Button variant="ghost" size="sm" disabled={disabled} onClick={() => open(crumb.id)} />}
                   >
                     <span className="block max-w-40 truncate" title={crumb.name}>
                       {crumb.name}

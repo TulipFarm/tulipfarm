@@ -195,9 +195,9 @@ export function AgentToolPicker({
             <li key={app.key}>
               <section aria-label={`${app.label} actions`}>
                 <Collapsible open={expanded} onOpenChange={next => toggle(app.key, next)}>
-                  <h3 id={`agent-tools-${app.key}`}>
-                    <CollapsibleTrigger render={<Button variant="ghost" size="chat-row" />}>
-                      <span className="flex min-w-0 items-center gap-2.5">
+                  <h3 id={`agent-tools-${app.key}`} className="grid">
+                    <CollapsibleTrigger render={<Button variant="ghost" size="lg" />}>
+                      <span className="flex min-w-0 flex-1 items-center gap-2.5">
                         <ToolAppIcon app={app.key} />
                         {app.label}
                       </span>

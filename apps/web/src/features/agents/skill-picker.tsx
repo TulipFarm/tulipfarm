@@ -246,7 +246,7 @@ function SelectedSkill({
           <Button
             type="button"
             variant="link"
-            size="xs"
+            size="sm"
             aria-label={`Select newer revision of ${catalog.name}`}
             disabled={catalogBlocked}
             onClick={() => onUpgrade(catalog)}
@@ -281,7 +281,7 @@ function PinnedSkillName({
   if (state?.kind === 'loading') return <p className="text-sm text-muted-foreground">Loading skill name…</p>;
   if (state?.kind === 'error')
     return (
-      <Button type="button" variant="outline" size="xs" onClick={retry}>
+      <Button type="button" variant="outline" size="sm" onClick={retry}>
         Retry skill name
       </Button>
     );

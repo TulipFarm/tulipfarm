@@ -300,7 +300,7 @@ function WorkspaceMenu() {
         aria-label={`Workspace menu, ${workspace.name}`}
         render={<SidebarMenuButton variant="workspace" size="compact" />}
       >
-        <EntityAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="xs" shape="square" />
+        <EntityAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
         <span className="truncate group-data-[collapsible=icon]:hidden">{workspace.name}</span>
         <span className="flex group-data-[collapsible=icon]:hidden">
           <ChevronDown size={12} aria-hidden="true" />
@@ -325,7 +325,7 @@ function WorkspaceMenu() {
                 render={<Link to="/$workspaceSlug" params={{ workspaceSlug: item.slug }} />}
                 onClick={close}
               >
-                <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="xs" shape="square" />
+                <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
                 <span className="min-w-0 flex-1 truncate">{item.name}</span>
                 {item.slug === workspace.slug && <Check size={14} aria-label="Current workspace" />}
               </DropdownMenuItem>
@@ -364,7 +364,7 @@ function ProfileMenu() {
         aria-label="Account menu"
         render={<SidebarMenuButton variant="navigation" size="compact" tooltip="Account" />}
       >
-        <EntityAvatar seed={user.id} name={name} image={user.image} size="xs" />
+        <EntityAvatar seed={user.id} name={name} image={user.image} size="sm" />
         <span className="min-w-0 flex-1 truncate">{name}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu" side="top">
@@ -686,7 +686,7 @@ function WorkspaceShellContent() {
             aria-label="Workspace header"
             className={`@container flex h-11 shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
           >
-            <SidebarTrigger size={onCalendar ? 'calendar-icon' : 'icon-sm'} />
+            <SidebarTrigger size={onCalendar ? 'icon' : 'icon-sm'} />
             <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
             <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
             {/* Under 20rem the page title needs the room; the navigation sheet still names the workspace. */}

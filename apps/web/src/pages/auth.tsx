@@ -119,9 +119,11 @@ export function VerifyEmailPage() {
       }
     >
       {invalid ? (
-        <Button size="onboarding" nativeButton={false} render={<Link to="/login" search={{ redirect: destination }} />}>
-          Request a new link
-        </Button>
+        <div className="grid">
+          <Button size="lg" nativeButton={false} render={<Link to="/login" search={{ redirect: destination }} />}>
+            Request a new link
+          </Button>
+        </div>
       ) : (
         <p role="status" aria-busy="true" className="flex items-center gap-2">
           <Spinner aria-hidden="true" />
@@ -170,9 +172,11 @@ export function LogoutPage() {
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
-          <Button variant="outline" size="onboarding" onClick={signOut}>
-            Try again
-          </Button>
+          <div className="grid">
+            <Button variant="outline" size="lg" onClick={signOut}>
+              Try again
+            </Button>
+          </div>
         </>
       ) : (
         <p role="status" aria-busy={pending} className="flex items-center gap-2">
@@ -240,9 +244,11 @@ export function CompleteProfilePage() {
             </p>
           )}
         </div>
-        <Button type="submit" size="onboarding" disabled={pending} aria-busy={pending}>
-          {pending && <Spinner />}Continue
-        </Button>
+        <div className="grid">
+          <Button type="submit" size="lg" disabled={pending} aria-busy={pending}>
+            {pending && <Spinner />}Continue
+          </Button>
+        </div>
       </form>
     </AuthLayout>
   );

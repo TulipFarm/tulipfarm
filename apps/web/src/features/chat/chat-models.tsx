@@ -114,12 +114,12 @@ export function ChatModelStatus({
           <p role={failed ? 'alert' : 'status'}>{message}</p>
           {!busy && (
             <>
-              <Button size="xs" variant="outline" onClick={() => void catalog.refresh()}>
+              <Button size="sm" variant="outline" onClick={() => void catalog.refresh()}>
                 Retry models
               </Button>
               {empty && <ModelSetupLink />}
               <Button
-                size="xs"
+                size="sm"
                 variant="outline"
                 nativeButton={false}
                 render={<Link to="/$workspaceSlug/settings/models" params={{ workspaceSlug: slug }} />}
@@ -138,7 +138,7 @@ export function ChatModelStatus({
       {catalog.preferenceSave === 'error' && !failed && !quiet && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <p role="alert">Could not save your default model. Your selection works for this chat.</p>
-          <Button size="xs" variant="outline" onClick={catalog.retryPreference}>
+          <Button size="sm" variant="outline" onClick={catalog.retryPreference}>
             Retry saving default
           </Button>
         </div>

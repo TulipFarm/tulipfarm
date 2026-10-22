@@ -24,6 +24,7 @@ import { onWindowReturn } from '@/lib/window-return';
 import { workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverDescription } from '@tulipfarm/sprout/popover';
+import { BudLauncher } from '@/components/bud-launcher';
 import { TulipAvatar } from '@/components/tulip-avatar';
 import { bud } from '@tulipfarm/conversations/avatar';
 import { BudContext, type BudCommand } from './bud-context';
@@ -355,10 +356,10 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
             </div>
           )
         : suggestion}
-      <Button
+      <BudLauncher
         ref={launcher}
+        docked={docked}
         variant={docked ? 'ghost' : 'outline'}
-        size={docked ? 'calendar' : 'bud-labeled'}
         aria-label={open ? 'Minimize Bud' : 'Open Bud'}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -405,7 +406,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
             <span className="text-xs font-normal text-muted-foreground">Separate private chat</span>
           </span>
         )}
-      </Button>
+      </BudLauncher>
       {!docked && failureNotice}
     </aside>
   );
