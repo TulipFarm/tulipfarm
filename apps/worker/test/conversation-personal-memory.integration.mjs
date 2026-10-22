@@ -47,13 +47,14 @@ test('default worker composition includes current personal memory across private
         }),
         'completed',
       );
-      const input = JSON.stringify(requests.at(-2).messages);
+      const input = JSON.stringify(requests.at(-1).messages);
       if (index < 2) assert.match(input, /Prefer concise bullet points/);
       else assert.doesNotMatch(input, /Prefer concise bullet points|personalMemory/);
       const history = await f.store.history(w.id, w.userId, chatId);
       assert.equal(history.messages[1].parts[0].text, 'Here is the answer.');
     }
-    assert.equal(requests.length, 6);
+    // Tool-free replies skip the completion check, so each reply makes one model request.
+    assert.equal(requests.length, 3);
   } finally {
     await f.close();
   }

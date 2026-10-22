@@ -176,6 +176,9 @@ export type ConversationToolContext = {
     epoch?: number;
   };
 };
+/** A reply's final credit write. It runs inside the executor's last transaction for the attempt. */
+export type ReplySettlement = (tx: ReplyTransaction) => Promise<void>;
+export type ReplyTransaction = RuntimeTransaction;
 export type ConversationReply = (input: {
   model: string;
   messages: { role: 'user' | 'assistant'; text: string }[];
@@ -183,6 +186,13 @@ export type ConversationReply = (input: {
   fence: ReplyFence;
   /** Fresh, runtime-authorized preference context, excluded from snapshots and history. */
   readPersonalMemory: () => Promise<{ content: string; revision: number } | undefined>;
+  /** The same context, read once in the reply's start transaction. Later preference edits apply to the next reply. */
+  personalMemory?: () => Promise<{ content: string; revision: number } | undefined>;
+  /**
+   * Registers the reply's final credit write. The executor runs it in the same transaction that delivers or fails
+   * the turn, or in its own transaction when the attempt ends any other way, so it runs once per attempt.
+   */
+  settle?: (settlement: ReplySettlement) => void;
   generateTitle: boolean;
   timeZone: string | null;
   priorCalls?: number;
@@ -389,6 +399,34 @@ export function createConversationExecutor(
         return operation(bindFileSources(tx));
       }),
     );
+  }
+
+  const settlements = new Map<string, ReplySettlement>();
+  const attempt = (fence: ReplyFence) => `${fence.turnId}:${fence.generation}:${fence.epoch}`;
+  /** Runs the attempt's final write: its body, then the registered credit settlement, in one transaction. */
+  async function finalTransaction<T>(fence: ReplyFence, operation: (tx: RuntimeTransaction) => Promise<T>) {
+    const result = await transaction(fence.workspaceId, async tx => {
+      const result = await operation(tx);
+      await settlements.get(attempt(fence))?.(tx);
+      return result;
+    });
+    settlements.delete(attempt(fence));
+    return result;
+  }
+  /** An attempt that ended without a final write (waiting, superseded or failed to fail) still settles its credits. */
+  async function settleUnfinished(fence: ReplyFence) {
+    const settle = settlements.get(attempt(fence));
+    if (!settle) return;
+    settlements.delete(attempt(fence));
+    try {
+      await transaction(fence.workspaceId, settle);
+    } catch (error) {
+      // The next attempt's start recovers an open hold, so a failed settlement is logged rather than raised.
+      log('error', 'activity', 'call_failed', {
+        operation: 'conversation.reply-settlement',
+        'error.type': errorType(error),
+      });
+    }
   }
 
   async function root(
@@ -1354,7 +1392,15 @@ export function createConversationExecutor(
           await requireKnowledgeSources(tx, chat.requester, inherited);
           await requireGoogleFileSources(tx, chat.requester, inherited);
           if (durable) await requireMcpSources(tx, chat.requester, fence.conversationId, inherited);
+          // The reply's start read includes preference memory, so its rounds need no transaction of their own.
+          const personalMemory =
+            chat.project_id || chat.slack || chat.context || compaction?.command
+              ? undefined
+              : await requireGitHubSources(tx, chat.requester, inherited).then(() =>
+                  readPersonalMemory(tx, chat.requester),
+                );
           return {
+            personalMemory,
             model: turn.responder === 'reverse-text-v1' ? defaultConversationModel : turn.responder,
             currentMessage,
             messages,
@@ -1461,6 +1507,14 @@ export function createConversationExecutor(
         fileContext = read.context;
       }
       let calls = source.priorTools.length;
+      let memoryUsed = false;
+      const preloadedPersonalMemory = async () => {
+        if (source.personalMemory?.content && !memoryUsed) {
+          memoryUsed = true;
+          inheritedSources.push({ kind: 'personal-memory', membershipId: source.requester.membershipId });
+        }
+        return source.personalMemory;
+      };
       const currentPersonalMemory = () =>
         staged('memory', () =>
           transaction(fence.workspaceId, async tx => {
@@ -1998,6 +2052,8 @@ export function createConversationExecutor(
             sourceMessages,
             executeTool,
             readPersonalMemory: currentPersonalMemory,
+            personalMemory: preloadedPersonalMemory,
+            settle: settlement => settlements.set(attempt(fence), settlement),
             fence,
             generateTitle: source.generateTitle,
             timeZone: source.timeZone,
@@ -2017,7 +2073,7 @@ export function createConversationExecutor(
       replied = true;
     }
     return staged('delivery', () =>
-      transaction(fence.workspaceId, async tx => {
+      finalTransaction(fence, async tx => {
         const chat = await root(tx, fence);
         if (!chat) return 'stale';
         const turn = await head(tx, fence.conversationId);
@@ -2146,7 +2202,7 @@ export function createConversationExecutor(
     planningFailure?: 'plan-budget',
   ): Promise<'retry' | 'failed' | 'stale'> {
     const fence = fenceSchema.parse(value);
-    return transaction(fence.workspaceId, async tx => {
+    return finalTransaction(fence, async tx => {
       if (!(await root(tx, fence))) return 'stale';
       const turn = await head(tx, fence.conversationId);
       if (
@@ -2404,6 +2460,8 @@ export function createConversationExecutor(
               }
             }
             throw new Error('conversation-reply-unavailable');
+          } finally {
+            if (fence) await settleUnfinished(fence);
           }
         }),
       reply.success ? reply.data.turnId : undefined,

@@ -1081,6 +1081,9 @@ export type ChatDetailPhase =
   | 'request'
   | 'resume'
   | 'requester'
+  | 'reply-start'
+  | 'checkpoint'
+  | 'credit-top-up'
   | 'publisher-close'
   | 'history'
   | 'render'
@@ -1131,8 +1134,10 @@ type ChatReplyClock = {
   sums: ChatReplySums;
   final?: ChatReplyFinal | undefined;
 };
+type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
   counter: { value: number };
+  database: ChatDatabase;
   purpose: ChatModelPurpose | 'turn';
   sequence?: number;
   reply: ChatReplyClock;
@@ -1169,7 +1174,14 @@ async function inChatReplyCategory<T>(category: ChatReplyCategory | undefined, c
 
 function chatReplyCategory(phase: ChatDetailPhase): ChatReplyCategory | undefined {
   if (phase === 'provider') return 'model';
-  if (phase === 'reserve' || phase === 'settle' || phase.startsWith('storage-') || phase.startsWith('credit-'))
+  if (
+    phase === 'reserve' ||
+    phase === 'settle' ||
+    phase === 'reply-start' ||
+    phase === 'checkpoint' ||
+    phase.startsWith('storage-') ||
+    phase.startsWith('credit-')
+  )
     return 'db';
   return undefined;
 }
@@ -1238,7 +1250,7 @@ function finishChatReply(clock: ChatReplyClock) {
 }
 
 /**
- * Measures one reply invocation. `reply` is an in-process key, such as the turn ID, that joins retried attempts; it is
+ * Measures one reply attempt and records its database transaction count and time when it ends. `reply` is an in-process key, such as the turn ID, that joins retried attempts; it is
  * never exported. The reply duration is recorded only after `noteChatReplyFinal`.
  */
 export async function withChatMeasurements<T>(call: () => Promise<T>, reply?: string): Promise<T> {
@@ -1249,10 +1261,12 @@ export async function withChatMeasurements<T>(call: () => Promise<T>, reply?: st
     active: { model: 0, tools: 0, db: 0 },
     sums: { model: 0, tools: 0, db: 0, tools_used: false },
   };
-  return chatMeasurement.run({ counter: { value: 0 }, purpose: 'turn', reply: clock }, async () => {
+  const database: ChatDatabase = { transactions: 0, milliseconds: 0 };
+  return chatMeasurement.run({ counter: { value: 0 }, database, purpose: 'turn', reply: clock }, async () => {
     try {
       return await call();
     } finally {
+      recordChatDatabase(database);
       finishChatReply(clock);
     }
   });
@@ -1316,6 +1330,31 @@ export function observeChatTool<T>(call: () => Promise<T>): Promise<T> {
   const clock = chatMeasurement.getStore()?.reply;
   if (clock) clock.sums.tools_used = true;
   return inChatReplyCategory('tools', call);
+}
+
+function recordChatDatabase(database: ChatDatabase) {
+  if (!database.transactions) return;
+  const meter = metrics.getMeter(scope);
+  meter.createHistogram('cloud_chat_db_transactions').record(database.transactions, dimensions);
+  meter.createHistogram('cloud_chat_db_duration', { unit: 's' }).record(database.milliseconds / 1000, dimensions);
+  log('info', 'activity', 'call_completed', {
+    operation: 'chat.database',
+    'db.transactions': database.transactions,
+    duration_ms: database.milliseconds,
+  });
+}
+
+/** Counts one database transaction, including its wait for a connection, toward the current reply's totals. */
+export async function observeChatTransaction<T>(call: () => Promise<T>): Promise<T> {
+  const state = chatMeasurement.getStore();
+  if (!state) return call();
+  const start = performance.now();
+  try {
+    return await call();
+  } finally {
+    state.database.transactions++;
+    state.database.milliseconds += performance.now() - start;
+  }
 }
 
 function chatDetailAttributes(state: ChatMeasurement): Attributes {
@@ -1404,20 +1443,23 @@ export function withChatModelRequest<T>(purpose: ChatModelPurpose, call: () => P
   const state = chatMeasurement.getStore();
   if (!state) return call();
   const sequence = ++state.counter.value;
-  return chatMeasurement.run({ counter: state.counter, purpose, sequence, reply: state.reply }, async () => {
-    let outcome = 'success';
-    try {
-      return await observeChatDetail('request', call);
-    } catch (error) {
-      outcome = 'error';
-      throw error;
-    } finally {
-      metrics
-        .getMeter(scope)
-        .createCounter('cloud_chat_model_requests')
-        .add(1, { ...dimensions, purpose, outcome });
-    }
-  });
+  return chatMeasurement.run(
+    { counter: state.counter, database: state.database, purpose, sequence, reply: state.reply },
+    async () => {
+      let outcome = 'success';
+      try {
+        return await observeChatDetail('request', call);
+      } catch (error) {
+        outcome = 'error';
+        throw error;
+      } finally {
+        metrics
+          .getMeter(scope)
+          .createCounter('cloud_chat_model_requests')
+          .add(1, { ...dimensions, purpose, outcome });
+      }
+    },
+  );
 }
 
 const chatRequestComponents = [
@@ -1445,6 +1487,16 @@ export function recordChatRequestSizes(sizes: Partial<Record<(typeof chatRequest
       .record(bytes, { ...dimensions, purpose: state.purpose, component });
   }
   log('info', 'inference', 'call_completed', { operation: 'chat.request-size', ...attributes });
+}
+
+export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error';
+/** One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran. */
+export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_completion_checks')
+    .add(1, { ...dimensions, outcome });
+  log('info', 'inference', 'call_completed', { operation: 'chat.completion-check', outcome });
 }
 
 export function recordChatDiscovery(counts: { offered: number; loaded: number; added: number; matched: number }) {

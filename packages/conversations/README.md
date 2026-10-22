@@ -81,7 +81,7 @@ When a reply reaches a final state (completed, failed, blocked or cancelled), th
 | `queue`      | `timing_started_at` to the first claim, capped at `total`                                                                                    |
 | `model`      | Wall time inside provider calls of every purpose                                                                                             |
 | `tools`      | Wall time inside real tool execution, excluding model calls the tool makes                                                                   |
-| `db`         | Wall time inside reserve, settle, credit locks and `storage-*` phases; nested phases count once                                              |
+| `db`         | Wall time inside reserve, settle, reply-start, checkpoint, `credit-*` and `storage-*` phases; nested phases count once                       |
 | `overhead`   | `max(0, total − queue − model − tools)`: our own time, including `db` and time re-queued between retries                                     |
 
 Sums are wall-time unions, so nested or concurrent calls of one kind count once. Retried attempts on the same worker add their sums to the final record; an attempt that runs on another worker loses its sums. The same values, the attempt count and the trace ID go on one `chat.reply.summary` log line per reply. The `cloud_chat_latency_window_*` gauges remain a 24-hour snapshot published by each API instance.
