@@ -227,7 +227,7 @@ export function FallbackRule({
     uncertain || conflict || !writable || read.state.kind !== 'ready' || read.state.refreshing || !!read.state.error;
   const eligibleTarget = (target: string | null) =>
     target === null ||
-    (source.available &&
+    ((source.available || source.unavailableReason === 'model-family-paused') &&
       families.some(family => family.id === target && family.available && family.fallbackFor.includes(source.id)));
   const visibleRead =
     read.state.kind === 'ready' && draft && draft.base.revision > read.state.data.revision

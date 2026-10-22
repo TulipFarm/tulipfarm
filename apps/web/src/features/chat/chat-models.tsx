@@ -15,7 +15,12 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     logo: modelLogo(family.vendor),
     efforts: [],
     disabled: !family.available,
-    ...(!family.available ? { unavailableReason: 'disabled in workspace' } : {}),
+    ...(!family.available
+      ? {
+          unavailableReason:
+            family.unavailableReason === 'model-family-paused' ? 'temporarily unavailable' : 'disabled in workspace',
+        }
+      : {}),
   };
 }
 
@@ -33,8 +38,9 @@ export function useChatModels(
     if (state.kind !== 'ready') return;
     const saved = user.lastModelFamilyId;
     const listed = (id: string | null | undefined) => state.data.families.find(family => family.id === id);
+    const savedFamily = listed(saved);
     const first =
-      listed(saved) ??
+      (savedFamily?.unavailableReason === 'model-family-paused' ? undefined : savedFamily) ??
       state.data.families.find(
         family => family.id === (state.data.defaultChatFamilyId ?? defaultChatModelFamilyId) && family.available,
       ) ??
@@ -101,7 +107,9 @@ export function ChatModelStatus({
       : state.kind === 'unavailable'
         ? 'Model access is unavailable. Ask a workspace admin.'
         : family && !family.available
-          ? `${family.displayName} is disabled in this workspace. Choose another model.`
+          ? family.unavailableReason === 'model-family-paused'
+            ? `${family.displayName} is temporarily unavailable. Choose another model.`
+            : `${family.displayName} is disabled in this workspace. Choose another model.`
           : empty
             ? `${noModelsConfigured}. An operator needs to set up a model provider.`
             : state.kind === 'ready' && !state.data.families.some(item => item.available)

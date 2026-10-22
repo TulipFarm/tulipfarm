@@ -22,7 +22,13 @@ import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/re
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
-import { conversationModel, roleModel, type ConversationModel } from './conversation-model.ts';
+import {
+  conversationFamilyPaused,
+  conversationModel,
+  roleModel,
+  type ConversationModel,
+} from './conversation-model.ts';
+import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
 import { recordUsage } from '@tulipfarm/extensions';
 import { CreditAttemptAlreadyDispatched, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { lockAuthorization, withMcpSourceContext } from '@tulipfarm/access';
@@ -109,7 +115,13 @@ export function meteredReply(
     describedHandles = [],
     project,
   }) => {
-    const chat = conversationModel(model);
+    // The picker offers no paused family, so one here is an existing chat or agent: it moves to the workspace fallback.
+    const replacement = conversationFamilyPaused(model)
+      ? await runtime.transaction(fence.workspaceId, commonCompatibility, tx =>
+          pausedFamilyReplacement(tx, model, conversationFamilyPaused),
+        )
+      : null;
+    const chat = conversationModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const title = generateTitle ? chatTitleModel() : undefined;

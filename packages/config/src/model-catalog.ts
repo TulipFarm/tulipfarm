@@ -47,9 +47,9 @@ export const modelCatalogFamilySchema = z.discriminatedUnion('available', [
   family.extend({
     available: z.literal(false),
     unavailableReason: z
-      .enum(['model-family-unavailable', 'workspace-disabled'])
+      .enum(['model-family-unavailable', 'model-family-paused', 'workspace-disabled'])
       .describe(
-        'Platform unavailability takes precedence over workspace disablement. Workspace enabled state is reported by model-policy/availability.',
+        'Platform unavailability takes precedence over a platform pause, and a pause over workspace disablement. A paused family is served for existing agents and chats but cannot be chosen for new ones. Workspace enabled state is reported by model-policy/availability.',
       ),
     mappingRevision: modelIdentifierSchema.nullable(),
     pricingRevision: modelIdentifierSchema.nullable(),
