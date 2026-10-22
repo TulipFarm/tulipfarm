@@ -219,3 +219,35 @@ test('list windows follow fresh scanned cursors even through an empty authorized
   );
   assert.ok(calls.every(call => call.workspace === workspaceId && call.user === 'reader'));
 });
+
+test('a committed send starts its reply in the background and a failed send starts nothing', async t => {
+  const app = Fastify();
+  const workspaceId = randomUUID(),
+    chatId = randomUUID();
+  const sent = [];
+  let fail = false;
+  registerConversations(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'sender' } }) } },
+    service: {
+      send: async (_workspaceId, _userId, _chatId, input, recorded) => {
+        if (fail) throw new AccessDenied();
+        recorded();
+        return { messageId: input.messageId, turnId: randomUUID(), sequence: 1 };
+      },
+    },
+    replies: { sent: (...args) => sent.push(args) },
+  });
+  t.after(() => app.close());
+  const send = () =>
+    app.inject({
+      method: 'PUT',
+      url: `/workspaces/${workspaceId}/conversations/${chatId}/messages/${randomUUID()}`,
+      payload: { commandId: randomUUID(), parts: [{ kind: 'text', text: 'hey' }] },
+      headers: { origin: 'http://localhost:5173' },
+    });
+  assert.equal((await send()).statusCode, 200);
+  assert.deepEqual(sent, [[workspaceId, chatId]]);
+  fail = true;
+  assert.notEqual((await send()).statusCode, 200);
+  assert.deepEqual(sent, [[workspaceId, chatId]], 'an uncommitted send must not start a reply');
+});

@@ -231,15 +231,27 @@ test('progress publishes each round in order, swallows failures, and stops after
     },
   };
   const publisher = createReplyTextPublisher(runtime, fence, 10);
-  publisher.progress(0, 1);
-  publisher.progress(1, 2);
-  publisher.progress(2, 3);
+  publisher.progress({ step: 0, round: 1 });
+  publisher.progress({ step: 1, round: 2, status: 'tool', tool: 'Knowledge', toolRounds: 0 });
+  publisher.progress({ step: 1, round: 2, status: 'tool', tool: 'x'.repeat(80), toolRounds: 0 });
+  publisher.progress({ step: 2, round: 3, status: 'done', tool: 'Knowledge', toolRounds: 1 });
   await publisher.close();
-  publisher.progress(3, 4);
+  publisher.progress({ step: 3, round: 4, status: 'thinking', toolRounds: 1 });
   await sleep(20);
   assert.deepEqual(sent, [
     { kind: 'progress', ...address, ...identity, step: 0, round: 1 },
-    { kind: 'progress', ...address, ...identity, step: 2, round: 3 },
+    {
+      kind: 'progress',
+      ...address,
+      ...identity,
+      step: 1,
+      round: 2,
+      status: 'tool',
+      toolRounds: 0,
+      seq: 1,
+      tool: 'x'.repeat(64),
+    },
+    { kind: 'progress', ...address, ...identity, step: 2, round: 3, status: 'done', toolRounds: 1, seq: 2 },
   ]);
 });
 

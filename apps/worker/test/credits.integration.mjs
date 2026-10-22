@@ -78,13 +78,14 @@ test(
       let body = '';
       for await (const chunk of req) body += chunk;
       const request = JSON.parse(body);
-      assert.equal(request.model, 'claude-sonnet-5');
       res.writeHead(200, { 'content-type': 'application/json' });
       if (isTitleRequest(request)) {
+        assert.equal(request.model, 'claude-haiku-4-5');
         titles++;
         res.end(JSON.stringify(anthropicText('Hello')));
         return;
       }
+      assert.equal(request.model, 'claude-sonnet-5');
       calls++;
       if (isCompletionRequest(request)) {
         const { usage, ...response } = completionReply('anthropic');
@@ -128,17 +129,25 @@ test(
       assert.equal(await activity(work), 'idle');
       assert.equal(calls, 2);
       assert.equal(titles, 1);
-      assert.equal((await summary()).used, 1);
-      assert.equal((await summary()).available, 999);
+      assert.equal((await summary()).used, 0.1);
+      assert.equal((await summary()).available, 999.9);
       assert.equal((await summary()).held, 0);
       assert.equal((await f.store.history(w.id, w.userId, chatId)).messages.at(-1).parts[0].text, 'A metered answer.');
+      // The fixture's default members table reaches the reply through the inventory and table tools.
+      const ownSources = rows =>
+        rows.map(({ sources, ...row }) => ({
+          ...row,
+          sources: sources.filter(source => !source.kind.startsWith('table-')),
+        }));
       assert.deepEqual(
-        (
-          await f.db.platform.query(
-            `SELECT sources, publication FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`,
-            [work.turnId],
-          )
-        ).rows,
+        ownSources(
+          (
+            await f.db.platform.query(
+              `SELECT sources, publication FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`,
+              [work.turnId],
+            )
+          ).rows,
+        ),
         [{ sources: [{ kind: 'private-conversation', conversationId: chatId }], publication: 'private' }],
       );
       unknown = true;
@@ -146,11 +155,13 @@ test(
       const toolWork = await send();
       assert.equal(await activity(toolWork), 'completed');
       assert.deepEqual(
-        (
-          await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`, [
-            toolWork.turnId,
-          ])
-        ).rows,
+        ownSources(
+          (
+            await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`, [
+              toolWork.turnId,
+            ])
+          ).rows,
+        ),
         [{ sources: [{ kind: 'private-conversation', conversationId: chatId }] }],
       );
       assert.equal(
@@ -158,8 +169,11 @@ test(
           .status,
         'completed',
       );
-      assert.ok((await summary()).held > 0);
-      assert.equal((await summary()).used, 1);
+      // Unknown usage is charged at each call's whole reservation when the reply settles, so nothing stays held.
+      const afterUnknown = await summary();
+      assert.equal(afterUnknown.held, 0);
+      assert.ok(afterUnknown.used > 0.1);
+      assert.equal(afterUnknown.available + afterUnknown.used, 1000);
       const blocked = await send();
       await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=1`);
       assert.equal(await activity(blocked), 'failed');

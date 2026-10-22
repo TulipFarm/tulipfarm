@@ -715,18 +715,19 @@ function ConversationDetail({
         </Popover>
       )
     : undefined;
-  const { pending, turn, thinking, narration, answerText, activity, stalledTurn, slowTurn } = useCurrentReply({
+  const { pending, turn, thinking, narration, answerText, activity, status, stalledTurn, slowTurn } = useCurrentReply({
     messages: data?.messages,
     outgoing,
     command: write.state.kind,
     stream,
   });
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
-  const activityLabel = currentTool
-    ? currentTool.activity?.trim() || currentTool.presentation?.label || toolActivityItems([currentTool])[0]?.label
-    : thinking
-      ? activity.label
-      : null;
+  const activityLabel =
+    currentTool && !status
+      ? currentTool.activity?.trim() || currentTool.presentation?.label || toolActivityItems([currentTool])[0]?.label
+      : thinking
+        ? activity.label
+        : null;
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
   const firstId = data?.messages.at(0)?.id;
@@ -982,7 +983,7 @@ function ConversationDetail({
                             key="activity"
                             variant="transcript"
                             items={toolActivityItems(message.tools)}
-                            active={!!turn && message.turn?.id === turn.id}
+                            active={thinking && !!turn && message.turn?.id === turn.id}
                             activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
                             onToggle={() => {
                               followLatest.current = 'inspecting';

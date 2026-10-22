@@ -163,6 +163,42 @@ export async function coordinatorAdmission(
   fence: ReplyFence,
   input: { tool?: string; reserve?: bigint } = {},
 ) {
+  return (await admitCoordinator(tx, fence, input))?.id ?? null;
+}
+
+/**
+ * Admits a coordinator reply's next model call, as {@link reserveCoordinatorModel} does, and returns what remains
+ * of its attempt's allowance, so the reply can enforce the budget in memory until its next database touch. Null
+ * when the turn coordinates no open attempt.
+ */
+export async function coordinatorReplyBudget(
+  tx: AgentTransaction & { commonVersion: number },
+  fence: ReplyFence,
+  reserve: bigint,
+) {
+  const admitted = await admitCoordinator(tx, fence, { reserve });
+  if (!admitted) return null;
+  return {
+    attemptId: admitted.id,
+    remainingUnits: BigInt(admitted.allowance.credits) * creditUnit - BigInt(admitted.spent),
+    remainingMilliseconds: admitted.allowance.activeMilliseconds - admitted.activeMilliseconds,
+  };
+}
+
+/** Adds a reply's model time to its coordinator attempt; the reply's usage rows carry the per-call share. */
+export async function recordCoordinatorReplyTime(tx: AgentTransaction, attemptId: string, elapsedMilliseconds: number) {
+  if (elapsedMilliseconds <= 0) return;
+  await tx.client.query(
+    `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET active_milliseconds=active_milliseconds+$2 WHERE id=$1`,
+    [attemptId, Math.ceil(elapsedMilliseconds)],
+  );
+}
+
+async function admitCoordinator(
+  tx: AgentTransaction & { commonVersion: number },
+  fence: ReplyFence,
+  input: { tool?: string; reserve?: bigint },
+) {
   if (tx.commonVersion < planCompatibility.minimum) return null;
   const binding = z
     .object({ linked: z.boolean(), lifecycle: planLifecycleSchema.nullable(), newer: z.boolean() })
@@ -252,7 +288,7 @@ export async function coordinatorAdmission(
   ) {
     throw new PlanGraphError('planning-budget');
   }
-  return row.id;
+  return row;
 }
 
 export async function reserveCoordinatorModel(
