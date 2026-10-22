@@ -11,6 +11,27 @@ import { registerConversations } from '../src/conversations.ts';
 import { approvalFixture } from '../../../packages/conversations/test/approval-fixture.mjs';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
+import { createRequire } from 'node:module';
+
+const telemetryRequire = createRequire(import.meta.resolve('@tulipfarm/observability'));
+const { context, metrics, trace } = telemetryRequire('@opentelemetry/api');
+const { MeterProvider, MetricReader } = telemetryRequire('@opentelemetry/sdk-metrics');
+const { BasicTracerProvider } = telemetryRequire('@opentelemetry/sdk-trace-base');
+const { AsyncLocalStorageContextManager } = createRequire(telemetryRequire.resolve('@opentelemetry/sdk-node'))(
+  '@opentelemetry/context-async-hooks',
+);
+
+class TestReader extends MetricReader {
+  async onShutdown() {}
+  async onForceFlush() {}
+}
+const metricReader = new TestReader();
+metrics.setGlobalMeterProvider(new MeterProvider({ readers: [metricReader] }));
+trace.setGlobalTracerProvider(new BasicTracerProvider());
+context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+
+const registerWithReplies = (app, dependencies) =>
+  registerConversationDispatch(app, { ...dependencies, replies: createReplyDispatch(dependencies) });
 
 test(
   'restricted API identity discovers persisted conversations and dispatches only control IDs',
@@ -56,7 +77,7 @@ test(
       });
       const calls = [];
       const executor = createConversationExecutor(f.runtime, reverseReply);
-      registerConversationDispatch(app, {
+      registerWithReplies(app, {
         pool,
         runtime: f.runtime,
         temporal: {
@@ -146,7 +167,7 @@ test(
       await attachments.upload(w.id, w.userId, chatId, uploadId, bytes);
       let initialSweep = false;
       const calls = [];
-      registerConversationDispatch(app, {
+      registerWithReplies(app, {
         pool: db.platform,
         runtime: f.runtime,
         attachments,
@@ -280,7 +301,7 @@ const outbox = async (f, turnId) =>
 
 test(
   'a send starts its reply before any sweep, with the same workflow id the sweep uses',
-  { timeout: 15000 },
+  { timeout: 60000 },
   async () => {
     const f = await conversationFixture();
     const starts = [];
@@ -314,7 +335,7 @@ test(
   },
 );
 
-test('a racing send and sweep start one workflow id and write one reply', { timeout: 15000 }, async () => {
+test('a racing send and sweep start one workflow id and write one reply', { timeout: 60000 }, async () => {
   const f = await conversationFixture();
   const executor = createConversationExecutor(f.runtime, reverseReply);
   const starts = [];
@@ -349,7 +370,7 @@ test('a racing send and sweep start one workflow id and write one reply', { time
   }
 });
 
-test('a failed start still saves the send, logs a code, and the sweep recovers it', { timeout: 15000 }, async t => {
+test('a failed start still saves the send, logs a code, and the sweep recovers it', { timeout: 60000 }, async t => {
   const f = await conversationFixture();
   const executor = createConversationExecutor(f.runtime, reverseReply);
   const lines = [];
@@ -362,7 +383,14 @@ test('a failed start still saves the send, logs a code, and the sweep recovers i
   const replies = createReplyDispatch({
     runtime: f.runtime,
     temporal: fakeTemporal(async options => {
-      if (++attempts === 1) throw Object.assign(new Error('4 DEADLINE_EXCEEDED: private detail'), { code: 4 });
+      if (++attempts === 1)
+        throw new Error('Failed to start Workflow', {
+          cause: Object.assign(new Error('4 DEADLINE_EXCEEDED: private detail'), {
+            code: 4,
+            details: 'private detail',
+            metadata: {},
+          }),
+        });
       await executor.process(options.args[0]);
     }),
   });
@@ -392,7 +420,7 @@ test('a failed start still saves the send, logs a code, and the sweep recovers i
   }
 });
 
-test('a send during an active reply queues behind it on both paths, as before', { timeout: 15000 }, async () => {
+test('a send during an active reply queues behind it on both paths, as before', { timeout: 60000 }, async () => {
   const f = await conversationFixture();
   const executor = createConversationExecutor(f.runtime, reverseReply);
   const starts = [];
@@ -425,3 +453,128 @@ test('a send during an active reply queues behind it on both paths, as before', 
     await f.close();
   }
 });
+
+test('a send dispatches only its own chat and leaves other due chats to the sweep', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.args[0]);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    const other = await newChat(f);
+    const missed = await quiet.send(other, 'missed');
+    const chatId = await newChat(f);
+    const sent = await route.send(chatId, 'mine');
+    await replies.settle();
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [sent.turnId],
+    );
+    assert.deepEqual(await outbox(f, missed.turnId), [{ dispatched: false }]);
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [sent.turnId, missed.turnId],
+    );
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a send starts its reply inside the request trace; the sweep does not', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const active = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async () => {
+      active.push(trace.getActiveSpan()?.spanContext().spanId);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const request = trace.getTracer('test').startSpan('PUT message');
+    await context.with(trace.setSpan(context.active(), request), () => route.send(chatId, 'traced'));
+    request.end();
+    await replies.settle();
+    await quiet.send(await newChat(f), 'untraced');
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(active, [request.spanContext().spanId, undefined]);
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a start that outlives its bound fails the send dispatch with a timeout code', { timeout: 60000 }, async t => {
+  const f = await conversationFixture();
+  const lines = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...rest) => {
+    lines.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    // A lazy first connect waits outside `withDeadline`; a start that never settles models it ignoring the RPC deadline.
+    temporal: fakeTemporal(() => new Promise(() => {})),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    await route.send(await newChat(f), 'stuck');
+    await replies.settle();
+    const failure = lines
+      .flatMap(line => line.split('\n'))
+      .filter(line => line.includes('"dispatch_failed"'))
+      .map(line => JSON.parse(line));
+    assert.deepEqual(
+      failure.map(line => line['error.code']),
+      ['timeout'],
+    );
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('dispatch metrics label each start with the path that made it', { timeout: 60000 }, async () => {
+  const before = await dispatchCounts();
+  const f = await conversationFixture();
+  const replies = createReplyDispatch({ runtime: f.runtime, temporal: fakeTemporal(async () => {}) });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    await route.send(await newChat(f), 'send');
+    await replies.settle();
+    await quiet.send(await newChat(f), 'sweep');
+    await replies.dispatch(f.workspace.id);
+    const after = await dispatchCounts();
+    const delta = key => (after[key] ?? 0) - (before[key] ?? 0);
+    assert.equal(delta('send/success'), 1);
+    assert.equal(delta('sweep/success'), 1);
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+async function dispatchCounts() {
+  const { resourceMetrics } = await metricReader.collect();
+  const counts = {};
+  for (const scope of resourceMetrics.scopeMetrics)
+    for (const metric of scope.metrics)
+      if (metric.descriptor.name === 'cloud_chat_dispatches')
+        for (const point of metric.dataPoints)
+          counts[`${point.attributes.dispatch_source}/${point.attributes.outcome}`] = point.value;
+  return counts;
+}

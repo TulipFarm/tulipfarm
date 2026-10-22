@@ -5,6 +5,24 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { errorAttributes, log, ROOT_CONTEXT, startTelemetry, trace } from '../src/index.ts';
 
+test('gRPC service errors map only reviewed status codes, through wrappers', () => {
+  const grpc = code =>
+    new Error('PRIVATE wrapper', {
+      cause: Object.assign(new Error('PRIVATE status text'), { code, details: 'PRIVATE details', metadata: {} }),
+    });
+  assert.equal(errorAttributes(grpc(4))['error.code'], 'timeout');
+  assert.equal(errorAttributes(grpc(14))['error.code'], 'service-unavailable');
+  assert.equal(errorAttributes(new AggregateError([grpc(14)]))['error.code'], 'service-unavailable');
+  assert.doesNotMatch(JSON.stringify(errorAttributes(grpc(4))), /PRIVATE/);
+  for (const code of [2, 13, '4'])
+    assert.equal(errorAttributes(grpc(code))['error.code'], undefined, `unreviewed status ${code}`);
+  assert.equal(
+    errorAttributes(Object.assign(new Error('PRIVATE'), { code: 4 }))['error.code'],
+    undefined,
+    'a bare numeric code is not a gRPC status',
+  );
+});
+
 test('export diagnostics retain only reviewed codes and HTTP status, never transport text', () => {
   for (const [message, code] of [
     ['Request Timeout', 'export-timeout'],

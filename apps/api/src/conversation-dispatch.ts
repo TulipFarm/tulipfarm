@@ -11,7 +11,7 @@ import { registerChatLatency } from './chat-latency.ts';
 import { createConversationMaintenance } from '@tulipfarm/conversations/maintenance';
 import { errorAttributes, log } from '@tulipfarm/observability';
 
-// The send route does not await its start, so this deadline bounds background work and shutdown, not the send.
+// The send route does not await its start; these deadlines bound background work and shutdown, not the send.
 const sendStartDeadlineMs = 2000;
 const sweepStartDeadlineMs = 10000;
 
@@ -26,14 +26,16 @@ export function createReplyDispatch(dependencies: {
     runtime: dependencies.runtime,
     start: async (work, source) => {
       const deadline = source === 'send' ? sendStartDeadlineMs : sweepStartDeadlineMs;
-      await temporal.connection.withDeadline(Date.now() + deadline, () =>
-        temporal.client.workflow.start('conversationReply', {
-          workflowId: `conversation-reply-v1-${work.workspaceId}-${work.turnId}-${work.generation}`,
-          taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
-          args: [work],
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-        }),
+      await bounded(deadline, () =>
+        temporal.connection.withDeadline(Date.now() + deadline, () =>
+          temporal.client.workflow.start('conversationReply', {
+            workflowId: `conversation-reply-v1-${work.workspaceId}-${work.turnId}-${work.generation}`,
+            taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+            args: [work],
+            workflowIdConflictPolicy: 'USE_EXISTING',
+            workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+          }),
+        ),
       );
     },
   });
@@ -46,7 +48,7 @@ export function createReplyDispatch(dependencies: {
         .catch(error =>
           log('warn', 'dependency', 'dispatch_failed', {
             ...errorAttributes(error),
-            'error.code': startFailure(error),
+            'error.code': errorAttributes(error)['error.code'] ?? 'failed',
             operation: 'chat.dispatch',
             dispatch_source: 'send',
           }),
@@ -60,25 +62,20 @@ export function createReplyDispatch(dependencies: {
   };
 }
 
-function startFailure(error: unknown) {
-  const code = errorAttributes(error)['error.code'];
-  if (code) return code;
-  const grpc = grpcStatus(error, 0);
-  if (grpc === 4) return 'timeout';
-  if (grpc === 14) return 'service-unavailable';
-  return 'failed';
-}
-
-function grpcStatus(error: unknown, depth: number): number | undefined {
-  if (depth > 4 || typeof error !== 'object' || error === null) return undefined;
-  const item = error as { code?: unknown; cause?: unknown; errors?: unknown };
-  if (typeof item.code === 'number') return item.code;
-  if (Array.isArray(item.errors))
-    for (const child of item.errors.slice(0, 8)) {
-      const found = grpcStatus(child, depth + 1);
-      if (found !== undefined) return found;
-    }
-  return grpcStatus(item.cause, depth + 1);
+/**
+ * `withDeadline` covers the RPC but not the lazy first connect (`connectTimeout`, 10s by default).
+ * A start that lands after this bound is harmless: the workflow id is deterministic and reuses the run.
+ */
+async function bounded<T>(ms: number, call: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'timeout' })), ms);
+  });
+  try {
+    return await Promise.race([call(), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function registerConversationDispatch(
@@ -89,11 +86,10 @@ export function registerConversationDispatch(
     temporal: ReturnType<typeof createTemporalClient>;
     attachments?: ReturnType<typeof createAttachments> | undefined;
     expireApprovals?: (workspaceId: string) => Promise<void>;
-    replies?: ReplyDispatch;
+    replies: ReplyDispatch;
   },
 ) {
-  const { pool, runtime, temporal } = dependencies;
-  const replies = dependencies.replies ?? createReplyDispatch({ runtime, temporal });
+  const { pool, runtime, temporal, replies } = dependencies;
   app.addHook('onClose', () => replies.settle());
   registerChatLatency(app, pool, runtime);
   const requests = createConversationRequests(runtime);
