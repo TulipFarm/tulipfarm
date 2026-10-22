@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { workspaceChange, ownMembership } from './workspace-query.fixture.mjs';
 import { createMemberTablesMock } from '../src/features/tables/workspace-members-mock-api.ts';
-import { selectInvitationMember } from './invitation-members.fixture.mjs';
 
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
@@ -336,10 +335,9 @@ try {
   await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
   await page.getByRole('heading', { name: 'No invitations yet' }).waitFor();
   await page.getByRole('button', { name: 'Invite members', exact: true }).last().click();
-  await page.getByRole('textbox', { name: 'Email 1', exact: true }).fill('ada@example.com');
-  await selectInvitationMember(page, 0, 'Ada · ada@example.com');
+  await page.getByRole('combobox', { name: 'Email addresses', exact: true }).fill('ada@example.com,');
   await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
-  await page.getByText('1 of 1 recipients confirmed.', { exact: false }).waitFor();
+  await page.getByText('1 invitation sent.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Copy link', exact: true }).click();

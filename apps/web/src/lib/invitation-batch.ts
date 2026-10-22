@@ -4,11 +4,24 @@ import { invitationInputSchema } from '@tulipfarm/workspaces/governance-contract
 export type InvitationReceipt =
   | { outcome: 'already-member' }
   | { outcome: 'created' | 'pending'; invitationId: string };
-export type RecipientCommand = { email: string; requestId: string; workspaceMemberId?: string };
+/**
+ * `memberRequestId` and `memberRecordId` make the workspace member row that is
+ * created for a new email idempotent, so a retry never adds a second row.
+ */
+export type RecipientCommand = {
+  email: string;
+  requestId: string;
+  memberRequestId: string;
+  memberRecordId: string;
+  workspaceMemberId?: string;
+};
 export type RecipientState =
   | { kind: 'queued' | 'sending' }
   | { kind: 'success'; result: InvitationReceipt }
-  | { kind: 'failed'; code: 'access-lost' | 'rate-limited' | 'invalid' | 'uncertain' | 'member-conflict' };
+  | {
+      kind: 'failed';
+      code: 'access-lost' | 'rate-limited' | 'invalid' | 'uncertain' | 'member-conflict' | 'member-unavailable';
+    };
 export type RecipientRow = RecipientCommand & { state: RecipientState };
 
 export function parseRecipients(input: string) {
@@ -36,10 +49,10 @@ export function parseRecipients(input: string) {
   return { recipients, invalid, duplicates };
 }
 
-export async function sendInvitationBatch(
-  commands: RecipientCommand[],
-  send: (command: RecipientCommand) => Promise<RecipientState>,
-  update: (command: RecipientCommand, state: RecipientState) => void,
+export async function sendInvitationBatch<Command extends Pick<RecipientCommand, 'email' | 'requestId'>>(
+  commands: Command[],
+  send: (command: Command) => Promise<RecipientState>,
+  update: (command: Command, state: RecipientState) => void,
 ) {
   let next = 0;
   let stopped: 'access-lost' | 'rate-limited' | undefined;

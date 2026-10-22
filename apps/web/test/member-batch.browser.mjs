@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright';
 import { createMemberTablesMock } from '../src/features/tables/workspace-members-mock-api.ts';
-import { selectInvitationMember } from './invitation-members.fixture.mjs';
 import { shellRead } from './shell-reads.mjs';
 import { governanceSnapshotSchema } from '@tulipfarm/workspaces/governance-contracts';
 
@@ -258,37 +257,40 @@ try {
   assert.equal(snapshot.members.length, 1);
   await page.getByRole('button', { name: 'Invite members', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  const input = page.getByRole('textbox', { name: 'Email 1', exact: true });
+  const input = dialog.getByRole('combobox', { name: 'Email addresses', exact: true });
+  const chips = dialog.locator('[data-slot="combobox-chip"]');
   const fillEmails = async value => {
-    const remove = dialog.getByRole('button', { name: /^Remove email / });
-    while ((await remove.count()) > 1) await remove.last().click();
+    await input.focus();
+    while ((await chips.count()) > 0) await page.keyboard.press('Backspace');
     await input.fill(value);
   };
   await fillEmails('FIRST@example.com, first@example.com, invalid');
   await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
-  await page.getByText('Enter a valid email address.').waitFor();
+  await page.getByText('Check invalid. It is not a valid email address.').waitFor();
   assert.equal(attempts.length, 0);
-  assert.equal(await dialog.getByRole('combobox', { name: 'Workspace member', exact: true }).count(), 3);
+  assert.equal(await dialog.getByRole('combobox', { name: 'Workspace member', exact: true }).count(), 0);
+  assert.deepEqual(await chips.allInnerTexts(), ['first@example.com']);
+  await input.fill('');
   await fillEmails(
-    'FIRST@example.com, first@example.com, lost@example.com, bob@example.com, pending@example.com, limited@example.com',
+    'FIRST@example.com, first@example.com, lost@example.com, bob@example.com, pending@example.com, limited@example.com,',
   );
-  await page.getByText('Duplicates removed:', { exact: false }).waitFor();
-  for (const [index, name] of ['first', 'first', 'lost', 'bob', 'pending', 'limited'].entries()) {
-    await selectInvitationMember(page, index, `${name} · ${name}@example.com`);
-  }
+  await page.getByText('Already added: first@example.com.', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Send invitations', exact: true }).dblclick();
-  await page.getByText('3 of 5 recipients confirmed.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Send invitations', exact: true }).waitFor();
   assert.equal(attempts.length, 5);
   assert.equal(peak, 2);
-  assert.equal(await page.getByText('Already a member.', { exact: true }).count(), 1);
-  assert.equal(await page.getByText('Invitation limit reached.', { exact: false }).count(), 1);
-  await page.getByRole('button', { name: 'Retry invitation for lost@example.com', exact: true }).click();
-  await page.getByText('4 of 5 recipients confirmed.', { exact: false }).waitFor();
+  const results = dialog.getByRole('region', { name: 'Invitation results' });
   assert.equal(
-    await dialog.getByRole('link', { name: 'Manage teams', exact: true }).getAttribute('href'),
-    '/acme/teams',
+    await results.getByRole('status').innerText(),
+    '1 invitation sent. 1 person was already invited. 1 person is already a member.',
   );
-  await dialog.getByText(/After each person accepts, add them to a team/).waitFor();
+  assert.deepEqual(await results.getByRole('alert').allInnerTexts(), [
+    '1 not sent: not confirmed, retrying is safe.',
+    '1 not sent: hourly limit reached, try again later.',
+  ]);
+  assert.deepEqual(await chips.allInnerTexts(), ['lost@example.com', 'limited@example.com']);
+  await page.getByRole('button', { name: 'Retry invitation for lost@example.com', exact: true }).click();
+  await results.getByText('2 invitations sent.', { exact: false }).waitFor();
   assert.deepEqual(
     attempts.filter(item => item.email === 'lost@example.com')[0],
     attempts.filter(item => item.email === 'lost@example.com')[1],
@@ -303,8 +305,8 @@ try {
     true,
   );
   await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  assert.equal(await input.inputValue(), 'limited@example.com');
-  await page.getByText('4 of 5 recipients confirmed.', { exact: false }).waitFor();
+  assert.equal(await chips.count(), 0, 'closing starts a fresh draft');
+  assert.equal(await results.count(), 0, 'closing clears results');
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'hidden' });
   await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
@@ -340,66 +342,47 @@ try {
   await page.getByRole('button', { name: 'Invite members', exact: true }).click();
   if (process.env.BATCH_SCREENSHOT_DIR)
     await page.screenshot({ path: `${process.env.BATCH_SCREENSHOT_DIR}/members-batch-dialog.png`, fullPage: true });
-  const resultRow = email =>
-    dialog
-      .getByRole('region', { name: 'Invitation results' })
-      .getByRole('listitem')
-      .filter({ has: page.getByText(email, { exact: true }) });
-  await resultRow('lost@example.com').getByRole('button', { name: 'Resend', exact: true }).click();
-  await resultRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
-  await resultRow('lost@example.com').getByRole('alert').waitFor();
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'hidden' });
+  const invitationRow = email => page.getByRole('listitem').filter({ has: page.getByText(email, { exact: true }) });
+  await invitationRow('lost@example.com').getByRole('button', { name: 'Resend', exact: true }).click();
+  await invitationRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
+  await invitationRow('lost@example.com').getByRole('alert').waitFor();
   await invitationsChanged();
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  await resultRow('lost@example.com').getByRole('button', { name: 'Retry resend', exact: true }).click();
-  await resultRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
-  await resultRow('lost@example.com').getByRole('button', { name: 'Copy link', exact: true }).waitFor();
+  await invitationRow('lost@example.com').getByRole('button', { name: 'Retry resend', exact: true }).click();
+  await invitationRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
+  await invitationRow('lost@example.com').getByRole('button', { name: 'Copy link', exact: true }).first().waitFor();
   assert.deepEqual(resendAttempts[1], resendAttempts[0]);
   assert.equal(items.filter(item => item.email === 'lost@example.com').length, 2);
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
   await row.getByRole('button', { name: 'Revoke link', exact: true }).click();
   await row.getByRole('button', { name: 'Confirm revoke', exact: true }).click();
   await row.getByText(/revoked\. Expires/).waitFor();
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  assert.equal(await resultRow('first@example.com').getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
-  assert.equal(await resultRow('first@example.com').getByRole('button', { name: 'Resend', exact: true }).count(), 0);
-  assert.equal(
-    await resultRow('first@example.com').getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(),
-    true,
-  );
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(await row.getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
+  assert.equal(await row.getByRole('button', { name: 'Resend', exact: true }).count(), 0);
+  assert.equal(await row.getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(), true);
   const pendingInvitation = items.find(item => item.email === 'pending@example.com');
   pendingInvitation.status = 'consumed';
   pendingInvitation.canCopy = false;
   await invitationsChanged();
   await page.getByText(/consumed\. Expires/).waitFor();
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
   assert.equal(
-    await resultRow('pending@example.com').getByRole('button', { name: 'Copy link', exact: true }).count(),
+    await invitationRow('pending@example.com').getByRole('button', { name: 'Copy link', exact: true }).count(),
     0,
   );
-  assert.equal(await resultRow('pending@example.com').getByRole('button', { name: 'Resend', exact: true }).count(), 0);
-  await fillEmails('denied@example.com, stopped@example.com, never@example.com');
-  for (const [index, name] of ['denied', 'stopped', 'never'].entries()) {
-    await selectInvitationMember(page, index, `${name} · ${name}@example.com`);
-  }
+  assert.equal(
+    await invitationRow('pending@example.com').getByRole('button', { name: 'Resend', exact: true }).count(),
+    0,
+  );
+  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
+  await fillEmails('denied@example.com, stopped@example.com, never@example.com,');
   dropAccess = true;
   await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
   await page.getByText('Admin access is unavailable.', { exact: false }).waitFor();
-  await page.getByRole('button', { name: 'Retry invitation for never@example.com', exact: true }).waitFor();
+  await results.getByText('3 not sent: admin access was lost.', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('Search members').count(), 0);
   assert.equal(await page.getByLabel('Search invitations').count(), 0);
   assert.equal(await dialog.getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
-  // Each address is a type="email" row since cloud cc0b0416 (#960), src/pages/invite-members-dialog.tsx:110; email inputs sanitize away surrounding spaces.
-  assert.deepEqual(
-    await dialog
-      .getByRole('textbox', { name: /^Email \d+$/ })
-      .evaluateAll(elements => elements.map(element => element.value)),
-    ['denied@example.com', 'stopped@example.com', 'never@example.com'],
-  );
+  assert.deepEqual(await chips.allInnerTexts(), ['denied@example.com', 'stopped@example.com', 'never@example.com']);
   assert.equal(attempts.filter(command => command.email === 'never@example.com').length, 0);
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'hidden' });
