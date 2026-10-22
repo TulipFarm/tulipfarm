@@ -1,0 +1,28 @@
+{
+  "families": [
+    {
+      "id": "acme-chat",
+      "name": "Acme Chat",
+      "vendor": "acme",
+      "currentModelId": "acme-chat-1",
+      "modelIds": ["acme-chat-1"]
+    }
+  ],
+  "models": [
+    {
+      "id": "acme-chat-1",
+      "name": "Acme Chat 1",
+      "provider": "azure",
+      "providerModelId": "Acme-Chat-1",
+      "metadata": { "max_input_tokens": 128000 },
+      "rates": [
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": null,
+          "usdPerMillionTokens": { "input": 0.5, "output": 1.5 }
+        }
+      ]
+    }
+  ]
+}

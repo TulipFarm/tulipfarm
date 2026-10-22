@@ -1,0 +1,13 @@
+{
+  "extends": "@tulipfarm/typescript-config/base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

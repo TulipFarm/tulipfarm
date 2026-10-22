@@ -1,0 +1,53 @@
+{
+  "name": "tulipfarm",
+  "description": "TulipFarm: describe business operations in chat; agents build and run the records, knowledge, and automations to do them.",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "packageManager": "pnpm@11.5.3",
+  "engines": {
+    "node": ">=26 <27",
+    "pnpm": "11.5.3"
+  },
+  "scripts": {
+    "workspace:operations": "node apps/database/src/workspace-operations.ts",
+    "recommendations:operate": "node apps/worker/src/recommendation-operations.ts",
+    "db": "node apps/database/src/cli.ts",
+    "workspace:credentials": "node apps/database/src/workspace-credentials.ts",
+    "workspace:registry": "node apps/database/src/table-registry.ts",
+    "dev": "pnpm infra:up && turbo run build --concurrency=2 --filter=@tulipfarm/database^... && pnpm dev:setup && turbo run dev dev:storage",
+    "dev:setup": "node apps/database/src/dev-setup.ts",
+    "self-host:setup": "node apps/database/src/self-host-setup.ts",
+    "config:docs": "node packages/config/scripts/config-docs.mjs",
+    "dev:session": "node apps/dev-seed/src/session-cli.ts",
+    "auth:reset-password": "node --env-file-if-exists=apps/api/.env.local apps/api/src/auth-reset-password.ts",
+    "seed": "node apps/dev-seed/src/cli.ts",
+    "seed:reset": "node apps/dev-seed/src/cli.ts reset",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "build": "turbo run build --concurrency=2",
+    "lint": "turbo run lint:repo",
+    "lint:repo": "oxfmt --check && oxlint --deny-warnings --no-error-on-unmatched-pattern --threads=2 . && node --test --test-concurrency=1 tooling/*.test.mjs && node tooling/check-doc-links.mjs",
+    "test:slack:acceptance": "node tooling/slack-acceptance.mjs",
+    "lint:fix": "oxlint --fix --no-error-on-unmatched-pattern .",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "turbo run typecheck --concurrency=2",
+    "test": "turbo run test --concurrency=2",
+    "test:apps": "turbo run test --concurrency=2 --continue --filter=@tulipfarm/api --filter=@tulipfarm/database --filter=@tulipfarm/dev-seed --filter=@tulipfarm/web --filter=@tulipfarm/worker",
+    "test:memory": "turbo run test --concurrency=2 --continue --filter=@tulipfarm/content-budget --filter=@tulipfarm/files --filter=@tulipfarm/knowledge --filter=@tulipfarm/memory-core --filter=@tulipfarm/memory-postgres --filter=@tulipfarm/workspace-storage",
+    "test:integrations": "turbo run test --concurrency=2 --continue --filter=@tulipfarm/atlassian --filter=@tulipfarm/email --filter=@tulipfarm/github --filter=@tulipfarm/google-workspace --filter=@tulipfarm/integrations --filter=@tulipfarm/provider-mcp --filter=@tulipfarm/slack --filter=@tulipfarm/slack-presentation --filter=@tulipfarm/workspace-mcp --filter=@tulipfarm/workspace-mcp-transport",
+    "test:platform": "turbo run test --concurrency=2 --continue --filter=@tulipfarm/access --filter=@tulipfarm/agents --filter=@tulipfarm/build-info --filter=@tulipfarm/config --filter=@tulipfarm/conversations --filter=@tulipfarm/extensions --filter=@tulipfarm/keyring --filter=@tulipfarm/observability --filter=@tulipfarm/recommendations --filter=@tulipfarm/tables --filter=@tulipfarm/workflow-snippets --filter=@tulipfarm/workflows --filter=@tulipfarm/workspaces",
+    "check": "node tooling/check.mjs",
+    "check:full": "node tooling/check.mjs --full",
+    "check:logged": "node tooling/check.mjs",
+    "test:files": "node --test --test-concurrency=1"
+  },
+  "devDependencies": {
+    "@shadcn/lint": "0.2.0",
+    "oxc-parser": "0.148.0",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.85.0",
+    "turbo": "2.11.4",
+    "typescript": "7.0.2"
+  }
+}

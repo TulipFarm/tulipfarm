@@ -1,0 +1,6 @@
+ts	phase	decision	why	evidence	result
+2026-09-27T15:10:00Z	design	Use one opt-in operator script rather than extending the local-only foundation fixture	Keep Azure authority and cleanup in apps/database while exercising committed foundation functions	apps/database/test/qualify-workspace-storage.mjs	implemented
+2026-09-27T15:10:01Z	isolation	Use a disposable database and a unique non-superuser provisioner	Foundation changes creator defaults and database PUBLIC grants	packages/workspace-storage/src/provisioning.ts	implemented
+2026-09-27T15:12:50.965Z	azure-first-attempt	Stop on self-grant SQLSTATE 0LP01 and remove the created provisioner	Do not continue setup after a role-management failure	apps/database/test/qualification-azure-initial-blocker.json	role removed; database and workspace roles never created
+2026-09-27T15:13:25.911Z	local	Remove unnecessary ADMIN TRUE from self-grant and rerun the same local script	PostgreSQL already grants ADMIN to a role creator; only SET access is needed	https://www.postgresql.org/docs/18/role-attributes.html	179 checks passed; no objects remain
+2026-09-27T15:19:23.605Z	azure	Run corrected script through documented production secret injection	Real restricted logins are required for S1.3 evidence	apps/database/test/qualification-azure.json	179 checks passed on 18.6; no objects remain

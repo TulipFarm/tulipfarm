@@ -1,0 +1,242 @@
+import { z } from 'zod';
+import { knowledgeCitationSchema } from './contracts.ts';
+
+export const githubCorpusLimits = Object.freeze({
+  repositories: 20,
+  listPageSize: 50,
+  issuePageSize: 20,
+  documentBytes: 256 * 1024,
+  markdownBytes: 1024 * 1024,
+  comments: 500,
+  responseBytes: 8 * 1024 * 1024,
+  requestTimeoutMs: 10000,
+  windowDays: 366,
+  documentsPerRepository: 1000,
+  codeFilesPerRepository: 1000,
+  skippedCodeFilesPerRepository: 200,
+});
+const printable = (value: string) => [...value].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127);
+export const githubRepositoryNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/)
+  .refine(value => !value.endsWith('/.') && !value.endsWith('/..'));
+export const githubRepositoryIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
+export const githubCorpusCursorTokenSchema = z.string().min(1).max(4096).refine(printable);
+export const githubCorpusKindSchema = z.enum(['code', 'discussions', 'docs', 'issues', 'pulls']);
+export const githubCorpusSelectionSchema = z.strictObject({
+  repositories: z
+    .array(githubRepositoryNameSchema)
+    .min(1)
+    .max(githubCorpusLimits.repositories)
+    .refine(
+      names =>
+        new Set(names.map(name => name.toLowerCase())).size === names.length &&
+        names.every((name, index) => index === 0 || (names[index - 1] ?? '').toLowerCase() < name.toLowerCase()),
+      'Repositories must be unique and sorted',
+    ),
+  kinds: z
+    .array(githubCorpusKindSchema)
+    .min(1)
+    .max(5)
+    .refine(
+      kinds =>
+        new Set(kinds).size === kinds.length &&
+        kinds.every((kind, index) => index === 0 || (kinds[index - 1] ?? '') < kind),
+      'Kinds must be unique and sorted',
+    ),
+  after: z.iso.date(),
+  // Automatic sources keep a rolling window: the engine moves `after` forward on every pass.
+  window: z.literal('rolling-90d').optional(),
+});
+export const githubCorpusBindingSchema = z.strictObject({
+  accountId: z.uuid(),
+  accountGeneration: z.number().int().positive(),
+  githubUserId: z.string().regex(/^[1-9][0-9]{0,19}$/),
+  login: z.string().min(1).max(39),
+});
+export const githubCorpusErrorCodeSchema = z.enum([
+  'not-configured',
+  'not-linked',
+  'stale-integration',
+  'reconnect-required',
+  'insufficient-scope',
+  'unauthenticated',
+  'forbidden',
+  'not-found',
+  'outside-selection',
+  'rate-limited',
+  'transient',
+  'invalid-response',
+  'response-too-large',
+  'invalid-cursor',
+  'invalid-selection',
+  'source-changed',
+  'too-large',
+  'unsupported',
+]);
+export type GitHubCorpusErrorCode = z.infer<typeof githubCorpusErrorCodeSchema>;
+export class GitHubCorpusError extends Error {
+  readonly code: GitHubCorpusErrorCode;
+  readonly retryAfterMs: number | null;
+  constructor(code: GitHubCorpusErrorCode, retryAfterMs: number | null = null) {
+    super(code);
+    this.name = 'GitHubCorpusError';
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+export type GitHubCorpusSelection = z.infer<typeof githubCorpusSelectionSchema>;
+export type GitHubCorpusKind = z.infer<typeof githubCorpusKindSchema>;
+export type GitHubCorpusBinding = z.infer<typeof githubCorpusBindingSchema>;
+export type GitHubRepository = {
+  repositoryId: string;
+  fullName: string;
+  visibility: 'public' | 'private' | 'internal';
+  title: string;
+};
+// `readable` is the reader's own current pull access, observed with their own account at `accessedAt`.
+export type GitHubRepositoryAccess = GitHubRepository & { accessedAt: string; readable: boolean };
+export type GitHubItemObservation = {
+  nativeId: string;
+  repositoryId: string;
+  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion';
+  title: string;
+  canonicalURL: string;
+  sourceRevision: string;
+  accessedAt: string;
+  coverage: 'supported' | 'too-large' | 'unsupported' | 'excluded';
+};
+export type GitHubCorpusPage = { observations: GitHubItemObservation[]; nextCursor: string | null };
+export type GitHubItemRead = GitHubItemObservation & { markdown: string };
+export type GitHubCorpusProvider = {
+  discover(
+    workspaceId: string,
+    userId: string,
+    accountId: string,
+    cursor?: string,
+  ): Promise<{ binding: GitHubCorpusBinding; items: GitHubRepository[]; nextCursor: string | null }>;
+  inspectSelection(
+    workspaceId: string,
+    userId: string,
+    accountId: string,
+    selection: GitHubCorpusSelection,
+  ): Promise<{ binding: GitHubCorpusBinding; title: string; repositories: GitHubRepository[] }>;
+  access(
+    workspaceId: string,
+    userId: string,
+    binding: GitHubCorpusBinding,
+    repositoryId: string,
+  ): Promise<GitHubRepositoryAccess>;
+  list(
+    workspaceId: string,
+    userId: string,
+    binding: GitHubCorpusBinding,
+    repositoryId: string,
+    selection: GitHubCorpusSelection,
+    cursor: string | null,
+  ): Promise<GitHubCorpusPage>;
+  read(
+    workspaceId: string,
+    userId: string,
+    binding: GitHubCorpusBinding,
+    repositoryId: string,
+    nativeId: string,
+    selection: GitHubCorpusSelection,
+  ): Promise<GitHubItemRead>;
+  // Returns the given code items that exist at the current head but fall outside its bounded code selection.
+  displacedCode(
+    workspaceId: string,
+    userId: string,
+    binding: GitHubCorpusBinding,
+    repositoryId: string,
+    selection: GitHubCorpusSelection,
+    nativeIds: string[],
+  ): Promise<string[]>;
+};
+
+export const githubKnowledgeConfigureSchema = z.strictObject({
+  commandId: z.uuid(),
+  accountId: z.uuid(),
+  selection: githubCorpusSelectionSchema,
+  memberIds: z.array(z.uuid()).max(100),
+});
+export const githubKnowledgeManageSchema = z.strictObject({
+  commandId: z.uuid(),
+  action: z.enum(['pause', 'resume', 'retry', 'remove']),
+});
+export const githubKnowledgeWorkSchema = z.strictObject({
+  workspaceId: z.uuid(),
+  sourceId: z.uuid(),
+  generation: z.number().int().positive(),
+});
+export const githubKnowledgeDiscoverSchema = z.strictObject({
+  accountId: z.uuid(),
+  cursor: githubCorpusCursorTokenSchema.optional(),
+});
+const repositorySchema = z.strictObject({
+  repositoryId: githubRepositoryIdSchema,
+  fullName: githubRepositoryNameSchema,
+  visibility: z.enum(['public', 'private', 'internal']),
+  title: z.string().max(512),
+});
+export const githubKnowledgeDiscoverySchema = z.strictObject({
+  binding: githubCorpusBindingSchema,
+  items: z.array(repositorySchema).max(100),
+  nextCursor: githubCorpusCursorTokenSchema.nullable(),
+});
+export const githubKnowledgeRepositorySchema = repositorySchema.extend({
+  state: z.enum(['active', 'unavailable']),
+  failure: z.string().max(128).nullable(),
+});
+export const githubKnowledgeSourceSchema = z.strictObject({
+  sourceId: z.uuid(),
+  selection: githubCorpusSelectionSchema.nullable(),
+  memberIds: z.array(z.uuid()).max(101),
+  title: z.string().max(2048),
+  canManage: z.boolean(),
+  state: z.enum(['active', 'paused', 'disconnected', 'removed']),
+  syncState: z.enum(['queued', 'syncing', 'ready', 'failed']),
+  failure: z.string().max(128).nullable(),
+  nextAttemptAt: z.iso.datetime(),
+  repositories: z.array(githubKnowledgeRepositorySchema).max(githubCorpusLimits.repositories).nullable(),
+  counts: z
+    .strictObject({
+      total: z.number().int().nonnegative(),
+      ready: z.number().int().nonnegative(),
+      failed: z.number().int().nonnegative(),
+    })
+    .nullable(),
+});
+export type GitHubKnowledgeConfigure = z.infer<typeof githubKnowledgeConfigureSchema>;
+export type GitHubKnowledgeManage = z.infer<typeof githubKnowledgeManageSchema>;
+export type GitHubKnowledgeWork = z.infer<typeof githubKnowledgeWorkSchema>;
+export type GitHubKnowledgeSource = z.infer<typeof githubKnowledgeSourceSchema>;
+export const githubKnowledgeListSchema = z.strictObject({ items: z.array(githubKnowledgeSourceSchema).max(100) });
+export const githubKnowledgeRefreshSchema = z.strictObject({
+  refreshed: z.number().int().min(0).max(20),
+  unavailable: z.number().int().min(0).max(20),
+  bounded: z.literal(true),
+});
+export const githubKnowledgeEvidenceSchema = z.strictObject({
+  title: z.string().max(512),
+  text: z.string().max(32768),
+  heading: z.string().max(2048),
+  citation: knowledgeCitationSchema,
+  original: z.strictObject({ kind: z.literal('github') }),
+  validUntil: z.iso.datetime(),
+});
+export const githubKnowledgeStatusSchema = z.strictObject({
+  documentId: z.uuid(),
+  revisionId: z.uuid(),
+  title: z.string().max(512),
+  publicationId: z.uuid().nullable(),
+  parsing: z.enum(['queued', 'parsing', 'ready', 'failed', 'ocr-unavailable']),
+  embedding: z.enum(['pending', 'failed', 'credits-blocked', 'ready']),
+  failure: z.string().max(128).nullable(),
+  historical: z.boolean(),
+});
+export const githubKnowledgeDocumentsQuerySchema = z.strictObject({ cursor: z.uuid().optional() });
+export const githubKnowledgeDocumentsSchema = z.strictObject({
+  items: z.array(githubKnowledgeStatusSchema.extend({ canRetry: z.boolean() })).max(20),
+  nextCursor: z.uuid().nullable(),
+});

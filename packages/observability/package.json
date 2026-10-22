@@ -1,0 +1,42 @@
+{
+  "name": "@tulipfarm/observability",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./temporal": {
+      "types": "./dist/temporal.d.ts",
+      "default": "./dist/temporal.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/api-logs": "0.220.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "0.220.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "0.220.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.220.0",
+    "@opentelemetry/resources": "2.9.0",
+    "@opentelemetry/sdk-logs": "0.220.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
+    "@opentelemetry/sdk-node": "0.220.0",
+    "@opentelemetry/sdk-trace-base": "2.9.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/common": "1.24.0",
+    "@tulipfarm/build-info": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*"
+  }
+}

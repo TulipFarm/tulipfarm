@@ -1,0 +1,353 @@
+[
+  {
+    "timestamp": "2026-09-27T19:16:04.091Z",
+    "target": "local",
+    "event": "sources",
+    "sources": [
+      {
+        "path": "apps/database/test/qualification-release-provisioner.mjs",
+        "sha256": "9539b53719813ef9710f3c21fb994bc55cda842232e5fa8d9ae254a5d3e6abf2"
+      },
+      {
+        "path": "apps/database/src/storage-release.ts",
+        "sha256": "fb0b0a9d141ada7f555cb15652bb471f79d3e8f422c24e567f7432732f9f67c6"
+      },
+      {
+        "path": "apps/database/src/storage-release-production.ts",
+        "sha256": "6ab65a97c95312363c5fb1023d64f92fd6ac8c3cb47d6ccb1a6f7e445b32c282"
+      },
+      {
+        "path": "apps/database/src/storage-release-access.ts",
+        "sha256": "bf4dc84326fa43c0dcde05ba74ff283623368b3344920df208405f625106e4ca"
+      },
+      {
+        "path": "packages/workspace-storage/src/provisioning.ts",
+        "sha256": "362b5639656f68733e51c95c52436afb0ebbc79c60fb7aefe032b7d8ba494b42"
+      },
+      {
+        "path": "packages/workspace-storage/dist/provisioning.js",
+        "sha256": "d520b7dd9fa4612adc87d2e01790978486d8711a611cc73aebc976874b72a7ca"
+      },
+      {
+        "path": "packages/workspace-storage/src/migrations.ts",
+        "sha256": "32e20161cd396f2d5da6acdb47b1349b25530eadf8a5ca184152ab6f7082e844"
+      },
+      {
+        "path": "packages/workspace-storage/dist/migrations.js",
+        "sha256": "81917e185c52523d09f44f805b74006af86df288b9c32214183ef8681265f56b"
+      },
+      {
+        "path": "packages/workspace-storage/src/names.ts",
+        "sha256": "6ba514ff69cb70a8c6819c88011cf76eaf99136442f412158efc191ab3927fb9"
+      },
+      {
+        "path": "packages/workspace-storage/dist/names.js",
+        "sha256": "535a1b01bf021c297b5f942803fed2b8a7e23774a511f9907ab347c0f64bec01"
+      },
+      {
+        "path": "packages/workspace-storage/src/transactions.ts",
+        "sha256": "fa44bc1d79024d31d8a7ca58ab08a712738c015c347220ae48a8ae0334631dd0"
+      },
+      {
+        "path": "packages/workspace-storage/dist/transactions.js",
+        "sha256": "4aa41b3ba9abc0af5c58d49f437c4d23ab9028a68406cd67e8e4920859d8a89a"
+      },
+      {
+        "path": "packages/workspaces/src/resource-migrations.ts",
+        "sha256": "6793833fea2767857f5f2dddd40e0b87193883d6d520c55ea26be795021438b4"
+      },
+      {
+        "path": "packages/workspaces/dist/table-migrations.js",
+        "sha256": "22805c92955130cdf994f9d94b729ab8885c489ec1b460c2a64d6c942c289441"
+      },
+      {
+        "path": "packages/workspaces/src/resource-registry.ts",
+        "sha256": "831a656de0164c043d77c0cff73a6345268bc99dfe86b2cfb572580c6c46c0f0"
+      },
+      {
+        "path": "packages/workspaces/dist/table-registry.js",
+        "sha256": "2dd64940b61efe2691c525160cba07f5990b29ddbf7f997ddb330532d42142d9"
+      },
+      {
+        "path": "packages/agents/src/common-migrations.ts",
+        "sha256": "2fa5ae411a38e73e56bb45785ce038f2d17e930393d42c4f2c57f03f9865417a"
+      },
+      {
+        "path": "packages/resources/dist/common-migrations.js",
+        "sha256": "e4b43dbea0a1ac621010254b1e28ffe81cfa8645273567af6eb55fb9ade102dd"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T19:16:04.167Z",
+    "target": "local",
+    "event": "objects",
+    "database": "release_qual_54e70649fa99a87c9ebfad82",
+    "owner": "release_qual_54e70649fa99a87c9ebfad82_owner",
+    "logins": [
+      {
+        "capability": "provisioning",
+        "role": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "secret": "qualification-54e70649fa99a87c9ebfad82-provisioning"
+      },
+      {
+        "capability": "authoring",
+        "role": "release_qual_54e70649fa99a87c9ebfad82_authoring",
+        "secret": "qualification-54e70649fa99a87c9ebfad82-authoring"
+      },
+      {
+        "capability": "confirmation",
+        "role": "release_qual_54e70649fa99a87c9ebfad82_confirmation",
+        "secret": "qualification-54e70649fa99a87c9ebfad82-confirmation"
+      },
+      {
+        "capability": "migration",
+        "role": "release_qual_54e70649fa99a87c9ebfad82_migration",
+        "secret": "qualification-54e70649fa99a87c9ebfad82-migration"
+      }
+    ],
+    "workspaceId": "32f5fff3-0edf-4380-8cce-724924344f56",
+    "names": {
+      "workspaceId": "32f5fff3-0edf-4380-8cce-724924344f56",
+      "schema": "ws_32f5fff30edf43808cce724924344f56",
+      "runtime": "ws_32f5fff30edf43808cce724924344f56_runtime",
+      "migration": "ws_32f5fff30edf43808cce724924344f56_migration",
+      "confirmation": "ws_32f5fff30edf43808cce724924344f56_confirmation",
+      "customOwner": "ws_32f5fff30edf43808cce724924344f56_owner"
+    }
+  },
+  {
+    "timestamp": "2026-09-27T19:16:04.167Z",
+    "target": "local",
+    "event": "common-stream",
+    "version": 6,
+    "migrations": [
+      {
+        "name": "0001_baseline.sql",
+        "checksum": "e26b94aa57a75bbf01ef583d7fd821458a7e41feb7113e8489bafbff1894fa2a"
+      },
+      {
+        "name": "0002_resource_service.sql",
+        "checksum": "a4ec31cbf2015d497c25df0d4766cd5eacbdbd2b3a9a58f2f2d6cad18dc4e9db"
+      },
+      {
+        "name": "0003_confirmation_history.sql",
+        "checksum": "673a43ba52f06c2ce6df5b82fe849cc600166c656252ecdd74f5d9e4bb6c572a"
+      },
+      {
+        "name": "0005_governance_invitations.sql",
+        "checksum": "77969910cbb8486251dcedebac8e97767b815378514873555e473e213838e22f"
+      },
+      {
+        "name": "0007_agents.sql",
+        "checksum": "0a480aa82f322902a1de1f1559b18f0e299af5a941885743ba29fc9b1ba913b3"
+      },
+      {
+        "name": "0009_governance_retired_teams.sql",
+        "checksum": "b3a66c0aa6239b75487854cf6cbdcf07100e3390f98415fae9e40ea00be71124"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T19:16:04.263Z",
+    "target": "local",
+    "event": "server",
+    "version": "PostgreSQL 18.3 (Debian 18.3-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "current_user": "postgres",
+    "current_database": "postgres",
+    "version_num": "180003"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:04.321Z",
+    "target": "local",
+    "event": "check",
+    "name": "all random database and role names absent",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:04.798Z",
+    "target": "local",
+    "event": "check",
+    "name": "separate marked database owner and private database",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.140Z",
+    "target": "local",
+    "event": "check",
+    "name": "actual release helper configures nonowner provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.427Z",
+    "target": "local",
+    "event": "check",
+    "name": "real workspace provisioning through nonowner login",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.431Z",
+    "target": "local",
+    "event": "provisioner-memberships",
+    "rows": [
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_confirmation",
+        "member": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "admin_option": true,
+        "inherit_option": false,
+        "set_option": false,
+        "grantor": 10,
+        "grantor_name": "postgres",
+        "grantor_superuser": true
+      },
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_migration",
+        "member": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "admin_option": true,
+        "inherit_option": false,
+        "set_option": false,
+        "grantor": 10,
+        "grantor_name": "postgres",
+        "grantor_superuser": true
+      },
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_owner",
+        "member": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "admin_option": true,
+        "inherit_option": false,
+        "set_option": false,
+        "grantor": 10,
+        "grantor_name": "postgres",
+        "grantor_superuser": true
+      },
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_owner",
+        "member": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "admin_option": false,
+        "inherit_option": true,
+        "set_option": true,
+        "grantor": 1878147,
+        "grantor_name": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "grantor_superuser": false
+      },
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_runtime",
+        "member": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "admin_option": true,
+        "inherit_option": false,
+        "set_option": false,
+        "grantor": 10,
+        "grantor_name": "postgres",
+        "grantor_superuser": true
+      },
+      {
+        "role": "ws_32f5fff30edf43808cce724924344f56_owner",
+        "member": "ws_32f5fff30edf43808cce724924344f56_migration",
+        "admin_option": false,
+        "inherit_option": false,
+        "set_option": true,
+        "grantor": 1878147,
+        "grantor_name": "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+        "grantor_superuser": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.490Z",
+    "target": "local",
+    "event": "check",
+    "name": "actual postuse ownership and membership inspection",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.504Z",
+    "target": "local",
+    "event": "check",
+    "name": "runtime direct login with PUBLIC CONNECT revoked and exact six receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.512Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration direct login with PUBLIC CONNECT revoked and exact six receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.527Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation direct login with PUBLIC CONNECT revoked and exact six receipts",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.578Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration custom owner creates table and runtime uses grants",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:05.870Z",
+    "target": "local",
+    "event": "check",
+    "name": "provisioner reconciliation and workspace retry preserve inspection and admission",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:06.143Z",
+    "target": "local",
+    "event": "check",
+    "name": "authoring registry actual configuration replay and direct capability boundary",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:06.597Z",
+    "target": "local",
+    "event": "check",
+    "name": "confirmation registry actual configuration replay and direct capability boundary",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:07.244Z",
+    "target": "local",
+    "event": "check",
+    "name": "migration registry actual configuration replay and direct capability boundary",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:07.512Z",
+    "target": "local",
+    "event": "check",
+    "name": "final actual inspection after all registry configuration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T19:16:08.403Z",
+    "target": "local",
+    "event": "cleanup",
+    "status": "PASS",
+    "database": "release_qual_54e70649fa99a87c9ebfad82",
+    "roles": [
+      "release_qual_54e70649fa99a87c9ebfad82_owner",
+      "release_qual_54e70649fa99a87c9ebfad82_provisioning",
+      "release_qual_54e70649fa99a87c9ebfad82_authoring",
+      "release_qual_54e70649fa99a87c9ebfad82_confirmation",
+      "release_qual_54e70649fa99a87c9ebfad82_migration",
+      "ws_32f5fff30edf43808cce724924344f56_runtime",
+      "ws_32f5fff30edf43808cce724924344f56_migration",
+      "ws_32f5fff30edf43808cce724924344f56_confirmation",
+      "ws_32f5fff30edf43808cce724924344f56_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  },
+  {
+    "timestamp": "2026-09-27T19:16:08.413Z",
+    "target": "local",
+    "event": "summary",
+    "status": "PASS",
+    "passed": 14,
+    "failed": 0
+  }
+]

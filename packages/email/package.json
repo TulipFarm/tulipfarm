@@ -1,0 +1,31 @@
+{
+  "name": "@tulipfarm/email",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "send": "node dist/send.js",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  },
+  "dependencies": {
+    "@azure/communication-email": "1.1.0",
+    "@tulipfarm/observability": "workspace:*",
+    "nodemailer": "10.1.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-email": "6.11.0"
+  }
+}

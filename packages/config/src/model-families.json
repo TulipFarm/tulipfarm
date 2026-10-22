@@ -1,0 +1,116 @@
+[
+  {
+    "id": "claude-haiku",
+    "name": "Claude Haiku",
+    "vendor": "anthropic",
+    "currentModelId": "claude-haiku-4-5",
+    "modelIds": ["claude-haiku-4-5"],
+    "roles": ["title", "compaction", "heartbeat"],
+    "capabilities": { "responseModelAliases": ["claude-haiku-4-5-20251001"] }
+  },
+  {
+    "id": "claude-sonnet",
+    "name": "Claude Sonnet",
+    "vendor": "anthropic",
+    "currentModelId": "claude-sonnet-5",
+    "modelIds": ["claude-sonnet-5"],
+    "roles": ["default-chat", "review", "plan"],
+    "capabilities": { "toolChoice": "auto" }
+  },
+  {
+    "id": "claude-opus",
+    "name": "Claude Opus",
+    "vendor": "anthropic",
+    "currentModelId": "claude-opus-5-5",
+    "modelIds": ["claude-opus-5-5"],
+    "capabilities": { "toolChoice": "auto" }
+  },
+  {
+    "id": "claude-fable",
+    "name": "Claude Fable",
+    "vendor": "anthropic",
+    "currentModelId": "claude-fable-5-1",
+    "modelIds": ["claude-fable-5-1"],
+    "capabilities": { "toolChoice": "auto" }
+  },
+  {
+    "id": "gpt-luna",
+    "name": "GPT Luna",
+    "vendor": "openai",
+    "currentModelId": "gpt-6-luna",
+    "modelIds": ["gpt-6-luna", "gpt-6-luna-openai"],
+    "roles": ["title", "heartbeat", "public-guide"],
+    "capabilities": { "reasoningOffForTools": true }
+  },
+  {
+    "id": "gpt-sol",
+    "name": "GPT Sol",
+    "vendor": "openai",
+    "currentModelId": "gpt-6-sol",
+    "modelIds": ["gpt-6-sol", "gpt-6-sol-openai"],
+    "roles": ["default-chat", "review", "plan"],
+    "capabilities": { "reasoningOffForTools": true }
+  },
+  {
+    "id": "gpt-astra",
+    "name": "GPT Astra",
+    "vendor": "openai",
+    "currentModelId": "gpt-6-astra",
+    "modelIds": ["gpt-6-astra", "gpt-6-astra-openai"],
+    "capabilities": { "api": "responses" }
+  },
+  {
+    "id": "deepseek-pro",
+    "name": "DeepSeek Pro",
+    "vendor": "deepseek",
+    "currentModelId": "deepseek-v4-pro",
+    "modelIds": ["deepseek-v4-pro"]
+  },
+  {
+    "id": "deepseek-flash",
+    "name": "DeepSeek Flash",
+    "vendor": "deepseek",
+    "currentModelId": "deepseek-v4-flash",
+    "modelIds": ["deepseek-v4-flash"],
+    "roles": ["title", "compaction", "heartbeat"]
+  },
+  {
+    "id": "grok",
+    "name": "Grok",
+    "vendor": "xai",
+    "currentModelId": "grok-4-6",
+    "modelIds": ["grok-4-6", "grok-4", "grok-4-6-xai"],
+    "capabilities": { "reasoningTokensInOutput": true }
+  },
+  {
+    "id": "grok-fast",
+    "name": "Grok Fast",
+    "vendor": "xai",
+    "currentModelId": "grok-4.3",
+    "modelIds": ["grok-4.3", "grok-4.3-xai"],
+    "roles": ["title", "compaction", "heartbeat"],
+    "capabilities": { "reasoningTokensInOutput": true }
+  },
+  { "id": "kimi", "name": "Kimi", "vendor": "moonshot", "currentModelId": "kimi-k2-6", "modelIds": ["kimi-k2-6"] },
+  {
+    "id": "kimi-code",
+    "name": "Kimi Code",
+    "vendor": "moonshot",
+    "currentModelId": "kimi-k2-7-code",
+    "modelIds": ["kimi-k2-7-code"]
+  },
+  {
+    "id": "gemini-flash",
+    "name": "Gemini Flash",
+    "vendor": "google",
+    "currentModelId": "gemini-3-8-flash",
+    "modelIds": ["gemini-3-8-flash", "gemini-3-5-flash"]
+  },
+  {
+    "id": "gemini-pro",
+    "name": "Gemini Pro",
+    "vendor": "google",
+    "currentModelId": "gemini-3-1-pro-preview",
+    "modelIds": ["gemini-3-1-pro-preview"]
+  }
+]

@@ -1,0 +1,163 @@
+[
+  {
+    "timestamp": "2026-09-27T15:12:43.833Z",
+    "target": "azure",
+    "event": "objects",
+    "database": "storage_qual_23c4b9ddf4c1a35ced2bed00",
+    "provisioner": "storage_qual_23c4b9ddf4c1a35ced2bed00_provisioner",
+    "workspaces": [
+      {
+        "label": "a",
+        "id": "441f0afe-2bdd-4522-b6bf-5d57d32143f5",
+        "names": {
+          "workspaceId": "441f0afe-2bdd-4522-b6bf-5d57d32143f5",
+          "schema": "ws_441f0afe2bdd4522b6bf5d57d32143f5",
+          "runtime": "ws_441f0afe2bdd4522b6bf5d57d32143f5_runtime",
+          "migration": "ws_441f0afe2bdd4522b6bf5d57d32143f5_migration",
+          "confirmation": "ws_441f0afe2bdd4522b6bf5d57d32143f5_confirmation",
+          "customOwner": "ws_441f0afe2bdd4522b6bf5d57d32143f5_owner"
+        }
+      },
+      {
+        "label": "b",
+        "id": "692f14de-9106-4578-89b0-42094563eb6e",
+        "names": {
+          "workspaceId": "692f14de-9106-4578-89b0-42094563eb6e",
+          "schema": "ws_692f14de9106457889b042094563eb6e",
+          "runtime": "ws_692f14de9106457889b042094563eb6e_runtime",
+          "migration": "ws_692f14de9106457889b042094563eb6e_migration",
+          "confirmation": "ws_692f14de9106457889b042094563eb6e_confirmation",
+          "customOwner": "ws_692f14de9106457889b042094563eb6e_owner"
+        }
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-27T15:12:45.961Z",
+    "target": "azure",
+    "event": "server",
+    "version": "PostgreSQL 18.6 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 13.2.0, 64-bit",
+    "version_num": 180006,
+    "current_user": "tfadmin",
+    "database": "postgres"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:45.965Z",
+    "target": "azure",
+    "event": "check",
+    "name": "PostgreSQL 18 admin connection",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:47.016Z",
+    "target": "azure",
+    "event": "check",
+    "name": "CREATE ROLE scoped non-superuser provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:47.308Z",
+    "target": "azure",
+    "event": "check",
+    "name": "GRANT scoped provisioner SET membership to admin",
+    "status": "BLOCKED",
+    "code": "0LP01"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:47.572Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_441f0afe2bdd4522b6bf5d57d32143f5_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:47.832Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_441f0afe2bdd4522b6bf5d57d32143f5_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:48.091Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_441f0afe2bdd4522b6bf5d57d32143f5_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:48.350Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_441f0afe2bdd4522b6bf5d57d32143f5_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:48.608Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_692f14de9106457889b042094563eb6e_runtime",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:48.869Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_692f14de9106457889b042094563eb6e_migration",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:49.130Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_692f14de9106457889b042094563eb6e_confirmation",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:49.393Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role ws_692f14de9106457889b042094563eb6e_owner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:50.180Z",
+    "target": "azure",
+    "event": "check",
+    "name": "cleanup role storage_qual_23c4b9ddf4c1a35ced2bed00_provisioner",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:50.703Z",
+    "target": "azure",
+    "event": "cleanup",
+    "database": "storage_qual_23c4b9ddf4c1a35ced2bed00",
+    "roles": [
+      "storage_qual_23c4b9ddf4c1a35ced2bed00_provisioner",
+      "ws_441f0afe2bdd4522b6bf5d57d32143f5_runtime",
+      "ws_441f0afe2bdd4522b6bf5d57d32143f5_migration",
+      "ws_441f0afe2bdd4522b6bf5d57d32143f5_confirmation",
+      "ws_441f0afe2bdd4522b6bf5d57d32143f5_owner",
+      "ws_692f14de9106457889b042094563eb6e_runtime",
+      "ws_692f14de9106457889b042094563eb6e_migration",
+      "ws_692f14de9106457889b042094563eb6e_confirmation",
+      "ws_692f14de9106457889b042094563eb6e_owner"
+    ],
+    "remainingRoles": [],
+    "remainingDatabases": []
+  },
+  {
+    "timestamp": "2026-09-27T15:12:50.703Z",
+    "target": "azure",
+    "event": "check",
+    "name": "all qualification objects removed",
+    "status": "PASS"
+  },
+  {
+    "timestamp": "2026-09-27T15:12:50.965Z",
+    "target": "azure",
+    "event": "summary",
+    "status": "FAIL",
+    "passed": 12,
+    "failed": 1
+  }
+]

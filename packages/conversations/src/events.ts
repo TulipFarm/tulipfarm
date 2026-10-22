@@ -1,0 +1,116 @@
+import { z } from 'zod';
+import { avatarSnapshotSchema } from './avatar.ts';
+import { toolPresentationSchema } from './tool-activity.ts';
+
+/** PostgreSQL channel that carries conversation notifications from every writer to every API replica. */
+export const conversationEventChannel = 'tf_conversation_events';
+
+const id = z.uuid();
+const count = z.number().int().nonnegative();
+
+/** Identifies one model request inside one reply attempt. A later identity replaces an earlier one. */
+export const streamIdentitySchema = z.strictObject({ turnId: id, generation: count, epoch: count, step: count });
+export type StreamIdentity = z.infer<typeof streamIdentitySchema>;
+
+/**
+ * Preview text for one model request. `text` replaces everything from `offset` onward.
+ * `reset` starts the request's text over. `seq` increases with every update of one identity.
+ */
+export const streamTextSchema = streamIdentitySchema.extend({
+  seq: count,
+  offset: count,
+  text: z.string(),
+  reset: z.boolean(),
+});
+export type StreamText = z.infer<typeof streamTextSchema>;
+
+/**
+ * The reply started model decision `round`. `step` orders it with preview text of the same attempt.
+ */
+export const streamProgressSchema = streamIdentitySchema.extend({ round: z.number().int().positive() });
+export type StreamProgress = z.infer<typeof streamProgressSchema>;
+export const streamAvatarSchema = streamIdentitySchema.extend({ seq: count, avatar: avatarSnapshotSchema });
+export type StreamAvatar = z.infer<typeof streamAvatarSchema>;
+
+/**
+ * Something visible in the conversation changed. `settled` marks a turn that reached a final or waiting state.
+ * `planId` names a plan of this chat whose outline changed; read that plan again.
+ */
+export const streamChangeSchema = z.strictObject({
+  turnId: id.optional(),
+  settled: z.boolean().optional(),
+  planId: id.optional(),
+});
+export type StreamChange = z.infer<typeof streamChangeSchema>;
+export const streamToolSchema = streamIdentitySchema.omit({ step: true }).extend({
+  id,
+  tool: z.string().max(64),
+  sequence: z.number().int().positive(),
+  status: z.enum(['running', 'completed', 'blocked', 'failed']),
+  presentation: toolPresentationSchema,
+});
+export type StreamTool = z.infer<typeof streamToolSchema>;
+
+export function applyStreamTool(state: StreamTool | undefined, update: StreamTool): StreamTool {
+  if (!state) return update;
+  const order = update.generation - state.generation || update.epoch - state.epoch;
+  return order < 0 || (order === 0 && (state.status !== 'running' || update.status === state.status)) ? state : update;
+}
+
+const address = { workspaceId: id, conversationId: id };
+export const conversationNotificationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('text'), ...address, ...streamTextSchema.shape }),
+  z.strictObject({ kind: z.literal('changed'), ...address, ...streamChangeSchema.shape }),
+  z.strictObject({ kind: z.literal('progress'), ...address, ...streamProgressSchema.shape }),
+  z.strictObject({ kind: z.literal('avatar'), ...address, ...streamAvatarSchema.shape }),
+  z.strictObject({ kind: z.literal('tool'), ...address, ...streamToolSchema.shape }),
+]);
+export type ConversationNotification = z.infer<typeof conversationNotificationSchema>;
+
+/** Server-sent event names on `GET /workspaces/:workspaceId/conversations/:chatId/events`. */
+export const conversationStreamEvents = {
+  /** `streamTextSchema` data. Sent live, and as a reset snapshot when a client connects during a reply. */
+  text: 'text',
+  /** `streamChangeSchema` data. Read history again. */
+  changed: 'changed',
+  /** `streamProgressSchema` data. Sent live, and as a snapshot when a client connects during a reply. */
+  progress: 'progress',
+  avatar: 'avatar',
+  tool: 'tool',
+  /** Notifications may have been missed. Read history again. */
+  resync: 'resync',
+} as const;
+
+export type StreamTextState = { identity: StreamIdentity; seq: number; text: string; complete: boolean };
+
+export function compareStreamIdentity(left: StreamIdentity, right: StreamIdentity) {
+  return left.generation - right.generation || left.epoch - right.epoch || left.step - right.step;
+}
+
+/** Keeps the latest progress of a turn. An older or equal identity leaves the state unchanged. */
+export function applyStreamProgress(state: StreamProgress | undefined, update: StreamProgress): StreamProgress {
+  return state && compareStreamIdentity(update, state) <= 0 ? state : update;
+}
+
+export function applyStreamAvatar(state: StreamAvatar | undefined, update: StreamAvatar): StreamAvatar {
+  const order = state ? compareStreamIdentity(update, state) : 1;
+  return state && (order < 0 || (order === 0 && update.seq <= state.seq)) ? state : update;
+}
+
+/**
+ * Applies one update to the preview text of a turn. Returns the previous state when the update is stale or a duplicate.
+ * A gap (an update that starts beyond the known text) keeps the known text and marks it incomplete until a reset arrives.
+ */
+export function applyStreamText(state: StreamTextState | undefined, update: StreamText): StreamTextState {
+  const identity = { turnId: update.turnId, generation: update.generation, epoch: update.epoch, step: update.step };
+  const order = state ? compareStreamIdentity(identity, state.identity) : 1;
+  if (state && order < 0) return state;
+  if (!state || order > 0) {
+    if (update.reset || update.offset === 0) return { identity, seq: update.seq, text: update.text, complete: true };
+    return { identity, seq: update.seq, text: '', complete: false };
+  }
+  if (update.seq <= state.seq) return state;
+  if (update.reset) return { identity, seq: update.seq, text: update.text, complete: true };
+  if (!state.complete || update.offset > state.text.length) return { ...state, seq: update.seq, complete: false };
+  return { identity, seq: update.seq, text: state.text.slice(0, update.offset) + update.text, complete: true };
+}

@@ -1,0 +1,11 @@
+.conversation-timeline {
+  overflow-anchor: none;
+}
+
+.question-panel {
+  border-color: color-mix(in srgb, var(--foreground) 16%, var(--card));
+}
+
+.question-panel [data-slot='form-footer'] {
+  padding-top: 4px;
+}

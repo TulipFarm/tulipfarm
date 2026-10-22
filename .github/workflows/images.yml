@@ -1,0 +1,91 @@
+# Builds and publishes the public container images to GHCR.
+#
+# Disabled until the first release (public images on GHCR). Release versions are
+# CalVer YYYY.M.D.N, the format packages/build-info validates.
+# The workflow only runs by manual dispatch, and the job is skipped unless the
+# repository variable PUBLISH_IMAGES is set to 'true'. To enable it at release:
+#   1. Set the repository variable PUBLISH_IMAGES=true.
+#   2. Add a `push: tags: ['release/*']` trigger that takes the version from the
+#      tag release/YYYY.M.D.N.
+# It uses only the built-in GITHUB_TOKEN; no repository secrets are needed.
+name: Container images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, CalVer YYYY.M.D.N (for example 2026.10.19.1)
+        type: string
+        required: true
+      push:
+        description: Push the images to GHCR (otherwise build only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: ${{ matrix.image }}
+    if: vars.PUBLISH_IMAGES == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: apps/api/Dockerfile
+            target: production
+          - image: worker
+            dockerfile: apps/worker/Dockerfile
+            target: worker
+          - image: storage-maintenance
+            dockerfile: apps/worker/Dockerfile
+            target: storage-maintenance
+          - image: snippet-broker
+            dockerfile: apps/snippet-broker/Dockerfile
+            target: production
+          - image: database
+            dockerfile: apps/database/Dockerfile
+            target: ''
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GHCR
+        if: inputs.push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Build${{ inputs.push && ' and push' || '' }} ${{ matrix.image }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+          PUSH: ${{ inputs.push }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          name="ghcr.io/$(printf %s "$REPOSITORY" | tr "[:upper:]" "[:lower:]")/$IMAGE"
+          args=(--file "$DOCKERFILE" --build-arg "RELEASE_VERSION=$VERSION" --build-arg "RELEASE_COMMIT=$COMMIT"
+            --label "org.opencontainers.image.source=https://github.com/$REPOSITORY"
+            --label "org.opencontainers.image.revision=$COMMIT"
+            --label "org.opencontainers.image.version=$VERSION"
+            --label "org.opencontainers.image.licenses=AGPL-3.0-only"
+            --tag "$name:$VERSION")
+          if [[ -n "$TARGET" ]]; then args+=(--target "$TARGET"); fi
+          if [[ "$PUSH" == true ]]; then args+=(--push); else args+=(--load); fi
+          docker buildx build "${args[@]}" .

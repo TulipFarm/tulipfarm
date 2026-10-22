@@ -1,0 +1,96 @@
+{
+  "families": [
+    {
+      "id": "openai-mini",
+      "name": "OpenAI Mini",
+      "vendor": "openai",
+      "currentModelId": "openai-mini-1",
+      "modelIds": ["openai-mini-1"],
+      "roles": ["title", "heartbeat", "public-guide"],
+      "capabilities": {
+        "reasoningOffForTools": true
+      }
+    },
+    {
+      "id": "openai-main",
+      "name": "OpenAI Main",
+      "vendor": "openai",
+      "currentModelId": "openai-main-1",
+      "modelIds": ["openai-main-1"],
+      "roles": ["default-chat", "review", "plan"],
+      "capabilities": {
+        "reasoningOffForTools": true
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "openai-mini-1",
+      "name": "OpenAI Mini 1",
+      "provider": "azure",
+      "providerModelId": "gpt-6-luna",
+      "metadata": {
+        "max_input_tokens": 922000,
+        "max_output_tokens": 128000
+      },
+      "rates": [
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": null,
+          "usdPerMillionTokens": {
+            "input": 0.1,
+            "output": 0.5,
+            "cacheRead": 0.01,
+            "cacheWrite": 0.125
+          }
+        },
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": 272000,
+          "usdPerMillionTokens": {
+            "input": 0.2,
+            "output": 0.75,
+            "cacheRead": 0.02,
+            "cacheWrite": 0.25
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai-main-1",
+      "name": "OpenAI Main 1",
+      "provider": "azure",
+      "providerModelId": "gpt-6-sol",
+      "metadata": {
+        "max_input_tokens": 922000,
+        "max_output_tokens": 128000
+      },
+      "rates": [
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": null,
+          "usdPerMillionTokens": {
+            "input": 2,
+            "output": 10,
+            "cacheRead": 0.2,
+            "cacheWrite": 2.5
+          }
+        },
+        {
+          "validFrom": null,
+          "validUntilExclusive": null,
+          "promptTokensAbove": 272000,
+          "usdPerMillionTokens": {
+            "input": 4,
+            "output": 15,
+            "cacheRead": 0.4,
+            "cacheWrite": 5
+          }
+        }
+      ]
+    }
+  ]
+}
