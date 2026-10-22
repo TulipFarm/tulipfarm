@@ -2335,7 +2335,9 @@ export function createConversationExecutor(
     );
   }
 
-  async function due(workspaceId: string): Promise<ReplyWork[]> {
+  /** A conversation narrows the same due query; every gate still applies. */
+  async function due(workspaceId: string, conversationId?: string): Promise<ReplyWork[]> {
+    const scope = conversationId === undefined ? null : uuidSchema.parse(conversationId);
     try {
       return await runtime.transaction(workspaceId, commonCompatibility, async tx => {
         const rows = z
@@ -2344,13 +2346,17 @@ export function createConversationExecutor(
           )
           .parse(
             (
-              await tx.client.query(`SELECT t.conversation_id AS "conversationId", t.id AS "turnId", t.generation
+              await tx.client.query(
+                `SELECT t.conversation_id AS "conversationId", t.id AS "turnId", t.generation
           FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
           WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting')))
           AND o.next_attempt_at <= clock_timestamp()
+          AND ($1::uuid IS NULL OR t.conversation_id = $1)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.turn_id=t.id)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} p WHERE p.conversation_id = t.conversation_id AND p.accepted_sequence < t.accepted_sequence AND p.status NOT IN ('completed', 'cancelled', 'blocked'))
-          ORDER BY o.next_attempt_at, t.id LIMIT 50`)
+          ORDER BY o.next_attempt_at, t.id LIMIT 50`,
+                [scope],
+              )
             ).rows,
           );
         return rows.map(row => ({ workspaceId, ...row }));

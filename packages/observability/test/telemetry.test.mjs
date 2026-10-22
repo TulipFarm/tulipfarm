@@ -19,6 +19,7 @@ import {
   withChatModelRequest,
   recordChatRequestSizes,
   recordChatDiscovery,
+  recordChatDispatch,
   errorType,
   log,
   observeCall,
@@ -455,6 +456,9 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     };
     chatMetrics.publish(chatSnapshot);
     chatMetrics.publish(chatSnapshot);
+    recordChatDispatch('send', 'success');
+    recordChatDispatch('send', 'success');
+    recordChatDispatch('sweep', 'error');
     assert.equal(await observeChatStage('context', async () => 42), 42);
     await assert.rejects(
       observeChatStage('model', async () => {
@@ -839,6 +843,15 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
       ],
     );
     assert.equal(data.find(metric => metric.descriptor.name === 'cloud_chat_discoveries').dataPoints[0].value, 1);
+    assert.deepEqual(
+      data
+        .find(metric => metric.descriptor.name === 'cloud_chat_dispatches')
+        .dataPoints.map(p => [p.attributes.dispatch_source, p.attributes.outcome, p.value]),
+      [
+        ['send', 'success', 2],
+        ['sweep', 'error', 1],
+      ],
+    );
     for (const metric of [details, sizes, requests]) {
       for (const point of metric.dataPoints) assert.equal(point.attributes['chat.request.sequence'], undefined);
     }

@@ -53,6 +53,7 @@ import { compactionDetailSchema } from '@tulipfarm/conversations/compaction';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
 import type { ConversationEventHub, ConversationStreamEvent } from './conversation-events.ts';
 import { conversationPage, conversationPages } from './conversation-pages.ts';
+import type { ReplyDispatch } from './conversation-dispatch.ts';
 
 const workspaceParams = z.strictObject({ workspaceId: z.uuid() });
 const chatParams = workspaceParams.extend({ chatId: z.uuid() });
@@ -204,6 +205,7 @@ export function registerConversations(
     identity?: Pick<Pool, 'query'>;
     events?: ConversationEventHub;
     eventTiming?: Partial<EventTiming>;
+    replies?: Pick<ReplyDispatch, 'sent'>;
   },
 ) {
   const { service } = dependencies;
@@ -795,6 +797,8 @@ export function registerConversations(
         const sent = await service.send(workspaceId, user(request), chatId, { ...input, messageId }, () => {
           recorded = true;
         });
+        // The send has committed; a replayed send dispatches too, since the start is idempotent per turn.
+        dependencies.replies?.sent(workspaceId, chatId);
         // Only the request that records the send publishes, so replaying it after the person deleted the file forever cannot bring the file back.
         if (recorded && dependencies.attachments && input.parts.some(part => part.kind === 'attachment')) {
           try {

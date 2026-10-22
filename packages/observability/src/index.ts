@@ -79,6 +79,7 @@ const spanAttributes = new Set([
   'error.issues',
   'error.stage',
   'duration_ms',
+  'dispatch_source',
   'chat.purpose',
   'chat.request.sequence',
   'chat.request.wire_bytes',
@@ -1047,6 +1048,15 @@ export async function observeChatStage<T>(phase: ChatStage, call: () => Promise<
       .record(seconds, { ...dimensions, phase, outcome });
     log('info', 'activity', 'call_completed', { operation: `chat.${phase}`, outcome, duration_ms: seconds * 1000 });
   }
+}
+
+/** `send` starts a reply from the send request; `sweep` is the background recovery path. */
+export type ChatDispatchSource = 'send' | 'sweep';
+export function recordChatDispatch(source: ChatDispatchSource, outcome: 'success' | 'error') {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_dispatches', { description: 'Reply workflow starts by dispatch path' })
+    .add(1, { ...dimensions, dispatch_source: source, outcome });
 }
 
 export type ChatModelPurpose = 'reply' | 'completion' | 'title' | 'calendar' | 'compaction';
