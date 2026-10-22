@@ -17,7 +17,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { ActionButton, jumpTo } from '@/components/action-button';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Label } from '@tulipfarm/sprout/label';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { WorkflowsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -30,7 +30,6 @@ import {
 } from '@tulipfarm/sprout/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Disclosure } from '@/components/disclosure';
-import { WorkflowsSample } from '@/components/empty-samples';
 import { workspaceRoute, workspaceWorkflowsRoute } from '@/router';
 import { apiOrigin } from '@/lib/auth';
 import { UnsavedChanges, samePage } from '@/features/tables/feedback';

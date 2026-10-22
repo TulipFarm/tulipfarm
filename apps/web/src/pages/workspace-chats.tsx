@@ -10,7 +10,6 @@ import { Archive } from 'reicon-react/icons/Archive';
 import { Trash } from 'reicon-react/icons/Trash';
 import { XIcon } from 'lucide-react';
 import { workspaceRoute } from '@/router';
-import { ChatsSample } from '@/components/empty-samples';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
@@ -33,7 +32,7 @@ import { Input } from '@tulipfarm/sprout/input';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@tulipfarm/sprout/input-group';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { ChatsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ConversationAccess } from '@/features/chat/conversation-access';
 import {
   titleError,

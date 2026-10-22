@@ -1,12 +1,11 @@
 import { type ReactNode } from 'react';
 import { Envelope } from 'reicon-react/icons/Envelope';
-import { InvitationsSample } from '@/components/empty-samples';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { InvitationsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { InvitationActions } from './invitation-actions';
 import type { InvitationAdministration } from './use-invitation-administration';
 

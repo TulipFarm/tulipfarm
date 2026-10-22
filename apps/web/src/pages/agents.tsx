@@ -5,7 +5,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { AgentsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import {
   DataList,
@@ -17,7 +17,6 @@ import {
 } from '@/components/data-list';
 import { Add } from 'reicon-react/icons/Add';
 import { Users } from 'reicon-react/icons/Users';
-import { AgentsSample } from '@/components/empty-samples';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from '@/features/agents/api';
 import { AgentRead } from '@/features/agents/feedback';
 import { KeepsEditsContext, samePage } from '@/features/tables/feedback';

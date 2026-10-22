@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
 import { Plug } from 'reicon-react/icons/Plug';
-import { IntegrationsSample } from '@/components/empty-samples';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
@@ -19,7 +18,7 @@ import {
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { IntegrationsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import {
   categories,
   integrationFromHash,
