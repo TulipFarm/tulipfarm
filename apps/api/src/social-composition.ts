@@ -1,6 +1,7 @@
 import { socialPlatformApps } from '@tulipfarm/extensions';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
-import { createSocialAccounts, type SocialRuntime } from '@tulipfarm/social/accounts';
+import { createSocialAccounts, type SocialAccounts, type SocialRuntime } from '@tulipfarm/social/accounts';
+import { createSocialChannels } from '@tulipfarm/social/channels';
 import { createPlatformApps, operatorPlatformApps } from '@tulipfarm/social/platform-apps';
 import { authConfig } from './auth.ts';
 
@@ -25,4 +26,10 @@ export function socialAccounts(runtime: SocialRuntime | undefined, env: NodeJS.P
   } catch {
     return null;
   }
+}
+
+/** Channels reached through the same connections and adapters as `socialAccounts`. */
+export function socialChannels(accounts: SocialAccounts | null, runtime: SocialRuntime | undefined) {
+  if (!accounts || !runtime) return null;
+  return createSocialChannels({ runtime, accounts, adapters: {} });
 }

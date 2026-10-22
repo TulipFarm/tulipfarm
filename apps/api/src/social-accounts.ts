@@ -4,13 +4,20 @@ import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { SocialAccounts } from '@tulipfarm/social/accounts';
+import type { SocialChannels } from '@tulipfarm/social/channels';
 import {
+  addChannelSchema,
   beginConnectionResultSchema,
   beginConnectionSchema,
+  channelGrantsSchema,
+  channelSchema,
+  discoveredChannelSchema,
   disconnectResultSchema,
   platformAppCreateSchema,
   platformAppMetadataSchema,
   platformAvailabilitySchema,
+  platformSchema,
+  socialAccountGrantsSchema,
   socialAccountMetadataSchema,
 } from '@tulipfarm/social/contracts';
 import { SocialError } from '@tulipfarm/social/credentials';
@@ -26,6 +33,8 @@ const errorSchema = {
 const workspaceParams = z.strictObject({ workspaceId: z.uuid() });
 const accountParams = workspaceParams.extend({ accountId: z.uuid() });
 const appParams = workspaceParams.extend({ platformAppId: z.uuid() });
+const channelParams = workspaceParams.extend({ channelId: z.uuid() });
+const channelFilter = z.strictObject({ accountId: z.uuid().optional(), platform: platformSchema.optional() });
 const callbackState = z.string().regex(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
 const callbackSchema = z.union([
   z.strictObject({ code: z.string().min(1).max(4096), state: callbackState }),
@@ -73,6 +82,10 @@ const statuses = {
   'account-authorization-denied': 400,
   'account-reconnect-required': 409,
   'account-unavailable': 503,
+  'grants-invalid': 400,
+  'channel-conflict': 409,
+  'channel-unreachable': 409,
+  'channel-unavailable': 409,
 } as const satisfies Record<SocialError['code'], number>;
 
 /** The workspace a request concerns: from the path, or from the OAuth state on the callback. */
@@ -90,6 +103,7 @@ export function registerSocialAccounts(
   accounts: SocialAccounts | null = null,
   enabled: (userId: string, workspaceId: string) => Promise<boolean> = (userId, workspaceId) =>
     isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId }),
+  channels: SocialChannels | null = null,
 ) {
   app.register(async routes => {
     validation.install(routes, true);
@@ -134,8 +148,11 @@ export function registerSocialAccounts(
       sessions.set(request, { userId: session.user.id, sessionId: session.session.id });
       if (!accounts) return reply.code(503).send({ error: 'account-unavailable' });
     });
-    routes.setErrorHandler<FastifyError>((error, _request, reply) => {
-      if (error instanceof AccessDenied) return reply.code(404).send({ error: 'account-not-found' });
+    routes.setErrorHandler<FastifyError>((error, request, reply) => {
+      if (error instanceof AccessDenied)
+        return reply.code(404).send({
+          error: request.routeOptions.url?.includes('/social/channels') ? 'channel-not-found' : 'account-not-found',
+        });
       if (error.statusCode === 400 || error.validation || error instanceof z.ZodError)
         return reply.code(400).send({ error: 'invalid-request' });
       if (error.statusCode === 413 || error.statusCode === 415)
@@ -147,6 +164,11 @@ export function registerSocialAccounts(
       const session = sessions.get(request);
       if (!session || !accounts) throw new SocialError('account-unavailable');
       return { ...session, accounts };
+    };
+    const channelContext = (request: FastifyRequest) => {
+      const session = sessions.get(request);
+      if (!session || !channels) throw new SocialError('account-unavailable');
+      return { ...session, channels };
     };
     const social = '/workspaces/:workspaceId/social';
     routes.get(
@@ -297,6 +319,134 @@ export function registerSocialAccounts(
         const { accounts, userId } = context(request);
         const { workspaceId, accountId } = accountParams.parse(request.params);
         return accounts.disconnect(workspaceId, userId, accountId);
+      },
+    );
+    routes.get(
+      `${base}/:accountId/grants`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'getSocialAccountGrantsV1',
+            'Read who may use and who may manage a shared social connection',
+            socialAccountGrantsSchema,
+          ),
+          params: json(accountParams),
+        },
+      },
+      async request => {
+        const { accounts, userId } = context(request);
+        const { workspaceId, accountId } = accountParams.parse(request.params);
+        return accounts.grants(workspaceId, userId, accountId);
+      },
+    );
+    routes.put(
+      `${base}/:accountId/grants`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'setSocialAccountGrantsV1',
+            'Replace who may use and who may manage a shared social connection',
+            socialAccountMetadataSchema,
+          ),
+          params: json(accountParams),
+          body: json(socialAccountGrantsSchema),
+        },
+      },
+      async request => {
+        const { accounts, userId } = context(request);
+        const { workspaceId, accountId } = accountParams.parse(request.params);
+        return accounts.setGrants(workspaceId, userId, accountId, request.body);
+      },
+    );
+    routes.get(
+      `${base}/:accountId/channels`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'discoverSocialChannelsV1',
+            'List the channels a connection can reach now; none is added',
+            z.array(discoveredChannelSchema),
+          ),
+          params: json(accountParams),
+        },
+      },
+      async request => {
+        const { channels, userId } = channelContext(request);
+        const { workspaceId, accountId } = accountParams.parse(request.params);
+        return channels.discover(workspaceId, userId, accountId);
+      },
+    );
+    const channelBase = `${social}/channels`;
+    routes.get(
+      channelBase,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('listSocialChannelsV1', 'List the channels the caller holds a grant on', z.array(channelSchema)),
+          params: json(workspaceParams),
+          querystring: json(channelFilter),
+        },
+      },
+      async request => {
+        const { channels, userId } = channelContext(request);
+        return channels.list(
+          workspaceParams.parse(request.params).workspaceId,
+          userId,
+          channelFilter.parse(request.query),
+        );
+      },
+    );
+    routes.post(
+      channelBase,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('addSocialChannelV1', 'Add a reachable channel; the adder may only manage it', channelSchema),
+          params: json(workspaceParams),
+          body: json(addChannelSchema),
+        },
+      },
+      async request => {
+        const { channels, userId } = channelContext(request);
+        return channels.add(workspaceParams.parse(request.params).workspaceId, userId, request.body);
+      },
+    );
+    routes.get(
+      `${channelBase}/:channelId`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('getSocialChannelV1', 'Read a social channel and its grants', channelSchema),
+          params: json(channelParams),
+        },
+      },
+      async request => {
+        const { channels, userId } = channelContext(request);
+        const { workspaceId, channelId } = channelParams.parse(request.params);
+        return channels.get(workspaceId, userId, channelId);
+      },
+    );
+    routes.put(
+      `${channelBase}/:channelId/grants`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'setSocialChannelGrantsV1',
+            'Replace who may publish, read analytics, engage and manage on a channel',
+            channelSchema,
+          ),
+          params: json(channelParams),
+          body: json(channelGrantsSchema),
+        },
+      },
+      async request => {
+        const { channels, userId } = channelContext(request);
+        const { workspaceId, channelId } = channelParams.parse(request.params);
+        return channels.setGrants(workspaceId, userId, channelId, request.body);
       },
     );
     routes.get(

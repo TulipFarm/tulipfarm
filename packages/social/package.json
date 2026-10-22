@@ -46,6 +46,10 @@
     "./accounts": {
       "types": "./dist/accounts.d.ts",
       "default": "./dist/accounts.js"
+    },
+    "./channels": {
+      "types": "./dist/channels.d.ts",
+      "default": "./dist/channels.js"
     }
   },
   "scripts": {
