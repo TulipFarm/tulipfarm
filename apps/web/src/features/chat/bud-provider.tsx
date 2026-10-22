@@ -56,7 +56,9 @@ async function request(workspaceId: string, signal: AbortSignal, command?: BudCo
 async function load(workspaceId: string, signal: AbortSignal) {
   try {
     const state = await request(workspaceId, signal);
-    return state.onboarding === 'active' ? request(workspaceId, signal, { kind: 'sync' }) : state;
+    return state.onboarding === 'active' && state.conversationId
+      ? request(workspaceId, signal, { kind: 'sync' })
+      : state;
   } catch (error) {
     if (error instanceof BudRequestError && error.message === 'bud-not-initialized')
       return request(workspaceId, signal, { kind: 'bootstrap' });
@@ -85,7 +87,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     load: signal => load(workspace.id, signal),
     staleTime: freshness.chat,
     pollWhile: data =>
-      data.onboarding === 'active' ||
+      (data.onboarding === 'active' && !!data.conversationId) ||
       data.preferences.some(item => item.status === 'asking' || item.status === 'proposed'),
     interval: 15_000,
     maxChecks: 120,
@@ -109,12 +111,6 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
       : null);
   const writing = useRef(false);
   const mounted = useRef(true);
-  const returnKey = `bud-return:${workspace.id}:${scope.kind === 'workspace' ? scope.membershipId : scope.userId}`;
-  const returnFromSetup = useCallback(() => {
-    const destination = sessionStorage.getItem(returnKey);
-    sessionStorage.removeItem(returnKey);
-    router.history.replace(destination?.startsWith(`/${workspace.slug}/`) ? destination : `/${workspace.slug}`);
-  }, [returnKey, router, workspace.slug]);
   const [container] = useState(() => {
     const element = document.createElement('div');
     element.dataset.budConversation = '';
@@ -122,6 +118,10 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     return element;
   });
   const full = !!data?.conversationId && pathname === `/${workspace.slug}/chat/${data.conversationId}`;
+  const returnFromSetup = useCallback(() => {
+    if (full) router.history.replace(`/${workspace.slug}`);
+    else setOpen(false);
+  }, [full, router, workspace.slug]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -196,9 +196,6 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     }, 30 * 60_000);
     return () => clearInterval(timer);
   }, [data?.nudge?.fingerprint, read.refresh]);
-  useEffect(() => {
-    if (full && data?.onboarding === 'skipped' && sessionStorage.getItem(returnKey)) returnFromSetup();
-  }, [full, data?.onboarding, returnFromSetup, returnKey]);
   useEffect(() => {
     if (!data?.nudge || data.nudge.presented || full || open || busy || error) return;
     const fingerprint = data.nudge.fingerprint;

@@ -273,6 +273,11 @@ test(
       assert.equal(new URL(page.url()).pathname, '/acme', 'a new member is not sent to a Bud chat');
       assert.equal(history.length, 0, 'no greeting before the member opens Bud');
       assert.equal(state?.conversationId, null, 'no Bud thread before the member opens Bud');
+      assert.equal(
+        commands.filter(command => command.kind === 'sync').length,
+        0,
+        'no setup checks before the member opens Bud',
+      );
       await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
       await popup.waitFor();
       await popup.getByText(budGreeting, { exact: true }).waitFor();
@@ -280,6 +285,15 @@ test(
       await shot('bud-onboarding');
       await popup.getByRole('button', { name: 'Skip setup', exact: true }).click();
       await popup.getByRole('button', { name: 'Skip setup', exact: true }).waitFor({ state: 'hidden' });
+      state.onboarding = 'completed';
+      await emit('changed');
+      await popup.getByRole('button', { name: 'Continue', exact: true }).click();
+      await popup.waitFor({ state: 'hidden' });
+      assert.equal(new URL(page.url()).pathname, '/acme', 'Continue in the popup keeps the current page');
+      state.onboarding = 'skipped';
+      await emit('changed');
+      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await popup.waitFor();
       assert.equal(await popup.getByRole('combobox').count(), 0, 'no position selector');
       assert.equal(
         await popup.getByRole('button', { name: /canvas|Model:|Add a file|Use a skill|Chat actions/i }).count(),
