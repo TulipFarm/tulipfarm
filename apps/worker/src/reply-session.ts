@@ -51,6 +51,8 @@ type Call = {
   worst: bigint;
   started: number;
   usage?: { providerPicoUsd: string; tokens: Parameters<typeof usageTokenCounts>[0] };
+  /** The provider refused the request before generating anything, so the call costs nothing. */
+  rejected?: boolean;
   milliseconds?: number;
 };
 type Hold = { id: string; held: bigint; calls: Call[] };
@@ -100,6 +102,8 @@ export async function beginReplySession(input: {
   fence: ReplyFence;
   chat: ConversationModel;
   title: ConversationModel | undefined;
+  /** The model a failed chat call may retry on once; its calls are billed as that model. */
+  fallback?: ConversationModel | undefined;
   externalContext: ExternalConversationContext | undefined;
   slack: SlackActionsFactory | undefined;
   mcp: McpExecutionFactory | null | undefined;
@@ -152,8 +156,9 @@ export async function beginReplySession(input: {
 
   const contextSources = () => mergeSources([...catalogSources, ...inventorySources]);
   const keyOf = (sources: readonly SourceDependency[]) => canonicalJson(mergeSources([...sources]));
-  /** An upper bound on a call's charge: its known cost, or its whole reservation while usage is unknown. */
-  const charge = (call: Call) => (call.usage ? units(call.usage.providerPicoUsd) : call.worst) + 1n;
+  /** An upper bound on a call's charge: its known cost, nothing when refused, or its whole reservation while usage is unknown. */
+  const charge = (call: Call) =>
+    (call.usage ? units(call.usage.providerPicoUsd) : call.rejected ? 0n : call.worst) + 1n;
   const consumed = () => (hold?.calls ?? []).reduce((total, call) => total + charge(call), 0n);
   const unflushed = () =>
     [...settledCalls, ...(hold?.calls ?? [])].reduce((total, call) => total + (call.milliseconds ?? 0), 0) -
@@ -227,7 +232,7 @@ export async function beginReplySession(input: {
     if (!current) return;
     const known = current.calls.flatMap(call => (call.usage ? [{ call, usage: call.usage }] : []));
     for (const call of current.calls)
-      if (!call.usage)
+      if (!call.usage && !call.rejected)
         log('warn', 'activity', 'call_failed', {
           operation: 'chat.credit-usage',
           'error.type': 'usage-unknown',
@@ -240,7 +245,7 @@ export async function beginReplySession(input: {
         id: call.id,
         modelId: call.modelId,
         pricingRevision: call.pricingRevision,
-        providerPicoUsd: call.usage?.providerPicoUsd ?? providerCostAtUnits(call.worst),
+        providerPicoUsd: call.usage?.providerPicoUsd ?? (call.rejected ? '0' : providerCostAtUnits(call.worst)),
         planMilliseconds: plan && call.milliseconds !== undefined ? Math.ceil(call.milliseconds) : null,
       })),
       () => {
@@ -372,7 +377,7 @@ export async function beginReplySession(input: {
 
   const meter: ToolModelMeter = async attempt => {
     if (lost) throw lost instanceof AccessDenied ? lost : new AccessDenied();
-    const model = [chat, title].find(
+    const model = [chat, title, input.fallback].find(
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
     );
     if (!model) throw new Error('conversation-model-unpriced');
@@ -395,9 +400,12 @@ export async function beginReplySession(input: {
     lastStep = Math.max(lastStep, attempt.step);
     lastInputBytes = attempt.inputBytes;
     const date = new Date().toISOString().slice(0, 10);
-    return async (usage: InferenceUsage) => {
+    return async (usage: InferenceUsage, outcome?: { rejected: boolean }) => {
       call.milliseconds = performance.now() - call.started;
-      if (usage.kind !== 'known') return;
+      if (usage.kind !== 'known') {
+        if (outcome?.rejected) call.rejected = true;
+        return;
+      }
       const { kind, ...tokens } = usage;
       const cost = calculateUsageCost({
         modelId: model.price.modelId,

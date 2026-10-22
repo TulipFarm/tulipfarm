@@ -234,6 +234,93 @@ test('unfinished replies stop automatic retries and permit explicit recovery wit
   }
 });
 
+test('model failures another attempt cannot fix end the reply at once; transient ones retry visibly', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const reply = async (failure, generation = 0) => {
+      const chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const sent = await f.store.send(w.id, w.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text: 'hey' }],
+      });
+      const executor = createConversationExecutor(f.runtime, async () => {
+        throw new Error(failure);
+      });
+      const outcome = await executor.process({
+        workspaceId: w.id,
+        conversationId: chatId,
+        turnId: sent.turnId,
+        generation,
+      });
+      return { outcome, turn: (await f.store.history(w.id, w.userId, chatId)).messages[0].turn };
+    };
+    for (const failure of [
+      'model-configuration',
+      'model-authentication',
+      'model-permission',
+      'model-quota',
+      'model-refusal',
+      'model-invalid-request',
+      'model-output-limit',
+    ]) {
+      const { outcome, turn } = await reply(failure);
+      assert.equal(outcome, 'failed', failure);
+      assert.equal(turn.status, 'failed', failure);
+      assert.equal(turn.errorCode, failure, failure);
+    }
+    for (const failure of ['model-unavailable', 'model-rate-limit', 'model-timeout', 'model-transport']) {
+      const { outcome, turn } = await reply(failure);
+      assert.equal(outcome, 'retry', failure);
+      assert.equal(turn.status, 'queued', failure);
+      assert.equal(turn.errorCode, failure, 'the pending retry keeps the classified reason for the page');
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('a reply answered by the fallback model records that model on the completed turn only', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      model: 'deepseek-flash',
+      parts: [{ kind: 'text', text: 'hey' }],
+    });
+    const executor = createConversationExecutor(f.runtime, async () => ({
+      text: 'Hello from the fallback',
+      sources: [{ kind: 'unknown' }],
+      fallback: 'kimi',
+    }));
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    const history = await f.store.history(w.id, w.userId, chatId);
+    assert.equal(history.messages[0].turn.status, 'completed');
+    assert.equal(history.messages[0].turn.errorCode, 'model-fallback:kimi');
+    assert.equal(history.messages.at(-1).parts[0].text, 'Hello from the fallback');
+    assert.equal(
+      (
+        await f.db.platform.query(`SELECT responder FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+          sent.turnId,
+        ])
+      ).rows[0].responder,
+      'deepseek-flash',
+      'the turn keeps the model the person selected',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test(
   'reply executor orders work, fences takeover, retries durably, and denies removed membership publication',
   { timeout: 60000 },

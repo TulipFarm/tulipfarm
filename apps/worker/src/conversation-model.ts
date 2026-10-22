@@ -51,3 +51,16 @@ export function roleModel(role: ModelCatalogRole, env: NodeJS.ProcessEnv = proce
   const model = catalog.role(role) ?? (role === 'title' ? null : catalog.defaultModel);
   return model ? conversationModel(model.id, env) : null;
 }
+
+/**
+ * The model with the catalog role `fallback`, which retries a failed chat call once. Without one, or when it is paused
+ * or is the chat's own model, failed replies are not retried on another model.
+ */
+export function chatFallbackModel(
+  chatFamily: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ConversationModel | undefined {
+  const model = loadModelCatalog(env).role('fallback');
+  if (!model || model.id === chatFamily || conversationFamilyPaused(model.id, env)) return undefined;
+  return conversationModel(model.id, env) ?? undefined;
+}

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initialModelMapping, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
-import { chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
+import { chatFallbackModel, chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
@@ -90,6 +90,13 @@ test('roles without a model: titles use the chat model, other roles the default 
   const assigned = { ...shipped, MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['review', 'title'] }) };
   assert.equal(roleModel('review', assigned).price.familyId, 'claude-haiku');
   assert.equal(chatTitleRoute(assigned).model, 'claude-haiku-4-5');
+});
+
+test('the chat fallback is off without a fallback-role model and never the chat model itself', () => {
+  assert.equal(chatFallbackModel('claude-sonnet', { ...shipped, MODEL_CATALOG: claudeCatalog({}) }), undefined);
+  const env = { ...shipped, MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['fallback'] }) };
+  assert.equal(chatFallbackModel('claude-sonnet', env).price.familyId, 'claude-haiku');
+  assert.equal(chatFallbackModel('claude-haiku', env), undefined);
 });
 
 test('chat rejects a reply when no model can serve it', async t => {

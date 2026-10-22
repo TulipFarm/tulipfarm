@@ -133,6 +133,16 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   model, that feature is off. `compaction`, `review`, `plan`, `heartbeat` and
   `public-guide` use the default model; the public guide still needs an Azure
   chat-completions route.
+- **Fallback.** The `fallback` role is off unless a model has it. Then a chat
+  model call that fails before producing any output, with a failure another
+  model can fix (`not_found`, `auth`, `quota_exceeded`, `rate_limited`,
+  `server_error`, `timeout` or `network`), retries once on that model. It never
+  retries after streamed output or on `content_filtered`, `context_too_long` or
+  `bad_request`, and a paused fallback model or the chat's own model is not
+  used. The reply notes and bills the model that answered; the chat keeps its
+  selected model. Each decision is counted as `gen_ai_model_fallback` with a
+  bounded `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
+  `failed`).
 - **Endpoints.** `model-endpoints.ts` checks every endpoint at startup and before
   each request: built-in provider and Azure Foundry hosts are implicit, every
   other host must be in `MODEL_ENDPOINT_HOSTS`, and http is allowed only on

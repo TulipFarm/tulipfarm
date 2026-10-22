@@ -539,7 +539,7 @@ test('provider inference telemetry covers body consumption, usage, returned erro
         count = finished().length;
         await assert.rejects(
           withChatMeasurements(() => inferWithTools(nativeRoutes.azure, messages, noTools, async () => noTools)),
-          error => error === transport,
+          error => error.message === 'model-transport' && error.code === 'network' && error.cause === transport,
         );
         details = finished().slice(count);
         assert.equal(details.find(span => span.name === 'chat.detail.provider').attributes.outcome, 'error');

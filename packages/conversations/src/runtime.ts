@@ -23,7 +23,13 @@ import {
   type createWorkspaceRuntime,
   commonCompatibility,
 } from '@tulipfarm/workspace-storage/runtime';
-import { chatToolCallLimit, toolReceiptSchema, turnStatusSchema, timeZoneSchema } from './contracts.ts';
+import {
+  chatToolCallLimit,
+  modelFallbackCodePrefix,
+  toolReceiptSchema,
+  turnStatusSchema,
+  timeZoneSchema,
+} from './contracts.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
 import { notifyConversationChange, notifyConversationTool } from './event-publisher.ts';
 import {
@@ -71,6 +77,7 @@ import { isCalendarReadCall } from '@tulipfarm/google-workspace/calendar-events'
 import {
   errorType,
   log,
+  modelErrorClass,
   observeChatStage,
   observeChatDetail,
   observeChatDetailSync,
@@ -270,12 +277,14 @@ const modelFailureSchema = z.enum([
   'model-context-overflow',
   'model-invalid-request',
   'model-invalid-decision',
+  'model-invalid-response',
   'model-incomplete-response',
   'model-output-limit',
   'model-cancelled',
   'model-timeout',
   'model-transport',
   'model-provider-error',
+  'model-request-failed',
 ]);
 type ModelFailure = z.infer<typeof modelFailureSchema>;
 // A retry repeats the same request, so failures caused by the model's setup or the request itself end the turn.
@@ -286,6 +295,8 @@ const terminalModelFailures = new Set<ModelFailure>([
   'model-quota',
   'model-invalid-request',
   'model-refusal',
+  'model-context-overflow',
+  'model-output-limit',
   'model-incomplete-response',
 ]);
 export const modelFailureEndsTurn = (failure: string) => {
@@ -1453,6 +1464,7 @@ export function createConversationExecutor(
     let text = 'Attachment received.';
     let title: string | undefined;
     let titleSource: ConversationResult['titleSource'];
+    let fallback: string | undefined;
     let sources: SourceDependency[] = [{ kind: 'unknown' }];
     let replied = false;
     const fileSources: FileSource[] = [];
@@ -2079,6 +2091,7 @@ export function createConversationExecutor(
       text = answer.text || 'The model returned an empty reply.';
       title = source.generateTitle ? answer.title : undefined;
       titleSource = answer.titleSource;
+      fallback = answer.fallback;
       sources = answer.sources;
       replied = true;
     }
@@ -2163,9 +2176,10 @@ export function createConversationExecutor(
             JSON.stringify(mergeSources([...source.inherited, ...sources])),
           ],
         );
+        // A completed turn has no error; its code only notes which fallback model answered.
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'completed', response_message_id = $2, lease_until = NULL, retry_at = NULL, error_code = NULL WHERE id = $1`,
-          [fence.turnId, messageId],
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'completed', response_message_id = $2, lease_until = NULL, retry_at = NULL, error_code = $3 WHERE id = $1`,
+          [fence.turnId, messageId, fallback ? `${modelFallbackCodePrefix}${fallback}` : null],
         );
         await interruptToolReceipts(tx, fence.turnId, 'failed');
         await changed(tx, fence, true);
@@ -2439,9 +2453,10 @@ export function createConversationExecutor(
           } catch (error) {
             if (error instanceof ExternalActionWaiting) return 'idle';
             if (error instanceof CreditAttemptAlreadyDispatched) return 'stale';
-            const code = telemetryErrorCode(
-              typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined,
-            );
+            const code =
+              telemetryErrorCode(
+                typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined,
+              ) ?? (error instanceof Error ? modelErrorClass(error.message) : undefined);
             log('error', 'activity', 'call_failed', {
               operation: 'conversation.reply',
               'error.type': errorType(error),
