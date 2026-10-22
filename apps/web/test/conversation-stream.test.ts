@@ -150,6 +150,29 @@ test('progress keeps the newest decision of each turn and ignores invalid data',
   stream.stop();
 });
 
+test('progress statuses of one step apply in seq order, and unknown statuses are ignored', () => {
+  const { stream, latest } = harness();
+  stream.start();
+  latest().open();
+  const progress = (update: object) =>
+    latest().emit('progress', JSON.stringify({ turnId, generation: 0, epoch: 0, step: 2, round: 2, ...update }));
+  progress({ status: 'thinking', toolRounds: 0, seq: 0 });
+  progress({ status: 'finishing', toolRounds: 0, seq: 1 });
+  progress({ status: 'thinking', toolRounds: 0, seq: 0 });
+  assert.equal(stream.snapshot().progress.get(turnId)?.status, 'finishing', 'an older seq of the same step is stale');
+  progress({ status: 'done', toolRounds: 0, seq: 2 });
+  assert.equal(stream.snapshot().progress.get(turnId)?.status, 'done');
+  progress({ status: 'planning', toolRounds: 0, seq: 3 });
+  assert.equal(stream.snapshot().progress.get(turnId)?.status, 'done');
+  progress({ step: 3, round: 3 });
+  assert.deepEqual(
+    stream.snapshot().progress.get(turnId),
+    { turnId, generation: 0, epoch: 0, step: 3, round: 3 },
+    'an update without a status still advances by step',
+  );
+  stream.stop();
+});
+
 test('avatar updates are ordered, generation-bound, and reject invalid expressions', t => {
   const { stream, latest } = harness();
   const errors: unknown[] = [];

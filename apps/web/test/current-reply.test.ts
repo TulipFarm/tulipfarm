@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { currentReply, useCurrentReply, type OutgoingMessage } from '../src/features/chat/current-reply.ts';
 import type { ConversationMessage } from '../src/features/chat/conversation-api.ts';
 import type { ConversationStreamSnapshot } from '../src/features/chat/conversation-stream.ts';
+import type { StreamProgress } from '@tulipfarm/conversations/events';
 
 type Input = Parameters<typeof useCurrentReply>[0];
 const message = (fields: Partial<ConversationMessage> = {}): ConversationMessage => ({
@@ -51,6 +52,12 @@ const preview = (generation = 2, step = 0, text = 'Reply text') => ({
   complete: true,
 });
 const progress = (generation = 2, step = 0, round = 1) => ({ turnId: 'turn', generation, epoch: 1, step, round });
+const status = (fields: Partial<StreamProgress> & Pick<StreamProgress, 'status'>, step = 0) => ({
+  ...progress(2, step, 1),
+  toolRounds: 0,
+  seq: 0,
+  ...fields,
+});
 
 function reply(fields: Partial<Input> = {}) {
   let result: ReturnType<typeof useCurrentReply> | undefined;
@@ -193,6 +200,56 @@ test('thinking names planning between tools and counts decisions only after the 
     }).activity.label,
     'Searching · Step 2',
   );
+});
+
+test('a reported status names what the reply does and numbers steps only after work tools finish', () => {
+  const label = (update: ReturnType<typeof status>, fields: Partial<Input> = {}) =>
+    reply({ stream: stream({ progress: new Map([['turn', update]]) }), ...fields }).activity.label;
+  assert.equal(label(status({ status: 'thinking' })), 'Thinking');
+  assert.equal(label(status({ status: 'thinking', round: 3 })), 'Thinking', 'rounds without work tools are not steps');
+  assert.equal(label(status({ status: 'tool', tool: 'Knowledge' })), 'Using Knowledge…');
+  assert.equal(label(status({ status: 'thinking', toolRounds: 1, round: 2 })), 'Planning next step · Step 2');
+  assert.equal(label(status({ status: 'tool', tool: 'Slack', toolRounds: 1 })), 'Using Slack… · Step 2');
+  assert.equal(label(status({ status: 'tool', toolRounds: 2 })), 'Using a tool… · Step 3');
+  assert.equal(label(status({ status: 'finishing', toolRounds: 2, round: 4 })), 'Finishing up');
+  assert.equal(
+    label(status({ status: 'thinking' }), { messages: [message({ tools: [tool()] })] }),
+    'Thinking',
+    'a saved tool row does not override the reported status',
+  );
+  const running = reply({
+    messages: [message({ tools: [tool({ tool: 'web.search', status: 'running' })] })],
+    stream: stream({ progress: new Map([['turn', status({ status: 'tool', tool: 'Web search', toolRounds: 1 })]]) }),
+  });
+  assert.deepEqual(running.activity, { activity: 'searching', label: 'Using Web search… · Step 2' });
+  assert.equal(running.status, 'tool');
+});
+
+test('done ends the spinner and label once the answer is on screen, even while the turn still saves', () => {
+  const answered = stream({
+    previews: new Map([['turn', preview(2, 1, 'Hello!')]]),
+    progress: new Map([['turn', status({ status: 'done', round: 2 }, 1)]]),
+  });
+  const done = reply({ stream: answered });
+  assert.equal(done.answerText, 'Hello!');
+  assert.equal(done.thinking, false);
+  assert.equal(done.status, 'done');
+  assert.equal(done.turn?.status, 'processing');
+  const finishing = reply({
+    stream: stream({ ...answered, progress: new Map([['turn', status({ status: 'finishing', round: 2 }, 1)]]) }),
+  });
+  assert.equal(finishing.thinking, true);
+  assert.equal(finishing.answerText, 'Hello!', 'a status of the answer step keeps streamed text an answer');
+  const unseen = reply({ stream: stream({ progress: new Map([['turn', status({ status: 'done' })]]) }) });
+  assert.equal(unseen.thinking, true, 'without a visible answer, as in project chats, progress stays until saved');
+  assert.equal(unseen.activity.label, 'Finishing up');
+});
+
+test('progress without a status keeps the round-based labels of older workers', () => {
+  const legacy = reply({ stream: stream({ progress: new Map([['turn', progress(2, 2, 3)]]) }) });
+  assert.equal(legacy.status, undefined);
+  assert.equal(legacy.activity.label, 'Planning next step · Step 3');
+  assert.equal(legacy.thinking, true);
 });
 
 test('stream unavailability does not hide saved work or retained text during polling fallback', () => {
