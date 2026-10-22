@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';

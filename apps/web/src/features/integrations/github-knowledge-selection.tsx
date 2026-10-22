@@ -436,7 +436,7 @@ export function GitHubSelectionForm({
                           : `${data.items.length} ${data.items.length === 1 ? 'repository' : 'repositories'}`}
                       </p>
                       <Popover>
-                        <PopoverTrigger render={<Button variant="ghost" size="xs" />}>
+                        <PopoverTrigger render={<Button variant="ghost" size="sm" />}>
                           Missing a repository?
                         </PopoverTrigger>
                         <PopoverContent align="end">

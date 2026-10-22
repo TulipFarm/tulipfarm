@@ -34,7 +34,7 @@ export function AvatarImagePicker({
   }
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <EntityAvatar seed={seed} name={name} image={image} size="xl" shape={shape} />
+      <EntityAvatar seed={seed} name={name} image={image} size="lg" shape={shape} />
       <Input
         ref={chooser}
         type="file"

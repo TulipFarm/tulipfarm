@@ -4,8 +4,6 @@ interface ImportMetaEnv {
   readonly VITE_WEBSITE_URL?: string;
   /** Public documentation origin. Optional. */
   readonly VITE_DOCS_URL?: string;
-  /** Origin serving agent avatar artwork at `/avatar/<object>/<color>.svg`. Optional; unset shows initials. */
-  readonly VITE_AGENT_AVATAR_URL?: string;
   /** Support email shown on the Help page. Optional; unset hides the contact section. */
   readonly VITE_SUPPORT_EMAIL?: string;
   /** Comma-separated web extension module specifiers, read at build time. */

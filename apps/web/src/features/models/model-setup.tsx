@@ -9,7 +9,7 @@ export const modelSetupDocsUrl = new URL(
 
 export const noModelsConfigured = 'No models configured';
 
-export function ModelSetupLink({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
+export function ModelSetupLink({ size = 'sm' }: { size?: 'sm' | 'md' }) {
   return (
     <Button
       size={size}

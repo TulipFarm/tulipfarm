@@ -99,7 +99,7 @@ export function SidebarRecentItem({
                   <p role="alert" className="text-xs text-sidebar-muted-foreground">
                     Could not load recent items.
                   </p>
-                  <Button variant="ghost" size="xs" onClick={retry}>
+                  <Button variant="ghost" size="sm" onClick={retry}>
                     Try again
                   </Button>
                 </div>
@@ -139,7 +139,7 @@ export function SidebarRecentItem({
                   <p role="alert" className="text-xs text-sidebar-muted-foreground">
                     Could not update recent items.
                   </p>
-                  <Button variant="ghost" size="xs" disabled={refreshing} aria-busy={refreshing} onClick={retry}>
+                  <Button variant="ghost" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={retry}>
                     Try again
                   </Button>
                 </div>

@@ -237,7 +237,6 @@ services:
         <<: *release
         VITE_API_URL: ${TULIPFARM_PUBLIC_URL}
         VITE_SUPPORT_EMAIL: ${TULIPFARM_SUPPORT_EMAIL:-}
-        VITE_AGENT_AVATAR_URL: ${TULIPFARM_AGENT_AVATAR_URL:-}
     restart: unless-stopped
     environment:
       TULIPFARM_SITE_ADDRESS: ${TULIPFARM_SITE_ADDRESS:-:80}

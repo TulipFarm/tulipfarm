@@ -350,7 +350,7 @@ export function TeamAdministration({ data, busy, change, recovery }: Props) {
                   cell: team => (
                     <Button
                       variant="link"
-                      size="task-link"
+                      size="md"
                       ref={node => {
                         if (node) detailTriggers.current.set(team.id, node);
                         else detailTriggers.current.delete(team.id);

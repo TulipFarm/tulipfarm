@@ -226,7 +226,7 @@ export function planOutline(view: PlanView, slug: string): PlanOutlineTask[] {
               <div className="space-y-2 text-xs text-muted-foreground">
                 <p>{task.report.summary}</p>
                 <Collapsible>
-                  <CollapsibleTrigger render={<Button variant="ghost" size="xs" />}>
+                  <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
                     Verification details
                   </CollapsibleTrigger>
                   <CollapsibleContent>
@@ -446,7 +446,7 @@ export function PlanCanvas({
                 {check.evidence.length > 0 && (
                   <div className="mt-1 text-xs text-muted-foreground">
                     <Collapsible>
-                      <CollapsibleTrigger render={<Button variant="ghost" size="xs" />}>Details</CollapsibleTrigger>
+                      <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>Details</CollapsibleTrigger>
                       <CollapsibleContent>
                         <ul className="mt-1 space-y-1">
                           {check.evidence.map(item => (

@@ -28,7 +28,7 @@ import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Users } from 'reicon-react/icons/Users';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 
 export type WorkflowNodeKind =
   | 'trigger'

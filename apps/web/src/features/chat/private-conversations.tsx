@@ -677,7 +677,7 @@ function ConversationDetail({
               <Button
                 type="button"
                 variant="scope"
-                size="badge"
+                size="sm"
                 aria-label={`Project sharing details: ${project?.name ?? 'project'}`}
                 title="Project sharing details"
               />
@@ -695,16 +695,21 @@ function ConversationDetail({
             {projectArchived && (
               <p className="text-sm text-muted-foreground">The project is archived, so this chat is read-only.</p>
             )}
-            <Button
-              variant="link"
-              size="task-link"
-              nativeButton={false}
-              render={
-                <Link to="/$workspaceSlug/projects/$projectId" params={{ workspaceSlug, projectId: sharedProjectId }} />
-              }
-            >
-              {project?.name ?? 'Open project'}
-            </Button>
+            <div className="grid min-w-0 grid-cols-1">
+              <Button
+                variant="link"
+                size="md"
+                nativeButton={false}
+                render={
+                  <Link
+                    to="/$workspaceSlug/projects/$projectId"
+                    params={{ workspaceSlug, projectId: sharedProjectId }}
+                  />
+                }
+              >
+                <span className="min-w-0 flex-1 truncate text-start">{project?.name ?? 'Open project'}</span>
+              </Button>
+            </div>
           </PopoverContent>
         </Popover>
       )

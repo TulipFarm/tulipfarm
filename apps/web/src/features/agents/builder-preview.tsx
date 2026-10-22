@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { CalendarClock, MessageSquare, ScrollText, ShieldCheck, Wrench } from 'lucide-react';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
@@ -89,7 +89,7 @@ export function AgentDraftSummary({
               <dd className="wrap-anywhere text-foreground">{value}</dd>
             </div>
             {onEdit && (
-              <Button variant="ghost" size="xs" aria-label={`Edit ${term.toLowerCase()}`} onClick={() => onEdit(step)}>
+              <Button variant="ghost" size="sm" aria-label={`Edit ${term.toLowerCase()}`} onClick={() => onEdit(step)}>
                 Edit
               </Button>
             )}

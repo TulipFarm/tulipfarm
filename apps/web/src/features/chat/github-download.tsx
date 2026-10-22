@@ -45,7 +45,7 @@ function DownloadLink({ path, children }: { path: string; children: ReactNode })
     <span>
       <Button
         variant="link"
-        size="task-link"
+        size="md"
         disabled={state === 'loading'}
         aria-busy={state === 'loading'}
         onClick={() => void download()}

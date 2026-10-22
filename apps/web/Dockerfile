@@ -14,7 +14,6 @@ RUN pnpm install --offline --frozen-lockfile --filter @tulipfarm/web...
 # Unset VITE_API_URL calls the API on the page's own origin, which is how Caddy serves it.
 ARG VITE_API_URL=
 ARG VITE_SUPPORT_EMAIL=
-ARG VITE_AGENT_AVATAR_URL=
 ARG VITE_TULIPFARM_WEB_EXTENSIONS=
 # Self-host Compose passes the release identity; without it the image reports a development build.
 ARG RELEASE_VERSION=
