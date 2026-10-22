@@ -14,7 +14,7 @@ import { Compress } from 'reicon-react/icons/Compress';
 import { X } from 'reicon-react/icons/X';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
-import { Marker, MarkerContent, MarkerIcon } from '@/components/marker';
+import { Separator, SeparatorContent, SeparatorIcon } from '@tulipfarm/sprout/separator';
 import { MentionList, MentionOption, MentionStatus } from '@tulipfarm/sprout/mention-list';
 import { requestSignal } from '@/lib/http';
 import { skillApi } from '@/features/skills/api';
@@ -322,11 +322,11 @@ export function SentSkill({ skill }: { skill: SkillReference }) {
 
 export function SkillUse({ skill }: { skill: SkillReference }) {
   return (
-    <Marker>
-      <MarkerIcon>
+    <Separator variant="marker">
+      <SeparatorIcon>
         <BookOpen size={16} />
-      </MarkerIcon>
-      <MarkerContent>Used skill {label(skill)}</MarkerContent>
-    </Marker>
+      </SeparatorIcon>
+      <SeparatorContent>Used skill {label(skill)}</SeparatorContent>
+    </Separator>
   );
 }
