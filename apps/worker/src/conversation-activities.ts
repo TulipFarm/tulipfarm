@@ -7,7 +7,7 @@ import {
   type ConversationRuntime,
   type ExternalConversationContext,
 } from '@tulipfarm/conversations/runtime';
-import { inferenceRouteSchema, type InferenceRoute } from '@tulipfarm/agents/inference';
+import { inferenceRouteSchema, type InferenceRoute, type ToolInferenceContext } from '@tulipfarm/agents/inference';
 import { respondToConversation } from './conversation-responder.ts';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
@@ -167,7 +167,7 @@ export function meteredReply(
     const answerText = project
       ? undefined
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
-    const progress = ({ step, round }: { step: number; round: number }) => publisher.progress(step, round);
+    const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
     // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
     const budUser =
       externalContext || project

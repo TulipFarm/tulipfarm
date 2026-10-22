@@ -25,9 +25,24 @@ export const streamTextSchema = streamIdentitySchema.extend({
 export type StreamText = z.infer<typeof streamTextSchema>;
 
 /**
- * The reply started model decision `round`. `step` orders it with preview text of the same attempt.
+ * What a reply is doing now. `thinking`: the model is generating. `tool`: a work tool runs. `finishing`: a step after the
+ * answer, such as the completion check or the title. `done`: the answer is final, though the turn may still be saving.
  */
-export const streamProgressSchema = streamIdentitySchema.extend({ round: z.number().int().positive() });
+export const replyStatusSchema = z.enum(['thinking', 'tool', 'finishing', 'done']);
+export type ReplyStatus = z.infer<typeof replyStatusSchema>;
+
+/**
+ * The reply started model decision `round`. `step` orders it with preview text of the same attempt, and `seq` orders
+ * statuses of one step. `tool` is the display name of the running work tool. `toolRounds` counts finished rounds of
+ * work tools. Updates without `status` come from workers that only report rounds.
+ */
+export const streamProgressSchema = streamIdentitySchema.extend({
+  round: z.number().int().positive(),
+  status: replyStatusSchema.optional(),
+  tool: z.string().min(1).max(64).optional(),
+  toolRounds: count.optional(),
+  seq: count.optional(),
+});
 export type StreamProgress = z.infer<typeof streamProgressSchema>;
 export const streamAvatarSchema = streamIdentitySchema.extend({ seq: count, avatar: avatarSnapshotSchema });
 export type StreamAvatar = z.infer<typeof streamAvatarSchema>;
@@ -87,9 +102,11 @@ export function compareStreamIdentity(left: StreamIdentity, right: StreamIdentit
   return left.generation - right.generation || left.epoch - right.epoch || left.step - right.step;
 }
 
-/** Keeps the latest progress of a turn. An older or equal identity leaves the state unchanged. */
+/** Keeps the latest progress of a turn. An older identity, or an equal one without a later `seq`, leaves it unchanged. */
 export function applyStreamProgress(state: StreamProgress | undefined, update: StreamProgress): StreamProgress {
-  return state && compareStreamIdentity(update, state) <= 0 ? state : update;
+  if (!state) return update;
+  const order = compareStreamIdentity(update, state) || (update.seq ?? 0) - (state.seq ?? 0);
+  return order <= 0 ? state : update;
 }
 
 export function applyStreamAvatar(state: StreamAvatar | undefined, update: StreamAvatar): StreamAvatar {

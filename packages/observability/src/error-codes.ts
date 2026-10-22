@@ -366,7 +366,8 @@ export function errorAttributes(error: unknown): {
       (value instanceof Error && typeof item.message === 'string' && Object.hasOwn(exportMessages, item.message)
         ? exportMessages[item.message]
         : undefined) ??
-      (item.message === 'timeout exceeded when trying to connect' ? 'wait_timeout' : undefined);
+      (item.message === 'timeout exceeded when trying to connect' ? 'wait_timeout' : undefined) ??
+      grpcCode(value);
     if (code && (!result['error.code'] || genericCodes.has(result['error.code']))) {
       result['error.code'] = code;
       result['error.reason'] = Object.hasOwn(reasons, code) ? reasons[code]! : code;
@@ -381,6 +382,15 @@ export function errorAttributes(error: unknown): {
     /* Hostile accessors must not replace the original failure. */
   }
   return result;
+}
+
+const grpcCodes: Record<number, string> = { 4: 'timeout', 14: 'service-unavailable' };
+
+/** gRPC service errors (Temporal, OTLP gRPC) carry a numeric status beside `details` and `metadata`. */
+function grpcCode(value: object): string | undefined {
+  const item = value as { code?: unknown };
+  if (!(value instanceof Error) || !('details' in value) || !('metadata' in value)) return undefined;
+  return typeof item.code === 'number' && Object.hasOwn(grpcCodes, item.code) ? grpcCodes[item.code] : undefined;
 }
 
 export function telemetryErrorCode(value: unknown): string | undefined {

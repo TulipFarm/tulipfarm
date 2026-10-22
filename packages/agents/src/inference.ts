@@ -59,7 +59,10 @@ import {
 } from './calendar-text-check.ts';
 import type { WorkspaceInventory } from './workspace-inventory.ts';
 import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
+import { isWorkTool } from './non-work-tools.ts';
 import type { AvatarSnapshot } from '@tulipfarm/conversations/results';
+import type { ReplyStatus } from '@tulipfarm/conversations/events';
+import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 export { serverSentEvents } from './inference-stream.ts';
 
 const credentialSchema = z.string().regex(/^[\x21-\x7e]{1,4096}$/);
@@ -975,8 +978,13 @@ export type ToolInferenceContext = {
   earlierMessages?: boolean;
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
-  /** Called before each model decision. `round` counts decisions from 1; `step` is that decision's meter step. */
-  progress?: (update: { step: number; round: number }) => void;
+  /**
+   * Reports what the reply is doing: before each model decision (`thinking`), while work tools run (`tool`, with the
+   * tool's display name), after an answer (`finishing`), and once the checked answer is final (`done`). `round` counts
+   * decisions from 1; `step` is the meter step of the decision the status belongs to. `toolRounds` counts finished
+   * rounds of work tools; tools in `nonWorkToolNames`, format corrections and the completion check never count.
+   */
+  progress?: (update: { step: number; round: number; status: ReplyStatus; tool?: string; toolRounds: number }) => void;
   /** Instructions of the chat's project. They follow the platform prompt as a second system block. */
   projectInstructions?: string | undefined;
 };
@@ -1586,7 +1594,20 @@ export async function inferWithTools(
   let budgetSpent = false;
   let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
   let expressionCalls = 0;
-  const finish = async (text: string) => ({ text, ...(tools?.avatar ? { avatar } : {}) });
+  let toolRounds = 0;
+  let decisionAt = { step: 0, round: 1 };
+  const report = (status: ReplyStatus, tool?: string) => {
+    try {
+      tools?.progress?.({ ...decisionAt, status, ...(tool ? { tool } : {}), toolRounds });
+    } catch {
+      /* Progress is a preview. */
+    }
+  };
+  // Only a checked answer is final. Other endings are not on screen until the turn saves.
+  const finish = async (text: string, checked = false) => {
+    report(checked ? 'done' : 'finishing');
+    return { text, ...(tools?.avatar ? { avatar } : {}) };
+  };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
   if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
   // Reaching the budget ends the turn with a reply. It is expected, so it logs one warning rather than a failed reply.
@@ -1663,11 +1684,8 @@ export async function inferWithTools(
               text: `${guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${chatToolCallLimit}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
             },
           });
-        try {
-          tools?.progress?.({ step: requestStep, round: step + 1 });
-        } catch {
-          /* Progress is a preview. */
-        }
+        decisionAt = { step: requestStep, round: step + 1 };
+        report('thinking');
         const answerStep = requestStep;
         const currentReminder = reminder;
         const activeCatalog = catalog;
@@ -1753,6 +1771,7 @@ export async function inferWithTools(
         }
       };
       let checked: z.infer<typeof completionCheckSchema>['decision'];
+      report('finishing');
       try {
         checked = await withChatModelRequest('completion', () => {
           const evidence = observeChatDetailSync('completion-context', () =>
@@ -1797,7 +1816,7 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
-        return finish(selected.text);
+        return finish(selected.text, true);
       }
       preview('');
       if (finalizing) return finish(stoppingReply);
@@ -1998,6 +2017,8 @@ export async function inferWithTools(
       }
     }
     calls += valid.length;
+    const work = valid.filter(({ native }) => isWorkTool(native.name));
+    if (work[0]) report('tool', toolDisplayName(work[0].call.tool));
     const outputs: ToolResult[] = [];
     if (valid.length === 1 && only) {
       const value = await execute(only.call, only.activity);
@@ -2027,6 +2048,7 @@ export async function inferWithTools(
     }
     for (const [index, entry] of valid.entries()) guard.record(entry.call, outputs[index]!.output);
     items.push({ kind: 'results', results: outputs });
+    if (work.length) toolRounds++;
   }
 }
 /**

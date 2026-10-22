@@ -6,10 +6,32 @@ import Fastify from 'fastify';
 import { Pool, escapeIdentifier, escapeLiteral } from 'pg';
 import { conversationFixture, reverseReply } from '../../../packages/conversations/test/fixture.mjs';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
-import { registerConversationDispatch } from '../src/conversation-dispatch.ts';
+import { createReplyDispatch, registerConversationDispatch } from '../src/conversation-dispatch.ts';
+import { registerConversations } from '../src/conversations.ts';
 import { approvalFixture } from '../../../packages/conversations/test/approval-fixture.mjs';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
+import { createRequire } from 'node:module';
+
+const telemetryRequire = createRequire(import.meta.resolve('@tulipfarm/observability'));
+const { context, metrics, trace } = telemetryRequire('@opentelemetry/api');
+const { MeterProvider, MetricReader } = telemetryRequire('@opentelemetry/sdk-metrics');
+const { BasicTracerProvider } = telemetryRequire('@opentelemetry/sdk-trace-base');
+const { AsyncLocalStorageContextManager } = createRequire(telemetryRequire.resolve('@opentelemetry/sdk-node'))(
+  '@opentelemetry/context-async-hooks',
+);
+
+class TestReader extends MetricReader {
+  async onShutdown() {}
+  async onForceFlush() {}
+}
+const metricReader = new TestReader();
+metrics.setGlobalMeterProvider(new MeterProvider({ readers: [metricReader] }));
+trace.setGlobalTracerProvider(new BasicTracerProvider());
+context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+
+const registerWithReplies = (app, dependencies) =>
+  registerConversationDispatch(app, { ...dependencies, replies: createReplyDispatch(dependencies) });
 
 test(
   'restricted API identity discovers persisted conversations and dispatches only control IDs',
@@ -55,7 +77,7 @@ test(
       });
       const calls = [];
       const executor = createConversationExecutor(f.runtime, reverseReply);
-      registerConversationDispatch(app, {
+      registerWithReplies(app, {
         pool,
         runtime: f.runtime,
         temporal: {
@@ -145,7 +167,7 @@ test(
       await attachments.upload(w.id, w.userId, chatId, uploadId, bytes);
       let initialSweep = false;
       const calls = [];
-      registerConversationDispatch(app, {
+      registerWithReplies(app, {
         pool: db.platform,
         runtime: f.runtime,
         attachments,
@@ -227,3 +249,332 @@ test(
     }
   },
 );
+
+function fakeTemporal(start) {
+  return {
+    connection: { withDeadline: (_deadline, operation) => operation() },
+    client: { workflow: { start: (_name, options) => start(options) } },
+  };
+}
+
+async function sendRoute(f, replies) {
+  const app = Fastify({ logger: false });
+  registerConversations(app, {
+    auth: { api: { getSession: async () => ({ user: { id: f.workspace.userId } }) } },
+    service: f.store,
+    replies,
+  });
+  await app.ready();
+  return {
+    app,
+    send: async (chatId, text) => {
+      const response = await app.inject({
+        method: 'PUT',
+        url: `/workspaces/${f.workspace.id}/conversations/${chatId}/messages/${randomUUID()}`,
+        payload: { commandId: randomUUID(), parts: [{ kind: 'text', text }] },
+        headers: { origin: 'http://localhost:5173' },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      return response.json();
+    },
+  };
+}
+
+async function newChat(f) {
+  const chatId = randomUUID();
+  await f.store.create(f.workspace.id, f.workspace.userId, { chatId, commandId: randomUUID() });
+  return chatId;
+}
+
+const replyTexts = async (f, chatId) =>
+  (await f.store.history(f.workspace.id, f.workspace.userId, chatId)).messages
+    .filter(message => message.author === 'assistant')
+    .map(message => message.parts.map(part => part.text).join(''));
+
+const outbox = async (f, turnId) =>
+  (
+    await f.db.platform.query(
+      `SELECT dispatched_at IS NOT NULL AS dispatched FROM ${f.table('tf_conversation_outbox')} WHERE turn_id=$1`,
+      [turnId],
+    )
+  ).rows;
+
+test(
+  'a send starts its reply before any sweep, with the same workflow id the sweep uses',
+  { timeout: 60000 },
+  async () => {
+    const f = await conversationFixture();
+    const starts = [];
+    const replies = createReplyDispatch({
+      runtime: f.runtime,
+      temporal: fakeTemporal(async options => {
+        starts.push(options);
+      }),
+    });
+    const route = await sendRoute(f, replies);
+    try {
+      const chatId = await newChat(f);
+      const sent = await route.send(chatId, 'hey');
+      await replies.settle();
+      assert.deepEqual(starts, [
+        {
+          workflowId: `conversation-reply-v1-${f.workspace.id}-${sent.turnId}-0`,
+          taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+          args: [{ workspaceId: f.workspace.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }],
+          workflowIdConflictPolicy: 'USE_EXISTING',
+          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+        },
+      ]);
+      assert.deepEqual(await outbox(f, sent.turnId), [{ dispatched: true }]);
+      await replies.dispatch(f.workspace.id);
+      assert.equal(starts.length, 1, 'an acknowledged send leaves nothing for the sweep');
+    } finally {
+      await route.app.close();
+      await f.close();
+    }
+  },
+);
+
+test('a racing send and sweep start one workflow id and write one reply', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const executor = createConversationExecutor(f.runtime, reverseReply);
+  const starts = [];
+  let release;
+  const both = new Promise(resolve => {
+    release = resolve;
+  });
+  const runs = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    // Holding each start until both paths have one proves both saw the turn; every start then runs the
+    // workflow, which is stricter than Temporal's USE_EXISTING and leaves only the database fence.
+    temporal: fakeTemporal(async options => {
+      starts.push(options.workflowId);
+      if (starts.length === 2) release();
+      await Promise.race([both, delay(2000)]);
+      runs.push(await executor.process(options.args[0]));
+    }),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const sent = await route.send(chatId, 'race');
+    await Promise.all([replies.dispatch(f.workspace.id), replies.settle()]);
+    assert.equal(starts.length, 2);
+    assert.deepEqual(new Set(starts), new Set([`conversation-reply-v1-${f.workspace.id}-${sent.turnId}-0`]));
+    assert.equal(runs.filter(result => result === 'completed').length, 1);
+    assert.deepEqual(await replyTexts(f, chatId), ['ecar']);
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a failed start still saves the send, logs a code, and the sweep recovers it', { timeout: 60000 }, async t => {
+  const f = await conversationFixture();
+  const executor = createConversationExecutor(f.runtime, reverseReply);
+  const lines = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...rest) => {
+    lines.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  let attempts = 0;
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async options => {
+      if (++attempts === 1)
+        throw new Error('Failed to start Workflow', {
+          cause: Object.assign(new Error('4 DEADLINE_EXCEEDED: private detail'), {
+            code: 4,
+            details: 'private detail',
+            metadata: {},
+          }),
+        });
+      await executor.process(options.args[0]);
+    }),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const sent = await route.send(chatId, 'offline');
+    await replies.settle();
+    assert.equal(attempts, 1);
+    assert.deepEqual(await outbox(f, sent.turnId), [{ dispatched: false }]);
+    const failure = lines
+      .flatMap(line => line.split('\n'))
+      .filter(line => line.includes('"dispatch_failed"'))
+      .map(line => JSON.parse(line));
+    assert.equal(failure.length, 1);
+    assert.equal(failure[0].level, 'warn');
+    assert.equal(failure[0].dispatch_source, 'send');
+    assert.equal(failure[0]['error.code'], 'timeout');
+    assert.doesNotMatch(JSON.stringify(failure), /private detail/);
+    assert.deepEqual(await replyTexts(f, chatId), []);
+    await replies.dispatch(f.workspace.id);
+    assert.equal(attempts, 2);
+    assert.deepEqual(await replyTexts(f, chatId), ['enilffo']);
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a send during an active reply queues behind it on both paths, as before', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const executor = createConversationExecutor(f.runtime, reverseReply);
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.args[0]);
+    }),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const first = await route.send(chatId, 'first');
+    await replies.settle();
+    assert.ok(await executor.claim(starts[0]), 'the first reply is now active');
+    const second = await route.send(chatId, 'second');
+    await replies.settle();
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [first.turnId],
+    );
+    assert.deepEqual(
+      (await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [second.turnId]))
+        .rows,
+      [{ status: 'queued' }],
+    );
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a send dispatches only its own chat and leaves other due chats to the sweep', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.args[0]);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    const other = await newChat(f);
+    const missed = await quiet.send(other, 'missed');
+    const chatId = await newChat(f);
+    const sent = await route.send(chatId, 'mine');
+    await replies.settle();
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [sent.turnId],
+    );
+    assert.deepEqual(await outbox(f, missed.turnId), [{ dispatched: false }]);
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [sent.turnId, missed.turnId],
+    );
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a send starts its reply inside the request trace; the sweep does not', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const active = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async () => {
+      active.push(trace.getActiveSpan()?.spanContext().spanId);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const request = trace.getTracer('test').startSpan('PUT message');
+    await context.with(trace.setSpan(context.active(), request), () => route.send(chatId, 'traced'));
+    request.end();
+    await replies.settle();
+    await quiet.send(await newChat(f), 'untraced');
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(active, [request.spanContext().spanId, undefined]);
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a start that outlives its bound fails the send dispatch with a timeout code', { timeout: 60000 }, async t => {
+  const f = await conversationFixture();
+  const lines = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...rest) => {
+    lines.push(String(chunk));
+    return write(chunk, ...rest);
+  });
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    // A lazy first connect waits outside `withDeadline`; a start that never settles models it ignoring the RPC deadline.
+    temporal: fakeTemporal(() => new Promise(() => {})),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    await route.send(await newChat(f), 'stuck');
+    await replies.settle();
+    const failure = lines
+      .flatMap(line => line.split('\n'))
+      .filter(line => line.includes('"dispatch_failed"'))
+      .map(line => JSON.parse(line));
+    assert.deepEqual(
+      failure.map(line => line['error.code']),
+      ['timeout'],
+    );
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('dispatch metrics label each start with the path that made it', { timeout: 60000 }, async () => {
+  const before = await dispatchCounts();
+  const f = await conversationFixture();
+  const replies = createReplyDispatch({ runtime: f.runtime, temporal: fakeTemporal(async () => {}) });
+  const quiet = await sendRoute(f, undefined);
+  const route = await sendRoute(f, replies);
+  try {
+    await route.send(await newChat(f), 'send');
+    await replies.settle();
+    await quiet.send(await newChat(f), 'sweep');
+    await replies.dispatch(f.workspace.id);
+    const after = await dispatchCounts();
+    const delta = key => (after[key] ?? 0) - (before[key] ?? 0);
+    assert.equal(delta('send/success'), 1);
+    assert.equal(delta('sweep/success'), 1);
+  } finally {
+    await quiet.app.close();
+    await route.app.close();
+    await f.close();
+  }
+});
+
+async function dispatchCounts() {
+  const { resourceMetrics } = await metricReader.collect();
+  const counts = {};
+  for (const scope of resourceMetrics.scopeMetrics)
+    for (const metric of scope.metrics)
+      if (metric.descriptor.name === 'cloud_chat_dispatches')
+        for (const point of metric.dataPoints)
+          counts[`${point.attributes.dispatch_source}/${point.attributes.outcome}`] = point.value;
+  return counts;
+}

@@ -131,6 +131,31 @@ export function isInternalTool(tool: string) {
   return internalTools.has(currentToolName(tool));
 }
 
+const toolAreaNames: Record<string, string> = {
+  tables: 'Tables',
+  rows: 'Tables',
+  schema: 'Tables',
+  knowledge: 'Knowledge',
+  web: 'Web search',
+  files: 'Files',
+  skills: 'Skills',
+  agents: 'Agents',
+  plans: 'Plans',
+  workflows: 'Workflows',
+  conversation: 'Chat history',
+  bud: 'Preferences',
+  present: 'Choices',
+  slack: 'Slack',
+  github: 'GitHub',
+  google: 'Google Workspace',
+  atlassian: 'Atlassian',
+  mcp: 'Connected apps',
+};
+/** A short product name for a tool, without its arguments, such as "Knowledge" or "Slack". */
+export function toolDisplayName(tool: string) {
+  return toolAreaNames[currentToolName(tool).split('.')[0] ?? ''] ?? 'a tool';
+}
+
 export const toolBrandSchema = z.enum([
   'google',
   'gmail',

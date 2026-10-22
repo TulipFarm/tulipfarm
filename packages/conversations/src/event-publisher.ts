@@ -3,6 +3,7 @@ import {
   conversationEventChannel,
   type ConversationNotification,
   type StreamIdentity,
+  type StreamProgress,
   type StreamTool,
 } from './events.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
@@ -75,9 +76,10 @@ export function streamTextPayloads(
   return payloads;
 }
 
+export type ReplyProgress = Pick<StreamProgress, 'step' | 'round' | 'status' | 'tool' | 'toolRounds'>;
 export type ReplyTextPublisher = {
   update(step: number, text: string): void;
-  progress(step: number, round: number): void;
+  progress(update: ReplyProgress): void;
   avatar(step: number, avatar: AvatarSnapshot): void;
   close(): Promise<void>;
 };
@@ -102,6 +104,7 @@ export function createReplyTextPublisher(
   let closed = false;
   let progressed: Promise<void> = Promise.resolve();
   let avatarSeq = 0;
+  let progressSeq = 0;
 
   const pending = () => latest !== null && (latest.step !== sent?.step || latest.text !== sent.text);
 
@@ -180,7 +183,7 @@ export function createReplyTextPublisher(
       latest = { step, text };
       schedule();
     },
-    progress(step, round) {
+    progress({ step, round, status, tool, toolRounds }) {
       if (closed) return;
       const payload: ConversationNotification = {
         kind: 'progress',
@@ -190,6 +193,8 @@ export function createReplyTextPublisher(
         epoch: fence.epoch,
         step,
         round,
+        ...(status ? { status, toolRounds: toolRounds ?? 0, seq: progressSeq++ } : {}),
+        ...(status === 'tool' && tool ? { tool: tool.slice(0, 64) } : {}),
       };
       progressed = progressed
         .then(() =>
