@@ -56,16 +56,43 @@ test('invalid state is corrected, and omitted state leaves ordinary reply text i
   );
 });
 
-test('Bud is absent unless the runtime enables it', async t => {
-  t.mock.method(globalThis, 'fetch', async (_url, options) => {
-    assert.doesNotMatch(options.body, /bud_state/);
-    return Response.json(
-      isCompletionRequest(JSON.parse(options.body))
-        ? completionReply('anthropic')
-        : nativeReply('anthropic', { text: 'Hello.' }),
-    );
+for (const provider of formats)
+  test(`${provider}: with Bud off, a greeting is one model round and the request has no avatar tool or instructions`, async t => {
+    const route = nativeRoutes[provider],
+      requests = [],
+      checks = [];
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (isCompletionRequest(body)) {
+        checks.push(requests.length);
+        return Response.json(completionReply(provider));
+      }
+      requests.push(options.body);
+      return Response.json(nativeReply(provider, { text: 'Hi! How can I help?' }));
+    });
+    const result = await inferWithTools(route, [{ role: 'user', text: 'hey' }], () => assert.fail());
+    assert.deepEqual(result, { text: 'Hi! How can I help?' });
+    assert.equal(requests.length, 1);
+    assert.deepEqual(checks, [1], 'the completion check follows the single reply round');
+    for (const pattern of [/bud_state/, /avatar/i, /expression/i, /Waving/, /\bBud\b.*\bIdle\b/])
+      assert.doesNotMatch(requests[0], pattern);
   });
-  assert.deepEqual(await inferWithTools(nativeRoutes.anthropic, [], () => assert.fail()), { text: 'Hello.' });
+
+test('with Bud off, a stray avatar-only call never costs a model round', async t => {
+  let requests = 0;
+  const replies = [
+    nativeReply('anthropic', {
+      text: 'Hello!',
+      calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Waving' } }],
+    }),
+  ];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    if (isCompletionRequest(JSON.parse(options.body))) return Response.json(completionReply('anthropic'));
+    requests++;
+    return Response.json(replies.shift());
+  });
+  assert.deepEqual(await inferWithTools(nativeRoutes.anthropic, [], () => assert.fail()), { text: 'Hello!' });
+  assert.equal(requests, 1);
 });
 
 test('expression-only loops are bounded and do not execute business actions', async t => {
