@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { defaultChatModelFamilyId } from '@tulipfarm/config/model-catalog';
 import { catalogFixture } from '../src/features/models/catalog-fixture.ts';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
@@ -21,7 +20,8 @@ const otherWorkspace = { ...workspace, id: '22222222-2222-4222-8222-222222222222
 const catalog = catalogFixture()
   .families.filter(family => family.vendor !== 'google')
   .map(family => ({ ...family, mappingRevision: 'fixture', pricingRevision: 'fixture' }));
-const defaultModelName = `Model: ${catalog.find(family => family.id === defaultChatModelFamilyId).displayName}`;
+const defaultChatFamilyId = 'claude-sonnet';
+const defaultModelName = `Model: ${catalog.find(family => family.id === defaultChatFamilyId).displayName}`;
 let browser;
 let activePage;
 try {
@@ -56,7 +56,10 @@ try {
         }
         if (path.endsWith('/model-catalog')) {
           await delay(wait);
-          return route.fulfill({ status, json: status === 200 ? { families: items } : { error: 'unavailable' } });
+          return route.fulfill({
+            status,
+            json: status === 200 ? { families: items, defaultChatFamilyId } : { error: 'unavailable' },
+          });
         }
         const json =
           path === '/v1/auth/get-session'
@@ -121,6 +124,14 @@ try {
       userId = 'grace';
       await page.reload();
       await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
+      // A saved model the operator removed from the catalog falls back to the default, with a notice.
+      userId = 'lin';
+      preferences.set('lin', 'retired-model');
+      await page.reload();
+      await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
+      await page
+        .getByText('Your last model is no longer available. New messages use Claude Sonnet.', { exact: true })
+        .waitFor();
       userId = 'ada';
       await page.goto(`${origin}/acme`);
       await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();

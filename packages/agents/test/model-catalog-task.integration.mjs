@@ -5,10 +5,9 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 process.env.MODEL_CATALOG_FILE = fileURLToPath(
-  new URL('../../config/test/fixtures/model-catalog-extend.json', import.meta.url),
+  new URL('../../config/test/fixtures/model-catalog-acme.json', import.meta.url),
 );
 delete process.env.MODEL_CATALOG;
-delete process.env.MODEL_CATALOG_MODE;
 
 const { createWorkspaceRuntime } = await import('@tulipfarm/workspace-storage/runtime');
 const { workspaceTableMigrations } = await import('@tulipfarm/workspaces/table-migrations');
@@ -51,8 +50,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   );
 
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'acme-chat',
-    MODEL_DEFAULT_FAMILY: 'acme-chat',
+    MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
     AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
     AZURE_FOUNDRY_API_KEY: 'synthetic-private-credential',
   });

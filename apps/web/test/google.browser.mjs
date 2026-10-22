@@ -381,7 +381,6 @@ test(
         return { id: proposalId, operation, digest };
       }
       const heartbeatModel = conversationModel('claude-haiku', {
-        MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
         ANTHROPIC_API_KEY: 'fixture-only',
       });
       async function runWorker(model = heartbeatModel) {

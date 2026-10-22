@@ -13,6 +13,7 @@ import { encryptCredential } from '../../../packages/workspaces/src/credentials.
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { fixture } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { initialModelMapping } from '@tulipfarm/config';
+import { modelCatalogOf } from '../../worker/test/model-catalog-fixture.mjs';
 
 test(
   'authenticated default buildApp persists model attempts, retries, fallback cost and revocation',
@@ -41,7 +42,7 @@ test(
       INTEGRATION_CREDENTIAL_KEY: '33'.repeat(32),
       EMAIL_DELIVERY_KEY_ID: 'email-test',
       EMAIL_DELIVERY_KEY: '44'.repeat(32),
-      MODEL_FAMILIES: 'claude-opus,gpt-astra',
+      MODEL_CATALOG: modelCatalogOf(['claude-opus', 'gpt-astra']),
       AZURE_FOUNDRY_ENDPOINT: 'https://synthetic-local.services.ai.azure.com/',
       ANTHROPIC_API_KEY: 'synthetic-loopback-provider-credential',
       AZURE_FOUNDRY_API_KEY: 'synthetic-loopback-provider-credential',

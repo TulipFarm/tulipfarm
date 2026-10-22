@@ -5,7 +5,7 @@ import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-m
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { completionReply, isCompletionRequest, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test('default worker composition includes current personal memory across private chats and omits deleted memory', async t => {
   const f = await conversationFixture();
@@ -15,7 +15,7 @@ test('default worker composition includes current personal memory across private
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const requests = [];
     t.mock.method(globalThis, 'fetch', async (_url, options) => {

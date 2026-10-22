@@ -76,7 +76,6 @@ async function setup(t) {
             ...process.env,
             MODEL_CATALOG_FILE: catalog(file),
             MODEL_CATALOG: '',
-            MODEL_CATALOG_MODE: '',
             MODEL_BUNDLE_RESTART_INPUT: JSON.stringify({
               workspaceId: w.id,
               taskId: task.id,
@@ -105,7 +104,7 @@ async function setup(t) {
 
 test('a task admitted before a model catalog change finishes after restart at the original rates', async t => {
   const { db, task, worker, generations, read } = await setup(t);
-  const before = await worker('model-catalog-extend.json', { outcome: 'unavailable', steps: 1 });
+  const before = await worker('model-catalog-acme.json', { outcome: 'unavailable', steps: 1 });
   assert.equal((await read()).status, 'pending');
   assert.deepEqual(await generations(), [{ bundleId: before.bundleId, status: 'pending' }]);
 
@@ -146,7 +145,7 @@ for (const [name, prepare] of Object.entries({
 }))
   test(`a task whose original bundle ${name} does not run under the new configuration`, async t => {
     const { db, worker, generations, read } = await setup(t);
-    const before = await worker('model-catalog-extend.json', { outcome: 'unavailable', steps: 1, ...prepare.input });
+    const before = await worker('model-catalog-acme.json', { outcome: 'unavailable', steps: 1, ...prepare.input });
     await prepare.tamper?.(db, before.bundleId);
     await assert.rejects(
       worker('model-catalog-repriced.json', { outcome: 'success', steps: 2 }),

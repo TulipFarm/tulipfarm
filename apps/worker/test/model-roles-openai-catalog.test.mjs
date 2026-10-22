@@ -2,15 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-// An operator catalog of only OpenAI-model families on the Azure route, replacing the shipped catalog. Its families
-// declare every role except compaction.
+// An operator catalog of only OpenAI models on the Azure route, replacing the shipped catalog. Its models declare
+// every role except compaction.
 process.env.MODEL_CATALOG_FILE = fileURLToPath(
   new URL('../../../packages/config/test/fixtures/model-catalog-openai-only.json', import.meta.url),
 );
-process.env.MODEL_CATALOG_MODE = 'replace';
 delete process.env.MODEL_CATALOG;
 
-const { modelRoleWarnings } = await import('@tulipfarm/config');
 const { inferWithSystem } = await import('@tulipfarm/agents/inference');
 const { effectiveCompactionPolicy } = await import('@tulipfarm/agents/compaction-policy');
 const { conversationModel, roleModel } = await import('../src/conversation-model.ts');
@@ -18,7 +16,7 @@ const { chatTitleModel } = await import('../src/conversation-activities.ts');
 const { heartbeatProcessor } = await import('../src/google-heartbeat-activities.ts');
 
 const env = {
-  MODEL_FAMILIES: 'openai-mini,openai-main',
+  MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: 'synthetic-key',
 };
@@ -88,14 +86,16 @@ test('skill review and the plan specialist use the review and plan roles', async
   }
 });
 
-test('compaction falls back to the default chat family when no family has the compaction role', async t => {
+test('compaction falls back to the default model when no model has the compaction role', async t => {
   const { tx } = workspace();
-  const previous = process.env.MODEL_FAMILIES;
-  process.env.MODEL_FAMILIES = env.MODEL_FAMILIES;
-  t.after(() => {
-    if (previous === undefined) delete process.env.MODEL_FAMILIES;
-    else process.env.MODEL_FAMILIES = previous;
-  });
+  for (const name of ['AZURE_FOUNDRY_ENDPOINT', 'AZURE_FOUNDRY_API_KEY']) {
+    const previous = process.env[name];
+    process.env[name] = env[name];
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
   const policy = await effectiveCompactionPolicy(tx);
   assert.deepEqual(policy.families, ['openai-main']);
   assert.equal(await roundTrip(t, conversationModel(policy.families[0], env)), 'gpt-6-sol');
@@ -116,11 +116,5 @@ test('the Gmail heartbeat answers with the heartbeat role and meters its tokens'
   });
   assert.equal(result, 'Nothing needs your attention.');
   assert.equal(requests[0].body.model, 'gpt-6-luna');
-  assert.equal(usage.get('gmail:item:1').model_id, 'openai-mini-1');
-});
-
-test('startup warns that no family has the compaction role', () => {
-  assert.deepEqual(modelRoleWarnings(env, ['title', 'compaction', 'review', 'plan', 'heartbeat']), [
-    'No family in MODEL_FAMILIES has the catalog role "compaction"; using openai-main. Add "compaction" to a family\'s roles to choose one.',
-  ]);
+  assert.equal(usage.get('gmail:item:1').model_id, 'gpt-6-luna-azure');
 });

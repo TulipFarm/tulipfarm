@@ -9,7 +9,7 @@ import { anthropicChat, anthropicText, isTitleRequest } from '../../../apps/work
 import { calendarTextRecovery } from '../src/calendar-text-check.ts';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { useModelFamilies } from '../../../apps/worker/test/model-families-fixture.mjs';
+import { useModelCatalog } from '../../../apps/worker/test/model-catalog-fixture.mjs';
 
 // These tests exhaust workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -23,7 +23,7 @@ for (const mode of ['correct', 'inconclusive', 'credits'])
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previous;
     });
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace.id,
         chatId = randomUUID();

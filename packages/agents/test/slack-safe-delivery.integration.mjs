@@ -299,7 +299,6 @@ test('GENERAL default answers use complete current audiences and retain private 
         await markWorkspaceReady(f.db.platform, f.workspace.id);
         Object.assign(process.env, {
           ANTHROPIC_API_KEY: 'fixture',
-          MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
           SLACK_LINK_PROMPTS_ENABLED: 'true',
           SLACK_CHANNEL_AGENTS_ENABLED: 'true',
           SLACK_PUBLIC_DELIVERY_ENABLED: 'true',

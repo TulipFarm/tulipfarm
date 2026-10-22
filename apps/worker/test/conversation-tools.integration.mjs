@@ -14,7 +14,7 @@ import {
 } from './native-chat-fixture.mjs';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 // These tests exhaust workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -27,7 +27,7 @@ test('default worker composition offers tools, executes a model choice, and publ
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const requests = [];
     t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -99,7 +99,7 @@ test('tool-loop continuation cannot dispatch another provider request after cred
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     t.mock.method(globalThis, 'fetch', async () => {
       calls++;
@@ -144,7 +144,7 @@ test('a guarded external turn linked to a person saves files.create output to th
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const objects = new Map();
     const files = createFiles(f.runtime, {
@@ -204,7 +204,7 @@ test('a sender removed after the turn started fails it visibly before any model 
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const objects = new Map();
     const files = createFiles(f.runtime, {

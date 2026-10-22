@@ -19,7 +19,7 @@ import {
   anthropicTools,
   isTitleRequest,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test('table and agent inventories include all pages, including an empty workspace', { timeout: 55000 }, async t => {
   const f = await conversationFixture();
@@ -220,7 +220,7 @@ test(
       if (priorKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = priorKey;
     });
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     const requests = [];
     t.mock.method(globalThis, 'fetch', async (_url, options) => {
       const body = JSON.parse(options.body);

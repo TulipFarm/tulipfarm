@@ -4,21 +4,21 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-// An operator catalog of only OpenAI-model families on the Azure route, replacing the shipped catalog. Its families
+// An operator catalog of only OpenAI-model families on the Azure route, replacing the shipped catalog. Its models
 // declare every role except compaction.
 const catalogFile = fileURLToPath(
   new URL('../../../packages/config/test/fixtures/model-catalog-openai-only.json', import.meta.url),
 );
 const env = {
-  MODEL_FAMILIES: 'openai-mini,openai-main',
+  MODEL_CATALOG_FILE: catalogFile,
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: 'synthetic-key',
 };
-Object.assign(process.env, env, { MODEL_CATALOG_FILE: catalogFile, MODEL_CATALOG_MODE: 'replace' });
+Object.assign(process.env, env);
 delete process.env.MODEL_CATALOG;
 
 const Fastify = (await import('fastify')).default;
-const { modelPricing } = await import('@tulipfarm/config');
+const { loadModelCatalog } = await import('@tulipfarm/config');
 const { commonCompatibility } = await import('@tulipfarm/workspace-storage/runtime');
 const { modelCatalogSchema } = await import('../../../packages/config/src/model-catalog.ts');
 const { registerModelCatalog } = await import('../src/model-catalog.ts');
@@ -27,7 +27,7 @@ const { registerConversations } = await import('../src/conversations.ts');
 const { guideBudget, guideLimits } = await import('../src/public-guide-config.ts');
 const { publicGuideModel, publicGuideWarnings } = await import('../src/public-guide-model.ts');
 
-test('the workspace catalog reports the default-chat role the web picks first', async t => {
+test('the workspace catalog reports the default model the web picks first', async t => {
   const app = Fastify();
   t.after(() => app.close());
   const runtime = {
@@ -71,7 +71,7 @@ test('the workspace catalog reports the default-chat role the web picks first', 
   );
 });
 
-test('a message without a model uses the default-chat role', async t => {
+test('a message without a model uses the default model', async t => {
   const app = Fastify();
   t.after(() => app.close());
   const sent = [];
@@ -122,7 +122,7 @@ test('the public guide answers with the public-guide role, priced from the effec
       [`${env.AZURE_FOUNDRY_ENDPOINT}openai/v1/chat/completions`, 'gpt-6-luna'],
     ],
   );
-  const rates = modelPricing.models.find(entry => entry.id === 'openai-mini-1').rates;
+  const { rates } = loadModelCatalog(env).model('openai-mini');
   const { turnMicroUsd, dailyTurns } = guideBudget(env);
   assert.equal(
     turnMicroUsd,
@@ -136,11 +136,16 @@ test('the public guide answers with the public-guide role, priced from the effec
   assert.deepEqual(publicGuideWarnings(env), []);
 });
 
-test('api startup warns about a role no enabled family has', () => {
+test('api startup warns about models left out for missing keys and a moved default', () => {
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('../src/server.ts', import.meta.url))], {
     encoding: 'utf8',
     timeout: 60_000,
-    env: { PATH: process.env.PATH, ...env, MODEL_CATALOG_FILE: catalogFile, MODEL_CATALOG_MODE: 'replace', PORT: '0' },
+    env: {
+      PATH: process.env.PATH,
+      AZURE_FOUNDRY_ENDPOINT: env.AZURE_FOUNDRY_ENDPOINT,
+      AZURE_FOUNDRY_API_KEY: env.AZURE_FOUNDRY_API_KEY,
+      PORT: '0',
+    },
   });
   const warnings = result.stderr
     .split('\n')
@@ -150,7 +155,8 @@ test('api startup warns about a role no enabled family has', () => {
   assert.deepEqual(warnings, [
     {
       level: 'warn',
-      msg: 'No family in MODEL_FAMILIES has the catalog role "compaction"; using openai-main. Add "compaction" to a family\'s roles to choose one.',
+      msg: 'Models without a provider key are not served: claude-haiku, claude-sonnet, claude-opus, claude-fable, gemini-flash, gemini-pro.',
     },
+    { level: 'warn', msg: 'The default model claude-sonnet is not served; gpt-luna is the default.' },
   ]);
 });

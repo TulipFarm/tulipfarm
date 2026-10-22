@@ -9,6 +9,9 @@ import { createAuth } from '../src/auth.ts';
 import { issuePasswordResetLink } from '../src/auth-reset-password.ts';
 import { decryptEmailDelivery } from '@tulipfarm/workspaces/email-delivery';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 const originalDatabaseURL = process.env.DATABASE_URL;
 const database = `password_auth_test_${randomUUID().replaceAll('-', '')}`;
 const adminURL = process.env.TEST_ADMIN_DATABASE_URL ?? 'postgresql://postgres:local-postgres@127.0.0.1:5432/postgres';
@@ -67,7 +70,7 @@ function setup(t, env) {
   t.mock.method(globalThis, 'fetch', async () =>
     Response.json(challenge.pass ? { success: true, hostname: 'localhost', action: 'sign_in' } : { success: false }),
   );
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   t.after(() => app.close());
   const post = (path, payload, cookie = '', remoteAddress = clientAddress()) =>
     app.inject({

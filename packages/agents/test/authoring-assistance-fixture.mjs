@@ -104,7 +104,6 @@ export function authoringFixture() {
     afterReserve: undefined,
   };
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'gpt-luna,gpt-sol,gpt-astra,claude-haiku',
     AZURE_FOUNDRY_ENDPOINT: 'https://fixture.openai.azure.com/',
     AZURE_FOUNDRY_API_KEY: 'fixture',
     ANTHROPIC_API_KEY: 'fixture',

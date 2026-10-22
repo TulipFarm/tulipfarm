@@ -19,15 +19,17 @@ import { registerCredits } from '../src/credits.ts';
 import { registerTableQueryTranslations } from '../src/table-query-translations.ts';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
+import { modelCatalogOf } from '../../worker/test/model-catalog-fixture.mjs';
 
 // These tests assert workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
 
+const catalog = JSON.parse(modelCatalogOf(['deepseek-flash']));
+catalog.models[0].roles = ['table-search'];
 const modelEnv = {
-  MODEL_FAMILIES: 'deepseek-flash',
+  MODEL_CATALOG: JSON.stringify(catalog),
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.openai.azure.com/',
   AZURE_FOUNDRY_API_KEY: 'synthetic',
-  TABLE_SEARCH_MODEL_FAMILY: 'deepseek-flash',
 };
 const option = label => ({ id: randomUUID(), label, retired: false });
 const reply = (content, status = 200) =>

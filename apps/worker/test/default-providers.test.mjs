@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { calculateUsageCost, modelPricing, selectableModelFamilies } from '@tulipfarm/config';
+import { readFileSync } from 'node:fs';
+import { calculateUsageCost, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { conversationModel } from '../src/conversation-model.ts';
@@ -23,6 +24,7 @@ const providers = {
     origin: azureEndpoint,
   },
 };
+const catalogFamilies = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8')).models.map(model => model.id);
 const recommended = {
   anthropic: ['claude-haiku', 'claude-sonnet', 'claude-opus', 'claude-fable'],
   openai: ['gpt-luna', 'gpt-sol', 'gpt-astra'],
@@ -269,9 +271,7 @@ async function providerServer(t, origin) {
 
 /** Pico-USD at the base tier of a catalog model for the fixture usage, computed from the catalog JSON. */
 function expectedPicoUsd(modelId) {
-  const rate = modelPricing.models
-    .find(model => model.id === modelId)
-    .rates.find(item => item.promptTokensAbove === null);
+  const rate = legacyModels.find(model => model.id === modelId).rates.find(item => item.promptTokensAbove === null);
   return BigInt(
     Math.round((tokens.input * rate.usdPerMillionTokens.input + tokens.output * rate.usdPerMillionTokens.output) * 1e6),
   );
@@ -296,7 +296,7 @@ function cost(price, usage) {
 for (const [provider, { env, origin }] of Object.entries(providers))
   test(`with only the ${provider} credential, its recommended families chat (streamed), title and run tasks at its own price`, async t => {
     const received = await providerServer(t, origin);
-    const enabled = selectableModelFamilies.map(family => family.id).filter(family => conversationModel(family, env));
+    const enabled = catalogFamilies.filter(family => conversationModel(family, env));
     assert.deepEqual(enabled, recommended[provider]);
     const environment = modelEnvironment(env);
     const continuity = environment.continuity(createMemoryRouteHealth);
@@ -305,7 +305,7 @@ for (const [provider, { env, origin }] of Object.entries(providers))
       const chat = conversationModel(family, env);
       const title = chatTitleModel(env);
       assert.equal(chat.route.provider, provider, family);
-      assert.equal(modelPricing.models.find(model => model.id === chat.price.modelId).provider, provider, family);
+      assert.equal(legacyModels.find(model => model.id === chat.price.modelId).provider, provider, family);
 
       // Chat with a first-turn title, metered as the worker meters it: by the priced model of the dispatched route.
       const settled = [];

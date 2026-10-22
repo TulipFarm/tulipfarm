@@ -93,7 +93,7 @@ test('pause reasons survive runtime, storage and task reads and clear on recover
     actualModelIds: () => [route.modelId],
     health: createModelRouteHealth(db.platform, () => 'pause-test'),
     budgetPicoUsd: () => '10000000000000',
-    legacyFamily: () => 'claude-opus',
+    defaultFamily: () => 'claude-opus',
     infer: async () => success({ kind: 'clarify', text: 'What next?' }),
   };
 
@@ -182,7 +182,7 @@ test('pause reasons survive runtime, storage and task reads and clear on recover
   });
   await t.test('caught configuration failure records model rather than a limit', async () => {
     const task = await start();
-    await createTaskRuntime(runtime, { ...model, legacyFamily: () => undefined }).process(w.id, task.id);
+    await createTaskRuntime(runtime, { ...model, defaultFamily: () => undefined }).process(w.id, task.id);
     await paused(task, 'model');
   });
   await t.test('failed generations preserve each non-model cause and the hard step ceiling', async () => {

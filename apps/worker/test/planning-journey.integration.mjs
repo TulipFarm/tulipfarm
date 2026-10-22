@@ -17,7 +17,7 @@ import {
   isCompletionRequest,
   isTitleRequest,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test(
   'Planning survives worker restart and lost dispatch acknowledgement without repeated work or charges',
@@ -32,7 +32,7 @@ test(
     const workflowsPath = fileURLToPath(new URL('../dist/workflows.js', import.meta.url));
     const previousKey = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'synthetic-only';
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     let runtime = f.runtime,
       modelCalls = 0,
       lostAck = false;

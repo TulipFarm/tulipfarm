@@ -5,7 +5,7 @@ import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { meteredReply } from '../src/conversation-activities.ts';
 import { anthropicChat } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure'])
   test(`model admission fences ${mode} and preserves spent credits`, async t => {
@@ -16,7 +16,7 @@ for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure']
       if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previous;
     });
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace,
         chatId = randomUUID();

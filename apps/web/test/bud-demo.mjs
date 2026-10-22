@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
-import { modelPricing, selectableModelFamilies } from '@tulipfarm/config';
+import { readModelCatalog } from '@tulipfarm/config';
 import { sendMessageSchema } from '@tulipfarm/conversations/contracts';
 import { respondToConversation } from '../../worker/src/conversation-responder.ts';
 import { membership, credits } from './chat-query.fixture.mjs';
 
 const workspaceId = '33333333-3333-4333-8333-333333333333';
 const now = () => new Date().toISOString();
-const model = modelPricing.models.find(
-  model => model.id === selectableModelFamilies.find(family => family.id === 'claude-haiku')?.currentModelId,
-);
+const model = readModelCatalog()
+  .catalog.models.find(family => family.id === 'claude-haiku')
+  ?.routes.find(route => route.provider === 'anthropic');
 
 export async function startBudDemo({ port = 4320, respond, apiKey = process.env.ANTHROPIC_API_KEY } = {}) {
   if (!respond && (!apiKey || !model))
@@ -42,7 +42,7 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
         {
           provider: 'anthropic',
           endpoint: 'https://api.anthropic.com/',
-          model: model.providerModelId,
+          model: model.model,
           apiKey,
           maxOutputTokens: 1024,
         },
@@ -140,7 +140,7 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
                   displayName: 'Claude Haiku (local demo)',
                   vendor: 'anthropic',
                   provider: 'anthropic',
-                  currentVersion: model?.providerModelId ?? 'fixture',
+                  currentVersion: model?.model ?? 'fixture',
                   inputCreditsPerMillionTokens: 100,
                   outputCreditsPerMillionTokens: 500,
                   available: true,

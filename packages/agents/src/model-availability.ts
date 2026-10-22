@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { selectableModelFamilies } from '@tulipfarm/config';
+import { readModelCatalog } from '@tulipfarm/config';
 import { relation, type AgentTransaction } from './store.ts';
 import { modelAvailabilitySchema } from './model-policy-contracts.ts';
 
@@ -13,7 +13,8 @@ export async function modelAvailability(tx: AgentTransaction) {
         )
       ).rows,
     );
-  return selectableModelFamilies.map(
+  // Every catalog model, served or not, so workspace choices survive a missing key.
+  return readModelCatalog().catalog.models.map(
     family =>
       rows.find(row => row.familyId === family.id) ?? {
         familyId: family.id,

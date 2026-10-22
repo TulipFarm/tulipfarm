@@ -6,6 +6,9 @@ import Fastify from 'fastify';
 import { protectBusinessRequests } from '../src/business.ts';
 import { buildApp } from '../src/app.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 test('Turbo dev passes Soul read and integration credentials to the API in strict mode', () => {
   const credentials = {
     R2_SOUL_READ_ACCESS_KEY_ID: 'regression-read-id',
@@ -60,7 +63,7 @@ test('every unsafe business method rejects absent and foreign origins before its
 });
 
 test('browser preflight permits supported mutations only for the configured web origin', async () => {
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   try {
     for (const method of ['PUT', 'PATCH', 'DELETE']) {
       const response = await app.inject({

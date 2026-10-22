@@ -19,7 +19,7 @@ import {
   isTitleRequest,
   toolResults,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 const usage = { input_tokens: 100, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 const streamed = text =>
@@ -58,7 +58,7 @@ test('project chats stream no answer text from sources other members cannot read
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const w = f.workspace,
       member = { userId: randomUUID(), membershipId: randomUUID() };

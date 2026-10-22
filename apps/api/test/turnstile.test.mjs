@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import { buildApp } from '../src/app.ts';
 import { createTurnstileVerifier, turnstileConfig, turnstileTestKeys } from '../src/turnstile.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 const config = { siteKey: 'fixture-site-key', secretKey: 'fixture-secret' };
 const success = { success: true, hostname: 'localhost', action: 'sign_in' };
 
@@ -134,7 +137,7 @@ test('production startup rejects every official dummy key and allows missing key
     Object.assign(process.env, { TURNSTILE_SITE_KEY: 'real-site', TURNSTILE_SECRET_KEY: secretKey });
     assert.throws(turnstileConfig, /test keys are only allowed/);
   }
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   try {
     await assert.rejects(app.ready(), /test keys are only allowed/);
   } finally {
@@ -200,7 +203,7 @@ test('HTTP options expose only the public key and preflight permits challenge to
   t.after(() => {
     process.env = oldEnv;
   });
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   try {
     const options = await app.inject('/v1/auth/options');
     assert.deepEqual(options.json(), { turnstileSiteKey: config.siteKey, google: false, magicLink: true });

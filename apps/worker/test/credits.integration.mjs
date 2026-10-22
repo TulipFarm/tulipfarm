@@ -16,7 +16,7 @@ import {
 } from './native-chat-fixture.mjs';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 // These tests assert workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -25,7 +25,7 @@ test('invalid ordinary model credentials never reserve credits across all retrie
   const f = await conversationFixture();
   const old = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'invalid credential with spaces';
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     calls++;
@@ -107,7 +107,7 @@ test(
     });
     const old = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'synthetic-only';
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace;
       const chatId = randomUUID();

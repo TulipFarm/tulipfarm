@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { modelFamilies, modelPricing, modelRoleDefault, modelRoleFamilies } from '@tulipfarm/config';
+import { readModelCatalog } from '@tulipfarm/config';
 
 export const guideLimits = {
   messageCharacters: 1200,
@@ -14,13 +14,14 @@ export const guideLimits = {
 } as const;
 
 /**
- * The per-turn budget of the public-guide role's family, priced from the effective catalog. Without an enabled guide
- * family, the catalog's first public-guide family prices it; the guide is off then anyway.
+ * The per-turn budget of the guide's model, priced from the model catalog: the model with the public-guide role, else
+ * the default model. It does not depend on provider keys; without a served guide model the guide is off anyway.
  */
 export function guideBudget(env: NodeJS.ProcessEnv = process.env) {
-  const familyId = modelRoleDefault('public-guide', env)?.familyId ?? modelRoleFamilies('public-guide')[0]?.id;
-  const modelId = modelFamilies.find(family => family.id === familyId)?.currentModelId;
-  const prices = modelPricing.models.find(model => model.id === modelId)?.rates;
+  const { models } = readModelCatalog(env).catalog;
+  const model = models.find(item => item.roles.includes('public-guide')) ?? models.find(item => item.default);
+  if (model?.pricing === 'unmetered') return { turnMicroUsd: 0, dailyTurns: 2000 };
+  const prices = model?.pricing;
   if (!prices?.length) return { turnMicroUsd: 0, dailyTurns: 0 };
   // UTF-8 bytes bound text tokens; reserve overhead for message framing. Never refund an attempted turn.
   const turnMicroUsd = Math.ceil(

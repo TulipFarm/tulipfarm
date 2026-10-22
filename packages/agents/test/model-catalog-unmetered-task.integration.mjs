@@ -8,7 +8,6 @@ process.env.MODEL_CATALOG_FILE = fileURLToPath(
   new URL('../../config/test/fixtures/model-catalog-unmetered.json', import.meta.url),
 );
 delete process.env.MODEL_CATALOG;
-delete process.env.MODEL_CATALOG_MODE;
 
 const { creditGate, unlimitedCredits } = await import('@tulipfarm/extensions');
 const { createWorkspaceRuntime } = await import('@tulipfarm/workspace-storage/runtime');
@@ -53,8 +52,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
 
   assert.equal(creditGate(), unlimitedCredits);
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'local-chat',
-    MODEL_DEFAULT_FAMILY: 'local-chat',
+    MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
     AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
     AZURE_FOUNDRY_API_KEY: 'synthetic-private-credential',
   });

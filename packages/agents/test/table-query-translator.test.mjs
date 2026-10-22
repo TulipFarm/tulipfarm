@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { initialModelMapping, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { test } from 'node:test';
 import { normalizeQueryRequest, queryCapabilities, TableQueryError } from '@tulipfarm/tables/query';
 import {
@@ -168,13 +170,22 @@ test('model input carries only schema metadata and escapes untrusted labels', as
     });
   };
   try {
-    const provider = modelTranslationProvider({
-      provider: 'azure',
-      endpoint: 'https://synthetic.openai.azure.com/',
-      model: 'DeepSeek-V4-Flash',
-      auth: { kind: 'api-key', value: 'synthetic' },
-      maxOutputTokens: 4096,
-    });
+    const flash = legacyModels.find(model => model.id === 'deepseek-v4-flash');
+    const provider = modelTranslationProvider(
+      {
+        provider: 'azure',
+        endpoint: 'https://synthetic.openai.azure.com/',
+        model: 'DeepSeek-V4-Flash',
+        auth: { kind: 'api-key', value: 'synthetic' },
+        maxOutputTokens: 4096,
+      },
+      {
+        modelId: flash.id,
+        pricingRevision: initialModelMapping.pricingRevision,
+        rates: flash.rates,
+        route: { maxOutputTokens: flash.maxOutputTokens },
+      },
+    );
     let metered, usage;
     const text = await provider.infer(
       translatorSystemPrompt,
@@ -230,19 +241,22 @@ test('invalid model output is rejected rather than repaired', () => {
 });
 
 test('translator selection is explicit and the fake is refused in production', () => {
-  assert.equal(tableSearchTranslator({}), null);
+  const anthropic = { ANTHROPIC_API_KEY: 'synthetic' };
+  assert.equal(tableSearchTranslator(anthropic), null, 'no model has the table-search role');
   assert.equal(tableSearchTranslator({ TABLE_SEARCH_TRANSLATOR: 'fake' }).modelId, 'fake-table-search');
   assert.throws(() => tableSearchTranslator({ TABLE_SEARCH_TRANSLATOR: 'fake', NODE_ENV: 'production' }), /production/);
   assert.throws(() => tableSearchTranslator({ TABLE_SEARCH_TRANSLATOR: 'gpt' }), /TABLE_SEARCH_TRANSLATOR/);
   assert.throws(
-    () => tableSearchTranslator({ TABLE_SEARCH_MODEL_FAMILY: 'deepseek-flash' }),
-    /configured model family/,
+    () => tableSearchTranslator({ ...anthropic, TABLE_SEARCH_MODEL_FAMILY: 'deepseek-flash' }),
+    /Remove TABLE_SEARCH_MODEL_FAMILY \(add "table-search" to the model's "roles"\)/,
   );
+  const catalog = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+  const flash = catalog.models.find(model => model.id === 'deepseek-flash');
+  flash.roles = [...(flash.roles ?? []), 'table-search'];
   const env = {
-    MODEL_FAMILIES: 'deepseek-flash',
+    MODEL_CATALOG: JSON.stringify(catalog),
     AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.openai.azure.com/',
     AZURE_FOUNDRY_API_KEY: 'synthetic',
-    TABLE_SEARCH_MODEL_FAMILY: 'deepseek-flash',
   };
   assert.equal(tableSearchTranslator(env).modelId, 'deepseek-v4-flash');
 });

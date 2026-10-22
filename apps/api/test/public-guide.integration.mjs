@@ -77,7 +77,6 @@ test(
     Object.assign(process.env, {
       NODE_ENV: 'test',
       DATABASE_URL: url.href,
-      MODEL_FAMILIES: '',
       BETTER_AUTH_SECRET: secret,
       BETTER_AUTH_URL: 'http://localhost:3001',
       WEB_ORIGIN: 'http://localhost:5173',

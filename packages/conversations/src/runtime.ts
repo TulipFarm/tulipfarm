@@ -1,3 +1,4 @@
+import { loadModelCatalog } from '@tulipfarm/config';
 import { randomUUID } from 'node:crypto';
 import { recordConversationActivity } from './activity.ts';
 import { createConversationRequests } from './requests.ts';
@@ -22,13 +23,7 @@ import {
   type createWorkspaceRuntime,
   commonCompatibility,
 } from '@tulipfarm/workspace-storage/runtime';
-import {
-  chatToolCallLimit,
-  defaultConversationModel,
-  toolReceiptSchema,
-  turnStatusSchema,
-  timeZoneSchema,
-} from './contracts.ts';
+import { chatToolCallLimit, toolReceiptSchema, turnStatusSchema, timeZoneSchema } from './contracts.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
 import { notifyConversationChange, notifyConversationTool } from './event-publisher.ts';
 import {
@@ -1297,7 +1292,7 @@ export function createConversationExecutor(
           await requireGoogleFileSources(tx, chat.requester, inherited);
           if (durable) await requireMcpSources(tx, chat.requester, fence.conversationId, inherited);
           return {
-            model: turn.responder === 'reverse-text-v1' ? defaultConversationModel : turn.responder,
+            model: turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder,
             currentMessage,
             messages,
             fileReferences: loadedReferences,

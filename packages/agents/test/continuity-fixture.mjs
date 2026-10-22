@@ -34,7 +34,7 @@ export function syntheticContinuity(model) {
     },
     allowed: () => true,
     actualModelIds: resolution => [resolution.modelId],
-    legacyFamily: () => 'claude-opus',
+    defaultFamily: () => 'claude-opus',
     budgetPicoUsd: () => '10000000000000',
     health: { claim: async () => true, finish: async () => {} },
     infer: async (resolution, input) => ({

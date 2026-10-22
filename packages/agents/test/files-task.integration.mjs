@@ -98,7 +98,7 @@ test(
       restrictions: () => ({ allowedProviders: ['anthropic'], allowedLocations: ['test'] }),
       allowed: () => true,
       actualModelIds: () => [route.modelId],
-      legacyFamily: () => 'claude-opus',
+      defaultFamily: () => 'claude-opus',
       budgetPicoUsd: () => '10000000000000',
       health: createModelRouteHealth(db.platform, () => 'files-task'),
       infer: async (_resolution, input) => {

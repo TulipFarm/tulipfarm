@@ -44,7 +44,7 @@ Deploy compatible API and ordinary-worker binaries before advancing the common s
 
 ## Reply processing
 
-A successful send commits the message, ordered parts, one queued turn, one ID-only outbox row, command receipt, sequence allocation, title, and activity together. The turn pins the selected model family in `responder`; sends without `model` use `gpt-sol`. Before migration `0030_conversation_models.sql`, turns keep the legacy `reverse-text-v1` responder and the executor replies with `gpt-sol`. Its accepted sequence has a composite foreign key to the source message sequence.
+A successful send commits the message, ordered parts, one queued turn, one ID-only outbox row, command receipt, sequence allocation, title, and activity together. The turn pins the selected model family in `responder`; sends without `model` use the model catalog's default model. Before migration `0030_conversation_models.sql`, turns keep the legacy `reverse-text-v1` responder and the executor replies with the default model. A turn whose family the catalog no longer lists replies with the default model. Its accepted sequence has a composite foreign key to the source message sequence.
 
 `createConversationExecutor(runtime)` locks authorization and the private root, requires the original membership, and claims only the earliest unfinished turn. A waiting, reconciling, or failed predecessor blocks later replies. A claim increments the epoch and persisted attempt count and receives a 60-second lease. Takeover after lease expiry invalidates old epochs even if their computation finishes later.
 

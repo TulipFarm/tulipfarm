@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import { nativeReply } from './native-fixture.mjs';
 import { createTaskComposition } from '../../../apps/worker/dist/task-composition.js';
 import { createServer } from 'node:http';
+import { modelCatalogOf } from '../../../apps/worker/test/model-catalog-fixture.mjs';
 
 const route = {
   id: 'task-test',
@@ -164,7 +165,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     health: createModelRouteHealth(db.platform, () => 'task-test'),
     infer,
     budgetPicoUsd: () => '10000000000000',
-    legacyFamily: () => 'claude-opus',
+    defaultFamily: () => 'claude-opus',
   };
   let engine = createTaskRuntime(runtime, model);
   const task = await tasks.start(w.id, user, {
@@ -709,8 +710,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       requests = [];
     process.env = {
       PATH: before.PATH,
-      MODEL_FAMILIES: 'claude-opus',
-      MODEL_DEFAULT_FAMILY: 'claude-opus',
+      MODEL_CATALOG: modelCatalogOf(['claude-opus']),
       ANTHROPIC_API_KEY: 'synthetic-only',
     };
     const server = createServer(async (request, response) => {

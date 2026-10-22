@@ -9,12 +9,10 @@ const telemetry = startTelemetry(buildInfo);
 const { buildApp } = await import('./app.ts');
 const { logUnconfiguredIntegrations } = await import('./integration-status.ts');
 
-const { modelRoleWarnings } = await import('@tulipfarm/config');
+// Fails startup on an invalid model catalog or provider environment.
+const { loadModelCatalog } = await import('@tulipfarm/config');
 const { publicGuideWarnings } = await import('./public-guide-model.ts');
-for (const msg of [
-  ...modelRoleWarnings(process.env, ['default-chat', 'compaction', 'public-guide']),
-  ...publicGuideWarnings(),
-])
+for (const msg of [...loadModelCatalog().warnings, ...publicGuideWarnings()])
   console.warn(JSON.stringify({ level: 'warn', msg }));
 
 const app = buildApp();
