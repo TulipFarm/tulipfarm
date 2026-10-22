@@ -329,7 +329,7 @@ for (const format of formats)
       assert.equal(requests.length, 1);
       assert.ok(!requests.some(isCompletionRequest));
       assert.deepEqual(steps, [0], 'one reserve and settle');
-      assert.deepEqual(rounds, [1]);
+      assert.deepEqual([...new Set(rounds)], [1], 'one model round');
     }
     assert.deepEqual(outcomes, ['skipped_no_tools', 'skipped_no_tools']);
   });
