@@ -578,6 +578,7 @@ type Event =
   | 'request_aborted'
   | 'service_started'
   | 'service_stopped'
+  | 'integration_unconfigured'
   | 'startup_failed'
   | 'shutdown_failed'
   | 'database_connection_failed'

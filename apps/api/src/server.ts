@@ -7,6 +7,7 @@ import { buildInfo } from './build-info.ts';
 await startExtensions('api', { resolve: specifier => import.meta.resolve(specifier) });
 const telemetry = startTelemetry(buildInfo);
 const { buildApp } = await import('./app.ts');
+const { logUnconfiguredIntegrations } = await import('./integration-status.ts');
 
 const { modelRoleWarnings } = await import('@tulipfarm/config');
 const { publicGuideWarnings } = await import('./public-guide-model.ts');
@@ -42,6 +43,7 @@ try {
   }
 
   await app.listen({ host: process.env.HOST ?? '127.0.0.1', port });
+  logUnconfiguredIntegrations();
 } catch (error) {
   captureException(error);
   log('error', 'lifecycle', 'startup_failed');
