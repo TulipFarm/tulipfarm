@@ -1,14 +1,17 @@
 import { useRef, useState } from 'react';
-import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
+import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@tulipfarm/sprout/input-group';
 import { onboardingDetailsSchema } from '@tulipfarm/workspaces/onboarding-contracts';
 import { newOnboardingToken, saveOnboarding } from '@/lib/onboarding';
 import { suggestWorkspaceSlug, workspaceSlugError } from '@/lib/workspace-slug';
 
+// New workspaces are always business workspaces; the signup flow does not ask.
+const accountType = 'business';
+
 export function useOnboardingFields(disabled: boolean) {
   const [name, setName] = useState('');
   const [customSlug, setCustomSlug] = useState<string | null>(null);
-  const [accountType, setAccountType] = useState<'personal' | 'business'>('business');
   const [submitted, setSubmitted] = useState(false);
   const saved = useRef<{ details: string; token: string; expiresAt: number | null } | null>(null);
   const slug = customSlug ?? suggestWorkspaceSlug(name);
@@ -34,63 +37,50 @@ export function useOnboardingFields(disabled: boolean) {
     return `/onboarding#token=${saved.current.token}`;
   }
   const fields = (
-    <div className="grid gap-4 lg:gap-3">
-      <ChoiceGroup
-        type="radio"
-        legend="Workspace type"
+    <div className="grid gap-5">
+      <Field
+        id="onboarding-workspace-name"
+        label="Workspace name"
         required
-        layout="columns"
-        value={accountType}
         disabled={disabled}
-        options={[
-          { value: 'personal', label: 'Personal' },
-          { value: 'business', label: 'Business' },
-        ]}
-        onValueChange={value => {
-          if (value === 'personal' || value === 'business') setAccountType(value);
-        }}
-      />
-      <div className="grid gap-4 sm:grid-cols-2 lg:gap-3">
-        <Field
-          id="onboarding-workspace-name"
-          label="Workspace name"
-          required
-          disabled={disabled}
-          error={submitted && !name.trim() ? 'Enter a workspace name.' : undefined}
-        >
-          <Input
-            name="workspace-name"
-            scale="lg"
-            autoComplete="organization"
-            maxLength={80}
-            value={name}
-            onChange={event => setName(event.target.value)}
+        error={submitted && !name.trim() ? 'Enter a workspace name.' : undefined}
+      >
+        <Input
+          name="workspace-name"
+          scale="lg"
+          autoComplete="organization"
+          placeholder="Acme Studio"
+          maxLength={80}
+          value={name}
+          onChange={event => setName(event.target.value)}
+        />
+      </Field>
+      <Field
+        id="onboarding-workspace-slug"
+        label="Workspace URL"
+        required
+        disabled={disabled}
+        helper="You can’t change this later."
+        // A URL derived from an empty name is not the visitor's mistake; the name error covers it.
+        error={submitted && (customSlug !== null || name.trim()) ? workspaceSlugError(slug) : undefined}
+      >
+        <InputGroup size="lg">
+          <InputGroupAddon>
+            <InputGroupText>{window.location.host}/</InputGroupText>
+          </InputGroupAddon>
+          <InputGroupInput
+            name="workspace-slug"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder="acme-studio"
+            maxLength={48}
+            value={slug}
+            onChange={event => setCustomSlug(event.target.value)}
           />
-        </Field>
-        <Field
-          id="onboarding-workspace-slug"
-          label="Workspace URL"
-          required
-          disabled={disabled}
-          helper="It cannot be changed after creation."
-          error={submitted ? workspaceSlugError(slug) : undefined}
-        >
-          <>
-            <Input
-              name="workspace-slug"
-              scale="lg"
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              maxLength={48}
-              value={slug}
-              onChange={event => setCustomSlug(event.target.value)}
-            />
-            <output className="block break-all pt-2 text-sm text-muted-foreground">{`${window.location.origin}/${slug}`}</output>
-          </>
-        </Field>
-      </div>
+        </InputGroup>
+      </Field>
     </div>
   );
-  return { fields, prepare, validate };
+  return { fields, prepare, validate, details: { name: name.trim(), slug } };
 }

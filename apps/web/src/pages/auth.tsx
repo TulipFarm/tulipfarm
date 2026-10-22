@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from '@tanstack/react-router';
+import { ArrowRight } from 'reicon-react/icons/ArrowRight';
+import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Button } from '@tulipfarm/sprout/button';
+import { Form } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
 import { Label } from '@tulipfarm/sprout/label';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { apiOrigin, authClient, authCallbackURLs, magicLinkDestination, safeAuthRedirect } from '@/lib/auth';
-import { accountExistsMessage, AuthForm, AuthLayout } from '@/features/auth/form';
+import { accountExistsMessage, AuthForm, AuthLayout, SignInAvailable } from '@/features/auth/form';
 import { clearDraftFiles } from '@/features/chat/draft-files';
 import { useOnboardingFields } from '@/features/auth/onboarding-fields';
 
@@ -42,33 +46,90 @@ export function RegisterPage() {
 
 export function WorkspaceSignupPage() {
   const [pending, setPending] = useState(false);
+  const [step, setStep] = useState<'workspace' | 'account'>('workspace');
   const workspace = useOnboardingFields(pending);
+  const { name, slug } = workspace.details;
+  const stepChanged = useRef(false);
+  useEffect(() => {
+    if (stepChanged.current) document.getElementById('auth-title')?.focus();
+    stepChanged.current = true;
+  }, [step]);
+  const returnError = new URLSearchParams(window.location.search).get('error');
+  const footer = (
+    <>
+      Have an account? Use the same email or Google account to create this workspace, or{' '}
+      <span className="font-medium text-foreground underline underline-offset-4">
+        <Link to="/login" search={{ redirect: '/' }}>
+          log in
+        </Link>
+      </span>
+      .
+    </>
+  );
+  if (step === 'workspace')
+    return (
+      <AuthLayout
+        step="Step 1 of 2"
+        title="Create your workspace"
+        subtitle="Next, you’ll create your account."
+        footer={footer}
+      >
+        <SignInAvailable>
+          <Form label="Workspace details" onSubmit={() => (workspace.validate() ? setStep('account') : 'invalid')}>
+            <div className="space-y-6">
+              {returnError !== null && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {returnError === 'ACCOUNT_EXISTS'
+                      ? accountExistsMessage
+                      : 'Sign-in did not finish. Please try again.'}
+                  </AlertDescription>
+                </Alert>
+              )}
+              {workspace.fields}
+              <div className="grid">
+                <Button type="submit" size="lg">
+                  Continue
+                  <ArrowRight aria-hidden="true" />
+                </Button>
+              </div>
+            </div>
+          </Form>
+        </SignInAvailable>
+      </AuthLayout>
+    );
   return (
-    <AuthLayout
-      compact
-      title="Create your workspace"
-      subtitle="Name your workspace, then sign in to make it yours."
-      footer={
-        <>
-          Have an account? Use the same email or Google account to create this workspace, or{' '}
-          <span className="font-medium text-foreground underline underline-offset-4">
-            <Link to="/login" search={{ redirect: '/' }}>
-              log in
-            </Link>
-          </span>
-          .
-        </>
-      }
-    >
-      <AuthForm
-        workspace={workspace}
-        withName
-        submitLabel="Create workspace with email"
-        passwordLabel="Create workspace"
-        googleLabel="Continue with Google"
-        pending={pending}
-        onPendingChange={setPending}
-      />
+    <AuthLayout step="Step 2 of 2" title="Create your account" subtitle={`Sign in to claim ${name}.`} footer={footer}>
+      <div className="space-y-6">
+        <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
+          <EntityAvatar seed={slug} name={name} size="md" shape="square" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium text-foreground">{name}</p>
+            <p className="truncate text-sm text-muted-foreground">
+              {window.location.host}/{slug}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            disabled={pending}
+            aria-label="Edit workspace details"
+            onClick={() => setStep('workspace')}
+          >
+            Edit
+          </Button>
+        </div>
+        <AuthForm
+          workspace={workspace}
+          withName
+          providersFirst
+          submitLabel="Create workspace with email"
+          passwordLabel="Create workspace"
+          linkLabel="Email me a sign-in link instead"
+          googleLabel="Continue with Google"
+          pending={pending}
+          onPendingChange={setPending}
+        />
+      </div>
     </AuthLayout>
   );
 }

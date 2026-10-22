@@ -29,7 +29,9 @@ export function LoginPage() {
       <AuthForm
         submitLabel="Email me a sign-in link"
         passwordLabel="Log in"
-        googleLabel="Sign in with Google"
+        linkLabel="Email me a sign-in link instead"
+        googleLabel="Continue with Google"
+        providersFirst
         pending={pending}
         onPendingChange={setPending}
       />

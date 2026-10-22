@@ -18,6 +18,8 @@ test('Turbo resolves attachment credentials only for API and worker dev, never b
   const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'dev', 'dev:storage', 'build', '--dry=json'], {
     cwd: root,
     encoding: 'utf8',
+    // The dry-run plan lists every task's files and already outgrows the 1 MB default.
+    maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, ...credentials },
   });
   assert.equal(result.status, 0, result.stderr);
