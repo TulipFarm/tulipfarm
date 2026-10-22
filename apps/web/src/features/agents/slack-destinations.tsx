@@ -8,7 +8,6 @@ import { Input } from '@tulipfarm/sprout/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/empty';
 import { ReadError } from '@/components/read-feedback';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
@@ -171,14 +170,12 @@ export function SlackDestinations({
                 ))}
               </ul>
             ) : (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>No Slack destinations</EmptyTitle>
-                  <EmptyDescription>
-                    Add a channel below. The bot and your linked account must already belong to it.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <StatePanel
+                kind="empty"
+                heading="h3"
+                title="No Slack destinations"
+                description="Add a channel below. The bot and your linked account must already belong to it."
+              />
             )}
             <ActionButton
               state={state.refreshing ? { kind: 'busy' } : { kind: 'ready' }}

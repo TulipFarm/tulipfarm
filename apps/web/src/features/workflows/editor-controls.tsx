@@ -18,7 +18,6 @@ import { Disclosure } from '@/components/disclosure';
 import { Field } from '@tulipfarm/sprout/field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/empty';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Link } from '@tanstack/react-router';
 import { workspaceRoute } from '@/router';
@@ -973,21 +972,20 @@ function RecordDate({
     );
   if (!tables.length)
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>No tables with a date or timestamp field are available to you</EmptyTitle>
-          <EmptyDescription>Add a date field to a table in chat, or ask an admin for table access.</EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent>
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link to="/$workspaceSlug/tables" params={{ workspaceSlug: workspace.slug }} />}
-          >
-            Open tables
-          </Button>
-        </EmptyContent>
-      </Empty>
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        title="No tables with a date or timestamp field are available to you"
+        description="Add a date field to a table in chat, or ask an admin for table access."
+      >
+        <Button
+          variant="outline"
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug/tables" params={{ workspaceSlug: workspace.slug }} />}
+        >
+          Open tables
+        </Button>
+      </StatePanel>
     );
   return (
     <div className="space-y-3">

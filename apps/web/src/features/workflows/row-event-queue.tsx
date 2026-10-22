@@ -12,7 +12,7 @@ import {
   AlertDialogCancel,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Button } from '@tulipfarm/sprout/button';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/empty';
+import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workflowRequest, WorkflowRequestError } from './api';
 import { useWorkflowChanges } from './queries';
 
@@ -108,14 +108,12 @@ export function RowEventQueue({
               {queue.oldestAt ? ` · Oldest: ${new Date(queue.oldestAt).toLocaleString()}` : ''}
             </p>
           ) : (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No waiting row events</EmptyTitle>
-                <EmptyDescription>
-                  New row events appear here after a matching table change. Started events appear in run history.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <StatePanel
+              kind="empty"
+              heading="h4"
+              title="No waiting row events"
+              description="New row events appear here after a matching table change. Started events appear in run history."
+            />
           )}
           {queue.blockers.map(blocker => (
             <Alert key={blocker.reason} role="note">
