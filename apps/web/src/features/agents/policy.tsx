@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ActionGroup, type ActionState } from '@/components/action-button';
+import { ActionGroup, type ButtonState } from '@tulipfarm/sprout/button';
 import { CheckboxField, ChoiceGroup, Field, type ChoiceOption } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
@@ -194,7 +194,7 @@ function PolicyForm({
   }
   const changedElsewhere = policy.version > base.version;
   const sending = write.state.kind === 'sending';
-  const state: ActionState = sending
+  const state: ButtonState = sending
     ? { kind: 'busy' }
     : write.state.kind === 'uncertain'
       ? { kind: 'blocked', reason: 'Check whether the last change went through first.' }
@@ -208,7 +208,7 @@ function PolicyForm({
           ? { kind: 'blocked', reason: 'Wait for the refresh to finish.' }
           : { kind: 'ready' };
   const locked = state.kind !== 'ready';
-  const reviewState: ActionState =
+  const reviewState: ButtonState =
     refreshing || sending
       ? { kind: 'busy' }
       : review && !review.reloaded && policy === review.policy

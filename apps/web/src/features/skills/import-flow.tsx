@@ -3,7 +3,6 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import type { SkillImportView } from '@tulipfarm/agents/skill-import-contracts';
 import { skillImportRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
-import { ActionButton } from '@/components/action-button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Field, ChoiceGroup, CheckboxField } from '@tulipfarm/sprout/field';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
@@ -442,7 +441,7 @@ function ImportReview({
               disabled={busy}
             />
           )}
-          <ActionButton
+          <Button
             pendingLabel="Installing skills…"
             state={
               busy
@@ -468,7 +467,7 @@ function ImportReview({
             }}
           >
             Install and enable
-          </ActionButton>
+          </Button>
           <p className="text-sm text-muted-foreground">
             Saves and enables these exact versions privately. Sharing, tools, and data access stay unchanged.
           </p>
@@ -597,14 +596,14 @@ function ImportReview({
         retry={command => void write.submit(command)}
       />
       {!['installed', 'cancelled', 'expired', 'unchanged'].includes(view.status) && (
-        <ActionButton
+        <Button
           variant="ghost"
           pendingLabel="Cancelling import…"
           state={busy ? { kind: 'busy' } : { kind: 'ready' }}
           onClick={() => void write.submit({ kind: 'cancel' })}
         >
           Cancel import
-        </ActionButton>
+        </Button>
       )}
     </section>
   );

@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { z } from 'zod';
 import type { scheduleSchema } from '@tulipfarm/agents/schedule-contracts';
-import { ActionButton, type ActionState } from '@/components/action-button';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { CheckboxField, ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
@@ -147,13 +146,13 @@ export function AgentSchedules({
   );
   if (concealed) return null;
   const mode = kinds[draft.kind];
-  const state: ActionState =
+  const state: ButtonState =
     write.state.kind === 'sending'
       ? { kind: 'busy' }
       : write.state.kind === 'uncertain'
         ? { kind: 'blocked', reason: 'Check whether the last change went through first.' }
         : { kind: 'ready' };
-  const inspectState: ActionState =
+  const inspectState: ButtonState =
     state.kind !== 'ready'
       ? state
       : !detail.definition.tools.includes('schema.inspect')
@@ -166,7 +165,7 @@ export function AgentSchedules({
             }
           : state;
   const sponsor = candidates.state.kind === 'ready' ? candidates.state.data.membershipId : null;
-  const sponsorState: ActionState =
+  const sponsorState: ButtonState =
     candidates.state.kind === 'loading'
       ? { kind: 'busy' }
       : !sponsor
@@ -176,7 +175,7 @@ export function AgentSchedules({
             fix: { kind: 'action', label: 'Try again', onClick: () => void candidates.refresh() },
           }
         : state;
-  const consentState: ActionState =
+  const consentState: ButtonState =
     sponsorState.kind !== 'ready' || draft.sponsorConsent
       ? sponsorState
       : {
@@ -270,7 +269,7 @@ export function AgentSchedules({
                 error={errors.resource}
                 onChange={tableId => update({ tableId })}
               />
-              <ActionButton
+              <Button
                 state={inspectState}
                 variant="outline"
                 onClick={() =>
@@ -283,7 +282,7 @@ export function AgentSchedules({
                 }
               >
                 Activate saved revision for inspection
-              </ActionButton>
+              </Button>
             </>
           )}
           <fieldset className="grid gap-5">
@@ -611,19 +610,19 @@ export function AgentSchedules({
                   )}
                   {!item.revoked && (
                     <div className="flex flex-wrap items-start gap-2">
-                      <ActionButton
+                      <Button
                         state={state}
                         variant="outline"
                         onClick={() => void write.submit({ kind: 'revoke', id: item.id })}
                       >
                         Revoke schedule
-                      </ActionButton>
+                      </Button>
                       {item.action.kind === 'task' ? (
-                        <ActionButton variant="outline" state={consentState} onClick={() => responsor(item)}>
+                        <Button variant="outline" state={consentState} onClick={() => responsor(item)}>
                           {item.paused ? 'Resume as sponsor' : 'Sponsor this schedule'}
-                        </ActionButton>
+                        </Button>
                       ) : (
-                        <ActionButton
+                        <Button
                           variant="outline"
                           state={
                             consentState.kind === 'ready' && draft.kind !== 'inspect'
@@ -641,7 +640,7 @@ export function AgentSchedules({
                           onClick={() => responsor(item)}
                         >
                           Sponsor with selected audience
-                        </ActionButton>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -669,7 +668,7 @@ function IntervalEditor({
   refresh,
 }: {
   item: Schedule;
-  consent: ActionState;
+  consent: ButtonState;
   save: (intervalMinutes: number) => Promise<unknown>;
   refresh: () => Promise<void>;
 }) {
@@ -678,7 +677,7 @@ function IntervalEditor({
   const [checked, setChecked] = useState(false);
   const write = useTableWrite(save, () => void refresh());
   const error = intervalError(item.action.kind, Number(minutes));
-  const state: ActionState =
+  const state: ButtonState =
     write.state.kind === 'sending'
       ? { kind: 'busy' }
       : write.state.kind === 'uncertain'

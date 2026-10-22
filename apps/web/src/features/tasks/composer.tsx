@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { ActionButton, type ActionState, type BlockerFix } from '@/components/action-button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, type ButtonState, type ButtonBlockerFix } from '@tulipfarm/sprout/button';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { Form, FormSection } from '@tulipfarm/sprout/form';
@@ -37,7 +36,7 @@ export function TaskStart({
   slug: string;
   detail: AgentDetail;
   concealed: boolean;
-  setup?: BlockerFix | undefined;
+  setup?: ButtonBlockerFix | undefined;
 }) {
   const api = useTaskApi(workspaceId);
   const navigate = useNavigate();
@@ -67,7 +66,7 @@ export function TaskStart({
 }
 
 type Mode =
-  | { kind: 'start'; detail: AgentDetail; setup?: BlockerFix | undefined }
+  | { kind: 'start'; detail: AgentDetail; setup?: ButtonBlockerFix | undefined }
   | { kind: 'reply'; task: TaskSummary; sequence: number };
 type ContextSource = Extract<TaskSources[number], { kind: 'task' | 'attachment' }>;
 
@@ -157,7 +156,7 @@ export function TaskComposer({
         ? 'Write what the agent should do.'
         : 'Write your message.'
       : undefined;
-  function submitState(): ActionState {
+  function submitState(): ButtonState {
     if (write.state.kind === 'sending') return { kind: 'busy' };
     if (write.state.kind === 'uncertain')
       return { kind: 'blocked', reason: 'Check whether your last request went through first.' };
@@ -375,9 +374,9 @@ export function TaskComposer({
             </div>
           </Disclosure>
         )}
-        <ActionButton type="submit" state={action} pendingLabel="Sending…">
+        <Button type="submit" state={action} pendingLabel="Sending…">
           {label}
-        </ActionButton>
+        </Button>
         {mode.kind === 'start' && (write.state.kind === 'uncertain' || write.state.kind === 'rejected') ? (
           <div className="grid justify-items-start gap-2">
             <Alert variant="destructive">

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { z } from 'zod';
 import type { workflowSchema } from '@tulipfarm/workflows/contracts';
-import { ActionButton, type ActionState } from '@/components/action-button';
 import { Badge } from '@tulipfarm/sprout/badge';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { DataList, DataListCell, DataListRow, DataListSecondary } from '@/components/data-list';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -23,7 +22,7 @@ export function WebhookDeliveries({
 }: {
   workspaceId: string;
   workflow: Workflow;
-  test: ActionState;
+  test: ButtonState;
   testRun: string | null;
   onTest: () => void;
   onOpenRun: (runId: string) => void;
@@ -55,9 +54,9 @@ export function WebhookDeliveries({
         stored.
       </p>
       <div className="flex flex-wrap items-start gap-2">
-        <ActionButton variant="outline" state={test} pendingLabel="Sending test event…" onClick={onTest}>
+        <Button variant="outline" state={test} pendingLabel="Sending test event…" onClick={onTest}>
           Send test event
-        </ActionButton>
+        </Button>
         <Button variant="ghost" disabled={checking} aria-busy={checking} onClick={() => void check()}>
           {checking ? 'Checking deliveries…' : 'Check deliveries'}
         </Button>

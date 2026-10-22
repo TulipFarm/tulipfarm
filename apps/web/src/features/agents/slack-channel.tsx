@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { ActionButton, type ActionState } from '@/components/action-button';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Form, FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
@@ -30,7 +29,7 @@ export function AgentSlackChannel({ workspaceId, agentId }: { workspaceId: strin
   const checking =
     checked === channel && (read.state.kind === 'loading' || (read.state.kind === 'ready' && read.state.refreshing));
   const attaching = write.state.kind === 'sending';
-  const attach: ActionState =
+  const attach: ButtonState =
     checking || attaching
       ? { kind: 'busy' }
       : write.state.kind === 'uncertain'
@@ -205,14 +204,14 @@ export function AgentSlackChannel({ workspaceId, agentId }: { workspaceId: strin
           <Button variant="ghost" onClick={() => setManual(value => !value)}>
             {manual ? 'Choose from my Slack channels' : 'Use a channel ID instead'}
           </Button>
-          <ActionButton
+          <Button
             type="submit"
             variant="outline"
             state={checking || attaching ? { kind: 'busy' } : { kind: 'ready' }}
             pendingLabel={checking ? 'Checking channel…' : undefined}
           >
             Check channel
-          </ActionButton>
+          </Button>
         </div>
       </Form>
       {checked === channel && (
@@ -246,13 +245,13 @@ export function AgentSlackChannel({ workspaceId, agentId }: { workspaceId: strin
                     : 'This channel has another assistant. Replacing it affects new threads only.'}
               </p>
               {value.agentId !== agentId && (
-                <ActionButton
+                <Button
                   state={attach}
                   pendingLabel={attaching ? 'Attaching agent…' : undefined}
                   onClick={() => void write.submit({ channel, version: value.version })}
                 >
                   {value.version === 0 ? 'Attach agent' : 'Replace channel agent'}
-                </ActionButton>
+                </Button>
               )}
             </div>
           )}

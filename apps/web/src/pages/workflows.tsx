@@ -13,8 +13,7 @@ import { DataList, DataListCell, DataListRow, DataListSecondary } from '@/compon
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { Button } from '@tulipfarm/sprout/button';
-import { ActionButton, jumpTo } from '@/components/action-button';
+import { Button, jumpTo } from '@tulipfarm/sprout/button';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Label } from '@tulipfarm/sprout/label';
 import { WorkflowsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -547,7 +546,7 @@ function WorkflowPage({
                           ? 'Disable workflow'
                           : 'Activate saved revision'}
                       </Button>
-                      <ActionButton
+                      <Button
                         variant="destructive"
                         pendingLabel="Archiving workflow..."
                         state={
@@ -558,7 +557,7 @@ function WorkflowPage({
                         onClick={() => setConfirmArchive(true)}
                       >
                         Archive workflow
-                      </ActionButton>
+                      </Button>
                     </div>
                     <WorkflowSharing
                       key={selected.id}

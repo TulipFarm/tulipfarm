@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { workspaceRoute, agentDetailRoute, newAgentRoute } from '@/router';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, jumpTo } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -36,7 +36,6 @@ import { AgentSetup } from '@/features/agents/readiness';
 import { agentStatus, agentTabs, visibleTabs, type AgentTab, type ExecutionCheck } from '@/features/agents/setup';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
-import { jumpTo } from '@/components/action-button';
 import { AgentBuilder } from '@/features/agents/builder';
 import { useFeatureRead } from '@/lib/query';
 import type { BuilderInitial } from '@/features/agents/builder-draft';

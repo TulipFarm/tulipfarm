@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { z } from 'zod';
-import { Button } from '@tulipfarm/sprout/button';
-import { ActionButton, type ActionState } from '@/components/action-button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Form, FormSection } from '@tulipfarm/sprout/form';
 import { Textarea } from '@tulipfarm/sprout/textarea';
@@ -51,7 +50,7 @@ export function AgentChat({
   const unconfirmed = write.state.kind === 'uncertain' && !recovered;
   const turnPending = !!turnId && (read.state.kind !== 'ready' || pending(read.state.data));
   const turnUnknown = !!turnId && (read.state.kind === 'error' || read.state.kind === 'unavailable');
-  const send: ActionState =
+  const send: ButtonState =
     write.state.kind === 'sending'
       ? { kind: 'busy' }
       : unconfirmed
@@ -138,9 +137,9 @@ export function AgentChat({
           <Field id="agent-prompt" label="Request" required error={errors.prompt}>
             <Textarea value={prompt} maxLength={8000} onChange={event => setPrompt(event.target.value)} />
           </Field>
-          <ActionButton type="submit" state={send} pendingLabel="Sending request…">
+          <Button type="submit" state={send} pendingLabel="Sending request…">
             Send request
-          </ActionButton>
+          </Button>
         </div>
       </Form>
       <WriteFeedback

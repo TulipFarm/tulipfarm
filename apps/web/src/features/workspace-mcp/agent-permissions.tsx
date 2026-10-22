@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { Button } from '@tulipfarm/sprout/button';
-import type { ActionState } from '@/components/action-button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
 import { UnsavedChanges } from '@/features/tables/feedback';
@@ -98,7 +97,7 @@ function PermissionEditor({
         : command.blocked
           ? 'Check the last save first.'
           : undefined);
-  const save: ActionState = command.busy
+  const save: ButtonState = command.busy
     ? { kind: 'busy' }
     : reason
       ? { kind: 'blocked', reason }
