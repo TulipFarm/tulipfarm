@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { GovernanceSnapshot } from '@tulipfarm/workspaces/governance-contracts';
 import { User } from 'reicon-react/icons/User';
-import { MembersSample } from '@/components/empty-samples';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { MembersSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table } from '@tulipfarm/sprout/table';
 import {
   Dialog,

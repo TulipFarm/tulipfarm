@@ -1,11 +1,10 @@
 import { ChatRound } from 'reicon-react/icons/ChatRound';
-import { CreateInChatSample } from '@/components/empty-samples';
 import { Link } from '@tanstack/react-router';
 import { tableDetailRoute, tableEditRoute, tablesRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { CreateInChatSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { TableDetail, TableList } from '@/features/tables/tables';
 
 export function TablesPage() {

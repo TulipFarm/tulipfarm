@@ -1,14 +1,12 @@
 import { useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ActionButton, ActionGroup, type ActionState } from '@/components/action-button';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, ActionGroup, type ButtonState } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/empty';
 import { ReadError } from '@/components/read-feedback';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
@@ -28,7 +26,7 @@ export function SlackDestinations({
   workspaceId: string;
   slug: string;
   teams: AgentContext['teams'];
-  administration: ActionState;
+  administration: ButtonState;
   addLimit: (id: string, permissions: Destination['permissions']) => void;
 }) {
   const api = useAgentSlackApi(workspaceId);
@@ -48,7 +46,7 @@ export function SlackDestinations({
     },
   );
   const update = (change: Partial<typeof blank>) => setDraft(current => ({ ...current, ...change }));
-  const available: ActionState =
+  const available: ButtonState =
     administration.kind === 'busy' || write.state.kind === 'sending'
       ? { kind: 'busy' }
       : administration.kind === 'blocked'
@@ -56,7 +54,7 @@ export function SlackDestinations({
         : write.state.kind === 'uncertain'
           ? { kind: 'blocked', reason: 'Check whether the last change went through first.' }
           : { kind: 'ready' };
-  const withTeam: ActionState =
+  const withTeam: ButtonState =
     available.kind !== 'ready' || draft.teamId
       ? available
       : {
@@ -157,11 +155,11 @@ export function SlackDestinations({
                       <p className="break-all text-sm text-muted-foreground">{item.channel}</p>
                     </div>
                     <div className="grid gap-3">
-                      <ActionButton
+                      <Button
                         state={available}
                         variant="outline"
                         onClick={() => addLimit(item.id, item.permissions)}
-                      >{`Add ${item.name} to execution limits`}</ActionButton>
+                      >{`Add ${item.name} to execution limits`}</Button>
                       <ActionGroup
                         state={withTeam}
                         actions={[{ label: 'Revoke destination', variant: 'outline', onClick: () => revoke(item) }]}
@@ -171,23 +169,21 @@ export function SlackDestinations({
                 ))}
               </ul>
             ) : (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>No Slack destinations</EmptyTitle>
-                  <EmptyDescription>
-                    Add a channel below. The bot and your linked account must already belong to it.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <StatePanel
+                kind="empty"
+                heading="h3"
+                title="No Slack destinations"
+                description="Add a channel below. The bot and your linked account must already belong to it."
+              />
             )}
-            <ActionButton
+            <Button
               state={state.refreshing ? { kind: 'busy' } : { kind: 'ready' }}
               variant="outline"
               pendingLabel="Reloading Slack destinations…"
               onClick={reload}
             >
               Reload Slack destinations
-            </ActionButton>
+            </Button>
             <Form disabled={available.kind !== 'ready'} onSubmit={add}>
               <div className="grid gap-5">
                 <Field

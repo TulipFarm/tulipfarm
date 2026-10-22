@@ -4,7 +4,6 @@ import { Add } from 'reicon-react/icons/Add';
 import { Database } from 'reicon-react/icons/Database';
 import { People } from 'reicon-react/icons/People';
 import { ShieldUser } from 'reicon-react/icons/ShieldUser';
-import { GrantsSample } from '@/components/empty-samples';
 import {
   type GovernanceSnapshot,
   type OwnMembership,
@@ -20,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { SettingsGroup, SettingsRow } from '@tulipfarm/sprout/settings-list';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { GrantsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { changeGovernance, governanceError, GovernanceRequestError } from '@/lib/governance';
 import { useGovernance } from '@/features/governance/queries';
 import { useGovernanceChanges } from '@/features/governance/changes';

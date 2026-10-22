@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActionButton } from '@/components/action-button';
+import { Button } from '@tulipfarm/sprout/button';
 import { FormSection } from '@tulipfarm/sprout/form';
 import {
   AlertDialog,
@@ -32,7 +32,7 @@ export function AgentDelete({
   if (concealed) return null;
   return (
     <FormSection title="Delete agent" description="Removes the agent and stops its active versions.">
-      <ActionButton
+      <Button
         variant="destructive"
         pendingLabel="Deleting agent…"
         onClick={() => setConfirming(true)}
@@ -45,7 +45,7 @@ export function AgentDelete({
         }
       >
         Delete agent
-      </ActionButton>
+      </Button>
       <WriteFeedback
         state={write.state}
         checkStatus={() => void refresh()}

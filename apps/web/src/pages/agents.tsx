@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { workspaceRoute, agentDetailRoute, newAgentRoute } from '@/router';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, jumpTo } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { AgentsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import {
   DataList,
@@ -17,7 +17,6 @@ import {
 } from '@/components/data-list';
 import { Add } from 'reicon-react/icons/Add';
 import { Users } from 'reicon-react/icons/Users';
-import { AgentsSample } from '@/components/empty-samples';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from '@/features/agents/api';
 import { AgentRead } from '@/features/agents/feedback';
 import { KeepsEditsContext, samePage } from '@/features/tables/feedback';
@@ -37,7 +36,6 @@ import { AgentSetup } from '@/features/agents/readiness';
 import { agentStatus, agentTabs, visibleTabs, type AgentTab, type ExecutionCheck } from '@/features/agents/setup';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
-import { jumpTo } from '@/components/action-button';
 import { AgentBuilder } from '@/features/agents/builder';
 import { useFeatureRead } from '@/lib/query';
 import type { BuilderInitial } from '@/features/agents/builder-draft';

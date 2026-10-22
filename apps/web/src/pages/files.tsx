@@ -24,7 +24,6 @@ import { Trash } from 'reicon-react/icons/Trash';
 import { Upload } from 'reicon-react/icons/Upload';
 import type { LibraryItem, LibraryPage, LibraryQuery } from '@tulipfarm/files/contracts';
 import { filesRoute, workspaceRoute } from '@/router';
-import { FilesSample } from '@/components/empty-samples';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import {
@@ -53,7 +52,7 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { SelectionSlot } from '@tulipfarm/sprout/selection-slot';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { FilesSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import {
   fileKeys,
   filesViewSchema,

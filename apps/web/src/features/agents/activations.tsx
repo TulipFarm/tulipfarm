@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActionButton, type ActionState } from '@/components/action-button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useTableWrite } from '@/features/tables/use-table-write';
@@ -50,7 +50,7 @@ export function AgentActivations({
   if (concealed) return null;
   const pendingId = write.state.kind === 'sending' ? write.state.input : null;
   const read = policy.state.kind === 'ready' ? policy.state : null;
-  function activateState(enabled: boolean): ActionState {
+  function activateState(enabled: boolean): ButtonState {
     if (read?.refreshing || activationWrite.state.kind === 'sending') return { kind: 'busy' };
     if (read?.error)
       return {
@@ -68,7 +68,7 @@ export function AgentActivations({
       return { kind: 'blocked', reason: 'Check whether the last activation went through first.' };
     return { kind: 'ready' };
   }
-  const revokeState = (activationId: string): ActionState =>
+  const revokeState = (activationId: string): ButtonState =>
     pendingId === activationId
       ? { kind: 'busy' }
       : pendingId
@@ -93,7 +93,7 @@ export function AgentActivations({
               <ScopeSummary workspaceId={workspaceId} scope={value.limits} />
             </p>
             <div id="agent-activate">
-              <ActionButton
+              <Button
                 state={activateState(value.enabled)}
                 pendingLabel={activationWrite.state.kind === 'sending' ? 'Activating…' : undefined}
                 onClick={() =>
@@ -105,7 +105,7 @@ export function AgentActivations({
                 }
               >
                 Activate saved instructions
-              </ActionButton>
+              </Button>
             </div>
             <Disclosure title="Technical identifiers">
               <p className="break-all text-sm">Definition {detail.definitionRevision}</p>
@@ -138,14 +138,14 @@ export function AgentActivations({
                   <p className="break-all text-sm">Revision {activation.revision}</p>
                   <p className="break-all text-sm">Activation {activation.id}</p>
                 </Disclosure>
-                <ActionButton
+                <Button
                   state={revokeState(activation.id)}
                   variant="outline"
                   pendingLabel="Revoking…"
                   onClick={() => void write.submit(activation.id)}
                 >
                   Revoke activation
-                </ActionButton>
+                </Button>
               </li>
             ))}
           </ul>

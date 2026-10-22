@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Button } from '@tulipfarm/sprout/button';
+import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
-import type { ActionState } from '@/components/action-button';
 import { webAgentDefinitionSchema } from './definition';
 import { agentDraftErrors, agentDraftFooterError } from './draft';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
@@ -123,7 +122,7 @@ export function AgentEditor({
     (status.state.kind === 'loading' || (status.state.kind === 'ready' && status.state.data.status === 'preparing'));
   const commandUnknown = !!command && (status.state.kind === 'error' || status.state.kind === 'unavailable');
   const changedElsewhere = !finished && baseRevision !== (detail?.savedRevision ?? null);
-  const save: ActionState =
+  const save: ButtonState =
     write.state.kind === 'sending' || commandPending
       ? { kind: 'busy' }
       : write.state.kind === 'uncertain' || commandUnknown

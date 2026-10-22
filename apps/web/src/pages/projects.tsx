@@ -49,13 +49,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { ProjectsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { useUrlDraft } from '@/features/tables/row-query';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
-import { ProjectsSample } from '@/components/empty-samples';
 import { UnsavedChanges, WriteFeedback } from '@/features/tables/feedback';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { confirmedRejection, type ReadState } from '@/features/tables/request-state';

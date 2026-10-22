@@ -406,7 +406,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
         };
         history[0].tools = [{ id: randomUUID(), tool: 'tables.list', status: 'running' }];
         await open();
-        const thinking = page.locator('[data-slot="thinking-state"]');
+        const thinking = page.getByText(/(Thinking|Planning next step|Drafting|Working|Searching) · Step \d/);
         await page
           .getByRole('region', { name: 'Conversation', exact: true })
           .getByRole('button', { name: /Working… Listing business tables/ })

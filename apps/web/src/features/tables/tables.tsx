@@ -4,7 +4,6 @@ import { Add } from 'reicon-react/icons/Add';
 import { Database } from 'reicon-react/icons/Database';
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { Edit } from 'reicon-react/icons/Edit';
-import { RecordsSample, TablesSample } from '@/components/empty-samples';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
@@ -19,7 +18,7 @@ import {
 } from '@tulipfarm/sprout/dropdown-menu';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { RecordsSample, TablesSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,

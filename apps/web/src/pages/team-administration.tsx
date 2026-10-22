@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { GovernanceSnapshot, Team } from '@tulipfarm/workspaces/governance-contracts';
 import { Add } from 'reicon-react/icons/Add';
 import { People } from 'reicon-react/icons/People';
-import { TeamsSample } from '@/components/empty-samples';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
@@ -13,7 +12,7 @@ import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { teamRoleSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { TeamsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import {
   Dialog,
   DialogContent,

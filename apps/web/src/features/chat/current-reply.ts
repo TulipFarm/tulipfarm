@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ChatDocument } from '@tulipfarm/conversations/rich-content';
-import type { ThinkingActivity } from '@/components/thinking-state';
+import type { SpinnerActivity } from '@tulipfarm/sprout/spinner';
 import type { ConversationMessage, SkillReference } from './conversation-api';
 import type { useConversationCommand } from './conversation-state';
 import type { ConversationStreamSnapshot } from './conversation-stream';
@@ -71,7 +71,7 @@ function thinkingOf(
   hasTools: boolean,
   progress?: { round: number },
 ) {
-  const state: { activity: ThinkingActivity; label: string } = !running
+  const state: { activity: SpinnerActivity; label: string } = !running
     ? { activity: 'working', label: hasTools || (progress?.round ?? 1) > 1 ? 'Planning next step' : 'Thinking' }
     : /\.(draft|propose)$/.test(running.tool)
       ? { activity: 'shaping', label: 'Drafting' }

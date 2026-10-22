@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@tulipfarm/sprout/dialog';
-import { Divider } from '@/components/divider';
+import { Separator } from '@tulipfarm/sprout/separator';
 import { MessageActions } from '@tulipfarm/sprout/message-actions';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
@@ -53,7 +53,7 @@ export function CompactionStatus({
   const usage = compactionUsage(part);
   const failed = part.state === 'failed';
   if (part.state === 'compacted' && part.handoffStatus !== 'pending' && part.handoffStatus !== 'failed') {
-    return <Divider>{part.trigger === 'manual' ? 'Compacted' : 'Auto compacted'}</Divider>;
+    return <Separator variant="fade">{part.trigger === 'manual' ? 'Compacted' : 'Auto compacted'}</Separator>;
   }
   if (part.trigger === 'inactivity') return <AutomaticRecap api={api} chatId={chatId} part={part} />;
   return (
@@ -112,7 +112,8 @@ function AutomaticRecap({
   });
   const state = read.state;
   const detail = state.kind === 'ready' && !state.error ? state.data : null;
-  if (detail?.state === 'compacted' && detail.handoff?.status === 'completed') return <Divider>Auto compacted</Divider>;
+  if (detail?.state === 'compacted' && detail.handoff?.status === 'completed')
+    return <Separator variant="fade">Auto compacted</Separator>;
   return (
     <section aria-label="Automatic chat recap" className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
       <p className="flex items-center gap-2 text-sm font-medium">

@@ -2,12 +2,12 @@
 name: TulipFarm web
 description: A quiet control room for business operations.
 colors:
-  primary: '#188038'
-  primary-foreground: '#ffffff'
-  primary-hover: '#146c2f'
-  primary-active: '#105825'
+  primary: 'light-dark(#188038, #75ce8e)'
+  primary-foreground: 'light-dark(#ffffff, #0e2615)'
+  primary-hover: 'light-dark(#146c2f, #8fd9a3)'
+  primary-active: 'light-dark(#105825, #a6e2b6)'
   primary-text: 'light-dark(#146c2f, #75ce8e)'
-  primary-subtle: 'light-dark(#e9f5ec, #1b3323)'
+  primary-subtle: 'light-dark(#edf7f0, #1b3323)'
   background: 'light-dark(#f9f9fa, #101113)'
   foreground: 'light-dark(#1b1b1b, #ffffff)'
   foreground-secondary: 'light-dark(#2f2f31, #e3e4e6)'
@@ -19,8 +19,8 @@ colors:
   secondary: 'light-dark(#f0f0f2, #28292e)'
   muted: 'light-dark(#f5f5f7, #202125)'
   muted-foreground: 'light-dark(#65666e, #a5a6af)'
-  accent: 'light-dark(#ebebed, #222327)'
-  border: 'light-dark(#f1f1f1, #1a1b1d)'
+  accent: 'light-dark(#f5f5f7, #202125)'
+  border: 'light-dark(#e8e8e8, #2d2e31)'
   input: 'light-dark(#dedee0, #26272b)'
   field: 'light-dark(#89898e, #727277)'
   ring: 'light-dark(#188038, #75ce8e)'
@@ -148,8 +148,12 @@ the main action within a region.
 
 The owner confirmed this description, the name "Action green", and the existing
 depth hierarchy on 29 September 2026. This snapshot was refreshed from code on
-1 October 2026 at revision `2e076cb2`. Tokens come from
-[`src/index.css`](src/index.css), component details from
+1 October 2026 at revision `2e076cb2`. Every color, the font, the type scale,
+motion and shadows come from Sprout's `tulipfarm` theme
+(`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
+with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
+onto `--sprout-*` tokens, and `test/sprout-theme.test.ts` fails if it keeps its
+own color values. Change colors in Sprout, not here. Component details come from
 the sprout library (`@tulipfarm/sprout`) and app-local
 [`src/components/`](src/components/), and shell composition from
 [`src/pages/workspace.tsx`](src/pages/workspace.tsx). This is a source inspection,
@@ -167,9 +171,10 @@ not a new browser verification. The broader implementation guide is
 
 ### Primary
 
-Action green supplies solid primary-button fills in both themes. The hover and
-active tokens darken the fill. Green text uses `primary-text`, which becomes lighter
-in dark mode. The subtle green background supports badges and selected text.
+Action green supplies solid primary-button fills. In light mode the fill is
+dark green with white text, and the hover and active tokens darken it. In dark
+mode the fill is light green with dark text, and hover and active lighten it.
+Green text uses `primary-text`, which becomes lighter in dark mode. The subtle green background supports badges and selected text.
 
 ### Neutral
 

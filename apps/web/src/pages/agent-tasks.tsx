@@ -10,9 +10,8 @@ import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { Checklist } from 'reicon-react/icons/Checklist';
-import { AgentTasksSample } from '@/components/empty-samples';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
-import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { AgentTasksSample, StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
 import {
   useTaskApi,
