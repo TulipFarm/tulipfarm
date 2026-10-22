@@ -41,7 +41,7 @@
       "files": [
         "apps/**/components/ui/**",
         "packages/**/components/ui/**",
-        "apps/web/src/components/{action-button,agent-avatar,bubble,calendar-board,calendar-event-list,chat-suggestions,data-grid,data-list,divider,drawer,empty,item,marker,reasoning,sidebar,table-pagination,thinking-state,tool-call,tulip-avatar,turnstile-challenge,workflow-diagram,worksheet-grid}.tsx",
+        "apps/web/src/components/{action-button,bubble,bud-launcher,calendar-board,calendar-event-list,chat-suggestions,data-grid,data-list,divider,drawer,empty,item,marker,reasoning,sidebar,table-pagination,thinking-state,tool-call,tulip-avatar,turnstile-challenge,workflow-diagram,worksheet-grid}.tsx",
         "apps/web/src/components/tulip-avatar/**"
       ],
       "rules": {

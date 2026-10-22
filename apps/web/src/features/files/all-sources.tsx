@@ -142,11 +142,13 @@ function Results({ label, results, empty }: { label: string; results: Result[]; 
             {result.icon}
           </span>
           <div className="min-w-0 flex-1">
-            <Button variant="link" size="task-link" nativeButton={false} role="link" render={result.link}>
-              <span className="min-w-0 truncate" title={result.name}>
-                {result.name}
-              </span>
-            </Button>
+            <div className="grid min-w-0 grid-cols-1">
+              <Button variant="link" size="md" nativeButton={false} role="link" render={result.link}>
+                <span className="min-w-0 flex-1 truncate text-start" title={result.name}>
+                  {result.name}
+                </span>
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">{result.context.filter(Boolean).join(' · ')}</p>
           </div>
         </li>

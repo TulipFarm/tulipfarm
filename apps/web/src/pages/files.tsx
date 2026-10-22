@@ -419,10 +419,10 @@ function Library({
             <nav aria-label="Files sections">
               <ul className="space-y-0.5">
                 {Object.entries(views).map(([value, label]) => (
-                  <li key={value}>
+                  <li key={value} className="grid">
                     <Button
                       variant={view === value ? 'secondary' : 'ghost'}
-                      size="nav"
+                      size="md"
                       nativeButton={false}
                       role="link"
                       render={
@@ -434,7 +434,7 @@ function Library({
                         />
                       }
                     >
-                      {label}
+                      <span className="flex-1 text-start">{label}</span>
                     </Button>
                   </li>
                 ))}

@@ -23,7 +23,7 @@ export function ActionButton({
   onClick?: (() => void) | undefined;
   type?: 'button' | 'submit' | undefined;
   variant?: ActionVariant | undefined;
-  size?: 'default' | 'sm' | 'lg' | undefined;
+  size?: 'md' | 'sm' | 'lg' | undefined;
 }) {
   return (
     <Button

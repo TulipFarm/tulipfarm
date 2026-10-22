@@ -69,8 +69,6 @@ try {
         return route.fulfill({ json: { status: true } });
       }
       if (url.origin === origin && !path.startsWith('/v1/')) return route.continue();
-      if (url.origin === 'https://avatars.tulipfarm.ai' && route.request().resourceType() === 'image')
-        return route.abort();
       unexpectedRequests.push(url.origin + path);
       return route.abort();
     });

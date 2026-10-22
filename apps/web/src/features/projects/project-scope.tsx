@@ -101,7 +101,7 @@ export function ProjectScopeSelect({
             id={id}
             type="button"
             variant={privateBadge ? 'ghost' : badge ? 'scope' : 'outline'}
-            size={badge ? 'badge' : 'default'}
+            size={badge ? 'sm' : 'md'}
             aria-label={`${label}: ${name}`}
             title={privateBadge ? 'Personal chat. Choose a project to share it.' : name}
             disabled={disabled}
@@ -199,18 +199,18 @@ export function ProjectScopeSelect({
           )}
         </Command>
         {onNewProject && (
-          <div className="border-t p-1">
+          <div className="grid border-t p-1">
             <Button
               type="button"
               variant="ghost"
-              size="nav"
+              size="md"
               onClick={() => {
                 setOpen(false);
                 onNewProject();
               }}
             >
               <Add size={16} aria-hidden="true" />
-              New project
+              <span className="flex-1 text-start">New project</span>
             </Button>
           </div>
         )}

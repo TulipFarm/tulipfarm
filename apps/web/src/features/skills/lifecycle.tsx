@@ -285,17 +285,17 @@ function BlockingAgents({ deletion, workspaceSlug }: { deletion: WorkspaceSkillD
       {deletion.blockers.length > 0 && (
         <ul aria-label="Agents that use this skill" className="divide-y rounded-lg border">
           {deletion.blockers.map(blocker => (
-            <li key={blocker.agentId} className="min-w-0 px-3 py-2">
+            <li key={blocker.agentId} className="grid min-w-0 grid-cols-1 px-3 py-2">
               <Button
                 variant="link"
-                size="task-link"
+                size="md"
                 role="link"
                 nativeButton={false}
                 render={
                   <Link to="/$workspaceSlug/agents/$agentId" params={{ workspaceSlug, agentId: blocker.agentId }} />
                 }
               >
-                <span className="min-w-0 wrap-anywhere">{blocker.name ?? 'Unnamed agent'}</span>
+                <span className="min-w-0 flex-1 truncate text-start">{blocker.name ?? 'Unnamed agent'}</span>
               </Button>
               {blocker.uses.map(use => (
                 <p key={use} className="text-xs text-muted-foreground">

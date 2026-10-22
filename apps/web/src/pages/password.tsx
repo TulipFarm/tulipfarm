@@ -182,21 +182,21 @@ export function ResetPasswordPage() {
       footer={<BackToLogin />}
     >
       {invalid ? (
-        <Button
-          size="onboarding"
-          nativeButton={false}
-          render={<Link to="/login/forgot-password" search={{ redirect: currentRedirect() }} />}
-        >
-          Request a new link
-        </Button>
+        <div className="grid">
+          <Button
+            size="lg"
+            nativeButton={false}
+            render={<Link to="/login/forgot-password" search={{ redirect: currentRedirect() }} />}
+          >
+            Request a new link
+          </Button>
+        </div>
       ) : done ? (
-        <Button
-          size="onboarding"
-          nativeButton={false}
-          render={<Link to="/login" search={{ redirect: currentRedirect() }} />}
-        >
-          Log in
-        </Button>
+        <div className="grid">
+          <Button size="lg" nativeButton={false} render={<Link to="/login" search={{ redirect: currentRedirect() }} />}>
+            Log in
+          </Button>
+        </div>
       ) : (
         <NewPasswordForm token={token} onDone={() => setDone(true)} />
       )}

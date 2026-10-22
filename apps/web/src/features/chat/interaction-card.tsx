@@ -120,7 +120,7 @@ export function InteractionCard({
       {kind === 'approval' && pending && interaction && (
         <div className="min-w-0">
           <Collapsible>
-            <CollapsibleTrigger render={<Button variant="ghost" size="xs" />}>Details</CollapsibleTrigger>
+            <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>Details</CollapsibleTrigger>
             <CollapsibleContent>
               <p className="max-w-sm py-1">
                 Request revision {interaction.request.revision}. Expires{' '}
@@ -413,7 +413,7 @@ function InformationCard({
               {request.answerSchema.kind === 'choices' && request.answerSchema.allowText && (
                 <Button
                   variant="ghost"
-                  size="xs"
+                  size="sm"
                   disabled={locked}
                   aria-expanded={typed}
                   aria-controls={`${id}-custom`}
@@ -432,7 +432,7 @@ function InformationCard({
           }}
           error={error ? 'Choose or enter an answer to continue.' : undefined}
         >
-          <Button variant="ghost" size="xs" disabled={locked} onClick={cancel}>
+          <Button variant="ghost" size="sm" disabled={locked} onClick={cancel}>
             Skip
           </Button>
         </FormFooter>

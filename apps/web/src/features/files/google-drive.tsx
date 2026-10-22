@@ -666,11 +666,13 @@ function Listing({
                     <GoogleFileIcon file={file} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <Button variant="link" size="task-link" nativeButton={false} role="link" render={link(file)}>
-                      <span className="min-w-0 truncate" title={file.name}>
-                        {file.name}
-                      </span>
-                    </Button>
+                    <div className="grid min-w-0 grid-cols-1">
+                      <Button variant="link" size="md" nativeButton={false} role="link" render={link(file)}>
+                        <span className="min-w-0 flex-1 truncate text-start" title={file.name}>
+                          {file.name}
+                        </span>
+                      </Button>
+                    </div>
                     <p className="truncate text-xs text-muted-foreground">
                       {type}
                       <span className="@2xl:hidden">

@@ -247,7 +247,7 @@ export function BuilderSlack({
                   </Badge>
                   <Button
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     disabled={disabled || checking}
                     onClick={() => void check(item.channel, item.name)}
                   >

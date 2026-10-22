@@ -208,7 +208,7 @@ export function TableList({
                       <TableCell>
                         <Button
                           variant="link"
-                          size="table-link"
+                          size="sm"
                           nativeButton={false}
                           render={
                             <Link to="/$workspaceSlug/tables/$tableId" params={{ workspaceSlug, tableId: table.id }} />

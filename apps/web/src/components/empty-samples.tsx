@@ -12,7 +12,7 @@ import { Plug } from 'reicon-react/icons/Plug';
 import { ShieldUser } from 'reicon-react/icons/ShieldUser';
 import { User } from 'reicon-react/icons/User';
 import { Users } from 'reicon-react/icons/Users';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
@@ -259,7 +259,7 @@ export function WorkflowsSample() {
   return (
     <SampleWindow icon={BranchDown} trail={['Workflows']}>
       <SampleTable
-        columns={[{ label: 'Workflow', size: 'wide' }, { label: 'Trigger' }, { label: 'Status', size: 'narrow' }]}
+        columns={[{ label: 'Workflow', size: 'lg' }, { label: 'Trigger' }, { label: 'Status', size: 'sm' }]}
         rows={[
           [
             <>
@@ -312,9 +312,9 @@ export function TablesSample() {
     <SampleWindow icon={Database} trail={['Tables']}>
       <SampleTable
         columns={[
-          { label: 'Table', size: 'wide' },
-          { label: 'Fields', size: 'narrow' },
-          { label: 'Rows', size: 'narrow' },
+          { label: 'Table', size: 'lg' },
+          { label: 'Fields', size: 'sm' },
+          { label: 'Rows', size: 'sm' },
         ]}
         rows={[
           [
@@ -374,8 +374,8 @@ export function TablesSample() {
 export function RecordsSample({ table, fields }: { table: string; fields: readonly string[] }) {
   const shown = fields.slice(0, 3);
   const columns: SampleColumn[] = shown.length
-    ? shown.map((label, index) => ({ label, size: index === 0 ? 'wide' : 'default' }))
-    : [{ label: 'Row', size: 'wide' }];
+    ? shown.map((label, index) => ({ label, size: index === 0 ? 'lg' : 'md' }))
+    : [{ label: 'Row', size: 'lg' }];
   const rows = [
     ['blue', 'lg', 'md'],
     ['green', 'md', 'sm'],
@@ -418,7 +418,7 @@ export function CreateInChatSample() {
         </p>
         <div className="max-w-80 rounded-lg border">
           <SampleTable
-            columns={[{ label: 'Field', size: 'wide' }, { label: 'Type' }]}
+            columns={[{ label: 'Field', size: 'lg' }, { label: 'Type' }]}
             rows={[
               [<SampleText tone="strong">Name</SampleText>, <SampleText tone="muted">Text</SampleText>],
               [<SampleText tone="strong">Contact email</SampleText>, <SampleText tone="muted">Email</SampleText>],
@@ -512,7 +512,7 @@ export function MembersSample() {
   return (
     <SampleWindow icon={User} trail={['Settings', 'Members']}>
       <SampleTable
-        columns={[{ label: 'Member', size: 'wide' }, { label: 'Role', size: 'narrow' }, { label: 'Teams' }]}
+        columns={[{ label: 'Member', size: 'lg' }, { label: 'Role', size: 'sm' }, { label: 'Teams' }]}
         rows={[
           [
             <>
@@ -595,7 +595,7 @@ export function InvitationsSample() {
   return (
     <SampleWindow icon={Envelope} trail={['Settings', 'Members', 'Invitations']}>
       <SampleTable
-        columns={[{ label: 'Email', size: 'wide' }, { label: 'Status', size: 'narrow' }, { label: 'Email delivery' }]}
+        columns={[{ label: 'Email', size: 'lg' }, { label: 'Status', size: 'sm' }, { label: 'Email delivery' }]}
         rows={[
           [
             <SampleText tone="link">maya@northwind.co</SampleText>,
@@ -628,9 +628,9 @@ export function GrantsSample() {
     <SampleWindow icon={ShieldUser} trail={['Settings', 'Table access']} tabs={['Sales', 'Finance', 'Support']}>
       <SampleTable
         columns={[
-          { label: 'Table', size: 'wide' },
-          { label: 'Read', size: 'narrow' },
-          { label: 'Edit', size: 'narrow' },
+          { label: 'Table', size: 'lg' },
+          { label: 'Read', size: 'sm' },
+          { label: 'Edit', size: 'sm' },
         ]}
         rows={[
           [

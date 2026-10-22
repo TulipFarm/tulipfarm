@@ -255,7 +255,7 @@ export function UseInChatDialog({
             <li key={file.id} className="space-y-2 px-3 py-2.5">
               <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
                 <FileTypeIcon name={file.name} mediaType={file.mediaType ?? ''} />
-                <span className="min-w-0 truncate" title={file.name}>
+                <span className="min-w-0 flex-1 truncate text-start" title={file.name}>
                   {file.name}
                 </span>
               </p>
@@ -459,10 +459,10 @@ function Destinations({
     list = (
       <ul aria-label="Chats you can post in" className="space-y-0.5">
         {(privateOnly ? read.state.data.filter(chat => !chat.projectId) : read.state.data).map(chat => (
-          <li key={chat.id}>
-            <Button variant="ghost" size="nav" onClick={() => choose(chat)}>
+          <li key={chat.id} className="grid">
+            <Button variant="ghost" size="md" onClick={() => choose(chat)}>
               <ChatIcon size={16} aria-hidden="true" />
-              <span className="min-w-0 truncate" title={chat.title}>
+              <span className="min-w-0 flex-1 truncate text-start" title={chat.title}>
                 {chat.title}
               </span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{chat.projectName ?? 'Private'}</span>
@@ -553,10 +553,10 @@ function TaskDestinations({
     list = (
       <ul aria-label="Agent tasks you can message" className="space-y-0.5">
         {read.state.data.map(task => (
-          <li key={task.id}>
-            <Button variant="ghost" size="nav" onClick={() => choose(task)}>
+          <li key={task.id} className="grid">
+            <Button variant="ghost" size="md" onClick={() => choose(task)}>
               <Checklist size={16} aria-hidden="true" />
-              <span className="min-w-0 truncate" title={task.title}>
+              <span className="min-w-0 flex-1 truncate text-start" title={task.title}>
                 {task.title}
               </span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground">{taskLabels[task.status] ?? ''}</span>

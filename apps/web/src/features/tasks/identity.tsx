@@ -32,15 +32,15 @@ export function TaskIdentity({ workspaceId, slug, task }: { workspaceId: string;
       </div>
     );
   return (
-    <div className="min-w-0 space-y-1">
+    <div className="grid min-w-0 grid-cols-1 gap-1">
       <Button
         variant="link"
-        size="task-link"
+        size="md"
         role="link"
         nativeButton={false}
         render={<Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug: slug, taskId: task.id }} />}
       >
-        <span className="line-clamp-2 min-w-0 whitespace-normal text-left break-words">{read.state.data.title}</span>
+        <span className="min-w-0 flex-1 truncate text-start">{read.state.data.title}</span>
       </Button>
       <p className="break-words text-sm text-muted-foreground">{read.state.data.agent}</p>
       {read.state.error && (

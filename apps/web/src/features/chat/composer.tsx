@@ -162,7 +162,7 @@ export function Composer({
           {attachments && <InputGroupAddon align="block-start">{attachments}</InputGroupAddon>}
           <RichTextEditor
             key={compact ? 'compact' : 'full'}
-            size={compact ? 'compact' : 'default'}
+            size={compact ? 'sm' : 'md'}
             condensed={condensed}
             ref={inputRef}
             placeholder={
@@ -198,7 +198,7 @@ export function Composer({
                         <TooltipTrigger
                           render={
                             <InputGroupButton
-                              size="icon-sm"
+                              size="icon"
                               variant="ghost"
                               aria-label="Attach files"
                               disabled={disabled || sending}
@@ -216,7 +216,7 @@ export function Composer({
                         <TooltipTrigger
                           render={
                             <InputGroupButton
-                              size="sm"
+                              size="md"
                               variant="ghost"
                               aria-label="Use a skill"
                               disabled={disabled || sending}
@@ -277,7 +277,7 @@ export function Composer({
                       <TooltipTrigger
                         render={
                           <InputGroupButton
-                            size="icon-sm"
+                            size="icon"
                             variant="default"
                             aria-label="Stop reply"
                             disabled={disabled}
@@ -295,7 +295,7 @@ export function Composer({
                         render={
                           <InputGroupButton
                             type="submit"
-                            size="icon-sm"
+                            size="icon"
                             variant={canSend ? 'default' : 'secondary'}
                             aria-label="Send message"
                             aria-busy={sending}
@@ -362,7 +362,7 @@ function PersonaPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <InputGroupButton size="sm" variant="ghost" disabled={disabled} aria-label={`Mode or agent: ${label}`} />
+          <InputGroupButton size="md" variant="ghost" disabled={disabled} aria-label={`Mode or agent: ${label}`} />
         }
       >
         <span className={`flex ${tone}`}>
@@ -440,7 +440,7 @@ function ModelPicker({
             <PopoverTrigger
               render={
                 <InputGroupButton
-                  size="sm"
+                  size="md"
                   variant="ghost"
                   disabled={disabled || models.length === 0}
                   aria-label={`Model: ${model?.label ?? 'Choose model'}${showEffort ? `, ${effortLabel[effort]} effort` : ''}`}
@@ -543,7 +543,7 @@ function FileChoices({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<InputGroupButton size="sm" variant="ghost" aria-label="Add a file" disabled={disabled} />}
+        render={<InputGroupButton size="md" variant="ghost" aria-label="Add a file" disabled={disabled} />}
       >
         <Paperclip size={16} aria-hidden="true" />
         <span className="hidden sm:inline">Files</span>

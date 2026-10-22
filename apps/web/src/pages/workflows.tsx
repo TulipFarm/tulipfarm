@@ -426,7 +426,7 @@ function WorkflowPage({
                     {shelfWorkflows.filter(matches).map(workflow => (
                       <DataListRow key={workflow.id}>
                         <DataListCell>
-                          <Button variant="link" size="task-link" disabled={blocked} onClick={() => choose(workflow)}>
+                          <Button variant="link" size="md" disabled={blocked} onClick={() => choose(workflow)}>
                             {workflow.definition.name}
                           </Button>
                         </DataListCell>
@@ -864,7 +864,7 @@ function WorkflowPage({
                           <Button
                             role="link"
                             variant="link"
-                            size="xs"
+                            size="sm"
                             nativeButton={false}
                             render={
                               <Link

@@ -239,7 +239,7 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
               <InputGroupAddon align="inline-end">
                 {(query || search) && (
                   <InputGroupButton
-                    size="icon-xs"
+                    size="icon"
                     aria-label="Clear search"
                     onClick={() => {
                       setQuery('');

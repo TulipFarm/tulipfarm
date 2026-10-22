@@ -21,7 +21,7 @@ export function PendingGoogleActions({
     <nav aria-label="Pending Google actions" className="flex flex-wrap justify-end border-b px-4 py-1">
       <Button
         variant="link"
-        size="task-link"
+        size="md"
         nativeButton={false}
         render={
           <Link

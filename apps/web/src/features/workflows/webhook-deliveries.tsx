@@ -69,7 +69,7 @@ export function WebhookDeliveries({
       {testRun && (
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm">Your last test event was admitted as a run.</p>
-          <Button variant="link" size="xs" onClick={() => onOpenRun(testRun)}>
+          <Button variant="link" size="sm" onClick={() => onOpenRun(testRun)}>
             Open test run
           </Button>
         </div>
@@ -147,7 +147,7 @@ export function WebhookDeliveries({
                     <DataListSecondary>{delivery.requestId ?? 'None sent'}</DataListSecondary>
                     <DataListCell>
                       {runId ? (
-                        <Button variant="link" size="task-link" onClick={() => onOpenRun(runId)}>
+                        <Button variant="link" size="md" onClick={() => onOpenRun(runId)}>
                           Open run
                         </Button>
                       ) : (

@@ -274,7 +274,7 @@ function Rail({
   return (
     <Button
       variant={active ? 'secondary' : 'ghost'}
-      size="nav"
+      size="md"
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
     >

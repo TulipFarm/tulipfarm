@@ -755,7 +755,7 @@ function LastRun({ run, slug }: { run: Schedule['lastRun']; slug: string }) {
       Last task: {taskStatusLabels[run.status]}
       <Button
         variant="link"
-        size="xs"
+        size="sm"
         role="link"
         nativeButton={false}
         render={<Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug: slug, taskId: run.taskId }} />}
