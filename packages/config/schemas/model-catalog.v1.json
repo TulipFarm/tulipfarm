@@ -11,6 +11,15 @@
       "const": 1,
       "description": "Catalog format version"
     },
+    "missingKeys": {
+      "default": "fail",
+      "description": "When no route of a model has its API key set: \"fail\" stops startup; \"skip\" leaves the model out. With \"skip\", a skipped default passes to the first remaining selectable, unpaused model, and a skipped role falls back as if no model had it. Startup fails when no model remains.",
+      "type": "string",
+      "enum": [
+        "fail",
+        "skip"
+      ]
+    },
     "providers": {
       "default": {},
       "description": "Provider accounts. Only needed to use other variables than a built-in provider's defaults.",
@@ -99,7 +108,7 @@
               "additionalProperties": false,
               "description": "One provider that serves the model"
             },
-            "description": "Where the model runs, in order of preference. The first route whose provider has its API key set serves it; startup fails when none has."
+            "description": "Where the model runs, in order of preference. The first route whose provider has its API key set serves it; see `missingKeys` for when none has."
           },
           "default": {
             "default": false,

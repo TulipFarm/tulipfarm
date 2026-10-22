@@ -35,6 +35,7 @@ test('the example catalog is valid and names the published schema', () => {
 test('omitted fields take their defaults', () => {
   const parsed = modelCatalogFileSchema.parse(catalog([model(), model({ id: 'claude-opus', default: undefined })]));
   assert.deepEqual(parsed.providers, {});
+  assert.equal(parsed.missingKeys, 'fail');
   assert.deepEqual(
     parsed.models.map(entry => [entry.default, entry.paused, entry.selectable, entry.roles]),
     [
@@ -155,6 +156,8 @@ test('unknown fields and versions are rejected', () => {
   rejects({ ...catalog([model()]), families: [] }, /Unrecognized key/);
   rejects(catalog([model({ enabled: true })]), /^models\.0: Unrecognized key/);
   rejects({ ...catalog([model()]), version: 2 }, /^version: /);
+  rejects({ ...catalog([model()]), missingKeys: 'ignore' }, /^missingKeys: /);
+  assert.deepEqual(problems({ ...catalog([model()]), missingKeys: 'skip' }), []);
   rejects(catalog([]), /^models: /);
 });
 

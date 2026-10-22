@@ -113,7 +113,7 @@ const modelSchema = z
       .array(routeSchema)
       .min(1)
       .describe(
-        'Where the model runs, in order of preference. The first route whose provider has its API key set serves it; startup fails when none has.',
+        'Where the model runs, in order of preference. The first route whose provider has its API key set serves it; see `missingKeys` for when none has.',
       ),
     default: z
       .boolean()
@@ -154,6 +154,12 @@ const catalogShape = z
   .strictObject({
     $schema: z.string().optional().describe(`Schema URL for editors: ${modelCatalogSchemaUrl}`),
     version: z.literal(1).describe('Catalog format version'),
+    missingKeys: z
+      .enum(['fail', 'skip'])
+      .default('fail')
+      .describe(
+        'When no route of a model has its API key set: "fail" stops startup; "skip" leaves the model out. With "skip", a skipped default passes to the first remaining selectable, unpaused model, and a skipped role falls back as if no model had it. Startup fails when no model remains.',
+      ),
     providers: z
       .record(z.string().regex(/^[a-z][a-z0-9-]{0,49}$/), providerSchema)
       .default({})
