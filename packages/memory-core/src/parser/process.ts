@@ -191,13 +191,19 @@ function execute(
   });
 }
 
+export function residentBytesFromProcStatus(status: string): number {
+  const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status);
+  if (match?.[1]) return Number(match[1]) * 1024;
+  // An exiting process releases its address space before it becomes a zombie, so VmRSS disappears first.
+  if (/^State:\s+\S/m.test(status)) return 0;
+  throw new Error('Parser memory is unavailable');
+}
+
 async function residentBytes(pid: number): Promise<number> {
   if (process.platform === 'linux') {
-    const status = await readFile(`/proc/${pid}/status`, { encoding: 'utf8', signal: AbortSignal.timeout(1000) });
-    const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status);
-    if (match?.[1]) return Number(match[1]) * 1024;
-    if (/^State:\s+Z/m.test(status)) return 0;
-    throw new Error('Parser memory is unavailable');
+    return residentBytesFromProcStatus(
+      await readFile(`/proc/${pid}/status`, { encoding: 'utf8', signal: AbortSignal.timeout(1000) }),
+    );
   }
   return new Promise((resolve, reject) => {
     execFile(

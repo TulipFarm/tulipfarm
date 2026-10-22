@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { runParserProcess } from '../dist/internal/parser/process.js';
+import { residentBytesFromProcStatus, runParserProcess } from '../dist/internal/parser/process.js';
 import { parseKnowledgeDocument, KnowledgeParseError, KnowledgeParserBusy } from '../dist/parser.js';
 
 const worker = new URL('./fixtures/parser-process.mjs', import.meta.url);
@@ -63,6 +63,13 @@ test('validates process output', async () => {
     processFailure('invalid-output', true)(error);
     return failure('malformed')(error);
   });
+});
+
+test('memory monitor reads Linux RSS and treats an exiting process without an address space as empty', () => {
+  assert.equal(residentBytesFromProcStatus('Name:\tnode\nState:\tR (running)\nVmRSS:\t   2048 kB\n'), 2048 * 1024);
+  assert.equal(residentBytesFromProcStatus('Name:\tnode\nState:\tZ (zombie)\n'), 0);
+  assert.equal(residentBytesFromProcStatus('Name:\tnode\nState:\tR (running)\nThreads:\t1\n'), 0);
+  assert.throws(() => residentBytesFromProcStatus(''), /Parser memory is unavailable/);
 });
 
 test('memory monitor failure kills and reaps the child without exposing its error', async () => {
