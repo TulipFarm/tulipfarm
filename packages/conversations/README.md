@@ -72,6 +72,20 @@ After a send commits, the API runs the same dispatch scoped to that chat, withou
 
 The ordinary worker registers `conversationReply` and `processConversationReply`. The workflow runs one activity with a 90-second timeout and no SDK activity retry; persisted state owns retry attempts. Arguments contain only UUIDs and generation. Activity results contain only bounded statuses. The activity replaces thrown diagnostics with `conversation-reply-unavailable`. No private text enters workflow history. API and worker Docker build inputs include this package.
 
+When a reply reaches a final state (completed, failed, blocked or cancelled), the worker records `cloud_chat_reply_duration` (unit `s`; `cloud_chat_reply_duration_seconds_*` in Prometheus) once, with one observation per `segment`, labelled `outcome` (`success`, `failed` or `cancelled`; blocked counts as failed) and `tools` (`yes` when a real tool ran; `present.choice` and plan-only steps don't count), plus the service dimensions. Buckets run from 0.1 to 300 seconds.
+
+| Segment      | Meaning                                                                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `total`      | `timing_started_at` to `timing_finished_at`, minus `timing_human_wait_seconds`, `timing_external_wait_seconds` and `timing_inactive_seconds` |
+| `first_text` | `timing_first_text_seconds`; skipped when a failed reply showed no text                                                                      |
+| `queue`      | `timing_started_at` to the first claim, capped at `total`                                                                                    |
+| `model`      | Wall time inside provider calls of every purpose                                                                                             |
+| `tools`      | Wall time inside real tool execution, excluding model calls the tool makes                                                                   |
+| `db`         | Wall time inside reserve, settle, credit locks and `storage-*` phases; nested phases count once                                              |
+| `overhead`   | `max(0, total − queue − model − tools)`: our own time, including `db` and time re-queued between retries                                     |
+
+Sums are wall-time unions, so nested or concurrent calls of one kind count once. Retried attempts on the same worker add their sums to the final record; an attempt that runs on another worker loses its sums. The same values, the attempt count and the trace ID go on one `chat.reply.summary` log line per reply. The `cloud_chat_latency_window_*` gauges remain a 24-hour snapshot published by each API instance.
+
 The API dispatcher also expires information requests, invokes the protected approval resolver for due requests, and cleans expired unbound attachments when the byte adapter is configured. The persistent browser UI uses bounded polling and explicit same-command recovery.
 
 Messages, parts, and command receipts are insert-only for the ordinary runtime. Ownership and source identities have no update grants. The trusted runtime's database login still spans a workspace. Human privacy is enforced by the domain service, not per-human PostgreSQL roles.

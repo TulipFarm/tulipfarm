@@ -94,6 +94,15 @@ const spanAttributes = new Set([
   'chat.discovery.loaded',
   'chat.discovery.added',
   'chat.discovery.matched',
+  'chat.reply.tools',
+  'chat.reply.attempts',
+  'chat.reply.total_seconds',
+  'chat.reply.first_text_seconds',
+  'chat.reply.queue_seconds',
+  'chat.reply.model_seconds',
+  'chat.reply.tools_seconds',
+  'chat.reply.db_seconds',
+  'chat.reply.overhead_seconds',
   'provider',
   'status_class',
   'job',
@@ -525,6 +534,13 @@ export function startTelemetry(build: BuildInfo) {
           options: { boundaries: [0.05, 0.25, 0.5, 1, 2.5, 10, 60] },
         },
       })),
+      {
+        instrumentName: 'cloud_chat_reply_duration',
+        aggregation: {
+          type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
+          options: { boundaries: [...chatReplyBuckets] },
+        },
+      },
       {
         instrumentName: 'cloud_chat_request_size',
         aggregation: {
@@ -1098,12 +1114,208 @@ export type ChatDetailPhase =
   | 'storage-reset'
   | 'credit-account-lock'
   | 'credit-usage-lock';
-type ChatMeasurement = { counter: { value: number }; purpose: ChatModelPurpose | 'turn'; sequence?: number };
+type ChatReplyCategory = 'model' | 'tools' | 'db';
+type ChatReplySums = Record<ChatReplyCategory, number> & { tools_used: boolean };
+/** Final turn timing read from tf_conversation_turns after the transition that ended the reply. */
+export type ChatReplyFinal = {
+  status: 'completed' | 'failed' | 'blocked' | 'cancelled';
+  totalSeconds: number;
+  queueSeconds: number;
+  firstTextSeconds: number | null;
+  attempts: number;
+};
+type ChatReplyClock = {
+  key: string | undefined;
+  since: number;
+  active: Record<ChatReplyCategory, number>;
+  sums: ChatReplySums;
+  final?: ChatReplyFinal | undefined;
+};
+type ChatMeasurement = {
+  counter: { value: number };
+  purpose: ChatModelPurpose | 'turn';
+  sequence?: number;
+  reply: ChatReplyClock;
+};
 const chatMeasurement = new AsyncLocalStorage<ChatMeasurement>();
+export const chatReplySegments = ['total', 'first_text', 'queue', 'model', 'tools', 'db', 'overhead'] as const;
+export const chatReplyBuckets = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 12, 20, 30, 60, 120, 300] as const;
 
-export function withChatMeasurements<T>(call: () => Promise<T>): Promise<T> {
+/**
+ * Sums are a union of intervals: nested or concurrent phases of one category count once, and tool time excludes model
+ * calls made inside a tool, so `model` and `tools` never overlap. Database time may overlap tools.
+ */
+function tickChatReply(clock: ChatReplyClock) {
+  const now = performance.now();
+  const seconds = (now - clock.since) / 1000;
+  clock.since = now;
+  if (clock.active.model > 0) clock.sums.model += seconds;
+  else if (clock.active.tools > 0) clock.sums.tools += seconds;
+  if (clock.active.db > 0) clock.sums.db += seconds;
+}
+
+async function inChatReplyCategory<T>(category: ChatReplyCategory | undefined, call: () => Promise<T>) {
+  const clock = chatMeasurement.getStore()?.reply;
+  if (!clock || !category) return call();
+  tickChatReply(clock);
+  clock.active[category]++;
+  try {
+    return await call();
+  } finally {
+    tickChatReply(clock);
+    clock.active[category]--;
+  }
+}
+
+function chatReplyCategory(phase: ChatDetailPhase): ChatReplyCategory | undefined {
+  if (phase === 'provider') return 'model';
+  if (phase === 'reserve' || phase === 'settle' || phase.startsWith('storage-') || phase.startsWith('credit-'))
+    return 'db';
+  return undefined;
+}
+
+// A retried attempt usually lands on the same worker; carry its sums so the final record covers every attempt.
+const chatReplyCarry = new Map<string, ChatReplySums & { at: number }>();
+const chatReplyCarryLimit = 1000;
+const chatReplyCarryMs = 60 * 60 * 1000;
+
+function carryChatReply(key: string, sums: ChatReplySums) {
+  const now = Date.now();
+  for (const [stored, value] of chatReplyCarry) {
+    if (now - value.at <= chatReplyCarryMs && chatReplyCarry.size < chatReplyCarryLimit) break;
+    chatReplyCarry.delete(stored);
+  }
+  chatReplyCarry.delete(key);
+  chatReplyCarry.set(key, { ...sums, at: now });
+}
+
+function finishChatReply(clock: ChatReplyClock) {
+  tickChatReply(clock);
+  const carried = clock.key === undefined ? undefined : chatReplyCarry.get(clock.key);
+  const sums: ChatReplySums = {
+    model: clock.sums.model + (carried?.model ?? 0),
+    tools: clock.sums.tools + (carried?.tools ?? 0),
+    db: clock.sums.db + (carried?.db ?? 0),
+    tools_used: clock.sums.tools_used || Boolean(carried?.tools_used),
+  };
+  if (!clock.final) {
+    if (clock.key !== undefined && (sums.model || sums.tools || sums.db || sums.tools_used))
+      carryChatReply(clock.key, sums);
+    return;
+  }
+  if (clock.key !== undefined) chatReplyCarry.delete(clock.key);
+  const { status, totalSeconds: total, queueSeconds: queue, firstTextSeconds, attempts } = clock.final;
+  const outcome = status === 'completed' ? 'success' : status === 'cancelled' ? 'cancelled' : 'failed';
+  const tools = sums.tools_used ? 'yes' : 'no';
+  const values: Partial<Record<(typeof chatReplySegments)[number], number>> = {
+    total,
+    ...(firstTextSeconds === null ? {} : { first_text: firstTextSeconds }),
+    queue,
+    model: sums.model,
+    tools: sums.tools,
+    db: sums.db,
+    overhead: Math.max(0, total - queue - sums.model - sums.tools),
+  };
+  const histogram = metrics.getMeter(scope).createHistogram('cloud_chat_reply_duration', {
+    unit: 's',
+    description: 'Chat reply time by segment, recorded once per reply at its final state',
+    advice: { explicitBucketBoundaries: [...chatReplyBuckets] },
+  });
+  const fields: Attributes = {};
+  for (const segment of chatReplySegments) {
+    const value = values[segment];
+    if (value === undefined) continue;
+    histogram.record(value, { ...dimensions, segment, outcome, tools });
+    fields[`chat.reply.${segment}_seconds`] = value;
+  }
+  log('info', 'activity', 'call_completed', {
+    operation: 'chat.reply.summary',
+    outcome,
+    'chat.reply.tools': tools,
+    'chat.reply.attempts': attempts,
+    ...fields,
+  });
+}
+
+/**
+ * Measures one reply invocation. `reply` is an in-process key, such as the turn ID, that joins retried attempts; it is
+ * never exported. The reply duration is recorded only after `noteChatReplyFinal`.
+ */
+export async function withChatMeasurements<T>(call: () => Promise<T>, reply?: string): Promise<T> {
   if (chatMeasurement.getStore()) return call();
-  return chatMeasurement.run({ counter: { value: 0 }, purpose: 'turn' }, call);
+  const clock: ChatReplyClock = {
+    key: reply,
+    since: performance.now(),
+    active: { model: 0, tools: 0, db: 0 },
+    sums: { model: 0, tools: 0, db: 0, tools_used: false },
+  };
+  return chatMeasurement.run({ counter: { value: 0 }, purpose: 'turn', reply: clock }, async () => {
+    try {
+      return await call();
+    } finally {
+      finishChatReply(clock);
+    }
+  });
+}
+
+export function chatReplyMeasured() {
+  return chatMeasurement.getStore() !== undefined;
+}
+
+/** Call inside the transaction that moved the turn to a final state; `guardChatReplyFinal` drops it on rollback. */
+export function noteChatReplyFinal(final: ChatReplyFinal) {
+  const state = chatMeasurement.getStore();
+  if (state) state.reply.final = final;
+}
+
+/** Timing columns of a finished tf_conversation_turns row, as written by its timing trigger. */
+export type ChatReplyTiming = {
+  status: ChatReplyFinal['status'];
+  startedAt: Date;
+  claimedAt: Date | null;
+  finishedAt: Date;
+  firstTextSeconds: number | null;
+  humanWaitSeconds: number;
+  externalWaitSeconds: number;
+  inactiveSeconds: number;
+  attempts: number;
+};
+
+/**
+ * Total runs from the saved user message to the final state, minus time waiting on a person (approvals, questions),
+ * on Slack or MCP, and while inactive, so `total` and `overhead` only hold time the reply could make progress.
+ */
+export function chatReplyFinal(timing: ChatReplyTiming): ChatReplyFinal {
+  const wall = (timing.finishedAt.getTime() - timing.startedAt.getTime()) / 1000;
+  const waits = timing.humanWaitSeconds + timing.externalWaitSeconds + timing.inactiveSeconds;
+  const totalSeconds = Math.max(0, wall - waits);
+  const queued = timing.claimedAt ? (timing.claimedAt.getTime() - timing.startedAt.getTime()) / 1000 : totalSeconds;
+  return {
+    status: timing.status,
+    totalSeconds,
+    queueSeconds: Math.min(totalSeconds, Math.max(0, queued)),
+    firstTextSeconds: timing.firstTextSeconds,
+    attempts: timing.attempts,
+  };
+}
+
+export async function guardChatReplyFinal<T>(call: () => Promise<T>): Promise<T> {
+  const state = chatMeasurement.getStore();
+  if (!state) return call();
+  const before = state.reply.final;
+  try {
+    return await call();
+  } catch (error) {
+    state.reply.final = before;
+    throw error;
+  }
+}
+
+/** Real tool execution in a reply. UI-only steps such as `present.choice` do not use it. */
+export function observeChatTool<T>(call: () => Promise<T>): Promise<T> {
+  const clock = chatMeasurement.getStore()?.reply;
+  if (clock) clock.sums.tools_used = true;
+  return inChatReplyCategory('tools', call);
 }
 
 function chatDetailAttributes(state: ChatMeasurement): Attributes {
@@ -1139,7 +1351,7 @@ export async function observeChatDetail<T>(phase: ChatDetailPhase, call: () => P
       const start = performance.now();
       let outcome = 'success';
       try {
-        return await call();
+        return await inChatReplyCategory(chatReplyCategory(phase), call);
       } catch (error) {
         outcome = 'error';
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -1163,6 +1375,11 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
     },
     span => {
       const start = performance.now();
+      const category = chatReplyCategory(phase);
+      if (category) {
+        tickChatReply(state.reply);
+        state.reply.active[category]++;
+      }
       let outcome = 'success';
       try {
         return call();
@@ -1171,6 +1388,10 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
         span.setStatus({ code: SpanStatusCode.ERROR });
         throw error;
       } finally {
+        if (category) {
+          tickChatReply(state.reply);
+          state.reply.active[category]--;
+        }
         span.setAttribute('outcome', outcome);
         finishChatDetail(phase, state, start, outcome);
         span.end();
@@ -1182,7 +1403,8 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
 export function withChatModelRequest<T>(purpose: ChatModelPurpose, call: () => Promise<T>): Promise<T> {
   const state = chatMeasurement.getStore();
   if (!state) return call();
-  return chatMeasurement.run({ counter: state.counter, purpose, sequence: ++state.counter.value }, async () => {
+  const sequence = ++state.counter.value;
+  return chatMeasurement.run({ counter: state.counter, purpose, sequence, reply: state.reply }, async () => {
     let outcome = 'success';
     try {
       return await observeChatDetail('request', call);
