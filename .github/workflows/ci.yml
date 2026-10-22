@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [lint, typecheck, test]
+        task: [lint, typecheck, 'test:apps', 'test:memory', 'test:integrations', 'test:platform']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

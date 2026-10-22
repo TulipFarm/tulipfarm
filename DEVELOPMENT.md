@@ -54,14 +54,18 @@ See [`self-host/README.md`](self-host/README.md#public-web).
 | `pnpm format:check` | Check formatting without writing changes                                             |
 | `pnpm typecheck`    | Type-check all workspaces                                                            |
 | `pnpm test`         | Run tests in all workspaces                                                          |
+| `pnpm test:<group>` | Run one CI test group: `apps`, `memory`, `integrations`, or `platform`               |
 | `pnpm check`        | Check only what changed since `origin/main` (`--base=<ref>` to change)               |
 | `pnpm check:full`   | Build, type-check, test, and lint everything, and validate the Compose files         |
 
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `pnpm lint`,
-`pnpm typecheck`, and `pnpm test` on GitHub-hosted runners for every pull request
-and push to `main`. [`.github/workflows/images.yml`](.github/workflows/images.yml)
+`pnpm typecheck`, and the four test groups as parallel jobs on GitHub-hosted
+runners for every pull request and push to `main`. Each group is a `test:<group>`
+script in `package.json`. Every tested workspace belongs to exactly one group, and
+`tooling/test-groups.test.mjs` fails the lint job when a workspace or a CI job is
+missing. [`.github/workflows/images.yml`](.github/workflows/images.yml)
 builds the container images for GHCR; it stays disabled until the first release.
 
 ## Layout
