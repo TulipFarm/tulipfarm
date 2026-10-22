@@ -10,6 +10,11 @@ One version identifies all apps and images of a release.
 
 ### Added
 
+- `MODEL_PAUSED_FAMILIES` pauses model families for new work. A paused family
+  stays in the catalog as "temporarily unavailable" (`model-family-paused`) and
+  cannot be chosen for new chats, new agents or fallback targets. Existing
+  agents and chats move to the workspace's fallback rule target when one is
+  set, and otherwise keep using it.
 - The `workspace.created` hook event carries `workspaceName`, the workspace's
   display name.
 - Leaf workspace packages: typescript-config, build-info, config, keyring,

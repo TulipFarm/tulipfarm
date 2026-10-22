@@ -340,3 +340,17 @@ test('an allowlisted localhost base URL works over http outside production', asy
   assert.equal(requests[0].path, '/proxy/v1/messages');
   assert.equal(requests[0].headers['x-api-key'], credential);
 });
+
+test('paused families must be enabled, cannot be the default, and are exposed to continuity', () => {
+  assert.throws(() => modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-astra' }), {
+    message: /MODEL_PAUSED_FAMILIES names gpt-astra, which is not enabled/,
+  });
+  assert.throws(() => modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-luna' }), {
+    message: /must not include MODEL_DEFAULT_FAMILY/,
+  });
+  const environment = modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-sol' });
+  assert.equal(environment.paused('gpt-sol'), true);
+  assert.equal(environment.paused('gpt-luna'), false);
+  assert.ok(environment.resolve('gpt-sol'), 'a paused family still resolves for existing work');
+  assert.equal(environment.continuity(createMemoryRouteHealth).paused('gpt-sol'), true);
+});

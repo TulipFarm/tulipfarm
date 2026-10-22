@@ -24,6 +24,16 @@ function enabledFamilies(env: NodeJS.ProcessEnv) {
   return modelFamilies.filter(family => enabled.has(family.id));
 }
 
+/** Families named by `MODEL_PAUSED_FAMILIES`: still served, but closed to new chats, new agents and model changes. */
+export function pausedModelFamilies(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+  return new Set(
+    (env.MODEL_PAUSED_FAMILIES ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean),
+  );
+}
+
 /** Families of the effective catalog that have `role`, in catalog order. */
 export function modelRoleFamilies(role: ModelRole) {
   return modelFamilies.filter(family => family.roles?.includes(role));
@@ -38,7 +48,9 @@ export function modelRoleFamilies(role: ModelRole) {
 export function modelRoleDefault(role: ModelRole, env: NodeJS.ProcessEnv = process.env): ModelRoleDefault | null {
   const setting = role in roleSettingValues ? roleSettingValues[role as RoleSettingRole](env) : undefined;
   if (setting?.trim()) return { familyId: setting.trim(), source: 'setting' };
-  const enabled = enabledFamilies(env);
+  const paused = pausedModelFamilies(env);
+  // New chats start on the default chat family, so a paused family cannot fill that role.
+  const enabled = enabledFamilies(env).filter(family => role !== 'default-chat' || !paused.has(family.id));
   const declared = enabled.find(family => family.roles?.includes(role));
   if (declared) return { familyId: declared.id, source: 'catalog' };
   if (role === 'title') return null;

@@ -38,4 +38,6 @@ export type ModelFamilyEligibility = (input: {
   workspaceId: string;
   modelFamilyId: string;
   fallbackFor?: string;
+  /** Use already bound to the family, such as a fallback rule from it; a paused family stays eligible. */
+  existing?: boolean;
 }) => boolean | Promise<boolean>;

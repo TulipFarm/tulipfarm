@@ -27,3 +27,28 @@ export async function modelAvailability(tx: AgentTransaction) {
 export async function modelFamilyEnabled(tx: AgentTransaction, familyId: string) {
   return (await modelAvailability(tx)).some(row => row.familyId === familyId && row.enabled);
 }
+
+/**
+ * The family that serves an existing agent or chat in place of the paused `familyId`: the workspace fallback rule's
+ * target, when the workspace enables it and the operator has not paused it too. Null keeps the paused family.
+ */
+export async function pausedFamilyReplacement(
+  tx: AgentTransaction,
+  familyId: string,
+  paused: (familyId: string) => boolean,
+): Promise<string | null> {
+  if (!paused(familyId)) return null;
+  const target = z
+    .object({ target_family_id: z.string().nullable() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT target_family_id FROM ${relation(tx, 'tf_model_fallback_rules')} WHERE source_family_id=$1`,
+          [familyId],
+        )
+      ).rows[0],
+    )?.target_family_id;
+  if (!target || paused(target)) return null;
+  return (await modelFamilyEnabled(tx, target)) ? target : null;
+}

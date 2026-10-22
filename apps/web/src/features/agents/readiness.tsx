@@ -37,7 +37,7 @@ export function AgentSetup({
         ? { kind: 'error' }
         : !detail.definition.modelFamilyId
           ? { kind: 'none' }
-          : family?.available
+          : family?.available || family?.unavailableReason === 'model-family-paused'
             ? { kind: 'available', name: family.displayName }
             : { kind: 'unavailable' };
   const steps = agentSetup({ detail, execution, model });

@@ -32,6 +32,11 @@ export function conversationModel(family: string, env: NodeJS.ProcessEnv = proce
   return { route, price: { familyId, modelId, pricingRevision, rates, maxInputTokens, maxOutputTokens } };
 }
 
+/** Whether the operator paused `family` (`MODEL_PAUSED_FAMILIES`). */
+export function conversationFamilyPaused(family: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return modelEnvironment(env)?.paused(family) ?? false;
+}
+
 /** The model of the family that fills `role` (its setting, else the effective catalog), or null when it has none. */
 export function roleModel(role: ModelRole, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
   const family = modelRoleDefault(role, env)?.familyId;
