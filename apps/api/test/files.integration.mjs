@@ -606,7 +606,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
   try {
     assert.deepEqual(
       f.stream.map(item => item.name),
-      ['0001_baseline.sql', '0002_turn_trace.sql', '0003_chat_send_timing.sql'],
+      ['0001_baseline.sql', '0002_turn_trace.sql', '0003_chat_send_timing.sql', '0004_social.sql'],
     );
     assert.equal(
       (await f.db.platform.query(`SELECT count(*)::integer AS count FROM ${f.table('tf_common_migrations')}`)).rows[0]
