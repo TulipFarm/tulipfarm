@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import type { Page } from '@/pages/workspace';
-import { useSidebar } from '@/components/sidebar';
+import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { SidebarRecentItem } from './sidebar-recent-item';
 import { useRecentItems, type RecentItem, type RecentSection } from './recent-queries';
 

@@ -61,14 +61,15 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
-  SidebarInset,
+  SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
-} from '@/components/sidebar';
+} from '@tulipfarm/sprout/sidebar';
+import { SidebarLeft } from 'reicon-react/icons/SidebarLeft';
 import { TooltipProvider } from '@tulipfarm/sprout/tooltip';
 import { authClient } from '@/lib/auth';
 import { SearchPalette, useSearchShortcut } from '@/features/search/search-palette';
@@ -265,11 +266,11 @@ function StandardNavItem({ page }: { page: Page }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        variant="navigation"
-        size="compact"
+        icon={Icon && <Icon size={16} aria-hidden="true" />}
         tooltip={page.label}
         isActive={active}
         aria-current={active ? 'page' : undefined}
+        nativeButton={false}
         render={
           <Link
             to={page.to}
@@ -282,8 +283,7 @@ function StandardNavItem({ page }: { page: Page }) {
         }
         onClick={() => setOpenMobile(false)}
       >
-        {Icon && <Icon size={16} aria-hidden="true" />}
-        <span>{page.label}</span>
+        {page.label}
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
@@ -298,13 +298,17 @@ function WorkspaceMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`Workspace menu, ${workspace.name}`}
-        render={<SidebarMenuButton variant="workspace" size="compact" />}
+        render={
+          <SidebarMenuButton
+            tooltip={workspace.name}
+            icon={
+              <EntityAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
+            }
+            badge={<ChevronDown size={12} aria-hidden="true" />}
+          />
+        }
       >
-        <EntityAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
-        <span className="truncate group-data-[collapsible=icon]:hidden">{workspace.name}</span>
-        <span className="flex group-data-[collapsible=icon]:hidden">
-          <ChevronDown size={12} aria-hidden="true" />
-        </span>
+        {workspace.name}
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu">
         <DropdownMenuItem render={<Link to={settings.to} params={params} />} onClick={close}>
@@ -362,10 +366,14 @@ function ProfileMenu() {
     >
       <DropdownMenuTrigger
         aria-label="Account menu"
-        render={<SidebarMenuButton variant="navigation" size="compact" tooltip="Account" />}
+        render={
+          <SidebarMenuButton
+            tooltip="Account"
+            icon={<EntityAvatar seed={user.id} name={name} image={user.image} size="sm" />}
+          />
+        }
       >
-        <EntityAvatar seed={user.id} name={name} image={user.image} size="sm" />
-        <span className="min-w-0 flex-1 truncate">{name}</span>
+        {name}
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu" side="top">
         <DropdownMenuGroup>
@@ -443,22 +451,21 @@ function SettingsNavigation() {
   const { setOpenMobile } = useSidebar();
   return (
     <>
-      <header className="flex h-11 shrink-0 items-center px-2 pr-14 md:mt-2 md:pr-2">
+      <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              variant="navigation"
-              size="compact"
+              icon={<ChevronLeft size={16} aria-hidden="true" />}
               tooltip="Back to app"
+              nativeButton={false}
               render={<Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} />}
               onClick={() => setOpenMobile(false)}
             >
-              <ChevronLeft size={16} aria-hidden="true" />
-              <span>Back to app</span>
+              Back to app
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-      </header>
+      </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Settings">
           <SidebarGroup>
@@ -488,50 +495,35 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
   return (
-    <Sidebar variant="app" collapsible="icon">
-      <aside aria-label="Workspace sidebar" className="flex h-full flex-col">
+    <Sidebar collapsible="icon" label="Workspace sidebar">
+      <>
         {settingsMode ? (
           <SettingsNavigation />
         ) : (
           <>
-            <header className="flex h-11 shrink-0 items-center gap-0.5 px-2 pr-14 md:mt-2 md:border-t md:border-transparent md:pr-2 group-data-[collapsible=icon]:justify-center">
-              <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
-                <WorkspaceMenu />
-              </div>
-              <span className="group-data-[collapsible=icon]:hidden">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Jump to…"
-                  title="Jump to… (⌘K / Ctrl+K)"
-                  aria-keyshortcuts="Meta+K Control+K"
-                  onClick={() => {
-                    setOpenMobile(false);
-                    onSearch();
-                  }}
-                >
-                  <Search3 size={16} aria-hidden="true" />
-                </Button>
-              </span>
-            </header>
+            <SidebarHeader>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <WorkspaceMenu />
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarHeader>
             <SidebarContent>
               <nav aria-label="Workspace navigation">
                 <SidebarGroup>
                   <SidebarMenu>
                     <SidebarMenuItem>
-                      <div className="hidden group-data-[collapsible=icon]:block">
-                        <SidebarMenuButton
-                          variant="navigation"
-                          size="compact"
-                          tooltip="Jump to…"
-                          aria-label="Jump to…"
-                          aria-keyshortcuts="Meta+K Control+K"
-                          onClick={onSearch}
-                        >
-                          <Search3 size={16} aria-hidden="true" />
-                          <span>Jump to…</span>
-                        </SidebarMenuButton>
-                      </div>
+                      <SidebarMenuButton
+                        icon={<Search3 size={16} aria-hidden="true" />}
+                        tooltip="Jump to…"
+                        aria-keyshortcuts="Meta+K Control+K"
+                        onClick={() => {
+                          setOpenMobile(false);
+                          onSearch();
+                        }}
+                      >
+                        Jump to…
+                      </SidebarMenuButton>
                     </SidebarMenuItem>
                     <NavItem page={newChat} />
                     <NavItem page={chats} />
@@ -563,7 +555,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>
-      </aside>
+      </>
     </Sidebar>
   );
 }
@@ -651,6 +643,7 @@ function WorkspaceShellContent() {
   const currentPage = useCurrentPage(),
     onCalendar = currentPage.to === '/$workspaceSlug/calendar';
   const onNewChat = currentPage === newChat;
+  const [navigationOpen, setNavigationOpen] = useState(true);
   const [calendarNavigationOpen, setCalendarNavigationOpen] = useState(false);
   useEffect(() => {
     if (onNewChat) document.title = 'New chat · TulipFarm';
@@ -669,59 +662,60 @@ function WorkspaceShellContent() {
   }, [user.id, workspace.id, workspace.slug]);
   return (
     <TooltipProvider>
-      <SidebarProvider
-        layout="app"
-        open={onCalendar ? calendarNavigationOpen : undefined}
-        onOpenChange={onCalendar ? setCalendarNavigationOpen : undefined}
-        persistState={!onCalendar}
-        banner={
-          workspace.status === 'ready' ? (
-            <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
-          ) : undefined
-        }
-      >
-        <WorkspaceNavigation onSearch={() => setSearchOpen(true)} />
-        <SidebarInset variant="app">
-          <header
-            aria-label="Workspace header"
-            className={`@container flex h-11 shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
-          >
-            <SidebarTrigger size={onCalendar ? 'icon' : 'icon-sm'} />
-            <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
-            <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
-            {/* Under 20rem the page title needs the room; the navigation sheet still names the workspace. */}
-            {!onCalendar && (
-              <span
-                title={workspace.name}
-                className="max-w-24 truncate text-xs text-muted-foreground md:hidden @max-xs:hidden"
-              >
-                {workspace.name}
-              </span>
+      {/* The analytics consent banner reserves --consent-inset at the bottom of the viewport. */}
+      <div className="grid h-svh grid-rows-1 overflow-hidden pb-(--consent-inset,0px)">
+        <SidebarProvider
+          open={onCalendar ? calendarNavigationOpen : navigationOpen}
+          onOpenChange={onCalendar ? setCalendarNavigationOpen : setNavigationOpen}
+        >
+          <WorkspaceNavigation onSearch={() => setSearchOpen(true)} />
+          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            {workspace.status === 'ready' && (
+              <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
             )}
-          </header>
-          <PageChromeContext value={chrome}>
-            <ChatHeaderContext value={headerElement}>
-              {workspace.status === 'provisioning' ? (
-                <WorkspaceSetup key={workspace.slug} name={workspace.name} slug={workspace.slug} />
-              ) : SidebarMockPage && workspace.slug === 'sidebar-mock' ? (
-                <Suspense fallback={<p role="status">Opening mock...</p>}>
-                  <SidebarMockPage />
-                </Suspense>
-              ) : (
-                <BudProvider key={workspace.id} headerActions={actionsElement}>
-                  <Outlet />
-                </BudProvider>
+            <header
+              aria-label="Workspace header"
+              className={`@container flex h-(--sprout-bar-height) shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
+            >
+              <SidebarTrigger>
+                <SidebarLeft size={16} aria-hidden="true" />
+              </SidebarTrigger>
+              <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
+              <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
+              {/* Under 20rem the page title needs the room; the navigation sheet still names the workspace. */}
+              {!onCalendar && (
+                <span
+                  title={workspace.name}
+                  className="max-w-24 truncate text-xs text-muted-foreground md:hidden @max-xs:hidden"
+                >
+                  {workspace.name}
+                </span>
               )}
-            </ChatHeaderContext>
-          </PageChromeContext>
-        </SidebarInset>
-        <SearchPalette
-          open={searchOpen}
-          onOpenChange={setSearchOpen}
-          pages={searchPages}
-          onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
-        />
-      </SidebarProvider>
+            </header>
+            <PageChromeContext value={chrome}>
+              <ChatHeaderContext value={headerElement}>
+                {workspace.status === 'provisioning' ? (
+                  <WorkspaceSetup key={workspace.slug} name={workspace.name} slug={workspace.slug} />
+                ) : SidebarMockPage && workspace.slug === 'sidebar-mock' ? (
+                  <Suspense fallback={<p role="status">Opening mock...</p>}>
+                    <SidebarMockPage />
+                  </Suspense>
+                ) : (
+                  <BudProvider key={workspace.id} headerActions={actionsElement}>
+                    <Outlet />
+                  </BudProvider>
+                )}
+              </ChatHeaderContext>
+            </PageChromeContext>
+          </main>
+          <SearchPalette
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            pages={searchPages}
+            onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
+          />
+        </SidebarProvider>
+      </div>
     </TooltipProvider>
   );
 }

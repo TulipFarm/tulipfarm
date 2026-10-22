@@ -5,7 +5,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Label } from '@tulipfarm/sprout/label';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
-import { SidebarMenuButton, SidebarMenuItem, useSidebar } from '@/components/sidebar';
+import { SidebarMenuButton, SidebarMenuItem, useSidebar } from '@tulipfarm/sprout/sidebar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SidebarRecentItem, type RecentState } from './sidebar-recent-item';
 
@@ -62,16 +62,15 @@ export function SidebarMockNavItem({ page }: { page: Page }) {
     return (
       <SidebarMenuItem>
         <SidebarMenuButton
-          variant="navigation"
-          size="compact"
+          icon={icon}
           tooltip={page.label}
           isActive={active}
           aria-current={active ? 'page' : undefined}
+          nativeButton={false}
           render={link}
           onClick={() => setOpenMobile(false)}
         >
-          {icon}
-          <span>{page.label}</span>
+          {page.label}
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
