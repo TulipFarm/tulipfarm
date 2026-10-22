@@ -34,10 +34,18 @@ test('configured flags resolve env override, then FEATURE_FLAGS_OFF, then defaul
   assert.equal(configuredFeatureFlag('slack-app-sender', {}), true);
   assert.equal(configuredFeatureFlag('slack-app-sender', { NODE_ENV: 'production' }), false);
   assert.equal(
-    configuredFeatureFlag('slack-app-sender', { NODE_ENV: 'production', FEATURE_FLAG_SLACK_APP_SENDER: 'true' }),
+    configuredFeatureFlag('slack-app-sender', {
+      NODE_ENV: 'production',
+      FEATURE_FLAG_SLACK_APP_SENDER: 'true',
+    }),
     true,
   );
-  assert.equal(configuredFeatureFlag('slack-app-sender', { FEATURE_FLAGS_OFF: 'slack-app-sender' }), false);
+  assert.equal(
+    configuredFeatureFlag('slack-app-sender', {
+      FEATURE_FLAGS_OFF: 'slack-app-sender',
+    }),
+    false,
+  );
   assert.equal(
     configuredFeatureFlag('slack-app-sender', {
       FEATURE_FLAGS_OFF: 'slack-app-sender',

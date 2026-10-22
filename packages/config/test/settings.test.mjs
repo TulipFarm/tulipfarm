@@ -84,7 +84,10 @@ test('secret files reject conflicts and unreadable paths without echoing values'
       }),
     error => error instanceof SecretFileError && error.message.includes('/missing/token'),
   );
-  const env = { BETTER_AUTH_SECRET_FILE: '/run/secrets/auth', NOT_SECRET_FILE: '/run/secrets/other' };
+  const env = {
+    BETTER_AUTH_SECRET_FILE: '/run/secrets/auth',
+    NOT_SECRET_FILE: '/run/secrets/other',
+  };
   assert.deepEqual(
     loadSecretFiles(env, undefined, () => 'auth'),
     ['BETTER_AUTH_SECRET'],

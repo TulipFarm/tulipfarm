@@ -1,19 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  familyProviderModels,
-  resolveModelFamily,
-  selectableModelFamilies,
-  initialModelMapping,
-  modelFamilies,
-  modelFamilyCatalogSchema,
-  modelFamilyIdSchema,
-} from '../src/model-continuity.ts';
+import { legacyModels, resolveModelFamily, initialModelMapping, modelFamilyIdSchema } from '../src/model-continuity.ts';
 import { modelFamilyIdSchema as identifier, modelIdentifierSchema } from '../src/model-identifier.ts';
 import { modelCatalogFamilySchema } from '../src/model-catalog.ts';
 import { parseModelResolution } from '../src/model-bundle.ts';
 import { calculateModelCost } from '../src/model-cost.ts';
-import { modelPricing } from '../src/index.ts';
 
 const route = {
   id: 'opus-us',
@@ -37,7 +28,15 @@ const input = {
 };
 const usage = tokens => ({
   kind: 'known',
-  tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, ...tokens },
+  tokens: {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cacheWrite5m: 0,
+    cacheWrite1h: 0,
+    ...tokens,
+  },
 });
 
 test('catalog identities use the same lightweight schema without changing accepted identifiers', () => {
@@ -67,34 +66,17 @@ test('catalog identities use the same lightweight schema without changing accept
   }
 });
 
-test('curated catalog rejects duplicate, missing, unknown and misplaced concrete versions', () => {
-  assert.equal(modelFamilyCatalogSchema.parse(modelFamilies).find(family => family.id === 'grok').vendor, 'xai');
-  for (const mutate of [
-    rows => {
-      rows.push(rows[0]);
-    },
-    rows => {
-      rows[0].modelIds.push(rows[0].modelIds[0]);
-    },
-    rows => {
-      rows[0].modelIds.push(rows[1].currentModelId);
-    },
-    rows => {
-      rows[0].modelIds.push('unknown-version');
-    },
-    rows => {
-      rows[0].currentModelId = rows[1].currentModelId;
-    },
-    rows => {
-      rows.find(family => family.id === 'grok').modelIds = ['grok-4-6'];
-    },
-  ]) {
-    const rows = structuredClone(modelFamilies);
-    mutate(rows);
-    assert.throws(() => modelFamilyCatalogSchema.parse(rows));
+test('the frozen record maps every initial family to one of its own models and cannot change', () => {
+  for (const family of initialModelMapping.families) {
+    const model = legacyModels.find(candidate => candidate.id === family.modelId);
+    assert.equal(model?.familyId, family.id, family.id);
   }
+  assert.equal(legacyModels.find(model => model.id === 'grok-4-6').vendor, 'xai');
   assert.throws(() => {
-    modelFamilies[0].modelIds.push('unknown-version');
+    legacyModels[0].rates[0].usdPerMillionTokens.input = 99;
+  }, TypeError);
+  assert.throws(() => {
+    legacyModels.push(legacyModels[0]);
   }, TypeError);
 });
 
@@ -105,7 +87,11 @@ test('initial price receipts reject forged families and contradictory initial ma
     assert.throws(() => parseModelResolution({ ...receipt, familyId }), /family identity mismatch/);
     assert.throws(
       () =>
-        calculateModelCost({ resolution: { ...receipt, familyId }, date: '2026-09-28', usage: usage({ input: 1 }) }),
+        calculateModelCost({
+          resolution: { ...receipt, familyId },
+          date: '2026-09-28',
+          usage: usage({ input: 1 }),
+        }),
       /family identity mismatch/,
     );
   }
@@ -117,29 +103,41 @@ test('initial price receipts reject forged families and contradictory initial ma
       revision: 'historical',
       families: [{ id: 'gemini-flash', modelId: 'gemini-3-5-flash' }],
     },
-    routes: [{ ...route, modelId: 'gemini-3-5-flash', provider: 'google', maxOutputTokens: 64000 }],
+    routes: [
+      {
+        ...route,
+        modelId: 'gemini-3-5-flash',
+        provider: 'google',
+        maxOutputTokens: 64000,
+      },
+    ],
   });
   assert.equal(parseModelResolution(JSON.parse(JSON.stringify(old))).modelId, 'gemini-3-5-flash');
   assert.throws(
-    () => parseModelResolution({ ...old, mappingRevision: initialModelMapping.revision }),
+    () =>
+      parseModelResolution({
+        ...old,
+        mappingRevision: initialModelMapping.revision,
+      }),
     /mapping identity mismatch/,
   );
 });
 
-test('all curated versions resolve only through explicitly supplied routes', () => {
-  for (const family of modelFamilies) {
-    for (const modelId of family.modelIds) {
-      const provider = modelPricing.models.find(model => model.id === modelId).provider;
-      const candidate = {
-        ...input,
-        familyId: family.id,
-        mapping: { ...initialModelMapping, revision: 'catalog-fixture', families: [{ id: family.id, modelId }] },
-        routes: [{ ...route, modelId, provider, maxInputTokens: 1, maxOutputTokens: 1 }],
-      };
-      const resolved = resolveModelFamily(candidate);
-      assert.deepEqual([resolved.familyId, resolved.modelId, resolved.route.provider], [family.id, modelId, provider]);
-      assert.throws(() => resolveModelFamily({ ...candidate, routes: [] }), /route-unavailable/);
-    }
+test('all recorded versions resolve only through explicitly supplied routes', () => {
+  for (const { familyId, id: modelId, provider } of legacyModels) {
+    const candidate = {
+      ...input,
+      familyId,
+      mapping: {
+        ...initialModelMapping,
+        revision: 'catalog-fixture',
+        families: [{ id: familyId, modelId }],
+      },
+      routes: [{ ...route, modelId, provider, maxInputTokens: 1, maxOutputTokens: 1 }],
+    };
+    const resolved = resolveModelFamily(candidate);
+    assert.deepEqual([resolved.familyId, resolved.modelId, resolved.route.provider], [familyId, modelId, provider]);
+    assert.throws(() => resolveModelFamily({ ...candidate, routes: [] }), /route-unavailable/);
   }
   assert.throws(
     () =>
@@ -167,17 +165,35 @@ test('resolution requires a qualified configured current route under location an
     { allowedLocations: [] },
   ])
     assert.throws(() => resolveModelFamily({ ...input, ...overrides }), /route-unavailable/);
-  assert.throws(() => resolveModelFamily({ ...input, routes: [route, { ...route, id: 'second' }] }), /ambiguous-route/);
-  assert.throws(() => resolveModelFamily({ ...input, routes: [{ ...route, boundedDecision: undefined }] }));
   assert.throws(
-    () => resolveModelFamily({ ...input, routes: [{ ...route, maxInputTokens: 2000000 }] }),
+    () =>
+      resolveModelFamily({
+        ...input,
+        routes: [route, { ...route, id: 'second' }],
+      }),
+    /ambiguous-route/,
+  );
+  assert.throws(() =>
+    resolveModelFamily({
+      ...input,
+      routes: [{ ...route, boundedDecision: undefined }],
+    }),
+  );
+  assert.throws(
+    () =>
+      resolveModelFamily({
+        ...input,
+        routes: [{ ...route, maxInputTokens: 2000000 }],
+      }),
     /route-unavailable/,
   );
 });
 
 test('Grok exposes two Azure models and prices the Fast deployment as 4.3', () => {
   assert.deepEqual(
-    modelFamilies.filter(family => family.vendor === 'xai').map(family => [family.id, family.currentModelId]),
+    initialModelMapping.families
+      .filter(family => family.id.startsWith('grok'))
+      .map(family => [family.id, family.modelId]),
     [
       ['grok', 'grok-4-6'],
       ['grok-fast', 'grok-4.3'],
@@ -211,9 +227,18 @@ test('Grok exposes two Azure models and prices the Fast deployment as 4.3', () =
 });
 
 test('unknown formats, prices, families and cross-family replacements fail closed', () => {
-  assert.throws(() => resolveModelFamily({ ...input, mapping: { ...initialModelMapping, format: 2 } }));
+  assert.throws(() =>
+    resolveModelFamily({
+      ...input,
+      mapping: { ...initialModelMapping, format: 2 },
+    }),
+  );
   assert.throws(
-    () => resolveModelFamily({ ...input, mapping: { ...initialModelMapping, pricingRevision: 'future' } }),
+    () =>
+      resolveModelFamily({
+        ...input,
+        mapping: { ...initialModelMapping, pricingRevision: 'future' },
+      }),
     /unsupported-pricing/,
   );
   assert.throws(() => resolveModelFamily({ ...input, familyId: 'unknown' }), /unknown-family/);
@@ -221,7 +246,10 @@ test('unknown formats, prices, families and cross-family replacements fail close
     () =>
       resolveModelFamily({
         ...input,
-        mapping: { ...initialModelMapping, families: [{ id: 'claude-opus', modelId: 'gpt-6-astra' }] },
+        mapping: {
+          ...initialModelMapping,
+          families: [{ id: 'claude-opus', modelId: 'gpt-6-astra' }],
+        },
       }),
     /unknown-model/,
   );
@@ -255,7 +283,7 @@ test('Kimi resolves to the deployed Azure model while removed GLM families are r
   );
   for (const familyId of ['glm', 'glm-fast']) {
     assert.equal(
-      modelFamilies.some(family => family.id === familyId),
+      initialModelMapping.families.some(family => family.id === familyId),
       false,
     );
     assert.throws(() => resolveModelFamily({ ...input, familyId }), /unknown-family/);
@@ -263,13 +291,24 @@ test('Kimi resolves to the deployed Azure model while removed GLM families are r
 });
 
 test('promotion and rollback produce new snapshots without changing earlier resolution', () => {
-  const gemini = { ...route, id: 'gemini-us', provider: 'google', modelId: 'gemini-3-5-flash', maxOutputTokens: 64000 };
+  const gemini = {
+    ...route,
+    id: 'gemini-us',
+    provider: 'google',
+    modelId: 'gemini-3-5-flash',
+    maxOutputTokens: 64000,
+  };
   const oldMapping = {
     ...initialModelMapping,
     revision: 'old',
     families: [{ id: 'gemini-flash', modelId: 'gemini-3-5-flash' }],
   };
-  const before = resolveModelFamily({ ...input, familyId: 'gemini-flash', mapping: oldMapping, routes: [gemini] });
+  const before = resolveModelFamily({
+    ...input,
+    familyId: 'gemini-flash',
+    mapping: oldMapping,
+    routes: [gemini],
+  });
   const after = resolveModelFamily({
     ...input,
     familyId: 'gemini-flash',
@@ -301,23 +340,43 @@ test('exact cost accounts for disjoint cache buckets and keeps missing usage unk
     calculateModelCost({
       resolution,
       date: '2026-09-28',
-      usage: usage({ input: 100, output: 10, cacheRead: 50, cacheWrite5m: 20, cacheWrite1h: 10 }),
+      usage: usage({
+        input: 100,
+        output: 10,
+        cacheRead: 50,
+        cacheWrite5m: 20,
+        cacheWrite1h: 10,
+      }),
     }).providerPicoUsd,
     '790000000',
   );
   assert.deepEqual(
-    calculateModelCost({ resolution, date: '2026-09-28', usage: { kind: 'unknown', reason: 'missing' } }),
+    calculateModelCost({
+      resolution,
+      date: '2026-09-28',
+      usage: { kind: 'unknown', reason: 'missing' },
+    }),
     { kind: 'unknown', reason: 'missing' },
   );
   assert.equal(calculateModelCost({ resolution, date: '2026-09-28', usage: usage({}) }).providerPicoUsd, '0');
   assert.throws(
-    () => calculateModelCost({ resolution, date: '2026-09-28', usage: usage({ cacheWrite: 1 }) }),
+    () =>
+      calculateModelCost({
+        resolution,
+        date: '2026-09-28',
+        usage: usage({ cacheWrite: 1 }),
+      }),
     /Unpriced usage/,
   );
   const tampered = JSON.parse(JSON.stringify(resolution));
   tampered.rates[0].usdPerMillionTokens.input = 99;
   assert.throws(
-    () => calculateModelCost({ resolution: tampered, date: '2026-09-28', usage: usage({ input: 1 }) }),
+    () =>
+      calculateModelCost({
+        resolution: tampered,
+        date: '2026-09-28',
+        usage: usage({ input: 1 }),
+      }),
     /price identity mismatch/,
   );
 });
@@ -326,15 +385,29 @@ test('context tiers use cached prompt tokens and apply the selected rate to the 
   const resolution = resolveModelFamily({
     ...input,
     familyId: 'gpt-astra',
-    routes: [{ ...route, provider: 'azure', modelId: 'gpt-6-astra', maxInputTokens: 922000 }],
+    routes: [
+      {
+        ...route,
+        provider: 'azure',
+        modelId: 'gpt-6-astra',
+        maxInputTokens: 922000,
+      },
+    ],
   });
   assert.equal(
-    calculateModelCost({ resolution, date: '2026-09-28', usage: usage({ input: 272000, output: 1 }) }).providerPicoUsd,
+    calculateModelCost({
+      resolution,
+      date: '2026-09-28',
+      usage: usage({ input: 272000, output: 1 }),
+    }).providerPicoUsd,
     '2720050000000',
   );
   assert.equal(
-    calculateModelCost({ resolution, date: '2026-09-28', usage: usage({ input: 272000, cacheRead: 1, output: 1 }) })
-      .providerPicoUsd,
+    calculateModelCost({
+      resolution,
+      date: '2026-09-28',
+      usage: usage({ input: 272000, cacheRead: 1, output: 1 }),
+    }).providerPicoUsd,
     '5440077000000',
   );
 });
@@ -343,29 +416,30 @@ test('dated price schedules retain both sides of the effective-date boundary', (
   const resolution = resolveModelFamily({
     ...input,
     familyId: 'gemini-flash',
-    routes: [{ ...route, provider: 'google', modelId: 'gemini-3-8-flash', maxOutputTokens: 64000 }],
+    routes: [
+      {
+        ...route,
+        provider: 'google',
+        modelId: 'gemini-3-8-flash',
+        maxOutputTokens: 64000,
+      },
+    ],
   });
   assert.equal(
-    calculateModelCost({ resolution, date: '2026-12-31', usage: usage({ input: 1000000 }) }).providerPicoUsd,
+    calculateModelCost({
+      resolution,
+      date: '2026-12-31',
+      usage: usage({ input: 1000000 }),
+    }).providerPicoUsd,
     '750000000000',
   );
   assert.equal(
-    calculateModelCost({ resolution, date: '2027-01-01', usage: usage({ input: 1000000 }) }).providerPicoUsd,
+    calculateModelCost({
+      resolution,
+      date: '2027-01-01',
+      usage: usage({ input: 1000000 }),
+    }).providerPicoUsd,
     '1500000000000',
   );
   assert.throws(() => calculateModelCost({ resolution, date: 'not-a-date', usage: usage({}) }));
-});
-
-test('a family lists the model it runs on each provider, the current version first', () => {
-  assert.deepEqual(familyProviderModels('gpt-luna'), [
-    { provider: 'azure', modelId: 'gpt-6-luna' },
-    { provider: 'openai', modelId: 'gpt-6-luna-openai' },
-  ]);
-  assert.deepEqual(familyProviderModels('grok'), [
-    { provider: 'azure', modelId: 'grok-4-6' },
-    { provider: 'xai', modelId: 'grok-4-6-xai' },
-  ]);
-  assert.deepEqual(familyProviderModels('claude-sonnet'), [{ provider: 'anthropic', modelId: 'claude-sonnet-5' }]);
-  assert.deepEqual(familyProviderModels('missing'), []);
-  assert.ok(selectableModelFamilies.some(family => family.vendor === 'google'));
 });

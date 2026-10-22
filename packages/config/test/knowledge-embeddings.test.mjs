@@ -10,12 +10,24 @@ const enabledEnv = {
 
 test('absent embedding opt-in is disabled regardless of chat settings or credentials', () => {
   assert.deepEqual(parseKnowledgeEmbeddingsConfig({}), { kind: 'disabled' });
-  assert.deepEqual(parseKnowledgeEmbeddingsConfig({ MODEL_FAMILIES: 'unknown', AZURE_FOUNDRY_ENDPOINT: 'bad' }), {
-    kind: 'disabled',
-  });
-  assert.deepEqual(parseKnowledgeEmbeddingsConfig({ ...enabledEnv, KNOWLEDGE_EMBEDDINGS_ENABLED: 'false' }), {
-    kind: 'disabled',
-  });
+  assert.deepEqual(
+    parseKnowledgeEmbeddingsConfig({
+      MODEL_CATALOG_FILE: 'missing.json',
+      AZURE_FOUNDRY_ENDPOINT: 'bad',
+    }),
+    {
+      kind: 'disabled',
+    },
+  );
+  assert.deepEqual(
+    parseKnowledgeEmbeddingsConfig({
+      ...enabledEnv,
+      KNOWLEDGE_EMBEDDINGS_ENABLED: 'false',
+    }),
+    {
+      kind: 'disabled',
+    },
+  );
   const enabled = parseKnowledgeEmbeddingsConfig(enabledEnv);
   assert.equal(enabled.kind, 'enabled');
   assert.equal(enabled.profile.id, 'azure-eastus-text-embedding-3-large-v1-1536-cl100k-prep1');
@@ -32,12 +44,16 @@ test('enabled settings fail closed without disclosing environment values', () =>
     { KNOWLEDGE_EMBEDDINGS_ENABLED: '1' },
     { AZURE_FOUNDRY_API_KEY: undefined },
     { AZURE_FOUNDRY_API_KEY: 'secret\nvalue' },
-    { AZURE_FOUNDRY_ENDPOINT: 'https://user:pass@other.services.ai.azure.com/' },
+    {
+      AZURE_FOUNDRY_ENDPOINT: 'https://user:pass@other.services.ai.azure.com/',
+    },
     { AZURE_FOUNDRY_ENDPOINT: 'not a url' },
     { KNOWLEDGE_EMBEDDINGS_PROVIDER: 'cohere' },
     { KNOWLEDGE_EMBEDDINGS_DIMENSIONS: '3072' },
     { KNOWLEDGE_EMBEDDINGS_MODEL: 'bad model' },
-    { AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/?secret=value' },
+    {
+      AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/?secret=value',
+    },
     { AZURE_FOUNDRY_ENDPOINT: 'http://example.services.ai.azure.com/' },
     { VITE_AZURE_FOUNDRY_API_KEY: 'private' },
     { PUBLIC_KNOWLEDGE_EMBEDDINGS_ENABLED: 'true' },
@@ -61,9 +77,16 @@ test('the Azure Foundry endpoint is required and accepts any secure resource', (
       profile: undefined,
     },
   );
-  assert.throws(() => parseKnowledgeEmbeddingsConfig({ ...enabledEnv, AZURE_FOUNDRY_ENDPOINT: undefined }), {
-    message: 'Invalid server knowledge embeddings configuration',
-  });
+  assert.throws(
+    () =>
+      parseKnowledgeEmbeddingsConfig({
+        ...enabledEnv,
+        AZURE_FOUNDRY_ENDPOINT: undefined,
+      }),
+    {
+      message: 'Invalid server knowledge embeddings configuration',
+    },
+  );
   const other = parseKnowledgeEmbeddingsConfig({
     ...enabledEnv,
     AZURE_FOUNDRY_ENDPOINT: 'https://other.services.ai.azure.com',
@@ -82,7 +105,10 @@ test('OpenAI-compatible embeddings use their own base URL and key with the store
     KNOWLEDGE_EMBEDDINGS_BASE_URL: 'https://api.openai.com/v1',
     KNOWLEDGE_EMBEDDINGS_API_KEY: 'synthetic-openai-key',
   };
-  const config = parseKnowledgeEmbeddingsConfig({ ...env, AZURE_FOUNDRY_API_KEY: 'unused' });
+  const config = parseKnowledgeEmbeddingsConfig({
+    ...env,
+    AZURE_FOUNDRY_API_KEY: 'unused',
+  });
   assert.deepEqual(
     { ...config, profile: undefined },
     {
@@ -96,12 +122,17 @@ test('OpenAI-compatible embeddings use their own base URL and key with the store
   );
   assert.equal(config.profile.dimensions, 1536);
   assert.equal(
-    parseKnowledgeEmbeddingsConfig({ ...env, KNOWLEDGE_EMBEDDINGS_BASE_URL: 'http://127.0.0.1:4000/v1/' }).endpoint,
+    parseKnowledgeEmbeddingsConfig({
+      ...env,
+      KNOWLEDGE_EMBEDDINGS_BASE_URL: 'http://127.0.0.1:4000/v1/',
+    }).endpoint,
     'http://127.0.0.1:4000/v1/',
   );
   assert.equal(
-    parseKnowledgeEmbeddingsConfig({ ...env, KNOWLEDGE_EMBEDDINGS_MODEL: 'openai/text-embedding-3-large' })
-      .requestModel,
+    parseKnowledgeEmbeddingsConfig({
+      ...env,
+      KNOWLEDGE_EMBEDDINGS_MODEL: 'openai/text-embedding-3-large',
+    }).requestModel,
     'openai/text-embedding-3-large',
   );
   for (const change of [
@@ -123,11 +154,17 @@ test('embedding costs retain exact pico-USD without output tokens or per-call ro
     date: '2026-10-03',
   });
   assert.equal(
-    calculateKnowledgeEmbeddingCost({ inputTokens: 1000000, date: '2026-10-03' }).providerPicoUsd,
+    calculateKnowledgeEmbeddingCost({
+      inputTokens: 1000000,
+      date: '2026-10-03',
+    }).providerPicoUsd,
     '130000000000',
   );
   assert.equal(
-    calculateKnowledgeEmbeddingCost({ inputTokens: Number.MAX_SAFE_INTEGER, date: '2026-10-03' }).providerPicoUsd,
+    calculateKnowledgeEmbeddingCost({
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      date: '2026-10-03',
+    }).providerPicoUsd,
     '1170935903116328830000',
   );
   assert.equal(calculateKnowledgeEmbeddingCost({ inputTokens: 0, date: '2026-10-03' }).providerPicoUsd, '0');

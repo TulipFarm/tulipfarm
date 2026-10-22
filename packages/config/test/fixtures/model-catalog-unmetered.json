@@ -1,21 +1,46 @@
 {
-  "families": [
+  "$schema": "https://tulipfarm.ai/schemas/model-catalog.v1.json",
+  "version": 1,
+  "models": [
     {
       "id": "local-chat",
       "name": "Local Chat",
       "vendor": "local",
-      "currentModelId": "local-chat-1",
-      "modelIds": ["local-chat-1"],
+      "routes": [
+        {
+          "provider": "azure",
+          "model": "Local-Chat-1"
+        }
+      ],
+      "default": true,
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      },
       "pricing": "unmetered"
-    }
-  ],
-  "models": [
+    },
     {
-      "id": "local-chat-1",
-      "name": "Local Chat 1",
-      "provider": "azure",
-      "providerModelId": "Local-Chat-1",
-      "metadata": { "max_input_tokens": 128000, "max_output_tokens": 16000 }
+      "id": "metered-chat",
+      "name": "Metered Chat",
+      "vendor": "local",
+      "routes": [
+        {
+          "provider": "azure",
+          "model": "Metered-Chat-1"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 16000
+      },
+      "pricing": [
+        {
+          "usdPerMillionTokens": {
+            "input": 0.5,
+            "output": 1.5
+          }
+        }
+      ]
     }
   ]
 }

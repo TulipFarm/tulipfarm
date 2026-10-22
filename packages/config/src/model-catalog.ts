@@ -2,12 +2,6 @@ import { z } from 'zod';
 import { modelProviderSchema } from './model-capabilities.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
-/**
- * The shipped catalog's default-chat family, kept literal so public route contracts never load the catalog JSON. A
- * server reports its own as `defaultChatFamilyId` in the catalog.
- */
-export const defaultChatModelFamilyId = 'claude-sonnet';
-
 const family = z.strictObject({
   id: modelFamilyIdSchema,
   displayName: z.string().min(1),
@@ -62,7 +56,7 @@ export const modelCatalogSchema = z.strictObject({
   defaultChatFamilyId: modelFamilyIdSchema
     .nullable()
     .optional()
-    .describe('Family new chats use unless the person chose one: the server default-chat role; null without models'),
+    .describe("Family new chats and agents use unless the person chose one: the server catalog's default model"),
 });
 export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
 export type ModelCatalogFamily = z.infer<typeof modelCatalogFamilySchema>;

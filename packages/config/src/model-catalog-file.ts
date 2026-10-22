@@ -238,11 +238,11 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
       issues.push({ path: at('selectable'), message: 'The default model must be selectable' });
     if (
       model.roles.includes('public-guide') &&
-      (types.some(type => type !== 'azure') || (model.capabilities?.api ?? 'chat-completions') !== 'chat-completions')
+      (!types.includes('azure') || (model.capabilities?.api ?? 'chat-completions') !== 'chat-completions')
     )
       issues.push({
         path: at('roles'),
-        message: 'The public-guide model needs only Azure routes using the chat-completions API',
+        message: 'The public-guide model needs an Azure route using the chat-completions API',
       });
     for (const [roleIndex, role] of model.roles.entries()) {
       if (model.roles.indexOf(role) !== roleIndex)

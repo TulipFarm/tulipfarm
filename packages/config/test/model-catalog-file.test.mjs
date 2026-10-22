@@ -69,12 +69,18 @@ test('ids are unique and each role is on one model', () => {
   rejects(catalog([model({ roles: ['default-chat'] })]), /^models\.0\.roles\.0:/);
 });
 
-const routes = (...providers) => ({ routes: providers.map(provider => ({ provider, model: 'm' })) });
+const routes = (...providers) => ({
+  routes: providers.map(provider => ({ provider, model: 'm' })),
+});
 
 test('model routes name built-in or declared providers, in order of preference', () => {
   rejects(catalog([model(routes('foundry'))]), /^models\.0\.routes\.0\.provider: Unknown provider "foundry"/);
   assert.deepEqual(
-    problems(catalog([model(routes('foundry', 'anthropic'))], { providers: { foundry: { type: 'azure' } } })),
+    problems(
+      catalog([model(routes('foundry', 'anthropic'))], {
+        providers: { foundry: { type: 'azure' } },
+      }),
+    ),
     [],
   );
   rejects(
@@ -87,7 +93,9 @@ test('model routes name built-in or declared providers, in order of preference',
     /^providers\.azure\.type: Provider "azure" must have type "azure"/,
   );
   rejects(
-    catalog([model(routes('gateway'))], { providers: { gateway: { type: 'openai-compatible' } } }),
+    catalog([model(routes('gateway'))], {
+      providers: { gateway: { type: 'openai-compatible' } },
+    }),
     /^providers\.gateway\.apiKeyEnv: Required/,
   );
   rejects(
@@ -95,16 +103,23 @@ test('model routes name built-in or declared providers, in order of preference',
     /^models\.0\.capabilities\.api: Provider type anthropic does not support this API/,
   );
   rejects(
-    catalog([model({ ...routes('openai', 'anthropic'), capabilities: { api: 'responses' } })]),
+    catalog([
+      model({
+        ...routes('openai', 'anthropic'),
+        capabilities: { api: 'responses' },
+      }),
+    ]),
     /^models\.0\.capabilities\.api: Provider type anthropic/,
   );
 });
 
-test('the public-guide model runs only on Azure chat completions', () => {
+test('the public-guide model has an Azure chat-completions route', () => {
   const guide = overrides => catalog([model({ roles: ['public-guide'], ...overrides })]);
   assert.deepEqual(problems(guide(routes('azure'))), []);
-  rejects(guide(routes('anthropic')), /^models\.0\.roles: The public-guide model needs only Azure routes/);
-  rejects(guide(routes('azure', 'openai')), /^models\.0\.roles: The public-guide model/);
+  // Served by another route, the guide is unavailable; the model still serves chats.
+  assert.deepEqual(problems(guide(routes('azure', 'openai'))), []);
+  rejects(guide(routes('anthropic')), /^models\.0\.roles: The public-guide model needs an Azure route/);
+  rejects(guide(routes('openai')), /^models\.0\.roles: The public-guide model/);
   rejects(
     guide({ ...routes('azure'), capabilities: { api: 'responses' } }),
     /^models\.0\.roles: The public-guide model/,
@@ -112,18 +127,34 @@ test('the public-guide model runs only on Azure chat completions', () => {
 });
 
 test('providers name environment variables, never secrets', () => {
-  const provider = apiKeyEnv => ({ providers: { foundry: { type: 'azure', apiKeyEnv } } });
+  const provider = apiKeyEnv => ({
+    providers: { foundry: { type: 'azure', apiKeyEnv } },
+  });
   rejects(
     catalog([model()], provider('sk-live-123')),
     /^providers\.foundry\.apiKeyEnv: Must be an environment variable name/,
   );
   rejects(catalog([model()], provider('VITE_AZURE_KEY')), /^providers\.foundry\.apiKeyEnv: Must not be a public/);
-  rejects(catalog([model()], { providers: { foundry: { type: 'azure', apiKey: 'x' } } }), /^providers\.foundry: /);
+  rejects(
+    catalog([model()], {
+      providers: { foundry: { type: 'azure', apiKey: 'x' } },
+    }),
+    /^providers\.foundry: /,
+  );
 });
 
 test('pricing needs a base rate and unambiguous tiers', () => {
   rejects(
-    catalog([model({ pricing: [{ promptTokensAbove: 1000, usdPerMillionTokens: { input: 1, output: 1 } }] })]),
+    catalog([
+      model({
+        pricing: [
+          {
+            promptTokensAbove: 1000,
+            usdPerMillionTokens: { input: 1, output: 1 },
+          },
+        ],
+      }),
+    ]),
     /^models\.0\.pricing: Needs a base rate/,
   );
   const rate = { usdPerMillionTokens: { input: 1, output: 1 } };
@@ -142,11 +173,25 @@ test('pricing needs a base rate and unambiguous tiers', () => {
     [],
   );
   rejects(
-    catalog([model({ pricing: [{ ...rate, validFrom: '2026-11-01', validUntilExclusive: '2026-10-01' }] })]),
+    catalog([
+      model({
+        pricing: [
+          {
+            ...rate,
+            validFrom: '2026-11-01',
+            validUntilExclusive: '2026-10-01',
+          },
+        ],
+      }),
+    ]),
     /^models\.0\.pricing\.0: validFrom must be before/,
   );
   rejects(
-    catalog([model({ pricing: [{ usdPerMillionTokens: { input: 0.0000001, output: 1 } }] })]),
+    catalog([
+      model({
+        pricing: [{ usdPerMillionTokens: { input: 0.0000001, output: 1 } }],
+      }),
+    ]),
     /^models\.0\.pricing\.0\.usdPerMillionTokens\.input: At most 6 decimal places/,
   );
   assert.deepEqual(problems(catalog([model({ pricing: 'unmetered' })])), []);
