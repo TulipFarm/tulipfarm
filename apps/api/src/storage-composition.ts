@@ -12,7 +12,7 @@ import { registerRecommendationDispatch } from './recommendation-dispatch.ts';
 import { registerRecommendationEvents } from './recommendation-events.ts';
 import { recommendationEligibility } from '@tulipfarm/recommendations/configuration';
 import { registerTableDispatch } from './table-dispatch.ts';
-import { registerConversationDispatch } from './conversation-dispatch.ts';
+import { createReplyDispatch, registerConversationDispatch } from './conversation-dispatch.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -238,6 +238,7 @@ export function registerStorageComposition(
   app.addHook('preClose', async () => {
     events.close();
   });
+  const replies = createReplyDispatch({ runtime, temporal });
   registerConversations(app, {
     auth: dependencies.auth,
     service: createConversations(runtime, chatSkills),
@@ -246,6 +247,7 @@ export function registerStorageComposition(
     attachments,
     identity: dependencies.pool,
     events,
+    replies,
   });
   registerProjects(app, {
     auth: dependencies.auth,
@@ -298,6 +300,7 @@ export function registerStorageComposition(
     runtime,
     temporal,
     attachments,
+    replies,
     expireApprovals: async workspaceId => {
       for (const requestId of await approvalRequests.due(workspaceId))
         await confirmation.approvals.expire(workspaceId, requestId);
