@@ -202,7 +202,7 @@ test(
           assert.match(geometry.after, /linear-gradient/);
           assert.equal(geometry.overflow, false);
         }
-        const shine = manual.locator('[data-slot="divider-shine"]');
+        const shine = manual.locator('.sprout-separator-fade-shine');
         await manual.hover();
         assert.equal(
           await shine.evaluate(element => getComputedStyle(element).animationName),
@@ -220,9 +220,9 @@ test(
             iterations: style.animationIterationCount,
           };
         });
-        assert.deepEqual(animation, { name: 'divider-shine', duration: '0.65s', iterations: '1' });
+        assert.deepEqual(animation, { name: 'sprout-separator-fade-shine', duration: '0.65s', iterations: '1' });
         await page.waitForFunction(() => {
-          const element = document.querySelector('[aria-label="Compacted"] [data-slot="divider-shine"]');
+          const element = document.querySelector('[aria-label="Compacted"] .sprout-separator-fade-shine');
           return (
             element &&
             element.getAnimations().every(animation => animation.playState === 'finished') &&

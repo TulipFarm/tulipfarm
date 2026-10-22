@@ -378,33 +378,6 @@
     text-underline-offset: 4px;
   }
 
-  [data-slot='divider-shine'] {
-    mask-image: linear-gradient(to right, transparent, black, transparent);
-    mask-size: 25% 100%;
-    mask-repeat: no-repeat;
-  }
-
-  @keyframes divider-shine {
-    0% {
-      mask-position: -34% 0;
-      opacity: 0;
-    }
-    20%,
-    80% {
-      opacity: 0.7;
-    }
-    100% {
-      mask-position: 134% 0;
-      opacity: 0;
-    }
-  }
-
-  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    [data-slot='divider']:hover > [data-slot='divider-shine'] {
-      animation: divider-shine 650ms ease-out both;
-    }
-  }
-
   [data-slot='gradient-banner'] {
     --banner-pearl: #fffdf7;
     --banner-ink: #25282d;
