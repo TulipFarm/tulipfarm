@@ -1,0 +1,49 @@
+.invite-email-field [data-slot='combobox-chips'] {
+  min-height: 2.75rem;
+  align-content: flex-start;
+}
+
+.invite-email-field [data-slot='combobox-chip'][data-status]::before {
+  content: '';
+  flex-shrink: 0;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-inline-end: 0.25rem;
+  border-radius: 9999px;
+}
+
+.invite-email-field [data-slot='combobox-chip'][data-status='queued']::before,
+.invite-email-field [data-slot='combobox-chip'][data-status='sending']::before {
+  border: 1.5px solid currentColor;
+  border-inline-end-color: transparent;
+}
+
+.invite-email-field [data-slot='combobox-chip'][data-status='failed'] {
+  background: color-mix(in srgb, var(--destructive) 12%, var(--card));
+  color: var(--destructive);
+}
+
+.invite-email-field [data-slot='combobox-chip'][data-status='failed']::before {
+  content: '!';
+  display: grid;
+  place-items: center;
+  width: 0.875rem;
+  height: 0.875rem;
+  background: var(--destructive);
+  color: var(--background);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .invite-email-field [data-slot='combobox-chip'][data-status='sending']::before {
+    animation: invite-chip-spin 0.8s linear infinite;
+  }
+}
+
+@keyframes invite-chip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

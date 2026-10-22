@@ -193,6 +193,10 @@ export function GovernanceContent({
                 invitations={invitations}
                 open={inviteOpen}
                 onOpenChange={setInviteOpen}
+                onViewInvitations={() => {
+                  setInviteOpen(false);
+                  setTab('invitations');
+                }}
                 members={state.kind === 'admin' ? state.data.directory : []}
                 initialInput={inviteMock ? 'jessica@example.test\njustin@example.test\njenny@example.test' : ''}
               />

@@ -1,128 +1,51 @@
 .invite-canvas {
+  --invite-cursor-1: #c92a2a;
+  --invite-cursor-2: #5b4fe0;
+  --invite-cursor-3: #1c6fb8;
+  --invite-cursor-4: #b55309;
+  display: flex;
   min-width: 0;
-  padding: 2rem;
-  background: var(--background);
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: var(--muted);
   color: var(--foreground);
-  container: invite-canvas / inline-size;
 }
 
-.invite-presence-field {
+.invite-board {
   position: relative;
-  display: grid;
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-  padding-bottom: 2rem;
+  min-height: 22rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background-color: var(--background);
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 14%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
-.invite-presence-group {
-  display: contents;
-}
-
-.invite-person {
-  --invite-color: var(--chart-4);
-  min-width: 0;
-  max-width: 95%;
-  color: var(--invite-color);
+.invite-board ul {
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
-.invite-person:nth-child(even) {
-  justify-self: end;
-}
-.invite-person[data-tone='1'] {
-  --invite-color: var(--chart-2);
-}
-.invite-person[data-tone='2'] {
-  --invite-color: var(--chart-3);
-}
-.invite-person[data-tone='3'] {
-  --invite-color: var(--chart-1);
-}
-.invite-person[data-tone='4'] {
-  --invite-color: var(--chart-5);
-}
-.invite-person-motion {
-  display: flex;
-  align-items: flex-start;
-  min-width: 0;
-}
-.invite-person-motion > svg {
-  flex-shrink: 0;
-  margin-right: -0.25rem;
+.invite-board-note {
+  position: absolute;
+  inset-inline: 1rem;
+  bottom: 1rem;
+  margin: 0;
 }
 
-.invite-person-label {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 1.1rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius-xl);
-  background: color-mix(in srgb, var(--invite-color) 10%, var(--card));
-  box-shadow: var(--shadow-sm);
-}
-
-.invite-person-label[data-member='true'] {
-  padding: 0.375rem 0.75rem 0.375rem 0.375rem;
-  border-radius: 9999px;
-  background: var(--card);
-  color: var(--foreground);
-}
-
-.invite-canvas-empty {
-  max-width: 16rem;
-}
-
-@container invite-canvas (min-width: 24rem) {
-  .invite-presence-field {
-    display: block;
-    min-height: var(--presence-height);
-  }
-  .invite-person {
-    position: absolute;
-    left: var(--person-x);
-    top: var(--person-y);
-    max-width: 44%;
-  }
-  .invite-canvas-empty {
-    position: absolute;
-    bottom: 0;
-  }
+.invite-board-note + .invite-board-note {
+  bottom: 2.75rem;
 }
 
 @media (min-width: 768px) {
   .invite-canvas {
-    min-height: 34rem;
+    padding: 2rem;
     border-left: 1px solid var(--border);
   }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .invite-person[data-animated='true'] .invite-person-motion {
-    animation: invite-person-drift var(--person-duration) ease-in-out var(--person-delay) infinite;
-    animation-play-state: paused;
-  }
-  .invite-canvas[data-paused='false'][data-hidden='false'] .invite-person[data-visible='true'] .invite-person-motion {
-    animation-play-state: running;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .invite-motion-control {
-    display: none;
-  }
-}
-
-@keyframes invite-person-drift {
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-  35% {
-    transform: translate(var(--person-drift-x), var(--person-drift-y));
-  }
-  70% {
-    transform: translate(calc(var(--person-drift-x) * -0.6), calc(var(--person-drift-y) * 0.5));
+  .invite-board {
+    min-height: 28rem;
   }
 }
