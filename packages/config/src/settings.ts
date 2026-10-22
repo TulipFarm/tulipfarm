@@ -291,17 +291,6 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'optional', example: 'support@example.com', commented: true },
   },
   {
-    name: 'TULIPFARM_AGENT_AVATAR_URL',
-    group: 'Self-hosted stack',
-    services: ['compose'],
-    usedBy: 'web build',
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Origin serving agent avatar artwork at `/avatar/<object>/<color>.svg` (web `VITE_AGENT_AVATAR_URL`). Unset shows initials.',
-    selfHost: { section: 'optional', example: 'https://avatars.example.com', commented: true },
-  },
-  {
     name: 'COMPOSE_PROFILES',
     group: 'Self-hosted stack',
     services: ['compose'],

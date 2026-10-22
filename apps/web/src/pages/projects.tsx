@@ -830,10 +830,10 @@ function ProjectChats({ project }: { project: Project }) {
             <>
               <ul aria-label="Project chats" className="-mx-3 divide-y">
                 {data.chats.map(chat => (
-                  <li key={chat.id} className="min-w-0">
+                  <li key={chat.id} className="grid min-w-0">
                     <Button
                       variant="ghost"
-                      size="chat-row"
+                      size="lg"
                       nativeButton={false}
                       render={
                         <Link

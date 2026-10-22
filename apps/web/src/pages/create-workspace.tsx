@@ -186,15 +186,17 @@ function SignedInCreateWorkspacePage() {
               <PublicAuthQueryProvider>
                 <AuthVerification key={challengeAttempt} onToken={setChallengeToken} action="create_workspace" />
               </PublicAuthQueryProvider>
-              <Button
-                type="submit"
-                size="onboarding"
-                disabled={saving || restoring || challengeToken === null}
-                aria-busy={saving || restoring}
-              >
-                {saving ? <Spinner aria-hidden="true" /> : <ArrowRightIcon aria-hidden="true" />}
-                {saving ? 'Creating workspace…' : saveError ? 'Try creating workspace again' : 'Create workspace'}
-              </Button>
+              <div className="grid">
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={saving || restoring || challengeToken === null}
+                  aria-busy={saving || restoring}
+                >
+                  {saving ? <Spinner aria-hidden="true" /> : <ArrowRightIcon aria-hidden="true" />}
+                  {saving ? 'Creating workspace…' : saveError ? 'Try creating workspace again' : 'Create workspace'}
+                </Button>
+              </div>
               {saveError && (
                 <Alert variant="destructive">
                   <AlertTitle>Workspace creation needs attention</AlertTitle>

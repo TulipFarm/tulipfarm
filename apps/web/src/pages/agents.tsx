@@ -6,7 +6,7 @@ import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import {
   DataList,
   DataListActions,
@@ -611,7 +611,7 @@ function AgentPage({
                                 <div>
                                   <Button
                                     variant="link"
-                                    size="xs"
+                                    size="sm"
                                     onClick={() => open('instructions', 'agent-slack-response')}
                                   >
                                     Edit Slack trigger
@@ -678,7 +678,7 @@ function AgentPage({
                               Channels this agent may post to are set in Execution.
                               <Button
                                 variant="link"
-                                size="xs"
+                                size="sm"
                                 onClick={() => open('execution', 'agent-slack-destinations')}
                               >
                                 Go to Slack destinations

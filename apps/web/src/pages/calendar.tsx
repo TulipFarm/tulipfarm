@@ -95,7 +95,7 @@ function SourceStatus({ label, read }: { label: string; read: Read }) {
         <p role="alert" className="text-xs text-destructive">
           {label} could not refresh.
         </p>
-        <Button variant="outline" size="xs" onClick={() => void read.refresh()}>
+        <Button variant="outline" size="sm" onClick={() => void read.refresh()}>
           Retry {label}
         </Button>
       </div>
@@ -334,18 +334,20 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
         <article key={task.id} aria-label={task.title} className="grid min-w-0">
           <Card size="sm">
             <CardHeader>
-              <Button
-                variant="ghost"
-                size="card-title"
-                nativeButton={false}
-                title={task.title}
-                render={
-                  <Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug: slug, taskId: task.id }} />
-                }
-              >
-                <CalendarKindIcon kind="task" marked />
-                <span className="line-clamp-2">{task.title}</span>
-              </Button>
+              <div className="grid min-w-0 grid-cols-1">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  nativeButton={false}
+                  title={task.title}
+                  render={
+                    <Link to="/$workspaceSlug/agent-tasks/$taskId" params={{ workspaceSlug: slug, taskId: task.id }} />
+                  }
+                >
+                  <CalendarKindIcon kind="task" marked />
+                  <span className="min-w-0 flex-1 truncate text-start">{task.title}</span>
+                </Button>
+              </div>
             </CardHeader>
             <div className="mt-auto">
               <CardFooter>
@@ -359,7 +361,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   >
                     {taskStatusLabels[task.status]}
                   </Badge>
-                  <Button variant="outline" size="calendar" onClick={() => openCreate(day, '09:00', task.title)}>
+                  <Button variant="outline" size="md" onClick={() => openCreate(day, '09:00', task.title)}>
                     <Clock3 size={14} />
                     Reserve time
                   </Button>
@@ -373,22 +375,24 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
         <article key={`${action.runId}:${action.stepId}`} aria-label={action.title} className="grid min-w-0">
           <Card size="sm">
             <CardHeader>
-              <Button
-                variant="ghost"
-                size="card-title"
-                nativeButton={false}
-                title={action.title}
-                render={
-                  <Link
-                    to="/$workspaceSlug/workflows"
-                    params={{ workspaceSlug: slug }}
-                    search={{ workflow: action.workflowId, view: 'runs', run: action.runId }}
-                  />
-                }
-              >
-                <CalendarKindIcon kind="workflow" marked />
-                <span className="line-clamp-2">{action.title}</span>
-              </Button>
+              <div className="grid min-w-0 grid-cols-1">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  nativeButton={false}
+                  title={action.title}
+                  render={
+                    <Link
+                      to="/$workspaceSlug/workflows"
+                      params={{ workspaceSlug: slug }}
+                      search={{ workflow: action.workflowId, view: 'runs', run: action.runId }}
+                    />
+                  }
+                >
+                  <CalendarKindIcon kind="workflow" marked />
+                  <span className="min-w-0 flex-1 truncate text-start">{action.title}</span>
+                </Button>
+              </div>
             </CardHeader>
             <div className="mt-auto">
               <CardFooter>
@@ -396,7 +400,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   <Badge variant="warning">Needs your input</Badge>
                   <Button
                     variant="outline"
-                    size="calendar"
+                    size="md"
                     aria-label={`Review ${action.title}`}
                     nativeButton={false}
                     render={
@@ -427,7 +431,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
           The workflow list is partial.{' '}
           <Button
             variant="link"
-            size="xs"
+            size="sm"
             nativeButton={false}
             render={<Link to="/$workspaceSlug/workflows" params={{ workspaceSlug: slug }} />}
           >
@@ -510,7 +514,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
               ))}
               <Button
                 variant="link"
-                size="xs"
+                size="sm"
                 nativeButton={false}
                 render={<Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />}
               >
@@ -582,7 +586,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             <span className="hidden sm:inline-flex">
               <Button
                 variant="ghost"
-                size="calendar"
+                size="md"
                 aria-label="Calendar commands"
                 title="Search events and commands (/)"
                 onClick={() => setCommandsOpen(true)}
@@ -591,7 +595,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 Search
               </Button>
             </span>
-            <Button size="calendar" onClick={() => openCreate()}>
+            <Button size="md" onClick={() => openCreate()}>
               <Plus size={14} />
               Create
             </Button>
@@ -607,7 +611,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             <div className="calendar-range-controls">
               <Button
                 variant="ghost"
-                size="calendar-icon"
+                size="icon"
                 aria-label="Previous range"
                 onClick={() => show({ date: moveDate(day, view, -1, zone) })}
               >
@@ -615,7 +619,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
               </Button>
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <h2 className="min-w-0" aria-label={title}>
-                  <PopoverTrigger render={<Button variant="ghost" size="calendar-title" aria-label="Choose date" />}>
+                  <PopoverTrigger render={<Button variant="ghost" size="md" aria-label="Choose date" />}>
                     <span className="calendar-title-full">{title}</span>
                     <span className="calendar-title-short">{format(localDate(day, '12:00', zone), 'MMM yyyy')}</span>
                     <ChevronDown size={14} />
@@ -638,7 +642,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
               </Popover>
               <Button
                 variant="ghost"
-                size="calendar-icon"
+                size="icon"
                 aria-label="Next range"
                 onClick={() => show({ date: moveDate(day, view, 1, zone) })}
               >
@@ -654,7 +658,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 }}
                 items={calendarViews.map(value => ({ value, label: viewLabels[value] }))}
               >
-                <SelectTrigger size="calendar" aria-label="Calendar view">
+                <SelectTrigger size="md" aria-label="Calendar view">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -669,9 +673,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             <div className="calendar-main-controls">
               <Popover open={pendingOpen} onOpenChange={setPendingOpen}>
                 <PopoverTrigger
-                  render={
-                    <Button variant="outline" size="calendar" aria-label="Pending work" title={pendingDescription} />
-                  }
+                  render={<Button variant="outline" size="md" aria-label="Pending work" title={pendingDescription} />}
                 >
                   <Inbox size={14} />
                   <span className="calendar-pending-label">Pending work</span>
@@ -713,22 +715,17 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   </footer>
                 </PopoverContent>
               </Popover>
-              <Button variant="outline" size="calendar" onClick={today}>
+              <Button variant="outline" size="md" onClick={today}>
                 Today
               </Button>
-              <Button
-                variant="outline"
-                size="calendar"
-                aria-label="Calendar filters"
-                onClick={() => setPanel('filters')}
-              >
+              <Button variant="outline" size="md" aria-label="Calendar filters" onClick={() => setPanel('filters')}>
                 <SlidersHorizontal size={14} />
                 Filters{filterCount > 0 && <Badge variant="secondary">{filterCount}</Badge>}
               </Button>
               <div className="calendar-desktop-tools">
                 <Button
                   variant="outline"
-                  size="calendar"
+                  size="md"
                   aria-label="Find time"
                   onClick={() => {
                     setPanel('find');
@@ -740,7 +737,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 </Button>
                 <Button
                   variant="ghost"
-                  size="calendar-icon"
+                  size="icon"
                   aria-label="Refresh calendar"
                   onClick={() => void sources.refresh()}
                 >
@@ -750,7 +747,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
               <div className="calendar-more-controls">
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    render={<Button variant="ghost" size="calendar-icon" aria-label="More calendar actions" />}
+                    render={<Button variant="ghost" size="icon" aria-label="More calendar actions" />}
                   >
                     <MoreHorizontal size={16} />
                   </DropdownMenuTrigger>
@@ -778,7 +775,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             </div>
           </header>
           <section aria-label="Now and next in this view" className="calendar-now-next">
-            <Button variant="ghost" size="calendar" aria-label="Go to now" onClick={goToNow}>
+            <Button variant="ghost" size="md" aria-label="Go to now" onClick={goToNow}>
               Now
               <span className="calendar-current-clock">
                 {now.toLocaleTimeString('en', { timeZone: zone, hour: 'numeric', minute: '2-digit' })}
@@ -787,17 +784,19 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             {planning.current[0] && (
               <div className="flex min-w-0 max-w-96 items-center gap-1">
                 <span className="shrink-0 text-muted-foreground">Happening now</span>
-                <Button
-                  variant="ghost"
-                  size="task-link"
-                  aria-label={`Now in view: ${planning.current[0].title}`}
-                  onClick={() => setSelected(planning.current[0]!.id)}
-                >
-                  <span className="truncate text-xs">
-                    {planning.current[0].title} · {compactItemTime(planning.current[0], zone)}
-                    {planning.current.length > 1 ? ` +${planning.current.length - 1}` : ''}
-                  </span>
-                </Button>
+                <div className="grid min-w-0 grid-cols-1">
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    aria-label={`Now in view: ${planning.current[0].title}`}
+                    onClick={() => setSelected(planning.current[0]!.id)}
+                  >
+                    <span className="truncate text-xs">
+                      {planning.current[0].title} · {compactItemTime(planning.current[0], zone)}
+                      {planning.current.length > 1 ? ` +${planning.current.length - 1}` : ''}
+                    </span>
+                  </Button>
+                </div>
               </div>
             )}
             {planning.next ? (
@@ -805,10 +804,10 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 <span className="shrink-0 text-muted-foreground">
                   {planning.next.time.kind === 'point' ? 'Next run' : 'Up next'}
                 </span>
-                <div className="min-w-0">
+                <div className="grid min-w-0 grid-cols-1">
                   <Button
                     variant="ghost"
-                    size="task-link"
+                    size="md"
                     aria-label={`Next in view: ${planning.next.title}`}
                     onClick={() => setSelected(planning.next!.id)}
                   >
@@ -837,7 +836,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   : 'Connect Google Calendar to add meetings and find free time.'}{' '}
                 <Button
                   variant="link"
-                  size="xs"
+                  size="sm"
                   nativeButton={false}
                   render={<Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />}
                 >
@@ -848,7 +847,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
             {google?.errors.map(error => (
               <p role="alert" key={error.id} className="py-1 text-xs text-destructive">
                 {error.message}{' '}
-                <Button variant="link" size="xs" onClick={() => void sources.google.refresh()}>
+                <Button variant="link" size="sm" onClick={() => void sources.google.refresh()}>
                   Retry
                 </Button>
               </p>
@@ -869,7 +868,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                       : 'Nothing scheduled here yet. Create an event or follow a workflow.'}
                   </p>
                   {filterCount > 0 && (
-                    <Button variant="outline" size="xs" onClick={clearFilters}>
+                    <Button variant="outline" size="sm" onClick={clearFilters}>
                       Clear filters
                     </Button>
                   )}

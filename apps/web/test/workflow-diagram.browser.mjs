@@ -21,7 +21,6 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
     {
       cwd: new URL('..', import.meta.url),
       stdio: 'ignore',
-      env: { ...process.env, VITE_AGENT_AVATAR_URL: 'https://avatars.tulipfarm.ai' },
     },
   );
   let browser;
@@ -42,12 +41,6 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
     page.setDefaultTimeout(10000);
     const errors = [],
       apiRequests = [];
-    await page.route('https://avatars.tulipfarm.ai/**', route =>
-      route.fulfill({
-        contentType: 'image/svg+xml',
-        body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="green"/></svg>',
-      }),
-    );
     page.on('pageerror', error => errors.push(String(error)));
     page.on('request', request => {
       if (new URL(request.url()).pathname.startsWith('/v1/')) apiRequests.push(request.url());

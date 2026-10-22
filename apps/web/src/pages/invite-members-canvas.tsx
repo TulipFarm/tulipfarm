@@ -3,7 +3,7 @@ import { MousePointer2, Pause, Play } from 'lucide-react';
 import type { GovernanceSnapshot } from '@tulipfarm/workspaces/governance-contracts';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Button } from '@tulipfarm/sprout/button';
-import { hash } from '@/lib/agent-avatar';
+import { hash } from '@/lib/hash';
 import type { RecipientRow } from '@/lib/invitation-batch';
 import './invite-members-canvas.css';
 

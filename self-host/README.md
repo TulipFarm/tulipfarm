@@ -93,14 +93,11 @@ is offered; keep the SMTP password only on the worker.
 ## Web app
 
 The web image is built by Compose and calls the API on the same origin, so it needs
-no API URL of its own. Two optional build settings in `self-host/.env` change it:
+no API URL of its own. One optional build setting in `self-host/.env` changes it:
+`TULIPFARM_SUPPORT_EMAIL` shows a support address on the Help page. Unset hides
+the contact section.
 
-- `TULIPFARM_SUPPORT_EMAIL` shows a support address on the Help page. Unset hides
-  the contact section.
-- `TULIPFARM_AGENT_AVATAR_URL` is an origin serving agent artwork at
-  `/avatar/<object>/<color>.svg`. Unset shows each agent's initial.
-
-Rebuild the web image after changing them: `docker compose up -d --build web`.
+Rebuild the web image after changing it: `docker compose up -d --build web`.
 
 ## Sign-in methods
 

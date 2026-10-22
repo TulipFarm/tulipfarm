@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { CheckCircle } from 'reicon-react/icons/CheckCircle';
 import { EnvelopeCheck } from 'reicon-react/icons/EnvelopeCheck';
-import { AgentAvatar } from '@/components/agent-avatar';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field, FieldSeparator } from '@tulipfarm/sprout/field';
@@ -131,7 +131,7 @@ function AgentActivity() {
   const current = Math.min(Math.floor(elapsed / ticksPerStep), agent.steps.length);
 
   return (
-    <GradientBanner variant="iris" size="xl">
+    <GradientBanner variant="iris" size="lg">
       <div className="grid w-full max-w-md gap-6">
         <div className="flex justify-center">
           <GradientBannerPanel tone="dark">
@@ -493,39 +493,45 @@ export function AuthForm({
           </Alert>
         )}
         <AuthVerification key={challengeAttempt} onToken={setChallengeToken} />
-        <Button
-          size="onboarding"
-          disabled={pending || cooldown > 0 || challengeToken === null}
-          aria-busy={pending}
-          onClick={() => {
-            if (submitting.current || !recipient || challengeToken === null || cooldown) return;
-            submitting.current = true;
-            void sendLink(recipient);
-          }}
-        >
-          {pending ? 'Resending link…' : cooldown ? `Resend link in ${cooldown}s` : 'Resend sign-in link'}
-        </Button>
-        {devLink && (
-          <Button size="onboarding" nativeButton={false} render={<a href={devLink} />}>
-            Open dev sign-in link
+        <div className="grid">
+          <Button
+            size="lg"
+            disabled={pending || cooldown > 0 || challengeToken === null}
+            aria-busy={pending}
+            onClick={() => {
+              if (submitting.current || !recipient || challengeToken === null || cooldown) return;
+              submitting.current = true;
+              void sendLink(recipient);
+            }}
+          >
+            {pending ? 'Resending link…' : cooldown ? `Resend link in ${cooldown}s` : 'Resend sign-in link'}
           </Button>
+        </div>
+        {devLink && (
+          <div className="grid">
+            <Button size="lg" nativeButton={false} render={<a href={devLink} />}>
+              Open dev sign-in link
+            </Button>
+          </div>
         )}
-        <Button
-          variant="outline"
-          size="onboarding"
-          disabled={pending}
-          onClick={() => {
-            setSentTo('');
-            setDevLink('');
-            setError('');
-            setEmailInput('');
-            setSubmitted(false);
-            setChallengeToken(null);
-            setChallengeAttempt(value => value + 1);
-          }}
-        >
-          Use a different email
-        </Button>
+        <div className="grid">
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={pending}
+            onClick={() => {
+              setSentTo('');
+              setDevLink('');
+              setError('');
+              setEmailInput('');
+              setSubmitted(false);
+              setChallengeToken(null);
+              setChallengeAttempt(value => value + 1);
+            }}
+          >
+            Use a different email
+          </Button>
+        </div>
       </div>
     );
   }
@@ -640,10 +646,12 @@ export function AuthForm({
         </div>
       )}
       {googleSignIn && (
-        <Button variant="outline" size="onboarding" disabled={pending} onClick={signInWithGoogle}>
-          <GoogleLogo />
-          {googleLabel}
-        </Button>
+        <div className="grid">
+          <Button variant="outline" size="lg" disabled={pending} onClick={signInWithGoogle}>
+            <GoogleLogo />
+            {googleLabel}
+          </Button>
+        </div>
       )}
     </div>
   );

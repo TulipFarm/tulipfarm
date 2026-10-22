@@ -228,7 +228,7 @@ export function AddToProjectDialog({
             <li key={file.id} className="space-y-2 px-3 py-2.5">
               <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
                 <FileTypeIcon name={file.name} mediaType={file.mediaType ?? ''} />
-                <span className="min-w-0 truncate" title={file.name}>
+                <span className="min-w-0 flex-1 truncate text-start" title={file.name}>
                   {file.name}
                 </span>
               </p>
@@ -282,7 +282,7 @@ export function AddToProjectDialog({
               <li key={file.id} className="space-y-1.5 px-3 py-2.5">
                 <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
                   <FileTypeIcon name={file.name} mediaType={file.mediaType ?? ''} />
-                  <span className="min-w-0 truncate" title={file.name}>
+                  <span className="min-w-0 flex-1 truncate text-start" title={file.name}>
                     {file.name}
                   </span>
                 </p>
@@ -441,10 +441,10 @@ function Destinations({
       )}
       <ul aria-label="Projects you manage" className="space-y-0.5">
         {editable.map(project => (
-          <li key={project.id}>
-            <Button variant="ghost" size="nav" onClick={() => choose(project)}>
+          <li key={project.id} className="grid">
+            <Button variant="ghost" size="md" onClick={() => choose(project)}>
               <Briefcase size={16} aria-hidden="true" />
-              <span className="min-w-0 truncate" title={project.name}>
+              <span className="min-w-0 flex-1 truncate text-start" title={project.name}>
                 {project.name}
               </span>
             </Button>
