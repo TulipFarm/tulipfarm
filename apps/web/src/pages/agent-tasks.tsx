@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { workspaceRoute, agentTaskRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
+import { Status } from '@tulipfarm/sprout/status';
 import { Disclosure } from '@/components/disclosure';
 import { ChevronLeftIcon } from 'lucide-react';
 import { PageContent } from '@tulipfarm/sprout/page-content';
@@ -32,6 +33,7 @@ import {
   taskApi,
   taskCredits,
   taskStatusLabel,
+  taskStatusStates,
   taskNextStep,
   type TaskAction,
   type TaskProposal,
@@ -139,6 +141,7 @@ export function AgentTasksPage() {
                                   : 'warning'
                             }
                           >
+                            <Status state={taskStatusStates[task.status]} size="sm" aria-hidden="true" />
                             {taskStatusLabel(task)}
                           </Badge>
                           {task.status === 'paused' && (

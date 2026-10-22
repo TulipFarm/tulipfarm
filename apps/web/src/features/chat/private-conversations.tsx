@@ -79,6 +79,7 @@ import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-pi
 import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
 import { RichMessage } from './rich-message';
+import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModels } from './chat-models';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
@@ -409,6 +410,7 @@ function ConversationDetail({
   const projects = useWorkspaceProjects(workspace.id);
   const navigate = useNavigate();
   const { workspaceSlug } = workspaceRoute.useParams();
+  const integrations = useIntegrationKeywords(workspace.id, workspaceSlug, draft ? undefined : chatId);
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
@@ -1243,6 +1245,7 @@ function ConversationDetail({
               sending={write.state.kind === 'sending'}
               validation={validation}
               onFiles={uploads.add}
+              integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
               fileChoices={{
                 read: mentions.typeTrigger,
                 knowledge: () => void navigate({ to: '/$workspaceSlug/files', params: { workspaceSlug } }),

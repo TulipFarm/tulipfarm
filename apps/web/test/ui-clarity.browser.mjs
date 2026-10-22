@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { normalizeQueryRequest } from '@tulipfarm/tables/query';
 import { governanceSnapshotSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
+import { modelOption } from './browser-controls.mjs';
 
 const port = Number(process.env.CLARITY_PORT ?? 5327);
 const origin = `http://127.0.0.1:${port}`;
@@ -295,7 +296,7 @@ try {
     }
     await page.goto(`${origin}/acme`);
     await page
-      .getByRole('button', { name: 'Model: Claude Sonnet', exact: true })
+      .getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true })
       .click()
       .catch(async error => {
         console.error(await page.locator('body').innerText(), errors);
@@ -304,13 +305,13 @@ try {
     await page.getByRole('option', { name: /Claude Sonnet/ }).waitFor();
     await screenshot('selection');
     if (!before) {
-      await page.getByRole('option', { name: /Claude Sonnet.*Current model/ }).waitFor();
+      assert.equal(await modelOption(page, 'Claude Sonnet').getAttribute('aria-selected'), 'true');
       if (mobile)
         for (const row of await page.getByRole('option').all()) assert.ok((await row.boundingBox()).height >= 44);
       await page.getByRole('combobox', { name: 'Search models' }).fill('Gemini');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Enter');
-      await page.getByRole('button', { name: 'Model: Gemini Flash', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).waitFor();
     }
     await page.keyboard.press('Escape');
     const rows = page

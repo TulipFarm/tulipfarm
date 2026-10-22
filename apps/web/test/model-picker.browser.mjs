@@ -5,6 +5,7 @@ import { defaultChatModelFamilyId } from '@tulipfarm/config/model-catalog';
 import { catalogFixture } from '../src/features/models/catalog-fixture.ts';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
+import { modelOption } from './browser-controls.mjs';
 
 const server = await startBuiltApp();
 const { origin } = server;
@@ -79,7 +80,8 @@ try {
       });
       await page.goto(`${origin}/acme`);
       await page.getByText('Checking available models…', { exact: true }).waitFor();
-      await page.getByRole('button', { name: defaultModelName, exact: true }).click();
+      await page.getByRole('combobox', { name: defaultModelName, exact: true }).click();
+      await page.getByRole('option').first().waitFor();
       assert.equal(await page.getByRole('option').count(), 13);
       assert.equal(await page.getByRole('option', { name: /Gemini/ }).count(), 0);
       for (const [name, brand] of [
@@ -89,14 +91,12 @@ try {
         ['Grok', 'grok'],
         ['Kimi', 'kimi'],
       ]) {
-        const row = page.getByRole('option', { name: name, exact: true });
-        assert.equal(await row.getAttribute('aria-disabled'), 'false');
-        assert.equal(await row.locator(`[data-brand="${brand}"]`).count(), 1);
+        const row = modelOption(page, name);
+        assert.notEqual(await row.getAttribute('aria-disabled'), 'true');
+        assert.equal(await row.locator(`[data-brand="${brand}"] svg`).count(), 1);
       }
       assert.equal(saves, 0, 'The automatic initial choice is not a user preference');
-      const deepseek = page
-        .getByRole('option', { name: 'DeepSeek Pro', exact: true })
-        .locator('[data-brand="deepseek"] svg');
+      const deepseek = modelOption(page, 'DeepSeek Pro').locator('[data-brand="deepseek"] svg');
       assert.equal(
         await deepseek.evaluate(
           glyph => glyph.querySelector('path') !== null && glyph.getBoundingClientRect().width > 0,
@@ -109,23 +109,23 @@ try {
       await search.fill('Grok Fast');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Enter');
-      await page.getByRole('button', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
       await page.getByText('Saving your default model…', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Model: Grok Fast', exact: true }).isDisabled(), true);
+      assert.equal(await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).isDisabled(), true);
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'grok-fast');
       await page.reload();
-      await page.getByRole('button', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
       await page.goto(`${origin}/other`);
-      await page.getByRole('button', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
       userId = 'grace';
       await page.reload();
-      await page.getByRole('button', { name: defaultModelName, exact: true }).waitFor();
+      await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
       userId = 'ada';
       await page.goto(`${origin}/acme`);
-      await page.getByRole('button', { name: 'Model: Grok Fast', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();
       saveStatus = 503;
-      await page.getByRole('option', { name: 'Claude Haiku', exact: true }).click();
+      await modelOption(page, 'Claude Haiku').click();
       await page.getByRole('button', { name: 'Retry saving default', exact: true }).waitFor();
       assert.equal(preferences.get('ada'), 'grok-fast');
       saveStatus = 200;
@@ -133,7 +133,7 @@ try {
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'claude-haiku');
       await page.reload();
-      await page.getByRole('button', { name: 'Model: Claude Haiku', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku', exact: true }).waitFor();
       const message = page.getByRole('textbox', { name: 'Message', exact: true });
       await message.fill('Keep this draft');
       status = 503;
@@ -166,7 +166,7 @@ try {
       assert.equal(preferences.get('ada'), 'claude-haiku');
       items = catalog.filter(family => family.id !== 'claude-haiku');
       await notifyChange(page, workspace.id, userId, 'catalog');
-      await page.getByRole('button', { name: 'Model: Claude Haiku', exact: true }).waitFor({ state: 'hidden' });
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku', exact: true }).waitFor({ state: 'hidden' });
       assert.equal(await page.getByText(/Claude Haiku/).count(), 0);
       assert.equal(preferences.get('ada'), 'claude-haiku');
       userId = 'new-user';

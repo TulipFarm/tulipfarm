@@ -18,6 +18,7 @@ import { format } from 'date-fns';
 import { workspaceCalendarRoute, workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
+import { Status } from '@tulipfarm/sprout/status';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@tulipfarm/sprout/accordion';
 import { Card, CardFooter, CardHeader } from '@tulipfarm/sprout/card';
 import { Calendar } from '@tulipfarm/sprout/calendar';
@@ -72,7 +73,7 @@ import {
   type CalendarView,
 } from '@/features/calendar/model';
 import { useCalendarSources } from '@/features/calendar/queries';
-import { taskStatusLabels } from '@/features/tasks/status';
+import { taskStatusLabels, taskStatusStates } from '@/features/tasks/status';
 import { CreateCalendarEvent, type InitialEvent } from '@/features/calendar/create-event';
 
 const viewLabels: Record<CalendarView, string> = { day: 'Day', week: 'Week', month: 'Month', agenda: 'Agenda' };
@@ -359,6 +360,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                         : 'secondary'
                     }
                   >
+                    <Status state={taskStatusStates[task.status]} size="sm" aria-hidden="true" />
                     {taskStatusLabels[task.status]}
                   </Badge>
                   <Button variant="outline" size="md" onClick={() => openCreate(day, '09:00', task.title)}>

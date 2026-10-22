@@ -66,6 +66,7 @@ import {
   type ConversationPart,
 } from '@/features/chat/conversation-api';
 import { ChatModelStatus, useChatModels } from '@/features/chat/chat-models';
+import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { Composer } from '@/features/chat/composer';
 import { StagedAttachments, useConversationAttachments } from '@/features/chat/conversation-attachments';
 import { useConversationCommand } from '@/features/chat/conversation-state';
@@ -599,6 +600,7 @@ function ProjectComposer({ project }: { project: Project }) {
   const navigate = useNavigate();
   const changes = useConversationChanges();
   const models = useChatModels(workspace.id, user);
+  const integrations = useIntegrationKeywords(workspace.id, workspace.slug);
   const read = useProject(useProjectApi(workspace.id), project.id);
   const base = useMemo(() => conversationApi(workspace.id, () => {}), [workspace.id]);
   const [chatId] = useState(() => crypto.randomUUID());
@@ -696,6 +698,7 @@ function ProjectComposer({ project }: { project: Project }) {
         model={models.model}
         models={models.choices}
         onModelChange={models.select}
+        integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
       />
       <CommandFeedback
         write={write}

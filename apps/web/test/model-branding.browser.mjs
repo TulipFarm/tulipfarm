@@ -105,7 +105,7 @@ async function routeApi(page, read) {
 
 async function logo(row, brand) {
   await row.locator(`[data-brand="${brand}"]`).first().waitFor();
-  assert.equal(await row.locator('[data-brand]').count(), 1, `${await row.innerText()} shows one logo`);
+  assert.equal(await row.locator('[data-brand] svg').count(), 1, `${await row.innerText()} shows one logo`);
   assert.equal(
     await row.locator(`[data-brand="${brand}"] svg`).evaluate(glyph => glyph.getBoundingClientRect().width > 0),
     true,
@@ -136,14 +136,14 @@ try {
     await routeApi(page, () => items);
 
     await page.goto(`${origin}/acme`);
-    await page.getByRole('button', { name: 'Model: Acme Chat', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }).click();
+    await page.getByRole('option').first().waitFor();
     assert.equal(await page.getByRole('option').count(), expected.length);
-    // The chosen row also reads "Current model".
     for (const [name, brand] of expected)
       await logo(page.getByRole('option', { name: new RegExp(`^${name}\\b`) }), brand);
     await screenshot(page, 'composer-picker', theme);
     await page.keyboard.press('Escape');
-    await logo(page.getByRole('button', { name: 'Model: Acme Chat', exact: true }), 'neutral');
+    await logo(page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }), 'neutral');
 
     await page.goto(`${origin}/acme/agents/${agentId}`);
     await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
@@ -167,7 +167,7 @@ try {
     items = catalogFixture([]);
     const setupGuide = 'https://docs.tulipfarm.ai/self-hosting/models/';
     await page.goto(`${origin}/acme`);
-    await page.getByRole('button', { name: 'Model: Acme Chat', exact: true }).waitFor();
+    await page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }).waitFor();
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page
       .getByText('No models configured. An operator needs to set up a model provider.', { exact: true })

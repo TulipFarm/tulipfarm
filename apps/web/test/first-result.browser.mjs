@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { notifyChange } from './chat-query.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
+import { modelOption } from './browser-controls.mjs';
 
 const port = Number(process.env.FIRST_RESULT_PORT ?? 5317);
 const cdpPort = port + 4000;
@@ -223,16 +224,16 @@ try {
     await page.goto(`${origin}/acme`);
     await page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
     if (!before) {
-      await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
       assert.equal(await page.getByRole('navigation', { name: 'Business setup' }).count(), 0);
       assert.equal(await page.getByText(/Plan work, draft text|Plans and drafts need only/).count(), 0);
       assert.equal(await page.getByRole('button', { name: /Refresh model availability|Retry models/ }).count(), 0);
     }
     await screenshot('home');
-    await page.getByRole('button', { name: /^Model:/ }).click();
+    await page.getByRole('combobox', { name: /^Model:/ }).click();
     await page.getByRole('combobox', { name: 'Search models' }).waitFor();
     if (!before) {
-      await page.getByRole('option', { name: 'Gemini Flash', exact: true }).waitFor();
+      await modelOption(page, 'Gemini Flash').waitFor();
       assert.equal(await page.getByRole('option').count(), 2);
     }
     await screenshot('models');
@@ -308,8 +309,8 @@ try {
     await page.goto(`${origin}/acme`);
     const message = page.getByRole('textbox', { name: 'Message', exact: true });
     const send = page.getByRole('button', { name: 'Send message', exact: true });
-    await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).click();
-    await page.getByRole('option', { name: 'Gemini Flash', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
+    await modelOption(page, 'Gemini Flash').click();
     // Cloud 8f05815c (#856) sends a starter on click from a new chat (private-conversations.tsx:454); a draft still disables starters.
     await message.fill('My own draft');
     assert.equal(
@@ -329,8 +330,8 @@ try {
       .waitFor();
     assert.equal(sends.length, 1);
     assert.equal(sends[0].model, 'gemini-flash');
-    await page.getByRole('button', { name: 'Model: Gemini Flash', exact: true }).click();
-    await page.getByRole('option', { name: 'Claude Sonnet', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).click();
+    await modelOption(page, 'Claude Sonnet').click();
     assert.equal(await page.getByRole('region', { name: 'Recommended for you' }).count(), 0);
     await message.fill('Keep this draft while checking models.');
     catalog = catalog.map(item =>
@@ -343,15 +344,15 @@ try {
     assert.equal(await send.isEnabled(), false);
     assert.equal(await message.textContent(), 'Keep this draft while checking models.');
     await screenshot('model-disabled');
-    await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
     assert.equal(
       await page.getByRole('option', { name: /^Claude Sonnet .*disabled in workspace/ }).getAttribute('aria-disabled'),
       'true',
     );
-    await page.getByRole('option', { name: 'Gemini Flash', exact: true }).click();
+    await modelOption(page, 'Gemini Flash').click();
     assert.equal(await send.isEnabled(), true);
     await send.click();
-    await page.getByRole('button', { name: 'Model: Gemini Flash', exact: true }).waitFor();
+    await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).waitFor();
     assert.equal(sends.at(-1).model, 'gemini-flash');
     await message.fill('Keep this draft while checking models.');
     catalogStatus = 503;
@@ -374,7 +375,7 @@ try {
         : item,
     );
     await notifyChange(page, workspace.id, 'ada', 'catalog');
-    await page.getByRole('button', { name: 'Model: Gemini Flash', exact: true }).waitFor({ state: 'hidden' });
+    await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).waitFor({ state: 'hidden' });
     assert.equal(await page.getByText(/Gemini Flash/).count(), 0);
     assert.equal(await send.isEnabled(), false);
     catalog = [];
@@ -393,7 +394,7 @@ try {
     catalogStatus = 200;
     catalog = [family('claude-sonnet', 'Claude Sonnet', 'anthropic'), family('gemini-flash', 'Gemini Flash', 'google')];
     await page.getByRole('button', { name: 'Retry models', exact: true }).click();
-    await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+    await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
     catalog = catalog.map(item => ({
       ...item,
       available: false,
