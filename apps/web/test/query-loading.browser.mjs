@@ -147,7 +147,7 @@ try {
     async function usableChat() {
       await page.getByRole('heading', { name: chat.title, exact: true }).waitFor();
       await page.getByText(messageText, { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
       await input.fill(draftText);
       await page.waitForFunction(() => document.querySelector('button[aria-label="Send message"]')?.disabled === false);
     }

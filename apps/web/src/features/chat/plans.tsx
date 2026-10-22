@@ -29,6 +29,8 @@ import {
 } from '@tulipfarm/sprout/plan-outline';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import type { StatusState } from '@tulipfarm/sprout/status';
+import { TaskTree, type TaskTreeTask } from '@tulipfarm/sprout/task-tree';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
@@ -151,6 +153,42 @@ const groupMarks: Record<NonNullable<PlanTask['summary']>['outcome'], PlanOutlin
   completed: 'done',
   failed: 'failed',
 };
+
+// Waiting and blocked work isn't finished, so it reads as paused rather than as a warning, which the tree counts as done.
+const taskStates: Record<PlanTask['state'], StatusState> = {
+  pending: 'pending',
+  ready: 'pending',
+  running: 'running',
+  verifying: 'running',
+  'waiting-input': 'paused',
+  'waiting-approval': 'paused',
+  blocked: 'paused',
+  completed: 'success',
+  failed: 'error',
+  cancelled: 'stopped',
+};
+
+/** The plan as a live tree; groups have no state of their own, so their marks follow their tasks. */
+function planTree(view: PlanView): TaskTreeTask[] {
+  const children = new Map<string | null, PlanTask[]>();
+  for (const task of view.tasks) children.set(task.parent, [...(children.get(task.parent) ?? []), task]);
+  const row = (task: PlanTask): TaskTreeTask =>
+    task.kind === 'group'
+      ? {
+          id: task.id,
+          title: task.title,
+          children: (children.get(task.key) ?? []).sort((a, b) => a.position - b.position).map(row),
+        }
+      : {
+          id: task.id,
+          title: task.title,
+          state: taskStates[task.state],
+          detail: ['waiting-input', 'waiting-approval', 'blocked'].includes(task.state)
+            ? taskLabel(task, view.canControl)
+            : undefined,
+        };
+  return (children.get(null) ?? []).sort((a, b) => a.position - b.position).map(row);
+}
 
 function assignee(task: PlanTask) {
   if (!task.assignee) return undefined;
@@ -621,7 +659,11 @@ function PlanReference({
       state={tone === 'done' ? 'success' : tone === 'failed' ? 'error' : tone === 'active' ? 'running' : 'default'}
       action={{ label: 'Open plan', onClick: () => canvas.show(planCanvasItem(workspaceId, chatId, current)) }}
     >
-      <p className="text-xs text-muted-foreground tabular-nums">{planProgress(current.counts)}</p>
+      {view?.tasks.length ? (
+        <TaskTree tasks={planTree(view)} summary={planProgress(view.counts)} />
+      ) : (
+        <p className="text-xs text-muted-foreground tabular-nums">{planProgress(current.counts)}</p>
+      )}
       {view?.canControl && open(view) && <PlanControls api={api} chatId={chatId} view={view} />}
     </ResultCard>
   );

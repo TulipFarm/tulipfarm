@@ -348,7 +348,7 @@ test(
         0,
         'full chat has no empty Canvas',
       );
-      await page.getByRole('button', { name: /^Model:/ }).waitFor();
+      await page.getByRole('combobox', { name: /^Model:/ }).waitFor();
       await page.getByRole('button', { name: 'Add a file', exact: true }).waitFor();
       await composer.fill('');
       await page.goBack();

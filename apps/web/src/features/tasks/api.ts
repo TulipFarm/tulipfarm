@@ -12,7 +12,7 @@ import { taskBatchStatusSchema, taskProposalViewSchema } from '@tulipfarm/agents
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
-export { taskStatusLabels, taskStatusLabel, taskNextStep } from './status';
+export { taskStatusLabels, taskStatusLabel, taskStatusStates, taskNextStep } from './status';
 
 export type TaskSummary = z.infer<typeof taskSummarySchema>;
 export type TaskSources = z.infer<typeof startTaskSchema>['sources'];

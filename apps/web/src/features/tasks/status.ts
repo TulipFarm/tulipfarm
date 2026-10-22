@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { taskSummarySchema, TaskPauseReason } from '@tulipfarm/agents/task-contracts';
+import type { StatusState } from '@tulipfarm/sprout/status';
 
 type TaskSummary = z.infer<typeof taskSummarySchema>;
 export const taskStatusLabels: Record<TaskSummary['status'], string> = {
@@ -9,6 +10,15 @@ export const taskStatusLabels: Record<TaskSummary['status'], string> = {
   'waiting-approval': 'Needs your review',
   paused: 'Paused',
   failed: 'Stopped. Check access and try again.',
+};
+/** The Status mark for each task status; waiting on a person reads as a warning, like its badge. */
+export const taskStatusStates: Record<TaskSummary['status'], StatusState> = {
+  pending: 'running',
+  completed: 'success',
+  'waiting-clarification': 'warning',
+  'waiting-approval': 'warning',
+  paused: 'paused',
+  failed: 'error',
 };
 const taskNextSteps: Record<TaskSummary['status'], string> = {
   pending: 'The agent is working. You can leave this page and return to check progress.',

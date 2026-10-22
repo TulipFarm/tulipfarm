@@ -5,6 +5,8 @@ import { Button } from '@tulipfarm/sprout/button';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { authClient } from '@/lib/auth';
 import type { ComposerModel } from './composer';
+import { familyCost } from '@/features/models/family-cost';
+import { modelBrand } from '@/features/models/model-brand';
 import { modelLogo } from '@/features/models/model-logo';
 import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setup';
 
@@ -13,7 +15,8 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     id: family.id,
     label: family.displayName,
     logo: modelLogo(family.vendor),
-    efforts: [],
+    brand: modelBrand(family.vendor),
+    cost: familyCost(family),
     disabled: !family.available,
     ...(!family.available
       ? {

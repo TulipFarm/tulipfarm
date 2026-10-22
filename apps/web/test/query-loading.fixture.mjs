@@ -167,6 +167,7 @@ export async function startFixture() {
       // Chat plans and the project picker read their lists on every chat (cloud features/chat/plans.tsx:53).
       else if (path === `${base}/conversations/${id}/plans`) json = { plans: [] };
       else if (path === `${base}/projects`) json = [];
+      else if (path === `${base}/integrations`) json = { integrations: [] };
       // Model settings read the compaction tab's policy with access (cloud ecd7b787 features/models/compaction-api.ts:21).
       else if (path === `${base}/compaction-policy`)
         json = {

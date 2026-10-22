@@ -10,7 +10,10 @@ test('composer controls explain themselves with shared tooltips', () => {
     composer,
     /<TooltipContent>Normal acts on your request\. Plan only proposes steps first\.<\/TooltipContent>/,
   );
-  assert.match(composer, /<TooltipTrigger\s+render=\{\s+<PopoverTrigger/);
+  assert.match(
+    composer,
+    /render=\{<TooltipTrigger render=\{<InputGroupButton size="md" variant="ghost" disabled=\{off\} \/>\} \/>\}/,
+  );
   assert.match(composer, /<TooltipContent>AI model that writes replies<\/TooltipContent>/);
   assert.match(composer, /<TooltipContent>Skills are saved procedures the agent follows · \/<\/TooltipContent>/);
 });

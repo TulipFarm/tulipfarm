@@ -9,6 +9,8 @@ import { Truck } from 'reicon-react/icons/Truck';
 import { User } from 'reicon-react/icons/User';
 import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { catalogFamily, catalogFixture, externalCatalogFamilyIds } from '@/features/models/catalog-fixture';
+import { modelBrand, type ModelBrand } from '@/features/models/model-brand';
+import { familyCost } from '@/features/models/family-cost';
 import { modelLogo } from '@/features/models/model-logo';
 
 export type Icon = ComponentType<{ size?: number; 'aria-hidden'?: boolean | 'true' }>;
@@ -21,8 +23,8 @@ export type Mode = {
   tone: 'text-info' | 'text-warning' | 'text-success' | 'text-chart-4';
 };
 export type Agent = { id: string; label: string; description: string; icon: Icon };
-export type Effort = 'low' | 'medium' | 'high' | 'max';
-export type Model = { id: string; label: string; logo: Icon; efforts: readonly Effort[] };
+/** `cost` is a raw number where higher costs more; the model picker rates it against the other models. */
+export type Model = { id: string; label: string; logo: Icon; brand: ModelBrand | null; cost?: number | undefined };
 
 export type Persona = { kind: 'mode'; mode: Mode } | { kind: 'agent'; agent: Agent };
 
@@ -64,13 +66,12 @@ export const agents: readonly Agent[] = [
   { id: 'fulfillment', label: 'Fulfillment', description: 'Tracks orders and shipments', icon: Truck },
 ];
 
-export const efforts: readonly Effort[] = ['low', 'medium', 'high', 'max'];
-
 const model = (family: ModelCatalogFamily): Model => ({
   id: family.id,
   label: family.displayName,
   logo: modelLogo(family.vendor),
-  efforts,
+  brand: modelBrand(family.vendor),
+  cost: familyCost(family),
 });
 
 export const defaultModel = model(catalogFamily('claude-opus'));
@@ -86,5 +87,3 @@ export const models: readonly Model[] = [
     ...externalCatalogFamilyIds,
   ]).families.map(model),
 ];
-
-export const effortLabel: Record<Effort, string> = { low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };

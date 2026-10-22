@@ -19,7 +19,7 @@ import {
 } from '@tulipfarm/sprout/command';
 import { Input } from '@tulipfarm/sprout/input';
 import { InputGroup, InputGroupAddon, InputGroupButton } from '@tulipfarm/sprout/input-group';
-import { RichTextEditor, type RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
+import { RichTextEditor, type RichTextEditorHandle, type RichTextKeyword } from '@tulipfarm/sprout/rich-text-editor';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,10 +29,10 @@ import {
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
-import { ReasoningEffort } from '@tulipfarm/sprout/reasoning-effort';
+import { ModelSelector, type ModelSelectorModel } from '@tulipfarm/sprout/model-selector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
-import { type Effort, effortLabel, type Model, type Agent, type Mode, type Persona } from './composer-options';
+import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 
 export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string };
 
@@ -54,7 +54,6 @@ type ComposerProps = {
   model: ComposerModel | null;
   models: readonly ComposerModel[];
   onModelChange: (id: string) => void;
-  reasoning?: { effort: Effort | null; onChange: (effort: Effort) => void };
   persona?: {
     value: Persona | null;
     modes: readonly Mode[];
@@ -67,6 +66,8 @@ type ComposerProps = {
   fileChoices?: { read: () => void; knowledge: () => void };
   onSkill?: (() => void) | undefined;
   extensions?: Extensions;
+  /** Integration names typed in the message show as chips; a disconnected one offers Connect. */
+  integrations?: { keywords: readonly RichTextKeyword[]; onConnect: (keyword: RichTextKeyword) => void } | undefined;
   /** Suggestions anchored above the message field. */
   picker?:
     | {
@@ -95,13 +96,13 @@ export function Composer({
   model,
   models,
   onModelChange,
-  reasoning,
   persona,
   mode,
   scope,
   fileChoices,
   onSkill,
   extensions,
+  integrations,
   picker,
 }: ComposerProps) {
   const fileInput = useRef<HTMLInputElement>(null);
@@ -180,6 +181,8 @@ export function Composer({
             ariaControls={compact ? undefined : picker?.id}
             ariaActiveDescendant={compact ? undefined : picker?.activeId}
             extensions={editorExtensions}
+            keywords={integrations?.keywords}
+            onKeywordConnect={integrations?.onConnect}
             onChange={doc => onContentChange({ version: 1, doc })}
             onSend={send}
             toolbarAddon={
@@ -267,7 +270,6 @@ export function Composer({
                     <ModelPicker
                       model={model}
                       models={models}
-                      reasoning={reasoning}
                       onModelChange={onModelChange}
                       disabled={disabled || sending}
                     />
@@ -417,93 +419,45 @@ function PersonaPicker({
 function ModelPicker({
   model,
   models,
-  reasoning,
   disabled,
   onModelChange,
 }: {
   model: ComposerModel | null;
   models: readonly ComposerModel[];
-  reasoning: ComposerProps['reasoning'];
   disabled: boolean;
   onModelChange: (id: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const effort = reasoning?.effort;
-  const showEffort = model && model.efforts.length > 0 && effort;
-  const effortIndex = effort && model ? Math.max(0, model.efforts.indexOf(effort)) : 0;
-
+  // A chosen model stays named on the trigger while the list is briefly empty, such as while a default saves.
+  const listed = model && !models.some(candidate => candidate.id === model.id) ? [model, ...models] : models;
+  const off = disabled || models.length === 0;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <PopoverTrigger
-              render={
-                <InputGroupButton
-                  size="md"
-                  variant="ghost"
-                  disabled={disabled || models.length === 0}
-                  aria-label={`Model: ${model?.label ?? 'Choose model'}${showEffort ? `, ${effortLabel[effort]} effort` : ''}`}
-                />
-              }
-            />
-          }
-        >
-          {model && <model.logo size={16} aria-hidden="true" />}
-          <span className="max-w-32 truncate">{model?.label ?? 'Choose model'}</span>
-          <ChevronDown size={12} aria-hidden="true" />
-        </TooltipTrigger>
-        <TooltipContent>AI model that writes replies</TooltipContent>
-      </Tooltip>
-      <PopoverContent size="picker" side="top" align="end" sideOffset={8}>
-        <Command>
-          <CommandInput aria-label="Search models" placeholder="Search models…" />
-          <CommandList>
-            <CommandEmpty>No models found.</CommandEmpty>
-            <CommandGroup heading="Model">
-              {models.map(candidate => (
-                <CommandItem
-                  key={candidate.id}
-                  value={candidate.label}
-                  data-checked={candidate.id === model?.id}
-                  disabled={!!candidate.disabled}
-                  aria-disabled={!!candidate.disabled}
-                  onSelect={() => {
-                    onModelChange(candidate.id);
-                    if (!reasoning) setOpen(false);
-                  }}
-                >
-                  <candidate.logo size={16} aria-hidden="true" />
-                  <span className="min-w-0">
-                    {candidate.label}
-                    {candidate.disabled ? ` (${candidate.unavailableReason ?? 'unavailable'})` : ''}
-                  </span>
-                  {candidate.id === model?.id && <span className="sr-only">Current model</span>}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-        {showEffort && (
-          <div className="flex flex-col gap-1 border-t px-4 pt-2.5 pb-4">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Effort</span>
-              <span className="font-medium">{effortLabel[effort]}</span>
-            </div>
-            <ReasoningEffort
-              label={model.label}
-              levels={model.efforts.map(level => effortLabel[level])}
-              value={effortIndex}
-              onValueChange={index => {
-                const level = model.efforts[index];
-                if (level) reasoning?.onChange(level);
-              }}
-            />
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+    <Tooltip>
+      <ModelSelector
+        models={listed.map(selectorModel)}
+        value={model?.id}
+        onValueChange={onModelChange}
+        emptyMessage="No models found."
+        disabled={off}
+        side="top"
+        align="end"
+        // The tooltip trigger drops the native `disabled` the selector sets, so the button takes it directly.
+        render={<TooltipTrigger render={<InputGroupButton size="md" variant="ghost" disabled={off} />} />}
+      />
+      <TooltipContent>AI model that writes replies</TooltipContent>
+    </Tooltip>
   );
+}
+
+function selectorModel(model: ComposerModel): ModelSelectorModel {
+  return {
+    id: model.id,
+    label: model.label,
+    brand: model.brand ?? undefined,
+    icon: model.brand ? undefined : <model.logo size={16} aria-hidden="true" />,
+    description: model.disabled ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}` : undefined,
+    disabled: model.disabled,
+    cost: model.cost,
+  };
 }
 
 const fileChoiceCopy = {

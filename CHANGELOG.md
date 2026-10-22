@@ -170,6 +170,12 @@ One version identifies all apps and images of a release.
 
 - Cloudflare Turnstile verification runs in the background. The widget appears
   only when Cloudflare needs the person to interact, or when verification fails.
+- Web app (`apps/web`) moves to `@tulipfarm/sprout` v0.7.0. The chat model
+  picker is Sprout's `ModelSelector`, with vendor logos, a relative cost meter
+  and searchable models. Integration names typed in a message show as chips
+  that say whether the app is connected and link to its setup. Task status
+  badges show Sprout's `Status` indicator, and chat plans draw their steps as a
+  `TaskTree`.
 
 ### Removed
 

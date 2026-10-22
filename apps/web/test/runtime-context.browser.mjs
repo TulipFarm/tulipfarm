@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
+import { modelOption } from './browser-controls.mjs';
 
 const port = Number(process.env.RUNTIME_CONTEXT_BROWSER_PORT ?? 5373);
 const origin = `http://127.0.0.1:${port}`;
@@ -98,8 +99,8 @@ try {
     });
   });
   await page.goto(`${origin}/acme/chat/${chat.id}`);
-  await page.getByRole('button', { name: /^Model:/ }).click();
-  await page.getByRole('option', { name: 'DeepSeek Flash', exact: true }).click();
+  await page.getByRole('combobox', { name: /^Model:/ }).click();
+  await modelOption(page, 'DeepSeek Flash').click();
   await page.getByLabel('Message', { exact: true }).fill('Show my events for today.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('button', { name: 'Retry same operation' }).click();
@@ -109,9 +110,9 @@ try {
   const error =
     'The model could not produce a valid answer or tool request. Retry uses the original model. To use another model, select it and send a new message.';
   assert.equal(await page.getByRole('alert').filter({ hasText: error }).count(), 1);
-  await page.getByRole('button', { name: /^Model:/ }).click();
+  await page.getByRole('combobox', { name: /^Model:/ }).click();
   // Chat composer model options show only the family label, without credit rates (cloud 9725b0ba features/chat/composer.tsx:296).
-  await page.getByRole('option', { name: 'Kimi', exact: true }).click();
+  await modelOption(page, 'Kimi').click();
   await page.getByRole('button', { name: 'Retry reply', exact: true }).click();
   await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor();
   assert.equal(sends[0].model, 'deepseek-flash');

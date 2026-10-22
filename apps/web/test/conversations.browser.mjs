@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { conversationPages } from '../../api/src/conversation-pages.ts';
+import { modelOption } from './browser-controls.mjs';
 
 const port = Number(process.env.CONVERSATION_BROWSER_PORT ?? 5293);
 const origin = `http://127.0.0.1:${port}`;
@@ -222,16 +223,17 @@ try {
   assert.equal(page.url(), `${origin}/acme`);
   assert.equal(writes.length, 0, 'Opening a workspace does not create a chat');
   assert.equal(await page.getByRole('region', { name: 'Chat list', exact: true }).count(), 0);
-  await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
   for (const name of ['DeepSeek Pro', 'DeepSeek Flash', 'Kimi', 'Kimi Code']) {
-    const option = page.getByRole('option', { name: name, exact: true });
+    const option = modelOption(page, name);
     assert.equal(
-      await option.locator(name.startsWith('Kimi') ? '[data-brand="kimi"]' : '[data-brand="deepseek"]').count(),
+      await option.locator(name.startsWith('Kimi') ? '[data-brand="kimi"] svg' : '[data-brand="deepseek"] svg').count(),
       1,
     );
   }
-  await page.getByRole('option', { name: 'Kimi', exact: true }).click();
-  await page.getByRole('button', { name: 'Model: Kimi', exact: true }).waitFor();
+  await modelOption(page, 'Kimi').click();
+  await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
+  await page.locator('[data-slot="model-selector-content"]').waitFor({ state: 'detached' });
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -315,9 +317,9 @@ try {
   assert.deepEqual(writes.at(-1), sent);
   assert.equal(sent.body.model, 'claude-sonnet');
   assert.equal(messages.get(chatId).length, 1);
-  await page.getByRole('button', { name: 'Model: Claude Sonnet', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
   assert.equal(await page.getByRole('option', { name: /Gemini Pro/ }).count(), 0);
-  await page.getByRole('option', { name: 'Claude Haiku', exact: true }).click();
+  await modelOption(page, 'Claude Haiku').click();
   await page.getByLabel('Message', { exact: true }).fill('Second');
   await page.getByLabel('Message', { exact: true }).press('Shift+Enter');
   assert.equal(
