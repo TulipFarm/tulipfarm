@@ -1,6 +1,35 @@
 import { createHash } from 'node:crypto';
 
 const sha = value => createHash('sha1').update(value).digest('hex');
+const bytesOf = content => (typeof content === 'string' ? Buffer.from(content) : Buffer.from(content));
+const blobSha = content => sha(Buffer.concat([Buffer.from('blob:'), bytesOf(content)]));
+// Builds nested Git trees from flat file paths, keyed by a tree SHA derived from each directory's entries.
+function buildTrees(files) {
+  const root = new Map();
+  for (const [path, content] of files) {
+    const names = path.split('/');
+    let dir = root;
+    for (const name of names.slice(0, -1)) {
+      if (!dir.has(name)) dir.set(name, new Map());
+      dir = dir.get(name);
+    }
+    dir.set(names.at(-1), content);
+  }
+  const trees = new Map();
+  const visit = (dir, prefix) => {
+    const entries = [...dir.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([name, value]) =>
+        value instanceof Map
+          ? { path: name, type: 'tree', sha: visit(value, `${prefix}${name}/`), prefix }
+          : { path: name, type: 'blob', sha: blobSha(value), size: bytesOf(value).byteLength, prefix },
+      );
+    const id = sha(`tree:${prefix}:${JSON.stringify(entries)}`);
+    trees.set(id, { prefix, entries });
+    return id;
+  };
+  return { root: visit(root, ''), trees };
+}
 const iso = offsetDays => new Date(Date.now() + offsetDays * 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 // A local GitHub REST and GraphQL fake with per-token repository access. No live GitHub account or network is involved.
@@ -9,7 +38,8 @@ export function fakeGitHub() {
   const tokens = new Map();
   const repos = new Map();
   const renamed = new Map();
-  const state = { failure: null, repos, renamed, truncate: false };
+  // `truncate` truncates the recursive tree; `truncateDirs` truncates the listing of those directory prefixes.
+  const state = { failure: null, repos, renamed, truncate: false, truncateDirs: new Set(), chunk: 64 * 1024 };
   function addRepo({
     id,
     fullName,
@@ -53,7 +83,7 @@ export function fakeGitHub() {
     repos.set(id, repo);
     return repo;
   }
-  const commit = repo => sha(JSON.stringify([...repo.files.entries()].sort()));
+  const commit = repo => buildTrees(repo.files).root;
   const readable = (repo, user) => repo && (!repo.private || repo.readers.has(user.id));
   const body = repo => ({
     id: repo.id,
@@ -77,26 +107,52 @@ export function fakeGitHub() {
     html_url: `https://github.com/${repo.full_name}/${issue.pull ? 'pull' : 'issues'}/${issue.number}`,
     ...(issue.pull ? { pull_request: { url: 'x' } } : {}),
   });
-  const discussionBody = (repo, item) => ({
-    number: item.number,
-    title: item.title,
-    body: item.body,
-    url: `https://github.com/${repo.full_name}/discussions/${item.number}`,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-    author: { login: item.author },
-    category: { name: 'General' },
-    comments: {
-      totalCount: item.comments.length,
-      nodes: item.comments.map(comment => ({
-        body: comment.body,
-        createdAt: comment.createdAt ?? item.createdAt,
-        updatedAt: comment.updatedAt ?? item.createdAt,
-        author: { login: comment.author ?? 'octo' },
-        replies: { totalCount: 0, nodes: [] },
-      })),
-    },
+  const replyBody = (item, reply) => ({
+    body: reply.body,
+    createdAt: reply.createdAt ?? item.createdAt,
+    updatedAt: reply.updatedAt ?? item.createdAt,
+    author: { login: reply.author ?? 'octo' },
   });
+  const commentId = (repo, item, index) => `DC_${repo.id}_${item.number}_${index}`;
+  const page = (nodes, after, size) => {
+    const start = after ? Number(after) : 0;
+    return {
+      pageInfo: { hasNextPage: start + size < nodes.length, endCursor: String(start + size) },
+      nodes: nodes.slice(start, start + size),
+    };
+  };
+  const discussionBody = (repo, item, after) => {
+    const comments = page(
+      item.comments.map((comment, index) => ({ comment, index })),
+      after,
+      100,
+    );
+    return {
+      number: item.number,
+      title: item.title,
+      body: item.body,
+      url: `https://github.com/${repo.full_name}/discussions/${item.number}`,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      author: { login: item.author },
+      category: { name: 'General' },
+      comments: {
+        totalCount: item.comments.length,
+        nodes: comments.nodes.map(({ comment, index }) => {
+          const replies = page(comment.replies ?? [], null, 100);
+          return {
+            id: commentId(repo, item, index),
+            ...replyBody(item, comment),
+            replies: {
+              totalCount: (comment.replies ?? []).length,
+              pageInfo: replies.pageInfo,
+              nodes: replies.nodes.map(reply => replyBody(item, reply)),
+            },
+          };
+        }),
+      },
+    };
+  };
   async function fetcher(input, init = {}) {
     const url = new URL(input);
     if (url.origin !== 'https://api.github.com') throw new Error(`unexpected origin ${url.origin}`);
@@ -126,6 +182,19 @@ export function fakeGitHub() {
         ? Response.json(body(repo))
         : Response.json({ message: 'Not Found' }, { status: 404 });
     }
+    if (path === '/graphql' && graph.query.includes('... on DiscussionComment')) {
+      const [, repoId, number, index] = /^DC_(\d+)_(\d+)_(\d+)$/.exec(graph.variables.id) ?? [];
+      const repo = repos.get(Number(repoId));
+      const item = repo?.discussions.get(Number(number));
+      const comment = item?.comments[Number(index)];
+      if (!readable(repo, user) || !comment) return Response.json({ data: { node: null } });
+      const replies = page(comment.replies ?? [], graph.variables.after, 100);
+      return Response.json({
+        data: {
+          node: { replies: { pageInfo: replies.pageInfo, nodes: replies.nodes.map(reply => replyBody(item, reply)) } },
+        },
+      });
+    }
     if (path === '/graphql') {
       const repo = [...repos.values()].find(item => item.node_id === graph.variables.id);
       if (!readable(repo, user))
@@ -152,7 +221,19 @@ export function fakeGitHub() {
         });
       }
       const item = repo.discussions.get(graph.variables.number);
-      return Response.json({ data: { node: { discussion: item ? discussionBody(repo, item) : null } } });
+      if (!graph.query.includes('nodes'))
+        return Response.json({
+          data: {
+            node: {
+              discussion: item
+                ? { comments: { pageInfo: page(item.comments, graph.variables.after, 100).pageInfo } }
+                : null,
+            },
+          },
+        });
+      return Response.json({
+        data: { node: { discussion: item ? discussionBody(repo, item, graph.variables.after) : null } },
+      });
     }
     match = /^\/repositories\/(\d+)(\/.*)?$/.exec(path);
     if (!match) return Response.json({ message: 'Not Found' }, { status: 404 });
@@ -165,30 +246,62 @@ export function fakeGitHub() {
         ? new Response(commit(repo), { headers: { 'content-type': 'application/vnd.github.sha' } })
         : Response.json({ message: 'Git Repository is empty.' }, { status: 409 });
     if (rest.startsWith('/git/trees/')) {
-      const entries = [...repo.files.entries()].map(([file, content]) => ({
-        path: file,
-        type: 'blob',
-        sha: sha(`blob:${content}`),
-        size: Buffer.byteLength(content),
-      }));
-      return Response.json({
-        sha: commit(repo),
-        truncated: state.truncate,
-        tree: [{ path: 'docs', type: 'tree', sha: sha('tree') }, ...(state.truncate ? entries.slice(0, 1) : entries)],
-      });
+      const { root, trees } = buildTrees(repo.files);
+      const id = rest.slice('/git/trees/'.length);
+      const found = trees.get(id === commit(repo) ? root : id);
+      if (!found) return Response.json({ message: 'Not Found' }, { status: 404 });
+      if (url.searchParams.get('recursive')) {
+        const entries = [];
+        const walk = tree => {
+          for (const entry of tree.entries) {
+            entries.push({ ...entry, path: `${entry.prefix}${entry.path}`, prefix: undefined });
+            if (entry.type === 'tree') walk(trees.get(entry.sha));
+          }
+        };
+        walk(found);
+        return Response.json({
+          sha: id,
+          truncated: state.truncate,
+          tree: state.truncate ? entries.slice(0, 1) : entries,
+        });
+      }
+      const truncated = state.truncateDirs.has(found.prefix);
+      const entries = found.entries.map(entry => ({ ...entry, prefix: undefined }));
+      return Response.json({ sha: id, truncated, tree: truncated ? entries.slice(0, 1) : entries });
+    }
+    match = /^\/git\/blobs\/([a-f0-9]{40})$/.exec(rest);
+    if (match) {
+      if (new Headers(init.headers).get('accept') !== 'application/vnd.github.raw')
+        throw new Error('blobs must be requested raw');
+      const content = [...repo.files.values()].find(value => blobSha(value) === match[1]);
+      if (content === undefined) return Response.json({ message: 'Not Found' }, { status: 404 });
+      const bytes = bytesOf(content);
+      let offset = 0;
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (offset >= bytes.byteLength) return controller.close();
+            controller.enqueue(new Uint8Array(bytes.subarray(offset, offset + state.chunk)));
+            offset += state.chunk;
+          },
+        }),
+        { headers: { 'content-type': 'application/octet-stream' } },
+      );
     }
     if (rest.startsWith('/contents/')) {
       const file = rest.slice('/contents/'.length).split('/').map(decodeURIComponent).join('/');
       const content = repo.files.get(file);
       if (content === undefined) return Response.json({ message: 'Not Found' }, { status: 404 });
-      const bytes = Buffer.from(content);
+      const bytes = bytesOf(content);
+      // Like GitHub, files over 1 MB come back without inline content.
+      const inline = bytes.byteLength <= 1024 * 1024;
       return Response.json({
         type: 'file',
         path: file,
-        sha: sha(`blob:${content}`),
+        sha: blobSha(content),
         size: bytes.byteLength,
-        encoding: 'base64',
-        content: bytes.toString('base64'),
+        encoding: inline ? 'base64' : 'none',
+        content: inline ? bytes.toString('base64') : '',
       });
     }
     if (rest === '/issues') {
@@ -211,9 +324,10 @@ export function fakeGitHub() {
           headers: { location: 'https://api.github.com/repositories/9/issues/1' },
         });
       if (match[2]) {
-        const page = Number(url.searchParams.get('page') ?? 1);
+        const number = Number(url.searchParams.get('page') ?? 1);
+        const per = Number(url.searchParams.get('per_page') ?? 30);
         return Response.json(
-          issue.comments.slice((page - 1) * 100, page * 100).map(comment => ({
+          issue.comments.slice((number - 1) * per, number * per).map(comment => ({
             user: { login: comment.user ?? 'octo' },
             body: comment.body,
             created_at: comment.created_at ?? issue.created_at,

@@ -41,20 +41,57 @@ repository rename or transfer keeps the same source row and only updates its
 displayed name. A redirected name at configuration time (an old name) is rejected
 with `invalid-selection`.
 
-| Kind              | Listing                                                                                                                                                                                                                                                      | Native ID                                 | Revision                              | Bounds                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
-| `docs`            | Recursive tree of the default-branch head commit, filtered to Markdown and text paths (`.md`, `.markdown`, `.mdx`, `.mdown`, `.txt`, `.text`, `.rst`, `.adoc`, `.asciidoc`, `.org`, plus `README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE` and similar names) | `doc:{repoId}:{path}`                     | `blob:{blobSha}`                      | 256 KiB per file, first 1,000 matching paths, UTF-8 only |
-| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all&since={after}` sorted by update                                                                                                                                                                                     | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 500 comments                                             |
-| `discussions`     | GraphQL `repository.discussions` ordered by update                                                                                                                                                                                                           | `discussion:{repoId}:{n}`                 | `discussion:{updatedAt}:{totalCount}` | 100 comments, 50 replies each                            |
+| Kind              | Listing                                                                                                                                     | Native ID                                 | Revision                              | Parts                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------------- |
+| `docs`            | Every file in the default-branch tree whose path looks like documentation (`.md`, `.txt`, `.rst`, `.adoc`, `README`, `LICENSE` and similar) | `doc:{repoId}:{path}`                     | `blob:{blobSha}`                      | 128 KiB of text each, split at a line break     |
+| `code`            | Every other file in the default-branch tree                                                                                                 | `code:{repoId}:{path}`                    | `blob:{blobSha}`                      | 128 KiB of text each; a binary file is one part |
+| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all&since={after}` sorted by update                                                                    | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
+| `discussions`     | GraphQL `repository.discussions` ordered by update                                                                                          | `discussion:{repoId}:{n}`                 | `discussion:{updatedAt}:{totalCount}` | 100 comments each, with every reply             |
 
-Docs are not date-bounded; issues, pull requests and discussions must have been
+There is no file-type allowlist, built-in exclusion or per-repository count cap:
+`.env` files, keys, `node_modules`, build output, lockfiles, minified files, maps and
+snapshots are indexed like any other file, because the repository owner chose to
+commit them. The doc or code kind is only a label. The single extension point for
+excluding paths is `githubPathIndexable(path)` in `packages/github/src/corpus-provider.ts`,
+which currently accepts every path; user opt-out patterns compose with it.
+
+Part 1 keeps the plain native ID; part `k` of a larger item is
+`{kind}:{repoId}:/p/{k}/{rest}`, titled `(part k of n)`. A path longer than 1,024
+bytes is identified by `/h/{sha256(path)}` instead of the path, and the full path is
+stored in `tf_knowledge_github_items.path` so the file can be read again.
+
+Files up to 1 MB are read through the contents API. Larger files are streamed from
+`GET /repositories/{id}/git/blobs/{sha}` with `Accept: application/vnd.github.raw`;
+only the part being read and an 8,000-byte head are kept in memory, so memory stays
+near one part whatever the file size. GitHub's blob limit (100 MB) is the only size
+bound. The blobs API ignores `Range`, so reading part `k` streams the bytes before it.
+
+Text is decoded by its byte-order mark (UTF-8, UTF-16LE, UTF-16BE); otherwise as UTF-8,
+falling back to Windows-1252 (a superset of Latin-1) for bytes that are not valid
+UTF-8. Line endings become `\n` and other control characters become U+FFFD. A file
+whose first 8,000 bytes contain a NUL without a UTF-16 byte-order mark, or whose
+extension marks an image, PDF, archive, office document, font, media or executable,
+is binary. A binary file is indexed as a placeholder holding its path, size and media
+type, noting that content extraction is pending OCR. `createGitHubCorpusProvider`
+accepts an `extractBinary` hook that receives the file's path, media type, size and a
+streamed body and may return its text instead.
+
+When the recursive tree is truncated or has more than 10,000 entries, the listing
+walks the tree one directory at a time (`GET /repositories/{id}/git/trees/{sha}`), at
+most 50 tree requests per page, and the cursor records the position in the walk. A
+single directory that GitHub itself truncates is recorded as an excluded
+`/truncated/{treeSha}` item, so the gap is visible.
+
+Docs and code are not date-bounded; issues, pull requests and discussions must have been
 updated after `after`. Every document is Markdown in `tf_knowledge_github_originals`
 and starts with provenance: repository, numeric ID, path and the commit and blob SHAs
 for files; author login and UTC time of the description and every comment for
 issues, pull requests and discussions. Canonical URLs for files are commit-pinned
 `blob/{commit}/{path}` links. Pull requests import the description and conversation
-comments, not inline review comments. Larger items are recorded as `too-large`, and
-non-UTF-8 files as `unsupported`; neither is published.
+comments, not inline review comments. Every issue comment and every discussion comment
+and reply is paged through; only a single part whose Markdown would exceed 1 MiB is
+recorded as `too-large`, and a later part of a file found to be binary as
+`unsupported`. Neither is published.
 
 When such a version replaces an imported item, the earlier revision stays stored
 but loses its publication, so search and evidence stop returning it. Import details
@@ -105,8 +142,9 @@ current active account for the same GitHub user.
 ## Reconciliation
 
 Each work item lists one provider page for one repository, after an owner check.
-The provider cursor encodes the phase (`docs:{commit}:{offset}`, `issues:{page}`,
-`discussions:{endCursor}`), so a docs listing stays pinned to one commit. The cursor
+The provider cursor encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}`
+while walking directories, either with `+{part}` inside a file, `issues:{page}`,
+`discussions:{endCursor}`), so a file listing stays pinned to one commit. The cursor
 commits only after every item outcome is persisted. After all repositories are
 traversed, unseen items in available repositories get an exact read. Only a 404 or
 410 file or issue, a transferred issue (301), a missing discussion, or an item now
@@ -133,12 +171,8 @@ cached per session.
 
 With `default-connection-knowledge` on, the first authorization of a personal account also
 creates owner-only sources for every readable repository, including new ones; see
-[automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). Automatic sources include `code`: readable UTF-8 files at the
-default-branch head, at most 1,000 per repository. Sensitive, generated, vendored and binary
-paths and files beyond the bound are recorded as excluded skips (at most 200 listed).
-Reconciliation asks the provider which unlisted files a new head pushed beyond the bound
-and gives them the same excluded skip, so coverage stays within 1,000; their originals are
-retained. A truncated tree or failed listing proves nothing displaced and keeps prior files.
+[automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). Automatic sources include `code`: every file at the
+default-branch head, with no count cap.
 Issues, pull requests and discussions use a rolling 90-day window.
 
 ## Verification
@@ -147,6 +181,7 @@ Issues, pull requests and discussions use a rolling 90-day window.
 lexical search, embeddings, and the search coordinator with a fixture provider.
 `packages/github/test/corpus-provider.test.mjs` covers REST and GraphQL mapping
 against `packages/github/test/corpus-fixture.mjs`.
-`apps/api/test/knowledge-github-code-bound.integration.mjs` runs the real provider and
-engine across a head change that displaces files beyond a scaled-down code bound. Live GitHub, GitHub rate limits
+`apps/api/test/knowledge-github-all-files.integration.mjs` runs the real provider and
+engine across head changes: formerly excluded files, a file in parts, a binary
+placeholder, a hashed long path, a truncated tree walk and deletions. Live GitHub, GitHub rate limits
 under load, and throughput remain unverified.

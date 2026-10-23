@@ -698,7 +698,7 @@ test(
             assert.equal(await row.getByRole('list', { name: 'Selected repositories' }).count(), 0);
             await row.getByRole('button', { name: 'View import details' }).click();
             await f.page
-              .getByText('This item exceeds the 256 KB file, 500-comment or 1 MB limit and is not searchable.')
+              .getByText('This part is larger than the 1 MB Knowledge limit and is not searchable.')
               .waitFor();
             const download = f.page.waitForEvent('download');
             await f.page
@@ -760,7 +760,7 @@ test(
             await replaced.getByText('Import failed', { exact: true }).waitFor();
             assert.equal(await replaced.getByText('Searchable', { exact: true }).count(), 0);
             await replaced
-              .getByText('This item exceeds the 256 KB file, 500-comment or 1 MB limit and is not searchable.')
+              .getByText('This part is larger than the 1 MB Knowledge limit and is not searchable.')
               .waitFor();
             await replaced
               .getByText(
