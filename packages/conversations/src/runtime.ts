@@ -178,6 +178,11 @@ export type ConversationToolContext = {
     epoch?: number;
   };
 };
+export type ConversationReplyOutcome = {
+  outcome: 'completed' | 'idle' | 'retry' | 'failed' | 'stale';
+  /** Present when the delivered first reply's chat still needs its generated title, at this title revision. */
+  title?: { titleRevision: number };
+};
 /** A reply's final credit write. It runs inside the executor's last transaction for the attempt. */
 export type ReplySettlement = (tx: ReplyTransaction) => Promise<void>;
 export type ReplyTransaction = RuntimeTransaction;
@@ -195,7 +200,6 @@ export type ConversationReply = (input: {
    * the turn, or in its own transaction when the attempt ends any other way, so it runs once per attempt.
    */
   settle?: (settlement: ReplySettlement) => void;
-  generateTitle: boolean;
   timeZone: string | null;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
@@ -1075,7 +1079,11 @@ export function createConversationExecutor(
     return done === 'stale' ? 'stale' : 'completed';
   }
 
-  async function complete(value: unknown): Promise<'completed' | 'stale' | 'retry'> {
+  /** `onTitle` hears, after delivery commits, that this reply's chat still needs its first generated title. */
+  async function complete(
+    value: unknown,
+    onTitle?: (titleRevision: number) => void,
+  ): Promise<'completed' | 'stale' | 'retry'> {
     const fence = fenceSchema.parse(value);
     const source = await staged('context', () =>
       observeChatDetail('history', () =>
@@ -1462,8 +1470,6 @@ export function createConversationExecutor(
     const interactiveChat = source.interactiveChat;
     const inheritedSources = source.inherited;
     let text = 'Attachment received.';
-    let title: string | undefined;
-    let titleSource: ConversationResult['titleSource'];
     let fallback: string | undefined;
     let sources: SourceDependency[] = [{ kind: 'unknown' }];
     let replied = false;
@@ -2077,7 +2083,6 @@ export function createConversationExecutor(
             personalMemory: preloadedPersonalMemory,
             settle: settlement => settlements.set(attempt(fence), settlement),
             fence,
-            generateTitle: source.generateTitle,
             timeZone: source.timeZone,
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
@@ -2089,14 +2094,15 @@ export function createConversationExecutor(
         ),
       );
       text = answer.text || 'The model returned an empty reply.';
-      title = source.generateTitle ? answer.title : undefined;
-      titleSource = answer.titleSource;
       fallback = answer.fallback;
       sources = answer.sources;
       replied = true;
     }
-    return staged('delivery', () =>
+    let titleRevision: number | undefined;
+    const delivered = await staged('delivery', () =>
       finalTransaction(fence, async tx => {
+        titleRevision = undefined;
+        let titled = source.generateTitle && replied;
         const chat = await root(tx, fence);
         if (!chat) return 'stale';
         const turn = await head(tx, fence.conversationId);
@@ -2140,7 +2146,7 @@ export function createConversationExecutor(
           !(await projectAudienceCanRead(tx, chat.project_id, fence.conversationId, [...source.inherited, ...sources]))
         ) {
           text = privateReply;
-          title = undefined;
+          titled = false;
           sources = [];
         }
         if (!chat.slack && !chat.context && !source.planningMode && replied) {
@@ -2188,24 +2194,9 @@ export function createConversationExecutor(
           [fence.conversationId],
         );
         await recordConversationActivity(tx, fence.conversationId);
-        if (
-          title &&
-          (titleSource === 'user-message' ||
-            ![...source.inherited, ...sources].some(
-              item =>
-                item.kind === 'github-personal' ||
-                (item.kind === 'github-source' && item.investigation) ||
-                item.kind === 'google-integration' ||
-                item.kind === 'mcp-integration' ||
-                item.kind === 'tulipfarm-file' ||
-                item.kind === 'google-file' ||
-                item.kind === 'knowledge-document',
-            ))
-        )
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_conversations')} SET title = $2, title_revision = title_revision + 1 WHERE id = $1 AND NOT title_manual AND title_revision = $3`,
-            [fence.conversationId, title, source.titleRevision],
-          );
+        // The title is generated after delivery from the requester's message alone, so it never waits on or reveals the reply.
+        if (titled && !chat.title_manual && chat.title_revision === source.titleRevision)
+          titleRevision = source.titleRevision;
         const next = await head(tx, fence.conversationId);
         if (next)
           await tx.client.query(
@@ -2215,6 +2206,8 @@ export function createConversationExecutor(
         return 'completed';
       }),
     );
+    if (delivered === 'completed' && titleRevision !== undefined) onTitle?.(titleRevision);
+    return delivered;
   }
 
   // A denial is deterministic, so retrying would repeat the same checks; an unverifiable source may recover and retries.
@@ -2273,7 +2266,10 @@ export function createConversationExecutor(
     await transaction(fence.workspaceId, tx => noteReplyTiming(tx, fence.turnId, ['cancelled'])).catch(() => undefined);
   }
 
-  async function process(value: unknown): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> {
+  async function process(
+    value: unknown,
+    onTitle?: (titleRevision: number) => void,
+  ): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> {
     const reply = replyWorkSchema.safeParse(value);
     return withChatMeasurements(
       () =>
@@ -2447,7 +2443,7 @@ export function createConversationExecutor(
               return typeof resumed === 'object' ? observeChatDetail('resume', resumed.finish) : resumed;
             fence = await staged('claim', () => claim(value));
             stage = 'prepare';
-            const result = fence ? await complete(fence) : 'idle';
+            const result = fence ? await complete(fence, onTitle) : 'idle';
             await noteCancelled(fence, result);
             return result;
           } catch (error) {
@@ -2540,5 +2536,14 @@ export function createConversationExecutor(
     });
   }
 
-  return { claim, complete, fail, process, due, acknowledge };
+  /** Processes a reply and reports whether its delivered first reply still needs a generated title. */
+  async function processReply(value: unknown): Promise<ConversationReplyOutcome> {
+    let titleRevision: number | undefined;
+    const outcome = await process(value, revision => {
+      titleRevision = revision;
+    });
+    return outcome === 'completed' && titleRevision !== undefined ? { outcome, title: { titleRevision } } : { outcome };
+  }
+
+  return { claim, complete, fail, process, processReply, due, acknowledge };
 }

@@ -91,16 +91,12 @@ test('the responder retains trusted tool envelopes and rejects missing provenanc
   });
 });
 
-test('the responder carries a first-response title outside the reply text', async t => {
-  t.mock.method(globalThis, 'fetch', async (_url, init) =>
-    Response.json(
-      isCompletionRequest(JSON.parse(init.body))
-        ? completionReply('anthropic')
-        : isTitleRequest(JSON.parse(init.body))
-          ? anthropicText('Customer follow-ups')
-          : anthropicText('Here is the plan.'),
-    ),
-  );
+test('a first reply is answered without waiting for a title request', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.ok(!isTitleRequest(body), 'no title request');
+    return Response.json(isCompletionRequest(body) ? completionReply('anthropic') : anthropicText('Here is the plan.'));
+  });
   const answer = await respondToConversation(
     { provider: 'anthropic', endpoint: 'https://api.anthropic.com/', model: 'fixture', apiKey: 'synthetic' },
     [{ role: 'user', text: 'Plan customer follow-ups' }],
@@ -109,50 +105,7 @@ test('the responder carries a first-response title outside the reply text', asyn
     undefined,
     true,
   );
-  assert.deepEqual(answer, { text: 'Here is the plan.', title: 'Customer follow-ups', sources: [] });
-});
-
-test('only a title isolated to original user messages carries independent provenance', async t => {
-  const sourceMessages = [{ role: 'user', text: 'Plan customer follow-ups' }];
-  const messages = [...sourceMessages, { role: 'user', text: 'PRIVATE_FILE_CONTEXT' }];
-  const sources = [
-    {
-      kind: 'google-integration',
-      integrationId,
-      membershipId: sourceId,
-      accountId: 'synthetic-account',
-      generation: 1,
-      scopes: [],
-    },
-  ];
-  t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    const body = JSON.parse(init.body);
-    if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
-    if (isTitleRequest(body)) {
-      assert.doesNotMatch(init.body, /PRIVATE_FILE_CONTEXT/);
-      assert.match(init.body, /Plan customer follow-ups/);
-      return Response.json(anthropicText('Customer follow-ups'));
-    }
-    return Response.json(anthropicText('Here is the plan.'));
-  });
-  const answer = await respondToConversation(
-    { provider: 'anthropic', endpoint: 'https://api.anthropic.com/', model: 'fixture', apiKey: 'synthetic' },
-    messages,
-    () => assert.fail('No tool expected'),
-    undefined,
-    undefined,
-    true,
-    null,
-    undefined,
-    sources,
-    sourceMessages,
-  );
-  assert.deepEqual(answer, {
-    text: 'Here is the plan.',
-    title: 'Customer follow-ups',
-    titleSource: 'user-message',
-    sources,
-  });
+  assert.deepEqual(answer, { text: 'Here is the plan.', sources: [] });
 });
 
 test('the responder discloses actual news widening even when the model omits it', async t => {

@@ -104,12 +104,16 @@ export function useConversationList(
   };
 }
 
-export function terminalTurns(history: ConversationHistory) {
-  return history.messages.flatMap(message =>
-    message.turn && ['completed', 'failed', 'blocked', 'cancelled'].includes(message.turn.status)
-      ? [`${message.turn.id}:${message.turn.generation}:${message.turn.status}`]
-      : [],
-  );
+/** Changes the chat lists also show: a settled turn, or a title that arrived after its reply. */
+export function listChanges(history: ConversationHistory) {
+  return [
+    ...history.messages.flatMap(message =>
+      message.turn && ['completed', 'failed', 'blocked', 'cancelled'].includes(message.turn.status)
+        ? [`${message.turn.id}:${message.turn.generation}:${message.turn.status}`]
+        : [],
+    ),
+    ...(history.chat ? [`title:${history.chat.titleRevision}`] : []),
+  ];
 }
 
 /** A live event stream announces changes, so polling only backs it up; otherwise poll with a backoff that never gives up on a pending reply. */
@@ -136,7 +140,7 @@ export function useConversationHistory(api: ConversationApi, chatId: string, pag
   const observed = useRef<Set<string> | null>(null);
   useEffect(() => {
     if (read.state.kind !== 'ready') return;
-    const terminal = terminalTurns(read.state.data);
+    const terminal = listChanges(read.state.data);
     if (!observed.current) {
       observed.current = new Set(terminal);
       return;

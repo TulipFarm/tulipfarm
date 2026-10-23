@@ -261,12 +261,8 @@ test('completion evidence excludes raw provider replay fields but retains tool r
   assert.match(JSON.stringify(requests[2]), /workflows_list/);
 });
 
-test('the separate title follows accepted completion and never leaks into streamed answers', async t => {
-  const replies = [
-    nativeReply('azure', { text: 'The answer is 42.' }),
-    selectReply('azure', verdict()),
-    nativeReply('azure', { text: 'A short title' }),
-  ];
+test('an accepted completion ends the reply without a title request', async t => {
+  const replies = [nativeReply('azure', { text: 'The answer is 42.' }), selectReply('azure', verdict())];
   const previews = [],
     steps = [];
   t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
@@ -282,9 +278,9 @@ test('the separate title follows accepted completion and never leaks into stream
     null,
     { ...resumed, answerText: update => previews.push(update) },
   );
-  assert.deepEqual(result, { text: 'The answer is 42.', title: 'A short title' });
-  assert.deepEqual(steps, [0, 1, 2]);
-  assert.ok(!previews.some(update => update.text.includes('title')));
+  assert.deepEqual(result, { text: 'The answer is 42.' });
+  assert.deepEqual(steps, [0, 1]);
+  assert.equal(replies.length, 0);
 });
 
 /** Collects the `chat.completion-check` outcomes that the reply logs. */
@@ -485,13 +481,11 @@ test('a skipped check ends the reply in the same state as a check that returns d
     return { result, preview: previews.at(-1), avatars, settled: usage.every(kind => kind === 'known') };
   };
   const answer = () => nativeReply('azure', { text: 'Hello. How can I help?' });
-  const title = () => nativeReply('azure', { text: 'Greeting' });
-  const skipped = await run(0, [answer(), title()]);
-  const checked = await run(1, [answer(), selectReply('azure', verdict()), title()]);
+  const skipped = await run(0, [answer()]);
+  const checked = await run(1, [answer(), selectReply('azure', verdict())]);
   assert.deepEqual(skipped, checked);
   assert.deepEqual(skipped.result, {
     text: 'Hello. How can I help?',
-    title: 'Greeting',
     avatar: { name: 'Bud', state: 'Idle' },
   });
 });

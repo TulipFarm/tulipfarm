@@ -1,6 +1,7 @@
 import {
   createConversationExecutor,
   replyWorkSchema,
+  type ReplyWork,
   type ConversationReply,
   type ConversationRuntime,
   type ExternalConversationContext,
@@ -50,6 +51,8 @@ import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { beginReplySession } from './reply-session.ts';
+import { conversationTitleActivity } from './conversation-title.ts';
+import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
@@ -100,7 +103,6 @@ export function meteredReply(
     personalMemory,
     settle,
     fence,
-    generateTitle,
     timeZone,
     priorCalls = 0,
     priorToolCalls = [],
@@ -118,8 +120,6 @@ export function meteredReply(
     const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
-    const title = generateTitle ? chatTitleModel() : undefined;
-    const titleRoute = title?.route;
     const fallback = chatFallbackModel(chat.price.familyId);
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
@@ -128,7 +128,6 @@ export function meteredReply(
         runtime,
         fence,
         chat,
-        title,
         fallback,
         externalContext,
         slack,
@@ -256,7 +255,7 @@ export function meteredReply(
         },
         session.meter,
         session.authorizeSources,
-        generateTitle,
+        false,
         timeZone,
         mcp && requester && !externalContext
           ? {
@@ -266,7 +265,6 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              titleRoute,
               ...(fallback
                 ? {
                     fallback: {
@@ -289,7 +287,6 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              titleRoute,
               ...(fallback
                 ? {
                     fallback: {
@@ -331,52 +328,65 @@ export function createConversationActivities(
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
   };
-  return {
-    processConversationReply: async (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
-      withChatMeasurements(async () => {
-        const parsed = replyWorkSchema.parse(work);
-        if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
-        const execution = mcp ?? null;
-        const inventory = compactor ? undefined : conversationInventoryReads(runtime);
-        const executor = createConversationExecutor(
-          runtime,
-          conversationReply ??
-            meteredReply(runtime, {
-              objects,
-              mcp: execution,
-              knowledge: knowledge ?? createKnowledgeTools({ runtime: storage }),
-              outputs: files,
-              skillExecution,
-              wakePlan,
-              inventory,
-            }),
-          undefined,
-          slack?.resumeConversation,
-          execution
-            ? (context, call) =>
-                execution(context.runtime).execute(
-                  {
-                    workspaceId: context.workspaceId,
-                    actor: context.actor,
-                    origin: {
-                      kind: 'private-chat',
-                      conversationId: context.origin.conversationId,
-                      turnId: context.origin.turnId,
-                      stepId: context.callId,
-                    },
+  const generateTitle = conversationTitleActivity(storage);
+  const run = <T>(
+    work: unknown,
+    process: (executor: ReturnType<typeof createConversationExecutor>, work: ReplyWork) => Promise<T>,
+  ) =>
+    withChatMeasurements(async () => {
+      const parsed = replyWorkSchema.parse(work);
+      if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
+      const execution = mcp ?? null;
+      const inventory = compactor ? undefined : conversationInventoryReads(runtime);
+      const executor = createConversationExecutor(
+        runtime,
+        conversationReply ??
+          meteredReply(runtime, {
+            objects,
+            mcp: execution,
+            knowledge: knowledge ?? createKnowledgeTools({ runtime: storage }),
+            outputs: files,
+            skillExecution,
+            wakePlan,
+            inventory,
+          }),
+        undefined,
+        slack?.resumeConversation,
+        execution
+          ? (context, call) =>
+              execution(context.runtime).execute(
+                {
+                  workspaceId: context.workspaceId,
+                  actor: context.actor,
+                  origin: {
+                    kind: 'private-chat',
+                    conversationId: context.origin.conversationId,
+                    turnId: context.origin.turnId,
+                    stepId: context.callId,
                   },
-                  context.callId,
-                  mcpCallSchema.parse(call),
-                )
-            : undefined,
-          files,
-          googleFiles,
-          chatSkills,
-          compactor ?? conversationCompactor(runtime, family => conversationModel(family), inventory),
-          conversationPlanning,
-        );
-        return executor.process(parsed);
-      }),
+                },
+                context.callId,
+                mcpCallSchema.parse(call),
+              )
+          : undefined,
+        files,
+        googleFiles,
+        chatSkills,
+        compactor ?? conversationCompactor(runtime, family => conversationModel(family), inventory),
+        conversationPlanning,
+      );
+      return process(executor, parsed);
+    });
+  return {
+    processConversationReply: (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
+      run(work, (executor, parsed) => executor.process(parsed)),
+    /** Delivers the reply and reports, without waiting on it, whether the chat still needs its first generated title. */
+    deliverConversationReply: (work: ReplyWork) => run(work, (executor, parsed) => executor.processReply(parsed)),
+    generateConversationTitle: ({
+      attempt,
+      final,
+      ...work
+    }: ConversationTitleWork & { attempt: number; final: boolean }) => generateTitle(work, attempt, final),
   };
 }
 import type { SkillExecutionFactory } from '@tulipfarm/agents/skill-execution';

@@ -99,6 +99,7 @@ const spanAttributes = new Set([
   'error.issues',
   'error.stage',
   'duration_ms',
+  'title_generation',
   'dispatch_source',
   'chat.purpose',
   'chat.request.sequence',
@@ -162,6 +163,9 @@ const dependencyEndpoints = [
 ] as const;
 export type DependencyEndpoint = (typeof dependencyEndpoints)[number];
 const endpoints = new Set<string>(dependencyEndpoints);
+const titleGenerationOutcomeValues = ['generated', 'skipped', 'failed', 'timeout'] as const;
+export type TitleGenerationOutcome = (typeof titleGenerationOutcomeValues)[number];
+const titleGenerationOutcomes = new Set<string>(titleGenerationOutcomeValues);
 
 function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (logLine && logOnlyAttributes.has(key)) {
@@ -174,6 +178,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
+  if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
   if (key === 'http.response.status_code' || key.startsWith('catalog.')) return safeDiagnosticNumber(key, value);
   return true;
 }
@@ -1732,6 +1737,18 @@ export async function observeTool<T>(
         span.end();
       }
     });
+}
+
+/** Records a chat's post-reply title step. A failure or timeout logs one warning with a bounded error code. */
+export function recordTitleGeneration(outcome: TitleGenerationOutcome, seconds: number, errorCode?: string) {
+  callMetrics('activity', 'chat.title', outcome, seconds);
+  const failed = outcome === 'failed' || outcome === 'timeout';
+  log(failed ? 'warn' : 'info', 'activity', failed ? 'call_failed' : 'call_completed', {
+    operation: 'chat.title',
+    title_generation: outcome,
+    duration_ms: Math.round(seconds * 1000),
+    ...(failed ? { 'error.code': telemetryErrorCode(errorCode) ?? 'model-request-failed' } : {}),
+  });
 }
 
 export function recordTaskTransition(status: 'started' | 'paused' | 'failed' | 'completed') {

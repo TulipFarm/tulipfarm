@@ -1020,8 +1020,8 @@ function chatRequest(
   }
 }
 /**
- * `provider` and `model` name the route of this request; the title request and a fallback retry may use a different route
- * from the chat steps. The settlement's `rejected` is true when the provider refused the request with an HTTP error and
+ * `provider` and `model` name the route of this request; a fallback retry may use a different route from the chat
+ * steps. The settlement's `rejected` is true when the provider refused the request with an HTTP error and
  * reported no usage, so nothing was generated.
  */
 export type ToolModelMeter = (attempt: {
@@ -1050,8 +1050,6 @@ export type ToolInferenceContext = {
    * rounds of work tools; tools in `nonWorkToolNames`, format corrections and the completion check never count.
    */
   progress?: (update: { step: number; round: number; status: ReplyStatus; tool?: string; toolRounds: number }) => void;
-  /** A cheaper route for the first-turn title request. The chat route is used when this is absent. */
-  titleRoute?: InferenceRoute | undefined;
   /** Instructions of the chat's project. They follow the platform prompt as a second system block. */
   projectInstructions?: string | undefined;
   /**
@@ -1540,16 +1538,144 @@ async function observeProviderResponse<T>(call: () => Promise<T>, failed: (resul
   }
 }
 
+async function sendChatRequest<T>(
+  target: z.output<typeof inferenceRouteSchema>,
+  step: number,
+  meter: ToolModelMeter | undefined,
+  wire: { url: string; headers: Record<string, string>; body: object },
+  select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
+  answerText?: ToolInferenceContext['answerText'],
+  onOutput?: () => void,
+) {
+  const streamFormat = routeStreamFormat(target);
+  const serialized = serializeChatRequest(
+    streamFormat ? { ...wire.body, ...streamRequestFields(streamFormat) } : wire.body,
+  );
+  const onUsage = await observeChatDetail('reserve', async () =>
+    meter?.({
+      step,
+      inputBytes: Buffer.byteLength(serialized),
+      maxOutputTokens: target.maxOutputTokens,
+      provider: target.provider,
+      model: target.model,
+    }),
+  );
+  return observeInference({ provider: target.provider, model: target.model, operation: 'chat' }, async report => {
+    // The streamed answer is a preview; a failing consumer must not affect the turn.
+    let held = false;
+    let published = false;
+    let previousText: string | undefined;
+    const publish = (text: string) => {
+      if (previousText === text) return;
+      previousText = text;
+      if (text) {
+        published = true;
+        onOutput?.();
+      }
+      try {
+        answerText?.({ step, text });
+      } catch {
+        return;
+      }
+    };
+    const onText =
+      answerText &&
+      ((text: string) => {
+        const visible = toolTextPreview(text);
+        held ||= visible !== text;
+        if (visible !== undefined) publish(visible);
+      });
+    const {
+      response,
+      body: json,
+      error,
+    } = await observeProviderResponse(
+      async () => {
+        const response = await fetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
+          method: 'POST',
+          headers: wire.headers,
+          body: serialized,
+          redirect: 'manual',
+          signal: AbortSignal.timeout(target.timeoutMs),
+        }).catch((error: unknown) => {
+          throw new ModelCallError(
+            timedOut(error) ? 'timeout' : 'transport',
+            { outputStarted: false },
+            { cause: error },
+          );
+        });
+        const result = await readModelResponse(response, streamFormat, {
+          onText,
+          onFirstToken: report.firstToken,
+        }).catch((error: unknown) => {
+          report.error(
+            new ModelCallError(
+              timedOut(error) ? 'timeout' : 'transport',
+              { status: response.status, outputStarted: published },
+              { cause: error },
+            ),
+          );
+          return { body: null, error: null };
+        });
+        return { response, ...result };
+      },
+      result => !result.response.ok || result.body === null || result.error !== null,
+    );
+    const value = observeChatDetailSync('response-parse', () => usage(target, json));
+    reportUsage(report, value);
+    await observeChatDetail('settle', async () =>
+      onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
+    );
+    if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
+    const selected = observeChatDetailSync('decision-parse', () => select(json));
+    if (selected.failed)
+      report.error(new ModelCallError('invalid-decision', { status: response.status, outputStarted: published }));
+    if (!selected.failed && held && selected.finalText !== undefined) publish(selected.finalText);
+    return selected.value;
+  });
+}
+
+/**
+ * Titles a new chat from the requester's message alone, after its reply was delivered.
+ * Returns undefined when the model gives no usable title; transport, timeout and credit failures throw.
+ */
+export async function inferChatTitle(
+  route: InferenceRoute,
+  request: string,
+  meter?: ToolModelMeter,
+): Promise<string | undefined> {
+  const config = inferenceRouteSchema.parse(route);
+  return withChatModelRequest('title', () =>
+    sendChatRequest(
+      config,
+      0,
+      meter,
+      chatRequest(config, [{ role: 'user', text: request }], titleSystemPrompt),
+      body => {
+        const text = textResponseSchema.safeParse(body);
+        const parsed =
+          text.success && text.data.trim()
+            ? chatTitleSchema.safeParse(initialTitle([{ kind: 'text', text: text.data }]))
+            : null;
+        return {
+          value: parsed?.success ? parsed.data : undefined,
+          failed: !parsed?.success || nativeStep(config, body).kind === 'failure',
+        };
+      },
+    ),
+  );
+}
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
   execute: (call: FrameworkCall, activity: string) => Promise<unknown>,
   meter?: ToolModelMeter,
-  generateTitle = false,
+  _generateTitle = false,
   timeZone: string | null = null,
   tools?: ToolInferenceContext,
   sourceMessages: readonly ChatTurn[] = messages,
-): Promise<{ text: string; title?: string; avatar?: AvatarSnapshot; fallback?: string }> {
+): Promise<{ text: string; avatar?: AvatarSnapshot; fallback?: string }> {
   // After a fallback answers a step, the rest of the turn uses its route.
   let config = inferenceRouteSchema.parse(route);
   let answeredBy: string | undefined;
@@ -1583,10 +1709,8 @@ export async function inferWithTools(
   // Only a checked answer is final. Other endings are not on screen until the turn saves.
   const finish = async (text: string, checked = false) => {
     report(checked ? 'done' : 'finishing');
-    const generatedTitle = generateTitle ? await title() : undefined;
     return {
       text,
-      ...(generatedTitle ? { title: generatedTitle } : {}),
       ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
@@ -1600,130 +1724,15 @@ export async function inferWithTools(
     log('warn', 'activity', 'call_failed', { operation: 'chat.tool-budget', 'error.type': reason });
   };
   const calendarBindings = new Map<string, CalendarTextBinding>();
-  const titleRoute = tools?.titleRoute ? inferenceRouteSchema.parse(tools.titleRoute) : undefined;
-  async function send<T>(
+  const send = <T>(
     wire: { url: string; headers: Record<string, string>; body: object },
     select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
     answerText?: ToolInferenceContext['answerText'],
     target = config,
-  ) {
-    const streamFormat = routeStreamFormat(target);
-    const serialized = serializeChatRequest(
-      streamFormat ? { ...wire.body, ...streamRequestFields(streamFormat) } : wire.body,
-    );
-    const step = requestStep++;
-    const onUsage = await observeChatDetail('reserve', async () =>
-      meter?.({
-        step,
-        inputBytes: Buffer.byteLength(serialized),
-        maxOutputTokens: target.maxOutputTokens,
-        provider: target.provider,
-        model: target.model,
-      }),
-    );
-    return observeInference({ provider: target.provider, model: target.model, operation: 'chat' }, async report => {
-      // The streamed answer is a preview; a failing consumer must not affect the turn.
-      let held = false;
-      let published = false;
-      let previousText: string | undefined;
-      const publish = (text: string) => {
-        if (previousText === text) return;
-        previousText = text;
-        if (text) {
-          published = true;
-          outputProduced = true;
-        }
-        try {
-          answerText?.({ step, text });
-        } catch {
-          return;
-        }
-      };
-      const onText =
-        answerText &&
-        ((text: string) => {
-          const visible = toolTextPreview(text);
-          held ||= visible !== text;
-          if (visible !== undefined) publish(visible);
-        });
-      const {
-        response,
-        body: json,
-        error,
-      } = await observeProviderResponse(
-        async () => {
-          const response = await fetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
-            method: 'POST',
-            headers: wire.headers,
-            body: serialized,
-            redirect: 'manual',
-            signal: AbortSignal.timeout(target.timeoutMs),
-          }).catch((error: unknown) => {
-            throw new ModelCallError(
-              timedOut(error) ? 'timeout' : 'transport',
-              { outputStarted: false },
-              { cause: error },
-            );
-          });
-          const result = await readModelResponse(response, streamFormat, {
-            onText,
-            onFirstToken: report.firstToken,
-          }).catch((error: unknown) => {
-            report.error(
-              new ModelCallError(
-                timedOut(error) ? 'timeout' : 'transport',
-                { status: response.status, outputStarted: published },
-                { cause: error },
-              ),
-            );
-            return { body: null, error: null };
-          });
-          return { response, ...result };
-        },
-        result => !result.response.ok || result.body === null || result.error !== null,
-      );
-      const value = observeChatDetailSync('response-parse', () => usage(target, json));
-      reportUsage(report, value);
-      await observeChatDetail('settle', async () =>
-        onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
-      );
-      if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
-      const selected = observeChatDetailSync('decision-parse', () => select(json));
-      if (selected.failed)
-        report.error(new ModelCallError('invalid-decision', { status: response.status, outputStarted: published }));
-      if (!selected.failed && held && selected.finalText !== undefined) publish(selected.finalText);
-      return selected.value;
+  ) =>
+    sendChatRequest(target, requestStep++, meter, wire, select, answerText, () => {
+      outputProduced = true;
     });
-  }
-  async function title(): Promise<string | undefined> {
-    const titleConfig = titleRoute ?? config;
-    const request = sourceMessages.filter(message => message.role === 'user').at(-1);
-    if (!request) return undefined;
-    try {
-      return await withChatModelRequest('title', () =>
-        send(
-          observeChatDetailSync('serialize', () =>
-            chatRequest(titleConfig, [{ role: 'user', text: request.text }], titleSystemPrompt),
-          ),
-          body => {
-            const text = textResponseSchema.safeParse(body);
-            const parsed =
-              text.success && text.data.trim()
-                ? chatTitleSchema.safeParse(initialTitle([{ kind: 'text', text: text.data }]))
-                : null;
-            return {
-              value: parsed?.success ? parsed.data : undefined,
-              failed: !parsed?.success || nativeStep(titleConfig, body).kind === 'failure',
-            };
-          },
-          undefined,
-          titleConfig,
-        ),
-      );
-    } catch {
-      return undefined;
-    }
-  }
   /**
    * Runs a reply step on the chat route and, when it fails before the turn produced any output with a failure another model
    * can fix, once more on the configured fallback, which then answers the rest of the turn. The chat model's failure is

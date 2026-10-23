@@ -28,19 +28,15 @@ function run(t, replies, { execute = () => assert.fail('No tool expected'), titl
 const statuses = events => events.filter(event => typeof event === 'object');
 
 test('a greeting without tools reports thinking, then done, with no tool or step', async t => {
-  const { result, events } = run(
-    t,
-    [nativeReply(format, { text: 'Hi! How can I help?' }), nativeReply(format, { text: 'Greeting' })],
-    { title: true },
-  );
-  assert.deepEqual(await result, { text: 'Hi! How can I help?', title: 'Greeting' });
+  const { result, events } = run(t, [nativeReply(format, { text: 'Hi! How can I help?' })], { title: true });
+  assert.deepEqual(await result, { text: 'Hi! How can I help?' });
   assert.deepEqual(statuses(events), [
     { step: 0, round: 1, status: 'thinking', toolRounds: 0 },
     { step: 0, round: 1, status: 'done', toolRounds: 0 },
   ]);
   assert.ok(!events.includes('completion-request'), 'a tool-free reply skips the completion check');
-  const done = events.findIndex(event => event.status === 'done');
-  assert.equal(events[done + 1], 'request-2', 'the answer is reported done before the title request');
+  assert.equal(events.at(-1).status, 'done', 'the reply ends done, with no title request after it');
+  assert.ok(!events.includes('request-2'));
 });
 
 test('bud_state alone is not tool work: no tool status and no step', async t => {

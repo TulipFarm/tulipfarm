@@ -89,6 +89,7 @@ const { modelEnvironment } = await import('@tulipfarm/agents/model-environment')
 const { conversationModel } = await import('../src/conversation-model.ts');
 const { chatTitleModel } = await import('../src/conversation-activities.ts');
 const { respondToConversation } = await import('../src/conversation-responder.ts');
+const { inferChatTitle } = await import('@tulipfarm/agents/inference');
 
 // The operator catalog replaces the shipped one; its provider reads the key and endpoint from its own variables.
 const env = {
@@ -133,21 +134,22 @@ test('an openai-compatible catalog model chats (streamed) and runs a task agains
   received.length = 0;
   const settled = [];
   const published = [];
+  const meter = async ({ provider, model }) => {
+    const price = [chat, title].find(
+      candidate => candidate?.route.provider === provider && candidate.route.model === model,
+    )?.price;
+    assert.ok(price, 'request is priced');
+    return async usage => settled.push(cost(price, usage));
+  };
   const result = await respondToConversation(
     { ...chat.route, maxOutputTokens: chat.price.maxOutputTokens },
     [{ role: 'user', text: 'Review my quarterly plan.' }],
     () => assert.fail('No tool expected'),
-    async ({ provider, model }) => {
-      const price = [chat, title].find(
-        candidate => candidate?.route.provider === provider && candidate.route.model === model,
-      )?.price;
-      assert.ok(price, 'request is priced');
-      return async usage => settled.push(cost(price, usage));
-    },
+    meter,
     async () => {},
     true,
     null,
-    { answerText: ({ text }) => published.push(text), titleRoute: title?.route, sources: () => [] },
+    { answerText: ({ text }) => published.push(text), sources: () => [] },
   );
   assert.equal(result.text, answerFragments.join(''));
   assert.ok(published.length >= 2 && published.at(-1) === answerFragments.join(''), 'the answer streams');
@@ -156,7 +158,12 @@ test('an openai-compatible catalog model chats (streamed) and runs a task agains
   assert.equal(chatRequest.body.model, 'meta-llama/Llama-3.3-70B-Instruct');
   assert.equal(chatRequest.body.stream, true);
   assert.equal(title.route.provider, 'openai-compatible');
-  assert.equal(result.title, titleText);
+  assert.equal(
+    received.some(request => request.kind === 'title'),
+    false,
+    'the reply never waits for a title',
+  );
+  assert.equal(await inferChatTitle((title ?? chat).route, 'Review my quarterly plan.', meter), titleText);
   assert.equal(received.find(request => request.kind === 'title')?.body.stream, true);
   assert.equal(settled.length, received.length);
   for (const picoUsd of settled) assert.equal(picoUsd, expectedPicoUsd);

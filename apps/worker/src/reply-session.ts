@@ -101,7 +101,6 @@ export async function beginReplySession(input: {
   runtime: ConversationRuntime;
   fence: ReplyFence;
   chat: ConversationModel;
-  title: ConversationModel | undefined;
   /** The model a failed chat call may retry on once; its calls are billed as that model. */
   fallback?: ConversationModel | undefined;
   externalContext: ExternalConversationContext | undefined;
@@ -118,12 +117,11 @@ export async function beginReplySession(input: {
   contextBytes: number;
   settle: ((settlement: ReplySettlement) => void) | undefined;
 }) {
-  const { runtime, fence, chat, title, externalContext } = input;
+  const { runtime, fence, chat, externalContext } = input;
   const chatId = (step: number) => `chat:${fence.turnId}:${fence.generation}:${fence.epoch}:${step}`;
-  // A greeting makes a reply call, a completion check and a title. Longer replies top up or roll the hold.
-  const preferred = (bytes: number) =>
-    2n * units(estimate(chat, bytes + holdSlackBytes).toString()) +
-    (title ? units(estimate(title, Math.min(bytes, holdSlackBytes), title.route.maxOutputTokens).toString()) : 0n);
+  // A greeting makes a reply call and a completion check; its title is billed separately after delivery. Longer replies
+  // top up or roll the hold.
+  const preferred = (bytes: number) => 2n * units(estimate(chat, bytes + holdSlackBytes).toString());
   // Every request carries a 4096-token allowance, so a balance below this cannot pay for any first call.
   const minimum = estimate(chat, 0);
   const withCatalog = Boolean(input.mcp) && !externalContext;
@@ -377,7 +375,7 @@ export async function beginReplySession(input: {
 
   const meter: ToolModelMeter = async attempt => {
     if (lost) throw lost instanceof AccessDenied ? lost : new AccessDenied();
-    const model = [chat, title, input.fallback].find(
+    const model = [chat, input.fallback].find(
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
     );
     if (!model) throw new Error('conversation-model-unpriced');
