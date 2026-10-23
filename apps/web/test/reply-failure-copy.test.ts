@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fallbackNote, replyFailure, replyRetrying } from '../src/features/chat/reply-failure-copy.ts';
+import {
+  fallbackNote,
+  replyFailure,
+  replyRetrying,
+  retryLabel,
+  unknownStop,
+} from '../src/features/chat/reply-failure-copy.ts';
 
 const reasons = [
   'incomplete-response',
@@ -37,11 +43,31 @@ test('every model failure gets short, specific copy with no provider details', (
   assert.match(replyFailure('model-quota')!, /Select another model/);
 });
 
-test('non-model and fallback codes are not reply failures', () => {
-  assert.equal(replyFailure(null), null);
-  assert.equal(replyFailure(undefined), null);
-  assert.equal(replyFailure('transient-failure'), null);
+test('a reply that stopped for a non-model cause says why in plain words', () => {
+  for (const code of [
+    'transient-failure',
+    'reply-interrupted',
+    'database-conflict',
+    'attempts-exhausted',
+    'access-denied',
+    'something-new',
+    null,
+    undefined,
+  ]) {
+    const copy = replyFailure(code);
+    assert.ok(copy, String(code));
+    assert.doesNotMatch(copy, /[a-z]+-[a-z]+|\.(read|list|search|fetch)\b|error code/i, String(code));
+  }
+  assert.equal(replyFailure('something-new'), unknownStop);
+  assert.match(replyFailure('database-conflict')!, /completed work is kept/);
   assert.equal(replyFailure('model-fallback:kimi'), null);
+  assert.equal(replyFailure('credits-exhausted'), null);
+});
+
+test('a failed reply with completed tool calls offers Continue', () => {
+  assert.equal(retryLabel('transient-failure', true, false), 'Continue');
+  assert.equal(retryLabel('transient-failure', false, false), 'Retry reply');
+  assert.equal(retryLabel('context-limit', true, true), 'Compact and retry');
 });
 
 test('a queued reply after a model failure says it is retrying instead of spinning silently', () => {

@@ -1274,6 +1274,18 @@ test('observeTool logs one rich failure record and marks thrown errors as logged
     async () => 'failed',
     () => ({ outcome: 'error', errorType: 'private user text' }),
   );
+  await observeTool(
+    'knowledge.read',
+    'chat',
+    async () => ({ error: 'knowledge-unavailable' }),
+    value => ({ outcome: 'result_error', errorCode: value.error }),
+  );
+  await observeTool(
+    'web.fetch',
+    'slack',
+    async () => 'failed',
+    () => ({ outcome: 'result_error', errorCode: 'private user text' }),
+  );
   t.mock.restoreAll();
   assert.equal(toolFailureLogged(denied), true);
   assert.equal(toolFailureLogged(invalid), true);
@@ -1287,6 +1299,8 @@ test('observeTool logs one rich failure record and marks thrown errors as logged
       ['rows.create', 'error', 'error', 'ZodError', 'unclassified'],
       ['rows.delete', 'error', 'blocked', 'AccessDenied', 'unclassified'],
       ['rows.update', 'error', 'error', 'Error', 'unclassified'],
+      ['knowledge.read', 'error', 'result_error', 'knowledge-unavailable', 'knowledge-unavailable'],
+      ['web.fetch', 'error', 'result_error', 'unclassified', 'unclassified'],
     ],
   );
   assert.ok(records.every(record => typeof record.duration_ms === 'number'));

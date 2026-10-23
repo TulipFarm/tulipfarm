@@ -1,4 +1,4 @@
-// Copy for a reply whose model call failed. The turn's error code is `model-<reason>`; provider messages never reach the page.
+// Copy for a failed reply. Model failures use `model-<reason>`; provider messages and internal codes never reach the page.
 
 // Mirrors `modelFallbackCodePrefix` in @tulipfarm/conversations/contracts.
 const modelFallbackPrefix = 'model-fallback:';
@@ -31,10 +31,32 @@ const replyFailures: Record<string, string> = {
 
 const genericFailure = `The model provider could not complete the reply. Retry uses the original model. ${switchModel} Check any tool activity before requesting another action.`;
 
-/** In-chat text for a failed reply, or null when the failure is not a model failure. */
+const kept = 'Your completed work is kept.';
+export const unknownStop = `Something went wrong while working on this. ${kept}`;
+const stopReasons: Record<string, string> = {
+  'transient-failure': unknownStop,
+  'reply-interrupted': `The reply stopped before it finished. ${kept}`,
+  'database-conflict': `The reply stopped because another change was saving at the same time. ${kept}`,
+  'attempts-exhausted': `The reply kept hitting a temporary problem and stopped. ${kept}`,
+  'access-denied': `The reply stopped because access to something it needed was denied. ${kept}`,
+  'project-context-too-large':
+    'The project context is too large for this reply. Shorten the project context, then retry.',
+};
+// These codes have their own message in the chat.
+const explainedElsewhere = new Set(['credits-exhausted', 'plan-budget', 'skill-unavailable']);
+
+/** In-chat text for why a failed reply stopped, or null when the chat explains the code with its own message. */
 export function replyFailure(code: string | null | undefined): string | null {
-  if (!code?.startsWith('model-') || code.startsWith(modelFallbackPrefix)) return null;
-  return replyFailures[code] ?? genericFailure;
+  if (code?.startsWith(modelFallbackPrefix)) return null;
+  if (code?.startsWith('model-')) return replyFailures[code] ?? genericFailure;
+  if (code && explainedElsewhere.has(code)) return null;
+  return (code && stopReasons[code]) || unknownStop;
+}
+
+/** A failed reply with completed tool calls continues from them; otherwise it is retried from the start. */
+export function retryLabel(code: string | null | undefined, resumes: boolean, compacts: boolean): string {
+  if (compacts) return 'Compact and retry';
+  return resumes ? 'Continue' : 'Retry reply';
 }
 
 /** Shown while a reply whose model call failed waits for its automatic retry, so it is never a silent spinner. */
@@ -42,7 +64,8 @@ export function replyRetrying(status: string, code: string | null | undefined): 
   if (status !== 'queued' || !code) return null;
   if (code.startsWith('model-') && !code.startsWith(modelFallbackPrefix))
     return 'The model call failed. Retrying automatically…';
-  if (code === 'transient-failure') return 'The reply hit a temporary problem. Retrying automatically…';
+  if (code === 'transient-failure' || code === 'database-conflict')
+    return 'The reply hit a temporary problem. Retrying automatically…';
   return null;
 }
 

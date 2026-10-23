@@ -48,6 +48,27 @@ One version identifies all apps and images of a release.
   Retry action, and a reply waiting to retry says so instead of a silent
   spinner. A call the provider refused before generating anything is not
   charged.
+- A chat reply that stops after tool calls no longer posts a canned list of
+  raw tool statuses. The turn fails with the cause of the failed attempt
+  (`database-conflict`, `model-timeout`, `reply-interrupted` and so on), the
+  chat shows that cause in plain words, and **Continue** resumes the reply from
+  its completed tool receipts without running them again.
+- Web and knowledge tool rows that succeeded no longer reload as "failed" or
+  "Knowledge source unavailable" when their reply context held personal memory
+  or an earlier answer of unknown provenance. Such markers now only conceal a
+  row's URLs, query and passages; a revoked retained source still conceals it.
+- A long chat reply no longer fails with `conversation-context-overflow` once
+  its tool results grow. Context fit is now estimated in tokens (the previous
+  round's reported prompt tokens plus a quarter of the bytes added since, or a
+  quarter of the request bytes) instead of treating request bytes as tokens;
+  bytes only size credit holds. Before every model round, a reply at the
+  compaction trigger (default 70% of the model's window) summarises its older
+  tool results with the compaction model, keeps the latest round verbatim,
+  unloads searched tools idle for two rounds, and continues. Without a summary
+  it leaves stubs. Each tool result is cut to 10% of the window, and the model
+  rereads any stored full result by call ID with `tool_result_read`. Each
+  compaction records `cloud_chat_context_compactions` and a
+  `chat.context-compaction` log with counts only.
 - Streamed model replies read token usage from any chunk, including a final
   usage-only chunk, and accept null usage details, DeepSeek cache fields and a
   missing `total_tokens`. Credits settle on that usage and

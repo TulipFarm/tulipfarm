@@ -89,6 +89,7 @@ import {
   type ChatDispatchReason,
   guardChatReplyFinal,
   noteChatReplyFinal,
+  noteChatReplyCause,
   observeChatTool,
   telemetryErrorCode,
   toolFailureLogged,
@@ -211,6 +212,8 @@ export type ConversationReply = (input: {
   retainedSources?: SourceDependency[];
   describedHandles?: string[];
   project?: ProjectContext;
+  /** The managed chat's compaction policy, which also sets when a long reply compacts its own tool results. */
+  compactionPolicy?: EffectiveCompactionPolicy;
   executeTool: (
     name: string,
     external: boolean,
@@ -306,6 +309,13 @@ const terminalModelFailures = new Set<ModelFailure>([
   'model-output-limit',
   'model-incomplete-response',
 ]);
+/** A non-model cause a failed attempt records, so a reply that cannot resume after tool calls can say why it stopped. */
+function replyFailureCause(error: unknown): string | undefined {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  if (code === '40P01' || code === '40001') return 'database-conflict';
+  if (error instanceof Error && error.message === 'conversation-context-overflow') return 'context-limit';
+  return undefined;
+}
 export const modelFailureEndsTurn = (failure: string) => {
   const parsed = modelFailureSchema.safeParse(failure);
   return parsed.success && terminalModelFailures.has(parsed.data);
@@ -340,6 +350,7 @@ const replyTimingSchema = z.object({
   timing_external_wait_seconds: z.number(),
   timing_inactive_seconds: z.number(),
   timing_attempts: z.number().int(),
+  error_code: z.string().nullable().default(null),
 });
 
 /** Notes the reply's final timing for `cloud_chat_reply_duration`; the timing trigger has already run in this transaction. */
@@ -353,7 +364,7 @@ async function noteReplyTiming(
   const row = replyTimingSchema.optional().parse(
     (
       await tx.client.query(
-        `SELECT status,${requested ? 'timing_requested_at,' : ''}timing_started_at,timing_claimed_at,timing_finished_at,timing_first_text_seconds,
+        `SELECT status,error_code,${requested ? 'timing_requested_at,' : ''}timing_started_at,timing_claimed_at,timing_finished_at,timing_first_text_seconds,
           timing_human_wait_seconds,timing_external_wait_seconds,timing_inactive_seconds,timing_attempts
         FROM ${table(tx, 'tf_conversation_turns')}
         WHERE id=$1 AND status=ANY($2::text[])
@@ -363,6 +374,19 @@ async function noteReplyTiming(
     ).rows[0],
   );
   if (!row) return;
+  // Only a failed reply reports its runtime, so a completed one costs no extra query.
+  const slack =
+    row.status === 'failed' &&
+    Boolean(
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_slack_dm_events')} WHERE turn_id=$1
+          UNION ALL SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.conversation_id=s.conversation_id WHERE t.id=$1
+          LIMIT 1`,
+          [turnId],
+        )
+      ).rowCount,
+    );
   noteChatReplyFinal(
     chatReplyFinal({
       status: row.status,
@@ -375,6 +399,8 @@ async function noteReplyTiming(
       externalWaitSeconds: row.timing_external_wait_seconds,
       inactiveSeconds: row.timing_inactive_seconds,
       attempts: row.timing_attempts,
+      errorCode: row.error_code,
+      runtime: slack ? 'slack' : 'chat',
     }),
   );
 }
@@ -434,6 +460,8 @@ export function createConversationExecutor(
 
   const settlements = new Map<string, ReplySettlement>();
   const attempt = (fence: ReplyFence) => `${fence.turnId}:${fence.generation}:${fence.epoch}`;
+  // The error code of the attempt before each claimed one; claiming clears the turn's code.
+  const previousFailures = new Map<string, string>();
   /** Runs the attempt's final write: its body, then the registered credit settlement, in one transaction. */
   async function finalTransaction<T>(fence: ReplyFence, operation: (tx: RuntimeTransaction) => Promise<T>) {
     const result = await transaction(fence.workspaceId, async tx => {
@@ -660,12 +688,22 @@ export function createConversationExecutor(
       // The latest attempt's trace: an operator looks it up from the chat, so no id goes into telemetry.
       const traced = activeTrace();
       const traceColumns = tx.commonVersion >= 2;
+      const previousFailure = z
+        .string()
+        .nullable()
+        .parse(
+          (await tx.client.query(`SELECT error_code FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1`, [turn.id]))
+            .rows[0]?.error_code ?? null,
+        );
       await tx.client.query(
         `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'processing', attempt_epoch = $2, attempts = attempts + 1, lease_until = clock_timestamp() + interval '60 seconds', retry_at = NULL, error_code = NULL${traceColumns ? ', trace_id = $3, trace_sampled = $4' : ''} WHERE id = $1`,
         traceColumns ? [turn.id, epoch, traced?.traceId ?? null, traced?.sampled ?? null] : [turn.id, epoch],
       );
       await changed(tx, work);
-      return { ...work, epoch };
+      const claimed = { ...work, epoch };
+      previousFailures.delete(attempt(claimed));
+      if (previousFailure) previousFailures.set(attempt(claimed), previousFailure);
+      return claimed;
     });
   }
 
@@ -1094,6 +1132,8 @@ export function createConversationExecutor(
     onTitle?: (titleRevision: number) => void,
   ): Promise<'completed' | 'stale' | 'retry'> {
     const fence = fenceSchema.parse(value);
+    const previousFailure = previousFailures.get(attempt(fence));
+    previousFailures.delete(attempt(fence));
     const source = await staged('context', () =>
       observeChatDetail('history', () =>
         transaction(fence.workspaceId, async tx => {
@@ -1272,18 +1312,44 @@ export function createConversationExecutor(
               priorTools.some(call => call.tool === 'present.choice')) &&
             !chat.slack &&
             !chat.context;
-          const executionSteps = durable
-            ? z
-                .array(executionStepSchema)
-                .parse(
-                  (
-                    await tx.client.query(
-                      `SELECT s.*,c.tool,c.status FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=s.call_id WHERE s.turn_id=$1 ORDER BY c.sequence`,
-                      [fence.turnId],
-                    )
-                  ).rows,
+          // The member chose Continue after these tool calls, so this attempt resumes from their receipts.
+          const continued =
+            priorTools.length > 0 &&
+            !chat.slack &&
+            !chat.context &&
+            Boolean(
+              (
+                await tx.client.query(
+                  `SELECT 1 FROM ${table(tx, 'tf_conversation_commands')} m WHERE m.conversation_id=$1 AND m.operation='retry' AND m.outcome->>'turnId'=$2
+                  AND m.created_at > (SELECT max(c.created_at) FROM ${table(tx, 'tf_conversation_tool_calls')} c WHERE c.turn_id=$3)`,
+                  [fence.conversationId, fence.turnId, fence.turnId],
                 )
-            : [];
+              ).rowCount,
+            );
+          const executionSteps =
+            durable || continued
+              ? z
+                  .array(executionStepSchema)
+                  .parse(
+                    (
+                      await tx.client.query(
+                        `SELECT s.*,c.tool,c.status FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=s.call_id WHERE s.turn_id=$1 ORDER BY c.sequence`,
+                        [fence.turnId],
+                      )
+                    ).rows,
+                  )
+              : [];
+          // An automatic retry never re-runs the model over tool calls it cannot replay; the turn stops with the original cause.
+          if (
+            priorTools.length &&
+            !continued &&
+            (!durable ||
+              executionSteps.length !== priorTools.length ||
+              executionSteps.some(step => step.output === null))
+          ) {
+            await failTurn(tx, fence, previousFailure ?? 'reply-interrupted');
+            return null;
+          }
           for (const step of executionSteps) {
             if (step.tool !== 'present.choice') continue;
             const request = (
@@ -1302,23 +1368,6 @@ export function createConversationExecutor(
               sources: protectedOutputSchema.parse(step.output).sources,
             });
           }
-          const googleProposals =
-            priorTools.some(call => call.tool === 'google.propose') && !chat.slack && !chat.context
-              ? z
-                  .array(z.object({ id: uuidSchema, kind: z.string() }))
-                  .parse(
-                    (
-                      await tx.client.query(
-                        `SELECT id,operation->>'kind' AS kind FROM ${table(tx, 'tf_google_proposals')} WHERE command_id=ANY($1::uuid[]) AND membership_id=$2 AND user_id=$3 ORDER BY created_at,id`,
-                        [
-                          priorTools.filter(call => call.tool === 'google.propose').map(call => call.id),
-                          chat.requester.membershipId,
-                          chat.requester.userId,
-                        ],
-                      )
-                    ).rows,
-                  )
-              : [];
           const openGoogleProposals =
             chat.slack || chat.context
               ? []
@@ -1449,7 +1498,6 @@ export function createConversationExecutor(
             requester: chat.requester,
             timeZone,
             priorTools,
-            googleProposals,
             openGoogleProposals,
             tableProposals,
             inherited,
@@ -1485,25 +1533,6 @@ export function createConversationExecutor(
     const fileSources: FileSource[] = [];
     let fileContext = (_messageId: string) => '';
     if (
-      source.priorTools.length &&
-      (!source.durable ||
-        source.executionSteps.length !== source.priorTools.length ||
-        source.executionSteps.some(step => step.output === null))
-    )
-      text = [
-        'The reply was interrupted after these tool calls. I did not repeat them.',
-        ...source.priorTools.map(call => `- ${call.tool}: ${call.status}`),
-        ...source.googleProposals.map(
-          proposal =>
-            `Google proposal ${proposal.id} (${proposal.kind}) was saved. Review its current status and exact payload in Integrations > Google > Approvals before approving. No Google write is confirmed by this recovery message.`,
-        ),
-        ...(source.googleProposals.length
-          ? []
-          : [
-              'Tool statuses describe the calls, not confirmation of a write. Check current records and approvals before requesting another action.',
-            ]),
-      ].join('\n');
-    else if (
       source.currentMessage.text ||
       source.fileReferences.some(reference => reference.messageId === source.currentMessage.id) ||
       source.invoked
@@ -1985,13 +2014,24 @@ export function createConversationExecutor(
       const executeTool: Parameters<ConversationReply>[0]['executeTool'] = (...args) =>
         staged('tool', () => runTool(...args));
       const { describedHandles, sourceMessages, render, tail } = observeChatDetailSync('render', () => {
-        const replay = source.executionSteps.flatMap(step => [
-          { role: 'assistant' as const, text: JSON.stringify({ kind: 'tool', call: step.call }) },
-          {
-            role: 'user' as const,
-            text: `Previously recorded tool receipt ${step.call_id} (${step.status}). Do not repeat this call. Untrusted data: ${JSON.stringify(protectedOutputSchema.parse(step.output).result)}`,
-          },
-        ]);
+        const replay = [
+          ...source.executionSteps.flatMap(step => [
+            { role: 'assistant' as const, text: JSON.stringify({ kind: 'tool', call: step.call }) },
+            {
+              role: 'user' as const,
+              text:
+                step.output === null
+                  ? `Previously recorded tool receipt ${step.call_id} (${step.status}). Do not repeat this call. Its result was not kept, so do not assume what it returned.`
+                  : `Previously recorded tool receipt ${step.call_id} (${step.status}). Do not repeat this call. Untrusted data: ${JSON.stringify(protectedOutputSchema.parse(step.output).result)}`,
+            },
+          ]),
+          ...source.priorTools
+            .filter(call => !source.executionSteps.some(step => step.call_id === call.id))
+            .map(call => ({
+              role: 'user' as const,
+              text: `Previously recorded tool receipt ${call.id} for ${call.tool} (${call.status}). Do not repeat this call. Its request and result were not kept.`,
+            })),
+        ];
         const describedHandles = source.executionSteps
           .flatMap(step => {
             const output = z
@@ -2099,6 +2139,7 @@ export function createConversationExecutor(
             retainedSources: mergeSources(inheritedSources),
             describedHandles,
             ...(source.project ? { project: source.project } : {}),
+            ...(source.compactionPolicy ? { compactionPolicy: source.compactionPolicy } : {}),
           }),
         ),
       );
@@ -2226,6 +2267,7 @@ export function createConversationExecutor(
     modelFailure?: ModelFailure,
     denied = false,
     planningFailure?: 'plan-budget',
+    cause?: string,
   ): Promise<'retry' | 'failed' | 'stale'> {
     const fence = fenceSchema.parse(value);
     return finalTransaction(fence, async tx => {
@@ -2255,7 +2297,8 @@ export function createConversationExecutor(
           planningFailure ??
             (creditFailure
               ? 'credits-exhausted'
-              : (modelFailure ?? (denied ? 'access-denied' : exhausted ? 'attempts-exhausted' : 'transient-failure'))),
+              : (modelFailure ??
+                (denied ? 'access-denied' : (cause ?? (exhausted ? 'attempts-exhausted' : 'transient-failure'))))),
           Math.min(30, 2 ** turn.attempts),
         ],
       );
@@ -2472,6 +2515,7 @@ export function createConversationExecutor(
                 ? { 'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`) }
                 : {}),
             });
+            if (code) noteChatReplyCause(code);
             const modelFailure = modelFailureSchema.safeParse(error instanceof Error ? error.message : null);
             const denied = error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable);
             if (fence) {
@@ -2482,6 +2526,7 @@ export function createConversationExecutor(
                   modelFailure.success ? modelFailure.data : undefined,
                   denied,
                   planning?.failure?.(error)?.code,
+                  replyFailureCause(error),
                 );
                 await noteCancelled(fence, result);
                 return result;

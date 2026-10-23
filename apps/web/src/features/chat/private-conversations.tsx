@@ -104,7 +104,7 @@ import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
-import { fallbackNote, replyFailure, replyRetrying } from './reply-failure-copy';
+import { fallbackNote, replyFailure, replyRetrying, retryLabel } from './reply-failure-copy';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
 import { useBud } from './bud-context';
@@ -1617,7 +1617,11 @@ function ConversationEntry({
                   )}
                   {message.turn.status === 'failed' && (
                     <Button size="sm" variant="outline" disabled={disabled} onClick={() => control('retry')}>
-                      {compactsOnRetry(message.turn.errorCode) ? 'Compact and retry' : 'Retry reply'}
+                      {retryLabel(
+                        message.turn.errorCode,
+                        message.tools.some(tool => tool.status === 'completed'),
+                        compactsOnRetry(message.turn.errorCode),
+                      )}
                     </Button>
                   )}
                   {message.turn.status === 'failed' && (

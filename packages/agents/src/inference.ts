@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  estimateInputTokens,
   modelApiSupported,
   modelEndpointProblem,
   modelCapabilities,
@@ -17,6 +18,7 @@ import {
   recordModelFallback,
   observeChatDetailSync,
   recordChatCompletionCheck,
+  recordChatContextCompaction,
   recordChatDiscovery,
   recordChatRequestSizes,
   withChatModelRequest,
@@ -65,6 +67,21 @@ import {
 import type { WorkspaceInventory } from './workspace-inventory.ts';
 import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
 import { isWorkTool } from './non-work-tools.ts';
+import {
+  cappedOutput,
+  parseToolNotes,
+  readChunk,
+  resultCapBytes,
+  stubCharacters,
+  stubOutput,
+  summaryOutput,
+  toolNotesInput,
+  toolNotesPrompt,
+  toolResultReadName,
+  toolResultReadSchema,
+  toolResultReadTool,
+  type ReplyContextLimits,
+} from './reply-context.ts';
 import type { AvatarSnapshot } from '@tulipfarm/conversations/results';
 import type { ReplyStatus } from '@tulipfarm/conversations/events';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
@@ -1110,9 +1127,30 @@ export type ToolInferenceContext = {
   fallback?: { route: InferenceRoute; label: string } | undefined;
   /** An optional catalog-role model for the stopping check. Without it, use the active chat route. */
   completionCheck?: InferenceRoute | undefined;
+  /**
+   * The chat model's input window and the compaction thresholds. With it, each tool result is cut to a tenth of the
+   * window, full outputs stay readable through `tool_result_read`, and before every model round whose estimated input
+   * reaches `triggerPercent` the loop compacts this reply's older tool results and prunes unused loaded tools. Context
+   * size never fails the reply. Without it, nothing is cut or compacted.
+   */
+  context?: ReplyContextLimits | undefined;
+  /**
+   * Summarises older tool results of this reply with the compaction model and returns its raw reply. `round` is the
+   * reply's model round, so each call is its own metered step. When absent or failing, results become stubs.
+   */
+  compactToolResults?: ((input: { round: number; system: string; text: string }) => Promise<string>) | undefined;
 };
 
-type ToolResult = { id: string; name: string; output: string; error: boolean; providerId: boolean };
+/** `ref` names a stored full output for `tool_result_read`; `compacted` marks a result already summarised or stubbed. */
+type ToolResult = {
+  id: string;
+  name: string;
+  output: string;
+  error: boolean;
+  providerId: boolean;
+  ref?: string;
+  compacted?: boolean;
+};
 /** One entry of the in-turn tool loop. Only the final answer text outlives the turn. */
 type LoopItem =
   | { kind: 'turn'; turn: ChatTurn }
@@ -1618,6 +1656,7 @@ async function sendChatRequest<T>(
   select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
   answerText?: ToolInferenceContext['answerText'],
   onOutput?: () => void,
+  onSettled?: (inputBytes: number, usage: InferenceUsage) => void,
 ) {
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
@@ -1698,6 +1737,7 @@ async function sendChatRequest<T>(
     await observeChatDetail('settle', async () =>
       onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
     );
+    onSettled?.(Buffer.byteLength(serialized), response.ok ? value : { kind: 'unknown' });
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
@@ -1801,10 +1841,20 @@ export async function inferWithTools(
     select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
     answerText?: ToolInferenceContext['answerText'],
     target = config,
+    settled?: (inputBytes: number, usage: InferenceUsage) => void,
   ) =>
-    sendChatRequest(target, requestStep++, meter, wire, select, answerText, () => {
-      outputProduced = true;
-    });
+    sendChatRequest(
+      target,
+      requestStep++,
+      meter,
+      wire,
+      select,
+      answerText,
+      () => {
+        outputProduced = true;
+      },
+      settled,
+    );
   /**
    * Runs a reply step on the chat route and, when it fails before the turn produced any output with a failure another model
    * can fix, once more on the configured fallback, which then answers the rest of the turn. The chat model's failure is
@@ -1856,7 +1906,166 @@ export async function inferWithTools(
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
   const loaded = new Set<string>();
+  const catalogKey = (mcp: McpModelCatalog | undefined) => JSON.stringify([mcp ?? null, [...loaded].sort()]);
   let reminder: ChatTurn | undefined;
+  const limits = tools?.context;
+  const capBytes = limits ? resultCapBytes(limits.window) : 0;
+  /** Full outputs of this reply's shortened results, by the reference `tool_result_read` takes. Never persisted. */
+  const stored = new Map<string, string>();
+  const chunksRead = new Set<string>();
+  let rereadOffered = false;
+  /** The provider's prompt tokens for the last reply round, and that request's bytes. */
+  let baseline: { bytes: number; tokens: number } | undefined;
+  /** The last round each loaded tool was loaded or called, so compaction unloads only idle ones. */
+  const lastUsed = new Map<string, number>();
+  const referTo = (entry: ToolResult, step: number) => {
+    if (entry.ref) return entry.ref;
+    const base = entry.providerId ? entry.id : `${entry.id}-r${step}`;
+    let ref = base;
+    for (let suffix = 2; stored.has(ref); suffix++) ref = `${base}-${suffix}`;
+    entry.ref = ref;
+    return ref;
+  };
+  const cap = (results: ToolResult[], step: number) => {
+    if (!limits) return results;
+    for (const entry of results) {
+      if (Buffer.byteLength(entry.output) <= capBytes) continue;
+      const ref = referTo(entry, step);
+      stored.set(ref, entry.output);
+      entry.output = cappedOutput(entry.output, ref, capBytes);
+      rereadOffered = true;
+    }
+    return results;
+  };
+  const roundTools = (active: ReturnType<typeof nativeChatTools>, finalizing: boolean) =>
+    finalizing
+      ? []
+      : [
+          ...active.tools,
+          ...(rereadOffered ? [toolResultReadTool] : []),
+          ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
+        ];
+  const roundBlocks = () => [
+    ...chatSystemBlocks(tools?.projectInstructions),
+    ...(tools?.avatar ? [budReminder(avatar)] : []),
+  ];
+  /** Estimated input tokens: the last round's reported prompt plus a quarter of the bytes added since, else bytes / 4. */
+  const estimateRound = (finalizing: boolean) =>
+    observeChatDetailSync('context-measure', () => {
+      const bytes = Buffer.byteLength(
+        JSON.stringify(
+          nativeRequest(
+            config,
+            roundBlocks(),
+            [{ kind: 'turn', turn: reminder! }, ...items],
+            roundTools(catalog!, finalizing),
+          ).body,
+        ),
+      );
+      return baseline ? baseline.tokens + estimateInputTokens(bytes - baseline.bytes) : estimateInputTokens(bytes);
+    });
+  /**
+   * Shrinks this reply's older tool results so the next request fits, keeping the latest round verbatim: summaries
+   * from the compaction model, else stubs. Loaded tools idle for two rounds are unloaded. Never fails the reply.
+   */
+  const compactContext = async (
+    step: number,
+    triggerTokens: number,
+    mcp: McpModelCatalog | undefined,
+    finalizing: boolean,
+  ) => {
+    if (!limits) return;
+    const trigger = Math.floor((limits.window * limits.triggerPercent) / 100);
+    const reply = items.slice(messages.length);
+    let lastRound = reply.length - 1;
+    while (lastRound >= 0 && reply[lastRound]!.kind !== 'results') lastRound--;
+    const resultsOf = (rounds: readonly LoopItem[]) =>
+      rounds.flatMap(item => (item.kind === 'results' ? item.results : [])).filter(entry => !entry.compacted);
+    const older = resultsOf(reply.filter((_, index) => index !== lastRound)).filter(
+      entry => entry.output.length > stubCharacters * 2,
+    );
+    const idle = [...loaded].filter(name => (lastUsed.get(name) ?? -1) < step - 2);
+    if (!older.length && !idle.length) return;
+    for (const entry of older) {
+      const ref = referTo(entry, step);
+      if (!stored.has(ref)) stored.set(ref, entry.output);
+    }
+    let notes = new Map<string, string>();
+    if (older.length && tools?.compactToolResults) {
+      const summarise = tools.compactToolResults;
+      try {
+        notes = parseToolNotes(
+          await withChatModelRequest('compaction', () =>
+            summarise({
+              round: step + 1,
+              system: toolNotesPrompt,
+              text: toolNotesInput(
+                older.map(entry => ({ ref: entry.ref!, name: entry.name, output: stored.get(entry.ref!)! })),
+                Math.floor((limits.window * limits.targetPercent) / 100) * 4,
+              ),
+            }),
+          ),
+        );
+      } catch {
+        // The summariser is optional: its failure leaves stubs, and lost access or credit fails the next model round.
+        notes = new Map();
+      }
+    }
+    let summarised = 0;
+    let stubbed = 0;
+    const stub = (entry: ToolResult) => {
+      entry.output = stubOutput(entry.name, stored.get(entry.ref!)!, entry.ref!);
+      entry.compacted = true;
+    };
+    for (const entry of older) {
+      const note = notes.get(entry.ref!);
+      if (note) {
+        entry.output = summaryOutput(entry.name, note, stored.get(entry.ref!)!, entry.ref!);
+        entry.compacted = true;
+        summarised++;
+      } else {
+        stub(entry);
+        stubbed++;
+      }
+    }
+    if (older.length) rereadOffered = true;
+    for (const name of idle) loaded.delete(name);
+    if (idle.length) {
+      catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded);
+      previousCatalog = catalogKey(mcp);
+    }
+    baseline = undefined;
+    let afterTokens = estimateRound(finalizing);
+    if (afterTokens >= trigger && summarised) {
+      for (const entry of older) stub(entry);
+      stubbed += summarised;
+      summarised = 0;
+      afterTokens = estimateRound(finalizing);
+    }
+    // Near the hard limit, the latest round is stubbed too; its full output stays readable.
+    if (afterTokens >= Math.floor(limits.window * 0.9)) {
+      const latest = lastRound < 0 ? [] : resultsOf([reply[lastRound]!]);
+      for (const entry of latest) {
+        const ref = referTo(entry, step);
+        if (!stored.has(ref)) stored.set(ref, entry.output);
+        stub(entry);
+        stubbed++;
+      }
+      if (latest.length) {
+        rereadOffered = true;
+        afterTokens = estimateRound(finalizing);
+      }
+    }
+    recordChatContextCompaction({
+      triggerTokens,
+      window: limits.window,
+      afterTokens,
+      summarised,
+      stubbed,
+      pruned: idle.length,
+      outcome: summarised ? 'summarised' : 'stubbed',
+    });
+  };
   for (let step = 0; ; step++) {
     const finalizing = calls >= chatToolCallLimit || guard.stalled;
     const stoppingReply = guard.stalled ? toolLoopReply : toolLimitReply;
@@ -1864,7 +2073,7 @@ export async function inferWithTools(
       const mcp = await observeChatDetail('round-prepare', async () => {
         await tools?.beforeRound?.();
         const mcp = await observeChatDetail('catalog', async () => tools?.catalog?.());
-        const catalogKey = observeChatDetailSync('serialize', () => JSON.stringify([mcp ?? null, loaded.size]));
+        const currentCatalogKey = observeChatDetailSync('serialize', () => catalogKey(mcp));
         const personalMemory =
           tools?.projectInstructions === undefined
             ? await observeChatDetail('memory', async () => tools?.readPersonalMemory?.())
@@ -1876,12 +2085,12 @@ export async function inferWithTools(
             : undefined;
         const inventoryKey = observeChatDetailSync('serialize', () => JSON.stringify(inventory ?? null));
         let catalogChanged = false;
-        if (!catalog || previousCatalog !== catalogKey) {
+        if (!catalog || previousCatalog !== currentCatalogKey) {
           catalogChanged = true;
           catalog = observeChatDetailSync('tool-schemas', () =>
             nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded),
           );
-          previousCatalog = catalogKey;
+          previousCatalog = currentCatalogKey;
         }
         if (!reminder || catalogChanged || previousMemory !== memoryKey || previousInventory !== inventoryKey) {
           previousMemory = memoryKey;
@@ -1908,11 +2117,17 @@ export async function inferWithTools(
             text: `${guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${chatToolCallLimit}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
           },
         });
+      if (limits) {
+        const triggerTokens = estimateRound(finalizing);
+        if (triggerTokens >= Math.floor((limits.window * limits.triggerPercent) / 100))
+          await compactContext(step, triggerTokens, mcp, finalizing);
+      }
       decisionAt = { step: requestStep, round: step + 1 };
       report('thinking');
       let answerStep = requestStep;
       const currentReminder = reminder;
-      const activeCatalog = catalog;
+      const activeCatalog = catalog!;
+      const offered = roundTools(activeCatalog, finalizing);
       observeChatDetailSync('serialize', () =>
         recordChatRequestSizes({
           reminder: Buffer.byteLength(currentReminder.text),
@@ -1923,12 +2138,7 @@ export async function inferWithTools(
         answerStep = requestStep;
         return send(
           observeChatDetailSync('serialize', () =>
-            nativeRequest(
-              target,
-              [...chatSystemBlocks(tools?.projectInstructions), ...(tools?.avatar ? [budReminder(avatar)] : [])],
-              [{ kind: 'turn', turn: currentReminder }, ...items],
-              finalizing ? [] : [...activeCatalog.tools, ...(tools?.avatar && expressionCalls < 6 ? [budTool] : [])],
-            ),
+            nativeRequest(target, roundBlocks(), [{ kind: 'turn', turn: currentReminder }, ...items], offered),
           ),
           body => {
             const selected = nativeStep(target, body);
@@ -1941,6 +2151,15 @@ export async function inferWithTools(
           },
           tools?.answerText,
           target,
+          (bytes, usage) => {
+            baseline =
+              usage.kind === 'known'
+                ? {
+                    bytes,
+                    tokens: usage.input + usage.cacheRead + usage.cacheWrite + usage.cacheWrite5m + usage.cacheWrite1h,
+                  }
+                : undefined;
+          },
         );
       });
       outputProduced = true;
@@ -2069,6 +2288,7 @@ export async function inferWithTools(
       continue;
     }
     if (finalizing) return finish(stoppingReply);
+    for (const call of selected.calls) if (loaded.has(call.name)) lastUsed.set(call.name, step);
     if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
     const result = (call: NativeCall, output: string, error: boolean): ToolResult => ({
@@ -2115,6 +2335,7 @@ export async function inferWithTools(
             const query = z.object({ query: z.string() }).safeParse(call.input);
             const before = loaded.size;
             const names = query.success ? active.search(query.data.query) : [];
+            for (const name of names) lastUsed.set(name, step);
             if (loaded.size > before) guard.progress();
             recordChatDiscovery({
               offered: active.tools.length,
@@ -2132,6 +2353,24 @@ export async function inferWithTools(
           }),
         }),
       );
+      continue;
+    }
+    if (selected.calls.some(call => call.name === toolResultReadName)) {
+      items.push({
+        kind: 'results',
+        results: selected.calls.map(call => {
+          if (call.name !== toolResultReadName)
+            return result(call, `Not run. Call ${toolResultReadName} on its own first.`, true);
+          const read = toolResultReadSchema.safeParse(call.input);
+          const output = read.success ? stored.get(read.data.callId) : undefined;
+          if (!read.success || output === undefined)
+            return result(call, 'No stored tool result of this reply has that callId.', true);
+          const key = JSON.stringify([read.data.callId, read.data.offset]);
+          if (!chunksRead.has(key)) guard.progress();
+          chunksRead.add(key);
+          return result(call, readChunk(output, read.data.callId, read.data.offset, capBytes), false);
+        }),
+      });
       continue;
     }
     const resolved = selected.calls.map(call => ({ native: call, resolved: active.resolve(call) }));
@@ -2283,7 +2522,7 @@ export async function inferWithTools(
       for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
     }
     for (const [index, entry] of valid.entries()) guard.record(entry.call, outputs[index]!.output);
-    items.push({ kind: 'results', results: outputs });
+    items.push({ kind: 'results', results: cap(outputs, step) });
     if (work.length) toolRounds++;
   }
 }

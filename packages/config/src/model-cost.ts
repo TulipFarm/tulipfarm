@@ -13,6 +13,14 @@ export function usageTokenCounts(tokens: z.infer<typeof modelTokenUsageSchema>) 
   };
 }
 
+/**
+ * Estimated input tokens of a request of `bytes` UTF-8 bytes. Context fit checks use it; credit holds keep request
+ * bytes as their worst-case token bound, clamped to the model's window.
+ */
+export function estimateInputTokens(bytes: number) {
+  return Math.ceil(Math.max(0, bytes) / 4);
+}
+
 function picoUsdPerToken(usdPerMillionTokens: number): bigint {
   const text = String(usdPerMillionTokens);
   if (!/^\d+(\.\d{1,6})?$/.test(text)) throw new Error('Unsupported price precision');

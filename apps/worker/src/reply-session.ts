@@ -381,8 +381,8 @@ export async function beginReplySession(input: {
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
     );
     if (!model) throw new Error('conversation-model-unpriced');
-    const maxInputTokens = attempt.inputBytes + 4096;
-    if (maxInputTokens > model.price.maxInputTokens) throw new Error('conversation-context-overflow');
+    // Request bytes bound the hold, never the context: the reply loop compacts by estimated tokens, so size never fails it.
+    const maxInputTokens = Math.min(attempt.inputBytes + 4096, model.price.maxInputTokens);
     const needCost = quote(model, maxInputTokens, attempt.maxOutputTokens);
     const need = units(needCost.toString());
     const overPlan =
