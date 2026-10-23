@@ -119,10 +119,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         accessGate: null,
         beforeRead: null,
         lister: null,
+        partError: null,
+        fileError: null,
       };
       const checks = [],
         reads = [],
-        lists = [];
+        lists = [],
+        fileReads = [];
       const observation = (repositoryId, nativeId) => {
         const item = state.repos.get(repositoryId).items.get(nativeId);
         return {
@@ -213,6 +216,27 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             markdown: `# ${item.title}\n\nGitHub repository at commit abc.\n\n${item.text}\n`,
           };
         },
+      };
+      // Like the GitHub provider, a file's parts come from one pass over the file, from the part asked for to the last.
+      const fileOf = nativeId => nativeId.replace(/^((?:doc|code):\d+:)\/p\/\d+\//, '$1');
+      const partOf = nativeId => Number(/^(?:doc|code):\d+:\/p\/(\d+)\//.exec(nativeId)?.[1] ?? 1);
+      provider.readFile = async (w, userId, b, id, nativeId, selection, path, accept) => {
+        own(userId, b);
+        fileReads.push({ id, nativeId });
+        const parts = [...state.repos.get(id).items.keys()]
+          .filter(key => fileOf(key) === fileOf(nativeId) && partOf(key) >= partOf(nativeId))
+          .sort((a, b) => partOf(a) - partOf(b));
+        if (!parts.length) throw new GitHubCorpusError('not-found');
+        for (const part of parts) {
+          const error = state.partError?.(part);
+          const outcome = error
+            ? { nativeId: part, error }
+            : { nativeId: part, read: await provider.read(w, userId, b, id, part, selection, path) };
+          reads.pop();
+          if ((await accept(outcome)) === false) return;
+          const ended = state.fileError?.(part);
+          if (ended) throw ended;
+        }
       };
       const fast = { sleep: async () => {} };
       const github = createGitHubKnowledge({ runtime, provider, sync: fast });
@@ -1122,6 +1146,64 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal((await sync()).disposition, 'ready');
         const listed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
         assert.equal(listed.failure, null);
+      });
+
+      await t.test('a file in parts is read in one pass, with failures kept to the parts they affect', async () => {
+        const items = state.repos.get('7002').items;
+        const ids = ['doc:7002:guide.md', ...[2, 3, 4].map(part => `doc:7002:/p/${part}/guide.md`)];
+        const put = revision =>
+          ids.forEach((id, index) =>
+            items.set(id, {
+              kind: 'doc',
+              title: `acme/leadership: guide.md (part ${index + 1} of 4)`,
+              text: `tulip guide part${index + 1} ${revision.replace(':', '')}`,
+              revision,
+            }),
+          );
+        const failures = async () => Promise.all(ids.map(id => itemFailure(id)));
+        put('blob:20');
+        fileReads.length = 0;
+        reads.length = 0;
+        await sync();
+        assert.deepEqual(fileReads, [{ id: '7002', nativeId: 'doc:7002:guide.md' }], 'one pass over the file');
+        assert.ok(!reads.some(read => ids.includes(read.nativeId)), 'no part is read on its own');
+        assert.deepEqual(await failures(), [null, null, null, null]);
+        assert.equal((await query(ownerActor, 'part3')).hits.length, 1);
+
+        // A part that cannot be indexed fails alone; an error ending the pass fails only the parts after it.
+        put('blob:21');
+        state.partError = id => (id === ids[1] ? new GitHubCorpusError('too-large') : null);
+        state.fileError = id => (id === ids[1] ? new GitHubCorpusError('transient') : null);
+        fileReads.length = 0;
+        try {
+          await sync();
+        } finally {
+          state.partError = null;
+          state.fileError = null;
+        }
+        assert.equal(fileReads.length, 1);
+        assert.deepEqual(await failures(), [null, 'too-large', 'transient', 'transient']);
+        assert.equal((await query(ownerActor, 'blob21')).hits.length, 1);
+
+        // An incremental pass that lists nothing reads the retryable parts again, in one pass from the first of them.
+        fileReads.length = 0;
+        state.lister = () => ({ observations: [], nextCursor: null });
+        try {
+          await db.platform.query(
+            `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+            [sourceId],
+          );
+          const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+          assert.equal((await github.process(work)).disposition, 'ready');
+        } finally {
+          state.lister = null;
+        }
+        assert.deepEqual(fileReads, [{ id: '7002', nativeId: ids[2] }]);
+        assert.deepEqual(await failures(), [null, 'too-large', null, null]);
+
+        for (const id of ids) items.delete(id);
+        await sync();
+        assert.deepEqual((await query(ownerActor, 'tulip')).hits, []);
       });
 
       await t.test('hybrid embeddings use the same GitHub eligibility', async () => {

@@ -34,6 +34,7 @@ import {
   type GitHubCorpusProvider,
   type GitHubCorpusSelection,
   type GitHubItemObservation,
+  type GitHubItemRead,
   type GitHubKnowledgeChanges,
   type GitHubKnowledgeWork,
   type GitHubRepository,
@@ -185,6 +186,13 @@ export type GitHubSyncOptions = {
   random: () => number;
 };
 export type GitHubProcessOptions = { heartbeat?: () => void; signal?: AbortSignal };
+
+// An item's read, or the error reading it, from a read the caller already made.
+type Supplied = GitHubItemRead | { error: unknown };
+type FilePart = { nativeId: string; path: string | null; run: (supplied?: Supplied) => Promise<void> };
+// A file's later parts carry a `/p/<part>/` prefix before the path; its first part has the plain native ID.
+const filePart = (nativeId: string) => Number(/^(?:doc|code):[0-9]+:\/p\/([0-9]+)\//.exec(nativeId)?.[1] ?? 1);
+const fileOf = (nativeId: string) => nativeId.replace(/^((?:doc|code):[0-9]+:)\/p\/[0-9]+\//, '$1');
 
 // Runs operation over items with at most limit in flight. After the first failure no new item starts.
 async function bounded<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>) {
@@ -1098,7 +1106,91 @@ export function createGitHubKnowledge({
     if (!captured.fresh && !(await check(work.workspaceId, captured.actor, captured.sourceId, repositoryId, true)))
       throw new GitHubCorpusError('forbidden');
   }
-  async function ingest(work: GitHubKnowledgeWork, token: string, s: Source, item: GitHubItemObservation) {
+  // Records one listed item and indexes it unless its listed revision is already published. `supplied` is the item's
+  // read, or the error reading it, when the caller has already read it; otherwise the item is fetched.
+  async function ingest(
+    work: GitHubKnowledgeWork,
+    token: string,
+    s: Source,
+    item: GitHubItemObservation,
+    supplied?: Supplied,
+  ) {
+    if (await admit(work, token, s, item)) await complete(work, token, s, item, supplied);
+  }
+  // The listed parts of one file: every part that needs a read is read from a single download of the file.
+  async function ingestFile(
+    work: GitHubKnowledgeWork,
+    token: string,
+    s: Source,
+    items: readonly GitHubItemObservation[],
+    progress: () => Promise<void>,
+  ) {
+    const needed: FilePart[] = [];
+    for (const item of items)
+      if (await admit(work, token, s, item))
+        needed.push({
+          nativeId: item.nativeId,
+          path: item.path ?? null,
+          run: supplied => complete(work, token, s, item, supplied),
+        });
+    await readParts(work, s, items[0]?.repositoryId ?? '', needed, progress);
+  }
+  // Hands each part its read from one pass over the file, from the first part needed. A part the pass did not reach is
+  // gone from the file; an error that ends the pass is every remaining part's error. An error a part's own handling
+  // throws stops the pass and is not handed to the other parts.
+  async function readParts(
+    work: GitHubKnowledgeWork,
+    s: Source,
+    repositoryId: string,
+    parts: readonly FilePart[],
+    progress: () => Promise<void>,
+  ) {
+    if (parts.length < 2 || !provider.readFile) {
+      for (const part of parts) {
+        await part.run();
+        await progress();
+      }
+      return;
+    }
+    const sorted = [...parts].sort((a, b) => filePart(a.nativeId) - filePart(b.nativeId));
+    const first = sorted[0] as FilePart;
+    const pending = new Map(sorted.map(part => [part.nativeId, part]));
+    let own: { error: unknown } | null = null;
+    let ended: { error: unknown } | null = null;
+    try {
+      await provider.readFile(
+        work.workspaceId,
+        s.owner_user_id,
+        s.binding,
+        repositoryId,
+        first.nativeId,
+        s.selection,
+        first.path,
+        async read => {
+          const part = pending.get(read.nativeId);
+          if (!part) return pending.size > 0;
+          pending.delete(read.nativeId);
+          try {
+            await part.run('read' in read ? read.read : { error: read.error });
+          } catch (error) {
+            own = { error };
+            throw error;
+          }
+          await progress();
+          return pending.size > 0;
+        },
+      );
+    } catch (error) {
+      if (own) throw (own as { error: unknown }).error;
+      ended = { error };
+    }
+    for (const part of pending.values()) {
+      await part.run(ended ?? { error: new GitHubCorpusError('not-found') });
+      await progress();
+    }
+  }
+  // Records one listed item; true when it still needs a read.
+  async function admit(work: GitHubKnowledgeWork, token: string, s: Source, item: GitHubItemObservation) {
     const documentId = identity(`${s.source_id}:github:${item.nativeId}`);
     await fenced(work, token, async tx => {
       const prior = z
@@ -1129,7 +1221,7 @@ export function createGitHubKnowledge({
         ],
       );
     });
-    if (item.coverage !== 'supported') return;
+    if (item.coverage !== 'supported') return false;
     const previous = await fenced(work, token, async tx =>
       z
         .object({ id: uuidSchema, source_revision: z.string(), lexical_publication_id: uuidSchema.nullable() })
@@ -1143,8 +1235,8 @@ export function createGitHubKnowledge({
           ).rows[0],
         ),
     );
-    if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) return;
-    if (
+    if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) return false;
+    return !(
       previous?.source_revision === item.sourceRevision &&
       (await fenced(
         work,
@@ -1157,19 +1249,31 @@ export function createGitHubKnowledge({
             )
           ).rowCount,
       ))
-    )
-      return;
+    );
+  }
+  // Reads, stores and publishes one admitted item, recording a failure that belongs to the item alone on it.
+  async function complete(
+    work: GitHubKnowledgeWork,
+    token: string,
+    s: Source,
+    item: GitHubItemObservation,
+    supplied?: Supplied,
+  ) {
+    const documentId = identity(`${s.source_id}:github:${item.nativeId}`);
     try {
       await ensureOwnerProof(work, token, item.repositoryId);
-      const read = await corpus.fetch(
-        work.workspaceId,
-        s.owner_user_id,
-        s.binding,
-        item.repositoryId,
-        item.nativeId,
-        s.selection,
-        item.path ?? null,
-      );
+      if (supplied && 'error' in supplied) throw supplied.error;
+      const read =
+        supplied ??
+        (await corpus.fetch(
+          work.workspaceId,
+          s.owner_user_id,
+          s.binding,
+          item.repositoryId,
+          item.nativeId,
+          s.selection,
+          item.path ?? null,
+        ));
       if (read.nativeId !== item.nativeId || read.repositoryId !== item.repositoryId)
         throw new GitHubCorpusError('source-changed');
       if (read.sourceRevision !== item.sourceRevision) {
@@ -1496,6 +1600,8 @@ export function createGitHubKnowledge({
       }
     };
     const seen = new Set<string>();
+    // Files whose unseen parts this run's sweep already read again.
+    const swept = new Set<string>();
     let selected: Repository[] = [];
     async function listing() {
       cursor.pages++;
@@ -1552,8 +1658,25 @@ export function createGitHubKnowledge({
             page.removed?.some(id => !/^(doc|code):/.test(id) || !id.slice(id.indexOf(':')).startsWith(prefix))
           )
             throw new GitHubCorpusError('invalid-response');
-          const { failure } = await bounded(page.observations, tuning.concurrency, async item => {
-            await ingest(work, token, claim, item);
+          // A file's parts are listed together and ingested as one unit, so they share one download.
+          const units: GitHubItemObservation[][] = [];
+          for (const item of page.observations) {
+            const unit = units.at(-1);
+            const last = unit?.[0];
+            if (
+              unit &&
+              last &&
+              (item.kind === 'doc' || item.kind === 'code') &&
+              item.kind === last.kind &&
+              item.sourceRevision === last.sourceRevision &&
+              fileOf(item.nativeId) === fileOf(last.nativeId)
+            )
+              unit.push(item);
+            else units.push([item]);
+          }
+          const { failure } = await bounded(units, tuning.concurrency, async unit => {
+            if (unit.length === 1) await ingest(work, token, claim, unit[0] as GitHubItemObservation);
+            else await ingestFile(work, token, claim, unit, beat);
             await beat();
           });
           if (failure) throw failure.error;
@@ -1633,65 +1756,72 @@ export function createGitHubKnowledge({
             .map(row => `${row.repository_id}:${row.kind}`),
         ),
       );
-      const rows = await fenced(work, token, async tx =>
-        z
-          .array(
-            z.object({
-              native_id: z.string(),
-              repository_id: z.string(),
-              kind: z.string(),
-              source_revision: z.string(),
-              document_id: uuidSchema.nullable(),
-              path: z.string().nullable(),
-            }),
-          )
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
+      // Unseen items in native ID order after `after`, or every unseen part of one file.
+      const unseen = (after: string | null, file: { repositoryId: string; nativeId: string } | null) =>
+        fenced(work, token, async tx =>
+          z
+            .array(
+              z.object({
+                native_id: z.string(),
+                repository_id: z.string(),
+                kind: z.string(),
+                source_revision: z.string(),
+                document_id: uuidSchema.nullable(),
+                path: z.string().nullable(),
+              }),
+            )
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
           JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
           WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) AND i.failure IS DISTINCT FROM $4
           AND NOT i.repository_id=ANY($5::text[])
-          AND ($7::text[] IS NULL OR i.failure=ANY($7::text[]) OR i.repository_id||':'||i.kind=ANY($8::text[])) ORDER BY i.native_id LIMIT $6`,
-                [
-                  claim.source_id,
-                  claim.reconciliation,
-                  cursor.after,
-                  deniedFailure,
-                  Object.keys(cursor.isolated ?? {}),
-                  sweepBatch,
-                  // An incremental pass lists only what changed, so it re-reads only items whose last read failed in a
-                  // way that may now succeed, and hides the kinds this pass could not read.
-                  incremental ? retryableItemFailures : null,
-                  [...denied],
-                ],
-              )
-            ).rows,
-          ),
-      );
+          AND ($7::text[] IS NULL OR i.failure=ANY($7::text[]) OR i.repository_id||':'||i.kind=ANY($8::text[]))
+          AND ($9::text IS NULL OR (i.repository_id=$9 AND regexp_replace(i.native_id,'^((?:doc|code):[0-9]+:)/p/[0-9]+/','\\1')=$10))
+          ORDER BY i.native_id LIMIT $6`,
+                  [
+                    claim.source_id,
+                    claim.reconciliation,
+                    after,
+                    deniedFailure,
+                    Object.keys(cursor.isolated ?? {}),
+                    file ? null : sweepBatch,
+                    // An incremental pass lists only what changed, so it re-reads only items whose last read failed in a
+                    // way that may now succeed, and hides the kinds this pass could not read.
+                    incremental ? retryableItemFailures : null,
+                    [...denied],
+                    file?.repositoryId ?? null,
+                    file?.nativeId ?? null,
+                  ],
+                )
+              ).rows,
+            ),
+        );
+      type Row = Awaited<ReturnType<typeof unseen>>[number];
+      const rows = await unseen(cursor.after ?? null, null);
       const verified = new Map<string, boolean>();
       for (const repositoryId of new Set(rows.map(row => row.repository_id)))
         verified.set(repositoryId, await verify(repositoryId));
-      const { completed, failure } = await bounded(rows, tuning.concurrency, async row => {
+      // Reads one unseen item again, or hands it the read or error of its file's single pass.
+      const reread = async (row: Row, supplied?: Supplied) => {
         if (!verified.get(row.repository_id)) return;
-        // A kind this pass could not read stays hidden, without reading it, until the connection can read it again.
-        if (denied.has(`${row.repository_id}:${row.kind}`)) {
-          const documentId = row.document_id;
-          if (documentId) await fenced(work, token, tx => clear(tx, documentId));
-          return;
-        }
         try {
-          const { markdown: _markdown, ...observation } = await corpus.fetch(
-            work.workspaceId,
-            claim.owner_user_id,
-            claim.binding,
-            row.repository_id,
-            row.native_id,
-            claim.selection,
-            row.path,
-          );
-          await ingest(work, token, claim, observation);
+          if (supplied && 'error' in supplied) throw supplied.error;
+          const read =
+            supplied ??
+            (await corpus.fetch(
+              work.workspaceId,
+              claim.owner_user_id,
+              claim.binding,
+              row.repository_id,
+              row.native_id,
+              claim.selection,
+              row.path,
+            ));
+          const { markdown: _markdown, ...observation } = read;
+          await ingest(work, token, claim, observation, read);
           await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
         } catch (error) {
           if (ownerDenied(error)) {
@@ -1710,6 +1840,39 @@ export function createGitHubKnowledge({
           else if (!(error instanceof GitHubCorpusError) || !['too-large', 'unsupported'].includes(error.code))
             throw error;
         }
+      };
+      const { completed, failure } = await bounded(rows, tuning.concurrency, async row => {
+        if (!verified.get(row.repository_id)) return;
+        // A kind this pass could not read stays hidden, without reading it, until the connection can read it again.
+        if (denied.has(`${row.repository_id}:${row.kind}`)) {
+          const documentId = row.document_id;
+          if (documentId) await fenced(work, token, tx => clear(tx, documentId));
+          return;
+        }
+        if (row.kind === 'doc' || row.kind === 'code') {
+          // Every unseen part of a file is read again from one download, the first time any of its parts comes up.
+          const file = { repositoryId: row.repository_id, nativeId: fileOf(row.native_id) };
+          const key = `${file.repositoryId}\n${file.nativeId}`;
+          if (swept.has(key)) return;
+          swept.add(key);
+          const parts = await unseen(null, file);
+          if (parts.length > 1) {
+            await readParts(
+              work,
+              claim,
+              row.repository_id,
+              parts.map(part => ({
+                nativeId: part.native_id,
+                path: part.path,
+                run: supplied => reread(part, supplied),
+              })),
+              beat,
+            );
+            await beat();
+            return;
+          }
+        }
+        await reread(row);
         await beat();
       });
       const last = rows[completed - 1];

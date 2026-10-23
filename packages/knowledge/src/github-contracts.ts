@@ -231,6 +231,8 @@ export type GitHubListHistory = {
   head?: string;
 };
 export type GitHubItemRead = GitHubItemObservation & { markdown: string };
+/** One part of a file read in a single pass: its read, or the error that part alone could not avoid. */
+export type GitHubFilePart = { nativeId: string } & ({ read: GitHubItemRead } | { error: GitHubCorpusError });
 export type GitHubCorpusProvider = {
   discover(
     workspaceId: string,
@@ -270,6 +272,21 @@ export type GitHubCorpusProvider = {
     selection: GitHubCorpusSelection,
     path?: string | null,
   ): Promise<GitHubItemRead>;
+  /**
+   * Reads a file's parts in order, from the part `nativeId` names to the file's last, with one download of the file.
+   * Each part goes to `accept` before the next is read, so memory holds about one part; `accept` returns false to stop
+   * early. An error that affects the whole file is thrown, and the parts not yet accepted are left unread.
+   */
+  readFile?(
+    workspaceId: string,
+    userId: string,
+    binding: GitHubCorpusBinding,
+    repositoryId: string,
+    nativeId: string,
+    selection: GitHubCorpusSelection,
+    path: string | null,
+    accept: (part: GitHubFilePart) => Promise<boolean | void>,
+  ): Promise<void>;
 };
 
 export const githubKnowledgeConfigureSchema = z.strictObject({

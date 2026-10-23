@@ -102,10 +102,17 @@ test('GitHub code indexing publishes every default-branch file across head chang
       'code:7010:src/index.ts',
     ];
 
+    // Over the inline limit, so the large file's parts come from the blob API, which GitHub serves only whole.
+    gh.github.state.inline = 128 * 1024;
+    const bigSha = createHash('sha1')
+      .update(Buffer.concat([Buffer.from('blob:'), Buffer.from(repo.files.get('data/big.csv'))]))
+      .digest('hex');
+    const blobs = () => gh.github.calls.filter(call => call.path.endsWith(`/git/blobs/${bigSha}`)).length;
     await t.test(
       'the first head publishes every file, with parts, a binary placeholder and a hashed path',
       async () => {
         assert.equal(await reconcile(), 'ready');
+        assert.equal(blobs(), 1, "the large file's parts are all read from one download");
         const rows = await items();
         assert.deepEqual(
           rows.map(row => (row.nativeId.startsWith('code:7010:/h/') ? 'code:7010:/h/' : row.nativeId)).toSorted(),
@@ -157,6 +164,7 @@ test('GitHub code indexing publishes every default-branch file across head chang
         gh.github.state.truncate = false;
       }
       const rows = await items();
+      assert.equal(blobs(), 1, 'an unchanged large file is not downloaded again');
       assert.equal(rows.length, first.length + 30);
       assert.ok(rows.every(row => row.searchable && row.failure === null));
       assert.ok((await hits('alpha')).length > 0);

@@ -48,6 +48,8 @@ export function fakeGitHub() {
     truncate: false,
     truncateDirs: new Set(),
     chunk: 64 * 1024,
+    // Like GitHub, files over 1 MB come back from the contents API without inline content.
+    inline: 1024 * 1024,
     snapshots,
     compare: null,
   };
@@ -422,8 +424,7 @@ export function fakeGitHub() {
       const content = repo.files.get(file);
       if (content === undefined) return Response.json({ message: 'Not Found' }, { status: 404 });
       const bytes = bytesOf(content);
-      // Like GitHub, files over 1 MB come back without inline content.
-      const inline = bytes.byteLength <= 1024 * 1024;
+      const inline = bytes.byteLength <= state.inline;
       return Response.json({
         type: 'file',
         path: file,
