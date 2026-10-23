@@ -909,6 +909,47 @@ test(
   },
 );
 
+test('a pinned policy whose models left the catalog is replaced on retry', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  try {
+    const id = await chat(f),
+      w = f.workspace,
+      maintenance = createConversationMaintenance(f.runtime);
+    const removed = compactor();
+    const pinned = removed.policy;
+    removed.policy = async () => ({ ...(await pinned()), families: ['retired-model'] });
+    removed.summarize = async () => {
+      throw new Error('compaction-model-unavailable');
+    };
+    await exchange(f, id);
+    await due(f, id);
+    await maintenance.sweep(w.id);
+    const [job] = await work(f, maintenance);
+    assert.equal(await maintenance.process(job, removed, async () => published()), 'failed');
+    const saved = async () =>
+      (
+        await f.db.platform.query(
+          `SELECT compaction_policy, error_code FROM ${f.table('tf_conversation_maintenance')} WHERE id=$1`,
+          [job.jobId],
+        )
+      ).rows[0];
+    assert.deepEqual(await saved(), { compaction_policy: null, error_code: 'compaction-model-unavailable' });
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_maintenance')} SET next_attempt_at=clock_timestamp() WHERE id=$1`,
+      [job.jobId],
+    );
+    const current = compactor();
+    assert.equal(await maintenance.process(job, current, async () => published()), 'ready');
+    assert.deepEqual(
+      current.calls.filter(call => call.purpose === 'summary').map(call => call.families),
+      [['claude-haiku']],
+    );
+    assert.deepEqual((await saved()).compaction_policy.families, ['claude-haiku']);
+  } finally {
+    await f.close();
+  }
+});
+
 test(
   'unconfirmed generation is not automatically dispatched or resumed without reconciliation',
   { timeout: 60000 },
