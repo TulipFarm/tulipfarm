@@ -85,11 +85,16 @@ test('roles without a model: titles use the chat model, other roles the default 
   const env = { ...shipped, MODEL_CATALOG: claudeCatalog({}) };
   assert.equal(chatTitleRoute(env), undefined);
   assert.equal(roleModel('title', env), null);
+  assert.equal(roleModel('completion-check', env), null, 'the active chat route is retained, not the default model');
   for (const role of ['compaction', 'review', 'plan', 'heartbeat'])
     assert.equal(roleModel(role, env).price.familyId, 'claude-sonnet', role);
-  const assigned = { ...shipped, MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['review', 'title'] }) };
+  const assigned = {
+    ...shipped,
+    MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['review', 'title', 'completion-check'] }),
+  };
   assert.equal(roleModel('review', assigned).price.familyId, 'claude-haiku');
   assert.equal(chatTitleRoute(assigned).model, 'claude-haiku-4-5');
+  assert.equal(roleModel('completion-check', assigned).price.familyId, 'claude-haiku');
 });
 
 test('the chat fallback is off without a fallback-role model and never the chat model itself', () => {
@@ -97,6 +102,16 @@ test('the chat fallback is off without a fallback-role model and never the chat 
   const env = { ...shipped, MODEL_CATALOG: claudeCatalog({ 'claude-haiku': ['fallback'] }) };
   assert.equal(chatFallbackModel('claude-sonnet', env).price.familyId, 'claude-haiku');
   assert.equal(chatFallbackModel('claude-haiku', env), undefined);
+});
+
+test('a skipped completion-check role keeps the active chat model instead of selecting the default', () => {
+  const catalog = JSON.parse(claudeCatalog({}));
+  catalog.missingKeys = 'skip';
+  catalog.models.push({
+    ...catalogModels.find(model => model.id === 'deepseek-flash'),
+    roles: ['completion-check'],
+  });
+  assert.equal(roleModel('completion-check', { ...shipped, MODEL_CATALOG: JSON.stringify(catalog) }), null);
 });
 
 test('chat rejects a reply when no model can serve it', async t => {
