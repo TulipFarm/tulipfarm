@@ -13,7 +13,11 @@ export class SocialError extends Error {
       | 'account-limit-reached'
       | 'account-authorization-denied'
       | 'account-reconnect-required'
-      | 'account-unavailable',
+      | 'account-unavailable'
+      | 'grants-invalid'
+      | 'channel-conflict'
+      | 'channel-unreachable'
+      | 'channel-unavailable',
   ) {
     super(code);
     this.name = 'SocialError';

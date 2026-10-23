@@ -9,6 +9,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
+import { validateIntegrationRecipients } from '@tulipfarm/integrations/authorization';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { PlatformAppCredentials, RefreshPolicy, SocialPlatformAdapter, TokenSet } from './adapter.ts';
 import {
@@ -20,11 +21,13 @@ import {
   platformAppCreateSchema,
   platformSchema,
   platforms,
+  socialAccountGrantsSchema,
   socialAccountLimits,
   type AccountState,
   type Platform,
   type PlatformAppMetadata,
   type PlatformAvailability,
+  type SocialAccountGrants,
   type SocialAccountMetadata,
 } from './contracts.ts';
 import { SocialError, socialCredentialCipher, type CredentialBinding } from './credentials.ts';
@@ -103,6 +106,37 @@ const replaceSecretSchema = z.strictObject({ clientSecret: z.string().min(1).max
 /** True while work bound at `boundGeneration` may still use the account (PRODUCT 7, 8). */
 export function generationCurrent(account: { generation: number; state: AccountState }, boundGeneration: number) {
   return account.generation === boundGeneration && account.state !== 'disconnected';
+}
+
+/**
+ * What a membership may do with a connection. A personal connection is its owner's alone; a shared one has
+ * separate `use` and `manage` grants to members and teams (PRODUCT 9).
+ */
+export async function socialAccountAccess(
+  tx: AuthorizationTransaction,
+  membershipId: string,
+  account: { id: string; ownership: 'personal' | 'business'; ownerMembershipId: string | null },
+) {
+  if (account.ownership === 'personal') {
+    const owner = account.ownerMembershipId === membershipId;
+    return { read: owner, use: owner, manage: owner };
+  }
+  const granted = z
+    .array(z.object({ permission: z.enum(['use', 'manage']) }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT DISTINCT g.permission FROM ${qualified(tx.schema, 'tf_social_account_grants')} g
+           LEFT JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=g.team_id AND mt.membership_id=$2
+           WHERE g.account_id=$1 AND (g.membership_id=$2 OR mt.membership_id IS NOT NULL)`,
+          [account.id, membershipId],
+        )
+      ).rows,
+    )
+    .map(grant => grant.permission);
+  const manage = granted.includes('manage');
+  const use = granted.includes('use');
+  return { read: manage || use, use, manage };
 }
 
 export type AccessToken = {
@@ -248,28 +282,12 @@ export function createSocialAccounts(options: {
     if (app.kind === 'replaced') return 'reconnect-required';
     return row.state;
   }
-  async function capabilities(tx: AuthorizationTransaction, actor: HumanActor, row: AccountRow) {
-    if (row.ownership === 'personal') {
-      const owner = row.owner_membership_id === actor.membershipId;
-      return { read: owner, use: owner, manage: owner };
-    }
-    const granted = z
-      .array(z.object({ permission: z.enum(['use', 'manage']) }))
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT DISTINCT g.permission FROM ${relation(tx, 'account_grants')} g
-             LEFT JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=g.team_id AND mt.membership_id=$2
-             WHERE g.account_id=$1 AND (g.membership_id=$2 OR mt.membership_id IS NOT NULL)`,
-            [row.id, actor.membershipId],
-          )
-        ).rows,
-      )
-      .map(grant => grant.permission);
-    const manage = granted.includes('manage');
-    const use = granted.includes('use');
-    return { read: manage || use, use, manage };
-  }
+  const capabilities = (tx: AuthorizationTransaction, actor: HumanActor, row: AccountRow) =>
+    socialAccountAccess(tx, actor.membershipId, {
+      id: row.id,
+      ownership: row.ownership,
+      ownerMembershipId: row.owner_membership_id,
+    });
   async function permit(
     tx: AuthorizationTransaction,
     actor: HumanActor,
@@ -301,6 +319,29 @@ export function createSocialAccounts(options: {
       grantsVersion: row.grants_version,
       capabilities: { ...access, use: access.use && state === 'active' },
     };
+  }
+  async function accountGrants(tx: AuthorizationTransaction, id: string) {
+    const rows = z
+      .array(
+        z.object({
+          permission: z.enum(['use', 'manage']),
+          membership_id: z.uuid().nullable(),
+          team_id: z.uuid().nullable(),
+        }),
+      )
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT permission,membership_id,team_id FROM ${relation(tx, 'account_grants')} WHERE account_id=$1 ORDER BY membership_id,team_id`,
+            [id],
+          )
+        ).rows,
+      );
+    const set = (permission: 'use' | 'manage') => ({
+      memberIds: rows.flatMap(row => (row.permission === permission && row.membership_id ? [row.membership_id] : [])),
+      teamIds: rows.flatMap(row => (row.permission === permission && row.team_id ? [row.team_id] : [])),
+    });
+    return { use: set('use'), manage: set('manage') };
   }
   async function audit(tx: AuthorizationTransaction, actor: HumanActor | null, id: string, operation: string) {
     await tx.client.query(
@@ -709,6 +750,76 @@ export function createSocialAccounts(options: {
     },
     async status(workspaceId: string, userId: string, id: string): Promise<SocialAccountMetadata> {
       return authorized(workspaceId, userId, async (tx, actor) => metadata(tx, workspaceId, actor, await load(tx, id)));
+    },
+    /** A shared connection's `use` grants and its managers. Managers only; personal connections have none (PRODUCT 9). */
+    async grants(workspaceId: string, userId: string, id: string): Promise<SocialAccountGrants> {
+      return authorized(workspaceId, userId, async (tx, actor) => {
+        const row = await load(tx, id);
+        await permit(tx, actor, row, 'manage');
+        if (row.ownership !== 'business') throw new AccessDenied();
+        const granted = await accountGrants(tx, row.id);
+        return {
+          expectedVersion: row.grants_version,
+          memberIds: granted.use.memberIds,
+          teamIds: granted.use.teamIds,
+          managers: granted.manage,
+        };
+      });
+    },
+    /**
+     * Replaces a shared connection's `use` grants and, when given, its managers. `grantsVersion` must match
+     * and increases; at least one active manager remains (PRODUCT 9).
+     */
+    async setGrants(workspaceId: string, userId: string, id: string, input: unknown): Promise<SocialAccountMetadata> {
+      const value = socialAccountGrantsSchema.parse(input);
+      return authorized(
+        workspaceId,
+        userId,
+        async (tx, actor) => {
+          const row = await load(tx, id, true);
+          await permit(tx, actor, row, 'manage');
+          if (row.ownership !== 'business') throw new AccessDenied();
+          if (row.grants_version !== value.expectedVersion) throw new SocialError('account-conflict');
+          const before = await metadata(tx, workspaceId, actor, row);
+          const current = await accountGrants(tx, row.id);
+          const users = { memberIds: value.memberIds, teamIds: value.teamIds };
+          const managers = value.managers ?? current.manage;
+          await validateIntegrationRecipients(tx, actor, users, current.use.teamIds);
+          await validateIntegrationRecipients(tx, actor, managers, current.manage.teamIds);
+          const active = await tx.client.query(
+            `SELECT 1 FROM ${qualified(tx.schema, 'tf_memberships')} m WHERE m.removed_at IS NULL AND
+             (m.id=ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_member_teams')} mt WHERE mt.membership_id=m.id AND mt.team_id=ANY($2::uuid[]))) LIMIT 1`,
+            [managers.memberIds, managers.teamIds],
+          );
+          if (!active.rowCount) throw new SocialError('grants-invalid');
+          await tx.client.query(`DELETE FROM ${relation(tx, 'account_grants')} WHERE account_id=$1`, [row.id]);
+          for (const [permission, set] of [
+            ['use', users],
+            ['manage', managers],
+          ] as const) {
+            for (const memberId of new Set(set.memberIds))
+              await tx.client.query(
+                `INSERT INTO ${relation(tx, 'account_grants')} (account_id,permission,membership_id) VALUES ($1,$2,$3)`,
+                [row.id, permission, memberId],
+              );
+            for (const teamId of new Set(set.teamIds))
+              await tx.client.query(
+                `INSERT INTO ${relation(tx, 'account_grants')} (account_id,permission,team_id) VALUES ($1,$2,$3)`,
+                [row.id, permission, teamId],
+              );
+          }
+          await tx.client.query(`UPDATE ${relation(tx, 'accounts')} SET grants_version=grants_version+1 WHERE id=$1`, [
+            row.id,
+          ]);
+          await audit(tx, actor, row.id, 'grants');
+          const updated = await load(tx, row.id);
+          const access = await capabilities(tx, actor, updated);
+          if (access.read) return metadata(tx, workspaceId, actor, updated);
+          // The editor removed their own access; they still learn the new version.
+          return { ...before, grantsVersion: updated.grants_version, capabilities: access };
+        },
+        'write',
+      );
     },
     begin(workspaceId: string, userId: string, sessionId: string, input: unknown) {
       return reserve(workspaceId, userId, sessionId, input);
