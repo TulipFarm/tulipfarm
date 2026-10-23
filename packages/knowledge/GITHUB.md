@@ -56,7 +56,7 @@ with `invalid-selection`.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------------- |
 | `docs`            | Every file in the default-branch tree whose path looks like documentation (`.md`, `.txt`, `.rst`, `.adoc`, `README`, `LICENSE` and similar) | `doc:{repoId}:{path}`                     | `blob:{blobSha}`                      | 128 KiB of text each, split at a line break     |
 | `code`            | Every other file in the default-branch tree                                                                                                 | `code:{repoId}:{path}`                    | `blob:{blobSha}`                      | 128 KiB of text each; a binary file is one part |
-| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all` sorted by update, with `since={after}` only when a cutoff is set                                  | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
+| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all&sort=updated&direction=asc`, continued with `since` from the last item's update time               | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
 | `discussions`     | GraphQL `repository.discussions` ordered by update                                                                                          | `discussion:{repoId}:{n}`                 | `discussion:{updatedAt}:{totalCount}` | 100 comments each, with every reply             |
 | `commits`         | `GET /repositories/{id}/commits?sha={head}`, 100 a page; later passes `GET /repositories/{id}/compare/{indexed}...{head}`                   | `commit:{repoId}:{sha}`                   | `commit:{sha}`                        | One per commit                                  |
 
@@ -74,9 +74,26 @@ stored in `tf_knowledge_github_items.path` so the file can be read again.
 
 Files up to 1 MB are read through the contents API. Larger files are streamed from
 `GET /repositories/{id}/git/blobs/{sha}` with `Accept: application/vnd.github.raw`;
-only the part being read and an 8,000-byte head are kept in memory, so memory stays
-near one part whatever the file size. GitHub's blob limit (100 MB) is the only size
-bound. The blobs API ignores `Range`, so reading part `k` streams the bytes before it.
+only the part being produced and an 8,000-byte head are kept in memory, so memory
+stays near one part whatever the file size. GitHub's blob limit (100 MB) is the only
+size bound. The blobs API ignores `Range`, so a file's parts are listed together on
+one page and the engine reads them in a single pass over one download
+(`GitHubCorpusProvider.readFile`), handing each part to ingestion as it is produced.
+Each part still goes through the usual revision check, and a failure stays with the
+part it affects: a part that cannot be indexed records its own failure, and an error
+that ends the download is recorded for the parts it did not reach. The sweep re-reads
+a file's unseen parts the same way, from the first of them. A provider without
+`readFile` falls back to reading each part on its own.
+
+Issues and pull requests are listed by update time, oldest first, 100 a page, so
+a repository with more than 50,000 of them (500 pages) is listed to the end rather
+than stopping at a page-number limit. Each page continues with `since` set to the
+last item's update time. Items sharing one update second can straddle a page boundary, so the next request starts
+one second earlier and drops items before that second; when a whole page shares one
+second, the listing pages by number within that second until it ends. An issue
+updated while a tie group of more than 100 is being paged can shift that group by
+one item; the next full pass reads it. A checkpointed page-number cursor from before
+this change restarts the issue listing.
 
 Text is decoded by its byte-order mark (UTF-8, UTF-16LE, UTF-16BE); otherwise as UTF-8,
 falling back to Windows-1252 (a superset of Latin-1) for bytes that are not valid
@@ -252,11 +269,12 @@ maximum for REST lists, comments, commits and GraphQL discussions) for one
 repository, after an owner check, or re-reads one batch of 100 unseen items. Items in
 a step are fetched with bounded concurrency (four at a time). The provider cursor
 encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}` while
-walking directories, either with `+{part}` inside a file, `issues:{page}`,
-`discussions:{endCursor}`, `commits:{head}:{page}` or
-`commits:{indexed}..{head}:{page}`), so a file or commit listing stays pinned to one
-commit. The cursor is checkpointed after every step, and only once every item outcome
-before it is persisted. While work progresses the run renews its lease every minute
+walking directories, `issues:{updatedAt}` or `issues:{updatedAt}/{page}` inside a
+group of items updated in the same second, `discussions:{endCursor}`,
+`commits:{head}:{page}` or `commits:{indexed}..{head}:{page}`), so a file or commit
+listing stays pinned to one commit. A file page ends only between files, so it can
+hold more than 100 parts. The cursor is checkpointed after every step, and only once
+every item outcome before it is persisted. While work progresses the run renews its lease every minute
 and heartbeats its Temporal activity (five-minute heartbeat timeout), so only a
 genuinely stuck run is restarted. A run that exhausts its budget releases the lease
 and the next due check continues from the checkpoint.
@@ -429,8 +447,10 @@ since-marks. `packages/github/test/knowledge-events.test.mjs` covers the
 event-to-repository mapping, and `knowledge-events.integration.mjs` signature
 checks, deduplication, capacity and expiry against PostgreSQL.
 `apps/api/test/knowledge-github-all-files.integration.mjs` runs the real provider and
-engine across head changes: formerly excluded files, a file in parts, a binary
-placeholder, a hashed long path, a truncated tree walk and deletions.
+engine across head changes: formerly excluded files, a file in parts read from one
+blob download, a binary placeholder, a hashed long path, a truncated tree walk and
+deletions. The provider test covers one download per file with bounded buffering,
+issue listings past 50,000 items and update-time ties.
 `apps/api/test/knowledge-github-commits.integration.mjs` runs both across a growing
 and force-pushed history. The integration test also covers rate-limit pauses, item
 and repository isolation, lease renewal, time-boxed runs and uncapped cursors; the

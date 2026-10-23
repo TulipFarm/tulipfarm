@@ -638,17 +638,137 @@ test('a truncated recursive tree is walked one directory at a time so every file
   );
 });
 
-test('a resumed listing continues inside a file with many parts', async () => {
+test('a file keeps all its parts on one listing page, and a cursor inside a file still resumes', async () => {
   const { provider, binding, repo } = setup();
   repo.files.set('data/huge.csv', 'r,1\n'.repeat(3400 * 1024));
+  for (let i = 0; i < 150; i++) repo.files.set(`src/m${String(i).padStart(3, '0')}.ts`, `export const m${i} = ${i};`);
   const first = await provider.list(workspaceId, 'reader', binding, '7001', code, null);
-  assert.equal(first.observations.length, 100);
-  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+101$/);
-  const items = await listAll(provider, binding, '7001', code);
-  const parts = items.filter(item => item.path === 'data/huge.csv');
-  assert.equal(parts.length, 107);
+  const parts = first.observations.filter(item => item.path === 'data/huge.csv');
+  assert.equal(parts.length, 107, 'the page grows past its size to finish the file');
   assert.equal(new Set(parts.map(item => item.nativeId)).size, 107);
   assert.equal(parts.at(-1).nativeId, 'code:7001:/p/107/data/huge.csv');
+  assert.ok(first.observations.length > 100);
+  const [, commit, index] = /^code:([a-f0-9]{40}):(\d+)$/.exec(first.nextCursor);
+  assert.ok(Number(index) > 0, 'the page fills between files');
+  const items = await listAll(provider, binding, '7001', code);
+  assert.equal(items.filter(item => item.path === 'data/huge.csv').length, 107);
+  assert.equal(new Set(items.map(item => item.nativeId)).size, items.length, 'no part is listed twice');
+  const fileIndex = items
+    .filter(item => !item.nativeId.includes('/p/'))
+    .findIndex(item => item.path === 'data/huge.csv');
+  const resumed = await provider.list(workspaceId, 'reader', binding, '7001', code, `code:${commit}:${fileIndex}+101`);
+  assert.deepEqual(
+    resumed.observations.filter(item => item.path === 'data/huge.csv').map(item => item.nativeId),
+    Array.from({ length: 7 }, (_, i) => `code:7001:/p/${101 + i}/data/huge.csv`),
+  );
+});
+
+// Wraps blob responses so the test sees how many bytes the provider has pulled from GitHub at any moment.
+function countingBlobs() {
+  const blobs = { downloads: 0, pulled: 0, cut: Infinity };
+  const wrap = fetcher => async (input, init) => {
+    const response = await fetcher(input, init);
+    if (!new URL(input).pathname.includes('/git/blobs/') || response.status !== 200) return response;
+    blobs.downloads++;
+    blobs.pulled = 0;
+    const reader = response.body.getReader();
+    return new Response(
+      new ReadableStream(
+        {
+          async pull(controller) {
+            const chunk = await reader.read();
+            if (chunk.done || blobs.pulled >= blobs.cut) return controller.close();
+            blobs.pulled += chunk.value.byteLength;
+            controller.enqueue(chunk.value);
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+      { headers: response.headers },
+    );
+  };
+  return { blobs, wrap };
+}
+const readParts = async (provider, binding, id, accept, value = code) => {
+  const parts = [];
+  await provider.readFile(workspaceId, 'reader', binding, '7001', id, value, null, async part => {
+    parts.push(part);
+    return accept?.(part, parts);
+  });
+  return parts;
+};
+
+test('a file is read in parts from one blob download, holding about one part at a time', async () => {
+  const counted = countingBlobs();
+  const { github, provider, binding, repo } = setup({ wrap: counted.wrap });
+  const text = Array.from({ length: 300000 }, (_, i) => `row ${i},${'v'.repeat(i % 17)}`).join('\n');
+  repo.files.set('data/huge.csv', text);
+  github.state.chunk = 4096;
+  const ids = (await listAll(provider, binding, '7001', code))
+    .filter(item => item.path === 'data/huge.csv')
+    .map(item => item.nativeId);
+  assert.ok(ids.length > 40);
+  github.calls.length = 0;
+  const ahead = [];
+  const parts = await readParts(provider, binding, ids[0], (_part, seen) => {
+    ahead.push(counted.blobs.pulled - seen.length * 128 * 1024);
+  });
+  assert.equal(github.calls.filter(call => call.path.includes('/git/blobs/')).length, 1, 'one download per file');
+  assert.equal(counted.blobs.downloads, 1);
+  assert.deepEqual(
+    parts.map(part => part.nativeId),
+    ids,
+  );
+  // Each part is handed over as soon as its end is known: no more than the line-break search and a chunk ahead.
+  assert.ok(Math.max(...ahead) <= 16 * 1024 + 2 * 4096, `pulled ahead ${Math.max(...ahead)} bytes`);
+  const contents = parts.map(part => /\n(`{3,})\n([\s\S]*)\n\1\n$/.exec(part.read.markdown)[2]);
+  assert.equal(contents.join('\n'), text, 'parts join back into the file');
+  for (const index of [0, 1, 17, ids.length - 1])
+    assert.deepEqual(parts[index].read.markdown, (await readAs(provider, binding, ids[index])).markdown);
+});
+
+test('a file read can start at a later part and stop early, ending the download', async () => {
+  const counted = countingBlobs();
+  const { github, provider, binding, repo } = setup({ wrap: counted.wrap });
+  repo.files.set('data/huge.csv', 'r,1\n'.repeat(3400 * 1024));
+  github.state.chunk = 4096;
+  const later = await readParts(provider, binding, 'code:7001:/p/100/data/huge.csv');
+  assert.deepEqual(
+    later.map(part => part.nativeId),
+    Array.from({ length: 8 }, (_, i) => `code:7001:/p/${100 + i}/data/huge.csv`),
+  );
+  assert.equal(later[0].read.markdown, (await readAs(provider, binding, 'code:7001:/p/100/data/huge.csv')).markdown);
+  const early = await readParts(provider, binding, 'code:7001:data/huge.csv', (_part, seen) => seen.length < 3);
+  assert.equal(early.length, 3);
+  assert.ok(counted.blobs.pulled < 4 * 128 * 1024, 'stopping ends the download');
+  await assert.rejects(
+    readParts(provider, binding, 'code:7001:/p/108/data/huge.csv'),
+    error => error.code === 'not-found',
+  );
+  counted.blobs.cut = 300 * 1024;
+  const cut = [];
+  await assert.rejects(
+    readParts(provider, binding, 'code:7001:data/huge.csv', part => {
+      cut.push(part);
+    }),
+    error => error.code === 'source-changed',
+  );
+  assert.equal(cut.length, 2, 'parts read before a short download are kept');
+});
+
+test('a file whose content turns out binary yields its placeholder and marks later parts unsupported', async () => {
+  const { provider, binding, repo } = setup();
+  repo.files.set('data/blob.dat', Buffer.concat([Buffer.from('a\0b'), Buffer.alloc(300 * 1024, 0x61)]));
+  const parts = await readParts(provider, binding, 'code:7001:data/blob.dat');
+  assert.equal(parts.length, 3);
+  assert.match(parts[0].read.markdown, /Binary file, \d+ bytes/);
+  assert.deepEqual(
+    parts.slice(1).map(part => [part.nativeId, part.error.code]),
+    [
+      ['code:7001:/p/2/data/blob.dat', 'unsupported'],
+      ['code:7001:/p/3/data/blob.dat', 'unsupported'],
+    ],
+  );
 });
 
 test('large files are streamed from the blob API in line-aligned parts that cover every byte once', async () => {

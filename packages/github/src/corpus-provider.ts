@@ -19,6 +19,7 @@ import {
   type GitHubCorpusSelection,
   type GitHubItemObservation,
   type GitHubItemRead,
+  type GitHubFilePart,
   type GitHubCorpusPage,
   type GitHubListHistory,
   type GitHubRepository,
@@ -680,7 +681,7 @@ export function createGitHubCorpusProvider(options: {
     token: string,
     endpoint: DependencyEndpoint,
     path: string,
-    init: { accept?: string; body?: unknown; timeoutMs?: number } = {},
+    init: { accept?: string; body?: unknown; signal?: AbortSignal } = {},
   ) {
     const budget = budgetKey(token, endpoint);
     await pace(budget);
@@ -689,7 +690,7 @@ export function createGitHubCorpusProvider(options: {
       response = await observeFetch('github', 'request', fetcher, { endpoint })(`https://api.github.com${path}`, {
         method: init.body === undefined ? 'GET' : 'POST',
         redirect: 'manual',
-        signal: AbortSignal.timeout(init.timeoutMs ?? limits.requestTimeoutMs),
+        signal: init.signal ?? AbortSignal.timeout(limits.requestTimeoutMs),
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: init.accept ?? 'application/vnd.github+json',
@@ -779,14 +780,31 @@ export function createGitHubCorpusProvider(options: {
     const next = /<[^>]*>;\s*rel="next"/.test(response.headers.get('link') ?? '');
     return { status: response.status, text, json, next };
   }
-  // Streams a raw Git blob. The time allowed grows with the bytes needed, up to `blobTimeoutMs`.
+  // Streams a raw Git blob. The network time allowed grows with the blob's size, up to `blobTimeoutMs`; time the caller
+  // spends between reads does not count, so a caller may process each part before reading the next.
   async function* blob(token: string, repositoryId: string, sha: string, bytes: number) {
-    const response = await retrying(() =>
-      open(token, 'github-blob', `/repositories/${repositoryId}/git/blobs/${sha}`, {
-        accept: 'application/vnd.github.raw',
-        timeoutMs: Math.min(limits.blobTimeoutMs, limits.requestTimeoutMs + Math.ceil(bytes / limits.partBytes) * 1000),
-      }),
-    );
+    const budget = Math.min(limits.blobTimeoutMs, limits.requestTimeoutMs + Math.ceil(bytes / limits.partBytes) * 1000);
+    let waited = 0;
+    let controller = new AbortController();
+    const timed = async <T>(operation: () => Promise<T>) => {
+      const started = Date.now();
+      const timer = setTimeout(() => controller.abort(), Math.max(0, budget - waited));
+      try {
+        return await operation();
+      } finally {
+        clearTimeout(timer);
+        waited += Date.now() - started;
+      }
+    };
+    const response = await retrying(() => {
+      controller = new AbortController();
+      return timed(() =>
+        open(token, 'github-blob', `/repositories/${repositoryId}/git/blobs/${sha}`, {
+          accept: 'application/vnd.github.raw',
+          signal: controller.signal,
+        }),
+      );
+    });
     if (response.status !== 200) {
       await response.body?.cancel().catch(() => undefined);
       throw new GitHubCorpusError([404, 409, 410, 422].includes(response.status) ? 'not-found' : 'invalid-response');
@@ -797,7 +815,7 @@ export function createGitHubCorpusProvider(options: {
       for (;;) {
         let chunk: ReadableStreamReadResult<Uint8Array>;
         try {
-          chunk = await reader.read();
+          chunk = await timed(() => reader.read());
         } catch {
           throw new GitHubCorpusError('transient');
         }
@@ -807,22 +825,6 @@ export function createGitHubCorpusProvider(options: {
     } finally {
       await reader.cancel().catch(() => undefined);
     }
-  }
-  // Keeps only the sniffed head and the byte range [start, end) of a streamed blob, so memory stays bounded by one part.
-  async function blobRange(token: string, repositoryId: string, file: FileRef, start: number, end: number) {
-    const head = new Uint8Array(Math.min(sniffBytes, file.size));
-    const window = new Uint8Array(end - start);
-    let offset = 0;
-    for await (const chunk of blob(token, repositoryId, file.sha, end)) {
-      const chunkEnd = offset + chunk.byteLength;
-      if (offset < head.byteLength) head.set(chunk.subarray(0, head.byteLength - offset), offset);
-      if (chunkEnd > start && offset < end)
-        window.set(chunk.subarray(Math.max(0, start - offset), end - offset), Math.max(0, offset - start));
-      offset = chunkEnd;
-      if (offset >= end && offset >= head.byteLength) break;
-    }
-    if (offset < end) throw new GitHubCorpusError('source-changed');
-    return { head, window };
   }
   async function graphql(token: string, query: string, variables: Record<string, unknown>) {
     const response = await call(token, 'github-graphql', '/graphql', { body: { query, variables } });
@@ -990,7 +992,7 @@ export function createGitHubCorpusProvider(options: {
     }
   }
   // Lists every default-branch file of one kind, in parts. The cursor is `<commit>:<offset>` over the sorted recursive
-  // tree, or `<commit>:w<index path>` while walking directories one request at a time; `+<part>` resumes inside a file.
+  // tree, or `<commit>:w<index path>` while walking directories one request at a time.
   async function listFiles(
     token: string,
     body: RepositoryBody,
@@ -1021,13 +1023,12 @@ export function createGitHubCorpusProvider(options: {
       part = Number(match[4] ?? 1);
     }
     const observations: GitHubItemObservation[] = [];
-    // Adds a file's parts from `from` and returns the part to resume at when the page fills first.
+    // Adds a file's parts from `from`. A file's parts always share one page, however many there are, so the sync reads
+    // them all from one download; a page fills only between files. `+<part>` cursors come from earlier listings.
     const add = (path: string, entry: TreeEntry, from: number) => {
       const parts = fileParts(path, entry.size ?? 0);
-      let next = from;
-      for (; next <= parts && observations.length < limits.listPageSize; next++)
+      for (let next = from; next <= parts; next++)
         observations.push(fileObservation(body, commit, accessedAt, path, entry.sha, next, parts));
-      return next <= parts ? next : null;
     };
     if (!walk) {
       const entries = await recursiveTree(token, body, commit);
@@ -1039,8 +1040,7 @@ export function createGitHubCorpusProvider(options: {
           if (observations.length >= limits.listPageSize)
             return { observations, nextCursor: `${phase}:${commit}:${index}` };
           const entry = files[index] as TreeEntry;
-          const resume = add(entry.path, entry, index === offset ? part : 1);
-          if (resume) return { observations, nextCursor: `${phase}:${commit}:${index}+${resume}` };
+          add(entry.path, entry, index === offset ? part : 1);
         }
         return { observations, nextCursor: nextPhase(selection, phase) };
       }
@@ -1081,20 +1081,14 @@ export function createGitHubCorpusProvider(options: {
         await enter(entry.sha, `${path}/`, 0, true);
         continue;
       }
-      if (entry.type === 'blob' && wanted(path)) {
-        const resume = add(path, entry, part);
-        if (resume) {
-          part = resume;
-          break;
-        }
-      }
+      if (entry.type === 'blob' && wanted(path)) add(path, entry, part);
       top.index++;
       part = 1;
     }
     return {
       observations,
       nextCursor: stack.length
-        ? `${phase}:${commit}:w${stack.map(frame => frame.index).join('.')}${part > 1 ? `+${part}` : ''}`
+        ? `${phase}:${commit}:w${stack.map(frame => frame.index).join('.')}`
         : nextPhase(selection, phase),
     };
   }
@@ -1572,6 +1566,105 @@ export function createGitHubCorpusProvider(options: {
     if (extracted?.trim()) return decode(Buffer.from(extracted), 'utf-8').trim();
     return `Binary file, ${file.size} bytes, media type ${mediaType}. Content extraction pending OCR; only its path and file details are indexed.`;
   }
+  // Reads a file's parts from `first` to its last in one pass over its content: inline when GitHub returned it, else
+  // one blob download. Part k covers bytes [(k - 1) × partBytes, k × partBytes), each end moved forward to a line
+  // break, so only the bytes from the current part's start to its end's search window are held.
+  async function* fileReads(
+    token: string,
+    body: RepositoryBody,
+    kind: 'doc' | 'code',
+    path: string,
+    first: number,
+    accessedAt: string,
+  ): AsyncGenerator<GitHubFilePart> {
+    const commit = await headCommit(token, body);
+    if (!commit) throw new GitHubCorpusError('not-found');
+    const file =
+      Buffer.byteLength(path) > 1024
+        ? await treeFile(token, body, commit, path)
+        : await contentFile(token, body, commit, path);
+    const parts = fileParts(path, file.size);
+    if (first > parts) throw new GitHubCorpusError('not-found');
+    const result = (part: number, content: string): GitHubFilePart => {
+      const base = fileObservation(body, commit, accessedAt, path, file.sha, part, parts);
+      const markdown = `# ${body.full_name}: ${path}${parts > 1 ? ` (part ${part} of ${parts})` : ''}\n\nGitHub repository ${body.full_name} (ID ${body.id}), file \`${path.replaceAll('`', '')}\` at commit ${commit} (blob ${file.sha})${parts > 1 ? `, part ${part} of ${parts}` : ''}.\n\n---\n\n${content}\n`;
+      if (Buffer.byteLength(markdown) > limits.markdownBytes)
+        return { nativeId: base.nativeId, error: new GitHubCorpusError('too-large') };
+      return { nativeId: base.nativeId, read: { ...base, markdown } };
+    };
+    // A binary file has one placeholder part; a file found binary only by its content has no readable later parts.
+    const binary = async function* (): AsyncGenerator<GitHubFilePart> {
+      if (first === 1) yield result(1, await binaryText(token, body, path, file));
+      for (let part = Math.max(2, first); part <= parts; part++)
+        yield {
+          nativeId: fileObservation(body, commit, accessedAt, path, file.sha, part, parts).nativeId,
+          error: new GitHubCorpusError('unsupported'),
+        };
+    };
+    if (isGitHubBinaryPath(path)) return yield* binary();
+    const inline = file.content;
+    const source = inline
+      ? (async function* () {
+          yield inline;
+        })()
+      : blob(token, String(body.id), file.sha, file.size);
+    const head = new Uint8Array(Math.min(sniffBytes, file.size));
+    let encoding: Encoding | null = null;
+    // `window` holds the bytes from `offset` to `received`; `from` is where the next part starts.
+    let window: Uint8Array = new Uint8Array(0);
+    let offset = 0;
+    let received = 0;
+    let from = 0;
+    let part = 1;
+    const needed = (k: number) =>
+      k === parts ? file.size : Math.min(file.size, k * limits.partBytes + boundarySearchBytes);
+    const ready = function* (): Generator<GitHubFilePart> {
+      while (encoding && encoding !== 'binary' && part <= parts && received >= needed(part)) {
+        const to = part === parts ? file.size : boundary(window, offset, part * limits.partBytes, file.size, encoding);
+        if (part >= first) {
+          const text = decode(window.subarray(from - offset, Math.max(from, to) - offset), encoding)
+            .replace(/^\s*\n/, '')
+            .trimEnd();
+          yield result(
+            part,
+            !text
+              ? parts > 1
+                ? '_No text content in this part._'
+                : '_No text content._'
+              : kind === 'code'
+                ? `${fence(text)}\n${text}\n${fence(text)}`
+                : text,
+          );
+        }
+        from = Math.max(from, to);
+        part++;
+        window = window.subarray(from - offset);
+        offset = from;
+      }
+    };
+    const sniffed = () => {
+      if (encoding || received < head.byteLength) return;
+      const found = sniff(head);
+      encoding = found.encoding;
+      from = found.bom;
+    };
+    for await (const chunk of source) {
+      if (received < head.byteLength) head.set(chunk.subarray(0, head.byteLength - received), received);
+      const merged = new Uint8Array(window.byteLength + chunk.byteLength);
+      merged.set(window);
+      merged.set(chunk, window.byteLength);
+      window = merged;
+      received += chunk.byteLength;
+      sniffed();
+      if (encoding === 'binary' || part > parts) break;
+      yield* ready();
+      if (part > parts) break;
+    }
+    sniffed();
+    if (encoding === 'binary') return yield* binary();
+    yield* ready();
+    if (part <= parts) throw new GitHubCorpusError('source-changed');
+  }
   async function readFile(
     token: string,
     body: RepositoryBody,
@@ -1580,39 +1673,43 @@ export function createGitHubCorpusProvider(options: {
     part: number,
     accessedAt: string,
   ): Promise<GitHubItemRead> {
-    const commit = await headCommit(token, body);
-    if (!commit) throw new GitHubCorpusError('not-found');
-    const file =
-      Buffer.byteLength(path) > 1024
-        ? await treeFile(token, body, commit, path)
-        : await contentFile(token, body, commit, path);
-    const parts = fileParts(path, file.size);
-    if (part > parts) throw new GitHubCorpusError('not-found');
-    const base = fileObservation(body, commit, accessedAt, path, file.sha, part, parts);
-    const finish = (content: string) => {
-      const markdown = `# ${body.full_name}: ${path}${parts > 1 ? ` (part ${part} of ${parts})` : ''}\n\nGitHub repository ${body.full_name} (ID ${body.id}), file \`${path.replaceAll('`', '')}\` at commit ${commit} (blob ${file.sha})${parts > 1 ? `, part ${part} of ${parts}` : ''}.\n\n---\n\n${content}\n`;
-      if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
-      return { ...base, markdown };
-    };
-    if (isGitHubBinaryPath(path)) return finish(await binaryText(token, body, path, file));
-    // Part `part` covers bytes [(part - 1) × partBytes, part × partBytes), each end moved forward to a line break.
-    const start = (part - 1) * limits.partBytes;
-    const end = Math.min(file.size, part * limits.partBytes + boundarySearchBytes);
-    const { head, window } = file.content
-      ? { head: file.content.subarray(0, sniffBytes), window: file.content.subarray(start, end) }
-      : await blobRange(token, String(body.id), file, start, end);
-    const { encoding, bom } = sniff(head);
-    if (encoding === 'binary') {
-      if (part > 1) throw new GitHubCorpusError('unsupported');
-      return finish(await binaryText(token, body, path, file));
+    for await (const read of fileReads(token, body, kind, path, part, accessedAt)) {
+      if ('error' in read) throw read.error;
+      return read.read;
     }
-    const from = part === 1 ? bom : boundary(window, start, start, file.size, encoding);
-    const to = part === parts ? file.size : boundary(window, start, part * limits.partBytes, file.size, encoding);
-    const text = decode(window.subarray(from - start, Math.max(from, to) - start), encoding)
-      .replace(/^\s*\n/, '')
-      .trimEnd();
-    if (!text) return finish(parts > 1 ? '_No text content in this part._' : '_No text content._');
-    return finish(kind === 'code' ? `${fence(text)}\n${text}\n${fence(text)}` : text);
+    throw new GitHubCorpusError('source-changed');
+  }
+  // Checks that a native ID names an item the selection covers, and resolves a file's full path.
+  function target(repositoryId: string, nativeId: string, input: GitHubCorpusSelection, path?: string | null) {
+    const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
+    const id = native(nativeId, repositoryId);
+    const { kind } = id;
+    if (
+      !selection.kinds.includes(
+        kind === 'doc'
+          ? 'docs'
+          : kind === 'code'
+            ? 'code'
+            : kind === 'issue'
+              ? 'issues'
+              : kind === 'pull'
+                ? 'pulls'
+                : kind === 'discussion'
+                  ? 'discussions'
+                  : 'commits',
+      )
+    )
+      throw new GitHubCorpusError('outside-selection');
+    if (id.marker) throw new GitHubCorpusError('not-found');
+    let file: string | null = null;
+    if (kind === 'doc' || kind === 'code') {
+      file = id.hash ? (path ?? null) : id.ref;
+      if (file === null || (id.hash && (Buffer.byteLength(file) <= 1024 || hashPath(file) !== id.hash)))
+        throw new GitHubCorpusError('not-found');
+      if (githubFileKind(file) !== kind || !githubPathIndexable(file) || githubPathOptedOut(selection, file))
+        throw new GitHubCorpusError('outside-selection');
+    }
+    return { selection, id, kind, file };
   }
   return {
     async discover(workspaceId, userId, accountId, cursor, options) {
@@ -1762,34 +1859,7 @@ export function createGitHubCorpusProvider(options: {
       });
     },
     async read(workspaceId, userId, expected, repositoryId, nativeId, input, path): Promise<GitHubItemRead> {
-      const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
-      const id = native(nativeId, repositoryId);
-      const { kind } = id;
-      if (
-        !selection.kinds.includes(
-          kind === 'doc'
-            ? 'docs'
-            : kind === 'code'
-              ? 'code'
-              : kind === 'issue'
-                ? 'issues'
-                : kind === 'pull'
-                  ? 'pulls'
-                  : kind === 'discussion'
-                    ? 'discussions'
-                    : 'commits',
-        )
-      )
-        throw new GitHubCorpusError('outside-selection');
-      if (id.marker) throw new GitHubCorpusError('not-found');
-      let file: string | null = null;
-      if (kind === 'doc' || kind === 'code') {
-        file = id.hash ? (path ?? null) : id.ref;
-        if (file === null || (id.hash && (Buffer.byteLength(file) <= 1024 || hashPath(file) !== id.hash)))
-          throw new GitHubCorpusError('not-found');
-        if (githubFileKind(file) !== kind || !githubPathIndexable(file) || githubPathOptedOut(selection, file))
-          throw new GitHubCorpusError('outside-selection');
-      }
+      const { selection, id, kind, file } = target(repositoryId, nativeId, input, path);
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
         const token = credential.accessToken;
         const accessedAt = new Date().toISOString();
@@ -1847,6 +1917,17 @@ export function createGitHubCorpusProvider(options: {
           ),
           markdown,
         };
+      });
+    },
+    async readFile(workspaceId, userId, expected, repositoryId, nativeId, input, path, accept) {
+      const { id, kind, file } = target(repositoryId, nativeId, input, path);
+      if (file === null || (kind !== 'doc' && kind !== 'code')) throw new GitHubCorpusError('not-found');
+      await withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
+        const token = credential.accessToken;
+        const body = await byId(token, repositoryId);
+        scoped(credential, repository(body));
+        for await (const part of fileReads(token, body, kind, file, id.part, new Date().toISOString()))
+          if ((await accept(part)) === false) break;
       });
     },
   };
