@@ -937,6 +937,8 @@ export const backgroundJobs = [
   'recommendation-spend-projection',
   'member-profile-dispatch',
   'member-profile-projection',
+  'social-publisher',
+  'social-refresh',
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 

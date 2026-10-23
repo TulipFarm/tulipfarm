@@ -16,6 +16,7 @@
     "test:invitation-expiry": "node --test test/invitation-expiry-process.integration.mjs",
     "test:conversations": "node --test test/conversation.integration.mjs",
     "test:atlassian": "node --test test/atlassian-chat.integration.mjs",
+    "test:social": "node --test test/social-publisher.integration.mjs",
     "start": "node dist/worker.js",
     "start:storage": "node dist/storage-worker.js"
   },
@@ -44,6 +45,7 @@
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
+    "@tulipfarm/social": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflow-snippets": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",

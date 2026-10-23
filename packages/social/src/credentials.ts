@@ -27,7 +27,9 @@ export class SocialError extends Error {
       | 'source-blocked'
       | 'source-unreadable'
       | 'media-unreadable'
-      | 'media-changed',
+      | 'media-changed'
+      | 'variant-conflict'
+      | 'settlement-unconfirmed',
   ) {
     super(code);
     this.name = 'SocialError';

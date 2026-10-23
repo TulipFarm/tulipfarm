@@ -534,6 +534,9 @@ importers:
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../../packages/slack
+      '@tulipfarm/social':
+        specifier: workspace:*
+        version: link:../../packages/social
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../../packages/tables

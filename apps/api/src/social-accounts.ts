@@ -103,6 +103,8 @@ const statuses = {
   'source-unreadable': 403,
   'media-unreadable': 403,
   'media-changed': 409,
+  'variant-conflict': 409,
+  'settlement-unconfirmed': 409,
 } as const satisfies Record<SocialError['code'], number>;
 
 /** The workspace a request concerns: from the path, or from the OAuth state on the callback. */
