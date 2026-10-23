@@ -7,6 +7,7 @@ import {
   Footer,
   Header,
   HeadingLevel,
+  ImageRun,
   LevelFormat,
   Packer,
   PageBreak,
@@ -147,6 +148,12 @@ const table = z
     rows: z.array(z.array(text).max(30)).max(2000),
   })
   .refine(value => value.header?.length || value.rows.length, 'A table needs a header or at least one row');
+const image = z.strictObject({
+  type: z.literal('image'),
+  fileId: z.uuid(),
+  width: z.int().min(10).max(100).optional(),
+  alt: z.string().max(500).optional(),
+});
 const style = {
   theme: z.enum(Object.keys(themes) as [keyof typeof themes]).default('default'),
   accentColor: color.optional(),
@@ -175,6 +182,7 @@ export const documentSpecSchema = z.strictObject({
         z.strictObject({ type: z.literal('divider') }),
         z.strictObject({ type: z.literal('pageBreak') }),
         z.strictObject({ type: z.literal('toc'), title: z.string().max(200).optional() }),
+        image,
       ]),
     )
     .min(1)
@@ -270,7 +278,7 @@ const chart = z
     value => value.series.every(entry => entry.values.length === value.categories.length),
     'Each series needs one value per category',
   );
-const slideBlock = z.discriminatedUnion('type', [paragraph, list, table, chart]);
+const slideBlock = z.discriminatedUnion('type', [paragraph, list, table, chart, image]);
 export const presentationSpecSchema = z.strictObject({
   ...style,
   aspectRatio: z.enum(['16:9', '4:3']).default('16:9'),
@@ -301,8 +309,66 @@ export const officeSpecSchemas = {
 
 export class OfficeSpecError extends Error {}
 
-/** Renders a JSON spec. Spec errors throw OfficeSpecError with a message the model can act on. */
-export async function renderOfficeDocument(format: OfficeFormat, content: string): Promise<Uint8Array> {
+export const officeImageLimits = Object.freeze({ images: 20, bytes: 8 * 1024 * 1024 });
+export type OfficeImageType = 'png' | 'jpg' | 'gif';
+/** An image a spec refers to by Files id, read by the caller under the author's access. */
+export type OfficeImage = { type: OfficeImageType; bytes: Uint8Array; width: number; height: number };
+
+/** The type and pixel size of a PNG, JPEG or GIF, read from its header; null for anything else. */
+export function officeImageInfo(bytes: Uint8Array): Omit<OfficeImage, 'bytes'> | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const sized = (type: OfficeImageType, width: number, height: number) =>
+    width > 0 && height > 0 ? { type, width, height } : null;
+  if (bytes.byteLength >= 24 && view.getUint32(0) === 0x89504e47 && view.getUint32(12) === 0x49484452)
+    return sized('png', view.getUint32(16), view.getUint32(20));
+  if (bytes.byteLength >= 10 && String.fromCharCode(...bytes.subarray(0, 6)).match(/^GIF8[79]a$/))
+    return sized('gif', view.getUint16(6, true), view.getUint16(8, true));
+  if (bytes.byteLength < 4 || view.getUint16(0) !== 0xffd8) return null;
+  for (let offset = 2; offset + 9 <= bytes.byteLength;) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1]!;
+    if (marker === 0xff) {
+      offset++;
+      continue;
+    }
+    // Start-of-frame markers carry the size; DHT (C4), JPG (C8) and DAC (CC) share the range but do not.
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc)
+      return sized('jpg', view.getUint16(offset + 7), view.getUint16(offset + 5));
+    offset += 2 + view.getUint16(offset + 2);
+  }
+  return null;
+}
+
+/** The Files ids of the images a spec places, in order and without repeats; empty for a spec that does not parse. */
+export function officeImageIds(format: OfficeFormat, content: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = officeSpecSchemas[format].parse(JSON.parse(content));
+  } catch {
+    return [];
+  }
+  const blocks =
+    format === 'docx'
+      ? (parsed as z.infer<typeof documentSpecSchema>).blocks
+      : format === 'pptx'
+        ? (parsed as z.infer<typeof presentationSpecSchema>).slides.flatMap(slide => [
+            ...(slide.content ?? []),
+            ...(slide.left ?? []),
+            ...(slide.right ?? []),
+          ])
+        : [];
+  return [...new Set(blocks.flatMap(block => (block.type === 'image' ? [block.fileId] : [])))];
+}
+
+/**
+ * Renders a JSON spec. Spec errors throw OfficeSpecError with a message the model can act on.
+ * `images` holds the bytes for every image block's file; a block whose file is missing is a spec error.
+ */
+export async function renderOfficeDocument(
+  format: OfficeFormat,
+  content: string,
+  images: ReadonlyMap<string, OfficeImage> = new Map(),
+): Promise<Uint8Array> {
   let json: unknown;
   try {
     json = JSON.parse(content);
@@ -311,12 +377,17 @@ export async function renderOfficeDocument(format: OfficeFormat, content: string
   }
   const parsed = officeSpecSchemas[format].safeParse(json);
   if (!parsed.success) throw new OfficeSpecError(z.prettifyError(parsed.error).slice(0, 4000));
+  const imageOf = (fileId: string) => {
+    const found = images.get(fileId);
+    if (!found) throw new OfficeSpecError(`Image ${fileId} is not available.`);
+    return found;
+  };
   const bytes =
     format === 'docx'
-      ? await renderDocument(parsed.data as z.infer<typeof documentSpecSchema>)
+      ? await renderDocument(parsed.data as z.infer<typeof documentSpecSchema>, imageOf)
       : format === 'xlsx'
         ? await renderWorkbook(parsed.data as z.infer<typeof workbookSpecSchema>)
-        : await renderPresentation(parsed.data as z.infer<typeof presentationSpecSchema>);
+        : await renderPresentation(parsed.data as z.infer<typeof presentationSpecSchema>, imageOf);
   return stable(bytes);
 }
 
@@ -374,7 +445,16 @@ const runs = (value: Text) =>
     ? [{ text: value }]
     : value.map(entry => (typeof entry === 'string' ? { text: entry } : entry));
 
-async function renderDocument(spec: z.infer<typeof documentSpecSchema>) {
+/** The page's text area in pixels at 96 dpi: A4 less the default 1-inch margins. */
+const textArea = { portrait: { width: 602, height: 931 }, landscape: { width: 931, height: 602 } } as const;
+/** Scales an image to fit `width` × `height` without enlarging it, keeping its aspect ratio. */
+function fit(image: OfficeImage, width: number, height: number) {
+  const scale = Math.min(1, width / image.width, height / image.height);
+  return { width: image.width * scale, height: image.height * scale };
+}
+
+async function renderDocument(spec: z.infer<typeof documentSpecSchema>, imageOf: (fileId: string) => OfficeImage) {
+  let drawings = 0;
   const theme = themeOf(spec);
   const inline = (value: Text, extra: { bold?: boolean; italics?: boolean; color?: string } = {}) =>
     runs(value).map(entry => {
@@ -499,6 +579,29 @@ async function renderDocument(spec: z.infer<typeof documentSpecSchema>) {
         return [new Paragraph({ children: [new PageBreak()] })];
       case 'toc':
         return [new TableOfContents(block.title ?? 'Contents', { hyperlink: true, headingStyleRange: '1-3' })];
+      case 'image': {
+        const found = imageOf(block.fileId);
+        const area = textArea[spec.orientation];
+        const size = fit(found, (area.width * (block.width ?? 100)) / 100, area.height * 0.9);
+        return [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [
+              new ImageRun({
+                type: found.type,
+                data: found.bytes,
+                transformation: { width: Math.round(size.width), height: Math.round(size.height) },
+                // docx numbers drawings from a counter shared by the process; a per-document id keeps renders identical.
+                altText: {
+                  id: String(++drawings),
+                  name: `Image ${drawings}`,
+                  ...(block.alt ? { title: block.alt, description: block.alt } : {}),
+                },
+              }),
+            ],
+          }),
+        ];
+      }
     }
   });
   const heading = (size: number) => ({
@@ -653,7 +756,10 @@ async function renderWorkbook(spec: z.infer<typeof workbookSpecSchema>) {
   return new Uint8Array(await workbook.xlsx.writeBuffer());
 }
 
-async function renderPresentation(spec: z.infer<typeof presentationSpecSchema>) {
+async function renderPresentation(
+  spec: z.infer<typeof presentationSpecSchema>,
+  imageOf: (fileId: string) => OfficeImage,
+) {
   const theme = themeOf(spec);
   const deck = new Presentation();
   deck.author = 'TulipFarm';
@@ -699,7 +805,20 @@ async function renderPresentation(spec: z.infer<typeof presentationSpecSchema>) 
         valign: 'top' as const,
       };
       if (block.type === 'paragraph') slide.addText(textRuns(block.text), { ...base, align: block.align ?? 'left' });
-      else if (block.type === 'list')
+      else if (block.type === 'image') {
+        const found = imageOf(block.fileId);
+        // Fit within the block's share at 96 dpi, never enlarged, centred in the space left over.
+        const size = fit(found, ((w * (block.width ?? 100)) / 100) * 96, share * 96);
+        const [iw, ih] = [size.width / 96, size.height / 96];
+        slide.addImage({
+          data: `image/${found.type === 'jpg' ? 'jpeg' : found.type};base64,${Buffer.from(found.bytes).toString('base64')}`,
+          x: x + (w - iw) / 2,
+          y: y + (share - ih) / 2,
+          w: iw,
+          h: ih,
+          ...(block.alt ? { altText: block.alt } : {}),
+        });
+      } else if (block.type === 'list')
         slide.addText(listRuns(block.items, block.ordered ?? false, 0), { ...base, paraSpaceAfter: 6 });
       else if (block.type === 'chart') {
         const pie = block.kind === 'pie' || block.kind === 'doughnut';

@@ -12,6 +12,7 @@ import {
   OfficeSpecError,
   googleConversions,
   officeFormats,
+  officeImageIds,
   renderOfficeDocument,
 } from '@tulipfarm/conversations/office-documents';
 import { GoogleLifecycleError, type createGoogleOperations } from '@tulipfarm/google-workspace/operations';
@@ -196,6 +197,10 @@ export async function invokeGoogleTool(
         if (!call.operation === !call.document) return invalidProposal('Set exactly one of operation or document.');
         let operation = call.operation;
         if (call.document) {
+          if (officeImageIds(call.document.format, call.document.content).length)
+            return invalidProposal(
+              'No proposal was created. Images are not supported in Google Drive documents yet. Remove the image blocks, or save the file in Files instead.',
+            );
           let bytes: Uint8Array;
           try {
             bytes = await renderOfficeDocument(call.document.format, call.document.content);

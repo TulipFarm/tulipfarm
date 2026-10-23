@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import JSZip from 'jszip';
 import { AccessDenied } from '@tulipfarm/access';
 import { createFiles } from '../../../files/src/index.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
@@ -191,6 +192,128 @@ test(
     }
   },
 );
+
+test(
+  'an Office output places images the requester can read, records them as inputs, and refuses any it cannot use',
+  { timeout: 60000 },
+  async () => {
+    const f = await setup();
+    try {
+      const { workspace: w, member } = f;
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      const upload = async (user, name, mediaType, body) => {
+        const id = randomUUID();
+        await f.files.upload(w.id, user, id, { name, parentId: null, mediaType }, body);
+        return id;
+      };
+      const logo = await upload(w.userId, 'Logo.png', 'image/png', png);
+      const hidden = await upload(member.user, 'Private.png', 'image/png', png);
+      const notes = await upload(w.userId, 'Notes.txt', 'text/plain', Buffer.from('Not an image'));
+      const doc = (name, fileId) => ({
+        tool: 'files.create',
+        name,
+        format: 'docx',
+        content: JSON.stringify({ blocks: [{ type: 'image', fileId, alt: 'Logo' }] }),
+      });
+      const chatId = await f.chat(w.userId);
+      const sent = await f.send(w.userId, chatId, [{ kind: 'text', text: 'Put the logo in a document' }]);
+      const placed = doc('Brief', logo);
+      const deck = {
+        tool: 'files.create',
+        name: 'Deck',
+        format: 'pptx',
+        content: JSON.stringify({ slides: [{ layout: 'content', content: [{ type: 'image', fileId: logo }] }] }),
+      };
+      assert.equal(
+        await f.reply(chatId, sent, [
+          placed,
+          deck,
+          doc('Hidden', hidden),
+          doc('Text', notes),
+          doc('Missing', randomUUID()),
+        ]),
+        'completed',
+      );
+      const [brief, slides, ...refused] = await f.receipts(chatId);
+      assert.deepEqual(
+        [brief, slides].map(row => row.output.result.derivedFrom.map(source => [source.fileId, source.sha256])),
+        [
+          [[logo, createHash('sha256').update(png).digest('hex')]],
+          [[logo, createHash('sha256').update(png).digest('hex')]],
+        ],
+      );
+      assert.deepEqual(
+        refused.map(row => [
+          row.output.result.error,
+          row.output.result.instruction.match(/can't be read|not a PNG/)?.[0],
+        ]),
+        [
+          ['invalid-content', "can't be read"],
+          ['invalid-content', 'not a PNG'],
+          ['invalid-content', "can't be read"],
+        ],
+      );
+      const bytes = (await f.files.download(w.id, w.userId, fileOutputId(sent.turnId, placed))).bytes;
+      const media = Object.keys((await JSZip.loadAsync(bytes)).files).filter(name => name.startsWith('word/media/'));
+      assert.equal(media.length, 1);
+      assert.deepEqual(
+        (await f.rows()).map(row => row.name).filter(name => !['Logo.png', 'Private.png', 'Notes.txt'].includes(name)),
+        ['Brief.docx', 'Deck.pptx'],
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test('an image revoked while its output is published blocks the output', { timeout: 60000 }, async () => {
+  const f = await setup();
+  try {
+    const { workspace: w, member } = f;
+    const imageId = randomUUID();
+    await f.files.upload(
+      w.id,
+      w.userId,
+      imageId,
+      { name: 'Chart.png', parentId: null, mediaType: 'image/png' },
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    await f.files.share(w.id, w.userId, imageId, { kind: 'individual', id: member.id }, 'viewer');
+    const chatId = await f.chat(member.user);
+    const sent = await f.send(member.user, chatId, [{ kind: 'text', text: 'Make a deck with the chart' }]);
+    const revoking = createFiles(f.runtime, {
+      ...f.bytes,
+      putIfAbsent: async (key, body) => {
+        await f.bytes.putIfAbsent(key, body);
+        await f.files.share(w.id, w.userId, imageId, { kind: 'individual', id: member.id }, null);
+      },
+    });
+    const deck = {
+      tool: 'files.create',
+      name: 'Deck',
+      format: 'pptx',
+      content: JSON.stringify({ slides: [{ layout: 'content', content: [{ type: 'image', fileId: imageId }] }] }),
+    };
+    assert.equal(await f.reply(chatId, sent, [deck], revoking), 'completed');
+    assert.deepEqual(
+      (await f.receipts(chatId)).map(row => row.status),
+      ['blocked'],
+      'the call is denied, and the turn goes on without the file',
+    );
+    assert.deepEqual(
+      (await f.rows()).map(row => row.name),
+      ['Chart.png'],
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 test('a named folder is used only when the requester can add to it', { timeout: 60000 }, async () => {
   const f = await setup();

@@ -10,7 +10,7 @@ You write a JSON spec. TulipFarm renders it into a real `.docx` file with the ch
 
 ## 1. Plan the document
 
-Decide the sections before you write. Use one `title`, then `heading` blocks in order (level 1, then 2, then 3). Put lists, tables, and quotes where they help the reader. Add a `toc` block after the title for documents with more than about five headings. Add `pageNumbers`, and a `header` or `footer` for formal documents.
+Decide the sections before you write. Use one `title`, then `heading` blocks in order (level 1, then 2, then 3). Put lists, tables, quotes, and images where they help the reader. Add a `toc` block after the title for documents with more than about five headings. Add `pageNumbers`, and a `header` or `footer` for formal documents.
 
 Ask only about choices that change the document, such as audience or length. If the request is clear, write it.
 
@@ -27,7 +27,7 @@ Read `references/spec.md` with `skills.read` (pass `resource`) before you write 
 Ask one short question: save to Google Drive or to TulipFarm Files? Ask only when `google.propose` is in your tools. Without it, use Files and do not ask. If the person already named a destination, use it.
 
 - **Files**: call `files.create` with `name` (include the `.docx` extension), `format: "docx"`, and `content` set to the spec as a JSON string. Set `folderId` only when the person named an accessible folder. The created-file card lets the person open and download the file.
-- **Google Drive**: call `google.propose` with `document: {name, format: "docx", content}` and no `operation`. Set `folderId` only for a Drive folder the person named and you found with `google.read`. Drive converts the file to a native Google Doc. The proposal is a review card, not a saved file. Ask the person to approve it on the card. When they say to proceed, check it with `google.status`, then run it with `google.execute`. Share the link from the result.
+- **Google Drive**: images are not supported yet; if the spec has an `image` block, save to Files instead. Otherwise call `google.propose` with `document: {name, format: "docx", content}` and no `operation`. Set `folderId` only for a Drive folder the person named and you found with `google.read`. Drive converts the file to a native Google Doc. The proposal is a review card, not a saved file. Ask the person to approve it on the card. When they say to proceed, check it with `google.status`, then run it with `google.execute`. Share the link from the result.
 
 Never claim the file exists before `files.create` or `google.execute` succeeds.
 
