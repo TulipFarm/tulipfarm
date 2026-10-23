@@ -1561,7 +1561,30 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     default: '0.1',
-    description: 'Share of new traces to keep, from 0 to 1. Child spans follow their parent.',
+    description:
+      'Share of new traces to keep, from 0 to 1. Child spans follow their parent. Chat replies are always kept; background `job.*` traces use `CLOUD_TELEMETRY_JOB_SAMPLE_RATIO`.',
+    selfHost: { section: 'telemetry', commented: true },
+  },
+  {
+    name: 'CLOUD_TELEMETRY_JOB_SAMPLE_RATIO',
+    group: 'Telemetry and flags',
+    services: all,
+    requirement: 'optional',
+    secret: false,
+    default: '0.01',
+    description:
+      'Share of new background job traces (`job.*` sweeps) to keep, from 0 to 1. Failed jobs still log and count every run.',
+    selfHost: { section: 'telemetry', commented: true },
+  },
+  {
+    name: 'CLOUD_TELEMETRY_ENVIRONMENT',
+    group: 'Telemetry and flags',
+    services: all,
+    requirement: 'optional',
+    secret: false,
+    default: 'production',
+    description:
+      'The `deployment.environment` resource attribute and `environment` metric dimension in production, such as `staging`. Lowercase letters, digits and hyphens, up to 32 characters.',
     selfHost: { section: 'telemetry', commented: true },
   },
   {

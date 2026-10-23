@@ -11,7 +11,6 @@ test('common upgrades refuse unfinished resource work without changing receipts 
   try {
     const current = await workspaceTableMigrations();
     const baseline = current;
-    assert.equal(baseline.length, 1);
     const workspace = await db.create(baseline);
     const table = name => qualified(workspace.names.schema, name);
     const sql = 'CREATE TABLE {{schema}}.tf_upgrade_probe (id integer PRIMARY KEY)';
@@ -31,7 +30,10 @@ test('common upgrades refuse unfinished resource work without changing receipts 
       inTransaction(db.platform, client => applyCommonMigrations(client, workspace.id, stream)),
       /unfinished table work/,
     );
-    assert.equal(await inTransaction(db.platform, client => applyCommonMigrations(client, workspace.id, baseline)), 1);
+    assert.equal(
+      await inTransaction(db.platform, client => applyCommonMigrations(client, workspace.id, baseline)),
+      baseline.length,
+    );
     await db.platform.query(`UPDATE ${table('tf_authoring_commands')} SET status = 'accepted' WHERE id = $1`, [
       commandId,
     ]);
@@ -60,7 +62,7 @@ test('common upgrades refuse unfinished resource work without changing receipts 
       assert.equal(
         (await db.platform.query(`SELECT count(*)::integer AS count FROM ${table('tf_common_migrations')}`)).rows[0]
           .count,
-        1,
+        baseline.length,
       );
       assert.equal(
         (await db.platform.query('SELECT to_regclass($1) AS relation', [table('tf_upgrade_probe')])).rows[0].relation,
@@ -77,7 +79,7 @@ test('common upgrades refuse unfinished resource work without changing receipts 
     assert.equal(
       (await db.platform.query(`SELECT count(*)::integer AS count FROM ${table('tf_common_migrations')}`)).rows[0]
         .count,
-      2,
+      baseline.length + 1,
     );
   } finally {
     await db.close();
@@ -130,7 +132,7 @@ test(
       assert.equal(
         (await db.platform.query(`SELECT count(*)::integer AS count FROM ${table('tf_common_migrations')}`)).rows[0]
           .count,
-        1,
+        db.baseline.length,
       );
       assert.deepEqual((await author.query(`SELECT request_id, status FROM ${table('tf_authoring_commands')}`)).rows, [
         { request_id: 'racing-save', status: 'preparing' },

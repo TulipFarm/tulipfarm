@@ -781,6 +781,8 @@ export function registerConversations(
       `${base}/:chatId/messages/:messageId`,
       {
         logLevel: 'silent',
+        // The reply continues this request's trace, so it is always kept and the turn's trace id stays findable.
+        config: { alwaysSampleTrace: true },
         schema: schema(
           'sendConversationMessageV1',
           'Persist a message and queue its reply',

@@ -97,7 +97,7 @@ test(
               `SELECT count(*)::integer AS count FROM ${qualified(item.names.schema, 'tf_common_migrations')}`,
             )
           ).rows[0].count,
-          2,
+          db.baseline.length + 1,
         );
         await db.platform.query(`SELECT * FROM ${qualified(item.names.schema, 'tf_drain_probe')}`);
       }

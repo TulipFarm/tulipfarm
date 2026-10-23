@@ -19,10 +19,12 @@ import {
 import {
   context,
   metrics,
+  isSpanContextValid,
   ROOT_CONTEXT,
   SpanKind,
   SpanStatusCode,
   trace,
+  TraceFlags,
   type Attributes,
   type Context,
   type Span,
@@ -32,8 +34,6 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import {
   BatchSpanProcessor,
-  ParentBasedSampler,
-  TraceIdRatioBasedSampler,
   type ReadableSpan,
   type SpanExporter,
   type SpanProcessor,
@@ -63,8 +63,10 @@ import {
   type ModelFallbackOutcome,
   type ModelUsageUnknownReason,
 } from './model-errors.ts';
+import { alwaysSample, chatTurnSpan, telemetrySampler } from './sampling.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
+export { alwaysSample, chatTurnSpan, TelemetryRootSampler, telemetrySampler } from './sampling.ts';
 export { errorAttributes, telemetryErrorCode };
 export { withErrorStage, type ErrorStage } from './error-codes.ts';
 export {
@@ -210,7 +212,8 @@ export function sanitizeSpan(span: ReadableSpan): ReadableSpan {
     ended: span.ended,
     status: { code: span.status.code },
     attributes: Object.fromEntries(Object.entries(span.attributes).filter(([key, value]) => safeAttribute(key, value))),
-    links: [],
+    // A link is only a span context; its attributes could carry anything, so they are dropped.
+    links: span.links.map(link => ({ context: link.context })),
     events: [],
     resource: span.resource,
     instrumentationScope: span.instrumentationScope,
@@ -242,6 +245,7 @@ export class TelemetryConfigError extends Error {
 
 export type TelemetryConfig = {
   ratio: number;
+  jobRatio: number;
   headers: Record<string, string>;
   traces?: string;
   metrics?: string;
@@ -398,17 +402,31 @@ export function telemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig | undef
   )
     throw new TelemetryConfigError('CLOUD_TELEMETRY_OTLP_AUTHORIZATION');
   const headers = otlpHeaders(env.CLOUD_TELEMETRY_OTLP_HEADERS, authorization);
-  const rawRatio = setting(env.CLOUD_TELEMETRY_SAMPLE_RATIO) ?? '0.1';
-  const ratio = Number(rawRatio);
-  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(rawRatio) || !(ratio >= 0 && ratio <= 1))
-    throw new TelemetryConfigError('CLOUD_TELEMETRY_SAMPLE_RATIO');
+  const ratio = sampleRatio(env.CLOUD_TELEMETRY_SAMPLE_RATIO, '0.1', 'CLOUD_TELEMETRY_SAMPLE_RATIO');
+  const jobRatio = sampleRatio(env.CLOUD_TELEMETRY_JOB_SAMPLE_RATIO, '0.01', 'CLOUD_TELEMETRY_JOB_SAMPLE_RATIO');
+  if (setting(env.CLOUD_TELEMETRY_ENVIRONMENT) !== undefined && !telemetryEnvironment(env))
+    throw new TelemetryConfigError('CLOUD_TELEMETRY_ENVIRONMENT');
   return {
     ratio,
+    jobRatio,
     headers,
     ...(traces ? { traces } : {}),
     ...(metrics ? { metrics } : {}),
     ...(logs ? { logs } : {}),
   };
+}
+
+function sampleRatio(value: string | undefined, fallback: string, name: string) {
+  const raw = setting(value) ?? fallback;
+  const ratio = Number(raw);
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw) || !(ratio >= 0 && ratio <= 1)) throw new TelemetryConfigError(name);
+  return ratio;
+}
+
+// A bounded label: it becomes the deployment.environment resource attribute and the environment metric dimension.
+function telemetryEnvironment(env: NodeJS.ProcessEnv) {
+  const value = setting(env.CLOUD_TELEMETRY_ENVIRONMENT);
+  return value !== undefined && /^[a-z][a-z0-9-]{0,31}$/.test(value) ? value : undefined;
 }
 
 let dimensions: Attributes = {};
@@ -420,7 +438,7 @@ export function telemetryIdentity(build: BuildInfo, production = process.env.NOD
   buildCommit = identity.commit;
   dimensions = {
     application: scope,
-    environment: production ? 'production' : 'development',
+    environment: production ? (telemetryEnvironment(process.env) ?? 'production') : 'development',
     service,
     service_version: identity.version,
   };
@@ -563,7 +581,7 @@ export function startTelemetry(build: BuildInfo) {
     resource,
     autoDetectResources: false,
     instrumentations: [],
-    sampler: new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(config.ratio) }),
+    sampler: telemetrySampler(config.ratio, config.jobRatio),
     spanProcessors: config.traces ? [spanProcessor] : [],
     metricReaders,
     logRecordProcessors: logProcessors,
@@ -797,7 +815,9 @@ export function createKnowledgeSyncMetrics() {
 export function log(level: Level, category: Category, event: Event, attributes: Attributes = {}) {
   const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value, true)));
   const active = trace.getSpan(context.active())?.spanContext();
-  const fields = { ...dimensions, ...backgroundContext.getStore(), ...safe, category, commit: buildCommit };
+  // trace_sampled says whether trace_id can be found in the trace backend; unsampled ids were never exported.
+  const sampled = active ? { trace_sampled: (active.traceFlags & TraceFlags.SAMPLED) === TraceFlags.SAMPLED } : {};
+  const fields = { ...dimensions, ...backgroundContext.getStore(), ...safe, category, commit: buildCommit, ...sampled };
   process.stdout.write(
     `${JSON.stringify({ level, event, ...fields, trace_id: active?.traceId, span_id: active?.spanId })}\n`,
   );
@@ -1100,7 +1120,11 @@ export type ChatStage =
   | 'delivery'
   | 'dispatch'
   | 'recovery';
-export async function observeChatStage<T>(phase: ChatStage, call: () => Promise<T>): Promise<T> {
+export async function observeChatStage<T>(
+  phase: ChatStage,
+  call: () => Promise<T>,
+  attributes: { dispatch_source?: ChatDispatchSource } = {},
+): Promise<T> {
   const start = performance.now();
   let outcome = 'success';
   try {
@@ -1114,12 +1138,50 @@ export async function observeChatStage<T>(phase: ChatStage, call: () => Promise<
       .getMeter(scope)
       .createHistogram('cloud_chat_stage_duration', { unit: 's' })
       .record(seconds, { ...dimensions, phase, outcome });
-    log('info', 'activity', 'call_completed', { operation: `chat.${phase}`, outcome, duration_ms: seconds * 1000 });
+    log('info', 'activity', 'call_completed', {
+      operation: `chat.${phase}`,
+      outcome,
+      duration_ms: seconds * 1000,
+      ...attributes,
+    });
   }
 }
 
 /** `send` starts a reply from the send request; `sweep` is the background recovery path. */
 export type ChatDispatchSource = 'send' | 'sweep';
+/** The active trace id and whether it was sampled, for storing beside the record it produced. */
+export function activeTrace(): { traceId: string; sampled: boolean } | undefined {
+  const active = trace.getSpan(context.active())?.spanContext();
+  if (!active || !isSpanContextValid(active)) return undefined;
+  return { traceId: active.traceId, sampled: (active.traceFlags & TraceFlags.SAMPLED) === TraceFlags.SAMPLED };
+}
+
+/**
+ * Runs a reply dispatch under a trace that is always kept. A send already runs in a kept request trace and continues
+ * it; a sweep, or any unsampled caller, starts a `chat.turn` root linked to the span that dispatched it.
+ */
+export async function withChatTurnRoot<T>(source: ChatDispatchSource, call: () => Promise<T>): Promise<T> {
+  const parent = trace.getSpan(context.active())?.spanContext();
+  const valid = parent !== undefined && isSpanContextValid(parent);
+  if (source === 'send' && valid && (parent.traceFlags & TraceFlags.SAMPLED) === TraceFlags.SAMPLED) return call();
+  const span = trace.getTracer(scope).startSpan(
+    chatTurnSpan,
+    {
+      attributes: { dispatch_source: source, 'build.commit': buildCommit },
+      ...(valid ? { links: [{ context: parent }] } : {}),
+    },
+    ROOT_CONTEXT,
+  );
+  try {
+    return await context.with(trace.setSpan(ROOT_CONTEXT, span), call);
+  } catch (error) {
+    span.setAttributes(errorAttributes(error));
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    throw error;
+  } finally {
+    span.end();
+  }
+}
 /**
  * Why a turn was due: `undispatched` never started; `unclaimed` started but no worker claimed it within the grace;
  * `retry` waits out a failed attempt; `expired` lost its worker lease; `waiting` polls an external action.
@@ -1785,12 +1847,17 @@ export function recordTaskTransition(status: 'started' | 'paused' | 'failed' | '
   log(status === 'failed' ? 'error' : 'info', 'task', 'task_status_changed', attributes);
 }
 
-export function startHttp(method: string, route: string) {
+/** `alwaysSample` keeps the request's trace regardless of the ratio, for routes such as a chat send that start a reply. */
+export function startHttp(method: string, route: string, options: { alwaysSample?: boolean } = {}) {
   const safeMethod = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE|CONNECT)$/.test(method) ? method : '_OTHER';
   const attributes = { 'http.request.method': safeMethod, 'http.route': route, 'build.commit': buildCommit };
   const span = trace
     .getTracer(scope)
-    .startSpan(`${safeMethod} ${route}`, { kind: SpanKind.SERVER, attributes }, ROOT_CONTEXT);
+    .startSpan(
+      `${safeMethod} ${route}`,
+      { kind: SpanKind.SERVER, attributes },
+      options.alwaysSample ? alwaysSample(ROOT_CONTEXT) : ROOT_CONTEXT,
+    );
   const spanContext = trace.setSpan(ROOT_CONTEXT, span);
   const start = performance.now();
   let finished = false;

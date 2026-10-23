@@ -1,5 +1,10 @@
 import { createConversationExecutor, type ConversationRuntime, type ReplyWork } from './runtime.ts';
-import { observeChatStage, recordChatDispatch, type ChatDispatchSource } from '@tulipfarm/observability';
+import {
+  observeChatStage,
+  recordChatDispatch,
+  withChatTurnRoot,
+  type ChatDispatchSource,
+} from '@tulipfarm/observability';
 
 /** Default time a started reply may stay unclaimed before the sweep starts it again. */
 export const defaultDispatchGraceMs = 5_000;
@@ -22,7 +27,10 @@ export function createConversationDispatch(options: {
     for (const { work, reason } of await executor.lease(workspaceId, scope.conversationId, graceMs)) {
       let started = false;
       try {
-        await observeChatStage('dispatch', () => options.start(work, source));
+        // Each reply starts under a kept trace, so the turn can record a trace id that is always findable.
+        await withChatTurnRoot(source, () =>
+          observeChatStage('dispatch', () => options.start(work, source), { dispatch_source: source }),
+        );
         started = true;
         await executor.acknowledge(work, graceMs);
         recordChatDispatch(source, 'success', reason);

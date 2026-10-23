@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
 import {
@@ -316,7 +317,7 @@ test(
         await start(await defaults());
         await slack.link(f, f.signed.owner, f.workspace.membershipId, 'UOWNER');
         // Fixture linking writes the identity directly; this is the record call member consent makes in the same transaction.
-        await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+        await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
             product: 'slack',
             membershipId: f.workspace.membershipId,
@@ -366,7 +367,7 @@ test(
         const owner = await atlassian.link(f, f.workspace.membershipId, 'owner-aaid');
         // Fixture linking writes the account directly; these are the record calls consent makes for each granted product.
         for (const product of ['jira', 'confluence'])
-          await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+          await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
             recordDefaultKnowledgeIntent(tx, {
               product,
               membershipId: f.workspace.membershipId,
@@ -421,7 +422,7 @@ test(
       async ({ f, q, defaults, start }) => {
         await start(await defaults());
         const owner = await atlassian.link(f, f.workspace.membershipId, 'owner-aaid');
-        await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+        await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
             product: 'jira',
             membershipId: f.workspace.membershipId,
@@ -503,7 +504,7 @@ test(
           }),
         );
         await slack.link(f, f.signed.owner, f.workspace.membershipId, 'UOWNER');
-        await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+        await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
             product: 'slack',
             membershipId: f.workspace.membershipId,
@@ -685,7 +686,7 @@ test(
       async ({ f, q, defaults, start, embeddingCalls }) => {
         await start(await defaults());
         await slack.link(f, f.signed.owner, f.workspace.membershipId, 'UOWNER');
-        await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+        await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
             product: 'slack',
             membershipId: f.workspace.membershipId,
@@ -733,7 +734,7 @@ test(
       async ({ f, q, defaults, start, embeddingCalls }) => {
         await start(await defaults());
         const owner = await atlassian.link(f, f.workspace.membershipId, 'owner-aaid');
-        await f.runtime.transaction(f.workspace.id, { minimum: 1, maximum: 1 }, tx =>
+        await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
           recordDefaultKnowledgeIntent(tx, {
             product: 'jira',
             membershipId: f.workspace.membershipId,

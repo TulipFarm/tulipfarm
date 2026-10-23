@@ -77,6 +77,7 @@ import { isCalendarReadCall } from '@tulipfarm/google-workspace/calendar-events'
 import {
   errorType,
   log,
+  activeTrace,
   modelErrorClass,
   observeChatStage,
   observeChatDetail,
@@ -653,9 +654,12 @@ export function createConversationExecutor(
         await changed(tx, work, true);
         return null;
       }
+      // The latest attempt's trace: an operator looks it up from the chat, so no id goes into telemetry.
+      const traced = activeTrace();
+      const traceColumns = tx.commonVersion >= 2;
       await tx.client.query(
-        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'processing', attempt_epoch = $2, attempts = attempts + 1, lease_until = clock_timestamp() + interval '60 seconds', retry_at = NULL, error_code = NULL WHERE id = $1`,
-        [turn.id, epoch],
+        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'processing', attempt_epoch = $2, attempts = attempts + 1, lease_until = clock_timestamp() + interval '60 seconds', retry_at = NULL, error_code = NULL${traceColumns ? ', trace_id = $3, trace_sampled = $4' : ''} WHERE id = $1`,
+        traceColumns ? [turn.id, epoch, traced?.traceId ?? null, traced?.sampled ?? null] : [turn.id, epoch],
       );
       await changed(tx, work);
       return { ...work, epoch };
