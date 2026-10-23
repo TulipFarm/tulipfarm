@@ -34,31 +34,31 @@ const numericPrecisionRules = Array.from({ length: 11 }, (_, scale) => {
   return rule;
 });
 
+/** Converts a table Zod schema with the shared label and numeric precision rules. */
+export function toJsonSchema(schema: z.ZodType) {
+  return z.toJSONSchema(schema, {
+    target: 'draft-2020-12',
+    io: 'input',
+    reused: 'ref',
+    override({ zodSchema, jsonSchema }) {
+      if (zodSchema === trimmedLabelSchema) {
+        delete jsonSchema.minLength;
+        jsonSchema.maxLength = 10000;
+      }
+      if (z.globalRegistry.get(zodSchema)?.['x-tulipfarm-trimmed-label'] === true) {
+        delete jsonSchema['x-tulipfarm-trimmed-label'];
+        jsonSchema.type = 'string';
+        delete jsonSchema.minLength;
+        jsonSchema.maxLength = 10000;
+        jsonSchema.pattern = labelPattern;
+      }
+      if (zodSchema === numericFieldSchema) jsonSchema.allOf = [...(jsonSchema.allOf ?? []), ...numericPrecisionRules];
+    },
+  });
+}
+
 function toTableJsonSchema(schema: typeof definitionSchema | typeof tableDocumentSchema, id: string, title: string) {
-  return {
-    ...z.toJSONSchema(schema, {
-      target: 'draft-2020-12',
-      io: 'input',
-      reused: 'ref',
-      override({ zodSchema, jsonSchema }) {
-        if (zodSchema === trimmedLabelSchema) {
-          delete jsonSchema.minLength;
-          jsonSchema.maxLength = 10000;
-        }
-        if (z.globalRegistry.get(zodSchema)?.['x-tulipfarm-trimmed-label'] === true) {
-          delete jsonSchema['x-tulipfarm-trimmed-label'];
-          jsonSchema.type = 'string';
-          delete jsonSchema.minLength;
-          jsonSchema.maxLength = 10000;
-          jsonSchema.pattern = labelPattern;
-        }
-        if (zodSchema === numericFieldSchema)
-          jsonSchema.allOf = [...(jsonSchema.allOf ?? []), ...numericPrecisionRules];
-      },
-    }),
-    $id: id,
-    title,
-  };
+  return { ...toJsonSchema(schema), $id: id, title };
 }
 
 export function tableDefinitionJsonSchema() {
