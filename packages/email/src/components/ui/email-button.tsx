@@ -11,7 +11,7 @@ export function EmailButton({ href, children }: EmailButtonProps) {
     <Section className="mt-8 text-center">
       <Button
         href={href}
-        className="box-border inline-block rounded-md bg-primary px-7 py-3 text-center text-base font-semibold text-primary-foreground no-underline"
+        className="box-border inline-block rounded-md bg-primary px-7 py-3 text-center text-base font-semibold text-primary-foreground no-underline hover:bg-primary-hover"
       >
         {children}
       </Button>
