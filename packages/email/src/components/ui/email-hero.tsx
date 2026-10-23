@@ -10,7 +10,7 @@ export interface EmailHeroProps {
 
 export function EmailHero({ eyebrow, title, description, children }: EmailHeroProps) {
   return (
-    <Section className="rounded-2xl bg-muted px-6 py-10 text-center sm:px-12 sm:py-14 dark:bg-muted-dark">
+    <Section className="border-0 border-b border-solid border-border bg-card px-6 py-10 text-center sm:px-12 sm:py-12 dark:border-border-dark dark:bg-card-dark">
       <Text className="m-0 mb-8 text-lg font-semibold tracking-tight text-foreground dark:text-foreground-dark">
         tulipfarm<span className="text-primary-text dark:text-primary-text-dark">.</span>
       </Text>

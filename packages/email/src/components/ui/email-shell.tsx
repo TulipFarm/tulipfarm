@@ -21,9 +21,9 @@ export function EmailShell({ preview, children, appUrl }: EmailShellProps) {
         <Preview>{preview}</Preview>
         <Body className="m-0 bg-background dark:bg-background-dark">
           <Section className="w-full bg-background px-4 py-8 font-sans text-foreground sm:py-12 dark:bg-background-dark dark:text-foreground-dark">
-            <Container className="mx-auto w-full max-w-[560px]">
+            <Container className="mx-auto w-full max-w-[560px] overflow-hidden rounded-xl border border-solid border-border bg-card dark:border-border-dark dark:bg-card-dark">
               {children}
-              <Section className="mt-10 border-0 border-t border-solid border-border px-2 pt-8 text-center dark:border-border-dark">
+              <Section className="border-0 border-t border-solid border-border px-6 py-8 text-center dark:border-border-dark">
                 <Text className="m-0 text-sm text-muted-foreground dark:text-muted-foreground-dark">
                   Your agents, at work in TulipFarm.
                 </Text>

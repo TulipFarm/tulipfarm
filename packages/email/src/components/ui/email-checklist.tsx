@@ -7,7 +7,7 @@ export interface EmailChecklistItem {
 
 export function EmailChecklist({ items }: { items: EmailChecklistItem[] }) {
   return (
-    <Section className="mb-6 rounded-xl border border-solid border-border dark:border-border-dark">
+    <Section className="mb-6 rounded-xl border border-solid border-border bg-card dark:border-border-dark dark:bg-card-dark">
       {items.map((item, index) => (
         <Row
           key={item.label}

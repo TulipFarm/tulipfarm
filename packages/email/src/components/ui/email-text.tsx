@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 import { Text } from 'react-email';
 
 const variants = {
-  body: 'm-0 mb-3 text-sm text-foreground dark:text-foreground-dark',
+  body: 'm-0 mb-3 text-base text-foreground dark:text-foreground-dark',
   muted: 'm-0 mb-3 text-sm text-muted-foreground dark:text-muted-foreground-dark',
-  emphasis: 'm-0 font-semibold text-foreground dark:text-foreground-dark',
+  emphasis: 'm-0 text-base font-semibold text-foreground dark:text-foreground-dark',
 } as const;
 
 export interface EmailTextProps {

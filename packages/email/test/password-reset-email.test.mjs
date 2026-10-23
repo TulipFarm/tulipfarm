@@ -14,3 +14,19 @@ test('the password reset email links to the reset page and states its expiry', a
   assert.match(email.text, /pat@example\.test/);
   assert.match(email.text, /60 minutes|1 hour/);
 });
+
+test('email styles use the Sprout 0.8.0 TulipFarm theme', async () => {
+  const email = await renderEmail({
+    template: 'password-reset',
+    props: {
+      email: 'pat@example.test',
+      url: 'https://app.example.test/reset',
+      expiresInMinutes: 60,
+    },
+  });
+
+  assert.match(email.html, /background-color:rgb\(249,249,250\)/);
+  assert.match(email.html, /background-color:rgb\(24,128,56\)/);
+  assert.match(email.html, /border-radius:12px/);
+  assert.match(email.html, /prefers-color-scheme:dark/);
+});
