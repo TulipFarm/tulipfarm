@@ -154,10 +154,39 @@ resumes its sync.
 
 At the start of every pass, an all-repositories source lists the account's
 repositories and adds any it does not know yet, up to 1,000 repositories per
-source. Repositories that another live source of the same owner already covers
-are skipped. A private repository visible without the `repo` scope is added and
+source. A private repository visible without the `repo` scope is added and
 reported as needing permission (see [Access status](#access-status)). A repository
 that cannot be resolved is skipped without failing the pass.
+
+### Chosen sources own their repositories
+
+A repository can be both in an all-repositories source and in a source whose
+owner chose repositories by name. The chosen source owns it, and the
+all-repositories source skips it, whichever was created first. A chosen source
+owns a repository when it has the same owner, is active or paused, keeps the
+repository included, its account is not disconnected, and it is shared with
+every member of the all-repositories source. When several chosen sources qualify,
+the one with the lowest source ID is named. If the all-repositories source is
+shared with a member the chosen source lacks, it keeps the repository so that
+member does not lose access; the owner then sees the repository from both sources.
+Of two all-repositories sources, each still skips repositories the other already
+knows.
+
+- When a chosen source adds, or includes again, a repository the all-repositories
+  source indexes, the all-repositories source tombstones that repository's
+  documents and revokes its access rows in the same transaction, and restarts its
+  current pass. It keeps the repository row, reported as `indexed-elsewhere`.
+- When the chosen source excludes the repository or is removed, the
+  all-repositories source restarts its pass and indexes the repository again, with
+  a full listing and, for commits, the full history.
+- Every pass of an all-repositories source re-checks ownership at the start,
+  withdraws repositories that became owned (for example after an account was
+  reconnected), skips owned repositories in listings and in the sweep, and indexes
+  released ones (for example after the chosen source's account was disconnected).
+  Without one of the hooks above, a change of ownership is therefore applied on the
+  next pass, so the repository can be found in both sources for at most one pass.
+- Owned repositories are not counted in the health counts for permissions, lost
+  access or failed sources, and still count towards the 1,000-repository bound.
 
 `excludePaths` holds up to 20 regular expressions of at most 200 characters.
 Each is matched against a repository-relative file path for the `docs` and `code`
@@ -231,16 +260,20 @@ The source DTO reports:
   installation). The Integrations page shows a reconnect prompt; only the owner
   sees the Reconnect GitHub button, and shared readers are told the owner must
   reconnect.
-- `repositoryCounts`: `active`, `excluded`, `needsPermission` and `accessLost`.
+- `repositoryCounts`: `active`, `excluded`, `indexedElsewhere`, `needsPermission`
+  and `accessLost`.
 
-Each repository has a `status` and `missingKinds`:
+Each repository has a `status`, `missingKinds` and `indexedBy` (the `sourceId` and
+title of the chosen source that owns it, or `null`). The all-repositories source
+settings and repository list show "Indexed by <title>" for those repositories.
 
-| Status             | Meaning                                                                                                                                                                            |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `active`           | Every selected kind is readable.                                                                                                                                                   |
-| `excluded`         | The owner opted the repository out.                                                                                                                                                |
-| `needs-permission` | The repository is visible but at least one selected kind is not readable: the account lacks the `repo` scope (every kind is missing), or GitHub returned 403 or 404 for that kind. |
-| `access-lost`      | A repository that was readable is now forbidden or removed from the account or installation.                                                                                       |
+| Status              | Meaning                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `active`            | Every selected kind is readable.                                                                                                                                                     |
+| `excluded`          | The owner opted the repository out.                                                                                                                                                  |
+| `indexed-elsewhere` | Only for an all-repositories source: a chosen source of the same owner indexes the repository (see [Chosen sources own their repositories](#chosen-sources-own-their-repositories)). |
+| `needs-permission`  | The repository is visible but at least one selected kind is not readable: the account lacks the `repo` scope (every kind is missing), or GitHub returned 403 or 404 for that kind.   |
+| `access-lost`       | A repository that was readable is now forbidden or removed from the account or installation.                                                                                         |
 
 A kind the listing cannot read (403, 404, GraphQL `FORBIDDEN` or insufficient
 scopes) is recorded as an item row with failure `denied`, no document and a
@@ -400,7 +433,8 @@ visibility, archive and edit actions, and installation events for every reposito
 they add or remove. The dispatch sweep reads pending deliveries and makes every
 active GitHub source due at once when it selects one of those repositories by ID
 and has not opted it out, or when it is an all-repositories source that does not
-know the repository yet (a new repository). It then closes the deliveries. A source
+know the repository yet (a new repository). An all-repositories source is not made
+due for a repository a chosen source owns. It then closes the deliveries. A source
 already running is asked to start another pass as soon as it finishes. The pass
 re-reads GitHub with the source owner's own account. A delivery not dispatched
 within an hour expires; polling covers it. At most 10,000 deliveries are pending
@@ -434,6 +468,16 @@ Common migration `0007_knowledge_github_commits.sql` allows the `commit` item ki
 adds `commit_head`. Before a workspace reaches that version, its sources index every
 selected kind except commits.
 
+Common migration `0010_github_knowledge_commits_backfill.sql` turns on `commits` for
+GitHub sources created before that kind existed. A source is changed only when its
+kinds are exactly the earlier default set (`code`, `discussions`, `docs`, `issues`,
+`pulls`); a source with fewer kinds was narrowed by its owner and keeps its choice.
+Both stored selection copies change together, the change is skipped when it would
+collide with another source of the same owner, and `commit_head` is cleared so the
+next pass indexes the full commit history. Planned automatic sources with the
+earlier set are updated too. Running it again changes nothing. Workspaces below
+version 10 keep their kinds, and below version 7 commits are never indexed.
+
 ## Automatic Knowledge
 
 Every authorization of a personal account creates one owner-only all-repositories
@@ -453,7 +497,10 @@ active account, so existing accounts get their all-repositories source.
 lost access, a rename or transfer, and reconnecting a rejected credential.
 `test/github-opt-out.integration.mjs` covers automatic creation, new repositories
 on later passes, repository, kind, path and cutoff opt-outs, full history and the
-1,000-repository bound. `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
+1,000-repository bound. `test/github-ownership.integration.mjs` covers handover in both directions,
+webhook dispatch for owned repositories, shared and disconnected exceptions,
+duplicate-free search, and migration 0010 (idempotence, narrowed sources, cleared
+commit heads and a full commit history afterwards). `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
 lexical search, embeddings, and the search coordinator with a fixture provider.
 `packages/github/test/corpus-provider.test.mjs` covers REST and GraphQL mapping
 against `packages/github/test/corpus-fixture.mjs`, including head-unchanged skips,

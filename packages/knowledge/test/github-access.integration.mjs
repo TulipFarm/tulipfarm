@@ -203,7 +203,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           7002: ['active', 'acme/roadmap', []],
           7003: ['needs-permission', 'acme/private-notes', allKinds],
         });
-        assert.deepEqual(source.repositoryCounts, { active: 2, excluded: 0, needsPermission: 1, accessLost: 0 });
+        assert.deepEqual(source.repositoryCounts, {
+          active: 2,
+          excluded: 0,
+          needsPermission: 1,
+          accessLost: 0,
+          indexedElsewhere: 0,
+        });
         assert.equal((await github.health(ws.id)).permissionRepositories, 1);
         const stale = await notice();
         assert.deepEqual(stale.notices, ['github-access-needs-attention']);
@@ -231,6 +237,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           excluded: 0,
           needsPermission: 1,
           accessLost: 0,
+          indexedElsewhere: 0,
         });
         assert.deepEqual((await listed()).counts, { total: 6, ready: 5, failed: 0 }, 'markers are not items');
         const titles = await found();
@@ -294,7 +301,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         const source = await listed();
         assert.equal(source.syncState, 'ready', 'other repositories keep syncing');
         assert.deepEqual((await statuses())[7001], ['access-lost', 'acme/handbook', []]);
-        assert.deepEqual(source.repositoryCounts, { active: 2, excluded: 0, needsPermission: 0, accessLost: 1 });
+        assert.deepEqual(source.repositoryCounts, {
+          active: 2,
+          excluded: 0,
+          needsPermission: 0,
+          accessLost: 1,
+          indexedElsewhere: 0,
+        });
         assert.equal((await github.health(ws.id)).lostRepositories, 1);
         assert.ok((await found()).every(title => !title.startsWith('acme/handbook')));
         assert.equal(await tombstoned(), 0);

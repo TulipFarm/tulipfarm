@@ -31,7 +31,11 @@ export async function discoverGitHubRepositories(
   return [...repositories.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
-export function filterGitHubRepositories(repositories: GitHubRepositoryChoice[], search: string, owner: string) {
+export function filterGitHubRepositories<T extends GitHubRepositoryChoice>(
+  repositories: T[],
+  search: string,
+  owner: string,
+) {
   const query = search.trim().toLowerCase();
   return repositories.filter(
     repository =>

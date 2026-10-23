@@ -353,6 +353,7 @@ function GitHubSourceRow({
           {repositoryCounts.needsPermission > 0 && ` · ${repositoryCounts.needsPermission} need permission`}
           {repositoryCounts.accessLost > 0 && ` · ${repositoryCounts.accessLost} access lost`}
           {repositoryCounts.excluded > 0 && ` · ${repositoryCounts.excluded} excluded`}
+          {repositoryCounts.indexedElsewhere > 0 && ` · ${repositoryCounts.indexedElsewhere} indexed by another source`}
         </p>
       )}
       {source.counts && (
@@ -374,6 +375,8 @@ function GitHubSourceRow({
                 <Badge variant="warning">Needs permission</Badge>
               ) : repository.status === 'access-lost' ? (
                 <Badge variant="warning">Access lost</Badge>
+              ) : repository.status === 'indexed-elsewhere' ? (
+                <Badge variant="outline">Indexed by {repository.indexedBy?.title ?? 'another source'}</Badge>
               ) : (
                 <Badge variant="secondary">Active</Badge>
               )}

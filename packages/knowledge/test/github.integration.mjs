@@ -989,10 +989,17 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
               failure: 'forbidden',
               excluded: false,
               status: 'access-lost',
+              indexedBy: null,
               missingKinds: [],
             },
           );
-          assert.deepEqual(listed.repositoryCounts, { active: 1, excluded: 0, needsPermission: 0, accessLost: 1 });
+          assert.deepEqual(listed.repositoryCounts, {
+            active: 1,
+            excluded: 0,
+            needsPermission: 0,
+            accessLost: 1,
+            indexedElsewhere: 0,
+          });
           assert.equal((await github.health(ws.id)).lostRepositories, 1);
           assert.equal(await live(), 2, 'blocked repository content is retained, not tombstoned');
           assert.deepEqual(await titles(ownerActor), ['acme/handbook: docs/vendors.md']);

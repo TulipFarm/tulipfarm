@@ -329,12 +329,21 @@ export const githubKnowledgeDiscoverySchema = z.strictObject({
 });
 // `needs-permission`: the repository is visible but some selected kinds cannot be read (`missingKinds`).
 // `access-lost`: the repository can no longer be read at all; its content stays hidden until access returns.
-export const githubKnowledgeRepositoryStatusSchema = z.enum(['active', 'excluded', 'needs-permission', 'access-lost']);
+// `indexed-elsewhere`: an all-repositories source skips a repository the owner's chosen-repository source
+// (`indexedBy`) indexes; it takes the repository back when that source no longer does.
+export const githubKnowledgeRepositoryStatusSchema = z.enum([
+  'active',
+  'excluded',
+  'needs-permission',
+  'access-lost',
+  'indexed-elsewhere',
+]);
 export const githubKnowledgeRepositorySchema = repositorySchema.extend({
   state: z.enum(['active', 'unavailable']),
   failure: z.string().max(128).nullable(),
   excluded: z.boolean(),
   status: githubKnowledgeRepositoryStatusSchema,
+  indexedBy: z.strictObject({ sourceId: z.uuid(), title: z.string().max(2048) }).nullable(),
   missingKinds: z.array(githubCorpusKindSchema).max(githubCorpusKinds.length),
 });
 export const githubKnowledgeRepositoryCountsSchema = z.strictObject({
@@ -342,6 +351,7 @@ export const githubKnowledgeRepositoryCountsSchema = z.strictObject({
   excluded: z.number().int().nonnegative(),
   needsPermission: z.number().int().nonnegative(),
   accessLost: z.number().int().nonnegative(),
+  indexedElsewhere: z.number().int().nonnegative(),
 });
 export const githubKnowledgeSourceSchema = z.strictObject({
   sourceId: z.uuid(),
