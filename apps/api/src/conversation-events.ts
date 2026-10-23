@@ -12,6 +12,7 @@ import {
   type StreamText,
   type StreamTextState,
   type StreamTool,
+  type StreamSubagents,
 } from '@tulipfarm/conversations/events';
 import { recommendationEventChannel } from '@tulipfarm/workspace-storage/recommendations';
 import { recommendationNotificationSchema, type RecommendationStreamEvent } from '@tulipfarm/recommendations/contracts';
@@ -30,6 +31,7 @@ export type ConversationStreamEvent =
   | { event: typeof conversationStreamEvents.progress; data: StreamProgress }
   | { event: typeof conversationStreamEvents.avatar; data: StreamAvatar }
   | { event: typeof conversationStreamEvents.tool; data: StreamTool }
+  | { event: typeof conversationStreamEvents.subagents; data: StreamSubagents }
   | { event: typeof conversationStreamEvents.resync; data: Record<string, never> };
 
 export type ConversationEventHub = {
@@ -118,7 +120,14 @@ export function createConversationEventHub(options: ConversationEventHubOptions)
     }
     const result = conversationNotificationSchema.safeParse(parsed);
     if (!result.success) return;
+    // Stop requests are for the worker running the sub-agents, not for browsers.
+    if (result.data.kind === 'subagent-stop') return;
     const target = address(result.data.workspaceId, result.data.conversationId);
+    if (result.data.kind === 'subagents') {
+      const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
+      broadcast({ event: conversationStreamEvents.subagents, data: update }, target);
+      return;
+    }
     if (result.data.kind === 'tool') {
       const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
       broadcast({ event: conversationStreamEvents.tool, data: update }, target);

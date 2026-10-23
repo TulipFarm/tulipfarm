@@ -72,6 +72,44 @@ export function applyStreamTool(state: StreamTool | undefined, update: StreamToo
   return order < 0 || (order === 0 && (state.status !== 'running' || update.status === state.status)) ? state : update;
 }
 
+/** A sub-agent's state. `timed-out` and `stopped` sub-agents ended early and returned partial output. */
+export const subagentStatusSchema = z.enum(['queued', 'running', 'done', 'failed', 'timed-out', 'stopped']);
+export type SubagentStatus = z.infer<typeof subagentStatusSchema>;
+/** One sub-agent card. `key` is stable within its `agents.delegate` call; `step` is what it is doing now. */
+export const subagentCardSchema = z.strictObject({
+  key: z.string().regex(/^a[0-9]$/),
+  kind: z.enum(['saved', 'helper']),
+  name: z.string().min(1).max(60),
+  role: z.string().min(1).max(80),
+  status: subagentStatusSchema,
+  step: z.string().max(80).optional(),
+  credits: z.number().nonnegative(),
+  elapsedMs: count,
+});
+export type SubagentCard = z.infer<typeof subagentCardSchema>;
+/** Live sub-agent cards of one `agents.delegate` call, identified by the tool call's `id`. A later `seq` replaces an earlier one. */
+export const streamSubagentsSchema = streamIdentitySchema.omit({ step: true }).extend({
+  id,
+  seq: count,
+  agents: z.array(subagentCardSchema).min(1).max(5),
+});
+export type StreamSubagents = z.infer<typeof streamSubagentsSchema>;
+/** The result of one `agents.delegate` call: each sub-agent's final card and report, as the model and history see it. */
+export const subagentResultSchema = z.object({
+  agents: z
+    .array(subagentCardSchema.omit({ step: true }).extend({ report: z.string() }))
+    .min(1)
+    .max(5),
+  totalCredits: z.number().nonnegative(),
+});
+export type SubagentResult = z.infer<typeof subagentResultSchema>;
+
+export function applyStreamSubagents(state: StreamSubagents | undefined, update: StreamSubagents): StreamSubagents {
+  if (!state) return update;
+  const order = update.generation - state.generation || update.epoch - state.epoch || update.seq - state.seq;
+  return order <= 0 ? state : update;
+}
+
 const address = { workspaceId: id, conversationId: id };
 export const conversationNotificationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('text'), ...address, ...streamTextSchema.shape }),
@@ -79,6 +117,15 @@ export const conversationNotificationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('progress'), ...address, ...streamProgressSchema.shape }),
   z.strictObject({ kind: z.literal('avatar'), ...address, ...streamAvatarSchema.shape }),
   z.strictObject({ kind: z.literal('tool'), ...address, ...streamToolSchema.shape }),
+  z.strictObject({ kind: z.literal('subagents'), ...address, ...streamSubagentsSchema.shape }),
+  /** Asks the worker running `id`'s sub-agents to stop one of them. API replicas ignore it. */
+  z.strictObject({
+    kind: z.literal('subagent-stop'),
+    ...address,
+    turnId: id,
+    id,
+    key: subagentCardSchema.shape.key,
+  }),
 ]);
 export type ConversationNotification = z.infer<typeof conversationNotificationSchema>;
 
@@ -92,6 +139,8 @@ export const conversationStreamEvents = {
   progress: 'progress',
   avatar: 'avatar',
   tool: 'tool',
+  /** `streamSubagentsSchema` data. Live sub-agent cards of a running `agents.delegate` call. */
+  subagents: 'subagents',
   /** Notifications may have been missed. Read history again. */
   resync: 'resync',
 } as const;

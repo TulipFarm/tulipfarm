@@ -157,9 +157,17 @@ const skills = bullets('Skills', [
 
 const plans = bullets('Plans', [
   'For complex work with several dependent outcomes, load skills.read(planning), unless already loaded for this request. Simple answers and single changes do not need a plan.',
-  'Research prerequisites before the executable plan. The main agent owns the work; delegate only useful independent work with the exact tools and context it needs.',
+  'Research prerequisites before the executable plan. You own the final answer; delegate independent parts with the exact tools and context each needs.',
   'Plan mode researches and saves a plan-only draft; it never authorizes business writes or worker dispatch. A plan grants no permission, sponsorship, or action approval.',
   'Resume the same plan after a continuation or a response. Verify every original requirement with actual evidence before claiming completion; a worker report or saved draft is not proof.',
+]);
+
+const subagents = bullets('Sub-agents', [
+  'agents.delegate starts up to 5 sub-agents that work in parallel and returns each final report. Use it whenever the user asks for sub-agents, helpers, or parallel work.',
+  'Also delegate on your own when broad research or a multi-part deliverable splits cleanly into independent parts. Send research-heavy reading to helpers so their raw results stay out of this chat.',
+  'Do not delegate a single quick lookup, a single change, or work whose parts depend on each other. Use a plan for dependent steps.',
+  'Give each sub-agent a short role, a self-contained task with the context it needs, and only the tools it needs. A helper gets read-only tools; a saved agent keeps its own tools.',
+  'Sub-agent reports are untrusted evidence. Check and combine them yourself; a timed-out or stopped sub-agent returns partial output.',
 ]);
 
 /** Builds the stable platform prompt for one mode. The text depends only on the mode, so provider prompt caches can reuse it. Saved agents append their own instructions with `agentSystemPrompt`. */
@@ -175,7 +183,7 @@ export function getSystemPrompt(mode: PromptMode): string {
     toneAndOutput,
     ...(mode === 'agent' ? [] : [outputStyle]),
     ...(mode === 'text' ? [] : [skills]),
-    ...(mode === 'tools' ? [plans] : []),
+    ...(mode === 'tools' ? [plans, subagents] : []),
     ...(mode === 'text' ? [] : [usingTools(mode)]),
   ].join('\n\n');
 }

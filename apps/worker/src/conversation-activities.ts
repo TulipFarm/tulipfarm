@@ -8,7 +8,16 @@ import {
 } from '@tulipfarm/conversations/runtime';
 import { inferenceRouteSchema, type InferenceRoute, type ToolInferenceContext } from '@tulipfarm/agents/inference';
 import { respondToConversation } from './conversation-responder.ts';
-import { conversationPlanning, createChatTools, isExternalTool, toolObservation } from '@tulipfarm/agents/tools';
+import {
+  conversationPlanning,
+  createChatTools,
+  discoverToolNames,
+  isExternalTool,
+  toolObservation,
+} from '@tulipfarm/agents/tools';
+import { createSubagentPool, resultCapBytes } from '@tulipfarm/agents/subagents';
+import { createSubagentDelegation } from './subagent-composition.ts';
+import { createSubagentStops, type SubagentStops } from './subagent-stops.ts';
 import {
   observeChatStage,
   observeTool,
@@ -69,6 +78,9 @@ export function chatTitleRoute(env: NodeJS.ProcessEnv = process.env): InferenceR
 
 /** Starts a changed plan's scheduler at once instead of waiting for the recovery sweep. */
 export type PlanWake = (workspaceId: string, planId: string) => Promise<unknown>;
+/** Starts a task at once instead of waiting for the recovery sweep. */
+export type TaskWake = (workspaceId: string, taskId: string) => Promise<unknown>;
+let sharedSubagentStops: SubagentStops | undefined;
 export type MeteredReplyOptions = {
   externalContext?: ExternalConversationContext | undefined;
   slack?: SlackActionsFactory | undefined;
@@ -78,6 +90,9 @@ export type MeteredReplyOptions = {
   outputs?: FileOutputStore | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
   wakePlan?: PlanWake | undefined;
+  wakeTask?: TaskWake | undefined;
+  /** Delivers per-card Stop requests to running sub-agents. */
+  subagentStops?: SubagentStops | undefined;
   /** The inventory read context measurement already made for this attempt, reused instead of read again. */
   inventory?: ConversationInventoryReads | undefined;
   /** Summarises a long reply's older tool results. Without it, they are cut to stubs that can be reread. */
@@ -94,6 +109,8 @@ export function meteredReply(
     outputs,
     skillExecution,
     wakePlan,
+    wakeTask,
+    subagentStops = (sharedSubagentStops ??= createSubagentStops()),
     inventory,
     compactor,
   }: MeteredReplyOptions = {},
@@ -209,6 +226,32 @@ export function meteredReply(
           }) => publisher.avatar(step, avatar),
         }
       : undefined;
+    const subagentPool = createSubagentPool();
+    let delegations = 0;
+    const chatToolOptions = (
+      toolRuntime: Parameters<typeof createChatTools>[0],
+      tool?: string,
+    ): NonNullable<Parameters<typeof createChatTools>[1]> => ({
+      integrations:
+        tool === undefined || tool === 'github.issue.read'
+          ? createIntegrationService({ runtime: toolRuntime, keyring: integrationCredentialKeyring() })
+          : undefined,
+      atlassian: tool === undefined || tool.startsWith('atlassian.') ? atlassianChatOperations(toolRuntime) : undefined,
+      google: googleOperations,
+      slack,
+      github:
+        tool === undefined || tool.startsWith('github.personal.') || tool.startsWith('github.investigation.')
+          ? githubChatReads(toolRuntime)
+          : undefined,
+      objects,
+      knowledge,
+      knowledgeBudgetRuntime: runtime,
+      outputs: outputs ? { files: outputs, autonomous: !requester } : undefined,
+      skillExecution,
+      telemetryRuntime: externalContext ? 'slack' : 'chat',
+      wakePlan,
+      agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
+    });
     try {
       return await respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
@@ -248,25 +291,24 @@ export function meteredReply(
               }
               const invoke = () =>
                 createChatTools(context.runtime, {
-                  integrations:
-                    call.tool === 'github.issue.read'
-                      ? createIntegrationService({ runtime: context.runtime, keyring: integrationCredentialKeyring() })
+                  ...chatToolOptions(context.runtime, call.tool),
+                  subagents:
+                    call.tool === 'agents.delegate'
+                      ? createSubagentDelegation({
+                          runtime: context.runtime,
+                          route: { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
+                          meter: session.creditMeter,
+                          tools: createChatTools(context.runtime, chatToolOptions(context.runtime)),
+                          offered: new Set(discoverToolNames({ kind: 'chat', earlierMessages })),
+                          pool: subagentPool,
+                          // The report leaves room for the result's envelope inside the reply's tool-result cap.
+                          resultBytes: resultCapBytes(replyContext.context.window) - 1024,
+                          sequence: delegations++,
+                          publish: project ? undefined : (id, cards) => publisher.subagents(id, cards),
+                          stops: subagentStops,
+                          wakeTask,
+                        })
                       : undefined,
-                  atlassian: call.tool.startsWith('atlassian.') ? atlassianChatOperations(context.runtime) : undefined,
-                  google: googleOperations,
-                  slack,
-                  github:
-                    call.tool.startsWith('github.personal.') || call.tool.startsWith('github.investigation.')
-                      ? githubChatReads(context.runtime)
-                      : undefined,
-                  objects,
-                  knowledge,
-                  knowledgeBudgetRuntime: runtime,
-                  outputs: outputs ? { files: outputs, autonomous: !requester } : undefined,
-                  skillExecution,
-                  telemetryRuntime: externalContext ? 'slack' : 'chat',
-                  wakePlan,
-                  agentSetup: slackAgentSetupFromEnvironment(context.runtime),
                 }).invokeWithSources(
                   {
                     ...context,
@@ -358,6 +400,7 @@ export function createConversationActivities(
   compactor?: ConversationCompactor,
   skillExecution?: SkillExecutionFactory,
   wakePlan?: PlanWake,
+  wakeTask?: TaskWake,
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -387,6 +430,7 @@ export function createConversationActivities(
             outputs: files,
             skillExecution,
             wakePlan,
+            wakeTask,
             inventory,
             compactor: effectiveCompactor,
           }),

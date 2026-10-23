@@ -115,6 +115,7 @@ const coreChatTools = new Set(
     'knowledge.read',
     'web.search',
     'web.fetch',
+    'agents.delegate',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';

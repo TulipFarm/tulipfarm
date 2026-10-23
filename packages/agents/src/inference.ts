@@ -2684,6 +2684,8 @@ export async function inferSpecialist(
   meter: ToolModelMeter,
   maxCalls: number,
   resume?: { nextStep: number; spentCalls: number; receipts: readonly { call: FrameworkCall; result: unknown }[] },
+  /** A chat sub-agent stops on `signal`, and reports each activity and interim text so it can return partial output. */
+  live?: { signal?: AbortSignal; onActivity?: (activity: string) => void; onText?: (text: string) => void },
 ): Promise<{ text: string; calls: number }> {
   allowed = withKnowledgeRetrieveGrant(allowed);
   const config = inferenceRouteSchema.parse(route);
@@ -2716,6 +2718,7 @@ export async function inferSpecialist(
     if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: false });
   };
   for (let step = resume?.nextStep ?? 0; step <= maxCalls + 3; step++) {
+    live?.signal?.throwIfAborted();
     const selected = await withChatModelRequest('reply', async () => {
       const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
       const serialized = serializeChatRequest(wire.body);
@@ -2736,7 +2739,9 @@ export async function inferSpecialist(
               headers: wire.headers,
               body: serialized,
               redirect: 'manual',
-              signal: AbortSignal.timeout(config.timeoutMs),
+              signal: live?.signal
+                ? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), live.signal])
+                : AbortSignal.timeout(config.timeoutMs),
             });
             const json: unknown = await response.json().catch(() => null);
             return { response, json };
@@ -2766,6 +2771,7 @@ export async function inferSpecialist(
       continue;
     }
     if (!selected.calls.length) return { text: selected.text, calls };
+    if (selected.text.trim()) live?.onText?.(selected.text);
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
     const result = (call: NativeCall, output: string, error: boolean): ToolResult => ({
       id: call.id,
@@ -2804,9 +2810,10 @@ export async function inferSpecialist(
     );
     calls += valid.length;
     const outputs = await Promise.all(
-      valid.map(async ({ native, call, activity }) =>
-        result(native, toolOutput(call, await execute(call, activity)), false),
-      ),
+      valid.map(async ({ native, call, activity }) => {
+        live?.onActivity?.(activity);
+        return result(native, toolOutput(call, await execute(call, activity)), false);
+      }),
     );
     items.push({ kind: 'results', results: outputs });
   }

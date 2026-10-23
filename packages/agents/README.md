@@ -104,6 +104,18 @@ Only the starter receives results, and a result is withheld when its sources are
 Slack cannot use the tools. The `# Plans` prompt section routes complex work to the built-in
 [Planning procedure](skills/planning/SKILL.md).
 
+Chat runs sub-agents with `agents.delegate` ([`subagents.ts`](src/subagents.ts),
+[`subagent-contracts.ts`](src/subagent-contracts.ts)). One call starts up to five sub-agents in parallel: activated
+saved agents, which run as private child tasks of the turn, or temporary helpers that the chat names and gives a role,
+instructions, and a subset of its read-only tools. A helper's tools are the intersection of its request, the read-only
+helper tools, and the tools the chat is offered; a saved child's delegation tools are its definition's tools that the
+chat is offered. Helpers cannot delegate again, and saved children start at depth one of the existing limit of three. The reply waits for every sub-agent. Each has a time limit (default 180 seconds, at most
+300); one that reaches it ends as timed out, one stopped by the user or by stopping the reply ends as stopped, and both
+return their partial output. The tool result holds every report, bounded by the reply's 10% tool-result cap. Helpers
+charge the reply's credit hold; a saved child spends from its own task allowance (25 credits unless the call asks for
+up to 100), and its spending is counted in the call's total. The worker publishes live cards as `subagents` stream events, and the chat shows them with Sprout's `AgentFanout`.
+Saved agents and Slack cannot use the tool. Telemetry records kind, outcome, duration, and credits only.
+
 Planning plans use `0046_planning.sql`: original requirements, receipt-backed
 prerequisites, a draft lifecycle, main-agent ownership, and a final verification
 task. `plans.claim` binds one task attempt to the live chat turn, generation, and

@@ -412,6 +412,7 @@ export async function resultSources(
     case 'plans.claim':
     case 'plans.report':
     case 'plans.start':
+    case 'agents.delegate':
       throw new AccessDenied();
     default: {
       const exhaustive: never = call;

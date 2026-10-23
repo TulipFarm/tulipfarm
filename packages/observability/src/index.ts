@@ -2024,6 +2024,30 @@ export function recordTitleGeneration(outcome: TitleGenerationOutcome, seconds: 
   });
 }
 
+/**
+ * Records one chat sub-agent that ended. Only its kind, outcome, duration, and credits are kept; never its name, task,
+ * report, or any identifier.
+ */
+export function recordSubagent(
+  kind: 'saved' | 'helper',
+  outcome: 'done' | 'failed' | 'timed-out' | 'stopped',
+  seconds: number,
+  credits: number,
+) {
+  const attributes = { 'subagent.kind': kind };
+  callMetrics('activity', 'chat.subagent', outcome, seconds, attributes);
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_subagent_credits', { description: 'Credits spent by chat sub-agents' })
+    .add(Math.max(0, credits), { ...dimensions, ...attributes, outcome });
+  log(outcome === 'failed' ? 'warn' : 'info', 'activity', outcome === 'failed' ? 'call_failed' : 'call_completed', {
+    operation: 'chat.subagent',
+    ...attributes,
+    outcome,
+    duration_ms: Math.round(seconds * 1000),
+  });
+}
+
 export function recordTaskTransition(status: 'started' | 'paused' | 'failed' | 'completed') {
   const attributes = { runtime: 'task', status };
   metrics

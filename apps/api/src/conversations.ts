@@ -12,6 +12,8 @@ import {
   chatSchema,
   controlResultSchema,
   controlTurnSchema,
+  stopSubagentResultSchema,
+  stopSubagentSchema,
   cursorSchema,
   deleteChatSchema,
   fileAudienceQuerySchema,
@@ -883,5 +885,22 @@ export function registerConversations(
         },
       );
     }
+    routes.post(
+      `${base}/:chatId/turns/:turnId/subagents/stop`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'stopConversationSubagentV1',
+          'Stop one sub-agent of a running reply',
+          turnParams,
+          stopSubagentResultSchema,
+          stopSubagentSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, chatId, turnId } = turnParams.parse(request.params);
+        return service.stopSubagent(workspaceId, user(request), chatId, turnId, stopSubagentSchema.parse(request.body));
+      },
+    );
   });
 }

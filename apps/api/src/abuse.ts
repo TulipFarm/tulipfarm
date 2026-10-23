@@ -41,6 +41,7 @@ const mutations = new Map<string, Policy>([
   ['sendConversationMessageV1', { name: 'conversation-send', max: 60, windowMs: 60_000 }],
   ['retryConversationTurnV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
   ['cancelConversationTurnV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
+  ['stopConversationSubagentV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
   ['deleteConversationV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
   ['reserveConversationUploadV1', { name: 'conversation-upload', max: 30, windowMs: 60_000 }],
   ['uploadConversationBytesV1', { name: 'conversation-upload', max: 30, windowMs: 60_000 }],

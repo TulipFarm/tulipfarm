@@ -387,7 +387,15 @@ export async function beginReplySession(input: {
     committed(result.opened, result.flushed);
   }
 
-  const meter: ToolModelMeter = async attempt => {
+  // Sub-agents reserve from the same hold at once; one reservation and top-up runs at a time.
+  let reserving: Promise<unknown> = Promise.resolve();
+  const meter: ToolModelMeter = attempt => meterWith(attempt);
+  const meterWith = (attempt: Parameters<ToolModelMeter>[0], spent?: (credits: number) => void) => {
+    const reserved = reserving.then(() => reserve(attempt, spent));
+    reserving = reserved.catch(() => {});
+    return reserved;
+  };
+  const reserve = async (attempt: Parameters<ToolModelMeter>[0], spent?: (credits: number) => void) => {
     if (lost) throw lost instanceof AccessDenied ? lost : new AccessDenied();
     const model = [chat, input.fallback, input.completionCheck].find(
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
@@ -409,8 +417,11 @@ export async function beginReplySession(input: {
       started: performance.now(),
     };
     hold!.calls.push(call);
-    lastStep = Math.max(lastStep, attempt.step);
-    lastInputBytes = attempt.inputBytes;
+    // Sub-agent calls use their own step range; the reply's checkpoints keep following the chat's own steps.
+    if (!spent) {
+      lastStep = Math.max(lastStep, attempt.step);
+      lastInputBytes = attempt.inputBytes;
+    }
     const date = new Date().toISOString().slice(0, 10);
     return async (usage: InferenceUsage, outcome?: { rejected: boolean }) => {
       call.milliseconds = performance.now() - call.started;
@@ -428,7 +439,10 @@ export async function beginReplySession(input: {
         usage: { kind, tokens },
         date,
       });
-      if (cost.kind === 'known') call.usage = { providerPicoUsd: cost.providerPicoUsd, tokens };
+      if (cost.kind === 'known') {
+        call.usage = { providerPicoUsd: cost.providerPicoUsd, tokens };
+        spent?.(Number(units(cost.providerPicoUsd)) / 1e12);
+      }
     };
   };
 
@@ -436,6 +450,11 @@ export async function beginReplySession(input: {
     requester: requester as Actor | null,
     destinations: started.destinations,
     meter,
+    /** The reply's meter that also reports each call's credits, for a sub-agent's running total. */
+    creditMeter:
+      (spent: (credits: number) => void): ToolModelMeter =>
+      attempt =>
+        meterWith(attempt, spent),
     sources: contextSources,
     readWorkspaceInventory: input.inventory ? async () => inventory : undefined,
     catalog: withCatalog && requester ? async () => catalog : undefined,

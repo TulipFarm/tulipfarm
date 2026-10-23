@@ -159,6 +159,14 @@
       "types": "./dist/tasks.d.ts",
       "default": "./dist/tasks.js"
     },
+    "./subagents": {
+      "types": "./dist/subagents.d.ts",
+      "default": "./dist/subagents.js"
+    },
+    "./subagent-contracts": {
+      "types": "./dist/subagent-contracts.d.ts",
+      "default": "./dist/subagent-contracts.js"
+    },
     "./task-contracts": {
       "types": "./dist/task-contracts.d.ts",
       "default": "./dist/task-contracts.js"
