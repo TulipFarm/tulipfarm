@@ -4,5 +4,9 @@
   "singleQuote": true,
   "arrowParens": "avoid",
   "sortPackageJson": false,
-  "ignorePatterns": ["packages/config/schemas/model-catalog.v1.json"]
+  "ignorePatterns": [
+    "packages/config/schemas/model-catalog.v1.json",
+    "packages/tables/schemas/table.v1.json",
+    "packages/tables/schemas/soul-table.v1.json"
+  ]
 }
