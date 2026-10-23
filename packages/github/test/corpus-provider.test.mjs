@@ -19,7 +19,14 @@ const accountId = '22222222-2222-4222-8222-222222222222';
 const after = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 const selection = { repositories: ['acme/handbook'], kinds: ['discussions', 'docs', 'issues', 'pulls'], after };
 
-function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages, extractBinary } = {}) {
+function setup({
+  scopes = ['repo', 'read:user'],
+  generation = 4,
+  discoveryPages,
+  extractBinary,
+  sleeps = [],
+  wrap = f => f,
+} = {}) {
   const github = fakeGitHub();
   const token = github.token(101, 'reader');
   const repo = github.addRepo({
@@ -82,14 +89,20 @@ function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages,
   const provider = createGitHubCorpusProvider({
     accounts,
     ...(extractBinary ? { extractBinary } : {}),
-    fetcher: discoveryPages
-      ? async (input, init) => {
-          const url = new URL(input);
-          return url.pathname === '/user/repos'
-            ? Response.json(discoveryPages[Number(url.searchParams.get('page')) - 1] ?? [])
-            : github.fetcher(input, init);
-        }
-      : github.fetcher,
+    fetcher: wrap(
+      discoveryPages
+        ? async (input, init) => {
+            const url = new URL(input);
+            return url.pathname === '/user/repos'
+              ? Response.json(discoveryPages[Number(url.searchParams.get('page')) - 1] ?? [])
+              : github.fetcher(input, init);
+          }
+        : github.fetcher,
+    ),
+    sleep: async ms => {
+      sleeps.push(ms);
+    },
+    random: () => 1,
   });
   const binding = { accountId, accountGeneration: generation, githubUserId: '101', login: 'reader' };
   return { github, repo, provider, binding, token, rejected: () => rejected };
@@ -418,7 +431,7 @@ test('GitHub corpus failures log exact HTTP status and a fixed endpoint class wi
 });
 
 test('rate limits carry retry-after and credential rejection invalidates the account', async () => {
-  const { provider, binding, github, rejected } = setup();
+  let { provider, binding, github, rejected } = setup();
   github.state.failure = () =>
     new Response('{}', {
       status: 403,
@@ -432,6 +445,15 @@ test('rate limits carry retry-after and credential rejection invalidates the acc
       error.retryAfterMs > 60000 &&
       error.retryAfterMs <= 91000,
   );
+  // The exhausted budget is remembered: the next request pauses without spending a call.
+  const spent = github.calls.length;
+  github.state.failure = null;
+  await assert.rejects(
+    provider.access(workspaceId, 'reader', binding, '7001'),
+    error => error.code === 'rate-limited' && error.retryAfterMs > 60000,
+  );
+  assert.equal(github.calls.length, spent);
+  ({ provider, binding, github, rejected } = setup());
   github.state.failure = () => new Response('{}', { status: 429, headers: { 'retry-after': '7' } });
   await assert.rejects(
     provider.list(workspaceId, 'reader', binding, '7001', selection, null),
@@ -592,7 +614,7 @@ test('a truncated recursive tree is walked one directory at a time so every file
   assert.deepEqual(walked.toSorted(), expected.toSorted(), 'the walk lists the same files as the complete tree');
   assert.ok(pages.some(page => /^code:[a-f0-9]{40}:w\d+(?:\.\d+)*(?:\+\d+)?$/.test(page.nextCursor ?? '')));
   assert.ok(
-    pages.every(page => page.observations.length <= 50),
+    pages.every(page => page.observations.length <= 100),
     'each page stays within the list page size',
   );
   const huge = walked.filter(id => id.endsWith('docs/huge.md'));
@@ -618,15 +640,15 @@ test('a truncated recursive tree is walked one directory at a time so every file
 
 test('a resumed listing continues inside a file with many parts', async () => {
   const { provider, binding, repo } = setup();
-  repo.files.set('data/huge.csv', 'r,1\n'.repeat(1700 * 1024));
+  repo.files.set('data/huge.csv', 'r,1\n'.repeat(3400 * 1024));
   const first = await provider.list(workspaceId, 'reader', binding, '7001', code, null);
-  assert.equal(first.observations.length, 50);
-  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+51$/);
+  assert.equal(first.observations.length, 100);
+  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+101$/);
   const items = await listAll(provider, binding, '7001', code);
   const parts = items.filter(item => item.path === 'data/huge.csv');
-  assert.equal(parts.length, 54);
-  assert.equal(new Set(parts.map(item => item.nativeId)).size, 54);
-  assert.equal(parts.at(-1).nativeId, 'code:7001:/p/54/data/huge.csv');
+  assert.equal(parts.length, 107);
+  assert.equal(new Set(parts.map(item => item.nativeId)).size, 107);
+  assert.equal(parts.at(-1).nativeId, 'code:7001:/p/107/data/huge.csv');
 });
 
 test('large files are streamed from the blob API in line-aligned parts that cover every byte once', async () => {
@@ -1052,4 +1074,78 @@ test('access checks can include repositories the connection sees but cannot read
     ),
     ['7001'],
   );
+});
+
+test('transient failures retry with exponential backoff before surfacing', async () => {
+  const sleeps = [];
+  const { provider, binding, github } = setup({ sleeps });
+  let failures = 2;
+  github.state.failure = () => (failures-- > 0 ? new Response('{}', { status: 503 }) : null);
+  const access = await provider.access(workspaceId, 'reader', binding, '7001');
+  assert.equal(access.readable, true);
+  assert.deepEqual(sleeps, [500, 1000]);
+  sleeps.length = 0;
+  const before = github.calls.length;
+  github.state.failure = () => new Response('{}', { status: 502 });
+  await assert.rejects(provider.access(workspaceId, 'reader', binding, '7001'), error => error.code === 'transient');
+  assert.equal(github.calls.length - before, 4, 'four attempts in total');
+  assert.deepEqual(sleeps, [500, 1000, 2000]);
+  sleeps.length = 0;
+  github.state.failure = () => Response.json({ message: 'Not Found' }, { status: 404 });
+  const denied = await provider.access(workspaceId, 'reader', binding, '7001').catch(error => error);
+  assert.ok(denied.readable === false || denied.code === 'forbidden');
+  assert.deepEqual(sleeps, [], 'a denial is not retried');
+  github.state.failure = () => Response.json({ message: 'Forbidden' }, { status: 403 });
+  await provider.access(workspaceId, 'reader', binding, '7001').catch(error => error);
+  assert.deepEqual(sleeps, [], 'a 403 without a rate limit is not retried');
+  const rejectedBefore = github.calls.length;
+  github.state.failure = () => Response.json({ message: 'Bad credentials' }, { status: 401 });
+  await assert.rejects(
+    provider.access(workspaceId, 'reader', binding, '7001'),
+    error => error.code === 'reconnect-required',
+  );
+  assert.equal(github.calls.length - rejectedBefore, 1, 'a rejected credential asks for reconnection at once');
+  assert.deepEqual(sleeps, []);
+});
+
+test('requests slow down as the rate budget drains and pause before it runs out', async () => {
+  const sleeps = [];
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  let remaining = 15;
+  const {
+    provider: paced,
+    binding,
+    github,
+  } = setup({
+    sleeps,
+    wrap: fetcher => async (input, init) => {
+      const response = await fetcher(input, init);
+      const headers = new Headers(response.headers);
+      headers.set('x-ratelimit-limit', '100');
+      headers.set('x-ratelimit-remaining', String(remaining));
+      headers.set('x-ratelimit-reset', String(reset));
+      return new Response(response.body, { status: response.status, headers });
+    },
+  });
+  await paced.access(workspaceId, 'reader', binding, '7001');
+  assert.deepEqual(sleeps, [], 'the first call has no budget to pace against');
+  await paced.access(workspaceId, 'reader', binding, '7001');
+  assert.equal(sleeps.length, 1, 'below a fifth of the budget, requests are spread until the reset');
+  assert.ok(sleeps[0] > 0 && sleeps[0] <= 10_000);
+  remaining = 5;
+  await paced.access(workspaceId, 'reader', binding, '7001');
+  const calls = github.calls.length;
+  await assert.rejects(
+    paced.access(workspaceId, 'reader', binding, '7001'),
+    error => error.code === 'rate-limited' && error.retryAfterMs > 500_000 && error.retryAfterMs <= 600_000,
+  );
+  assert.equal(github.calls.length, calls, 'the reserve is never spent by sync');
+});
+
+test('issue listings request the GitHub maximum page size', async () => {
+  const { provider, binding, github } = setup();
+  await listAll(provider, binding, '7001', { ...selection, kinds: ['issues'] });
+  const issues = github.calls.filter(call => call.path.endsWith('/issues'));
+  assert.ok(issues.length);
+  assert.ok(issues.every(call => call.query.per_page === '100'));
 });

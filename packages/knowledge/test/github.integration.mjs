@@ -178,7 +178,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         },
         list: async (_w, userId, b, id, selection, _cursor, history) => {
           own(userId, b);
-          if (state.listError) throw state.listError;
+          const listError = typeof state.listError === 'function' ? state.listError(id) : state.listError;
+          if (listError) throw listError;
           lists.push({ id, kinds: selection.kinds, history });
           const repo = state.repos.get(id);
           const kinds = { doc: 'docs', code: 'code', issue: 'issues', pull: 'pulls', discussion: 'discussions' };
@@ -211,7 +212,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           };
         },
       };
-      const github = createGitHubKnowledge({ runtime, provider });
+      const fast = { sleep: async () => {} };
+      const github = createGitHubKnowledge({ runtime, provider, sync: fast });
       const disabled = createKnowledgeEmbeddings({ runtime, github, config: { kind: 'disabled' } });
       const search = createKnowledgeSearch({ runtime, embeddings: disabled, github });
 
@@ -335,7 +337,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
 
       await t.test(
-        'list/read revision drift cannot publish mismatched content and the next reconciliation recovers',
+        'a revision fetched newer than the listing is indexed immediately under its own identity',
         async () => {
           const nativeId = 'doc:7001:docs/supplier.md';
           const item = state.repos.get('7001').items.get(nativeId);
@@ -350,38 +352,32 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
               }
             };
             await sync();
-            const receipt = (
+            const indexed = (
               await db.platform.query(
-                `SELECT i.failure,d.lexical_publication_id FROM ${table('github_items')} i
-          JOIN ${table('documents')} d ON d.id=i.document_id WHERE i.source_id=$1 AND i.native_id=$2`,
+                `SELECT i.failure,i.source_revision AS item_revision,r.source_revision,d.lexical_publication_id,o.markdown FROM ${table('github_items')} i
+          JOIN ${table('documents')} d ON d.id=i.document_id JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
+          JOIN ${table('github_originals')} o ON o.revision_id=r.id WHERE i.source_id=$1 AND i.native_id=$2`,
                 [sourceId, nativeId],
               )
             ).rows[0];
-            assert.equal(receipt.failure, 'source-changed');
-            assert.equal(receipt.lexical_publication_id, null);
+            assert.equal(indexed.failure, null);
+            assert.equal(indexed.item_revision, 'blob:drift-fetched', 'the item follows the revision that was read');
+            assert.equal(indexed.source_revision, 'blob:drift-fetched');
+            assert.match(indexed.markdown, /drift content must match the observed revision/);
+            assert.ok(indexed.lexical_publication_id, 'published in the same pass');
             assert.equal(
               (
                 await db.platform.query(
                   `SELECT count(*)::int n FROM ${table('revisions')} r
           JOIN ${table('documents')} d ON d.id=r.document_id
-          WHERE d.source_id=$1 AND r.source_revision IN ('blob:drift-listed','blob:drift-fetched')`,
+          WHERE d.source_id=$1 AND r.source_revision='blob:drift-listed'`,
                   [sourceId],
                 )
               ).rows[0].n,
               0,
+              'the listed revision never stores content it did not describe',
             );
-            await sync();
-            const recovered = (
-              await db.platform.query(
-                `SELECT i.failure,r.source_revision,d.lexical_publication_id FROM ${table('github_items')} i
-          JOIN ${table('documents')} d ON d.id=i.document_id JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
-          WHERE i.source_id=$1 AND i.native_id=$2`,
-                [sourceId, nativeId],
-              )
-            ).rows[0];
-            assert.equal(recovered.failure, null);
-            assert.equal(recovered.source_revision, 'blob:drift-fetched');
-            assert.ok(recovered.lexical_publication_id);
+            assert.equal((await query(ownerActor, 'drift')).hits.length, 1);
           } finally {
             state.beforeRead = null;
             Object.assign(item, original);
@@ -522,9 +518,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             selection: { ...input.selection, repositories: ['acme/handbook'] },
           });
           let expired = false;
+          // Expiry is injected mid-parse; one item at a time keeps it from landing between another item's check and publish.
           const importer = createGitHubKnowledge({
             runtime,
             provider,
+            sync: { ...fast, concurrency: 1 },
             parseDocument: async value => {
               const parsed = await parseKnowledgeDocument(value);
               if (!expired) {
@@ -607,6 +605,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           const importer = createGitHubKnowledge({
             runtime,
             provider,
+            sync: fast,
             parseDocument: async () => {
               parses++;
               throw new KnowledgeParseError('resource-limited', { reason: 'timeout' });
@@ -902,7 +901,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         state.listError = null;
         const failed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
         assert.equal(failed.failure, 'rate-limited');
+        assert.equal(failed.syncState, 'syncing', 'a rate limit pauses the pass instead of failing it');
         assert.ok(Date.parse(failed.nextAttemptAt) > Date.now() + 110000);
+        const paused = (
+          await db.platform.query(`SELECT cursor,lease_token FROM ${table('github_sources')} WHERE source_id=$1`, [
+            sourceId,
+          ])
+        ).rows[0];
+        assert.equal(paused.lease_token, null);
+        assert.equal(paused.cursor.phase, 'listing', 'the saved cursor is kept for the resumed pass');
         assert.equal(await live(), 3);
         state.omit = true;
         await sync();
@@ -982,6 +989,137 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           assert.equal((await query(ownerActor, 'acme')).hits.length, 2);
         },
       );
+
+      const itemFailure = async nativeId =>
+        (
+          await db.platform.query(`SELECT failure FROM ${table('github_items')} WHERE source_id=$1 AND native_id=$2`, [
+            sourceId,
+            nativeId,
+          ])
+        ).rows[0]?.failure;
+
+      await t.test('an item GitHub keeps failing is isolated and the pass still completes', async () => {
+        const nativeId = 'doc:7002:README.md';
+        const item = state.repos.get('7002').items.get(nativeId);
+        item.revision = 'blob:10';
+        item.text = 'orchid roadmap peony';
+        state.beforeRead = (_repositoryId, id) => {
+          if (id === nativeId) throw new GitHubCorpusError('transient');
+        };
+        try {
+          await sync();
+        } finally {
+          state.beforeRead = null;
+        }
+        const listed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+        assert.equal(listed.syncState, 'ready');
+        assert.equal(listed.failure, null, 'one failed item does not fail the source');
+        assert.equal(listed.counts.failed, 1);
+        assert.equal(await itemFailure(nativeId), 'transient');
+        assert.deepEqual((await query(ownerActor, 'peony')).hits, []);
+        assert.equal((await query(ownerActor, 'lilac')).hits.length, 1, 'other items stay published');
+        await sync();
+        assert.equal(await itemFailure(nativeId), null, 'the next pass retries the item');
+        assert.equal((await query(ownerActor, 'peony')).hits.length, 1);
+      });
+
+      await t.test('a repository GitHub keeps failing is set aside for the pass without tombstones', async () => {
+        const before = await live();
+        state.listError = id => (id === '7002' ? new GitHubCorpusError('transient') : null);
+        try {
+          await sync();
+        } finally {
+          state.listError = null;
+        }
+        const listed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+        assert.equal(listed.syncState, 'ready');
+        assert.equal(listed.failure, 'transient');
+        assert.equal(listed.state, 'active');
+        assert.equal(listed.repositories.find(r => r.repositoryId === '7002').state, 'active');
+        assert.equal(await live(), before, 'an isolated repository never tombstones');
+        await sync();
+        const recovered = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+        assert.equal(recovered.failure, null);
+        assert.equal(await live(), before);
+      });
+
+      await t.test('a transient owner access check is retried instead of blocking the repository', async () => {
+        let failures = 0;
+        state.accessError = userId =>
+          userId === ws.userId && failures === 0 ? (failures++, new GitHubCorpusError('transient')) : null;
+        try {
+          await sync();
+        } finally {
+          state.accessError = null;
+        }
+        assert.equal(failures, 1);
+        const listed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+        assert.equal(listed.failure, null, 'the retried check succeeded, so no repository was set aside');
+        assert.ok(listed.repositories.every(r => r.state === 'active'));
+      });
+
+      await t.test('a run is time-boxed, heartbeats and renews its lease while it works', async () => {
+        const stepped = createGitHubKnowledge({
+          runtime,
+          provider,
+          sync: { ...fast, runBudgetMs: 0, leaseRenewMs: 0 },
+        });
+        const leases = [];
+        let beats = 0;
+        state.accessGate = async userId => {
+          if (userId !== ws.userId) return;
+          leases.push(
+            (
+              await db.platform.query(`SELECT lease_until FROM ${table('github_sources')} WHERE source_id=$1`, [
+                sourceId,
+              ])
+            ).rows[0].lease_until,
+          );
+        };
+        let runs = 0,
+          result;
+        try {
+          for (; runs < 20 && result?.disposition !== 'ready'; runs++) {
+            await db.platform.query(
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const work = (await stepped.due(ws.id)).find(w => w.sourceId === sourceId);
+            result = await stepped.process(work, { heartbeat: () => beats++ });
+            if (result.disposition !== 'ready') assert.equal(result.disposition, 'retry');
+          }
+        } finally {
+          state.accessGate = null;
+        }
+        assert.equal(result.disposition, 'ready');
+        assert.ok(runs >= 3, `a zero budget makes one step per run (${runs} runs)`);
+        assert.ok(beats >= runs);
+        assert.ok(leases.length >= 2);
+        assert.ok(
+          leases.every(lease => lease && lease.getTime() > Date.now() + 14 * 60000),
+          'the lease is renewed to a full term while work progresses',
+        );
+        await db.platform.query(
+          `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+          [sourceId],
+        );
+        const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+        assert.equal(
+          (await github.process(work)).disposition,
+          'ready',
+          'the default budget finishes a pass in one run',
+        );
+      });
+
+      await t.test('large sources are not capped by item or page counts', async () => {
+        await db.platform.query(
+          `UPDATE ${table('github_sources')} SET cursor=jsonb_set(cursor,'{pages}','25000') WHERE source_id=$1`,
+          [sourceId],
+        );
+        assert.equal((await sync()).disposition, 'ready');
+        const listed = (await github.list(ws.id, ws.userId)).items.find(s => s.sourceId === sourceId);
+        assert.equal(listed.failure, null);
+      });
 
       await t.test('hybrid embeddings use the same GitHub eligibility', async () => {
         await db.platform.query(

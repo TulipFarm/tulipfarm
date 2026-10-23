@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { setTimeout as wait } from 'node:timers/promises';
 import type { EngineClock } from './rolling.ts';
 import { z } from 'zod';
 import { createGitHubCorpusAdapter } from '../corpus-adapters.ts';
@@ -36,7 +38,7 @@ import {
   type GitHubRepository,
   type GitHubRepositoryAccess,
 } from '../github-contracts.ts';
-import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
+import { KnowledgeParseError, KnowledgeParserBusy, parseKnowledgeDocument } from '../parser.ts';
 import { citationSchema, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
@@ -54,7 +56,10 @@ const cursorSchema = z.strictObject({
   index: z.number().int().min(0).max(githubCorpusLimits.repositories),
   page: githubCorpusCursorTokenSchema.nullable(),
   after: z.string().max(1200).nullable(),
-  pages: z.number().int().min(0).max(20000),
+  // Progress counter only. A pass has no page cap; the stuck-loop guard rejects a cursor that repeats.
+  pages: z.number().int().min(0),
+  // Repositories set aside for the rest of this pass after a transient failure. They are retried on the next pass.
+  isolated: z.record(z.string().max(20), z.string().max(64)).optional(),
 });
 const initialCursor = () => cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0 });
 const sourceSchema = z.object({
@@ -118,6 +123,44 @@ const skippable = [
 const ownerDenials = [...repositoryDenials, 'insufficient-scope'];
 const ownerDenied = (error: unknown): error is GitHubCorpusError =>
   error instanceof GitHubCorpusError && ownerDenials.includes(error.code);
+// Failures that stay with one item or repository so the rest of the pass continues.
+const isolatable = (error: unknown): error is GitHubCorpusError =>
+  error instanceof GitHubCorpusError && ['transient', 'invalid-response', 'response-too-large'].includes(error.code);
+const rateLimited = (error: unknown): error is GitHubCorpusError =>
+  error instanceof GitHubCorpusError && error.code === 'rate-limited';
+const leaseMs = 15 * 60_000;
+export type GitHubSyncOptions = {
+  // Wall time one run spends on listing pages and sweep batches before it checkpoints and hands over.
+  runBudgetMs: number;
+  // Items fetched and indexed at the same time within one page or batch.
+  concurrency: number;
+  // How often a progressing run extends its 15-minute lease.
+  leaseRenewMs: number;
+  sleep: (ms: number) => Promise<void>;
+  random: () => number;
+};
+export type GitHubProcessOptions = { heartbeat?: () => void; signal?: AbortSignal };
+
+// Runs operation over items with at most limit in flight. After the first failure no new item starts.
+async function bounded<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>) {
+  const done = items.map(() => false);
+  let next = 0;
+  let failure = null as { error: unknown } | null;
+  const worker = async () => {
+    while (!failure && next < items.length) {
+      const index = next++;
+      try {
+        await operation(items[index] as T);
+        done[index] = true;
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  const prefix = done.indexOf(false);
+  return { completed: prefix === -1 ? items.length : prefix, failure };
+}
 
 // An optional cutoff only narrows history; it can be any past date.
 const cutoffValid = (after: string | null | undefined, now: number) => !after || Date.parse(after) <= now;
@@ -144,13 +187,46 @@ export function createGitHubKnowledge({
   telemetry = knowledgeTelemetry,
   gate,
   parseDocument = parseKnowledgeDocument,
+  sync = {},
 }: {
   runtime: Runtime;
   provider: GitHubCorpusProvider;
   parseDocument?: typeof parseKnowledgeDocument;
   telemetry?: Telemetry;
+  sync?: Partial<GitHubSyncOptions>;
 } & EngineClock) {
+  const tuning: GitHubSyncOptions = {
+    runBudgetMs: 5 * 60_000,
+    concurrency: 4,
+    leaseRenewMs: 60_000,
+    sleep: ms => wait(ms),
+    random: Math.random,
+    ...sync,
+  };
+  const sweepBatch = githubCorpusLimits.listPageSize;
   const corpus = createGitHubCorpusAdapter(provider);
+  // The host admits two parser processes at once; concurrent item fetches wait for a free one instead of failing.
+  async function parse(input: Parameters<typeof parseDocument>[0]) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await parseDocument(input);
+      } catch (error) {
+        if (!(error instanceof KnowledgeParserBusy) || attempt >= 600) throw error;
+        await wait(100);
+      }
+    }
+  }
+  // Transient permission checks retry with jittered backoff; only a real denial marks a repository unavailable.
+  async function retryTransient<T>(operation: () => Promise<T>) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (attempt >= 3 || !(error instanceof GitHubCorpusError) || error.code !== 'transient') throw error;
+        await tuning.sleep(Math.floor(tuning.random() * 1000 * 2 ** attempt));
+      }
+    }
+  }
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'github') throw new AccessDenied();
     if (
@@ -303,7 +379,7 @@ export function createGitHubKnowledge({
       .parse(
         (
           await tx.client.query(
-            `SELECT count(*)::int AS total,count(d.lexical_publication_id)::int AS ready,count(*) FILTER (WHERE i.failure IS NOT NULL)::int AS failed FROM ${table(tx, 'github_items')} i LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL WHERE i.source_id=$1 AND i.failure IS DISTINCT FROM $2`,
+            `SELECT count(*)::int AS total,count(d.lexical_publication_id)::int AS ready,count(*) FILTER (WHERE i.failure IS NOT NULL)::int AS failed FROM ${table(tx, 'github_items')} i LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL WHERE i.source_id=$1 AND i.failure IS DISTINCT FROM $2 AND (i.document_id IS NULL OR d.id IS NOT NULL)`,
             [s.source_id, deniedFailure],
           )
         ).rows[0],
@@ -325,7 +401,7 @@ export function createGitHubKnowledge({
         visibility: r.visibility,
         title: r.title,
         state: r.state,
-        failure: r.failure,
+        failure: r.failure ?? s.cursor.isolated?.[r.repository_id] ?? null,
         excluded: r.excluded,
         status,
         missingKinds:
@@ -744,7 +820,9 @@ export function createGitHubKnowledge({
     let failure: GitHubCorpusError | null = null;
     for (const binding of captured.bindings) {
       try {
-        const observed = await corpus.permissions(workspaceId, actor.userId, binding, repositoryId);
+        const observed = await retryTransient(() =>
+          corpus.permissions(workspaceId, actor.userId, binding, repositoryId),
+        );
         if (observed.repositoryId !== repositoryId) throw new GitHubCorpusError('invalid-response');
         if (!observed.readable) {
           failure = new GitHubCorpusError('forbidden');
@@ -929,7 +1007,21 @@ export function createGitHubKnowledge({
     );
     await tx.client.query(`DELETE FROM ${table(tx, 'access_proofs')} WHERE document_id=$1`, [documentId]);
   }
+  // Concurrent items of one repository share a single owner check; parallel checks would supersede each other.
+  const proofs = new Map<string, Promise<void>>();
   async function ensureOwnerProof(work: GitHubKnowledgeWork, token: string, repositoryId: string) {
+    const key = `${work.workspaceId}:${work.sourceId}:${repositoryId}`;
+    const next = (proofs.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => proveOwner(work, token, repositoryId));
+    proofs.set(key, next);
+    try {
+      await next;
+    } finally {
+      if (proofs.get(key) === next) proofs.delete(key);
+    }
+  }
+  async function proveOwner(work: GitHubKnowledgeWork, token: string, repositoryId: string) {
     const captured = await fenced(work, token, async (tx, s, actor) => ({
       actor,
       sourceId: s.source_id,
@@ -959,12 +1051,6 @@ export function createGitHubKnowledge({
             )
           ).rows[0],
         );
-      if (!prior) {
-        const count = z
-          .object({ n: z.number() })
-          .parse((await tx.client.query(`SELECT count(*)::int AS n FROM ${table(tx, 'github_items')}`)).rows[0]).n;
-        if (count >= 20000) throw new KnowledgeError('quota');
-      }
       if (prior && (prior.source_revision !== item.sourceRevision || item.coverage !== 'supported'))
         await clear(tx, documentId);
       await tx.client.query(
@@ -1023,8 +1109,29 @@ export function createGitHubKnowledge({
         s.selection,
         item.path ?? null,
       );
-      if (read.sourceRevision !== item.sourceRevision || read.nativeId !== item.nativeId)
+      if (read.nativeId !== item.nativeId || read.repositoryId !== item.repositoryId)
         throw new GitHubCorpusError('source-changed');
+      if (read.sourceRevision !== item.sourceRevision) {
+        // GitHub moved on after listing. Index the fetched revision now; the item row follows what was read.
+        const current = await fenced(work, token, async tx => {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_items')} SET source_revision=$3,failure=NULL WHERE source_id=$1 AND native_id=$2`,
+            [s.source_id, item.nativeId, read.sourceRevision],
+          );
+          return z
+            .object({ source_revision: z.string(), lexical_publication_id: uuidSchema.nullable() })
+            .optional()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT r.source_revision,d.lexical_publication_id FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'revisions')} r ON r.id=d.observed_revision_id WHERE d.id=$1 AND d.tombstoned_at IS NULL`,
+                  [documentId],
+                )
+              ).rows[0],
+            );
+        });
+        if (current?.source_revision === read.sourceRevision && current.lexical_publication_id) return;
+      }
       const bytes = Buffer.from(read.markdown);
       if (read.title.length > 512 || bytes.byteLength > githubCorpusLimits.markdownBytes)
         throw new KnowledgeError('quota');
@@ -1103,7 +1210,7 @@ export function createGitHubKnowledge({
       const content = Buffer.from(stored.markdown);
       if (content.byteLength !== stored.original.bytes || digest(content) !== stored.original.sha256)
         throw new KnowledgeError('integrity');
-      const parsed = await parseDocument({
+      const parsed = await parse({
         bytes: content,
         filename: 'github-document.md',
         mediaType: 'text/markdown',
@@ -1136,7 +1243,7 @@ export function createGitHubKnowledge({
       });
       telemetry.recordImport('item', 'ready');
     } catch (error) {
-      if (error instanceof KnowledgeError && error.code === 'superseded') throw error;
+      if ((error instanceof KnowledgeError && error.code === 'superseded') || rateLimited(error)) throw error;
       await fenced(work, token, async tx => {
         if (error instanceof GitHubCorpusError && ['not-found', 'outside-selection'].includes(error.code))
           await clear(tx, documentId, true);
@@ -1178,10 +1285,12 @@ export function createGitHubKnowledge({
             : 'provider',
         error instanceof KnowledgeParseError ? error.diagnostics : undefined,
       );
+      // The failure stays with this item. Denials and source-level faults still stop the run.
       if (
-        !(error instanceof KnowledgeParseError) &&
-        !(error instanceof KnowledgeError && ['quota', 'permission-expired'].includes(error.code)) &&
-        !(error instanceof GitHubCorpusError && skippable.includes(error.code))
+        denial(error) ||
+        error instanceof AccessDenied ||
+        (error instanceof GitHubCorpusError && !skippable.includes(error.code) && !isolatable(error)) ||
+        !(error instanceof KnowledgeParseError || error instanceof KnowledgeError || error instanceof GitHubCorpusError)
       )
         throw error;
     }
@@ -1240,12 +1349,15 @@ export function createGitHubKnowledge({
       }
     });
   }
-  async function process(value: GitHubKnowledgeWork): Promise<{ disposition: 'ready' | 'retry' | 'stale' | 'busy' }> {
+  async function process(
+    value: GitHubKnowledgeWork,
+    options: GitHubProcessOptions = {},
+  ): Promise<{ disposition: 'ready' | 'retry' | 'rate-limited' | 'stale' | 'busy' }> {
     denyMcpEgress();
     const work = githubKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
-    const claim = await transaction(work.workspaceId, async tx => {
+    const claimed = await transaction(work.workspaceId, async tx => {
       const s = await source(tx, work.sourceId);
       if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
@@ -1269,195 +1381,255 @@ export function createGitHubKnowledge({
         ]);
       }
       await tx.client.query(
-        `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
-        [s.source_id, token],
+        `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+$3::double precision*interval '1 millisecond',sync_state='syncing' WHERE source_id=$1`,
+        [s.source_id, token, leaseMs],
       );
       return s;
     });
-    if (typeof claim === 'string') return { disposition: claim };
-    try {
-      await fenced(work, token, async () => undefined);
-      const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };
-      await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 5, true);
-      const cursor = claim.cursor;
-      if (cursor.phase === 'listing' && cursor.index === 0 && !cursor.page && claim.selection.scope === 'all')
-        await follow(work, token, claim);
-      const selected = (await fenced(work, token, tx => repositories(tx, claim.source_id))).filter(r => !r.excluded);
-      if (cursor.phase === 'listing') {
-        if (cursor.pages >= 20000) throw new KnowledgeError('quota');
-        cursor.pages++;
-        const repository: Repository | undefined = selected[cursor.index];
-        if (!repository) {
-          cursor.phase = 'sweep';
-          cursor.page = null;
-        } else {
-          let accessible = true;
-          try {
-            accessible = await check(work.workspaceId, owner, claim.source_id, repository.repository_id, true);
-          } catch (error) {
-            if (!ownerDenied(error)) throw error;
-            accessible = false;
-          }
-          const history = await fenced(work, token, async tx =>
-            storesCommits(tx)
-              ? z
-                  .object({ commit_head: z.string().nullable() })
-                  .parse(
-                    (
-                      await tx.client.query(
-                        `SELECT commit_head FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
-                        [claim.source_id, repository.repository_id],
-                      )
-                    ).rows[0],
-                  )
-              : null,
-          );
-          const selection = history
-            ? claim.selection
-            : { ...claim.selection, kinds: claim.selection.kinds.filter(kind => kind !== 'commits') };
-          if (accessible && selection.kinds.length) {
-            try {
-              const page = await corpus.discover(
-                work.workspaceId,
-                claim.owner_user_id,
-                claim.binding,
-                repository.repository_id,
-                selection,
-                cursor.page,
-                ...(history ? [{ commitHead: history.commit_head }] : []),
-              );
-              if (page.nextCursor && page.nextCursor === cursor.page) throw new GitHubCorpusError('invalid-cursor');
-              for (const item of page.observations) {
-                if (item.repositoryId !== repository.repository_id) throw new GitHubCorpusError('invalid-response');
-                await ingest(work, token, claim, item);
-              }
-              const commits = history ? page.commits : undefined;
-              if (commits)
-                await fenced(work, token, async tx => {
-                  // Commits never change, so a listing of only the newer commits keeps every indexed commit current.
-                  // A commit not yet indexed stays unseen, so the sweep reads it again.
-                  if (commits.retained)
-                    await tx.client.query(
-                      `UPDATE ${table(tx, 'github_items')} i SET seen_generation=$3 FROM ${table(tx, 'documents')} d
-                      WHERE i.source_id=$1 AND i.repository_id=$2 AND i.kind='commit' AND d.id=i.document_id AND d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL`,
-                      [claim.source_id, repository.repository_id, claim.reconciliation],
-                    );
-                  await tx.client.query(
-                    `UPDATE ${table(tx, 'github_repositories')} SET commit_head=$3 WHERE source_id=$1 AND repository_id=$2`,
-                    [claim.source_id, repository.repository_id, commits.head],
-                  );
-                });
-              await fenced(work, token, tx => project(tx, claim.source_id, repository.repository_id));
-              cursor.page = page.nextCursor;
-            } catch (error) {
-              if (!ownerDenied(error)) throw error;
-              await fenced(work, token, tx => unavailable(tx, claim.source_id, repository.repository_id, error.code));
-              cursor.page = null;
-            }
-          } else cursor.page = null;
-          if (!cursor.page) {
-            cursor.index++;
-            if (cursor.index >= selected.length) cursor.phase = 'sweep';
-          }
-        }
-      } else {
-        const rows = await fenced(work, token, async tx =>
-          z
-            .array(
-              z.object({
-                native_id: z.string(),
-                repository_id: z.string(),
-                kind: z.string(),
-                source_revision: z.string(),
-                document_id: uuidSchema.nullable(),
-                path: z.string().nullable(),
-              }),
-            )
-            .parse(
-              (
-                await tx.client.query(
-                  `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
-          JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
-          LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
-          WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) AND i.failure IS DISTINCT FROM $4 ORDER BY i.native_id LIMIT 20`,
-                  [claim.source_id, claim.reconciliation, cursor.after, deniedFailure],
-                )
-              ).rows,
-            ),
-        );
-        const verified = new Map<string, boolean>();
-        const denied = new Set(
-          await fenced(work, token, async tx =>
-            z
-              .array(z.object({ repository_id: z.string(), kind: z.string() }))
+    if (typeof claimed === 'string') return { disposition: claimed };
+    const claim = claimed;
+    const cursor = claim.cursor;
+    const started = performance.now();
+    let renewed = started;
+    // Heartbeats Temporal and, while work progresses, extends the lease so only a genuinely stuck run is restarted.
+    const beat = async () => {
+      options.heartbeat?.();
+      if (performance.now() - renewed < tuning.leaseRenewMs) return;
+      renewed = performance.now();
+      await fenced(work, token, tx =>
+        tx.client.query(
+          `UPDATE ${table(tx, 'github_sources')} SET lease_until=clock_timestamp()+$2::double precision*interval '1 millisecond' WHERE source_id=$1`,
+          [work.sourceId, leaseMs],
+        ),
+      );
+    };
+    const isolate = (repositoryId: string, code: string) => {
+      cursor.isolated = { ...cursor.isolated, [repositoryId]: code };
+    };
+    const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };
+    // Owner check for one repository: false when GitHub denies it, isolated when GitHub is transiently unavailable.
+    const verify = async (repositoryId: string) => {
+      try {
+        return await check(work.workspaceId, owner, claim.source_id, repositoryId, true);
+      } catch (error) {
+        if (ownerDenied(error)) return false;
+        if (!isolatable(error)) throw error;
+        isolate(repositoryId, error.code);
+        return false;
+      }
+    };
+    const seen = new Set<string>();
+    let selected: Repository[] = [];
+    async function listing() {
+      cursor.pages++;
+      const repository: Repository | undefined = selected[cursor.index];
+      if (!repository) {
+        cursor.phase = 'sweep';
+        cursor.page = null;
+        return;
+      }
+      const accessible = await verify(repository.repository_id);
+      const history = await fenced(work, token, async tx =>
+        storesCommits(tx)
+          ? z
+              .object({ commit_head: z.string().nullable() })
               .parse(
                 (
                   await tx.client.query(
-                    `SELECT repository_id,kind FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND failure=$2 AND document_id IS NULL AND seen_generation=$3`,
-                    [claim.source_id, deniedFailure, claim.reconciliation],
+                    `SELECT commit_head FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+                    [claim.source_id, repository.repository_id],
                   )
-                ).rows,
+                ).rows[0],
               )
-              .map(row => `${row.repository_id}:${row.kind}`),
-          ),
-        );
-        for (const row of rows) {
-          let accessible = verified.get(row.repository_id);
-          if (accessible === undefined) {
-            try {
-              accessible = await check(work.workspaceId, owner, claim.source_id, row.repository_id, true);
-            } catch (error) {
-              if (!ownerDenied(error)) throw error;
-              accessible = false;
-            }
-            verified.set(row.repository_id, accessible);
-          }
-          // A kind this pass could not read stays hidden, without reading it, until the connection can read it again.
-          if (accessible && denied.has(`${row.repository_id}:${row.kind}`)) {
-            const documentId = row.document_id;
-            if (documentId) await fenced(work, token, tx => clear(tx, documentId));
-          } else if (accessible)
-            try {
-              const observed = await corpus.fetch(
-                work.workspaceId,
-                claim.owner_user_id,
-                claim.binding,
-                row.repository_id,
-                row.native_id,
-                claim.selection,
-                row.path,
+          : null,
+      );
+      const selection = history
+        ? claim.selection
+        : { ...claim.selection, kinds: claim.selection.kinds.filter(kind => kind !== 'commits') };
+      if (accessible && selection.kinds.length) {
+        try {
+          const page = await corpus.discover(
+            work.workspaceId,
+            claim.owner_user_id,
+            claim.binding,
+            repository.repository_id,
+            selection,
+            cursor.page,
+            ...(history ? [{ commitHead: history.commit_head }] : []),
+          );
+          // Stuck-loop guard: a repository that hands back a cursor it already returned cannot make progress.
+          const key = `${repository.repository_id}\n${page.nextCursor}`;
+          if (page.nextCursor && (page.nextCursor === cursor.page || seen.has(key)))
+            throw new GitHubCorpusError('invalid-cursor');
+          seen.add(key);
+          if (page.observations.some(item => item.repositoryId !== repository.repository_id))
+            throw new GitHubCorpusError('invalid-response');
+          const { failure } = await bounded(page.observations, tuning.concurrency, async item => {
+            await ingest(work, token, claim, item);
+            await beat();
+          });
+          if (failure) throw failure.error;
+          const commits = history ? page.commits : undefined;
+          if (commits)
+            await fenced(work, token, async tx => {
+              // Commits never change, so a listing of only the newer commits keeps every indexed commit current.
+              // A commit not yet indexed stays unseen, so the sweep reads it again.
+              if (commits.retained)
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'github_items')} i SET seen_generation=$3 FROM ${table(tx, 'documents')} d
+                  WHERE i.source_id=$1 AND i.repository_id=$2 AND i.kind='commit' AND d.id=i.document_id AND d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL`,
+                  [claim.source_id, repository.repository_id, claim.reconciliation],
+                );
+              await tx.client.query(
+                `UPDATE ${table(tx, 'github_repositories')} SET commit_head=$3 WHERE source_id=$1 AND repository_id=$2`,
+                [claim.source_id, repository.repository_id, commits.head],
               );
-              const { markdown: _markdown, ...observation } = observed;
-              await ingest(work, token, claim, observation);
-              await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
-            } catch (error) {
-              if (ownerDenied(error)) {
-                await fenced(work, token, tx => unavailable(tx, claim.source_id, row.repository_id, error.code));
-                verified.set(row.repository_id, false);
-              } else if (
-                !(error instanceof GitHubCorpusError) ||
-                !['not-found', 'outside-selection', 'too-large', 'unsupported'].includes(error.code)
-              )
-                throw error;
-              else if (row.document_id && ['not-found', 'outside-selection'].includes(error.code)) {
-                const documentId = row.document_id;
-                await fenced(work, token, tx => clear(tx, documentId, true));
-              }
-            }
-          cursor.after = row.native_id;
+            });
+          await fenced(work, token, tx => project(tx, claim.source_id, repository.repository_id));
+          cursor.page = page.nextCursor;
+        } catch (error) {
+          if (ownerDenied(error))
+            await fenced(work, token, tx => unavailable(tx, claim.source_id, repository.repository_id, error.code));
+          else if (isolatable(error)) isolate(repository.repository_id, error.code);
+          else throw error;
+          cursor.page = null;
         }
-        if (rows.length < 20) {
+      } else cursor.page = null;
+      if (!cursor.page) {
+        cursor.index++;
+        if (cursor.index >= selected.length) cursor.phase = 'sweep';
+      }
+    }
+    // One batch of items not seen in this pass. Returns true when the pass is complete.
+    async function sweep() {
+      const rows = await fenced(work, token, async tx =>
+        z
+          .array(
+            z.object({
+              native_id: z.string(),
+              repository_id: z.string(),
+              kind: z.string(),
+              source_revision: z.string(),
+              document_id: uuidSchema.nullable(),
+              path: z.string().nullable(),
+            }),
+          )
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
+          JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
+          LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
+          WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) AND i.failure IS DISTINCT FROM $4
+          AND NOT i.repository_id=ANY($5::text[]) ORDER BY i.native_id LIMIT $6`,
+                [
+                  claim.source_id,
+                  claim.reconciliation,
+                  cursor.after,
+                  deniedFailure,
+                  Object.keys(cursor.isolated ?? {}),
+                  sweepBatch,
+                ],
+              )
+            ).rows,
+          ),
+      );
+      const denied = new Set(
+        await fenced(work, token, async tx =>
+          z
+            .array(z.object({ repository_id: z.string(), kind: z.string() }))
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT repository_id,kind FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND failure=$2 AND document_id IS NULL AND seen_generation=$3`,
+                  [claim.source_id, deniedFailure, claim.reconciliation],
+                )
+              ).rows,
+            )
+            .map(row => `${row.repository_id}:${row.kind}`),
+        ),
+      );
+      const verified = new Map<string, boolean>();
+      for (const repositoryId of new Set(rows.map(row => row.repository_id)))
+        verified.set(repositoryId, await verify(repositoryId));
+      const { completed, failure } = await bounded(rows, tuning.concurrency, async row => {
+        if (!verified.get(row.repository_id)) return;
+        // A kind this pass could not read stays hidden, without reading it, until the connection can read it again.
+        if (denied.has(`${row.repository_id}:${row.kind}`)) {
+          const documentId = row.document_id;
+          if (documentId) await fenced(work, token, tx => clear(tx, documentId));
+          return;
+        }
+        try {
+          const { markdown: _markdown, ...observation } = await corpus.fetch(
+            work.workspaceId,
+            claim.owner_user_id,
+            claim.binding,
+            row.repository_id,
+            row.native_id,
+            claim.selection,
+            row.path,
+          );
+          await ingest(work, token, claim, observation);
+          await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
+        } catch (error) {
+          if (ownerDenied(error)) {
+            verified.set(row.repository_id, false);
+            await fenced(work, token, tx => unavailable(tx, claim.source_id, row.repository_id, error.code));
+          } else if (error instanceof GitHubCorpusError && ['not-found', 'outside-selection'].includes(error.code)) {
+            const documentId = row.document_id;
+            if (documentId) await fenced(work, token, tx => clear(tx, documentId, true));
+          } else if (isolatable(error))
+            await fenced(work, token, tx =>
+              tx.client.query(
+                `UPDATE ${table(tx, 'github_items')} SET failure=$3 WHERE source_id=$1 AND native_id=$2`,
+                [claim.source_id, row.native_id, error.code],
+              ),
+            );
+          else if (!(error instanceof GitHubCorpusError) || !['too-large', 'unsupported'].includes(error.code))
+            throw error;
+        }
+        await beat();
+      });
+      const last = rows[completed - 1];
+      if (last) cursor.after = last.native_id;
+      if (failure) throw failure.error;
+      return rows.length < sweepBatch;
+    }
+    try {
+      await fenced(work, token, async () => undefined);
+      await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 5, true);
+      let refreshed = performance.now();
+      if (cursor.phase === 'listing' && cursor.index === 0 && !cursor.page && claim.selection.scope === 'all')
+        await follow(work, token, claim);
+      selected = (await fenced(work, token, tx => repositories(tx, claim.source_id))).filter(r => !r.excluded);
+      // Time-boxed: page after page until the pass ends, the budget is spent or Temporal cancels the activity.
+      for (;;) {
+        await beat();
+        if (performance.now() - refreshed >= tuning.leaseRenewMs) {
+          refreshed = performance.now();
+          await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 5, true);
+        }
+        if (cursor.phase === 'listing') await listing();
+        else if (await sweep()) {
           await fenced(work, token, async tx => {
             await tx.client.query(
-              `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=NULL,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1`,
-              [claim.source_id, initialCursor()],
+              `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1`,
+              [claim.source_id, initialCursor(), Object.keys(cursor.isolated ?? {}).length ? 'transient' : null],
             );
           });
           telemetry.recordImport('source', 'ready');
           return { disposition: 'ready' };
         }
+        cursorSchema.parse(cursor);
+        await fenced(work, token, tx =>
+          tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET cursor=$2,failure=NULL WHERE source_id=$1`, [
+            claim.source_id,
+            cursor,
+          ]),
+        );
+        if (performance.now() - started >= tuning.runBudgetMs || options.signal?.aborted) break;
       }
-      cursorSchema.parse(cursor);
       await fenced(work, token, async tx => {
         await tx.client.query(
           `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),failure=NULL WHERE source_id=$1`,
@@ -1466,6 +1638,19 @@ export function createGitHubKnowledge({
       });
       return { disposition: 'retry' };
     } catch (error) {
+      // A rate limit pauses the pass: the cursor is kept and the run resumes at GitHub's reset time.
+      if (rateLimited(error) && cursorSchema.safeParse(cursor).success) {
+        const paused = await transaction(work.workspaceId, async tx => {
+          const current = await source(tx, work.sourceId);
+          if (current.generation !== work.generation || current.lease_token !== token) return false;
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='syncing',failure='rate-limited',next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond' WHERE source_id=$1`,
+            [work.sourceId, cursor, Math.max(1000, error.retryAfterMs ?? 60_000)],
+          );
+          return true;
+        });
+        return { disposition: paused ? 'rate-limited' : 'stale' };
+      }
       const result = await transaction(work.workspaceId, async tx => {
         const current = await source(tx, work.sourceId);
         if (current.generation !== work.generation || current.lease_token !== token)

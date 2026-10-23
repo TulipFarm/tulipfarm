@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { embeddingWorkSchema, type EmbeddingWork, type createKnowledgeEmbeddings } from '@tulipfarm/knowledge';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
@@ -47,8 +48,9 @@ export function registerKnowledgeEmbeddingDispatch(
             await startKnowledgeEmbeddingWorkflow(dependencies.temporal, work);
           }
         } catch (error) {
-          if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
-            app.log.error({ workspaceId: row.workspace_id }, 'Knowledge embedding dispatch will retry');
+          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
+            recordDispatchSkip('embedding');
+          else app.log.error({ workspaceId: row.workspace_id }, 'Knowledge embedding dispatch will retry');
         }
         after = row.workspace_id;
       }

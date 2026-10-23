@@ -246,17 +246,36 @@ exported as the gauges `cloud_knowledge_reconnect_sources`,
 
 ## Reconciliation
 
-Each work item lists one provider page for one repository, after an owner check.
-The provider cursor encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}`
-while walking directories, either with `+{part}` inside a file, `issues:{page}`,
-`discussions:{endCursor}`, `commits:{head}:{page}` or `commits:{indexed}..{head}:{page}`),
-so a file or commit listing stays pinned to one commit. The cursor
-commits only after every item outcome is persisted. After all repositories are
-traversed, unseen items in available repositories get an exact read. Only a 404 or
-410 file or issue, a transferred issue (301), a missing discussion, or an item now
-outside the window tombstones a document. A file rename therefore tombstones the old
-path and publishes the new path. A partial, truncated or failed listing, or an
-unavailable repository, never tombstones.
+A run claims the source for a 15-minute lease and works in a time-boxed loop of at
+most five minutes. Each step lists one provider page of 100 items (the GitHub
+maximum for REST lists, comments, commits and GraphQL discussions) for one
+repository, after an owner check, or re-reads one batch of 100 unseen items. Items in
+a step are fetched with bounded concurrency (four at a time). The provider cursor
+encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}` while
+walking directories, either with `+{part}` inside a file, `issues:{page}`,
+`discussions:{endCursor}`, `commits:{head}:{page}` or
+`commits:{indexed}..{head}:{page}`), so a file or commit listing stays pinned to one
+commit. The cursor is checkpointed after every step, and only once every item outcome
+before it is persisted. While work progresses the run renews its lease every minute
+and heartbeats its Temporal activity (five-minute heartbeat timeout), so only a
+genuinely stuck run is restarted. A run that exhausts its budget releases the lease
+and the next due check continues from the checkpoint.
+
+After all repositories are traversed, unseen items in available repositories get an
+exact read. Only a 404 or 410 file or issue, a transferred issue (301), a missing
+discussion, or an item now outside the window tombstones a document. A file rename
+therefore tombstones the old path and publishes the new path. A partial, truncated
+or failed listing, or an unavailable repository, never tombstones.
+
+There is no cap on items or listing pages per source; progress is visible through
+the source's total, ready and failed counts. The only loop guard is a provider cursor
+that repeats (the same cursor returned for the next page, or one already seen in the
+run), which fails the source with `invalid-cursor`. This applies to every phase,
+commits included.
+
+When the read returns a newer revision than the listing, the newer revision is
+indexed immediately and the item records the revision that was read; content is
+never stored under a revision it does not match.
 
 Commits are listed last, so a long history never delays a repository's other kinds.
 `tf_knowledge_github_repositories.commit_head` records the default-branch head whose
@@ -270,11 +289,39 @@ only when a listing finishes, so an interrupted pass compares from the older hea
 A commit removed from the default branch by a force push stays indexed while GitHub
 still serves it by SHA.
 
-Rate limits (`429`, or `403` with `x-ratelimit-remaining: 0` or `retry-after`, or a
-GraphQL `RATE_LIMITED` error) fail the work item with `rate-limited`; the next
-attempt waits for `retry-after` or `x-ratelimit-reset`, at least 30 seconds. Readers
-refresh up to 20 repositories per request. Owner work items renew at most five
-stale owner checks each. Search makes no GitHub requests.
+### Failures, retries and rate limits
+
+The provider retries transient failures (5xx, timeouts, network errors) up to four
+attempts with exponential backoff and jitter (0.5 s doubling, capped at 8 s); a
+`retry-after` above 8 s is returned at once. A rejected credential (401) is never
+retried: it moves the source to the reconnect state. Denials (403 without a rate
+limit, 404, 451) are never retried either; they mark the repository or kind (see
+[Access status](#access-status)). Owner access checks get up to two more attempts in the
+engine with jittered backoff; only a real denial marks a repository unavailable.
+
+A failure that survives the retries is isolated. A failed item records `transient`
+(or `invalid-response`) on itself and the pass continues. A repository whose listing
+or access check keeps failing is skipped for the rest of the pass and shown as
+`transient`; the source still finishes the pass as `ready` with failure `transient`,
+and the next pass retries it. Isolation never tombstones.
+
+Rate limits are a pause, not a failure. The provider remembers
+`x-ratelimit-remaining` and `x-ratelimit-reset` per token and API (REST core or
+GraphQL). Below 20% of the limit it spaces requests across the time left until
+reset (at most ten seconds apart); at a 5% reserve, and on `429`, `403` with
+`x-ratelimit-remaining: 0` or `retry-after`, or a GraphQL `RATE_LIMITED` error, it
+stops with `rate-limited`. The engine then keeps the cursor, leaves the source
+`syncing` with failure `rate-limited`, and schedules the next attempt at
+`retry-after` or `x-ratelimit-reset` (60 seconds when unknown). Readers refresh up to
+20 repositories per request. Owner work items renew at most five stale owner checks
+each. Search makes no GitHub requests.
+
+### Dispatch
+
+The API sweep starts due sources (20 per check) every two seconds. A workspace
+whose storage version the API cannot use is skipped and counted in
+`cloud_dispatch_skipped_workspaces` (labels `dispatcher` and
+`reason=incompatible_version`; no workspace label).
 
 ## Reader-first rollout
 
@@ -316,5 +363,7 @@ against `packages/github/test/corpus-fixture.mjs`.
 engine across head changes: formerly excluded files, a file in parts, a binary
 placeholder, a hashed long path, a truncated tree walk and deletions.
 `apps/api/test/knowledge-github-commits.integration.mjs` runs both across a growing
-and force-pushed history. Live GitHub, GitHub rate limits
+and force-pushed history. The integration test also covers rate-limit pauses, item
+and repository isolation, lease renewal, time-boxed runs and uncapped cursors; the
+provider test covers retries, backoff and pacing. Live GitHub, GitHub rate limits
 under load, and throughput remain unverified.

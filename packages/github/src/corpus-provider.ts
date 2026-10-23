@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { observeFetch, type DependencyEndpoint } from '@tulipfarm/observability';
 import { AccessDenied } from '@tulipfarm/access';
@@ -32,6 +33,17 @@ import {
 } from './accounts.ts';
 
 type Accounts = Pick<ReturnType<typeof createGitHubAccounts>, 'withReadCredential'>;
+// Transient failures (network, timeout, 5xx) are retried in place before the engine isolates the item or repository.
+const requestAttempts = 4;
+const retryBaseMs = 500;
+const retryCapMs = 8000;
+// Below this share of the hourly budget, requests are spread evenly until the reset; the reserve is left for interactive reads.
+const paceBelowRatio = 0.2;
+const rateReserveRatio = 0.05;
+const maxPaceMs = 10_000;
+// GraphQL and REST have separate GitHub budgets.
+const budgetKey = (token: string, endpoint: DependencyEndpoint) =>
+  `${createHash('sha256').update(token).digest('hex').slice(0, 32)}:${endpoint === 'github-graphql' ? 'graphql' : 'core'}`;
 const repositorySchema = z.object({
   id: z.number().int().positive(),
   node_id: z.string().min(1).max(256),
@@ -266,7 +278,7 @@ export type GitHubBinaryFile = {
 export type GitHubBinaryExtractor = (file: GitHubBinaryFile) => Promise<string | null>;
 const fence = (content: string) =>
   '`'.repeat(Math.max(3, ...[...content.matchAll(/`+/g)].map(match => match[0].length + 1)));
-const DISCUSSIONS = `query($id:ID!,$cursor:String){node(id:$id){... on Repository{discussions(first:20,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{number title updatedAt url comments{totalCount}}}}}}`;
+const DISCUSSIONS = `query($id:ID!,$cursor:String){node(id:$id){... on Repository{discussions(first:${limits.listPageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{number title updatedAt url comments{totalCount}}}}}}`;
 const REPLY = 'body createdAt updatedAt author{login}';
 const DISCUSSION = `query($id:ID!,$number:Int!,$after:String){node(id:$id){... on Repository{discussion(number:$number){number title body url createdAt updatedAt author{login} category{name} comments(first:100,after:$after){totalCount nodes{id ${REPLY} replies(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{${REPLY}}}}}}}}}`;
 const DISCUSSION_COMMENT_CURSOR = `query($id:ID!,$number:Int!,$after:String){node(id:$id){... on Repository{discussion(number:$number){comments(first:100,after:$after){pageInfo{hasNextPage endCursor}}}}}}`;
@@ -533,8 +545,13 @@ export function createGitHubCorpusProvider(options: {
   accounts: Accounts;
   fetcher?: typeof fetch;
   extractBinary?: GitHubBinaryExtractor;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
 }): GitHubCorpusProvider {
   const fetcher = options.fetcher ?? fetch;
+  const sleep = options.sleep ?? ((ms: number) => wait(ms));
+  const random = options.random ?? Math.random;
+  const budgets = new Map<string, { remaining: number; limit: number; resetAt: number }>();
   async function withAccount<T>(
     workspaceId: string,
     userId: string,
@@ -577,6 +594,50 @@ export function createGitHubCorpusProvider(options: {
       throw new GitHubCorpusError('transient');
     }
   }
+  // Retries transient failures (network, timeout, 5xx) in place; denials, credential and rate-limit failures are final.
+  async function retrying<T>(operation: () => Promise<T>) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (!(error instanceof GitHubCorpusError) || error.code !== 'transient' || attempt >= requestAttempts)
+          throw error;
+        // Jittered exponential backoff; a server-provided retry-after is honoured when it is short.
+        if (error.retryAfterMs !== null && error.retryAfterMs > retryCapMs) throw error;
+        const backoff = Math.min(retryCapMs, retryBaseMs * 2 ** (attempt - 1)) * (0.5 + random() / 2);
+        await sleep(Math.max(backoff, error.retryAfterMs ?? 0));
+      }
+    }
+  }
+  // Spends the remaining budget evenly until the reset, and pauses before the reserve kept for interactive reads.
+  async function pace(key: string) {
+    const budget = budgets.get(key);
+    if (!budget) return;
+    const untilReset = budget.resetAt - Date.now();
+    if (untilReset <= 0) {
+      budgets.delete(key);
+      return;
+    }
+    const reserve = Math.max(1, Math.ceil(budget.limit * rateReserveRatio));
+    if (budget.remaining <= reserve)
+      throw new GitHubCorpusError('rate-limited', Math.min(3_600_000, Math.max(1000, untilReset)));
+    if (budget.remaining < budget.limit * paceBelowRatio)
+      await sleep(Math.min(maxPaceMs, Math.ceil(untilReset / (budget.remaining - reserve))));
+  }
+  function observeBudget(key: string, headers: Headers) {
+    const remaining = Number(headers.get('x-ratelimit-remaining'));
+    const limit = Number(headers.get('x-ratelimit-limit'));
+    const reset = Number(headers.get('x-ratelimit-reset'));
+    if (!headers.has('x-ratelimit-remaining') || !Number.isFinite(remaining) || !Number.isFinite(reset) || reset <= 0)
+      return;
+    budgets.delete(key);
+    budgets.set(key, {
+      remaining: Math.max(0, remaining),
+      limit: Number.isFinite(limit) && limit > 0 ? limit : Math.max(remaining, 1),
+      resetAt: reset * 1000,
+    });
+    if (budgets.size > 1000) budgets.delete(budgets.keys().next().value as string);
+  }
   // Maps transport, credential, rate-limit and server failures before any body is read.
   async function open(
     token: string,
@@ -584,6 +645,8 @@ export function createGitHubCorpusProvider(options: {
     path: string,
     init: { accept?: string; body?: unknown; timeoutMs?: number } = {},
   ) {
+    const budget = budgetKey(token, endpoint);
+    await pace(budget);
     let response: Response;
     try {
       response = await observeFetch('github', 'request', fetcher, { endpoint })(`https://api.github.com${path}`, {
@@ -602,6 +665,7 @@ export function createGitHubCorpusProvider(options: {
     } catch {
       throw new GitHubCorpusError('transient');
     }
+    observeBudget(budget, response.headers);
     const retry = Number(response.headers.get('retry-after'));
     const reset = Number(response.headers.get('x-ratelimit-reset'));
     const retryAfterMs =
@@ -627,11 +691,19 @@ export function createGitHubCorpusProvider(options: {
     return response;
   }
   // JSON and other metadata responses are read whole up to `responseBytes`; file content uses `blob` instead.
-  async function call(
+  function call(
     token: string,
     endpoint: DependencyEndpoint,
     path: string,
     init: { accept?: string; body?: unknown } = {},
+  ) {
+    return retrying(() => readWhole(token, endpoint, path, init));
+  }
+  async function readWhole(
+    token: string,
+    endpoint: DependencyEndpoint,
+    path: string,
+    init: { accept?: string; body?: unknown },
   ) {
     const response = await open(token, endpoint, path, init);
     const reader = response.body?.getReader();
@@ -672,10 +744,12 @@ export function createGitHubCorpusProvider(options: {
   }
   // Streams a raw Git blob. The time allowed grows with the bytes needed, up to `blobTimeoutMs`.
   async function* blob(token: string, repositoryId: string, sha: string, bytes: number) {
-    const response = await open(token, 'github-blob', `/repositories/${repositoryId}/git/blobs/${sha}`, {
-      accept: 'application/vnd.github.raw',
-      timeoutMs: Math.min(limits.blobTimeoutMs, limits.requestTimeoutMs + Math.ceil(bytes / limits.partBytes) * 1000),
-    });
+    const response = await retrying(() =>
+      open(token, 'github-blob', `/repositories/${repositoryId}/git/blobs/${sha}`, {
+        accept: 'application/vnd.github.raw',
+        timeoutMs: Math.min(limits.blobTimeoutMs, limits.requestTimeoutMs + Math.ceil(bytes / limits.partBytes) * 1000),
+      }),
+    );
     if (response.status !== 200) {
       await response.body?.cancel().catch(() => undefined);
       throw new GitHubCorpusError([404, 409, 410, 422].includes(response.status) ? 'not-found' : 'invalid-response');
@@ -1041,7 +1115,7 @@ export function createGitHubCorpusProvider(options: {
       z.object({
         node: z
           .object({
-            discussions: z.object({ pageInfo, nodes: z.array(discussionNode).max(20) }).optional(),
+            discussions: z.object({ pageInfo, nodes: z.array(discussionNode).max(limits.listPageSize) }).optional(),
           })
           .nullable(),
       }),

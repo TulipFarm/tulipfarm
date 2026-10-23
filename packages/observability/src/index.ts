@@ -1242,6 +1242,23 @@ export function recordChatDispatch(
     .add(1, { ...dimensions, dispatch_source: source, dispatch_reason: reason, outcome });
 }
 
+export type DispatchSkipper = 'github' | 'slack' | 'google' | 'atlassian' | 'embedding' | 'defaults' | 'knowledge';
+/**
+ * A background dispatcher skipped a workspace because its storage schema is outside the running release's
+ * compatibility window. Work for that workspace stalls until it is migrated, so any sustained rate needs attention.
+ */
+export function recordDispatchSkip(
+  dispatcher: DispatchSkipper,
+  reason: 'incompatible_version' = 'incompatible_version',
+) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_dispatch_skipped_workspaces', {
+      description: 'Workspaces a background dispatcher skipped, by dispatcher and reason',
+    })
+    .add(1, { ...dimensions, dispatcher, reason });
+}
+
 export type ChatModelPurpose = 'reply' | 'completion' | 'title' | 'calendar' | 'compaction';
 export type ChatDetailPhase =
   | 'turn'

@@ -125,7 +125,7 @@ test('GitHub code indexing publishes every default-branch file across head chang
     );
     for (let i = 0; i < 30; i++)
       repo.files.set(`pkg/m${String(i).padStart(2, '0')}/alpha.ts`, `export const alpha${i} = 'alpha';`);
-    await t.test('a failed listing at the new head preserves the published files', async () => {
+    await t.test('a listing that keeps failing at the new head preserves the published files', async () => {
       gh.github.state.failure = (_user, path) =>
         path.includes('/git/trees/') ? Response.json({ message: 'Server Error' }, { status: 500 }) : null;
       try {
@@ -141,11 +141,12 @@ test('GitHub code indexing publishes every default-branch file across head chang
       }
       const state = (
         await f.db.platform.query(
-          `SELECT sync_state FROM ${f.table('tf_knowledge_github_sources')} WHERE source_id=$1`,
+          `SELECT sync_state,failure FROM ${f.table('tf_knowledge_github_sources')} WHERE source_id=$1`,
           [sourceId],
         )
       ).rows[0];
-      assert.equal(state.sync_state, 'failed');
+      // The repository is isolated for this pass; the source finishes it and retries the repository next pass.
+      assert.deepEqual({ ...state }, { sync_state: 'ready', failure: 'transient' });
       assert.equal((await items()).filter(row => row.searchable).length, first.length);
     });
     await t.test('a truncated tree at the new head is walked and every file is published', async () => {
