@@ -36,9 +36,9 @@ const statusLabels = {
 const syncLabels = { queued: 'Queued', syncing: 'Syncing', ready: 'Sync complete', failed: 'Sync failed' };
 const repositoryFailures: Record<string, string> = {
   forbidden:
-    'The source owner can no longer read this repository in GitHub. It may have been made private, transferred or deleted. Its content stays hidden until access returns; other repositories keep syncing.',
+    'The source owner can no longer read this repository in GitHub. It may have been made private, transferred or deleted, or the TulipFarm GitHub App may not be installed on it. Ask an organization owner to install the App on it. Its content stays hidden until access returns; other repositories keep syncing.',
   'insufficient-scope':
-    'The connected GitHub account cannot read this repository. Reconnect it with repository access, then retry.',
+    'The connected GitHub account cannot read this repository. Ask an organization owner to install the TulipFarm GitHub App on it, then retry.',
   transient: 'GitHub kept failing for this repository. Other repositories kept syncing; the next sync retries it.',
 };
 const missingContent = (kinds: GitHubKind[]) => kinds.map(kind => githubKindLabels[kind].short).join(', ');

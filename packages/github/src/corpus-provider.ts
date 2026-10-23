@@ -843,10 +843,6 @@ export function createGitHubCorpusProvider(options: {
     if (types.length) throw new GitHubCorpusError('invalid-response');
     return body.data;
   }
-  function scoped(credential: GitHubCredential, repo: GitHubRepository) {
-    if (repo.visibility !== 'public' && !credential.scopes.includes('repo'))
-      throw new GitHubCorpusError('insufficient-scope');
-  }
   async function byId(token: string, repositoryId: string) {
     const response = await call(
       token,
@@ -1712,7 +1708,7 @@ export function createGitHubCorpusProvider(options: {
     return { selection, id, kind, file };
   }
   return {
-    async discover(workspaceId, userId, accountId, cursor, options) {
+    async discover(workspaceId, userId, accountId, cursor) {
       const page = cursor === undefined ? 1 : Number(parse(githubCorpusCursorTokenSchema, cursor, 'invalid-cursor'));
       if (!Number.isInteger(page) || page < 1 || page > 100) throw new GitHubCorpusError('invalid-cursor');
       return withAccount(workspaceId, userId, accountId, null, async (credential, binding) => {
@@ -1730,9 +1726,7 @@ export function createGitHubCorpusProvider(options: {
         });
         return {
           binding,
-          items: repositories.filter(
-            repo => options?.includeUnreadable || repo.visibility === 'public' || credential.scopes.includes('repo'),
-          ),
+          items: repositories,
           nextCursor: items.length === 50 ? String(page + 1) : null,
         };
       });
@@ -1756,7 +1750,6 @@ export function createGitHubCorpusProvider(options: {
           if (body.full_name.toLowerCase() !== name.toLowerCase()) throw new GitHubCorpusError('invalid-selection');
           if (body.permissions?.pull === false) throw new GitHubCorpusError('forbidden');
           const value = repository(body);
-          scoped(credential, value);
           repositories.push(value);
         }
         const [first] = repositories;
@@ -1787,7 +1780,6 @@ export function createGitHubCorpusProvider(options: {
           throw error;
         }
         const value = repository(body);
-        scoped(credential, value);
         return { ...value, accessedAt, readable: true };
       });
     },
@@ -1798,7 +1790,6 @@ export function createGitHubCorpusProvider(options: {
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
         const token = credential.accessToken;
         const body = await byId(token, repositoryId);
-        scoped(credential, repository(body));
         const accessedAt = new Date().toISOString();
         const value = cursor ?? `${phases(selection)[0] ?? 'docs'}:`;
         const split = value.indexOf(':');
@@ -1841,8 +1832,7 @@ export function createGitHubCorpusProvider(options: {
                     ? await listDiscussions(token, body, state, accessedAt, selection, mark)
                     : await listCommits(token, body, state, accessedAt, selection, history);
         } catch (error) {
-          if (!(error instanceof GitHubCorpusError) || !['forbidden', 'insufficient-scope'].includes(error.code))
-            throw error;
+          if (!(error instanceof GitHubCorpusError) || error.code !== 'forbidden') throw error;
           page = {
             observations: denied(body, phase as Phase, accessedAt, selection),
             nextCursor: nextPhase(selection, phase as Phase),
@@ -1864,7 +1854,6 @@ export function createGitHubCorpusProvider(options: {
         const token = credential.accessToken;
         const accessedAt = new Date().toISOString();
         const body = await byId(token, repositoryId);
-        scoped(credential, repository(body));
         if (file !== null && (kind === 'doc' || kind === 'code'))
           return readFile(token, body, kind, file, id.part, accessedAt);
         if (kind === 'commit') return readCommit(token, body, id.ref, accessedAt);
@@ -1925,7 +1914,6 @@ export function createGitHubCorpusProvider(options: {
       await withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
         const token = credential.accessToken;
         const body = await byId(token, repositoryId);
-        scoped(credential, repository(body));
         for await (const part of fileReads(token, body, kind, file, id.part, new Date().toISOString()))
           if ((await accept(part)) === false) break;
       });

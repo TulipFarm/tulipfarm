@@ -441,7 +441,7 @@ export function GitHubSelectionForm({
                               target="_blank"
                               rel="noreferrer"
                             >
-                              GitHub Settings → Applications → Authorized OAuth Apps
+                              GitHub Settings → Applications → Authorized GitHub Apps
                             </a>
                             , then reopen this picker.
                           </p>

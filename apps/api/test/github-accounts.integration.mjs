@@ -45,7 +45,6 @@ test('GitHub HTTP composition authorizes owners, validates requests and conceals
           GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
           GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
           GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
-          GITHUB_OAUTH_SCOPES: f.configuration.scopes.join(' '),
         };
         assert.throws(() => githubAccounts(f.runtime, env));
         env.INTEGRATION_CREDENTIAL_KEY_ID = 'test';

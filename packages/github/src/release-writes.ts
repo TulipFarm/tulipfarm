@@ -101,8 +101,7 @@ export async function checkReleaseTarget(
   if (
     repo.full_name.toLowerCase() !== `${operation.owner}/${operation.repo}`.toLowerCase() ||
     !repo.permissions.push ||
-    (dispatch && repo.archived) ||
-    !credential.scopes.includes('repo')
+    (dispatch && repo.archived)
   )
     throw new GitHubBatchError('batch-conflict');
   if (!dispatch) return;

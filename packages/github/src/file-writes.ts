@@ -62,13 +62,7 @@ export async function checkFileTarget(
   )
     throw new GitHubBatchError('batch-conflict');
   if (!dispatch) return repository;
-  if (
-    repository.archived ||
-    !repository.permissions.push ||
-    (fileChanges(operation).some(file => /^\.github\/workflows\/.*\.ya?ml$/i.test(file.path)) &&
-      !credential.scopes.includes('workflow'))
-  )
-    throw new GitHubBatchError('batch-conflict');
+  if (repository.archived || !repository.permissions.push) throw new GitHubBatchError('batch-conflict');
   const reference = z
     .object({ ref: z.literal(`refs/heads/${operation.branch}`), object: z.object({ type: z.literal('commit'), sha }) })
     .parse(await read(branchPath(operation)));

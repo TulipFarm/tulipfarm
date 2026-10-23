@@ -1236,13 +1236,7 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'sign-in', example: 'noreply@example.com', commented: true },
   },
 
-  ...oauthClient(
-    'GITHUB_OAUTH',
-    'GitHub',
-    'GitHub',
-    apps,
-    '`repo` is always requested so Knowledge can read private repositories and their contents.',
-  ),
+  ...oauthClient('GITHUB_OAUTH', 'GitHub', 'GitHub', apps, false),
   {
     name: 'GITHUB_WEBHOOK_APP_ID',
     group: 'GitHub',

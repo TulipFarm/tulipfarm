@@ -6,7 +6,7 @@ import { verifyWorkspaceIsolation } from '@tulipfarm/workspace-storage/provision
 import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.ts';
 import { createGitHubAccounts } from '@tulipfarm/github';
 
-export async function githubFixture({ connectionsPerPool = 4, scopes = ['repo', 'read:user'] } = {}) {
+export async function githubFixture({ connectionsPerPool = 4 } = {}) {
   const db = await fixture();
   let runtime;
   try {
@@ -39,13 +39,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       clientId: 'fixture-client',
       clientSecret: 'fixture-secret',
       redirectUri: 'http://127.0.0.1:5218/github/callback',
-      scopes,
     };
     const calls = [];
     let profile = { id: 123, login: 'octocat' };
     const defaultBehavior = async url =>
       url.endsWith('/access_token')
-        ? Response.json({ access_token: 'synthetic-access-token', token_type: 'bearer', scope: scopes.join(',') })
+        ? Response.json({ access_token: 'synthetic-access-token', token_type: 'bearer', scope: '' })
         : Response.json(profile);
     let behavior = defaultBehavior;
     const makeService = (overrides = {}) =>

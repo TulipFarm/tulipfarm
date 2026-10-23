@@ -21,7 +21,6 @@ export async function githubChatFixture(options) {
     GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
     GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
     GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
-    GITHUB_OAUTH_SCOPES: f.configuration.scopes.join(' '),
   };
   const prior = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);

@@ -7,12 +7,11 @@ const configured = {
   GITHUB_OAUTH_CLIENT_ID: 'local-client',
   GITHUB_OAUTH_CLIENT_SECRET: 'local-secret',
   GITHUB_OAUTH_REDIRECT_URI: 'https://app.example.test/github/callback',
-  GITHUB_OAUTH_SCOPES: 'read:user read:org repo workflow delete_repo project write:discussion',
   GITHUB_MCP_READ_BINDINGS: '[]',
   GITHUB_MCP_WRITE_BINDINGS: '[]',
 };
 
-test('production GitHub is disabled or complete with all accepted operation scopes', () => {
+test('production GitHub is disabled or complete', () => {
   assert.deepEqual(githubRuntimeConfiguration({ NODE_ENV: 'production' }), {
     oauth: null,
     readBindings: [],
@@ -24,21 +23,6 @@ test('production GitHub is disabled or complete with all accepted operation scop
     delete partial[key];
     assert.throws(() => githubRuntimeConfiguration(partial));
     assert.throws(() => githubRuntimeConfiguration({ ...configured, [key]: '' }));
-  }
-  const withoutRepo = configured.GITHUB_OAUTH_SCOPES.replace(' repo', '');
-  assert.deepEqual(githubRuntimeConfiguration({ ...configured, GITHUB_OAUTH_SCOPES: withoutRepo }).oauth.scopes, [
-    ...withoutRepo.split(' '),
-    'repo',
-  ]);
-  for (const scope of configured.GITHUB_OAUTH_SCOPES.split(' ').filter(scope => scope !== 'repo')) {
-    assert.throws(() =>
-      githubRuntimeConfiguration({
-        ...configured,
-        GITHUB_OAUTH_SCOPES: configured.GITHUB_OAUTH_SCOPES.split(' ')
-          .filter(item => item !== scope)
-          .join(' '),
-      }),
-    );
   }
 });
 

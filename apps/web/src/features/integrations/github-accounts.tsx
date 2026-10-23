@@ -49,7 +49,7 @@ export function GitHubAccounts({
         await changes.authority('github-personal');
         setNotice(
           visibleAccounts.find(account => account.id === id)?.identity
-            ? 'Disconnected from TulipFarm. To revoke the OAuth grant at GitHub, open GitHub Settings, Applications, Authorized OAuth Apps. Revoking the grant can affect other workspaces using the same GitHub account.'
+            ? 'Disconnected from TulipFarm. To revoke the grant at GitHub, open GitHub Settings, Applications, Authorized GitHub Apps. Revoking the grant can affect other workspaces using the same GitHub account.'
             : 'Unfinished integration dismissed.',
         );
       } else {
@@ -123,8 +123,8 @@ export function GitHubAccounts({
                 {!state.data.configured && (
                   <StatePanel
                     kind="unavailable"
-                    title="GitHub OAuth is not configured"
-                    description="Ask your operator to configure the GitHub OAuth App. Existing accounts can still be disconnected."
+                    title="GitHub is not configured"
+                    description="Ask your operator to configure the GitHub App. Existing accounts can still be disconnected."
                   />
                 )}
                 <div className="flex flex-wrap items-center justify-between gap-3">

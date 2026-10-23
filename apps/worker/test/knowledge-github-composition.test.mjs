@@ -42,7 +42,6 @@ test('GitHub composition without OAuth configuration or keys stays not-configure
       GITHUB_OAUTH_CLIENT_ID: 'id',
       GITHUB_OAUTH_CLIENT_SECRET: 'secret',
       GITHUB_OAUTH_REDIRECT_URI: 'https://app.example/github/callback',
-      GITHUB_OAUTH_SCOPES: 'repo',
     },
   ]) {
     let options;

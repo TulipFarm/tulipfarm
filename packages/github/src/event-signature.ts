@@ -19,7 +19,7 @@ const metadata = z.object({
 });
 const signingSecret = z.string().min(32).max(4096);
 
-export function readGitHubAppDelivery(secret: string, raw: Buffer, headers: Headers) {
+export function readGitHubAppDelivery(secret: string, raw: Buffer, headers: Headers, appId?: string) {
   if (!signingSecret.safeParse(secret).success) throw new Error('Invalid GitHub App webhook secret');
   if (raw.byteLength > githubWebhookBodyLimit) throw new GitHubWebhookError('payload-too-large');
   const signature = headers['x-hub-signature-256'];
@@ -30,6 +30,12 @@ export function readGitHubAppDelivery(secret: string, raw: Buffer, headers: Head
   ) {
     throw new GitHubWebhookError('signature-invalid');
   }
+  if (
+    appId !== undefined &&
+    (headers['x-github-hook-installation-target-type'] !== 'integration' ||
+      headers['x-github-hook-installation-target-id'] !== appId)
+  )
+    throw new GitHubWebhookError('headers-invalid');
   const parsed = metadata.safeParse({ deliveryId: headers['x-github-delivery'], event: headers['x-github-event'] });
   if (!parsed.success) throw new GitHubWebhookError('headers-invalid');
   let body: unknown;

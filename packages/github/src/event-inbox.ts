@@ -95,7 +95,7 @@ export function createGitHubEventInbox(options: {
       ]);
   }
   async function accept(raw: Buffer, headers: Parameters<typeof readGitHubAppDelivery>[2]) {
-    const delivery = readGitHubAppDelivery(options.signingSecret, raw, headers);
+    const delivery = readGitHubAppDelivery(options.signingSecret, raw, headers, appId);
     let normalized;
     try {
       normalized = normalizeGitHubEvent(delivery.event, delivery.body);

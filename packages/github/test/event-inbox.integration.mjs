@@ -47,6 +47,8 @@ const request = (value = body(), id = randomUUID(), event = 'pull_request') => {
       'x-hub-signature-256': `sha256=${githubWebhookSignature(secret, raw)}`,
       'x-github-delivery': id,
       'x-github-event': event,
+      'x-github-hook-installation-target-type': 'integration',
+      'x-github-hook-installation-target-id': '100',
     },
   };
 };

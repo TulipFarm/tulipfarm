@@ -101,8 +101,6 @@ export async function checkRepositoryTarget(
     (repository.archived && operation.kind !== 'repository.archive' && operation.kind !== 'repository.delete')
   )
     throw new GitHubBatchError('batch-conflict');
-  if (operation.kind === 'repository.delete' && !credential.scopes.includes('delete_repo'))
-    throw new GitHubBatchError('batch-conflict');
   if (operation.kind === 'branch.create') {
     const commit = z.object({ sha }).parse(await read(`${repositoryPath(operation)}/git/commits/${operation.headSha}`));
     if (commit.sha !== operation.headSha) throw new GitHubBatchError('batch-conflict');

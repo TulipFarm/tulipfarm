@@ -176,10 +176,6 @@ test('current identities, heads, blob SHAs, rights, workflow scope and truncated
     { ...fileOperations[1], headSha: 'c'.repeat(40) },
   ])
     await assert.rejects(run(operation), /batch-conflict/);
-  await assert.rejects(
-    run({ ...fileOperations[0], path: '.github/workflows/build.yml' }, { ...credential, scopes: ['repo'] }),
-    /batch-conflict/,
-  );
   f.state.push = false;
   await assert.rejects(run(fileOperations[0]), /batch-conflict/);
   f.state.push = true;

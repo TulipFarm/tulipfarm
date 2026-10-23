@@ -129,7 +129,7 @@ try {
   listDelay = 0;
   configured = false;
   await page.reload();
-  await page.getByRole('heading', { name: 'GitHub OAuth is not configured' }).waitFor();
+  await page.getByRole('heading', { name: 'GitHub is not configured' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Connect GitHub account', exact: true }).count(), 0);
   configured = true;
   failList = true;

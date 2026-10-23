@@ -238,8 +238,8 @@ test('nested project field item content and repository identities and current ri
   const f = await projectProviderFixture();
   try {
     for (const patch of [
-      { ownerNodeId: 'O_9' },
-      { ownerType: 'organization' },
+      { ownerNodeId: 'U_123' },
+      { ownerType: 'user' },
       { projectId: 'P_2' },
       { projectNumber: 2 },
       { itemId: 'PI_2' },
@@ -248,7 +248,13 @@ test('nested project field item content and repository identities and current ri
     ])
       await assert.rejects(requireWriteTarget({ ...projectOperations[14], ...patch }, credential, f.fetcher, true));
     await assert.rejects(
-      requireWriteTarget(projectOperations[0], { ...credential, scopes: ['read:project'] }, f.fetcher, true),
+      requireWriteTarget(
+        { ...projectOperations[0], owner: 'octocat', ownerType: 'user', ownerNodeId: 'U_123' },
+        credential,
+        f.fetcher,
+        true,
+      ),
+      error => error instanceof GitHubBatchError && error.code === 'batch-conflict',
     );
     await assert.rejects(
       requireWriteTarget(

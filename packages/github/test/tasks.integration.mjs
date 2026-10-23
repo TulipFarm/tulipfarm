@@ -137,7 +137,6 @@ async function setup(t, mcpSlots) {
     GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
     GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
     GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
-    GITHUB_OAUTH_SCOPES: f.configuration.scopes.join(' '),
   });
   tasks = createAgentTasks(f.runtime);
   const options = {
@@ -1094,7 +1093,6 @@ test(
       GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
       GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
       GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
-      GITHUB_OAUTH_SCOPES: f.configuration.scopes.join(' '),
     };
     const start = async () => {
       child = fork(fileURLToPath(new URL('../../../apps/worker/test/github-task-worker.mjs', import.meta.url)), [], {

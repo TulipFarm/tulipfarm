@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { authorizationUrl, exchange, githubConfiguration, hasScopes, identity, refresh } from '../src/provider.ts';
+import { authorizationUrl, exchange, githubConfiguration, identity, refresh } from '../src/provider.ts';
 import { credentialCipher } from '../src/credentials.ts';
 import { callbackSchema } from '../src/contracts.ts';
 
@@ -26,7 +26,6 @@ const config = {
   clientId: 'fixture-client',
   clientSecret: 'fixture-secret',
   redirectUri: 'http://127.0.0.1:5218/github/callback',
-  scopes: ['repo', 'read:user'],
 };
 test('GitHub configuration distinguishes disabled, complete and partial configuration', () => {
   assert.equal(githubConfiguration({}), null);
@@ -36,11 +35,8 @@ test('GitHub configuration distinguishes disabled, complete and partial configur
     GITHUB_OAUTH_CLIENT_ID: config.clientId,
     GITHUB_OAUTH_CLIENT_SECRET: config.clientSecret,
     GITHUB_OAUTH_REDIRECT_URI: config.redirectUri,
-    GITHUB_OAUTH_SCOPES: config.scopes.join(' '),
   };
   assert.deepEqual(githubConfiguration(env), config);
-  assert.deepEqual(githubConfiguration({ ...env, GITHUB_OAUTH_SCOPES: 'read:user' }).scopes, ['read:user', 'repo']);
-  assert.throws(() => githubConfiguration({ ...env, GITHUB_OAUTH_SCOPES: ' ' }), /Invalid GitHub/);
   for (const redirect of [
     'http://remote.test/github/callback',
     'https://user:password@host/github/callback',
@@ -90,14 +86,10 @@ test('OAuth uses S256, account selection, form exchange and stable numeric ident
     }),
     { id: '1234', login: 'octocat' },
   );
-  assert.equal(hasScopes(['repo'], ['public_repo', 'repo:status']), true);
-  assert.equal(hasScopes(['public_repo'], ['repo']), false);
-  await assert.rejects(
-    exchange(config, 'code', verifier, async () =>
-      Response.json({ access_token: 'token', token_type: 'bearer', scope: 'public_repo' }),
-    ),
-    /reconnect-required/,
+  const bare = await exchange(config, 'code', verifier, async () =>
+    Response.json({ access_token: 'token', token_type: 'bearer', scope: '' }),
   );
+  assert.deepEqual(bare.scopes, []);
   await assert.rejects(identity('token', async () => Response.json({ id: 1, login: '<script>' })));
   await assert.rejects(
     identity('token', async () => new Response('x'.repeat(65537))),

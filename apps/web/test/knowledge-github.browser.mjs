@@ -665,7 +665,7 @@ test(
           assert.equal(await f.page.getByRole('button', { name: 'Add repositories', exact: true }).isDisabled(), true);
           f.faults.configured = false;
           await f.page.reload();
-          await f.page.getByRole('heading', { name: 'GitHub OAuth is not configured' }).waitFor();
+          await f.page.getByRole('heading', { name: 'GitHub is not configured' }).waitFor();
           assert.equal(
             await f.page.getByRole('heading', { name: 'Repositories in Knowledge', exact: true }).count(),
             0,
