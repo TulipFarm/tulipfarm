@@ -5,10 +5,11 @@ import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import { Card, CardContent } from '@tulipfarm/sprout/card';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { useFlag } from '@/lib/feature-flags';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { useGitHubAccounts } from './queries';
 import { GitHubSelectionForm } from './github-knowledge-selection';
+import { describeGitHubContent } from './github-knowledge-content';
+import { GitHubSourceSettings } from './github-knowledge-source-settings';
 import {
   GitHubKnowledgeError,
   githubConcealKeys,
@@ -30,13 +31,6 @@ const statusLabels = {
   'ocr-unavailable': 'Not searchable',
 } as const;
 
-const kindNames = {
-  code: 'Code',
-  docs: 'Docs',
-  issues: 'Issues',
-  pulls: 'Pull requests',
-  discussions: 'Discussions',
-} as const;
 const syncLabels = { queued: 'Queued', syncing: 'Syncing', ready: 'Sync complete', failed: 'Sync failed' };
 const repositoryFailures: Record<string, string> = {
   forbidden:
@@ -232,6 +226,8 @@ function GitHubSourceRow({
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const { change } = useFeatureChanges();
   const [refresh, setRefresh] = useState<
     { kind: 'idle' | 'loading' } | { kind: 'done'; refreshed: number; unavailable: number } | { kind: 'error' }
@@ -248,7 +244,10 @@ function GitHubSourceRow({
   useEffect(() => () => controller.current?.abort(), []);
   const busy = command.state.kind === 'sending';
   const locked = disabled || command.locked || refresh.kind === 'loading';
-  const blocked = source.repositories?.filter(repository => repository.state === 'unavailable') ?? [];
+  const blocked =
+    source.repositories?.filter(repository => repository.state === 'unavailable' && !repository.excluded) ?? [];
+  const excludedCount = source.repositories?.filter(repository => repository.excluded).length ?? 0;
+  const listed = showAll ? source.repositories : source.repositories?.slice(0, 20);
   async function refreshAccess() {
     if (controller.current || locked) return;
     const current = new AbortController();
@@ -282,8 +281,10 @@ function GitHubSourceRow({
           {source.selection && (
             <>
               <p className="text-sm text-muted-foreground">
-                {source.selection.kinds.map(kind => kindNames[kind]).join(', ')} · activity after{' '}
-                {source.selection.after} UTC
+                {source.selection.scope === 'all'
+                  ? 'All repositories, including new ones'
+                  : `${source.selection.repositories.length} chosen ${source.selection.repositories.length === 1 ? 'repository' : 'repositories'}`}
+                {excludedCount > 0 && ` · ${excludedCount} excluded`} · {describeGitHubContent(source.selection)}
               </p>
               <p className="text-sm text-muted-foreground">
                 {source.memberIds.length} selected {source.memberIds.length === 1 ? 'member' : 'members'}, including the
@@ -314,18 +315,20 @@ function GitHubSourceRow({
       )}
       {source.repositories && (
         <ul aria-label="Selected repositories" className="space-y-1 text-sm">
-          {source.repositories.map(repository => (
+          {listed?.map(repository => (
             <li key={repository.repositoryId} className="flex flex-wrap items-center gap-2">
               <span className="break-all">{repository.fullName}</span>
               {repository.visibility !== 'public' && (
                 <Badge variant="outline">{repository.visibility === 'private' ? 'Private' : 'Internal'}</Badge>
               )}
-              {repository.state === 'unavailable' ? (
+              {repository.excluded ? (
+                <Badge variant="outline">Excluded</Badge>
+              ) : repository.state === 'unavailable' ? (
                 <Badge variant="warning">Blocked</Badge>
               ) : (
                 <Badge variant="secondary">Active</Badge>
               )}
-              {repository.failure && (
+              {repository.failure && !repository.excluded && (
                 <span className="w-full text-muted-foreground">
                   {repositoryFailures[repository.failure] ??
                     'Permissions for this repository cannot be verified. Its content stays hidden.'}
@@ -334,6 +337,11 @@ function GitHubSourceRow({
             </li>
           ))}
         </ul>
+      )}
+      {source.repositories && source.repositories.length > 20 && (
+        <Button variant="ghost" size="sm" onClick={() => setShowAll(value => !value)}>
+          {showAll ? 'Show fewer repositories' : `Show all ${source.repositories.length} repositories`}
+        </Button>
       )}
       {(source.failure || (source.counts?.failed ?? 0) > 0) && (
         <Alert variant="destructive">
@@ -371,6 +379,11 @@ function GitHubSourceRow({
         </Button>
         {source.canManage && (
           <>
+            {source.selection && source.state !== 'removed' && (
+              <Button variant="outline" disabled={locked} onClick={() => setEditing(value => !value)}>
+                {editing ? 'Close settings' : 'Edit settings'}
+              </Button>
+            )}
             {source.state === 'active' && (
               <Button variant="outline" disabled={locked} onClick={() => manage('pause')}>
                 Pause source
@@ -393,7 +406,20 @@ function GitHubSourceRow({
         )}
       </div>
       {!source.canManage && (
-        <p className="text-sm text-muted-foreground">Only the source owner can pause, resume, retry, or remove it.</p>
+        <p className="text-sm text-muted-foreground">
+          Only the source owner can change settings, pause, resume, retry, or remove it.
+        </p>
+      )}
+      {editing && source.selection && (
+        <GitHubSourceSettings
+          api={api}
+          source={{ ...source, selection: source.selection }}
+          onClose={() => setEditing(false)}
+          onSaved={async () => {
+            setEditing(false);
+            await changed();
+          }}
+        />
       )}
       {showDocuments && source.state === 'active' && <GitHubSourceDocuments api={api} sourceId={source.sourceId} />}
       {busy && <p role="status">Updating source…</p>}
@@ -451,7 +477,6 @@ export function GitHubKnowledgeSources({
   const api = useMemo(() => githubKnowledgeApi(workspaceId), [workspaceId]);
   const { change } = useFeatureChanges();
   const accounts = useGitHubAccounts(workspaceId);
-  const automatic = useFlag('default-connection-knowledge');
   const [selecting, setSelecting] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -503,10 +528,9 @@ export function GitHubKnowledgeSources({
             </div>
             {!selecting && (
               <p className="max-w-prose text-sm text-muted-foreground">
-                Import selected content so you can find it in Knowledge.{' '}
-                {automatic
-                  ? 'New GitHub integrations also import automatically; see Automatic Knowledge.'
-                  : 'Connecting an account does not import anything automatically.'}
+                Connecting a GitHub account indexes every repository it can read, with all content and full history. New
+                repositories are added automatically. Use Edit settings on a source to leave out repositories, content
+                types or file paths.
               </p>
             )}
             {accountsChecked && !active.length && (
@@ -562,7 +586,9 @@ export function GitHubKnowledgeSources({
                     <div className="space-y-3 border-t border-foreground/10 pt-4">
                       <p className="text-sm font-medium text-foreground">No repositories imported yet</p>
                       <p className="text-sm text-muted-foreground">
-                        Choose repositories, what to import, and who can see the content.
+                        {active.length
+                          ? 'Indexing starts automatically for connected accounts. You can also add a source now and choose who can see the content.'
+                          : 'Connect a GitHub account to index its repositories.'}
                       </p>
                       <Button
                         disabled={!active.length}

@@ -3,7 +3,6 @@ import { z } from 'zod';
 export const knowledgeLimits = Object.freeze({
   documents: 10_000,
   revisionsPerDocument: 32,
-  sources: 100,
   originalBytes: 10 * 1024 * 1024,
   normalizedBytes: 10 * 1024 * 1024,
   retainedBytes: 1024 * 1024 * 1024,

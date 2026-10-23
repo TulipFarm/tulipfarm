@@ -17,9 +17,6 @@ export function createPostgresKnowledgeRepository(
     readDocumentRevision(values: [revisionId: string, documentId: string]) {
       return client.query(`SELECT * FROM ${table('revisions')} WHERE id=$1 AND document_id=$2`, values);
     },
-    countSources() {
-      return client.query(`SELECT count(*)::int AS count FROM ${table('sources')}`);
-    },
     insertSource(values: [id: string, provider: string, namespace: string, selection: string, owner: string]) {
       return client.query(
         `INSERT INTO ${table('sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,$2,$3,$4,$5)`,

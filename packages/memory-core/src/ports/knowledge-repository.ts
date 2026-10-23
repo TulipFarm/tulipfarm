@@ -4,7 +4,6 @@ export interface KnowledgeRepository {
   readSource(values: [id: string]): Promise<RepositoryResult>;
   readDocument(values: [id: string]): Promise<RepositoryResult>;
   readDocumentRevision(values: [revisionId: string, documentId: string]): Promise<RepositoryResult>;
-  countSources(): Promise<RepositoryResult>;
   insertSource(
     values: [id: string, provider: string, namespace: string, selection: string, owner: string],
   ): Promise<RepositoryResult>;

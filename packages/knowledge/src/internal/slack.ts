@@ -36,14 +36,7 @@ import {
   type SlackThreadObservation,
 } from '../slack-contracts.ts';
 import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
-import {
-  citationSchema,
-  knowledgeLimits,
-  KnowledgeAccountChanged,
-  KnowledgeError,
-  lexicalInput,
-  revisionInput,
-} from './contracts.ts';
+import { citationSchema, KnowledgeAccountChanged, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
 
@@ -318,10 +311,6 @@ export function createSlackKnowledge({
         [memberIds],
       );
       if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const count = z
-        .object({ n: z.number() })
-        .parse((await tx.client.query(`SELECT count(*)::int AS n FROM ${table(tx, 'sources')}`)).rows[0]).n;
-      if (count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
       const inserted = await tx.client.query(
         `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'slack',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
         [input.commandId, inspected.binding.teamId, JSON.stringify(input.selection), human.membershipId],

@@ -283,7 +283,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             github.configure(ws.id, ws.userId, {
               ...input,
               commandId: randomUUID(),
-              selection: { ...input.selection, after: '2020-01-01' },
+              selection: { ...input.selection, after: '2999-01-01' },
             }),
             error => error.code === 'invalid-selection',
           );
@@ -939,6 +939,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
               title: 'acme/leadership',
               state: 'unavailable',
               failure: 'forbidden',
+              excluded: false,
             },
           );
           assert.equal(await live(), 2, 'blocked repository content is retained, not tombstoned');

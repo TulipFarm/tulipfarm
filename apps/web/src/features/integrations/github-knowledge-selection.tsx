@@ -6,7 +6,6 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField, ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
-import { Input } from '@tulipfarm/sprout/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -16,43 +15,25 @@ import { useFeatureRead, useFeatureScope } from '@/lib/query';
 import {
   GitHubKnowledgeError,
   githubConcealKeys,
+  githubCorpusLimits,
   githubCorpusSelectionSchema,
   githubKnowledgeErrorMessages,
   githubSourceKeys,
   type ConfigureGitHub,
-  type GitHubKind,
   type GitHubKnowledgeApi,
   type GitHubRepositoryChoice,
   type GitHubSource,
 } from './github-knowledge-api';
 import { discoverGitHubRepositories, filterGitHubRepositories } from './github-repositories';
 import { CommandFeedback, ReadResult, useCommand } from './slack-knowledge-shared';
+import {
+  checkGitHubContent,
+  defaultGitHubContent,
+  describeGitHubContent,
+  GitHubContentOptions,
+} from './github-knowledge-content';
 
-const day = 86_400_000;
-const isoDate = (time: number) => new Date(time).toISOString().slice(0, 10);
-const displayDate = new Intl.DateTimeFormat('en-GB', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
-const kindNames: Record<GitHubKind, string> = {
-  code: 'code',
-  docs: 'Docs',
-  issues: 'issues',
-  pulls: 'pull requests',
-  discussions: 'discussions',
-};
-const kindOptions: { value: GitHubKind; label: string; description?: string }[] = [
-  {
-    value: 'docs',
-    label: 'Documentation and text files',
-    description: 'Every Markdown and text file on the default branch, at any size.',
-  },
-  { value: 'issues', label: 'Issues and comments' },
-  { value: 'pulls', label: 'Pull request descriptions and comments' },
-  { value: 'discussions', label: 'Discussions' },
-];
+const repositoryLimit = githubCorpusLimits.repositories;
 const reconnectErrors = new Set([
   'github-not-linked',
   'github-reconnect-required',
@@ -81,8 +62,8 @@ export function GitHubSelectionForm({
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [pendingAccount, setPendingAccount] = useState<string | null>(null);
   const [selected, setSelected] = useState<GitHubRepositoryChoice[]>([]);
-  const [kinds, setKinds] = useState<GitHubKind[]>(['docs', 'issues', 'pulls']);
-  const [after, setAfter] = useState(() => isoDate(Date.now() - 90 * day));
+  const [mode, setMode] = useState<'all' | 'chosen'>('all');
+  const [content, setContent] = useState(defaultGitHubContent);
   const [shared, setShared] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [memberSearch, setMemberSearch] = useState('');
@@ -115,9 +96,13 @@ export function GitHubSelectionForm({
   );
   const selectedAccount = accounts.find(account => account.id === accountId);
   const repositories = selected.map(item => item.fullName).sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1));
-  const selection = githubCorpusSelectionSchema.safeParse({ repositories, kinds: [...kinds].sort(), after });
-  const start = Date.parse(after);
-  const dateInvalid = !Number.isFinite(start) || start > Date.now() || Date.now() - start > 366 * day;
+  const checked = checkGitHubContent(content);
+  const selection = githubCorpusSelectionSchema.safeParse({
+    ...(mode === 'all' ? { scope: 'all', repositories: [] } : { repositories }),
+    kinds: checked.kinds,
+    ...(checked.excludePaths.length ? { excludePaths: checked.excludePaths } : {}),
+    ...(checked.after ? { after: checked.after } : {}),
+  });
   const candidates =
     members.state.kind === 'ready'
       ? members.state.data.members.filter(member => scope.kind !== 'workspace' || member.id !== scope.membershipId)
@@ -159,36 +144,12 @@ export function GitHubSelectionForm({
           <AccordionTrigger>Import settings</AccordionTrigger>
           <AccordionContent>
             <div className="space-y-5 pt-2">
-              <ChoiceGroup
-                type="checkbox"
-                legend="Content to import"
-                required
-                options={kindOptions}
-                value={kinds}
-                onValueChange={setKinds}
-                error={attempted && !kinds.length ? 'Choose at least one kind of content.' : undefined}
+              <GitHubContentOptions
+                idPrefix={`${formId}-content`}
+                value={content}
+                onChange={setContent}
+                attempted={attempted}
               />
-              <div className="max-w-sm">
-                <Field
-                  id="github-after"
-                  label="Import activity after"
-                  required
-                  helper="Applies to issues, pull requests and discussions, not documentation. Dates use UTC."
-                  error={
-                    attempted && dateInvalid
-                      ? 'Enter a date that is not in the future and no more than 366 days ago.'
-                      : undefined
-                  }
-                >
-                  <Input
-                    type="date"
-                    min={isoDate(Date.now() - 366 * day)}
-                    max={isoDate(Date.now())}
-                    value={after}
-                    onChange={event => setAfter(event.target.value)}
-                  />
-                </Field>
-              </div>
               <section aria-label="Who can access this content" className="space-y-3 border-t pt-4">
                 <h4 className="text-sm font-medium">Who can access this content?</h4>
                 <CheckboxField
@@ -248,11 +209,7 @@ export function GitHubSelectionForm({
       </Accordion>
       {!settingsOpen && (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          {kindOptions
-            .filter(kind => kinds.includes(kind.value))
-            .map(kind => kindNames[kind.value])
-            .join(', ') || 'Choose content'}{' '}
-          · {Number.isFinite(start) ? `since ${displayDate.format(start)}` : 'choose a date'} ·{' '}
+          {content.kinds.length ? describeGitHubContent(checked) : 'Choose content'} ·{' '}
           {shared ? `${memberIds.length} readers + you` : 'only you'}
         </p>
       )}
@@ -264,10 +221,12 @@ export function GitHubSelectionForm({
       <FormFooter
         form={formId}
         layout="compact"
-        dirty={selected.length > 0}
+        dirty={mode === 'all' || selected.length > 0}
         summary={
           <p role="status" className="text-sm font-medium">
-            {selected.length} / 20 selected
+            {mode === 'all'
+              ? 'All repositories'
+              : `${selected.length.toLocaleString()} / ${repositoryLimit.toLocaleString()} selected`}
           </p>
         }
         submit={{
@@ -280,7 +239,7 @@ export function GitHubSelectionForm({
               : { kind: 'ready' },
         }}
         error={
-          attempted && (!selection.success || dateInvalid || !audienceReady)
+          attempted && (!selection.success || !checked.valid || !audienceReady)
             ? 'Review the highlighted choices before adding to Knowledge.'
             : undefined
         }
@@ -305,8 +264,8 @@ export function GitHubSelectionForm({
         onSubmit={() => {
           if (command.locked || pendingAccount || !discoveryReady || !accountId) return;
           setAttempted(true);
-          if (!selection.success || dateInvalid || !audienceReady) {
-            if (!kinds.length || dateInvalid || !audienceReady) setSettingsOpen(true);
+          if (!selection.success || !checked.valid || !audienceReady) {
+            if (!checked.valid || !audienceReady) setSettingsOpen(true);
             return 'invalid';
           }
           void command.send({
@@ -364,6 +323,26 @@ export function GitHubSelectionForm({
               </div>
             </Alert>
           )}
+          <ChoiceGroup
+            type="radio"
+            legend="Repositories to index"
+            required
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              {
+                value: 'all',
+                label: 'All repositories',
+                description:
+                  'Every repository this account can read, including new ones. Leave repositories out later in the source settings.',
+              },
+              {
+                value: 'chosen',
+                label: 'Only repositories I choose',
+                description: `Pick up to ${repositoryLimit.toLocaleString()} repositories.`,
+              },
+            ]}
+          />
           <div ref={searchRegion} className="space-y-3">
             <ReadResult state={discovery.state} retry={discovery.refresh} label="GitHub repositories">
               {data => {
@@ -384,6 +363,16 @@ export function GitHubSelectionForm({
                         Check GitHub again
                       </Button>
                     </StatePanel>
+                  );
+                if (mode === 'all')
+                  return (
+                    <>
+                      <p role="status" className="text-sm">
+                        {data.items.length.toLocaleString()} {data.items.length === 1 ? 'repository' : 'repositories'}{' '}
+                        will be indexed now. New repositories are added on each sync.
+                      </p>
+                      {importSettings}
+                    </>
                   );
                 const owners = [...new Set(data.items.map(item => item.fullName.split('/')[0]!))].sort((a, b) =>
                   a.localeCompare(b),
@@ -500,7 +489,7 @@ export function GitHubSelectionForm({
                             value: item.repositoryId,
                             label: `${item.fullName}${item.visibility === 'public' ? '' : ` (${item.visibility})`}`,
                             disabled:
-                              selected.length >= 20 &&
+                              selected.length >= repositoryLimit &&
                               !selected.some(value => value.repositoryId === item.repositoryId),
                           }))}
                           error={
@@ -541,7 +530,7 @@ export function GitHubSelectionForm({
                 Checking all repository pages, including organizations. Search will cover the complete list.
               </p>
             )}
-            {selected.length > 0 && (
+            {mode === 'chosen' && selected.length > 0 && (
               <section aria-label="Selected repositories" className="space-y-2">
                 {selected.length > 0 && (
                   <ul className="flex flex-wrap gap-2">
@@ -566,7 +555,7 @@ export function GitHubSelectionForm({
                     ))}
                   </ul>
                 )}
-                {selected.length >= 20 && (
+                {selected.length >= repositoryLimit && (
                   <p className="text-xs text-muted-foreground">
                     Selection limit reached. Remove a repository to choose another.
                   </p>

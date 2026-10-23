@@ -28,9 +28,14 @@ command and lease semantics as the Slack adapter.
 
 ## Selection and documents
 
-A source binds one of the owner's personal GitHub accounts and selects 1 to 20
-repositories by `owner/name`, one or more content kinds, and an `after` date within
-366 days. The configure command ID is the source ID. Member IDs are membership
+A source binds one of the owner's personal GitHub accounts and selects either every
+repository that account can read (`scope: 'all'`, with an empty `repositories` list)
+or 1 to 1,000 repositories by `owner/name`. It also selects one or more content
+kinds (all kinds by default), optional `excludePaths` patterns and an optional
+`after` cutoff date. Without `after`, issues, pull requests and discussions are
+imported for their full history. A cutoff may be any date that is not in the
+future. A rolling `window` is rejected. There is no limit on the number of
+Knowledge sources in a workspace. The configure command ID is the source ID. Member IDs are membership
 incarnation IDs. The owner is always included. Any member may be selected; private
 repositories never become workspace-public because every reader needs their own
 proof (see Authority).
@@ -45,7 +50,7 @@ with `invalid-selection`.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------- | ----------------------------------------------- |
 | `docs`            | Every file in the default-branch tree whose path looks like documentation (`.md`, `.txt`, `.rst`, `.adoc`, `README`, `LICENSE` and similar) | `doc:{repoId}:{path}`                     | `blob:{blobSha}`                      | 128 KiB of text each, split at a line break     |
 | `code`            | Every other file in the default-branch tree                                                                                                 | `code:{repoId}:{path}`                    | `blob:{blobSha}`                      | 128 KiB of text each; a binary file is one part |
-| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all&since={after}` sorted by update                                                                    | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
+| `issues`, `pulls` | `GET /repositories/{id}/issues?state=all` sorted by update, with `since={after}` only when a cutoff is set                                  | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
 | `discussions`     | GraphQL `repository.discussions` ordered by update                                                                                          | `discussion:{repoId}:{n}`                 | `discussion:{updatedAt}:{totalCount}` | 100 comments each, with every reply             |
 
 There is no file-type allowlist, built-in exclusion or per-repository count cap:
@@ -82,8 +87,8 @@ most 50 tree requests per page, and the cursor records the position in the walk.
 single directory that GitHub itself truncates is recorded as an excluded
 `/truncated/{treeSha}` item, so the gap is visible.
 
-Docs and code are not date-bounded; issues, pull requests and discussions must have been
-updated after `after`. Every document is Markdown in `tf_knowledge_github_originals`
+Docs and code are not date-bounded; with a cutoff, issues, pull requests and
+discussions must have been updated after `after`. Every document is Markdown in `tf_knowledge_github_originals`
 and starts with provenance: repository, numeric ID, path and the commit and blob SHAs
 for files; author login and UTC time of the description and every comment for
 issues, pull requests and discussions. Canonical URLs for files are commit-pinned
@@ -99,6 +104,39 @@ and the status route report the newer version: `failed` with its coverage failur
 or `queued` while it awaits import, with `historical: true`. The download then
 returns the earlier version, and the web UI labels it **Download earlier version**.
 Corrected 5 October 2026 for issue #455; Slack and Atlassian follow the same rule.
+
+## Opting out
+
+Everything is indexed by default. The owner narrows a source with
+`POST /v1/workspaces/:workspaceId/knowledge/github/sources/:sourceId/settings`,
+which replaces the content kinds, `excludePaths`, the `after` cutoff and the set
+of excluded repositories. An excluded repository keeps its row with `excluded`
+set. Its documents and any documents of a removed kind are withdrawn at once.
+A changed cutoff or new patterns withdraw content on the next sync. An
+all-repositories source never re-adds an excluded repository. Including it again
+resumes its sync.
+
+At the start of every pass, an all-repositories source lists the account's
+repositories and adds any it does not know yet, up to 1,000 repositories per
+source. Repositories that another live source of the same owner already covers
+are skipped. Private repositories are skipped when the account lacks the `repo`
+scope. A repository that cannot be resolved is skipped without failing the pass.
+
+`excludePaths` holds up to 20 regular expressions of at most 200 characters.
+Each is matched against a repository-relative file path for the `docs` and `code`
+kinds; a matching path is not listed or read. Patterns run on the JavaScript
+backtracking engine, so configuration rejects shapes that can backtrack
+catastrophically:
+
+- nested quantified groups such as `(a+)+`;
+- backreferences;
+- more than one unbounded repetition (`*`, `+`, `{n,}`);
+- more than one optional or bounded repetition alongside an unbounded one, or
+  more than four without one.
+
+A leading `^.*` and a trailing `.*$` are removed first, because they do not
+change what matches. Paths longer than 1,024 characters are never tested.
+Patterns compile with the `su` flags.
 
 ## Authority
 
@@ -169,15 +207,22 @@ cached per session.
 
 ## Automatic Knowledge
 
-With `default-connection-knowledge` on, the first authorization of a personal account also
-creates owner-only sources for every readable repository, including new ones; see
-[automatic integration Knowledge](../../docs/knowledge-defaults-delivery.md). Automatic sources include `code`: every file at the
-default-branch head, with no count cap.
-Issues, pull requests and discussions use a rolling 90-day window.
+Every authorization of a personal account creates one owner-only all-repositories
+source with every content kind and full history, unless the owner already has one
+for that account. Indexing starts at once. Unlike other providers, GitHub ignores
+the `default-connection-knowledge` flag and the automatic Knowledge gate never
+holds its sources. Automatic sources include `code`: every file at the default-branch
+head, with no count cap.
+Issues, pull requests and discussions keep their full history. Migration
+`common/0006_github_knowledge_opt_out.sql` removes the earlier rolling 90-day window
+and its date from existing GitHub sources. It also records a default intent for every
+active account, so existing accounts get their all-repositories source.
 
 ## Verification
 
-`test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
+`test/github-opt-out.integration.mjs` covers automatic creation, new repositories
+on later passes, repository, kind, path and cutoff opt-outs, full history and the
+1,000-repository bound. `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
 lexical search, embeddings, and the search coordinator with a fixture provider.
 `packages/github/test/corpus-provider.test.mjs` covers REST and GraphQL mapping
 against `packages/github/test/corpus-fixture.mjs`.

@@ -16,7 +16,7 @@ const importSettings = page => page.getByRole('button', { name: /^Import setting
 
 test(
   'GitHub Knowledge selection and management in the personal GitHub settings in Chromium',
-  { timeout: 240_000 },
+  { timeout: 300_000 },
   async t => {
     const root = fileURLToPath(new URL('..', import.meta.url));
     const server = await createServer({
@@ -59,6 +59,7 @@ test(
         title: 'acme/handbook',
         state: 'active',
         failure: null,
+        excluded: false,
       },
       {
         repositoryId: '7002',
@@ -67,6 +68,7 @@ test(
         title: 'acme/leadership',
         state: 'unavailable',
         failure: 'forbidden',
+        excluded: false,
       },
     ];
     const source = (overrides = {}) => ({
@@ -225,7 +227,7 @@ test(
               sourceId: body.commandId,
               selection: body.selection,
               memberIds: [workspace.id, ...body.memberIds],
-              title: body.selection.repositories[0],
+              title: body.selection.scope === 'all' ? 'All repositories' : body.selection.repositories[0],
               repositories: repositories.slice(0, 1),
               counts: { total: 0, ready: 0, failed: 0 },
               syncState: 'queued',
@@ -243,6 +245,25 @@ test(
             syncState: body.action === 'retry' ? 'queued' : old.syncState,
           };
           if (status === 200) sources.set(id, json);
+        } else if (path.includes('/knowledge/github/sources/') && path.endsWith('/settings')) {
+          const id = path.split('/sources/')[1].split('/')[0],
+            body = request.postDataJSON();
+          writes.push({ kind: 'settings', id, body });
+          const old = sources.get(id);
+          json = {
+            ...old,
+            selection: {
+              ...old.selection,
+              kinds: body.kinds,
+              ...(body.excludePaths.length ? { excludePaths: body.excludePaths } : { excludePaths: undefined }),
+              after: body.after ?? undefined,
+            },
+            repositories: old.repositories.map(item => ({
+              ...item,
+              excluded: body.excludedRepositories.includes(item.repositoryId),
+            })),
+          };
+          sources.set(id, json);
         } else if (path.includes('/knowledge/github/sources/') && path.endsWith('/refresh')) {
           writes.push({ kind: 'refresh', path });
           status = faults.refresh;
@@ -342,8 +363,12 @@ test(
         await page.getByRole('button', { name: 'Add repositories', exact: true }).click();
         await page.getByRole('region', { name: 'Select GitHub repositories', exact: true }).waitFor();
       };
+      const choose = async () => {
+        await select();
+        await page.getByRole('radio', { name: /^Only repositories I choose/ }).click();
+      };
       try {
-        await run({ page, context, faults, sources, documents, writes, reads, open, select });
+        await run({ page, context, faults, sources, documents, writes, reads, open, select, choose });
         assert.deepEqual(errors, []);
         assert.deepEqual(unknown, []);
       } finally {
@@ -407,7 +432,7 @@ test(
             f.faults.discovery = 503;
             await f.open();
             await f.page.getByText('No repositories imported yet', { exact: true }).waitFor();
-            await f.select();
+            await f.choose();
             assert.equal(await f.page.getByText('No repositories imported yet', { exact: true }).count(), 0);
             await f.page.getByRole('status', { name: 'Loading GitHub repositories' }).waitFor();
             await f.page.getByRole('button', { name: 'Retry loading GitHub repositories' }).waitFor();
@@ -435,7 +460,7 @@ test(
             await f.page.getByRole('searchbox', { name: 'Find repositories' }).fill('archive');
             await f.page.getByRole('checkbox', { name: 'acme/archive (internal)' }).click();
             assert.ok(f.reads.some(read => read.query.cursor === '2'));
-            await f.page.getByText('2 / 20 selected').waitFor();
+            await f.page.getByText('2 / 1,000 selected').waitFor();
             await f.page.getByRole('searchbox', { name: 'Find repositories' }).fill('');
             await f.page.getByRole('checkbox', { name: 'acme/handbook (private)' }).click();
             await importSettings(f.page);
@@ -449,7 +474,8 @@ test(
             assert.equal(await f.page.getByLabel('Use GitHub account', { exact: true }).isDisabled(), true);
             const original = f.writes.find(write => write.kind === 'save').body;
             assert.deepEqual(original.selection.repositories, ['acme/archive', 'acme/handbook', 'acme/leadership']);
-            assert.deepEqual(original.selection.kinds, ['discussions', 'docs', 'issues', 'pulls']);
+            assert.deepEqual(original.selection.kinds, ['code', 'docs', 'issues', 'pulls']);
+            assert.equal(original.selection.after, undefined);
             assert.equal(original.accountId, personal.id);
             assert.deepEqual(original.memberIds, []);
             f.faults.save = 200;
@@ -458,6 +484,29 @@ test(
             await f.page.getByText('acme/archive was saved.', { exact: false }).waitFor();
             assert.deepEqual(f.writes.filter(write => write.kind === 'save').at(-1).body, original);
           }),
+      );
+
+      await t.test('all repositories and all content are selected by default and new repositories follow', () =>
+        fixture(async f => {
+          await f.open();
+          await f.page.getByText('indexes every repository it can read', { exact: false }).waitFor();
+          await f.select();
+          assert.equal(await f.page.getByRole('radio', { name: /^All repositories/ }).isChecked(), true);
+          await f.page
+            .getByText('3 repositories will be indexed now. New repositories are added on each sync.')
+            .waitFor();
+          await f.page.getByText('All content · full history · only you', { exact: true }).waitFor();
+          await f.page.getByRole('button', { name: 'Add to Knowledge', exact: true }).click();
+          await f.page.getByText('All repositories was saved.', { exact: false }).waitFor();
+          const saved = f.writes.find(write => write.kind === 'save').body;
+          assert.deepEqual(saved.selection, {
+            scope: 'all',
+            repositories: [],
+            kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
+          });
+          const row = f.page.getByRole('listitem', { name: 'All repositories', exact: true });
+          await row.getByText('All repositories, including new ones · All content · full history').waitFor();
+        }),
       );
 
       await t.test(
@@ -474,7 +523,7 @@ test(
             f.faults.discoveryPages = Array.from({ length: 6 }, (_, index) => all.slice(index * 50, (index + 1) * 50));
             f.faults.failedCursor = '6';
             await f.open();
-            await f.select();
+            await f.choose();
             await f.page.getByRole('button', { name: 'Retry loading GitHub repositories' }).waitFor();
             assert.equal(await f.page.getByRole('checkbox').count(), 0);
             assert.equal(
@@ -512,14 +561,12 @@ test(
             await f.page.getByRole('button', { name: 'Clear filters', exact: true }).click();
             await f.page.getByText('260 repositories', { exact: true }).waitFor();
             await f.page.getByRole('button', { name: 'Remove TulipFarm/tulipfarm-cloud', exact: true }).click();
-            await f.page.getByText('0 / 20 selected', { exact: true }).waitFor();
+            await f.page.getByText('0 / 1,000 selected', { exact: true }).waitFor();
             assert.equal(await search.evaluate(element => element === document.activeElement), true);
             const choices = repositoryList.getByRole('checkbox');
-            for (let index = 0; index < 20; index++) await choices.nth(index).check();
-            await f.page.getByText('20 / 20 selected', { exact: true }).waitFor();
-            assert.equal(await choices.nth(20).isDisabled(), true);
-            await choices.nth(0).uncheck();
-            assert.equal(await choices.nth(20).isEnabled(), true);
+            for (let index = 0; index < 25; index++) await choices.nth(index).check();
+            await f.page.getByText('25 / 1,000 selected', { exact: true }).waitFor();
+            assert.equal(await choices.nth(25).isEnabled(), true);
           }),
       );
 
@@ -528,7 +575,7 @@ test(
         () =>
           fixture(async f => {
             await f.open();
-            await f.select();
+            await f.choose();
             await f.page.getByRole('checkbox', { name: 'acme/handbook (private)' }).click();
             await chooseAccount(f.page, '@octo-work');
             await f.page.getByRole('button', { name: 'Keep this account', exact: true }).click();
@@ -539,18 +586,28 @@ test(
             await f.page.getByRole('checkbox', { name: 'work/public-docs', exact: true }).click();
             await importSettings(f.page);
             for (const name of [
+              'Source code',
+              'Documentation and text files',
+              'Issues and comments',
+              'Pull request descriptions and comments',
+              'Discussions',
+            ])
+              await f.page.getByRole('checkbox', { name }).click();
+            await f.page.getByLabel('Only index activity after').fill('2999-01-01');
+            await f.page.getByLabel('Exclude file paths').fill('^vendor/\n(a+)+$');
+            await f.page.getByRole('button', { name: 'Add to Knowledge', exact: true }).click();
+            await f.page.getByText('Choose at least one kind of content.').waitFor();
+            await f.page.getByText('Enter a date that is not in the future.').waitFor();
+            await f.page.getByText('“(a+)+$” could take too long to match', { exact: false }).waitFor();
+            assert.equal(f.writes.filter(write => write.kind === 'save').length, 0);
+            for (const name of [
               'Documentation and text files',
               'Issues and comments',
               'Pull request descriptions and comments',
             ])
               await f.page.getByRole('checkbox', { name }).click();
-            await f.page.getByLabel('Import activity after').fill('2020-01-01');
-            await f.page.getByRole('button', { name: 'Add to Knowledge', exact: true }).click();
-            await f.page.getByText('Choose at least one kind of content.').waitFor();
-            await f.page.getByText('Enter a date that is not in the future and no more than 366 days ago.').waitFor();
-            assert.equal(f.writes.filter(write => write.kind === 'save').length, 0);
-            await f.page.getByRole('checkbox', { name: 'Documentation and text files' }).click();
-            await f.page.getByLabel('Import activity after').fill(after);
+            await f.page.getByLabel('Only index activity after').fill(after);
+            await f.page.getByLabel('Exclude file paths').fill('^vendor/\n\\.min\\.js$');
             f.faults.members = 503;
             await f.page.getByRole('checkbox', { name: 'Share with selected workspace members' }).click();
             await f.page.getByRole('button', { name: 'Retry loading workspace members' }).waitFor();
@@ -568,12 +625,14 @@ test(
             f.faults.save = 400;
             f.faults.saveError = 'github-invalid-selection';
             await f.page.getByRole('button', { name: 'Cancel selection' }).click();
-            await f.select();
+            await f.choose();
             await chooseAccount(f.page, '@octo-work');
             await f.page.getByRole('checkbox', { name: 'work/public-docs', exact: true }).click();
             await f.page.getByRole('button', { name: 'Add to Knowledge', exact: true }).click();
             await f.page
-              .getByText('A repository was renamed or the date is outside the last 366 days.', { exact: false })
+              .getByText('A repository was renamed, a date is in the future or an exclude pattern was rejected.', {
+                exact: false,
+              })
               .waitFor();
             f.faults.save = 200;
             f.faults.saveError = null;
@@ -583,8 +642,7 @@ test(
             assert.equal(saved.accountId, work.id);
             assert.deepEqual(saved.selection, {
               repositories: ['work/public-docs'],
-              kinds: ['docs', 'issues', 'pulls'],
-              after: saved.selection.after,
+              kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
             });
           }),
       );
@@ -615,8 +673,24 @@ test(
             .getByText('The source owner can no longer read this repository in GitHub.', { exact: false })
             .waitFor();
           await row().getByText('Blocked', { exact: true }).waitFor();
-          await row().getByText('Docs, Issues, Pull requests · activity after', { exact: false }).waitFor();
+          await row()
+            .getByText('2 chosen repositories · docs, issues, pull requests · activity since', { exact: false })
+            .waitFor();
           await row().getByText('8 ready · 1 failed · 9 items discovered').waitFor();
+          await row().getByRole('button', { name: 'Edit settings' }).click();
+          const settings = row().getByRole('region', { name: 'GitHub source settings', exact: true });
+          await settings.getByRole('checkbox', { name: 'acme/leadership (private)' }).uncheck();
+          await settings.getByText('1 of 2 repositories included', { exact: true }).waitFor();
+          await settings.getByRole('checkbox', { name: 'Discussions' }).check();
+          await settings.getByLabel('Exclude file paths').fill('^vendor/');
+          await settings.getByRole('button', { name: 'Save source settings' }).click();
+          await row().getByText('Excluded', { exact: true }).waitFor();
+          await row().getByText('1 excluded · discussions, docs, issues, pull requests', { exact: false }).waitFor();
+          const change = f.writes.find(write => write.kind === 'settings').body;
+          assert.deepEqual(change.excludedRepositories, ['7002']);
+          assert.deepEqual(change.kinds, ['discussions', 'docs', 'issues', 'pulls']);
+          assert.deepEqual(change.excludePaths, ['^vendor/']);
+          assert.equal(change.after, after);
           f.faults.refresh = 503;
           await row().getByRole('button', { name: 'Refresh my access' }).click();
           await row()
@@ -693,7 +767,10 @@ test(
             ]);
             await f.open();
             const row = f.page.getByRole('listitem', { name: 'Shared GitHub source', exact: true });
-            await row.getByText('Only the source owner can pause, resume, retry, or remove it.').waitFor();
+            await row
+              .getByText('Only the source owner can change settings, pause, resume, retry, or remove it.')
+              .waitFor();
+            assert.equal(await row.getByRole('button', { name: 'Edit settings' }).count(), 0);
             assert.equal(await row.getByRole('button', { name: 'Pause source' }).count(), 0);
             assert.equal(await row.getByRole('list', { name: 'Selected repositories' }).count(), 0);
             await row.getByRole('button', { name: 'View import details' }).click();
@@ -822,10 +899,10 @@ test(
                 const item = source({ title: 'acme/handbook and international supplier operations '.repeat(4) });
                 f.sources.set(item.sourceId, item);
                 await f.open();
-                await f.select();
+                await f.choose();
                 await f.page.getByRole('checkbox', { name: /^acme\/handbook-international/ }).focus();
                 await f.page.keyboard.press('Space');
-                await f.page.getByText('1 / 20 selected').waitFor();
+                await f.page.getByText('1 / 1,000 selected').waitFor();
                 await importSettings(f.page);
                 await f.page.getByRole('checkbox', { name: 'Share with selected workspace members' }).focus();
                 await f.page.keyboard.press('Space');

@@ -120,22 +120,19 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
     }
     const privateInput = await recap();
     let first, firstHit;
-    await t.test('creating the grouped source obeys the normal 100-source limit', async () => {
+    await t.test('creating the grouped source has no workspace source limit', async () => {
       const ids = [];
-      for (let index = 0; index < knowledgeLimits.sources; index++) {
+      for (let index = 0; index < 120; index++) {
         ids.push(randomUUID());
         await db.platform.query(
           `INSERT INTO ${table('sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'note',$2,$3,$4)`,
           [ids.at(-1), owner.membershipId, `initial-quota-${index}`, owner.membershipId],
         );
       }
-      await assert.rejects(
-        service.publish(privateInput),
-        error => error instanceof KnowledgeError && error.code === 'quota',
-      );
+      await service.publish(privateInput);
       assert.equal(
         (await db.platform.query(`SELECT 1 FROM ${table('sources')} WHERE provider='conversation'`)).rowCount,
-        0,
+        1,
       );
       await db.platform.query(`DELETE FROM ${table('sources')} WHERE id=ANY($1::uuid[])`, [ids]);
     });
@@ -639,11 +636,9 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
         );
       },
     );
-    await t.test('an existing group accepts new chat documents at the shared source quota', async () => {
-      const remaining =
-        knowledgeLimits.sources -
-        (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('sources')}`)).rows[0].count;
-      for (let index = 0; index < remaining; index++)
+    await t.test('an existing group accepts new chat documents among many sources', async () => {
+      const before = (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('sources')}`)).rows[0].count;
+      for (let index = 0; index < 120; index++)
         await db.platform.query(
           `INSERT INTO ${table('sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'note',$2,$3,$4)`,
           [randomUUID(), owner.membershipId, `quota-${index}`, owner.membershipId],
@@ -652,7 +647,7 @@ test('conversation Knowledge publishes saved recaps and dynamically retains the 
       await service.publish(input);
       assert.equal(
         (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('sources')}`)).rows[0].count,
-        knowledgeLimits.sources,
+        before + 120,
       );
       assert.equal(
         (

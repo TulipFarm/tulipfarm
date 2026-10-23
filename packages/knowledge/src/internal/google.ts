@@ -245,10 +245,6 @@ export function createGoogleKnowledge({
         [memberIds],
       );
       if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const count = z
-        .object({ n: z.number() })
-        .parse((await tx.client.query(`SELECT count(*)::int AS n FROM ${table(tx, 'sources')}`)).rows[0]).n;
-      if (count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
       const inserted = await tx.client.query(
         `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'google',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
         [input.commandId, inspected.binding.accountId, JSON.stringify(input.selection), human.membershipId],

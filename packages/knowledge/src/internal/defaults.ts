@@ -19,7 +19,7 @@ import {
   type AtlassianSite,
   type AtlassianTarget,
 } from '../atlassian-contracts.ts';
-import { type GitHubRepository } from '../github-contracts.ts';
+import { githubCorpusKinds, type GitHubRepository } from '../github-contracts.ts';
 import { slackAccountKey, type SlackConversation } from '../slack-contracts.ts';
 import { KnowledgeAccountChanged, KnowledgeError } from './contracts.ts';
 import {
@@ -97,9 +97,12 @@ async function disabledOwners(
   return disabled;
 }
 
+/** GitHub Knowledge is on for everyone: its automatic sources and intents are never held by the feature flag. */
+export const ungatedDefaultKnowledgeProducts: readonly DefaultKnowledgeProduct[] = ['github'];
+
 /**
  * Lists automatic sources whose owner cannot use the feature now. Engines exclude them before their dispatch limit and recheck at claim time.
- * Manual sources are never held, and older storage versions have no automatic sources.
+ * Manual sources and ungated products are never held, and older storage versions have no automatic sources.
  */
 export function createDefaultKnowledgeGate({
   runtime,
@@ -120,8 +123,8 @@ export function createDefaultKnowledgeGate({
           (
             await tx.client.query(
               `SELECT d.source_id FROM ${table(tx, 'default_sources')} d JOIN ${table(tx, 'default_intents')} i ON i.id=d.intent_id
-      JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id WHERE m.user_id=ANY($1::text[])`,
-              [disabled],
+      JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id WHERE m.user_id=ANY($1::text[]) AND NOT i.product=ANY($2::text[])`,
+              [disabled, ungatedDefaultKnowledgeProducts],
             )
           ).rows,
         )
@@ -285,27 +288,23 @@ export function createDefaultKnowledge({
     return engine;
   };
   const adapters: Record<DefaultKnowledgeProduct, Adapter> = {
+    // One source per account follows every repository it can read; the source's own passes add new repositories.
     github: {
-      groupSize: defaultKnowledgeLimits.groups.github,
-      async discover(ws, i, page) {
-        const result = await required(engines.github).discover(ws, i.user_id, i.account_key, page ?? undefined);
-        return {
-          scopes: result.items.map(r => ({ key: r.repositoryId, group: '', title: r.fullName })),
-          nextCursor: result.nextCursor,
-        };
+      groupSize: 1,
+      perAccount: true,
+      async discover(ws, i) {
+        await required(engines.github).discover(ws, i.user_id, i.account_key);
+        return { scopes: [{ key: 'all-repositories', group: '', title: 'All repositories' }], nextCursor: null };
       },
-      covered: (tx, i, scopes) =>
+      // Any all-repositories source of this account, in any state, is the member's own choice; it is never recreated.
+      covered: (tx, i) =>
         owned(
           tx,
-          `SELECT DISTINCT r.repository_id AS key FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id WHERE s.owner_membership_id=$1 AND r.repository_id=ANY($2::text[])`,
-          [i.membership_id, scopes.map(s => s.key)],
+          `SELECT 'all-repositories' AS key FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id
+        WHERE s.owner_membership_id=$1 AND g.binding->>'accountId'=$2 AND g.selection->>'scope'='all' LIMIT 1`,
+          [i.membership_id, i.account_key],
         ),
-      selection: (_i, scopes, at) => ({
-        repositories: scopes.map(s => s.title).sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : 1)),
-        kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
-        after: isoDay(at, -defaultKnowledgeLimits.windowDays),
-        window: 'rolling-90d',
-      }),
+      selection: () => ({ scope: 'all', repositories: [], kinds: [...githubCorpusKinds].sort() }),
       configure: (ws, i, commandId, selection) =>
         required(engines.github).configure(ws, i.user_id, {
           commandId,
@@ -493,8 +492,8 @@ export function createDefaultKnowledge({
           (
             await tx.client.query(
               `SELECT i.id,i.generation FROM ${table(tx, 'default_intents')} i JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id AND m.removed_at IS NULL
-        WHERE i.state='active' AND i.lease_token IS NULL AND i.next_attempt_at<=$1 AND NOT m.user_id=ANY($2::text[]) ORDER BY i.next_attempt_at,i.id LIMIT 20`,
-              [now(), disabled],
+        WHERE i.state='active' AND i.lease_token IS NULL AND i.next_attempt_at<=$1 AND (i.product=ANY($3::text[]) OR NOT m.user_id=ANY($2::text[])) ORDER BY i.next_attempt_at,i.id LIMIT 20`,
+              [now(), disabled, ungatedDefaultKnowledgeProducts],
             )
           ).rows,
         )
@@ -662,7 +661,8 @@ export function createDefaultKnowledge({
       return i;
     });
     if (typeof claim === 'string') return { disposition: claim };
-    if (!(await enabled(work.workspaceId, claim.user_id))) return { disposition: 'stale' };
+    if (!ungatedDefaultKnowledgeProducts.includes(claim.product) && !(await enabled(work.workspaceId, claim.user_id)))
+      return { disposition: 'stale' };
     const leased = await transaction(
       work.workspaceId,
       async tx =>

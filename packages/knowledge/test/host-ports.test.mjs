@@ -54,7 +54,7 @@ function gateFixture(featureFlags, enabled) {
           query: async (_sql, values) => {
             queries++;
             if (queries === 1) return { rows: [{ user_id: 'test-user' }] };
-            assert.deepEqual(values, [['test-user']]);
+            assert.deepEqual(values, [['test-user'], ['github']]);
             return { rows: [{ source_id: sourceId }] };
           },
         },

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { effectiveSelection, type EngineClock } from './rolling.ts';
+import type { EngineClock } from './rolling.ts';
 import { z } from 'zod';
 import { createGitHubCorpusAdapter } from '../corpus-adapters.ts';
 import {
@@ -23,18 +23,21 @@ import {
   githubKnowledgeConfigureSchema,
   githubKnowledgeDocumentsSchema,
   githubKnowledgeManageSchema,
+  githubKnowledgeSettingsSchema,
   githubKnowledgeSourceSchema,
   githubKnowledgeStatusSchema,
   githubKnowledgeWorkSchema,
   type GitHubCorpusBinding,
+  type GitHubCorpusKind,
   type GitHubCorpusProvider,
   type GitHubCorpusSelection,
   type GitHubItemObservation,
   type GitHubKnowledgeWork,
+  type GitHubRepository,
   type GitHubRepositoryAccess,
 } from '../github-contracts.ts';
 import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
-import { citationSchema, knowledgeLimits, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
+import { citationSchema, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
 
@@ -80,6 +83,7 @@ const repositorySchema = z.object({
   title: z.string(),
   state: z.enum(['active', 'unavailable']),
   failure: z.string().nullable(),
+  excluded: z.boolean(),
 });
 const readerSchema = z.object({
   account_id: uuidSchema,
@@ -112,10 +116,15 @@ const skippable = [
 const repositoryDenied = (error: unknown): error is GitHubCorpusError =>
   error instanceof GitHubCorpusError && repositoryDenials.includes(error.code);
 
-function windowValid(after: string, now: number) {
-  const start = Date.parse(after);
-  return Number.isFinite(start) && start <= now && now - start <= githubCorpusLimits.windowDays * 86_400_000;
-}
+// An optional cutoff only narrows history; it can be any past date.
+const cutoffValid = (after: string | null | undefined, now: number) => !after || Date.parse(after) <= now;
+const itemKinds: Record<GitHubCorpusKind, string> = {
+  code: 'code',
+  discussions: 'discussion',
+  docs: 'doc',
+  issues: 'issue',
+  pulls: 'pull',
+};
 
 export function createGitHubKnowledge({
   runtime,
@@ -187,7 +196,7 @@ export function createGitHubKnowledge({
         ).rows[0],
       );
     if (!row) throw new AccessDenied();
-    return { ...row, selection: effectiveSelection(row.selection, now()) };
+    return row;
   }
   async function repositories(tx: Tx, sourceId: string) {
     return z
@@ -195,7 +204,7 @@ export function createGitHubKnowledge({
       .parse(
         (
           await tx.client.query(
-            `SELECT repository_id,full_name,visibility,title,state,failure FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 ORDER BY length(repository_id),repository_id`,
+            `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 ORDER BY length(repository_id),repository_id`,
             [sourceId],
           )
         ).rows,
@@ -249,6 +258,7 @@ export function createGitHubKnowledge({
       title: r.title,
       state: r.state,
       failure: r.failure,
+      excluded: r.excluded,
     }));
     return githubKnowledgeSourceSchema.parse({
       sourceId: s.source_id,
@@ -282,7 +292,7 @@ export function createGitHubKnowledge({
   async function configure(workspaceId: string, userId: string, value: unknown) {
     denyMcpEgress();
     const input = githubKnowledgeConfigureSchema.parse(value);
-    if (!windowValid(input.selection.after, now())) throw new GitHubCorpusError('invalid-selection');
+    if (!cutoffValid(input.selection.after, now())) throw new GitHubCorpusError('invalid-selection');
     const actor = await memberTransaction(workspaceId, userId, async (_tx, a) => a);
     const memberIds = [...new Set([...input.memberIds, actor.membershipId])].sort();
     const fingerprint = digest(JSON.stringify({ accountId: input.accountId, selection: input.selection, memberIds }));
@@ -294,7 +304,15 @@ export function createGitHubKnowledge({
       return dto(tx, prior);
     });
     if (replay) return replay;
-    const inspected = await provider.inspectSelection(workspaceId, userId, input.accountId, input.selection);
+    // Every repository the account can read is added by the source's own sync passes, so nothing is inspected up front.
+    const inspected =
+      input.selection.scope === 'all'
+        ? await provider.discover(workspaceId, userId, input.accountId).then(({ binding }) => ({
+            binding,
+            title: `All repositories of ${binding.login}`,
+            repositories: [],
+          }))
+        : await provider.inspectSelection(workspaceId, userId, input.accountId, input.selection);
     if (
       inspected.binding.accountId !== input.accountId ||
       inspected.repositories.length !== input.selection.repositories.length ||
@@ -317,10 +335,6 @@ export function createGitHubKnowledge({
         [memberIds],
       );
       if (active.rowCount !== memberIds.length) throw new AccessDenied();
-      const count = z
-        .object({ n: z.number() })
-        .parse((await tx.client.query(`SELECT count(*)::int AS n FROM ${table(tx, 'sources')}`)).rows[0]).n;
-      if (count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
       const inserted = await tx.client.query(
         `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'github',$2,$3::jsonb::text,$4) ON CONFLICT DO NOTHING`,
         [input.commandId, inspected.binding.githubUserId, JSON.stringify(input.selection), human.membershipId],
@@ -399,7 +413,7 @@ export function createGitHubKnowledge({
       `INSERT INTO ${table(tx, 'access_proofs')} (id,document_id,membership_id,access_epoch,principal,acl_version,membership_version,acl_checked_at,membership_checked_at,expires_at)
       SELECT gen_random_uuid(),d.id,x.membership_id,s.access_epoch,x.binding->>'githubUserId',r.source_revision,x.binding->>'accountGeneration',x.observed_at,x.observed_at,x.expires_at
       FROM ${table(tx, 'github_access')} x
-      JOIN ${table(tx, 'github_repositories')} c ON c.source_id=x.source_id AND c.repository_id=x.repository_id AND c.state='active'
+      JOIN ${table(tx, 'github_repositories')} c ON c.source_id=x.source_id AND c.repository_id=x.repository_id AND c.state='active' AND NOT c.excluded
       JOIN ${table(tx, 'github_items')} i ON i.source_id=x.source_id AND i.repository_id=x.repository_id
       JOIN ${table(tx, 'documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL
       JOIN ${table(tx, 'revisions')} r ON r.id=d.observed_revision_id
@@ -499,6 +513,90 @@ export function createGitHubKnowledge({
       return dto(tx, await source(tx, sourceId));
     });
   }
+  // Replaces the source's kinds, opt-out patterns, optional cutoff and excluded repositories, then starts a new pass.
+  // Content of newly excluded repositories and kinds is withdrawn at once; the pass withdraws anything the new
+  // patterns or cutoff leave out, and re-imports whatever is included again.
+  async function settings(workspaceId: string, userId: string, sourceId: string, value: unknown) {
+    denyMcpEgress();
+    sourceId = uuidSchema.parse(sourceId);
+    const input = githubKnowledgeSettingsSchema.parse(value);
+    if (!cutoffValid(input.after, now())) throw new GitHubCorpusError('invalid-selection');
+    const excluded = [...new Set(input.excludedRepositories)].sort();
+    const fingerprint = digest(JSON.stringify({ sourceId, settings: { ...input, excludedRepositories: excluded } }));
+    return memberTransaction(workspaceId, userId, async (tx, actor) => {
+      const s = await manager(tx, actor, sourceId);
+      const replay = z
+        .object({ fingerprint: z.string() })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(`SELECT fingerprint FROM ${table(tx, 'github_commands')} WHERE command_id=$1`, [
+              input.commandId,
+            ])
+          ).rows[0],
+        );
+      if (replay) {
+        if (replay.fingerprint !== fingerprint) throw new KnowledgeError('conflict');
+        return dto(tx, s);
+      }
+      if (s.state === 'removed') throw new KnowledgeError('conflict');
+      const { kinds: _kinds, excludePaths: _paths, after: _after, ...kept } = s.selection;
+      const selection = githubCorpusSelectionSchema.parse({
+        ...kept,
+        kinds: input.kinds,
+        ...(input.excludePaths.length ? { excludePaths: input.excludePaths } : {}),
+        ...(input.after ? { after: input.after } : {}),
+      });
+      const known = new Set((await repositories(tx, sourceId)).map(r => r.repository_id));
+      if (excluded.some(id => !known.has(id))) throw new GitHubCorpusError('invalid-selection');
+      const text = z
+        .object({ text: z.string() })
+        .parse((await tx.client.query('SELECT $1::jsonb::text AS text', [JSON.stringify(selection)])).rows[0]).text;
+      const duplicate = await tx.client.query(
+        `SELECT 1 FROM ${table(tx, 'sources')} WHERE provider='github' AND account_namespace=$1 AND owner_membership_id=$2 AND state<>'removed' AND id<>$3 AND md5(selection)=md5($4)`,
+        [s.binding.githubUserId, s.owner_membership_id, sourceId, text],
+      );
+      if (duplicate.rowCount) throw new KnowledgeError('conflict');
+      await tx.client.query(`UPDATE ${table(tx, 'sources')} SET selection=$2 WHERE id=$1`, [sourceId, text]);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'github_sources')} SET selection=$2::jsonb,cursor=$3,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
+        [sourceId, text, initialCursor()],
+      );
+      const newlyExcluded = z
+        .array(z.object({ repository_id: z.string() }))
+        .parse(
+          (
+            await tx.client.query(
+              `UPDATE ${table(tx, 'github_repositories')} SET excluded=true WHERE source_id=$1 AND NOT excluded AND repository_id=ANY($2::text[]) RETURNING repository_id`,
+              [sourceId, excluded],
+            )
+          ).rows,
+        )
+        .map(row => row.repository_id);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[])`,
+        [sourceId, excluded],
+      );
+      const kinds = selection.kinds.map(kind => itemKinds[kind]);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL
+        FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
+        [sourceId, newlyExcluded, kinds],
+      );
+      await tx.client.query(
+        `DELETE FROM ${table(tx, 'access_proofs')} p USING ${table(tx, 'github_items')} i
+        WHERE i.source_id=$1 AND p.document_id=i.document_id AND (i.repository_id=ANY($2::text[]) OR NOT i.kind=ANY($3::text[]))`,
+        [sourceId, newlyExcluded, kinds],
+      );
+      for (const repositoryId of newlyExcluded) await invalidate(tx, sourceId, repositoryId);
+      await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
+        input.commandId,
+        sourceId,
+        fingerprint,
+      ]);
+      return dto(tx, await source(tx, sourceId));
+    });
+  }
   // One authoritative repository check with the reader's own linked GitHub accounts. Failures never renew evidence.
   async function check(workspaceId: string, actor: HumanActor, sourceId: string, repositoryId: string, owner: boolean) {
     const captured = await memberTransaction(workspaceId, actor.userId, async (tx, human) => {
@@ -511,7 +609,7 @@ export function createGitHubKnowledge({
         .parse(
           (
             await tx.client.query(
-              `SELECT repository_id,full_name,visibility,title,state,failure FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+              `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
               [sourceId, repositoryId],
             )
           ).rows[0],
@@ -551,7 +649,7 @@ export function createGitHubKnowledge({
       );
       return { s, r, bindings: owner ? bindings.slice(0, 1) : bindings, fence };
     });
-    if (!owner && captured.r.state !== 'active') return false;
+    if ((!owner && captured.r.state !== 'active') || captured.r.excluded) return false;
     let result: { observed: GitHubRepositoryAccess; binding: GitHubCorpusBinding } | null = null;
     let failure: GitHubCorpusError | null = null;
     for (const binding of captured.bindings) {
@@ -612,7 +710,7 @@ export function createGitHubKnowledge({
       const r = repositorySchema.parse(
         (
           await tx.client.query(
-            `SELECT repository_id,full_name,visibility,title,state,failure FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+            `SELECT repository_id,full_name,visibility,title,state,failure,excluded FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
             [sourceId, repositoryId],
           )
         ).rows[0],
@@ -630,7 +728,7 @@ export function createGitHubKnowledge({
           await tx.client.query(
             `SELECT c.repository_id FROM ${table(tx, 'github_repositories')} c
         LEFT JOIN ${table(tx, 'github_access')} x ON x.source_id=c.source_id AND x.repository_id=c.repository_id AND x.membership_id=$2
-        WHERE c.source_id=$1 AND c.state='active' AND (NOT $4 OR x.expires_at IS NULL OR x.expires_at<clock_timestamp()+interval '2 minutes')
+        WHERE c.source_id=$1 AND c.state='active' AND NOT c.excluded AND (NOT $4 OR x.expires_at IS NULL OR x.expires_at<clock_timestamp()+interval '2 minutes')
         ORDER BY x.expires_at NULLS FIRST,c.repository_id LIMIT $3`,
             [sourceId, actor.membershipId, limit, staleOnly],
           )
@@ -727,7 +825,7 @@ export function createGitHubKnowledge({
       fresh: !!(
         await tx.client.query(
           `SELECT 1 FROM ${table(tx, 'github_access')} a JOIN ${table(tx, 'github_repositories')} r USING(source_id,repository_id)
-        WHERE a.source_id=$1 AND a.repository_id=$2 AND a.membership_id=$3 AND r.state='active'
+        WHERE a.source_id=$1 AND a.repository_id=$2 AND a.membership_id=$3 AND r.state='active' AND NOT r.excluded
         AND a.binding IS NOT NULL AND a.expires_at>clock_timestamp()+interval '1 minute'`,
           [s.source_id, repositoryId, actor.membershipId],
         )
@@ -977,6 +1075,58 @@ export function createGitHubKnowledge({
         throw error;
     }
   }
+  // Adds every repository the owner's account can now read to an all-repositories source. Repositories the member
+  // excluded keep their row and stay excluded; repositories another of the member's live sources covers are left to it.
+  async function follow(work: GitHubKnowledgeWork, token: string, s: Source) {
+    const found = new Map<string, GitHubRepository>();
+    let page: string | undefined;
+    for (let pages = 0; pages < 100 && found.size < githubCorpusLimits.repositories; pages++) {
+      const result = await provider.discover(work.workspaceId, s.owner_user_id, s.binding.accountId, page);
+      if (result.binding.githubUserId !== s.binding.githubUserId) throw new GitHubCorpusError('stale-integration');
+      for (const r of result.items) found.set(r.repositoryId, r);
+      if (!result.nextCursor || result.nextCursor === page) break;
+      page = result.nextCursor;
+    }
+    await fenced(work, token, async tx => {
+      const known = new Set(
+        z
+          .array(z.object({ repository_id: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT r.repository_id FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} o ON o.id=r.source_id
+            WHERE (r.source_id=$1 OR (o.owner_membership_id=$2 AND o.provider='github' AND o.state<>'removed' AND NOT r.excluded)) AND r.repository_id=ANY($3::text[])`,
+                [s.source_id, s.owner_membership_id, [...found.keys()]],
+              )
+            ).rows,
+          )
+          .map(row => row.repository_id),
+      );
+      let room =
+        githubCorpusLimits.repositories -
+        z
+          .object({ n: z.number() })
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT count(*)::int AS n FROM ${table(tx, 'github_repositories')} WHERE source_id=$1`,
+                [s.source_id],
+              )
+            ).rows[0],
+          ).n;
+      for (const r of [...found.values()].sort(
+        (a, b) => a.repositoryId.length - b.repositoryId.length || (a.repositoryId < b.repositoryId ? -1 : 1),
+      )) {
+        if (room <= 0) break;
+        if (known.has(r.repositoryId)) continue;
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [s.source_id, r.repositoryId, r.fullName, r.visibility, r.title.slice(0, 512) || r.fullName],
+        );
+        room--;
+      }
+    });
+  }
   async function process(value: GitHubKnowledgeWork): Promise<{ disposition: 'ready' | 'retry' | 'stale' | 'busy' }> {
     denyMcpEgress();
     const work = githubKnowledgeWorkSchema.parse(value);
@@ -999,7 +1149,9 @@ export function createGitHubKnowledge({
       const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };
       await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 5, true);
       const cursor = claim.cursor;
-      const selected = await fenced(work, token, tx => repositories(tx, claim.source_id));
+      if (cursor.phase === 'listing' && cursor.index === 0 && !cursor.page && claim.selection.scope === 'all')
+        await follow(work, token, claim);
+      const selected = (await fenced(work, token, tx => repositories(tx, claim.source_id))).filter(r => !r.excluded);
       if (cursor.phase === 'listing') {
         if (cursor.pages >= 20000) throw new KnowledgeError('quota');
         cursor.pages++;
@@ -1060,7 +1212,7 @@ export function createGitHubKnowledge({
               (
                 await tx.client.query(
                   `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
-          JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active'
+          JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
           WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) ORDER BY i.native_id LIMIT 20`,
                   [claim.source_id, claim.reconciliation, cursor.after],
@@ -1300,6 +1452,7 @@ export function createGitHubKnowledge({
     list,
     listDocuments,
     manage,
+    settings,
     due,
     health,
     process,

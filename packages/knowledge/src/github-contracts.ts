@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { knowledgeCitationSchema } from './contracts.ts';
 
 export const githubCorpusLimits = Object.freeze({
-  repositories: 20,
+  repositories: 1000,
+  excludePatterns: 20,
+  excludePatternLength: 200,
   listPageSize: 50,
   issuePageSize: 20,
   // Files are indexed in parts of about this many bytes, split at a line break, so any file size fits the parser.
@@ -15,7 +17,6 @@ export const githubCorpusLimits = Object.freeze({
   responseBytes: 8 * 1024 * 1024,
   requestTimeoutMs: 10000,
   blobTimeoutMs: 10 * 60 * 1000,
-  windowDays: 366,
   // Larger or truncated recursive trees are walked one directory at a time.
   recursiveTreeEntries: 10000,
   treeRequestsPerPage: 50,
@@ -27,32 +28,108 @@ export const githubRepositoryNameSchema = z
   .refine(value => !value.endsWith('/.') && !value.endsWith('/..'));
 export const githubRepositoryIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const githubCorpusCursorTokenSchema = z.string().min(1).max(4096).refine(printable);
-export const githubCorpusKindSchema = z.enum(['code', 'discussions', 'docs', 'issues', 'pulls']);
-export const githubCorpusSelectionSchema = z.strictObject({
-  repositories: z
-    .array(githubRepositoryNameSchema)
-    .min(1)
-    .max(githubCorpusLimits.repositories)
-    .refine(
-      names =>
-        new Set(names.map(name => name.toLowerCase())).size === names.length &&
-        names.every((name, index) => index === 0 || (names[index - 1] ?? '').toLowerCase() < name.toLowerCase()),
-      'Repositories must be unique and sorted',
-    ),
-  kinds: z
-    .array(githubCorpusKindSchema)
-    .min(1)
-    .max(5)
-    .refine(
-      kinds =>
-        new Set(kinds).size === kinds.length &&
-        kinds.every((kind, index) => index === 0 || (kinds[index - 1] ?? '') < kind),
-      'Kinds must be unique and sorted',
-    ),
-  after: z.iso.date(),
-  // Automatic sources keep a rolling window: the engine moves `after` forward on every pass.
-  window: z.literal('rolling-90d').optional(),
-});
+// Adding a kind here turns it on for automatic sources, which select every kind.
+export const githubCorpusKinds = ['code', 'discussions', 'docs', 'issues', 'pulls'] as const;
+export const githubCorpusKindSchema = z.enum(githubCorpusKinds);
+// Opt-out patterns run on a backtracking engine, so only shapes with a small, bounded cost are accepted: no repeated
+// group whose body can itself repeat or branch (`(a+)+`, `(a|a)*`), no backreferences, at most one unbounded
+// repetition and a few optional parts (one beside an unbounded repetition). Patterns search anywhere in the path, so a leading `^.*` or trailing `.*$` is
+// redundant and is removed before counting. Paths are at most 1,024 characters, which bounds each test.
+function patternShape(pattern: string) {
+  const groups: boolean[] = [];
+  let unbounded = 0,
+    bounded = 0;
+  for (let index = 0; index < pattern.length; index++) {
+    const char = pattern[index];
+    if (char === '\\') {
+      if (/[1-9k]/.test(pattern[index + 1] ?? '')) return null;
+      index++;
+    } else if (char === '[') {
+      for (index++; index < pattern.length && pattern[index] !== ']'; index++) if (pattern[index] === '\\') index++;
+    } else if (char === '(') {
+      groups.push(false);
+      if (pattern[index + 1] === '?') index++;
+    } else if (char === ')') {
+      const inner = groups.pop() ?? false;
+      const next = pattern[index + 1] ?? '';
+      if (inner && '*+{'.includes(next)) return null;
+      if (groups.length) groups[groups.length - 1] ||= inner || '*+?{'.includes(next);
+    } else if ('*+?{|'.includes(char ?? '')) {
+      if (char === '*' || char === '+') unbounded++;
+      else if (char === '{') {
+        const close = pattern.indexOf('}', index);
+        const [low = '', high] = pattern.slice(index + 1, close < 0 ? index + 1 : close).split(',');
+        if (high === '' || Number(high) - Number(low) > 16) unbounded++;
+        else bounded++;
+      } else if (char === '?' && pattern[index - 1] !== '*' && pattern[index - 1] !== '+' && pattern[index - 1] !== '}')
+        bounded++;
+      if (groups.length) groups[groups.length - 1] = true;
+    }
+  }
+  // Each optional part multiplies the backtracking of an unbounded repetition, so together only one is allowed.
+  return unbounded === 0 ? (bounded <= 4 ? pattern : null) : unbounded === 1 && bounded <= 1 ? pattern : null;
+}
+const redundant = (pattern: string) => pattern.replace(/^\^?\.\*\??/, '').replace(/(^|[^\\])\.\*\??\$?$/, '$1') || '.';
+export function githubExcludePatternProblem(pattern: string): 'length' | 'unsafe' | 'invalid' | null {
+  if (!pattern.length || pattern.length > githubCorpusLimits.excludePatternLength) return 'length';
+  if (!patternShape(redundant(pattern))) return 'unsafe';
+  try {
+    new RegExp(pattern, 'su');
+  } catch {
+    return 'invalid';
+  }
+  return null;
+}
+export const githubExcludePatternSchema = z
+  .string()
+  .refine(pattern => githubExcludePatternProblem(pattern) === null, 'Pattern is not a safe regular expression');
+export const githubCorpusKindsSchema = z
+  .array(githubCorpusKindSchema)
+  .min(1)
+  .max(githubCorpusKinds.length)
+  .refine(
+    kinds =>
+      new Set(kinds).size === kinds.length &&
+      kinds.every((kind, index) => index === 0 || (kinds[index - 1] ?? '') < kind),
+    'Kinds must be unique and sorted',
+  );
+export const githubCorpusSelectionSchema = z
+  .strictObject({
+    // `all` follows every repository the account can read; `repositories` is then empty and opt-outs are stored per source.
+    scope: z.literal('all').optional(),
+    repositories: z
+      .array(githubRepositoryNameSchema)
+      .max(githubCorpusLimits.repositories)
+      .refine(
+        names =>
+          new Set(names.map(name => name.toLowerCase())).size === names.length &&
+          names.every((name, index) => index === 0 || (names[index - 1] ?? '').toLowerCase() < name.toLowerCase()),
+        'Repositories must be unique and sorted',
+      ),
+    kinds: githubCorpusKindsSchema,
+    // Repository-relative file paths matching any pattern are never indexed.
+    excludePaths: z.array(githubExcludePatternSchema).max(githubCorpusLimits.excludePatterns).optional(),
+    // Issues, pull requests and discussions updated before this date are skipped. Absent means full history.
+    after: z.iso.date().optional(),
+  })
+  .refine(
+    selection => (selection.scope === 'all' ? selection.repositories.length === 0 : selection.repositories.length > 0),
+    'Select repositories, or every repository',
+  );
+const compiled = new Map<string, RegExp>();
+function excludePattern(pattern: string) {
+  let value = compiled.get(pattern);
+  if (!value) {
+    value = new RegExp(redundant(pattern), 'su');
+    if (compiled.size >= 1000) compiled.clear();
+    compiled.set(pattern, value);
+  }
+  return value;
+}
+/** True when a repository-relative file path matches one of the selection's opt-out patterns. */
+export function githubPathOptedOut(selection: Pick<GitHubCorpusSelection, 'excludePaths'>, path: string) {
+  return path.length <= 1024 && !!selection.excludePaths?.some(pattern => excludePattern(pattern).test(path));
+}
 export const githubCorpusBindingSchema = z.strictObject({
   accountId: z.uuid(),
   accountGeneration: z.number().int().positive(),
@@ -159,6 +236,14 @@ export const githubKnowledgeConfigureSchema = z.strictObject({
   selection: githubCorpusSelectionSchema,
   memberIds: z.array(z.uuid()).max(100),
 });
+export const githubKnowledgeSettingsSchema = z.strictObject({
+  commandId: z.uuid(),
+  kinds: githubCorpusKindsSchema,
+  excludePaths: z.array(githubExcludePatternSchema).max(githubCorpusLimits.excludePatterns),
+  after: z.iso.date().nullable(),
+  // The complete set of the source's repositories to leave out; every other repository is indexed.
+  excludedRepositories: z.array(githubRepositoryIdSchema).max(githubCorpusLimits.repositories),
+});
 export const githubKnowledgeManageSchema = z.strictObject({
   commandId: z.uuid(),
   action: z.enum(['pause', 'resume', 'retry', 'remove']),
@@ -186,6 +271,7 @@ export const githubKnowledgeDiscoverySchema = z.strictObject({
 export const githubKnowledgeRepositorySchema = repositorySchema.extend({
   state: z.enum(['active', 'unavailable']),
   failure: z.string().max(128).nullable(),
+  excluded: z.boolean(),
 });
 export const githubKnowledgeSourceSchema = z.strictObject({
   sourceId: z.uuid(),
@@ -207,6 +293,7 @@ export const githubKnowledgeSourceSchema = z.strictObject({
     .nullable(),
 });
 export type GitHubKnowledgeConfigure = z.infer<typeof githubKnowledgeConfigureSchema>;
+export type GitHubKnowledgeSettings = z.infer<typeof githubKnowledgeSettingsSchema>;
 export type GitHubKnowledgeManage = z.infer<typeof githubKnowledgeManageSchema>;
 export type GitHubKnowledgeWork = z.infer<typeof githubKnowledgeWorkSchema>;
 export type GitHubKnowledgeSource = z.infer<typeof githubKnowledgeSourceSchema>;

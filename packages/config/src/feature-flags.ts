@@ -37,7 +37,8 @@ export const featureFlags = {
     env: 'FEATURE_FLAG_SLACK_APP_SENDER',
   },
   'default-connection-knowledge': {
-    description: 'New eligible integration enablements automatically get owner-only Knowledge with ongoing discovery.',
+    description:
+      'New eligible integration enablements automatically get owner-only Knowledge with ongoing discovery. GitHub always does, whatever this flag says.',
     default: 'development',
     env: 'FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE',
   },

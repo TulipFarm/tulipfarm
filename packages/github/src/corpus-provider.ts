@@ -9,6 +9,7 @@ import {
   githubCorpusCursorTokenSchema,
   githubCorpusLimits as limits,
   githubCorpusSelectionSchema,
+  githubPathOptedOut,
   githubRepositoryIdSchema,
   githubRepositoryNameSchema,
   type GitHubCorpusBinding,
@@ -707,8 +708,9 @@ export function createGitHubCorpusProvider(options: {
       'excluded',
     );
   }
-  const after = (selection: GitHubCorpusSelection) => `${selection.after}T00:00:00Z`;
-  const inWindow = (selection: GitHubCorpusSelection, time: string) => Date.parse(time) >= Date.parse(after(selection));
+  // Without a cutoff the whole history is in scope.
+  const inWindow = (selection: GitHubCorpusSelection, time: string) =>
+    !selection.after || Date.parse(time) >= Date.parse(`${selection.after}T00:00:00Z`);
   async function tree(token: string, body: RepositoryBody, sha: string, recursive = false) {
     const response = await call(
       token,
@@ -741,7 +743,8 @@ export function createGitHubCorpusProvider(options: {
     selection: GitHubCorpusSelection,
   ) {
     const kind = phase === 'docs' ? 'doc' : 'code';
-    const wanted = (path: string) => githubFileKind(path) === kind && githubPathIndexable(path);
+    const wanted = (path: string) =>
+      githubFileKind(path) === kind && githubPathIndexable(path) && !githubPathOptedOut(selection, path);
     let commit: string;
     let walk: number[] | null = null;
     let offset = 0;
@@ -850,7 +853,7 @@ export function createGitHubCorpusProvider(options: {
     const response = await call(
       token,
       'github-issues',
-      `/repositories/${body.id}/issues?${new URLSearchParams({ state: 'all', sort: 'updated', direction: 'asc', since: after(selection), per_page: String(limits.issuePageSize), page: String(page) })}`,
+      `/repositories/${body.id}/issues?${new URLSearchParams({ state: 'all', sort: 'updated', direction: 'asc', ...(selection.after ? { since: `${selection.after}T00:00:00Z` } : {}), per_page: String(limits.issuePageSize), page: String(page) })}`,
     );
     if (response.status === 410 || response.status === 404)
       return { observations: [], nextCursor: nextPhase(selection, 'issues') };
@@ -1204,7 +1207,7 @@ export function createGitHubCorpusProvider(options: {
         file = id.hash ? (path ?? null) : id.ref;
         if (file === null || (id.hash && (Buffer.byteLength(file) <= 1024 || hashPath(file) !== id.hash)))
           throw new GitHubCorpusError('not-found');
-        if (githubFileKind(file) !== kind || !githubPathIndexable(file))
+        if (githubFileKind(file) !== kind || !githubPathIndexable(file) || githubPathOptedOut(selection, file))
           throw new GitHubCorpusError('outside-selection');
       }
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {

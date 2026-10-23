@@ -6,6 +6,7 @@ import { knowledgeCitationSchema } from '@tulipfarm/knowledge/contracts';
 import {
   githubKnowledgeConfigureSchema,
   githubKnowledgeManageSchema,
+  githubKnowledgeSettingsSchema,
   githubKnowledgeDiscoverSchema,
   githubKnowledgeDiscoverySchema,
   githubKnowledgeListSchema,
@@ -200,6 +201,22 @@ export function registerGitHubKnowledge(
       request => {
         const { workspaceId, sourceId } = sourceParams.parse(request.params);
         return service.manage(workspaceId, user(request), sourceId, request.body);
+      },
+    );
+    routes.post(
+      `${base}/sources/:sourceId/settings`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'updateGitHubKnowledgeSettingsV1',
+          sourceParams,
+          githubKnowledgeSourceSchema,
+          githubKnowledgeSettingsSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, sourceId } = sourceParams.parse(request.params);
+        return service.settings(workspaceId, user(request), sourceId, request.body);
       },
     );
     routes.post(
