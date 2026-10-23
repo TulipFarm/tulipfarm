@@ -10,6 +10,7 @@ import {
   createKnowledgeAgentTools,
   createKnowledgeEmbeddings,
   createKnowledgeSearch,
+  createKnowledgeSourceFailures,
   GitHubCorpusError,
 } from '../dist/index.js';
 
@@ -238,6 +239,42 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.ok(titles.includes('acme/roadmap: doc:7002:README.md'), 'readable kinds keep syncing');
         assert.equal(await tombstoned(), 0, 'hidden content is kept for when access returns');
         assert.deepEqual((await notice()).notices, ['github-access-needs-attention']);
+        const failures = createKnowledgeSourceFailures({ runtime });
+        assert.deepEqual(
+          (await failures.list(ws.id, ws.userId, sourceId)).items,
+          [],
+          'denied markers are not failures',
+        );
+        await db.platform.query(
+          `INSERT INTO ${table('github_items')} (source_id,native_id,repository_id,kind,source_revision,seen_generation,failure)
+           VALUES ($1,'doc:7001:assets/huge.md','7001','doc','r1',0,'too-large'),($1,'doc:7001:gone.md','7001','doc','r1',0,'forbidden')`,
+          [sourceId],
+        );
+        assert.deepEqual(
+          (await failures.list(ws.id, ws.userId, sourceId)).items.map(
+            ({ id, documentId, status, reason, observedAt }) => ({
+              id,
+              documentId,
+              status,
+              reason,
+              observedAt,
+            }),
+          ),
+          [
+            {
+              id: 'github:doc:7001:assets/huge.md',
+              documentId: null,
+              status: 'failed',
+              reason: 'too-large',
+              observedAt: null,
+            },
+            { id: 'github:doc:7001:gone.md', documentId: null, status: 'failed', reason: 'provider', observedAt: null },
+          ],
+        );
+        await db.platform.query(
+          `DELETE FROM ${table('github_items')} WHERE source_id=$1 AND native_id IN ('doc:7001:assets/huge.md','doc:7001:gone.md')`,
+          [sourceId],
+        );
 
         fake.repos.get('7002').denied.clear();
         await sync();

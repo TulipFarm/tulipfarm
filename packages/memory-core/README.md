@@ -96,6 +96,10 @@ text instead. The result profile then has `fallback` set to the original
 failure, and the Knowledge source failures endpoint
 (`GET /v1/workspaces/:workspaceId/knowledge/sources/:sourceId/failures`, source
 owner only) lists it as `raw-text` next to items that stayed unsearchable.
+For GitHub sources it also lists provider items that failed before becoming a
+document (for example `too-large` or a fetch error), with a null `documentId`.
+GitHub `denied` coverage markers record missing permissions, not failures, so
+the list excludes them.
 
 ## Authority and host responsibilities
 

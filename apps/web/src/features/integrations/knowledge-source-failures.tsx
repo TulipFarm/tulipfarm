@@ -23,6 +23,8 @@ const reasonLabels: Record<string, string> = {
   'ocr-required': 'The file contains only scanned images, and text recognition is unavailable.',
   provider: 'The file could not be fetched or read after several attempts.',
   credits: 'Indexing paused because the workspace has no credits left.',
+  'too-large': 'The item is larger than Knowledge can import.',
+  excluded: 'The provider did not list this part, so it was skipped.',
 };
 
 const time = (value: string) => new Date(value).toLocaleString();
@@ -54,7 +56,7 @@ export function KnowledgeSourceFailures({ workspaceId, sourceId }: { workspaceId
             ) : (
               <ul className="divide-y" aria-label="Items with import problems">
                 {data.items.map(item => (
-                  <li key={item.documentId} className="space-y-1 py-2 text-sm">
+                  <li key={item.id} className="space-y-1 py-2 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
                       {item.canonicalUrl ? (
                         <a className="font-medium underline" href={item.canonicalUrl} target="_blank" rel="noreferrer">
@@ -71,10 +73,16 @@ export function KnowledgeSourceFailures({ workspaceId, sourceId }: { workspaceId
                       {reasonLabels[item.reason] ?? 'The item could not be read.'}
                       {item.status === 'raw-text' ? ' Its text was indexed without formatting.' : ''}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Seen {time(item.observedAt)}
-                      {item.attempts > 1 ? ` · ${item.attempts} attempts` : ''}
-                    </p>
+                    {(item.observedAt || item.attempts > 1) && (
+                      <p className="text-xs text-muted-foreground">
+                        {[
+                          item.observedAt ? `Seen ${time(item.observedAt)}` : '',
+                          item.attempts > 1 ? `${item.attempts} attempts` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>

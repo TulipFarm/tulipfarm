@@ -13,9 +13,25 @@ const failure = z.enum([
   'ocr-required',
   'provider',
   'credits',
+  'too-large',
+  'excluded',
 ]);
+// GitHub item failures shown with their own reason; any other fetch or access failure is reported as provider.
+const githubReasons = [
+  'unsupported',
+  'encrypted',
+  'malformed',
+  'resource-limited',
+  'ocr-required',
+  'too-large',
+  'excluded',
+];
+// A GitHub kind the connection cannot read is a coverage marker shown as needing permission, not a failed item.
+const githubDeniedMarker = 'denied';
 export const knowledgeSourceFailureSchema = z.strictObject({
-  documentId: z.uuid(),
+  id: z.string().min(1),
+  // Null for a provider item that failed before it became a document.
+  documentId: z.uuid().nullable(),
   title: z.string(),
   canonicalUrl: z.string().nullable(),
   // failed: not searchable. ocr-unavailable: scanned content without OCR. raw-text: searchable from its raw text
@@ -23,7 +39,7 @@ export const knowledgeSourceFailureSchema = z.strictObject({
   status: z.enum(['failed', 'ocr-unavailable', 'raw-text']),
   reason: failure,
   attempts: z.number().int().min(0),
-  observedAt: z.iso.datetime(),
+  observedAt: z.iso.datetime().nullable(),
 });
 export const knowledgeSourceFailuresSchema = z.strictObject({
   sourceId: z.uuid(),
@@ -34,17 +50,18 @@ export const knowledgeSourceFailuresSchema = z.strictObject({
 export type KnowledgeSourceFailures = z.infer<typeof knowledgeSourceFailuresSchema>;
 
 const rowSchema = z.object({
-  document_id: z.uuid(),
+  id: z.string(),
+  document_id: z.uuid().nullable(),
   title: z.string(),
   canonical_url: z.string().nullable(),
   status: z.enum(['failed', 'ocr-unavailable', 'raw-text']),
   reason: failure,
   attempts: z.number().int(),
-  observed_at: z.date(),
+  observed_at: z.date().nullable(),
 });
 
 // Documents in one source that could not be parsed, or were indexed from raw text instead, for the source owner.
-// Works for every provider because it reads only the shared Knowledge tables.
+// Works for every provider from the shared Knowledge tables, plus GitHub items that failed without a parsed document.
 export function createKnowledgeSourceFailures({ runtime }: { runtime: KnowledgeOptions['runtime'] }) {
   const store = createKnowledgeStore({ runtime, ...sqlExternalAuthority() });
   async function list(workspaceId: string, userId: string, sourceId: string): Promise<KnowledgeSourceFailures> {
@@ -65,18 +82,30 @@ export function createKnowledgeSourceFailures({ runtime }: { runtime: KnowledgeO
       const rows = z.array(rowSchema).parse(
         (
           await tx.client.query(
-            `SELECT d.id AS document_id,r.title,r.canonical_url,r.created_at AS observed_at,w.attempts,
-              CASE WHEN w.parsing IN ('failed','ocr-unavailable') THEN w.parsing ELSE 'raw-text' END AS status,
-              CASE WHEN w.parsing IN ('failed','ocr-unavailable') THEN COALESCE(w.failure,'provider') ELSE f.profile->>'fallback' END AS reason
-            FROM ${table('documents')} d
-            JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
-            JOIN ${table('work')} w ON w.revision_id=r.id
-            LEFT JOIN ${table('parse_profiles')} f ON f.publication_id=d.lexical_publication_id
-            WHERE d.source_id=$1 AND d.tombstoned_at IS NULL
-              AND (w.parsing IN ('failed','ocr-unavailable') OR f.profile ? 'fallback')
-            ORDER BY (w.parsing IN ('failed','ocr-unavailable')) DESC,r.created_at DESC,d.id
+            `WITH docs AS (
+              SELECT d.id::text AS id,d.id AS document_id,r.title,r.canonical_url,r.created_at AS observed_at,w.attempts,
+                CASE WHEN w.parsing IN ('failed','ocr-unavailable') THEN w.parsing ELSE 'raw-text' END AS status,
+                CASE WHEN w.parsing IN ('failed','ocr-unavailable') THEN COALESCE(w.failure,'provider') ELSE f.profile->>'fallback' END AS reason
+              FROM ${table('documents')} d
+              JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
+              JOIN ${table('work')} w ON w.revision_id=r.id
+              LEFT JOIN ${table('parse_profiles')} f ON f.publication_id=d.lexical_publication_id
+              WHERE d.source_id=$1 AND d.tombstoned_at IS NULL
+                AND (w.parsing IN ('failed','ocr-unavailable') OR f.profile ? 'fallback')
+            ), github AS (
+              SELECT 'github:'||i.native_id AS id,d.id AS document_id,COALESCE(r.title,i.native_id) AS title,r.canonical_url,
+                r.created_at AS observed_at,0 AS attempts,'failed' AS status,
+                CASE WHEN i.failure=ANY($3::text[]) THEN i.failure ELSE 'provider' END AS reason
+              FROM ${table('github_items')} i
+              LEFT JOIN ${table('documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL
+              LEFT JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
+              WHERE i.source_id=$1 AND i.failure IS NOT NULL AND i.failure<>$4
+                AND NOT EXISTS (SELECT 1 FROM docs WHERE docs.document_id=i.document_id)
+            )
+            SELECT * FROM (SELECT * FROM docs UNION ALL SELECT * FROM github) failures
+            ORDER BY (status<>'raw-text') DESC,observed_at DESC NULLS LAST,id
             LIMIT $2`,
-            [sourceId, knowledgeSourceFailureLimit + 1],
+            [sourceId, knowledgeSourceFailureLimit + 1, githubReasons, githubDeniedMarker],
           )
         ).rows,
       );
@@ -84,13 +113,14 @@ export function createKnowledgeSourceFailures({ runtime }: { runtime: KnowledgeO
         sourceId,
         syncedAt: source.synced_at?.toISOString() ?? null,
         items: rows.slice(0, knowledgeSourceFailureLimit).map(row => ({
+          id: row.id,
           documentId: row.document_id,
           title: row.title,
           canonicalUrl: row.canonical_url,
           status: row.status,
           reason: row.reason,
           attempts: row.attempts,
-          observedAt: row.observed_at.toISOString(),
+          observedAt: row.observed_at?.toISOString() ?? null,
         })),
         truncated: rows.length > knowledgeSourceFailureLimit,
       });

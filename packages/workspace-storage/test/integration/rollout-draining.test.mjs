@@ -71,7 +71,7 @@ test(
       END $$; CREATE TABLE {{schema}}.tf_drain_probe (id integer);`;
       const stream = [
         ...db.baseline,
-        { name: '0007_drain_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+        { name: '9999_drain_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
       ];
       await assert.rejects(
         rolloutCommonMigrations({

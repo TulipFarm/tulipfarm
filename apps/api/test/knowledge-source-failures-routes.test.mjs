@@ -14,6 +14,7 @@ test('source failures route lists failed and raw-text items for the source owner
     syncedAt: '2026-10-16T09:00:00.000Z',
     items: [
       {
+        id: documentId,
         documentId,
         title: 'Quarterly scan.pdf',
         canonicalUrl: 'https://drive.example.test/file',
@@ -21,6 +22,16 @@ test('source failures route lists failed and raw-text items for the source owner
         reason: 'ocr-required',
         attempts: 1,
         observedAt: '2026-10-16T08:59:00.000Z',
+      },
+      {
+        id: 'github:code:1:/assets/huge.json',
+        documentId: null,
+        title: 'code:1:/assets/huge.json',
+        canonicalUrl: null,
+        status: 'failed',
+        reason: 'too-large',
+        attempts: 0,
+        observedAt: null,
       },
     ],
     truncated: false,

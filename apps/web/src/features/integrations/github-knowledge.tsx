@@ -23,6 +23,7 @@ import {
   type GitHubSource,
 } from './github-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand, useExpired } from './slack-knowledge-shared';
+import { KnowledgeSourceFailures } from './knowledge-source-failures';
 
 const statusLabels = {
   queued: 'Queued for import',
@@ -219,6 +220,7 @@ function GitHubSourceDocuments({ api, sourceId }: { api: GitHubKnowledgeApi; sou
 }
 
 function GitHubSourceRow({
+  workspaceId,
   api,
   source,
   disabled,
@@ -227,6 +229,7 @@ function GitHubSourceRow({
   onReconnect,
   accountBusy,
 }: {
+  workspaceId: string;
   api: GitHubKnowledgeApi;
   source: GitHubSource;
   disabled: boolean;
@@ -476,6 +479,9 @@ function GitHubSourceRow({
         />
       )}
       {showDocuments && source.state === 'active' && <GitHubSourceDocuments api={api} sourceId={source.sourceId} />}
+      {showDocuments && source.state === 'active' && source.canManage && (
+        <KnowledgeSourceFailures workspaceId={workspaceId} sourceId={source.sourceId} />
+      )}
       {busy && <p role="status">Updating source…</p>}
       {refresh.kind === 'done' && (
         <p role="status" className="text-sm">
@@ -662,6 +668,7 @@ export function GitHubKnowledgeSources({
                       {visibleSources.map(source => (
                         <GitHubSourceRow
                           key={source.sourceId}
+                          workspaceId={workspaceId}
                           api={api}
                           source={source}
                           disabled={sources.state.kind !== 'ready' || !!sources.state.error || sources.state.refreshing}

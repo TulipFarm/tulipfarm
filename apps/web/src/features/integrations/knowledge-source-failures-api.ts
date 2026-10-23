@@ -4,13 +4,14 @@ import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http
 import { KnowledgeRequestError } from './knowledge-request-error';
 
 const failureSchema = z.object({
-  documentId: z.uuid(),
+  id: z.string().min(1),
+  documentId: z.uuid().nullable(),
   title: z.string(),
   canonicalUrl: z.string().nullable(),
   status: z.enum(['failed', 'ocr-unavailable', 'raw-text']),
   reason: z.string(),
   attempts: z.number().int().nonnegative(),
-  observedAt: z.iso.datetime(),
+  observedAt: z.iso.datetime().nullable(),
 });
 const failuresSchema = z.object({
   sourceId: z.uuid(),

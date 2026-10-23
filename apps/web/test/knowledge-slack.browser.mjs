@@ -502,6 +502,7 @@ test(
               syncedAt: '2026-10-16T09:00:00.000Z',
               items: [
                 {
+                  id: 'oversized',
                   documentId: randomUUID(),
                   title: '#general · Oversized thread',
                   canonicalUrl: null,
@@ -511,6 +512,7 @@ test(
                   observedAt: '2026-10-16T08:00:00.000Z',
                 },
                 {
+                  id: 'plain-export',
                   documentId: randomUUID(),
                   title: '#general · Plain export',
                   canonicalUrl: null,
