@@ -7,7 +7,12 @@ export const tableNameSchema = z
   .refine(
     value => value === value.normalize('NFKC').toLowerCase() && [...value].length <= 80,
     'Expected a normalized table name',
-  );
+  )
+  .meta({
+    description:
+      'Readable table identity used in Soul format 3 instead of a table UUID; normalized to lowercase NFKC and at most 80 code points.',
+    examples: ['customer_orders'],
+  });
 export const tableNamesSchema = z
   .record(tableIdSchema, tableNameSchema)
   .refine(
@@ -16,7 +21,8 @@ export const tableNamesSchema = z
       Object.keys(names).length <= 65 &&
       new Set(Object.values(names)).size === Object.keys(names).length,
     'Expected distinct table names for the definition and its relationships',
-  );
+  )
+  .meta({ description: 'Trusted mapping from table UUIDs to distinct readable table names.' });
 export type TableNames = z.infer<typeof tableNamesSchema>;
 
 export function tableName(title: string, ordinal = 1) {
@@ -40,12 +46,22 @@ const namedFieldSchema = z.union([
   ...fieldSchema.options.filter(field => field.shape.kind.value !== 'relationship'),
   fieldSchema.options[7].extend({ targetTableId: tableNameSchema }),
 ]);
-export const tableDocumentSchema = z.strictObject({
-  ...definitionSchema.shape,
-  formatVersion: z.literal(3),
-  id: tableNameSchema,
-  fields: z.array(namedFieldSchema).max(64),
-});
+export const tableDocumentSchema = z
+  .strictObject({
+    ...definitionSchema.shape,
+    formatVersion: z.literal(3).meta({ description: 'Soul table document format version; exactly 3.' }),
+    id: tableNameSchema.meta({
+      description: 'Readable identity of this table, not its UUID.',
+      examples: ['customer_orders'],
+    }),
+    fields: z.array(namedFieldSchema).max(64).meta({
+      description: 'The fields that define each row; relationship targets use readable table names.',
+    }),
+  })
+  .meta({
+    description:
+      'A version-3 Soul table document describes the shape of its rows with readable table names. Zod enforces on the Soul conversion path: names are lowercase NFKC and at most 80 code points; labels trim to 1–120 characters and use well-formed Unicode; field IDs are unique after lowercase normalization; option IDs within each select field and unique-key IDs are unique; unique-key field IDs and field sets are distinct; unique keys reference existing scalar fields; and reverse relationship field identities do not collide.',
+  });
 
 function nameFor(names: TableNames, id: string) {
   const name = names[tableIdSchema.parse(id)];

@@ -43,6 +43,8 @@
       "types": "./dist/names.d.ts",
       "default": "./dist/names.js"
     },
+    "./table.v1.schema.json": "./schemas/table.v1.json",
+    "./soul-table.v1.schema.json": "./schemas/soul-table.v1.json",
     "./identities": {
       "types": "./dist/identities.d.ts",
       "default": "./dist/identities.js"
@@ -109,6 +111,8 @@
     "@types/yauzl": "3.4.0",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
   }
 }

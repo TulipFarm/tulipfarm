@@ -1,8 +1,20 @@
 import { z } from 'zod';
 
-export const tableIdSchema = z.uuid().toLowerCase().brand<'TableId'>();
-export const fieldIdSchema = z.uuid().toLowerCase().brand<'FieldId'>();
-export const recordIdSchema = z.uuid().toLowerCase().brand<'RecordId'>();
+export const tableIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'TableId'>()
+  .meta({ description: 'Stable UUID identifying a table; input is normalized to lowercase.' });
+export const fieldIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'FieldId'>()
+  .meta({ description: 'Stable UUID identifying a field; input is normalized to lowercase.' });
+export const recordIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'RecordId'>()
+  .meta({ description: 'Stable UUID identifying one row; input is normalized to lowercase.' });
 export const revisionSchema = z
   .string()
   .regex(/^[a-f0-9]{40}$/)
@@ -13,10 +25,6 @@ export class TableValidationError extends Error {
     this.name = 'TableValidationError';
   }
 }
-export const teamIdSchema = z.uuid().toLowerCase().brand<'TeamId'>();
-export const optionIdSchema = z.uuid().toLowerCase().brand<'OptionId'>();
-export const fileIdSchema = z.uuid().toLowerCase().brand<'FileId'>();
-export const uniqueKeyIdSchema = z.uuid().toLowerCase().brand<'UniqueKeyId'>();
 export const tableDefinitionMessages = {
   wellFormedText: 'Expected well-formed Unicode without null bytes',
   duplicateOption: 'Duplicate option identity',
@@ -54,15 +62,45 @@ export const tableDefinitionRules: readonly TableRule[] = [
     rule: 'Relationship reverse field IDs must be unique per target table and must not reuse a field ID of a self-referencing table.',
   },
 ];
+export const teamIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'TeamId'>()
+  .meta({ description: 'UUID identifying the team that owns this table; input is normalized to lowercase.' });
+export const optionIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'OptionId'>()
+  .meta({ description: 'Stable UUID identifying a select option; input is normalized to lowercase.' });
+export const fileIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'FileId'>()
+  .meta({ description: 'Stable UUID identifying a file; input is normalized to lowercase.' });
+export const uniqueKeyIdSchema = z
+  .uuid()
+  .toLowerCase()
+  .brand<'UniqueKeyId'>()
+  .meta({ description: 'Stable UUID identifying a unique key; input is normalized to lowercase.' });
 const textSchema = z
   .string()
   .max(10000)
-  .refine(
-    value => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value),
-    tableDefinitionMessages.wellFormedText,
-  );
-const labelSchema = textSchema.trim().min(1).max(120);
-const cardinalitySchema = z.enum(['one', 'many']);
+  .refine(value => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value), tableDefinitionMessages.wellFormedText)
+  .meta({
+    description: 'Text stored in one row. Use maxLength on the field to limit its value.',
+  });
+export const trimmedLabelSchema = textSchema.trim().min(1).max(120);
+function label(description: string, example: string) {
+  return trimmedLabelSchema.meta({
+    description,
+    examples: [example],
+    'x-tulipfarm-trimmed-label': true,
+  });
+}
+const cardinalitySchema = z.enum(['one', 'many']).meta({
+  description: 'Whether a field refers to exactly one item or can contain multiple items.',
+  examples: ['one', 'many'],
+});
 export const decimalSchema = z.string().regex(/^-?(?:0|[1-9][0-9]{0,19})(?:\.[0-9]{1,10})?$/);
 export const dateSchema = z.iso
   .date()
@@ -76,7 +114,15 @@ export const timestampSchema = z.iso
   }, 'Timestamp must represent a supported UTC instant')
   .transform(value => new Date(value).toISOString());
 
-export const optionSchema = z.strictObject({ id: optionIdSchema, label: labelSchema, retired: z.boolean() });
+export const optionSchema = z
+  .strictObject({
+    id: optionIdSchema,
+    label: label('Display text shown for this select option.', 'Open'),
+    retired: z.boolean().meta({
+      description: 'Whether this option is retired; retired options remain readable but cannot be newly selected.',
+    }),
+  })
+  .meta({ description: 'One selectable option, with a stable identity and display text.' });
 const optionsSchema = z
   .array(optionSchema)
   .min(1)
@@ -84,55 +130,176 @@ const optionsSchema = z
   .refine(
     options => new Set(options.map(option => option.id)).size === options.length,
     tableDefinitionMessages.duplicateOption,
-  );
-const base = { id: fieldIdSchema, label: labelSchema, required: z.boolean() };
-export const fieldSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ ...base, kind: z.literal('text'), maxLength: z.int().min(1).max(10000) }),
-  z
-    .strictObject({
-      ...base,
-      kind: z.literal('numeric'),
-      precision: z.int().min(1).max(30),
-      scale: z.int().min(0).max(10),
-    })
-    .refine(
-      field => field.scale <= field.precision && field.precision - field.scale <= 20,
-      tableDefinitionMessages.decimalPrecisionScale,
-    ),
-  z.strictObject({ ...base, kind: z.literal('boolean') }),
-  z.strictObject({ ...base, kind: z.literal('date') }),
-  z.strictObject({ ...base, kind: z.literal('timestamp'), timezone: z.literal('UTC') }),
-  z.strictObject({ ...base, kind: z.literal('single-select'), options: optionsSchema }),
-  z.strictObject({ ...base, kind: z.literal('multi-select'), options: optionsSchema }),
-  z.strictObject({
-    ...base,
-    kind: z.literal('relationship'),
-    targetTableId: tableIdSchema,
-    cardinality: cardinalitySchema,
-    inverseCardinality: cardinalitySchema,
-    reverse: z.strictObject({ fieldId: fieldIdSchema, label: labelSchema }).nullable(),
-    onDelete: z.literal('restrict'),
+  )
+  .meta({ description: 'The available choices for a select field; provide 1–256 options with distinct IDs.' });
+const base = {
+  id: fieldIdSchema,
+  label: label('Human-readable name for this field; it is not a stable identifier.', 'Customer name'),
+  required: z.boolean().meta({
+    description: 'Whether every row must contain a non-null value for this field.',
   }),
-  z.strictObject({
+};
+const textFieldSchema = z
+  .strictObject({
     ...base,
-    kind: z.literal('file'),
-    cardinality: cardinalitySchema,
-    access: z.literal('independent'),
-  }),
-]);
-export const uniqueKeySchema = z.strictObject({
-  id: uniqueKeyIdSchema,
-  fieldIds: z.array(fieldIdSchema).min(1).max(8),
-  nulls: z.literal('distinct'),
-});
+    kind: z.literal('text').meta({ description: 'A field containing text.' }),
+    maxLength: z
+      .int()
+      .min(1)
+      .max(10000)
+      .meta({
+        description:
+          'Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.',
+        examples: [255],
+      }),
+  })
+  .meta({ description: 'A text field with a maximum value length.' });
+const numericFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('numeric').meta({ description: 'A fixed-precision decimal field.' }),
+    precision: z
+      .int()
+      .min(1)
+      .max(30)
+      .meta({
+        description: 'Maximum total decimal digits, including digits before and after the decimal point.',
+        examples: [12],
+      }),
+    scale: z
+      .int()
+      .min(0)
+      .max(10)
+      .meta({
+        description:
+          'Maximum digits after the decimal point; must not exceed precision, and precision minus scale is at most 20.',
+        examples: [2],
+      }),
+  })
+  .refine(
+    field => field.scale <= field.precision && field.precision - field.scale <= 20,
+    tableDefinitionMessages.decimalPrecisionScale,
+  )
+  .meta({ description: 'A fixed-precision decimal field, such as a currency amount with precision 12 and scale 2.' });
+const booleanFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('boolean').meta({ description: 'A field containing true or false.' }),
+  })
+  .meta({ description: 'A true-or-false field, useful for a yes/no business fact.' });
+const dateFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('date').meta({ description: 'A calendar date without a time of day.' }),
+  })
+  .meta({ description: 'A calendar-date field, such as an invoice due date.' });
+const timestampFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('timestamp').meta({ description: 'A date and time represented as a UTC instant.' }),
+    timezone: z.literal('UTC').meta({ description: 'The required timezone for this timestamp field: UTC.' }),
+  })
+  .meta({ description: 'A date-and-time field for an event that occurs at a specific instant.' });
+const singleSelectFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('single-select').meta({ description: 'A field where a row chooses one option.' }),
+    options: optionsSchema.meta({
+      description: 'The one-of choices available to rows, such as a ticket status.',
+      examples: [[{ id: '11111111-1111-4111-8111-111111111111', label: 'Open', retired: false }]],
+    }),
+  })
+  .meta({ description: 'A controlled choice field where each row selects one option.' });
+const multiSelectFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('multi-select').meta({ description: 'A field where a row can choose multiple options.' }),
+    options: optionsSchema.meta({
+      description: 'The choices available to rows, such as the tags that can be applied.',
+    }),
+  })
+  .meta({ description: 'A controlled choice field where each row can select multiple options.' });
+const relationshipFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('relationship').meta({ description: 'A field linking a row to rows in another table.' }),
+    targetTableId: tableIdSchema.meta({
+      description: 'UUID of the table whose rows this field links to.',
+    }),
+    cardinality: cardinalitySchema.meta({
+      description: 'How many target rows one source row may reference.',
+    }),
+    inverseCardinality: cardinalitySchema.meta({
+      description: 'How many source rows one target row may be referenced from.',
+    }),
+    reverse: z
+      .strictObject({
+        fieldId: fieldIdSchema,
+        label: label('Display name for the corresponding field on the target table.', 'Related tickets'),
+      })
+      .nullable()
+      .meta({
+        description: 'Optional reverse field to expose this relationship on the target table; null means none.',
+      }),
+    onDelete: z.literal('restrict').meta({
+      description:
+        'Deletion behavior for a target row. The only supported value, restrict, prevents deleting a linked row.',
+    }),
+  })
+  .meta({ description: 'A field that links rows to another table.' });
+const fileFieldSchema = z
+  .strictObject({
+    ...base,
+    kind: z.literal('file').meta({ description: 'A field containing references to attached files.' }),
+    cardinality: cardinalitySchema.meta({
+      description: 'Whether this row can contain one file or multiple files.',
+    }),
+    access: z.literal('independent').meta({
+      description:
+        'File access behavior. Independent means file authorization is checked separately from table access.',
+    }),
+  })
+  .meta({ description: 'A field that stores one or more independently authorized file references.' });
+export const fieldSchema = z
+  .discriminatedUnion('kind', [
+    textFieldSchema,
+    numericFieldSchema,
+    booleanFieldSchema,
+    dateFieldSchema,
+    timestampFieldSchema,
+    singleSelectFieldSchema,
+    multiSelectFieldSchema,
+    relationshipFieldSchema,
+    fileFieldSchema,
+  ])
+  .meta({
+    description: 'One field in the table shape; kind selects the field-specific properties and row value type.',
+  });
+export const uniqueKeySchema = z
+  .strictObject({
+    id: uniqueKeyIdSchema,
+    fieldIds: z.array(fieldIdSchema).min(1).max(8).meta({
+      description: 'IDs of 1–8 existing scalar fields that together must be unique for each row.',
+    }),
+    nulls: z.literal('distinct').meta({
+      description: 'Null handling for this key. Distinct means rows with null key values do not conflict.',
+    }),
+  })
+  .meta({ description: 'A compound uniqueness rule for the selected fields.' });
+const definitionOnlyRules =
+  'Zod also checks rules this JSON Schema cannot express: labels trim to 1–120 characters and must be well-formed Unicode; field IDs are unique after lowercase normalization; option IDs within each select field and unique-key IDs are unique; unique-key field IDs and field sets are distinct; each unique key refers only to existing scalar fields; and reverse relationship field identities do not collide.';
 export const definitionSchema = z
   .strictObject({
-    formatVersion: z.literal(2),
+    formatVersion: z.literal(2).meta({ description: 'Table definition format version; exactly 2.' }),
     id: tableIdSchema,
     owningTeamId: teamIdSchema,
-    label: labelSchema,
-    fields: z.array(fieldSchema).max(64),
-    uniqueKeys: z.array(uniqueKeySchema).max(64),
+    label: label('Human-readable table title; it defines the shape shown to people.', 'Customer orders'),
+    fields: z.array(fieldSchema).max(64).meta({
+      description: 'The fields that define the shape of each row; a row is one instance of this table.',
+    }),
+    uniqueKeys: z.array(uniqueKeySchema).max(64).meta({
+      description: 'Optional uniqueness rules across fields; use these when a business identifier must not repeat.',
+    }),
   })
   .superRefine((definition, context) => {
     const fields = new Map(definition.fields.map(field => [field.id, field]));
@@ -180,6 +347,9 @@ export const definitionSchema = z
       }
       reverseIds.add(reverseId);
     }
+  })
+  .meta({
+    description: `A version-2 table definition describes the shape of its rows. ${definitionOnlyRules}`,
   });
 
 const optionIdsSchema = z

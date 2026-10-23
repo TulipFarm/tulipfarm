@@ -1,0 +1,960 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "$ref": "#/$defs/__schema0"
+    },
+    "id": {
+      "$ref": "#/$defs/__schema1"
+    },
+    "owningTeamId": {
+      "$ref": "#/$defs/__schema2"
+    },
+    "label": {
+      "$ref": "#/$defs/__schema3"
+    },
+    "fields": {
+      "$ref": "#/$defs/__schema5"
+    },
+    "uniqueKeys": {
+      "$ref": "#/$defs/__schema48"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "id",
+    "owningTeamId",
+    "label",
+    "fields",
+    "uniqueKeys"
+  ],
+  "additionalProperties": false,
+  "description": "A version-2 table definition describes the shape of its rows. Zod also checks rules this JSON Schema cannot express: labels trim to 1–120 characters and must be well-formed Unicode; field IDs are unique after lowercase normalization; option IDs within each select field and unique-key IDs are unique; unique-key field IDs and field sets are distinct; each unique key refers only to existing scalar fields; and reverse relationship field identities do not collide.",
+  "$defs": {
+    "__schema0": {
+      "type": "number",
+      "const": 2,
+      "description": "Table definition format version; exactly 2."
+    },
+    "__schema1": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "Stable UUID identifying a table; input is normalized to lowercase."
+    },
+    "__schema2": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "UUID identifying the team that owns this table; input is normalized to lowercase."
+    },
+    "__schema3": {
+      "maxLength": 10000,
+      "description": "Human-readable table title; it defines the shape shown to people.",
+      "examples": [
+        "Customer orders"
+      ],
+      "$ref": "#/$defs/__schema4",
+      "type": "string",
+      "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+    },
+    "__schema4": {
+      "type": "string",
+      "maxLength": 10000,
+      "description": "Text stored in one row. Use maxLength on the field to limit its value."
+    },
+    "__schema5": {
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema6"
+      },
+      "description": "The fields that define the shape of each row; a row is one instance of this table."
+    },
+    "__schema6": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema7"
+        },
+        {
+          "$ref": "#/$defs/__schema13"
+        },
+        {
+          "$ref": "#/$defs/__schema17"
+        },
+        {
+          "$ref": "#/$defs/__schema19"
+        },
+        {
+          "$ref": "#/$defs/__schema21"
+        },
+        {
+          "$ref": "#/$defs/__schema24"
+        },
+        {
+          "$ref": "#/$defs/__schema32"
+        },
+        {
+          "$ref": "#/$defs/__schema35"
+        },
+        {
+          "$ref": "#/$defs/__schema44"
+        }
+      ],
+      "description": "One field in the table shape; kind selects the field-specific properties and row value type."
+    },
+    "__schema7": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "maxLength": {
+          "$ref": "#/$defs/__schema12"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "maxLength"
+      ],
+      "additionalProperties": false,
+      "description": "A text field with a maximum value length."
+    },
+    "__schema8": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "Stable UUID identifying a field; input is normalized to lowercase."
+    },
+    "__schema9": {
+      "maxLength": 10000,
+      "description": "Human-readable name for this field; it is not a stable identifier.",
+      "examples": [
+        "Customer name"
+      ],
+      "$ref": "#/$defs/__schema4",
+      "type": "string",
+      "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+    },
+    "__schema10": {
+      "type": "boolean",
+      "description": "Whether every row must contain a non-null value for this field."
+    },
+    "__schema11": {
+      "type": "string",
+      "const": "text",
+      "description": "A field containing text."
+    },
+    "__schema12": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000,
+      "description": "Maximum number of characters allowed in a text value. Use a title-sized limit such as 120–255 for short names.",
+      "examples": [
+        255
+      ]
+    },
+    "__schema13": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema14"
+        },
+        "precision": {
+          "$ref": "#/$defs/__schema15"
+        },
+        "scale": {
+          "$ref": "#/$defs/__schema16"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "precision",
+        "scale"
+      ],
+      "additionalProperties": false,
+      "description": "A fixed-precision decimal field, such as a currency amount with precision 12 and scale 2.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 0,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 1,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 21,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 2,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 22,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 3,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 3,
+                "maximum": 23,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 4,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 4,
+                "maximum": 24,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 5,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 25,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 6,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 6,
+                "maximum": 26,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 7,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 7,
+                "maximum": 27,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 8,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 8,
+                "maximum": 28,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 9,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 9,
+                "maximum": 29,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scale": {
+                "const": 10,
+                "description": "Digits after the decimal point; this condition sets the permitted precision range."
+              }
+            },
+            "required": [
+              "scale"
+            ]
+          },
+          "then": {
+            "properties": {
+              "precision": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 30,
+                "description": "Total decimal digits, bounded by the selected scale."
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          }
+        }
+      ]
+    },
+    "__schema14": {
+      "type": "string",
+      "const": "numeric",
+      "description": "A fixed-precision decimal field."
+    },
+    "__schema15": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30,
+      "description": "Maximum total decimal digits, including digits before and after the decimal point.",
+      "examples": [
+        12
+      ]
+    },
+    "__schema16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Maximum digits after the decimal point; must not exceed precision, and precision minus scale is at most 20.",
+      "examples": [
+        2
+      ]
+    },
+    "__schema17": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema18"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "A true-or-false field, useful for a yes/no business fact."
+    },
+    "__schema18": {
+      "type": "string",
+      "const": "boolean",
+      "description": "A field containing true or false."
+    },
+    "__schema19": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema20"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "description": "A calendar-date field, such as an invoice due date."
+    },
+    "__schema20": {
+      "type": "string",
+      "const": "date",
+      "description": "A calendar date without a time of day."
+    },
+    "__schema21": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema22"
+        },
+        "timezone": {
+          "$ref": "#/$defs/__schema23"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "timezone"
+      ],
+      "additionalProperties": false,
+      "description": "A date-and-time field for an event that occurs at a specific instant."
+    },
+    "__schema22": {
+      "type": "string",
+      "const": "timestamp",
+      "description": "A date and time represented as a UTC instant."
+    },
+    "__schema23": {
+      "type": "string",
+      "const": "UTC",
+      "description": "The required timezone for this timestamp field: UTC."
+    },
+    "__schema24": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "options": {
+          "$ref": "#/$defs/__schema26"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "options"
+      ],
+      "additionalProperties": false,
+      "description": "A controlled choice field where each row selects one option."
+    },
+    "__schema25": {
+      "type": "string",
+      "const": "single-select",
+      "description": "A field where a row chooses one option."
+    },
+    "__schema26": {
+      "description": "The one-of choices available to rows, such as a ticket status.",
+      "examples": [
+        [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "label": "Open",
+            "retired": false
+          }
+        ]
+      ],
+      "$ref": "#/$defs/__schema31"
+    },
+    "__schema27": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema28"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema29"
+        },
+        "retired": {
+          "$ref": "#/$defs/__schema30"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "retired"
+      ],
+      "additionalProperties": false,
+      "description": "One selectable option, with a stable identity and display text."
+    },
+    "__schema28": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "Stable UUID identifying a select option; input is normalized to lowercase."
+    },
+    "__schema29": {
+      "maxLength": 10000,
+      "description": "Display text shown for this select option.",
+      "examples": [
+        "Open"
+      ],
+      "$ref": "#/$defs/__schema4",
+      "type": "string",
+      "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+    },
+    "__schema30": {
+      "type": "boolean",
+      "description": "Whether this option is retired; retired options remain readable but cannot be newly selected."
+    },
+    "__schema31": {
+      "minItems": 1,
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema27"
+      },
+      "description": "The available choices for a select field; provide 1–256 options with distinct IDs."
+    },
+    "__schema32": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema33"
+        },
+        "options": {
+          "$ref": "#/$defs/__schema34"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "options"
+      ],
+      "additionalProperties": false,
+      "description": "A controlled choice field where each row can select multiple options."
+    },
+    "__schema33": {
+      "type": "string",
+      "const": "multi-select",
+      "description": "A field where a row can choose multiple options."
+    },
+    "__schema34": {
+      "description": "The choices available to rows, such as the tags that can be applied.",
+      "$ref": "#/$defs/__schema31"
+    },
+    "__schema35": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema36"
+        },
+        "targetTableId": {
+          "$ref": "#/$defs/__schema37"
+        },
+        "cardinality": {
+          "$ref": "#/$defs/__schema38"
+        },
+        "inverseCardinality": {
+          "$ref": "#/$defs/__schema40"
+        },
+        "reverse": {
+          "$ref": "#/$defs/__schema41"
+        },
+        "onDelete": {
+          "$ref": "#/$defs/__schema43"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "targetTableId",
+        "cardinality",
+        "inverseCardinality",
+        "reverse",
+        "onDelete"
+      ],
+      "additionalProperties": false,
+      "description": "A field that links rows to another table."
+    },
+    "__schema36": {
+      "type": "string",
+      "const": "relationship",
+      "description": "A field linking a row to rows in another table."
+    },
+    "__schema37": {
+      "description": "UUID of the table whose rows this field links to.",
+      "$ref": "#/$defs/__schema1"
+    },
+    "__schema38": {
+      "description": "How many target rows one source row may reference.",
+      "$ref": "#/$defs/__schema39"
+    },
+    "__schema39": {
+      "type": "string",
+      "enum": [
+        "one",
+        "many"
+      ],
+      "description": "Whether a field refers to exactly one item or can contain multiple items.",
+      "examples": [
+        "one",
+        "many"
+      ]
+    },
+    "__schema40": {
+      "description": "How many source rows one target row may be referenced from.",
+      "$ref": "#/$defs/__schema39"
+    },
+    "__schema41": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/__schema42"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional reverse field to expose this relationship on the target table; null means none."
+    },
+    "__schema42": {
+      "type": "object",
+      "properties": {
+        "fieldId": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "maxLength": 10000,
+          "description": "Display name for the corresponding field on the target table.",
+          "examples": [
+            "Related tickets"
+          ],
+          "$ref": "#/$defs/__schema4",
+          "type": "string",
+          "pattern": "^(?!\\s*$)(?![\\s\\S]*\\u0000)[\\s\\S]*$"
+        }
+      },
+      "required": [
+        "fieldId",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "__schema43": {
+      "type": "string",
+      "const": "restrict",
+      "description": "Deletion behavior for a target row. The only supported value, restrict, prevents deleting a linked row."
+    },
+    "__schema44": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "label": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "required": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "kind": {
+          "$ref": "#/$defs/__schema45"
+        },
+        "cardinality": {
+          "$ref": "#/$defs/__schema46"
+        },
+        "access": {
+          "$ref": "#/$defs/__schema47"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "required",
+        "kind",
+        "cardinality",
+        "access"
+      ],
+      "additionalProperties": false,
+      "description": "A field that stores one or more independently authorized file references."
+    },
+    "__schema45": {
+      "type": "string",
+      "const": "file",
+      "description": "A field containing references to attached files."
+    },
+    "__schema46": {
+      "description": "Whether this row can contain one file or multiple files.",
+      "$ref": "#/$defs/__schema39"
+    },
+    "__schema47": {
+      "type": "string",
+      "const": "independent",
+      "description": "File access behavior. Independent means file authorization is checked separately from table access."
+    },
+    "__schema48": {
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema49"
+      },
+      "description": "Optional uniqueness rules across fields; use these when a business identifier must not repeat."
+    },
+    "__schema49": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/__schema50"
+        },
+        "fieldIds": {
+          "$ref": "#/$defs/__schema51"
+        },
+        "nulls": {
+          "$ref": "#/$defs/__schema52"
+        }
+      },
+      "required": [
+        "id",
+        "fieldIds",
+        "nulls"
+      ],
+      "additionalProperties": false,
+      "description": "A compound uniqueness rule for the selected fields."
+    },
+    "__schema50": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "Stable UUID identifying a unique key; input is normalized to lowercase."
+    },
+    "__schema51": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema8"
+      },
+      "description": "IDs of 1–8 existing scalar fields that together must be unique for each row."
+    },
+    "__schema52": {
+      "type": "string",
+      "const": "distinct",
+      "description": "Null handling for this key. Distinct means rows with null key values do not conflict."
+    }
+  },
+  "$id": "https://tulipfarm.ai/schemas/table.v1.json",
+  "title": "TulipFarm table definition"
+}
