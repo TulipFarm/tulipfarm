@@ -94,16 +94,6 @@ export function createConversationKnowledge({
     const parsed = await parseKnowledgeDocument({ bytes, filename: 'conversation.md', mediaType: 'text/markdown' });
     const published = await store.transaction(input.workspaceId, input.requester, true, async (tx, actor) => {
       await fence(tx, input);
-      if (
-        !(await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_knowledge_sources')} WHERE id=$1`, [sourceId])).rowCount
-      ) {
-        const usage = z
-          .object({ count: z.number().int() })
-          .parse(
-            (await tx.client.query(`SELECT count(*)::int AS count FROM ${table(tx, 'tf_knowledge_sources')}`)).rows[0],
-          );
-        if (usage.count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
-      }
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tf_knowledge_sources')} (id,provider,account_namespace,selection,owner_membership_id)
         VALUES ($1,'conversation',$2,'conversations',$3) ON CONFLICT DO NOTHING`,

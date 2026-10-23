@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { githubCorpusLimits } from './github-contracts.ts';
 import { slackCorpusLimits } from './slack-contracts.ts';
 
 export const defaultKnowledgeProducts = ['google-drive', 'gmail', 'slack', 'github', 'jira', 'confluence'] as const;
@@ -11,7 +10,7 @@ export const defaultKnowledgeLimits = Object.freeze({
   scopes: 2000,
   rediscoverMs: 3_600_000,
   windowDays: 90,
-  groups: { github: githubCorpusLimits.repositories, slack: slackCorpusLimits.conversations, atlassian: 50 },
+  groups: { slack: slackCorpusLimits.conversations, atlassian: 50 },
 });
 export const defaultKnowledgeIntentInputSchema = z.strictObject({
   product: defaultKnowledgeProductSchema,

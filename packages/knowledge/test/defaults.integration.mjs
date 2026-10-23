@@ -123,23 +123,21 @@ test(
         },
       );
 
-      await t.test('flag off leaves queued intent untouched; flag on processes it', async () => {
+      await t.test('GitHub is never gated: a disabled flag still leaves the queued intent due', async () => {
         flags.set(owner.userId, false);
-        assert.deepEqual(await defaults.due(ws.id), []);
         const [intent] = (await defaults.list(ws.id, owner.userId)).items;
         assert.equal(intent.syncState, 'queued');
-        assert.equal(
-          (await defaults.process({ workspaceId: ws.id, intentId: intent.intentId, generation: 1 })).disposition,
-          'stale',
+        assert.deepEqual(
+          (await defaults.due(ws.id)).map(w => w.intentId),
+          [intent.intentId],
         );
-        assert.equal(state.configured.length, 0);
         flags.delete(owner.userId);
       });
 
       await t.test(
-        'manual repositories are preserved and >20 repositories are grouped without truncation',
+        'connecting creates one owner-only source following every repository, with all content and full history',
         async () => {
-          // Owner already has a manual source covering repo-00; discovery must not recreate it.
+          // A manual source for one repository is kept; the automatic source follows the whole account beside it.
           const manualSource = randomUUID();
           await db.platform.query(
             `INSERT INTO ${table('sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'github','101','{"manual":true}',$2)`,
@@ -154,36 +152,26 @@ test(
               { phase: 'listing', index: 0, page: null, after: null, pages: 0 },
             ],
           );
-          await db.platform.query(
-            `INSERT INTO ${table('github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,'9000','acme/repo-00','private','acme/repo-00')`,
-            [manualSource],
-          );
           await drain();
-          const repositories = state.configured.flatMap(c => c.selection.repositories);
-          assert.equal(repositories.length, 44, 'all discovered repositories except the manual one');
-          assert.ok(!repositories.includes('acme/repo-00'));
-          assert.equal(new Set(repositories).size, 44);
-          assert.ok(
-            state.configured.every(
-              c => c.selection.repositories.length <= 20 && c.accountId === accountId && c.userId === owner.userId,
-            ),
+          assert.equal(state.configured.length, 1);
+          const [configured] = state.configured;
+          assert.equal(configured.accountId, accountId);
+          assert.equal(configured.userId, owner.userId);
+          assert.deepEqual(configured.memberIds, [], 'automatic sources are owner-only');
+          assert.deepEqual(
+            configured.selection,
+            { scope: 'all', repositories: [], kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] },
+            'every repository and content kind, no cutoff date and no rolling window',
           );
-          assert.ok(
-            state.configured.every(c => c.memberIds.length === 0),
-            'automatic sources are owner-only',
-          );
-          assert.deepEqual(state.configured[0].selection.kinds, ['code', 'discussions', 'docs', 'issues', 'pulls']);
-          assert.equal(state.configured[0].selection.window, 'rolling-90d');
           const [intent] = (await defaults.list(ws.id, owner.userId)).items;
           assert.equal(intent.syncState, 'ready');
-          assert.deepEqual(intent.scopes, { discovered: 45, included: 44, manual: 1 });
-          assert.equal(intent.sources.length, 3);
-          assert.ok(intent.sources.every(s => s.state === 'created'));
+          assert.equal(intent.sources.length, 1);
+          assert.equal(intent.sources[0].state, 'created');
         },
       );
 
       await t.test(
-        'rediscovery adds future repositories once, never duplicates, and late-page failure keeps earlier sources',
+        'later passes never duplicate the account source, and a failed discovery is visible and retried',
         async () => {
           const before = state.configured.length;
           clock = new Date(clock.getTime() + 2 * 3600_000);
@@ -193,25 +181,19 @@ test(
             visibility: 'private',
             title: 'acme/new-repo',
           });
-          state.failPage = 4;
+          state.failPage = 1;
           await drain();
           let [intent] = (await defaults.list(ws.id, owner.userId)).items;
           assert.equal(intent.syncState, 'failed');
           assert.equal(intent.failure, 'rate-limited');
-          assert.equal(state.configured.length, before, 'no new or replacement sources after a failed page');
-          assert.equal(intent.sources.length, 3);
+          assert.equal(state.configured.length, before);
           state.failPage = null;
           clock = new Date(clock.getTime() + 3600_000);
           await drain();
           [intent] = (await defaults.list(ws.id, owner.userId)).items;
           assert.equal(intent.syncState, 'ready');
-          assert.deepEqual(
-            state.configured.slice(before).map(c => c.selection.repositories),
-            [['acme/new-repo']],
-          );
-          clock = new Date(clock.getTime() + 2 * 3600_000);
-          await drain();
-          assert.equal(state.configured.length, before + 1, 'a later pass with no new scopes creates nothing');
+          assert.equal(state.configured.length, before, 'the source itself picks up new repositories');
+          assert.equal(intent.sources.length, 1);
         },
       );
 
@@ -255,17 +237,11 @@ test(
         assert.equal((await defaults.due(ws.id)).length, 1);
       });
 
-      await t.test('the automatic gate holds only automatic sources of disabled owners', async () => {
-        const automatic = (
-          await db.platform.query(`SELECT source_id FROM ${table('default_sources')} ORDER BY source_id`)
-        ).rows.map(r => r.source_id);
+      await t.test('the automatic gate never holds GitHub sources, even for a disabled owner', async () => {
+        assert.equal((await db.platform.query(`SELECT count(*)::int n FROM ${table('default_sources')}`)).rows[0].n, 1);
         assert.deepEqual(await defaults.held(ws.id), []);
         flags.set(owner.userId, false);
-        assert.deepEqual(
-          (await defaults.held(ws.id)).sort(),
-          automatic,
-          'every automatic source of a disabled owner is held; manual sources never are',
-        );
+        assert.deepEqual(await defaults.held(ws.id), []);
         flags.delete(owner.userId);
       });
 
@@ -391,12 +367,12 @@ test(
         assert.ok(slack.every(c => c.selection.kind === 'channels' && c.selection.window === 'rolling-90d'));
         const github = configured.filter(c => c.provider === 'github');
         assert.deepEqual(
-          github.map(c => [c.accountId, c.selection.repositories]).sort(),
+          github.map(c => [c.accountId, c.selection.scope, c.selection.repositories]).sort(),
           [
-            [a1, ['one/a']],
-            [a2, ['two/b']],
+            [a1, 'all', []],
+            [a2, 'all', []],
           ].sort(),
-          'accounts keep their own scopes; a shared repo is indexed once',
+          'each account gets one source that follows every repository it can read',
         );
         const atlassian = configured.filter(c => c.provider === 'atlassian');
         const sizes = product =>

@@ -305,7 +305,7 @@ export function fakeGitHub() {
       });
     }
     if (rest === '/issues') {
-      const since = Date.parse(url.searchParams.get('since'));
+      const since = url.searchParams.has('since') ? Date.parse(url.searchParams.get('since')) : -Infinity;
       const per = Number(url.searchParams.get('per_page'));
       const page = Number(url.searchParams.get('page'));
       const all = [...repo.issues.values()]

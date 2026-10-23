@@ -125,9 +125,11 @@ test(
         'background dispatch discovers and configures the automatic source',
       );
       const [source] = await created();
-      assert.deepEqual([...source.selection.repositories].sort(), ['acme/handbook', 'acme/leadership']);
-      assert.equal(source.selection.window, 'rolling-90d');
-      assert.ok(source.selection.kinds.includes('code'));
+      assert.deepEqual(
+        source.selection,
+        { scope: 'all', repositories: [], kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] },
+        'every repository the account can read, every kind, full history',
+      );
       const published = async path =>
         (
           await f.db.platform.query(
@@ -195,6 +197,7 @@ test(
       }
       assert.equal(JSON.stringify(history).includes(owner.token), false);
 
+      // GitHub Knowledge is on for everyone: turning the automatic-knowledge flag off never holds its sources.
       process.env.FEATURE_FLAGS_OFF = 'default-connection-knowledge';
       const sourceRow = async () =>
         (
@@ -203,37 +206,18 @@ test(
             [source.source_id],
           )
         ).rows[0];
-      // A page claimed before the flag turned off may still finish and advance the generation.
-      await eventually(
-        async () => (await sourceRow()).lease_token === null,
-        'in-flight GitHub work settles before the flag turns off',
-      );
-      const held = await sourceRow();
-      const paid = embeddingCalls.length;
+      await eventually(async () => (await sourceRow()).lease_token === null, 'in-flight GitHub work settles');
+      const running = await sourceRow();
       await f.db.platform.query(
         `UPDATE ${f.table('tf_knowledge_github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
         [source.source_id],
       );
-      await f.db.platform.query(
-        `UPDATE ${f.table('tf_knowledge_default_intents')} SET next_attempt_at=clock_timestamp() WHERE id=$1`,
-        [intentId],
+      await eventually(
+        async () => (await sourceRow()).generation > running.generation,
+        'flag off does not hold automatic GitHub work',
       );
-      const heldIntent = (await intent())[0];
-      await startDefaultKnowledgeWorkflow(temporal, {
-        workspaceId: f.workspace.id,
-        intentId,
-        generation: heldIntent.generation,
-      });
-      await client.workflow
-        .getHandle(`knowledge-defaults-${f.workspace.id}-${intentId}-${heldIntent.generation}`)
-        .result();
-      await delay(5000);
-      assert.equal((await sourceRow()).generation, held.generation, 'flag off stops queued automatic ingestion');
-      assert.equal((await intent())[0].generation, heldIntent.generation, 'flag off stops queued automatic discovery');
-      assert.ok(await published('doc:7001:docs/supplier.md'), 'flag off retains data');
-      assert.equal(embeddingCalls.length, paid, 'flag off makes no paid embedding request');
+      assert.ok(await published('doc:7001:docs/supplier.md'));
       delete process.env.FEATURE_FLAGS_OFF;
-      await eventually(async () => (await sourceRow()).generation > held.generation, 'flag on resumes automatic work');
     } finally {
       if (priorFlags === undefined) delete process.env.FEATURE_FLAGS_OFF;
       else process.env.FEATURE_FLAGS_OFF = priorFlags;

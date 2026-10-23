@@ -53,7 +53,7 @@ test(
     });
     await loadPlatformBaseline(db.platform);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 5);
+    assert.equal(migrations.length, 6);
     const pool = new Pool({ connectionString: db.connectionString, options: '-c search_path=app' });
     cleanup.push(() => pool.end());
     let link;

@@ -366,7 +366,7 @@ test('an automatic Gmail source rolls its 90-day window forward with the clock',
   }
 });
 
-test('an automatic GitHub source rolls its 90-day window forward with the clock', { timeout: 300000 }, async () => {
+test('GitHub sources index full history and never roll a window with the clock', { timeout: 300000 }, async () => {
   const { db, ws, table, runtime, live } = await workspace();
   try {
     const accountId = randomUUID();
@@ -376,9 +376,9 @@ test('an automatic GitHub source rolls its 90-day window forward with the clock'
     );
     const binding = { accountId, accountGeneration: 1, githubUserId: '101', login: 'owner' };
     let clock = Date.now() + 1000;
-    const issues = new Map([['issue:7001:1', { at: clock - 80 * day, text: 'orchid shipment from the old quarter' }]]);
+    const issues = new Map([['issue:7001:1', { at: clock - 800 * day, text: 'orchid shipment from two years ago' }]]);
     const afters = [];
-    const inWindow = (id, s) => issues.get(id).at >= Date.parse(s.after);
+    const inWindow = (id, s) => !s.after || issues.get(id).at >= Date.parse(s.after);
     const observation = id => ({
       nativeId: id,
       repositoryId: '7001',
@@ -417,30 +417,38 @@ test('an automatic GitHub source rolls its 90-day window forward with the clock'
       },
     };
     const github = createGitHubKnowledge({ runtime, provider, now: () => clock });
+    const selection = {
+      repositories: ['acme/handbook'],
+      kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
+    };
+    await assert.rejects(
+      github.configure(ws.id, ws.userId, {
+        commandId: randomUUID(),
+        accountId,
+        memberIds: [],
+        selection: { ...selection, after: date(clock - 90 * day), window: 'rolling-90d' },
+      }),
+      'GitHub has no rolling window',
+    );
     const source = await github.configure(ws.id, ws.userId, {
       commandId: randomUUID(),
       accountId,
       memberIds: [],
-      selection: {
-        repositories: ['acme/handbook'],
-        kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
-        after: date(clock - 90 * day),
-        window: 'rolling-90d',
-      },
+      selection,
     });
     await drain(github, db, ws, table, 'github_sources', source.sourceId);
-    assert.equal(afters.at(-1), date(clock - 90 * day));
+    assert.equal(afters.at(-1), undefined, 'no cutoff is sent to the provider');
     assert.deepEqual(await live(source.sourceId), ['issue:7001:1']);
 
     clock += 20 * day;
     issues.set('issue:7001:2', { at: clock - day, text: 'orchid shipment confirmed this week' });
     await drain(github, db, ws, table, 'github_sources', source.sourceId);
     await drain(github, db, ws, table, 'github_sources', source.sourceId);
-    assert.equal(afters.at(-1), date(clock - 90 * day), 'the stored selection is not frozen at configuration time');
+    assert.ok(afters.every(after => after === undefined));
     assert.deepEqual(
       await live(source.sourceId),
-      ['issue:7001:2'],
-      'new activity enters and aged-out activity is tombstoned',
+      ['issue:7001:1', 'issue:7001:2'],
+      'new activity enters and old activity is kept',
     );
   } finally {
     await runtime.close?.();

@@ -177,8 +177,6 @@ export function createDocumentStore<Context, Source extends { kind: string }>({
           throw new KnowledgeError('conflict');
         return { id: existing.id, accessEpoch: existing.access_epoch };
       }
-      const count = z.object({ count: z.number() }).parse((await repository(tx).countSources()).rows[0]);
-      if (count.count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
       await repository(tx).insertSource([
         input.id,
         input.provider,

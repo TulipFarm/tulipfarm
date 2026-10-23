@@ -121,11 +121,18 @@ test('selection contract bounds repositories, kinds and ordering', () => {
   );
   assert.equal(
     githubCorpusSelectionSchema.safeParse({
-      repositories: Array.from({ length: 21 }, (_, i) => `o/r${String(i).padStart(2, '0')}`),
+      repositories: Array.from({ length: 1001 }, (_, i) => `o/r${String(i).padStart(4, '0')}`),
       kinds: ['docs'],
       after,
     }).success,
     false,
+  );
+  assert.equal(
+    githubCorpusSelectionSchema.safeParse({
+      repositories: Array.from({ length: 1000 }, (_, i) => `o/r${String(i).padStart(4, '0')}`),
+      kinds: ['docs'],
+    }).success,
+    true,
   );
   assert.equal(
     githubCorpusSelectionSchema.safeParse({ repositories: ['../x'], kinds: ['docs'], after }).success,
@@ -248,6 +255,51 @@ test('listing yields every doc, issue, pull request and discussion with stable p
   assert.deepEqual(
     onlyPulls.map(item => item.nativeId),
     ['pull:7001:2'],
+  );
+});
+
+test('without a cutoff the listing covers full history and asks GitHub for every issue', async () => {
+  const { provider, binding, github } = setup();
+  const { after: _after, ...full } = selection;
+  const items = await listAll(provider, binding, '7001', full);
+  assert.deepEqual(
+    items.filter(item => item.kind !== 'doc').map(item => item.nativeId),
+    ['issue:7001:3', 'issue:7001:1', 'pull:7001:2', 'discussion:7001:5'],
+  );
+  const issueCalls = github.calls.filter(call => call.path.endsWith('/issues'));
+  assert.ok(issueCalls.length > 0);
+  assert.ok(issueCalls.every(call => !('since' in call.query)));
+  const stale = await provider.read(workspaceId, 'reader', binding, '7001', 'issue:7001:3', full);
+  assert.match(stale.markdown, /Stale/);
+  await assert.rejects(
+    provider.read(workspaceId, 'reader', binding, '7001', 'issue:7001:3', selection),
+    error => error instanceof GitHubCorpusError && error.code === 'outside-selection',
+  );
+});
+
+test('opt-out path patterns leave matching docs and code out of listing and reading', async () => {
+  const { provider, binding, repo } = setup();
+  repo.files.set('vendor/lib.ts', 'export const vendored = 1;');
+  repo.files.set('src/app.min.js', 'x');
+  const opted = { ...selection, kinds: ['code', 'docs'], excludePaths: ['^docs/', '^vendor/', '\\.min\\.js$'] };
+  assert.equal(githubCorpusSelectionSchema.safeParse(opted).success, true);
+  const items = await listAll(provider, binding, '7001', opted);
+  const ids = items.map(item => item.nativeId);
+  assert.ok(ids.includes('doc:7001:README.md'));
+  assert.ok(ids.includes('code:7001:src/index.ts'));
+  for (const id of ['doc:7001:docs/supplier.md', 'code:7001:vendor/lib.ts', 'code:7001:src/app.min.js'])
+    assert.ok(!ids.includes(id), id);
+  await assert.rejects(
+    provider.read(workspaceId, 'reader', binding, '7001', 'doc:7001:docs/supplier.md', opted),
+    error => error instanceof GitHubCorpusError && error.code === 'outside-selection',
+  );
+  await assert.rejects(
+    provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:vendor/lib.ts', opted),
+    error => error instanceof GitHubCorpusError && error.code === 'outside-selection',
+  );
+  assert.match(
+    (await provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:src/index.ts', opted)).markdown,
+    /export/,
   );
 });
 
@@ -458,7 +510,8 @@ test('code selection indexes every default-branch file, including ones GitHub us
     'src/big.ts': 'y'.repeat(300 * 1024),
   }))
     repo.files.set(path, content);
-  assert.equal(githubCorpusSelectionSchema.safeParse({ ...code, window: 'rolling-90d' }).success, true);
+  assert.equal(githubCorpusSelectionSchema.safeParse(code).success, true);
+  assert.equal(githubCorpusSelectionSchema.safeParse({ ...code, window: 'rolling-90d' }).success, false);
   const items = await listAll(provider, binding, '7001', code);
   assert.deepEqual(
     items.map(item => [item.nativeId, item.coverage]),

@@ -2,7 +2,11 @@ import { z } from 'zod';
 import {
   githubCorpusBindingSchema,
   githubCorpusKindSchema,
+  githubCorpusKinds,
+  githubCorpusLimits,
   githubCorpusSelectionSchema,
+  githubExcludePatternProblem,
+  type GitHubKnowledgeSettings,
 } from '@tulipfarm/knowledge/github-contracts';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http';
@@ -23,7 +27,13 @@ const sourceSchema = z.object({
   failure: z.string().nullable(),
   nextAttemptAt: z.iso.datetime(),
   repositories: z
-    .array(repositorySchema.extend({ state: z.enum(['active', 'unavailable']), failure: z.string().nullable() }))
+    .array(
+      repositorySchema.extend({
+        state: z.enum(['active', 'unavailable']),
+        failure: z.string().nullable(),
+        excluded: z.boolean().default(false),
+      }),
+    )
     .nullable(),
   counts: z
     .object({
@@ -63,7 +73,8 @@ export type GitHubKind = z.infer<typeof githubCorpusKindSchema>;
 export type GitHubRepositoryChoice = z.infer<typeof repositorySchema>;
 export type ConfigureGitHub = { commandId: string; accountId: string; selection: GitHubSelection; memberIds: string[] };
 export type ManageGitHub = { commandId: string; action: 'pause' | 'resume' | 'retry' | 'remove' };
-export { githubCorpusSelectionSchema };
+export type GitHubSettings = GitHubKnowledgeSettings;
+export { githubCorpusKinds, githubCorpusLimits, githubCorpusSelectionSchema, githubExcludePatternProblem };
 
 export const githubKnowledgeErrorMessages: Record<string, string> = {
   'github-not-configured':
@@ -77,7 +88,7 @@ export const githubKnowledgeErrorMessages: Record<string, string> = {
   'github-forbidden': 'Your GitHub account cannot read one of these repositories.',
   'github-rate-limited': 'GitHub is limiting requests. Wait a minute, then try again.',
   'github-invalid-selection':
-    'A repository was renamed or the date is outside the last 366 days. Reload the list and choose again.',
+    'A repository was renamed, a date is in the future or an exclude pattern was rejected. Reload and try again.',
 };
 
 export class GitHubKnowledgeError extends Error {
@@ -93,7 +104,7 @@ export class GitHubKnowledgeError extends Error {
         : status === 400
           ? 'The source selection was rejected. Check the repositories, content types, date, and members.'
           : status === 413
-            ? 'This selection exceeds the Knowledge limit. Choose fewer repositories.'
+            ? 'This selection exceeds the Knowledge limit of 1,000 repositories. Choose fewer repositories.'
             : [401, 403, 404].includes(status)
               ? 'This source or GitHub account is unavailable to you. Check your GitHub account and source access.'
               : 'Could not confirm the GitHub request. Check your connection and try again.');
@@ -138,6 +149,8 @@ export function githubKnowledgeApi(workspaceId: string) {
       sourceSchema.parse(await request('/sources', 'POST', signal, input)),
     manage: async (sourceId: string, input: ManageGitHub, signal: AbortSignal) =>
       sourceSchema.parse(await request(`/sources/${encodeURIComponent(sourceId)}/manage`, 'POST', signal, input)),
+    settings: async (sourceId: string, input: GitHubSettings, signal: AbortSignal) =>
+      sourceSchema.parse(await request(`/sources/${encodeURIComponent(sourceId)}/settings`, 'POST', signal, input)),
     refresh: async (sourceId: string, signal: AbortSignal) =>
       refreshSchema.parse(await request(`/sources/${encodeURIComponent(sourceId)}/refresh`, 'POST', signal)),
     async original(documentId: string, revisionId: string, signal: AbortSignal) {

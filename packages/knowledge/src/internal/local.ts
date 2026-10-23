@@ -224,10 +224,6 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       const sourceId = identity(`local:${human.membershipId}:${input.input.kind}`);
       const existingSource = await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [sourceId]);
       if (!existingSource.rowCount) {
-        const count = z
-          .object({ count: z.number() })
-          .parse((await tx.client.query(`SELECT count(*)::int AS count FROM ${table(tx, 'sources')}`)).rows[0]).count;
-        if (count >= knowledgeLimits.sources) throw new KnowledgeError('quota');
         await tx.client.query(
           `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,$2,$3,'local',$4)`,
           [sourceId, input.input.kind, human.membershipId, human.membershipId],

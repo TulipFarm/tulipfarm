@@ -282,12 +282,8 @@ export function createGitHubAccounts(options: {
         if (prepared.row.identity && prepared.row.identity.id !== who.id)
           throw new GitHubAccountError('account-conflict');
         // Only the first authorization of an account is a new enablement; reconnects keep their identity.
-        const automatic =
-          prepared.row.identity === null &&
-          options.defaultKnowledge &&
-          (await options.defaultKnowledge.enabled(workspaceId, userId))
-            ? options.defaultKnowledge
-            : undefined;
+        // GitHub Knowledge is not behind the feature flag: every new account starts indexing.
+        const automatic = prepared.row.identity === null ? options.defaultKnowledge : undefined;
         let intent: string | null = null;
         const completed = await authorized(workspaceId, prepared.actor, async (tx, actor) => {
           const row = await load(tx, actor, prepared.row.id);

@@ -299,9 +299,9 @@ test(
       await t.test('the defaults service filters disabled owners before its own limit', async () => {
         for (let i = 0; i < 21; i++)
           await record({
-            product: 'github',
+            product: 'slack',
             membershipId: disabled.membershipId,
-            accountKey: `account-${i}`,
+            accountKey: `T${i}:UOTHER`,
             accountLabel: `account ${i}`,
           });
         await db.platform.query(
@@ -309,16 +309,20 @@ test(
           [disabled.membershipId],
         );
         const { intentId: ownerIntent } = await record({
-          product: 'github',
+          product: 'slack',
           membershipId: owner.membershipId,
-          accountKey: 'owner-account',
+          accountKey: 'TOWNER:UOWNER',
           accountLabel: 'owner',
         });
+        // GitHub is never gated, so a disabled owner's GitHub intent still dispatches.
+        const { intentId: githubIntent } = await record({
+          product: 'github',
+          membershipId: disabled.membershipId,
+          accountKey: randomUUID(),
+          accountLabel: 'disabled github',
+        });
         const defaults = createDefaultKnowledge({ runtime, engines: {}, enabled });
-        assert.deepEqual(
-          (await defaults.due(ws.id)).map(w => w.intentId),
-          [ownerIntent],
-        );
+        assert.deepEqual((await defaults.due(ws.id)).map(w => w.intentId).sort(), [ownerIntent, githubIntent].sort());
         assert.equal(
           (await createDefaultKnowledge({ runtime, engines: {}, enabled: async () => true }).due(ws.id)).length,
           20,
@@ -592,82 +596,70 @@ test(
   },
 );
 
-test('a manual choice made after planning wins over the planned automatic source', { timeout: 300000 }, async () => {
-  const env = await setup();
-  const { ws, runtime, record, db, table, owner } = env;
-  try {
-    const accountId = randomUUID();
-    await db.platform.query(
-      `INSERT INTO ${table('tf_github_accounts')} (id,owner_membership_id,generation,state,config_hash,identity,scopes,credential) VALUES ($1,$2,1,'active','fixture',$3,'{repo,read:user}','{}')`,
-      [accountId, owner.membershipId, { id: '101', login: 'owner' }],
-    );
-    const repos = Array.from({ length: 25 }, (_, i) => ({
-      repositoryId: String(7000 + i),
-      fullName: `acme/repo-${String(i).padStart(2, '0')}`,
-      visibility: 'private',
-      title: `acme/repo-${i}`,
-    }));
-    const provider = {
-      inspectSelection: async (_w, _u, id, selection) => ({
-        binding: { accountId: id, accountGeneration: 1, githubUserId: '101', login: 'owner' },
-        title: 'Selected GitHub',
-        repositories: selection.repositories.map(name => repos.find(r => r.fullName === name)),
-      }),
-    };
-    const github = createGitHubKnowledge({ runtime, provider });
-    const raced = repos[22];
-    let first = true;
-    const engines = {
-      github: {
-        discover: async () => ({ items: repos, nextCursor: null }),
-        configure: async (w, userId, value) => {
-          if (first) {
-            first = false;
-            await github.configure(w, userId, {
-              commandId: randomUUID(),
-              accountId,
-              memberIds: [],
-              selection: { repositories: [raced.fullName], kinds: ['issues'], after: date(Date.now() - 30 * day) },
-            });
-          }
-          return github.configure(w, userId, value);
+test(
+  'an all-repositories source the member made after planning wins over the planned one',
+  { timeout: 300000 },
+  async () => {
+    const env = await setup();
+    const { ws, runtime, record, db, table, owner } = env;
+    try {
+      const accountId = randomUUID();
+      await db.platform.query(
+        `INSERT INTO ${table('tf_github_accounts')} (id,owner_membership_id,generation,state,config_hash,identity,scopes,credential) VALUES ($1,$2,1,'active','fixture',$3,'{repo,read:user}','{}')`,
+        [accountId, owner.membershipId, { id: '101', login: 'owner' }],
+      );
+      const binding = { accountId, accountGeneration: 1, githubUserId: '101', login: 'owner' };
+      const repos = Array.from({ length: 25 }, (_, i) => ({
+        repositoryId: String(7000 + i),
+        fullName: `acme/repo-${String(i).padStart(2, '0')}`,
+        visibility: 'private',
+        title: `acme/repo-${i}`,
+      }));
+      const provider = {
+        discover: async () => ({ binding, items: repos, nextCursor: null }),
+        inspectSelection: async (_w, _u, _id, selection) => ({
+          binding,
+          title: 'Selected GitHub',
+          repositories: selection.repositories.map(name => repos.find(r => r.fullName === name)),
+        }),
+      };
+      const github = createGitHubKnowledge({ runtime, provider });
+      let manual = null;
+      const engines = {
+        github: {
+          discover: github.discover,
+          configure: async (w, userId, value) => {
+            if (!manual) manual = await github.configure(w, userId, { ...value, commandId: randomUUID() });
+            return github.configure(w, userId, value);
+          },
         },
-      },
-    };
-    let clock = new Date(Date.now() + 1000);
-    const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
-    await record({ product: 'github', membershipId: owner.membershipId, accountKey: accountId, accountLabel: 'owner' });
-    await drain(defaults, env);
-    clock = new Date(clock.getTime() + 3_600_000 + 1000);
-    await drain(defaults, env);
-    const rows = (
-      await db.platform.query(
-        `SELECT r.repository_id AS id,count(*)::int AS n FROM ${table('github_repositories')} r JOIN ${table('sources')} s ON s.id=r.source_id GROUP BY r.repository_id`,
-      )
-    ).rows;
-    assert.deepEqual(
-      rows.filter(r => r.n !== 1),
-      [],
-      'every repository is indexed exactly once',
-    );
-    assert.equal(rows.length, 25);
-    const automatic = (
-      await db.platform.query(
-        `SELECT r.repository_id AS id FROM ${table('github_repositories')} r JOIN ${table('default_sources')} d ON d.source_id=r.source_id WHERE d.state='created'`,
-      )
-    ).rows.map(r => r.id);
-    assert.ok(!automatic.includes(raced.repositoryId), 'the raced repository stays with the manual source');
-    assert.equal(automatic.length, 24);
-    const [intent] = (await defaults.list(ws.id, owner.userId)).items;
-    assert.equal(intent.scopes.manual, 1);
-    assert.ok(
-      intent.sources.some(s => s.state === 'failed' && s.failure === 'existing'),
-      'the planned source records that a manual choice won',
-    );
-  } finally {
-    await env.close();
-  }
-});
+      };
+      let clock = new Date(Date.now() + 1000);
+      const defaults = createDefaultKnowledge({ runtime, engines, enabled: async () => true, now: () => clock });
+      await record({
+        product: 'github',
+        membershipId: owner.membershipId,
+        accountKey: accountId,
+        accountLabel: 'owner',
+      });
+      await drain(defaults, env);
+      clock = new Date(clock.getTime() + 3_600_000 + 1000);
+      await drain(defaults, env);
+      const live = (
+        await db.platform.query(
+          `SELECT s.id FROM ${table('sources')} s JOIN ${table('github_sources')} g ON g.source_id=s.id WHERE s.state<>'removed' AND g.selection->>'scope'='all'`,
+        )
+      ).rows.map(r => r.id);
+      assert.deepEqual(live, [manual.sourceId], 'the account is followed by exactly one all-repositories source');
+      const [intent] = (await defaults.list(ws.id, owner.userId)).items;
+      assert.equal(intent.syncState, 'ready');
+      assert.deepEqual(intent.scopes, { discovered: 1, included: 0, manual: 1 }, 'the member choice won');
+      assert.ok(intent.sources.every(s => s.state === 'failed' && s.sourceState === null));
+    } finally {
+      await env.close();
+    }
+  },
+);
 
 test(
   'Atlassian defaults isolate a refused site and keep each identity to its own sites and opt-out',

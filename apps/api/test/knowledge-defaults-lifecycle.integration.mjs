@@ -144,7 +144,7 @@ test(
 );
 
 test(
-  'GitHub records one intent per first authorization; replay, reconnect and flag-off do not',
+  'GitHub records one intent per first authorization, even with the flag off; replay and reconnect do not',
   { timeout: 60000 },
   async () => {
     const f = await githubFixture();
@@ -179,8 +179,8 @@ test(
       assert.equal((await intents(f.db, f.table)).length, 2, 'a different identity is a separate enablement');
       await flagOff(() => connect(789));
       rows = await intents(f.db, f.table);
-      assert.equal(rows.length, 2);
-      assert.equal(spy.started.length, 2);
+      assert.equal(rows.length, 3, 'GitHub Knowledge is on for everyone, so the flag does not stop it');
+      assert.equal(spy.started.length, 3);
     } finally {
       await f.close();
     }

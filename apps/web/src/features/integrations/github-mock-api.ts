@@ -130,10 +130,13 @@ if (githubMockEnabled) {
       const body = JSON.parse(String(init?.body));
       const existing = sources.find(source => source.sourceId === body.commandId);
       if (existing) return Response.json(existing);
+      const everything = body.selection.scope === 'all';
+      const account = accounts.find(item => item.id === body.accountId);
       const source: GitHubSource = {
         sourceId: body.commandId,
-        title:
-          body.selection.repositories.length === 1
+        title: everything
+          ? `All repositories of ${account?.identity?.login ?? 'GitHub'}`
+          : body.selection.repositories.length === 1
             ? body.selection.repositories[0]
             : `${body.selection.repositories[0]} and ${body.selection.repositories.length - 1} more`,
         selection: body.selection,
@@ -143,9 +146,12 @@ if (githubMockEnabled) {
         syncState: 'ready',
         failure: null,
         nextAttemptAt: new Date().toISOString(),
-        repositories: [...repositories, ...workRepositories]
-          .filter(item => body.selection.repositories.includes(item.fullName))
-          .map(item => ({ ...item, state: 'active', failure: null })),
+        repositories: (everything
+          ? account?.id === secondId
+            ? workRepositories
+            : repositories
+          : [...repositories, ...workRepositories].filter(item => body.selection.repositories.includes(item.fullName))
+        ).map(item => ({ ...item, state: 'active', failure: null, excluded: false })),
         counts: { total: 12, ready: 12, failed: 0 },
       };
       sources.push(source);
@@ -156,6 +162,24 @@ if (githubMockEnabled) {
       const source = sources.find(item => path.includes(item.sourceId));
       if (!source) return Response.json({ error: 'knowledge-not-found' }, { status: 404 });
       source.state = body.action === 'pause' ? 'paused' : body.action === 'remove' ? 'removed' : 'active';
+      return Response.json(source);
+    }
+    if (path.endsWith('/settings')) {
+      const body = JSON.parse(String(init?.body));
+      const source = sources.find(item => path.includes(item.sourceId));
+      if (!source?.selection) return Response.json({ error: 'knowledge-not-found' }, { status: 404 });
+      source.selection = {
+        ...(source.selection.scope ? { scope: source.selection.scope } : {}),
+        repositories: source.selection.repositories,
+        kinds: body.kinds,
+        ...(body.excludePaths.length ? { excludePaths: body.excludePaths } : {}),
+        ...(body.after ? { after: body.after } : {}),
+      };
+      source.repositories =
+        source.repositories?.map(item => ({
+          ...item,
+          excluded: body.excludedRepositories.includes(item.repositoryId),
+        })) ?? null;
       return Response.json(source);
     }
     if (path.endsWith('/refresh')) return Response.json({ refreshed: 1, unavailable: 0, bounded: true });
