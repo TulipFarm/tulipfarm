@@ -166,6 +166,21 @@ export async function requireWorkflowSources(tx: AuthorizationTransaction, actor
   for (const source of await protectedSourceClosure(tx, workflows)) await requireProtectedSource(tx, actor, source);
 }
 
+/**
+ * A tool receipt retains the whole reply context it ran in, not only the tool's own sources. Every concrete retained source must
+ * stay readable. Provenance markers are not revocable sources, so they never change the receipt's outcome; the viewer's own
+ * personal memory is readable, and opaque provenance only conceals the receipt's details. Returns whether to conceal them.
+ */
+export async function requireRetainedToolSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
+  let opaque = false;
+  for (const source of z.array(sourceDependencySchema).parse(sources))
+    if (source.kind === 'personal-memory') opaque ||= source.membershipId !== actor.membershipId;
+    else if (source.kind === 'unknown' || source.kind === 'unavailable' || source.kind === 'shared-slack-turn')
+      opaque = true;
+    else await requireProtectedSource(tx, actor, source);
+  return opaque;
+}
+
 /** Files read for a turn stay readable by its requester through delivery. */
 export async function requireFileSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
   for (const source of z.array(sourceDependencySchema).parse(sources))

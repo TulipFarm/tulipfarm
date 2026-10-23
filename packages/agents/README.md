@@ -25,6 +25,15 @@ Inspected on 11 October 2026. `createChatTools(runtime, options)` takes named
 `{ knowledge }` or `{ google, slack }`. An omitted or `undefined` dependency stays
 unavailable. `telemetryRuntime` defaults to `chat`.
 
+Each tool call records `call_count`, `call_time` and a log line labelled by
+`tool`, `runtime` and `outcome`: `success`, `waiting`, `blocked`, `error` (the
+call threw or its task failed) or `result_error` (it returned a structured
+failure the chat shows as failed, such as `knowledge-unavailable`, a failed
+`web.fetch`, or a knowledge retrieval whose branches all failed or were
+unavailable). `error`, `result_error` and `blocked` also count in
+`cloud_tool_failures` and log `call_failed` with a bounded `error.code`; for
+`result_error`, `error.type` repeats that code.
+
 The worker's `meteredReply(runtime, options)` takes named `MeteredReplyOptions`.
 Omitted or `undefined` `slack`, `mcp`, and `knowledge` settings retain their
 environment-based defaults; supplied factories bypass those defaults.

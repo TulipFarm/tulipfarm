@@ -45,6 +45,7 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { conversationCompactor, projectReminder } from './conversation-compactor.ts';
 import type { ConversationCompactor } from '@tulipfarm/conversations/compaction';
+import { compactionDefaults } from '@tulipfarm/config/compaction';
 import { withFileSources, type FileContent, type GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
@@ -79,6 +80,8 @@ export type MeteredReplyOptions = {
   wakePlan?: PlanWake | undefined;
   /** The inventory read context measurement already made for this attempt, reused instead of read again. */
   inventory?: ConversationInventoryReads | undefined;
+  /** Summarises a long reply's older tool results. Without it, they are cut to stubs that can be reread. */
+  compactor?: ConversationCompactor | undefined;
 };
 export function meteredReply(
   runtime: ConversationRuntime,
@@ -92,6 +95,7 @@ export function meteredReply(
     skillExecution,
     wakePlan,
     inventory,
+    compactor,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   return async ({
@@ -110,6 +114,7 @@ export function meteredReply(
     retainedSources = [],
     describedHandles = [],
     project,
+    compactionPolicy,
   }) => {
     // The picker offers no paused family, so one here is an existing chat or agent: it moves to the workspace fallback.
     const replacement = conversationFamilyPaused(model)
@@ -122,6 +127,28 @@ export function meteredReply(
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const fallback = chatFallbackModel(chat.price.familyId);
     const completionCheck = roleModel('completion-check') ?? undefined;
+    const replyContext = {
+      context: {
+        window: chat.price.maxInputTokens,
+        triggerPercent: compactionPolicy?.triggerPercent ?? compactionDefaults.triggerPercent,
+        targetPercent: compactionPolicy?.targetPercent ?? compactionDefaults.targetPercent,
+      },
+      ...(compactor && compactionPolicy?.automatic && compactionPolicy.families.length
+        ? {
+            compactToolResults: async ({ round, system, text }: { round: number; system: string; text: string }) =>
+              (
+                await compactor.summarize({
+                  fence,
+                  purpose: 'tool-results',
+                  step: round,
+                  system,
+                  messages: [{ role: 'user', text }],
+                  families: compactionPolicy.families,
+                })
+              ).text,
+          }
+        : {}),
+    } satisfies Pick<ToolInferenceContext, 'context' | 'compactToolResults'>;
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
     const session = await observeChatDetail('reply-start', () =>
@@ -267,6 +294,7 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
+              ...replyContext,
               completionCheck: completionCheck?.route,
               ...(fallback
                 ? {
@@ -290,6 +318,7 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
+              ...replyContext,
               completionCheck: completionCheck?.route,
               ...(fallback
                 ? {
@@ -342,6 +371,8 @@ export function createConversationActivities(
       if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
       const execution = mcp ?? null;
       const inventory = compactor ? undefined : conversationInventoryReads(runtime);
+      const effectiveCompactor =
+        compactor ?? conversationCompactor(runtime, family => conversationModel(family), inventory);
       const executor = createConversationExecutor(
         runtime,
         conversationReply ??
@@ -353,6 +384,7 @@ export function createConversationActivities(
             skillExecution,
             wakePlan,
             inventory,
+            compactor: effectiveCompactor,
           }),
         undefined,
         slack?.resumeConversation,
@@ -376,7 +408,7 @@ export function createConversationActivities(
         files,
         googleFiles,
         chatSkills,
-        compactor ?? conversationCompactor(runtime, family => conversationModel(family), inventory),
+        effectiveCompactor,
         conversationPlanning,
       );
       return process(executor, parsed);

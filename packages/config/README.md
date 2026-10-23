@@ -133,6 +133,11 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   model, that feature is off. `compaction`, `review`, `plan`, `heartbeat` and
   `public-guide` use the default model; the public guide still needs an Azure
   chat-completions route.
+- **Context window.** `limits.maxInputTokens` is the window a chat reply fits
+  in. Fit is estimated in tokens (the provider's reported prompt tokens, or a
+  quarter of the request bytes). A reply never fails on its size: at the
+  workspace compaction trigger it summarises its older tool results, and each
+  tool result is cut to 10% of the window with the rest readable by call ID.
 - **Completion checks.** The optional `completion-check` role checks whether a
   tool-using chat reply is a sufficient stopping point. Without it, checks keep
   using the active chat model (including a chat fallback). Assign the role to

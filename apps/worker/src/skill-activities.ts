@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { currentMember, lockAuthorization, sourceDependenciesSchema, type HumanActor } from '@tulipfarm/access';
 import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { calculateUsageCost, estimateInputTokens, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
 import { CreditAttemptAlreadyDispatched, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
@@ -33,11 +33,12 @@ export function meteredSkillReviewer(
           modelId: price.modelId,
           pricingRevision: price.pricingRevision,
           rates: price.rates,
-          maxInputTokens: inputBytes + 4096,
+          maxInputTokens: Math.min(inputBytes + 4096, price.maxInputTokens),
           maxOutputTokens,
           date: new Date().toISOString().slice(0, 10),
         };
-        if (quote.maxInputTokens > price.maxInputTokens) throw new Error('skill-review-context-limit');
+        if (estimateInputTokens(inputBytes) + 4096 > price.maxInputTokens)
+          throw new Error('skill-review-context-limit');
         const attempt = `skill-review:${importId}:${input.id}`;
         const admitted = await runtime.transaction(workspaceId, skillPackageCompatibility, async tx => {
           await lockAuthorization(tx);

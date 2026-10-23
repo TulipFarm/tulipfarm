@@ -214,11 +214,11 @@ test('chat can plan work, but cannot set the plan budget, and saved agents canno
 
 test('tool outcomes include returned failures and waiting without using payload values as labels', () => {
   assert.deepEqual(toolObservation({ error: 'read-forbidden' }, 'github.personal.read'), {
-    outcome: 'error',
+    outcome: 'result_error',
     errorCode: 'read-forbidden',
   });
   assert.deepEqual(toolObservation({ data: { status: 'failed' } }, 'google.execute'), {
-    outcome: 'error',
+    outcome: 'result_error',
     errorCode: 'failed',
   });
   assert.deepEqual(toolObservation({ code: 'access-denied' }), { outcome: 'success', errorCode: 'access-denied' });
@@ -227,24 +227,54 @@ test('tool outcomes include returned failures and waiting without using payload 
     { data: { status: 'failed', result: 'PRIVATE RESULT' } },
     { kind: 'error' },
   ])
-    assert.equal(toolOutcome(value), 'error');
+    assert.equal(toolOutcome(value), 'result_error');
   for (const value of [{ kind: 'waiting' }, { status: 'pending' }, { data: { status: 'executing' } }])
     assert.equal(toolOutcome(value), 'waiting');
   assert.equal(toolOutcome({ status: 'blocked' }), 'blocked');
   assert.equal(toolOutcome({ text: 'PRIVATE RESULT' }), 'success');
-  assert.equal(toolOutcome({ state: 'failed', data: { text: 'PRIVATE RESULT' } }, 'github.personal.read'), 'error');
-  assert.equal(toolOutcome({ statuses: ['succeeded', 'unknown'] }, 'github.personal.execute'), 'error');
+  assert.equal(
+    toolOutcome({ state: 'failed', data: { text: 'PRIVATE RESULT' } }, 'github.personal.read'),
+    'result_error',
+  );
+  assert.equal(toolOutcome({ statuses: ['succeeded', 'unknown'] }, 'github.personal.execute'), 'result_error');
   assert.equal(toolOutcome({ statuses: ['succeeded', 'unattempted'] }, 'github.personal.execute'), 'waiting');
   assert.equal(toolOutcome({ data: { status: 'cancelled' } }, 'google.read'), 'success');
-  assert.equal(toolOutcome({ commandId: 'PRIVATE ID', status: 'conflict' }, 'agents.status'), 'error');
+  assert.equal(toolOutcome({ commandId: 'PRIVATE ID', status: 'conflict' }, 'agents.status'), 'result_error');
   for (const [result, expected] of [
     [{ kind: 'waiting', status: 'awaiting-approval' }, 'waiting'],
     [{ kind: 'receipt', status: 'rejected', result: 'PRIVATE RESULT' }, 'blocked'],
-    [{ kind: 'receipt', status: 'outcome-unknown', result: 'PRIVATE RESULT' }, 'error'],
+    [{ kind: 'receipt', status: 'outcome-unknown', result: 'PRIVATE RESULT' }, 'result_error'],
   ]) {
     const output = { result, sources: ['PRIVATE SOURCE'] };
     assert.equal(toolOutcome(output.result, 'mcp.call'), expected);
   }
+});
+
+test('returned tool failures the chat shows as failed are result_error with a bounded code', () => {
+  assert.deepEqual(
+    toolObservation({ provider: 'knowledge', error: 'knowledge-unavailable', reason: 'PRIVATE' }, 'knowledge.read'),
+    { outcome: 'result_error', errorCode: 'knowledge-unavailable' },
+  );
+  assert.deepEqual(toolObservation({ kind: 'public-web', status: 'failed', url: 'PRIVATE' }, 'web.fetch'), {
+    outcome: 'result_error',
+    errorCode: 'failed',
+  });
+  assert.equal(toolOutcome({ kind: 'public-web', status: 'partial' }, 'web.search'), 'success');
+  const branch = (status, passages = 0) => ({
+    status,
+    documents: passages ? [{ title: 'PRIVATE', passages: Array.from({ length: passages }, () => ({})) }] : [],
+  });
+  const retrieve = (...branches) => ({ provider: 'knowledge', action: 'search', branches });
+  assert.deepEqual(toolObservation(retrieve(branch('unavailable'), branch('no-match')), 'knowledge.retrieve'), {
+    outcome: 'result_error',
+    errorCode: 'knowledge-unavailable',
+  });
+  assert.deepEqual(toolObservation(retrieve(branch('failed'), branch('unavailable')), 'knowledge.retrieve'), {
+    outcome: 'result_error',
+    errorCode: 'failed',
+  });
+  assert.equal(toolOutcome(retrieve(branch('failed'), branch('evidence', 2)), 'knowledge.retrieve'), 'success');
+  assert.equal(toolOutcome(retrieve(branch('no-match')), 'knowledge.retrieve'), 'success');
 });
 
 test('chat tool dispatch records one payload-free outcome for success, returned failure, and exception', async t => {
@@ -334,7 +364,7 @@ test('chat tool dispatch records one payload-free outcome for success, returned 
     records.map(record => [record.tool, record.runtime, record.outcome]),
     [
       ['knowledge.search', 'chat', 'success'],
-      ['knowledge.search', 'chat', 'error'],
+      ['knowledge.search', 'chat', 'result_error'],
       ['mcp.search', 'chat', 'error'],
       ['knowledge.search', 'chat', 'success'],
       ['knowledge.search', 'chat', 'success'],
@@ -342,6 +372,9 @@ test('chat tool dispatch records one payload-free outcome for success, returned 
       ['knowledge.search', 'task', 'success'],
     ],
   );
+  const returned = records.find(record => record.outcome === 'result_error');
+  assert.equal(returned.event, 'call_failed');
+  assert.equal(returned['error.type'], returned['error.code']);
   assert.doesNotMatch(JSON.stringify(records), /PRIVATE|query|sources|arguments/);
 });
 

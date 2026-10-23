@@ -284,9 +284,27 @@ test('calendar capture preserves no-MCP interruption recovery and rejects malfor
       `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
       [work.turnId],
     );
-    assert.equal(await executor.process({ ...work, generation: 1 }), 'completed');
+    assert.equal(await executor.process({ ...work, generation: 1 }), 'stale');
     assert.equal(calls, 1);
-    assert.match((await f.history()).messages[1].parts[0].text, /did not repeat/);
+    const stopped = await f.history();
+    assert.equal(stopped.messages.length, 1);
+    assert.equal(stopped.messages[0].turn.status, 'failed');
+    assert.equal(stopped.messages[0].turn.errorCode, 'transient-failure');
+    assert.equal(JSON.stringify(stopped).includes('google.read'), true, 'the receipt row stays');
+    assert.equal(JSON.stringify(stopped).includes('did not repeat'), false);
+    const retried = await f.store.retry(f.workspace.id, f.member.userId, work.conversationId, work.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: stopped.messages[0].turn.generation,
+    });
+    let resumed;
+    const resume = createConversationExecutor(f.runtime, async input => {
+      resumed = input;
+      return 'Your meetings are listed above.';
+    });
+    assert.equal(await resume.process({ ...work, generation: retried.generation }), 'completed');
+    assert.equal(calls, 1);
+    assert.deepEqual(resumed.priorToolCalls, [{ tool: 'google.read', operation }]);
+    assert.ok(resumed.messages.some(message => message.text.includes('Do not repeat this call. Untrusted data:')));
     const saved = (
       await f.db.platform.query(`SELECT call_id,output FROM ${f.table('tf_conversation_execution_steps')}`)
     ).rows[0];

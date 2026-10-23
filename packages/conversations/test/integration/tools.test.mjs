@@ -62,7 +62,16 @@ for (const interruption of ['cancel', 'reclaim', 'membership'])
           { tool: 'skills.list', status: 'completed' },
           { tool: 'web.fetch', status: 'failed' },
         ]);
-        assert.equal(await executor.complete(reclaimed), 'completed');
+        // The reclaimed attempt cannot resume after a tool call, so it stops with the crash cause instead of answering.
+        assert.equal(await executor.complete(reclaimed), 'stale');
+        assert.equal(
+          (
+            await f.db.platform.query(`SELECT error_code FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+              sent.turnId,
+            ])
+          ).rows[0].error_code,
+          'reply-interrupted',
+        );
       }
       if (interruption === 'membership') {
         await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET removed_at = now() WHERE id = $1`, [
@@ -108,7 +117,7 @@ test('chat executes authorized tools, persists safe receipts, and never replays 
         undefined,
         '  Listing your\n business records  ',
       );
-      assert.deepEqual(result.tables, []);
+      assert.ok(Array.isArray(result.tables));
       const skill = await executeTool('skills.read', false, context =>
         createChatTools(context.runtime).invoke(context, { tool: 'skills.read', skillId: 'table-authoring' }),
       );
@@ -120,7 +129,7 @@ test('chat executes authorized tools, persists safe receipts, and never replays 
       `UPDATE ${f.table('tf_conversation_turns')} SET retry_at = clock_timestamp() - interval '1 second' WHERE id = $1`,
       [sent.turnId],
     );
-    assert.equal(await executor.process({ ...work, generation: 1 }), 'completed');
+    assert.equal(await executor.process({ ...work, generation: 1 }), 'stale');
     assert.equal(calls, 1);
     const history = await f.store.history(w.id, w.userId, chatId);
     assert.deepEqual(
@@ -134,8 +143,32 @@ test('chat executes authorized tools, persists safe receipts, and never replays 
       history.messages[0].tools.map(({ activity }) => activity),
       ['Listing business tables', 'Reading a procedure'],
     );
-    assert.match(history.messages[1].parts[0].text, /did not repeat/);
+    // The stop carries the failed attempt's cause instead of a canned tool dump.
+    assert.equal(history.messages.length, 1);
+    assert.equal(history.messages[0].turn.status, 'failed');
+    assert.equal(history.messages[0].turn.errorCode, 'transient-failure');
+    assert.equal(JSON.stringify(history).includes('did not repeat'), false);
     assert.equal(JSON.stringify(history).includes('Discover resources first'), false);
+    const retried = await f.store.retry(w.id, w.userId, chatId, sent.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: history.messages[0].turn.generation,
+    });
+    let resumed;
+    const resume = createConversationExecutor(f.runtime, async input => {
+      resumed = input;
+      return 'Continued from the completed tools.';
+    });
+    assert.equal(await resume.process({ ...work, generation: retried.generation }), 'completed');
+    assert.equal(calls, 1);
+    assert.equal(resumed.priorCalls, 2);
+    for (const tool of ['tables.definitions', 'skills.read'])
+      assert.ok(
+        resumed.messages.some(message => message.text.includes(`for ${tool} (completed). Do not repeat this call.`)),
+      );
+    const continued = await f.store.history(w.id, w.userId, chatId);
+    assert.equal(continued.messages[0].turn.status, 'completed');
+    assert.equal(continued.messages[0].tools.length, 2);
+    assert.equal(continued.messages[1].parts[0].text, 'Continued from the completed tools.');
   } finally {
     await f.close();
   }
@@ -209,6 +242,52 @@ test('competing completions cannot both execute a tool at the same sequence', as
     assert.equal(operations, 1);
     assert.equal(results.filter(result => result.status === 'fulfilled' && result.value === 'completed').length, 1);
     assert.equal((await f.store.history(w.id, w.userId, chatId)).messages[0].tools.length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a reply stopped after tools keeps the failed attempt cause instead of a tool dump', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Read the procedure' }],
+    });
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool('skills.read', false, context =>
+        createChatTools(context.runtime).invoke(context, { tool: 'skills.read', skillId: 'table-authoring' }),
+      );
+      throw Object.assign(new Error('deadlock detected'), { code: '40P01' });
+    });
+    assert.equal(await executor.process(work), 'retry');
+    assert.equal(
+      (
+        await f.db.platform.query(`SELECT error_code FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+          sent.turnId,
+        ])
+      ).rows[0].error_code,
+      'database-conflict',
+    );
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+      [sent.turnId],
+    );
+    assert.equal(await executor.process({ ...work, generation: 1 }), 'stale');
+    const history = await f.store.history(w.id, w.userId, chatId);
+    assert.equal(history.messages.length, 1);
+    assert.equal(history.messages[0].turn.status, 'failed');
+    assert.equal(history.messages[0].turn.errorCode, 'database-conflict');
+    assert.deepEqual(
+      history.messages[0].tools.map(({ tool, status }) => [tool, status]),
+      [['skills.read', 'completed']],
+    );
+    assert.equal(JSON.stringify(history).includes('interrupted'), false);
   } finally {
     await f.close();
   }

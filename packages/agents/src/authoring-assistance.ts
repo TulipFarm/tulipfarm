@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { currentMember, lockAuthorization, resolveHuman, uuidSchema, type HumanActor } from '@tulipfarm/access';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts, type ResolvedModel } from '@tulipfarm/config';
+import {
+  calculateUsageCost,
+  estimateInputTokens,
+  reserveModelCost,
+  usageTokenCounts,
+  type ResolvedModel,
+} from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import {
@@ -209,11 +215,11 @@ export function createAgentAuthoringAssistance(dependencies: {
       modelId: authorized.resolution.modelId,
       pricingRevision: authorized.resolution.pricingRevision,
       rates: authorized.resolution.rates,
-      maxInputTokens: inference.inputBytes + 4096,
+      maxInputTokens: Math.min(inference.inputBytes + 4096, authorized.resolution.route.maxInputTokens),
       maxOutputTokens: inference.maxOutputTokens,
       date: new Date().toISOString().slice(0, 10),
     };
-    if (quote.maxInputTokens > authorized.resolution.route.maxInputTokens)
+    if (estimateInputTokens(inference.inputBytes) + 4096 > authorized.resolution.route.maxInputTokens)
       throw new AgentAuthoringError('input-too-large');
     const reservation = reserveModelCost(quote);
     checkSignal(signal);

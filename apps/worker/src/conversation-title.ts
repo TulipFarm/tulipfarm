@@ -1,6 +1,6 @@
 import { inferChatTitle, inferenceRouteSchema, type ToolModelMeter } from '@tulipfarm/agents/inference';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { calculateUsageCost, estimateInputTokens, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { conversationTitleWorkSchema, createConversationTitles } from '@tulipfarm/conversations/titles';
 import { recordUsage } from '@tulipfarm/extensions';
@@ -104,8 +104,9 @@ function titleMeter(
 ): ToolModelMeter {
   return async ({ inputBytes, maxOutputTokens }) => {
     const priced = model.price;
-    const maxInputTokens = inputBytes + 4096;
-    if (maxInputTokens > priced.maxInputTokens) throw new Error('conversation-context-overflow');
+    if (estimateInputTokens(inputBytes) + 4096 > priced.maxInputTokens)
+      throw new Error('conversation-context-overflow');
+    const maxInputTokens = Math.min(inputBytes + 4096, priced.maxInputTokens);
     const quote = {
       modelId: priced.modelId,
       pricingRevision: priced.pricingRevision,

@@ -4,7 +4,7 @@ import { renewConversationReplyLease, type ConversationRuntime } from '@tulipfar
 import type { ChatMessage, ConversationCompactor } from '@tulipfarm/conversations/compaction';
 import { projectContextReminder, type ProjectContext } from '@tulipfarm/conversations/project-context';
 import { requireCurrentConversationSources } from '@tulipfarm/conversations/source-access';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { calculateUsageCost, estimateInputTokens, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
 import type { ConversationModel } from './conversation-model.ts';
 import { recordUsage } from '@tulipfarm/extensions';
 import {
@@ -34,8 +34,8 @@ export function projectReminder(project: ProjectContext | undefined): ChatMessag
 }
 
 /**
- * Compaction model access for chat turns. Request bytes count as tokens, matching the reply meter's conservative admission bound,
- * so a measured context that fits is one the meter admits. Summaries use only the policy's approved budget families, in order.
+ * Compaction model access for chat turns. A measure estimates tokens as a quarter of the request bytes, plus room for the
+ * MCP catalog; the reply loop compacts by the same estimate. Summaries use only the policy's approved budget families, in order.
  */
 export function conversationCompactor(
   runtime: ConversationRuntime,
@@ -56,13 +56,15 @@ export function conversationCompactor(
           )?.inventory;
       return {
         tokens:
-          measureToolRequest(
-            resolved.route,
-            [...projectReminder(project as ProjectContext | undefined), ...messages],
-            generateTitle,
-            timeZone,
-            (project as ProjectContext | undefined)?.instructions,
-            inventory,
+          estimateInputTokens(
+            measureToolRequest(
+              resolved.route,
+              [...projectReminder(project as ProjectContext | undefined), ...messages],
+              generateTitle,
+              timeZone,
+              (project as ProjectContext | undefined)?.instructions,
+              inventory,
+            ),
           ) + 4096,
         window: resolved.price.maxInputTokens,
       };
@@ -108,8 +110,9 @@ export function conversationCompactor(
             system,
             messages,
             async ({ inputBytes, maxOutputTokens }) => {
-              const maxInputTokens = inputBytes + 4096;
-              if (maxInputTokens > price.maxInputTokens) throw new Error('compaction-ineffective');
+              if (estimateInputTokens(inputBytes) + 4096 > price.maxInputTokens)
+                throw new Error('compaction-ineffective');
+              const maxInputTokens = Math.min(inputBytes + 4096, price.maxInputTokens);
               const quote = {
                 modelId: price.modelId,
                 pricingRevision: price.pricingRevision,

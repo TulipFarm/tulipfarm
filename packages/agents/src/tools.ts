@@ -1489,6 +1489,7 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
       ? (envelope.data as Record<string, unknown>)
       : envelope;
   const statuses = [envelope.state, result.status, ...(Array.isArray(envelope.statuses) ? envelope.statuses : [])];
+  const branchFailure = knowledgeBranchFailure(result);
   if (
     envelope.error ||
     result.error ||
@@ -1496,9 +1497,10 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
       status =>
         typeof status === 'string' && ['failed', 'error', 'conflict', 'outcome-unknown', 'unknown'].includes(status),
     ) ||
-    result.kind === 'error'
+    result.kind === 'error' ||
+    branchFailure
   )
-    outcome = 'error';
+    outcome = 'result_error';
   else if (
     statuses.some(
       status => typeof status === 'string' && ['blocked', 'rejected', 'cancelled', 'expired'].includes(status),
@@ -1545,8 +1547,31 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
             'cancelled',
             'expired',
           ].includes(status),
-      ),
+      ) ??
+      branchFailure,
   };
+}
+
+/** A knowledge retrieval whose branches found no evidence and include a failed or unavailable branch, as the chat shows it. */
+function knowledgeBranchFailure(result: Record<string, unknown>): 'failed' | 'knowledge-unavailable' | undefined {
+  if (result.provider !== 'knowledge' || !Array.isArray(result.branches)) return undefined;
+  const branches = result.branches.filter(
+    (branch): branch is Record<string, unknown> => typeof branch === 'object' && branch !== null,
+  );
+  const evidence = branches.some(
+    branch =>
+      Array.isArray(branch.documents) &&
+      branch.documents.some(
+        document =>
+          typeof document === 'object' &&
+          document !== null &&
+          Array.isArray((document as { passages?: unknown }).passages) &&
+          (document as { passages: unknown[] }).passages.length > 0,
+      ),
+  );
+  if (evidence) return undefined;
+  if (branches.some(branch => branch.status === 'failed')) return 'failed';
+  return branches.some(branch => branch.status === 'unavailable') ? 'knowledge-unavailable' : undefined;
 }
 
 export function toolOutcome(value: unknown, tool?: ToolName): ToolOutcome {

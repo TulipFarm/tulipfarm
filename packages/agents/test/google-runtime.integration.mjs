@@ -76,7 +76,7 @@ test('stored Google append OVERWRITE calls still parse through executor and chat
   }
 });
 
-test('lost answer recovers the existing Google proposal and tool statuses without repeating actions', async () => {
+test('lost answer stops with its cause and keeps the Google proposal receipt without repeating actions', async () => {
   const f = await googleRuntimeFixture();
   try {
     const w = f.workspace.id,
@@ -105,11 +105,16 @@ test('lost answer recovers the existing Google proposal and tool statuses withou
       `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
       [sent.turnId],
     );
-    assert.equal(await executor.process({ ...work, generation: 1 }), 'completed');
+    assert.equal(await executor.process({ ...work, generation: 1 }), 'stale');
     const history = await f.store.history(w, f.member.userId, chatId);
-    assert.equal(
-      history.messages.at(-1).parts[0].text,
-      `The reply was interrupted after these tool calls. I did not repeat them.\n- google.read: completed\n- google.propose: completed\nGoogle proposal ${proposal.data.id} (docs.documents.create) was saved. Review its current status and exact payload in Integrations > Google > Approvals before approving. No Google write is confirmed by this recovery message.`,
+    assert.equal(history.messages.length, 1);
+    assert.equal(history.messages[0].turn.errorCode, 'transient-failure');
+    assert.deepEqual(
+      history.messages[0].tools.map(tool => [tool.tool, tool.status, tool.googleProposalId ?? null]),
+      [
+        ['google.read', 'completed', null],
+        ['google.propose', 'completed', proposal.data.id],
+      ],
     );
     assert.equal(attempts, 1);
     assert.equal(

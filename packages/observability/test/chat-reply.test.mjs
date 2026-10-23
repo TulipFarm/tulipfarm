@@ -11,7 +11,9 @@ import {
 import {
   chatReplyBuckets,
   chatReplyFinal,
+  chatStopReason,
   guardChatReplyFinal,
+  noteChatReplyCause,
   noteChatReplyFinal,
   observeChatDetail,
   observeChatTool,
@@ -205,6 +207,60 @@ test('a failed reply records outcome=failed once, after its retried attempts, an
   });
   const outcomes = (await collect()).points.filter(point => point.attributes.segment === 'total');
   assert.deepEqual(outcomes.map(point => point.attributes.outcome).sort(), ['cancelled', 'failed']);
+});
+
+test('stopped reply reasons are bounded and prefer the stored code over the attempt cause', () => {
+  assert.equal(chatStopReason('credits-exhausted'), 'credits');
+  assert.equal(chatStopReason('project-context-too-large'), 'context');
+  assert.equal(chatStopReason('model-context-overflow'), 'context');
+  assert.equal(chatStopReason('model-timeout'), 'provider-timeout');
+  assert.equal(chatStopReason('model-rate-limited'), 'provider-error');
+  assert.equal(chatStopReason('attempts-exhausted', '40P01'), 'database');
+  assert.equal(chatStopReason('transient-failure', 'pool_capacity'), 'database');
+  assert.equal(chatStopReason(null, 'conversation-context-overflow'), 'context');
+  assert.equal(chatStopReason('attempts-exhausted'), 'other');
+  assert.equal(chatStopReason('access-denied', '40P01'), 'other');
+  assert.equal(chatStopReason('PRIVATE free text'), 'other');
+});
+
+test('a failed reply logs one chat.reply-stopped event with only its bounded reason and runtime', async t => {
+  const stopped = [];
+  const write = process.stdout.write;
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (typeof line !== 'string' || !line.startsWith('{"level"')) return write.call(process.stdout, line, ...rest);
+    if (line.includes('chat.reply-stopped')) stopped.push(JSON.parse(line));
+    return true;
+  });
+  await withChatMeasurements(async () => {
+    noteChatReplyCause('40P01');
+  }, 'turn-stopped');
+  await withChatMeasurements(async () => {
+    noteChatReplyCause('40P01');
+    noteChatReplyFinal(chatReplyFinal(timing({ status: 'failed', errorCode: 'attempts-exhausted', runtime: 'slack' })));
+  }, 'turn-stopped');
+  await withChatMeasurements(async () => {
+    noteChatReplyFinal(chatReplyFinal(timing({ status: 'completed', errorCode: null, runtime: 'chat' })));
+  });
+  await withChatMeasurements(async () => {
+    noteChatReplyFinal(chatReplyFinal(timing({ status: 'blocked', errorCode: 'access-denied' })));
+  });
+  await withChatMeasurements(async () => {
+    noteChatReplyFinal(chatReplyFinal(timing({ status: 'failed', errorCode: 'PRIVATE turn text' })));
+  });
+  assert.equal(stopped.length, 2);
+  assert.equal(stopped[0].event, 'call_failed');
+  assert.equal(stopped[0].level, 'warn');
+  assert.equal(stopped[0].operation, 'chat.reply-stopped');
+  assert.equal(stopped[0].outcome, 'failed');
+  assert.equal(stopped[0]['chat.stop.reason'], 'database');
+  assert.equal(stopped[0].runtime, 'slack');
+  assert.equal(stopped[0]['error.code'], 'attempts-exhausted');
+  assert.equal(stopped[1]['chat.stop.reason'], 'other');
+  assert.equal(stopped[1].runtime, 'chat');
+  assert.equal(stopped[1]['error.code'], undefined);
+  assert.doesNotMatch(JSON.stringify(stopped), /PRIVATE|turn-stopped/);
+  await reader.forceFlush();
+  exporter.reset();
 });
 
 test('reply timing without a claim counts the whole reply as queue', () => {

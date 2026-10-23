@@ -53,6 +53,7 @@ import {
 } from './error-codes.ts';
 import {
   modelCallDiagnostics,
+  modelErrorClasses,
   modelFallbackOutcomes,
   modelUsageOutcomes,
   modelUsageUnknownReasons,
@@ -127,6 +128,13 @@ const spanAttributes = new Set([
   'chat.discovery.loaded',
   'chat.discovery.added',
   'chat.discovery.matched',
+  'chat.compaction.trigger_tokens',
+  'chat.compaction.window',
+  'chat.compaction.after_tokens',
+  'chat.compaction.summarised',
+  'chat.compaction.stubbed',
+  'chat.compaction.pruned',
+  'chat.compaction.outcome',
   'chat.reply.tools',
   'chat.reply.attempts',
   'chat.reply.total_seconds',
@@ -137,6 +145,7 @@ const spanAttributes = new Set([
   'chat.reply.tools_seconds',
   'chat.reply.db_seconds',
   'chat.reply.overhead_seconds',
+  'chat.stop.reason',
   'provider',
   'status_class',
   'job',
@@ -197,6 +206,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
   if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
+  if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);
   if (key === 'http.response.status_code' || key.startsWith('catalog.')) return safeDiagnosticNumber(key, value);
   return true;
 }
@@ -1261,13 +1271,19 @@ export type ChatReplyFinal = {
   queueSeconds: number;
   firstTextSeconds: number | null;
   attempts: number;
+  /** The turn's stored error code, a fixed machine code; only its bounded class becomes a label. */
+  errorCode?: string | null | undefined;
+  runtime?: ChatReplyRuntime | undefined;
 };
+export type ChatReplyRuntime = 'chat' | 'slack';
 type ChatReplyClock = {
   key: string | undefined;
   since: number;
   active: Record<ChatReplyCategory, number>;
   sums: ChatReplySums;
   final?: ChatReplyFinal | undefined;
+  /** Bounded code of this attempt's failure, used when the turn stores only a generic code. */
+  cause?: string | undefined;
 };
 type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
@@ -1383,6 +1399,81 @@ function finishChatReply(clock: ChatReplyClock) {
     'chat.reply.attempts': attempts,
     ...fields,
   });
+  if (status === 'failed') recordChatReplyStopped(clock.final.errorCode, clock.final.runtime ?? 'chat', clock.cause);
+}
+
+export const chatStopReasons = [
+  'context',
+  'provider-timeout',
+  'provider-error',
+  'database',
+  'credits',
+  'other',
+] as const;
+export type ChatStopReason = (typeof chatStopReasons)[number];
+const genericStopCodes = new Set(['attempts-exhausted', 'transient-failure']);
+const databaseStopCodes = new Set([
+  'closed',
+  'queue_full',
+  'wait_timeout',
+  'pool_capacity',
+  'stale_credential',
+  'incompatible_version',
+  'runtime_unavailable',
+]);
+
+function stopReasonOf(code: string): ChatStopReason | undefined {
+  if (code === 'credits-exhausted' || code === 'credit-limit') return 'credits';
+  if (
+    code === 'context-limit' ||
+    code === 'context_too_long' ||
+    code === 'model-context-overflow' ||
+    code === 'conversation-context-overflow' ||
+    code === 'project-context-too-large' ||
+    code.startsWith('compaction-')
+  )
+    return 'context';
+  if (code === 'model-timeout' || code === 'model-transport' || code === 'timeout' || code === 'network')
+    return 'provider-timeout';
+  if (
+    code.startsWith('model-') ||
+    code.startsWith('conversation-model-') ||
+    (modelErrorClasses as readonly string[]).includes(code)
+  )
+    return 'provider-error';
+  // PostgreSQL SQLSTATE classes for connections, transaction rollback, resources, lock state and shutdown.
+  if (databaseStopCodes.has(code) || /^(08|25|40|53|55|57)[0-9A-Z]{3}$/.test(code)) return 'database';
+  return undefined;
+}
+
+/**
+ * Bounded reason a chat reply ended without an answer. The turn's stored code wins; a generic code such as
+ * `attempts-exhausted` falls back to the bounded code of the failure that ended the last attempt.
+ */
+export function chatStopReason(errorCode: string | null | undefined, cause?: string): ChatStopReason {
+  const stored = typeof errorCode === 'string' ? stopReasonOf(errorCode) : undefined;
+  if (stored) return stored;
+  if ((errorCode == null || genericStopCodes.has(errorCode)) && cause) return stopReasonOf(cause) ?? 'other';
+  return 'other';
+}
+
+/** One chat reply that ended failed, without a final answer. Labels are the bounded reason and runtime only. */
+function recordChatReplyStopped(errorCode: string | null | undefined, runtime: ChatReplyRuntime, cause?: string) {
+  const reason = chatStopReason(errorCode, cause);
+  const code = telemetryErrorCode(errorCode) ?? telemetryErrorCode(cause);
+  log('warn', 'activity', 'call_failed', {
+    operation: 'chat.reply-stopped',
+    outcome: 'failed',
+    'chat.stop.reason': reason,
+    runtime,
+    ...(code ? { 'error.code': code } : {}),
+  });
+}
+
+/** Notes the bounded code of the failure that ended this reply attempt, for `chat.reply-stopped`. */
+export function noteChatReplyCause(code: string | undefined) {
+  const clock = chatMeasurement.getStore()?.reply;
+  if (clock && code) clock.cause = code;
 }
 
 /**
@@ -1453,6 +1544,8 @@ export type ChatReplyTiming = {
   externalWaitSeconds: number;
   inactiveSeconds: number;
   attempts: number;
+  errorCode?: string | null | undefined;
+  runtime?: ChatReplyRuntime | undefined;
 };
 
 /**
@@ -1476,6 +1569,8 @@ export function chatReplyFinal(timing: ChatReplyTiming): ChatReplyFinal {
     queueSeconds: Math.min(afterSave, Math.max(0, queued)),
     firstTextSeconds: timing.firstTextSeconds === null ? null : timing.firstTextSeconds + (sendSeconds ?? 0),
     attempts: timing.attempts,
+    ...(timing.errorCode === undefined ? {} : { errorCode: timing.errorCode }),
+    ...(timing.runtime === undefined ? {} : { runtime: timing.runtime }),
   };
 }
 
@@ -1682,6 +1777,47 @@ export function recordChatDiscovery(counts: { offered: number; loaded: number; a
   log('info', 'inference', 'call_completed', { operation: 'chat.discovery', ...attributes });
 }
 
+export type ChatContextCompactionOutcome = 'summarised' | 'stubbed';
+/**
+ * One mid-reply context compaction: estimated input tokens that triggered it and after it, the model window, and how
+ * many older tool results were summarised or stubbed and loaded tool definitions pruned. Counts only, never content.
+ */
+export function recordChatContextCompaction(compaction: {
+  triggerTokens: number;
+  window: number;
+  afterTokens: number;
+  summarised: number;
+  stubbed: number;
+  pruned: number;
+  outcome: ChatContextCompactionOutcome;
+}) {
+  const state = chatMeasurement.getStore();
+  const attributes: Attributes = state ? chatDetailAttributes(state) : {};
+  const counts = {
+    trigger_tokens: compaction.triggerTokens,
+    window: compaction.window,
+    after_tokens: compaction.afterTokens,
+    summarised: compaction.summarised,
+    stubbed: compaction.stubbed,
+    pruned: compaction.pruned,
+  };
+  for (const [name, count] of Object.entries(counts)) {
+    if (!Number.isSafeInteger(count) || count < 0) throw new RangeError('invalid-chat-context-compaction-count');
+    attributes[`chat.compaction.${name}`] = count;
+  }
+  const { outcome } = compaction;
+  attributes['chat.compaction.outcome'] = outcome;
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_context_compactions')
+    .add(1, { ...dimensions, outcome });
+  metrics
+    .getMeter(scope)
+    .createHistogram('cloud_chat_context_compaction_ratio')
+    .record(compaction.window ? compaction.afterTokens / compaction.window : 0, { ...dimensions, outcome });
+  log('info', 'inference', 'call_completed', { operation: 'chat.context-compaction', ...attributes });
+}
+
 export const chatLatencyPhases = [
   'wall',
   'active',
@@ -1787,8 +1923,12 @@ export async function observeCall<T>(
 }
 
 export type ToolRuntime = 'chat' | 'task' | 'slack' | 'agent';
-export type ToolOutcome = 'success' | 'error' | 'waiting' | 'blocked';
-/** `errorType` names a failure that the dispatcher caught and reported as a returned outcome. */
+export type ToolOutcome = 'success' | 'error' | 'result_error' | 'waiting' | 'blocked';
+/**
+ * `error` is a call that threw or a dispatch that failed; `result_error` is a call that returned a structured failure,
+ * such as an unavailable source, which the chat shows as failed. `errorType` names a failure that the dispatcher caught
+ * and reported as a returned outcome.
+ */
 export type ToolObservation = { outcome: ToolOutcome; errorCode?: unknown; errorType?: string };
 
 const loggedToolFailures = new WeakSet<object>();
@@ -1841,10 +1981,12 @@ export async function observeTool<T>(
         span.setAttributes(details);
         throw error;
       } finally {
-        const failed = outcome === 'error' || outcome === 'blocked';
+        const failed = outcome === 'error' || outcome === 'result_error' || outcome === 'blocked';
         const seconds = (performance.now() - start) / 1000;
         if (failed) {
           errorCode ??= 'unclassified';
+          // A returned failure has no exception type; its bounded code stands in so error_type stays low-cardinality.
+          if (outcome === 'result_error') failure ??= errorCode;
           span.setStatus({ code: SpanStatusCode.ERROR });
           span.setAttribute('error.code', errorCode);
           metrics

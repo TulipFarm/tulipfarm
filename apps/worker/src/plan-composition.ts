@@ -9,7 +9,7 @@ import { parsePlanWorkerReport } from '@tulipfarm/agents/plan-contracts';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { inferSpecialist, inferenceRouteSchema } from '@tulipfarm/agents/inference';
 import { createChatTools, frameworkCallSchema, type KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { calculateUsageCost, estimateInputTokens, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
 import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
 import { errorAttributes, log, retryError } from '@tulipfarm/observability';
@@ -283,8 +283,8 @@ export function createPlanComposition(options: {
         if (Date.now() >= retained.deadlineAt || Date.now() - started > assignment.allowance.activeMilliseconds)
           throw new Error('time-limit');
         if (provider !== validated.provider || model !== validated.model) throw new Error('model-unpriced');
-        const maxInputTokens = inputBytes + 4096;
-        if (maxInputTokens > price.maxInputTokens) throw new Error('context-overflow');
+        if (estimateInputTokens(inputBytes) + 4096 > price.maxInputTokens) throw new Error('context-overflow');
+        const maxInputTokens = Math.min(inputBytes + 4096, price.maxInputTokens);
         const quote = {
           modelId: price.modelId,
           pricingRevision: price.pricingRevision,
