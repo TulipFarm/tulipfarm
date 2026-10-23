@@ -116,6 +116,26 @@ test('request parser rejects malformed, oversized, unsupported, and poisoned bod
   assert.equal(app.server.maxRequestsPerSocket, 1_000);
 });
 
+test('behind a proxy, idle keep-alive connections outlive the proxy idle timeout', t => {
+  // A proxy that reuses a connection the API has just closed returns 502 without reaching the API.
+  // AWS ALB and nginx keep idle upstream connections for 60 seconds by default.
+  const previous = process.env.API_PROXY_MODE;
+  t.after(() => {
+    if (previous === undefined) delete process.env.API_PROXY_MODE;
+    else process.env.API_PROXY_MODE = previous;
+  });
+  for (const mode of ['reverse-proxy', 'azure-container-apps']) {
+    process.env.API_PROXY_MODE = mode;
+    const options = securityServerOptions();
+    assert.ok(options.keepAliveTimeout > 60_000, `${mode} keepAliveTimeout`);
+    assert.ok(options.connectionTimeout > options.keepAliveTimeout, `${mode} connectionTimeout`);
+    assert.equal(options.requestTimeout, 30_000);
+  }
+  process.env.API_PROXY_MODE = 'direct';
+  assert.equal(securityServerOptions().keepAliveTimeout, 5_000);
+  assert.equal(securityServerOptions().connectionTimeout, 60_000);
+});
+
 test('global throttle covers changing paths and spoofed headers, but leaves liveness available', async t => {
   const app = fixture();
   t.after(() => app.close());
