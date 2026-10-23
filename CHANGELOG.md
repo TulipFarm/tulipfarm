@@ -69,6 +69,30 @@ One version identifies all apps and images of a release.
   rereads any stored full result by call ID with `tool_result_read`. Each
   compaction records `cloud_chat_context_compactions` and a
   `chat.context-compaction` log with counts only.
+- A chat reply no longer stops because of its context size:
+  - When a provider rejects a round as too long (OpenAI, xAI and Azure
+    `context_length_exceeded` or "maximum context/prompt length", Anthropic
+    "prompt is too long" or `request_too_large`, Google `INVALID_ARGUMENT`
+    token limits, or a context-window stop reason), the reply counts that
+    request as at least the window, stubs or summarises every tool result but
+    the latest round, unloads tools that round did not use, stubs the latest
+    round on the second try, and sends the same step again, at most twice.
+    The rejected call settles as refused and is not charged. Only then does
+    the turn end with the `context-limit` cause.
+  - Before a reply, a request that does not fit the window is compacted once
+    even when automatic compaction is off or paused by the circuit breaker.
+    If no summary makes it fit, the oldest messages, except the current
+    message and the latest completed exchange, are left out behind a note
+    listing their IDs for `conversation.messages.read`. Turns no longer fail
+    with `compaction-paused`, `compaction-failed` or `context-limit` before
+    the reply starts.
+  - The completion check's evidence is trimmed to fit its model's window:
+    older tool outputs are cut to previews, then the oldest entries are
+    dropped, always keeping the latest request and the candidate reply.
+  - Slack and external-context replies receive the workspace compaction
+    policy and summarise older tool results with the compaction models. The
+    summariser reads only that reply's own tool outputs, passes the same
+    source check as each model request, and its notes are never stored.
 - Streamed model replies read token usage from any chunk, including a final
   usage-only chunk, and accept null usage details, DeepSeek cache fields and a
   missing `total_tokens`. Credits settle on that usage and

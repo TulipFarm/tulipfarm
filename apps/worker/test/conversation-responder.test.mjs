@@ -208,3 +208,89 @@ test('source authorization is measured before credit admission and dispatch, inc
   }
   assert.doesNotMatch(JSON.stringify(records), /PRIVATE|synthetic|https:/);
 });
+
+/** Reports the request's own size as its prompt tokens, so the reply's context estimate grows with each round. */
+const reported = (body, init) => ({ ...body, usage: { ...body.usage, input_tokens: Math.ceil(init.body.length / 4) } });
+
+test('the tool-result summariser runs only after the same source check as a model request', async t => {
+  let step = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) =>
+    Response.json(
+      isCompletionRequest(JSON.parse(init.body))
+        ? completionReply('anthropic')
+        : step < 6
+          ? reported(anthropicTools([{ tool: 'web.fetch', url: `https://example.com/${++step}` }]), init)
+          : anthropicText('Read every page.'),
+    ),
+  );
+  const events = [];
+  const answer = await respondToConversation(
+    { provider: 'anthropic', endpoint: 'https://api.anthropic.com/', model: 'fixture', apiKey: 'synthetic' },
+    [{ role: 'user', text: 'Read the pages.' }],
+    async call => ({
+      result: { text: `${call.url} ${'lorem ipsum '.repeat(3000)}` },
+      sources: [{ kind: 'public-web', url: call.url }],
+    }),
+    undefined,
+    async sources => {
+      events.push(['authorize', sources.length]);
+    },
+    false,
+    null,
+    {
+      sources: () => [],
+      context: { window: 20_000, triggerPercent: 70, targetPercent: 30 },
+      compactToolResults: async ({ text }) => {
+        events.push(['summarise']);
+        return JSON.stringify({
+          notes: JSON.parse(text).results.map(({ callId }) => ({ callId, note: 'Read one page.' })),
+        });
+      },
+    },
+  );
+  assert.equal(answer.text, 'Read every page.');
+  const summarised = events.findIndex(([kind]) => kind === 'summarise');
+  assert.ok(summarised > 0, 'the summariser ran');
+  assert.equal(events[summarised - 1][0], 'authorize');
+  assert.ok(events[summarised - 1][1] > 0, 'the check covers the sources the summarised results came from');
+});
+
+test('a failed source check before summarising leaves stubs and fails at the next model request', async t => {
+  let step = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) =>
+    Response.json(
+      isCompletionRequest(JSON.parse(init.body))
+        ? completionReply('anthropic')
+        : reported(anthropicTools([{ tool: 'web.fetch', url: `https://example.com/${++step}` }]), init),
+    ),
+  );
+  let summarised = 0;
+  let revoked = false;
+  await assert.rejects(
+    respondToConversation(
+      { provider: 'anthropic', endpoint: 'https://api.anthropic.com/', model: 'fixture', apiKey: 'synthetic' },
+      [{ role: 'user', text: 'Read the pages.' }],
+      async call => {
+        // The third round is the first to compact, so its summariser is the first request after revocation.
+        if (step >= 2) revoked = true;
+        return { result: { text: `${call.url} ${'lorem ipsum '.repeat(3000)}` }, sources: [] };
+      },
+      undefined,
+      async () => {
+        if (revoked) throw new Error('source-revoked');
+      },
+      false,
+      null,
+      {
+        sources: () => [],
+        context: { window: 20_000, triggerPercent: 70, targetPercent: 30 },
+        compactToolResults: async () => {
+          summarised++;
+          return '{"notes":[]}';
+        },
+      },
+    ),
+    /source-revoked/,
+  );
+  assert.equal(summarised, 0);
+});

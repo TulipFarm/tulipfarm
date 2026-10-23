@@ -301,3 +301,169 @@ test('compaction unloads searched tools idle for two rounds; tool search can loa
   assert.ok(offered[4].includes('rows_create'));
   assert.ok(!offered[5].includes('rows_create'));
 });
+
+/** Each provider's wording for a request longer than the model's context window. */
+const overflowErrors = {
+  'OpenAI context_length_exceeded': [
+    'azure',
+    {
+      error: {
+        code: 'context_length_exceeded',
+        message:
+          "This model's maximum context length is 40000 tokens. However, your messages resulted in 52000 tokens.",
+      },
+    },
+  ],
+  'xAI maximum prompt length': [
+    'azure',
+    { error: { message: "This model's maximum prompt length is 40000 but the request contains 52000 tokens." } },
+  ],
+  'Azure Responses context_length_exceeded': [
+    'responses',
+    { error: { code: 'context_length_exceeded', message: 'Your input exceeds the context window of this model.' } },
+  ],
+  'Anthropic prompt is too long': [
+    'anthropic',
+    {
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'prompt is too long: 52000 tokens > 40000 maximum' },
+    },
+  ],
+  'Google INVALID_ARGUMENT token limit': [
+    'google',
+    {
+      error: {
+        code: 400,
+        status: 'INVALID_ARGUMENT',
+        message: 'The input token count (52000) exceeds the maximum number of tokens allowed (40000).',
+      },
+    },
+  ],
+};
+
+for (const [name, [format, error]] of Object.entries(overflowErrors))
+  test(`${name}: a provider overflow compacts every result but the latest round and retries the same step`, async t => {
+    const window = 40000;
+    let rounds = 0;
+    let rejected = 0;
+    let retried;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(completionReply(format));
+      rounds++;
+      if (rounds <= 3)
+        return Response.json(nativeReply(format, { calls: [fetchCall(rounds, { id: `fetch_${rounds}` })] }));
+      const outputs = allOutputs(format, body);
+      if (!outputs.some(output => output.includes('to save context'))) {
+        rejected++;
+        return Response.json(error, { status: 400 });
+      }
+      retried = outputs;
+      return Response.json(nativeReply(format, { text: 'Answered after compaction.' }));
+    });
+    const settlements = [];
+    let executed = 0;
+    const result = await inferWithTools(
+      nativeRoutes[format],
+      [{ role: 'user', text: 'Research this.' }],
+      async () => ({ text: page(++executed) }),
+      async attempt => async (usage, outcome) =>
+        settlements.push({ step: attempt.step, usage: usage.kind, ...outcome }),
+      false,
+      null,
+      { context: limits(window), compactToolResults: async ({ text }) => notesFor(text) },
+    );
+    assert.equal(result.text, 'Answered after compaction.');
+    assert.equal(rejected, 1);
+    assert.equal(retried.length, 3);
+    assert.ok(retried.slice(0, -1).every(output => output.includes('to save context')));
+    assert.match(retried.at(-1), /page-3 /);
+    // The rejected call settles as refused, so it is never charged; the retry is a separate, charged step.
+    assert.deepEqual(
+      settlements.filter(entry => entry.rejected),
+      [{ step: settlements.find(entry => entry.rejected).step, usage: 'unknown', rejected: true }],
+    );
+    // Three tool rounds, the rejected round, its retry, and the completion check.
+    assert.equal(settlements.length, 6);
+    assert.equal(new Set(settlements.map(entry => entry.step)).size, 6);
+  });
+
+test('a second provider overflow stubs the latest round too, and a third ends with conversation-context-overflow', async t => {
+  const format = 'azure';
+  const [, error] = overflowErrors['OpenAI context_length_exceeded'];
+  for (const accept of [2, Infinity]) {
+    let rounds = 0;
+    const rejectedRequests = [];
+    let accepted;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(completionReply(format));
+      rounds++;
+      if (rounds <= 2)
+        return Response.json(nativeReply(format, { calls: [fetchCall(rounds, { id: `fetch_${rounds}` })] }));
+      const outputs = allOutputs(format, body);
+      if (rejectedRequests.length < accept) {
+        rejectedRequests.push(outputs);
+        return Response.json(error, { status: 400 });
+      }
+      accepted = outputs;
+      return Response.json(nativeReply(format, { text: 'Answered from stubs.' }));
+    });
+    let executed = 0;
+    const reply = inferWithTools(
+      nativeRoutes[format],
+      [],
+      async () => ({ text: page(++executed) }),
+      undefined,
+      false,
+      null,
+      { context: limits(40000), compactToolResults: async ({ text }) => notesFor(text) },
+    );
+    if (accept === Infinity) {
+      await assert.rejects(reply, err => {
+        assert.equal(err.message, 'conversation-context-overflow');
+        assert.equal(err.cause.message, 'model-context-overflow');
+        return true;
+      });
+      assert.equal(rejectedRequests.length, 3);
+    } else {
+      assert.equal((await reply).text, 'Answered from stubs.');
+      assert.equal(rejectedRequests.length, 2);
+      assert.ok(
+        accepted.every(output => output.includes('compacted to save context')),
+        'every result is stubbed',
+      );
+    }
+    t.mock.restoreAll();
+  }
+});
+
+test('a context-window stop reason is retried after compaction like a rejection', async t => {
+  const format = 'anthropic';
+  let rounds = 0;
+  let stopped = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply(format));
+    rounds++;
+    if (rounds <= 2)
+      return Response.json(nativeReply(format, { calls: [fetchCall(rounds, { id: `fetch_${rounds}` })] }));
+    if (!allOutputs(format, body).some(output => output.includes('to save context'))) {
+      stopped++;
+      return Response.json({ ...nativeReply(format, { text: '' }), stop_reason: 'model_context_window_exceeded' });
+    }
+    return Response.json(nativeReply(format, { text: 'Answered.' }));
+  });
+  let executed = 0;
+  const result = await inferWithTools(
+    nativeRoutes[format],
+    [],
+    async () => ({ text: page(++executed) }),
+    undefined,
+    false,
+    null,
+    { context: limits(40000) },
+  );
+  assert.equal(result.text, 'Answered.');
+  assert.equal(stopped, 1);
+});

@@ -12,6 +12,7 @@ import {
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createConversations } from '@tulipfarm/conversations';
 import { createConversationExecutor, type ConversationReply } from '@tulipfarm/conversations/runtime';
+import type { ConversationCompactor } from '@tulipfarm/conversations/compaction';
 import {
   createChannelProvider,
   currentSlackMessage,
@@ -69,6 +70,8 @@ export function createSlackDefault(
     modelFamilyId?: string;
     reply: (guard: ExternalConversationContext, slack?: SlackActionsFactory) => ConversationReply;
     channels: ReturnType<typeof createSlackChannelAgents>;
+    /** Supplies the workspace compaction policy, so a long channel reply compacts its own tool results like a chat. */
+    compactor?: ConversationCompactor | undefined;
   },
 ) {
   const { runtime, channels } = options;
@@ -169,6 +172,11 @@ export function createSlackDefault(
     options.reply(guard, slack),
     guard,
     slack?.(runtime).resumeConversation,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.compactor,
   );
   async function admit(workspaceId: string, eventId: string) {
     return transaction(workspaceId, async tx => {

@@ -138,6 +138,12 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   quarter of the request bytes). A reply never fails on its size: at the
   workspace compaction trigger it summarises its older tool results, and each
   tool result is cut to 10% of the window with the rest readable by call ID.
+  If the provider still rejects a round as too long, the reply counts that
+  request as at least the window, compacts every result but the latest round
+  (then the latest round too) toward the target, and retries the round at most
+  twice; the rejected call is not charged. Slack and external-context replies
+  use the same workspace policy and summary models. The completion check's
+  evidence is trimmed, oldest first, to fit its model's window.
 - **Completion checks.** The optional `completion-check` role checks whether a
   tool-using chat reply is a sufficient stopping point. Without it, checks keep
   using the active chat model (including a chat fallback). Assign the role to

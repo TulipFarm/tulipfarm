@@ -167,6 +167,26 @@ export function summaryBlock(summary: WorkingSummary, wording: readonly { id: st
   };
 }
 
+export const omittedHeading = 'Earlier conversation messages omitted to fit the context window.';
+/**
+ * Stands in for the oldest messages that were left out of a reply's context because it would not fit otherwise and no
+ * summary could make it fit. The messages are unchanged and remain readable by ID.
+ */
+export function omittedBlock(messageIds: readonly string[]): ChatMessage {
+  const listed = messageIds.slice(-50);
+  const more = messageIds.length - listed.length;
+  return {
+    role: 'user',
+    text: [
+      `${omittedHeading} ${messageIds.length} earlier message${messageIds.length === 1 ? ' was' : 's were'} left out of this request; they are preserved.`,
+      `Use conversation.messages.read with a messageId to reread any of them when the recent messages are not enough: ${listed.join(', ')}${more ? `, and ${more} older` : ''}.`,
+    ].join('\n'),
+  };
+}
+/** Whether a model context stands in for earlier messages that `conversation.messages.read` can reread. */
+export const refersToEarlierMessages = (messages: readonly ChatMessage[]) =>
+  messages.some(message => message.text.startsWith(summaryHeading) || message.text.startsWith(omittedHeading));
+
 export function cleanedFileNote(messageId: string): ChatMessage {
   return {
     role: 'user',

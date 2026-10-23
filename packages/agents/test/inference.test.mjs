@@ -2247,6 +2247,13 @@ for (const [provider, status, error, reason] of [
   ['google', 503, { status: 'UNAVAILABLE' }, 'unavailable'],
   ['azure', 400, { code: 'content_filter' }, 'refusal'],
   ['azure', 400, { code: 'context_length_exceeded' }, 'context-overflow'],
+  [
+    'azure',
+    400,
+    { message: "This model's maximum prompt length is 131072 but the request contains 140000 tokens." },
+    'context-overflow',
+  ],
+  ['anthropic', 413, { type: 'request_too_large' }, 'context-overflow'],
   ['anthropic', 400, { type: 'invalid_request_error', message: 'prompt is too long: synthetic' }, 'context-overflow'],
   [
     'google',
