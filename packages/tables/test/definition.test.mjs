@@ -6,8 +6,10 @@ import {
   validateValue,
   fieldSchema,
   valueSchema,
+  tableDefinitionMessages,
+  tableDefinitionRules,
 } from '@tulipfarm/tables/definition';
-import { proposeTableSchema } from '@tulipfarm/tables/proposal-contracts';
+import { proposeTableSchema, tableProposalMessages, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 
 const table = '00000000-0000-4000-8000-000000000001';
 const team = '00000000-0000-4000-8000-000000000002';
@@ -196,4 +198,26 @@ test('record validation rejects malformed Unicode and enforces reference and num
   for (const timestamp of ['0001-01-01T00:00:00+01:00', '9999-12-31T23:59:59-01:00']) {
     assert.equal(valueSchema.safeParse({ kind: 'timestamp', value: timestamp }).success, false);
   }
+});
+
+test('custom rule failures report the exported rule messages', () => {
+  const messages = input =>
+    definitionSchema.safeParse(input).error.issues.map(({ path, message }) => ({ path, message }));
+  assert.deepEqual(messages(definition([text, text])), [
+    { path: ['fields'], message: tableDefinitionMessages.duplicateField },
+  ]);
+  assert.deepEqual(messages(definition([{ ...base, kind: 'numeric', precision: 3, scale: 5 }])), [
+    { path: ['fields', 0], message: tableDefinitionMessages.decimalPrecisionScale },
+  ]);
+  const plan = { kind: 'schema', tableId: table, expectedRevision: null, dependsOn: [], transforms: { outputs: [] } };
+  assert.deepEqual(
+    proposeTableSchema
+      .safeParse({ plans: [{ ...plan, target: definition([text]), tableId: second }] })
+      .error.issues.map(issue => issue.message),
+    [tableProposalMessages.targetMismatch],
+  );
+  const listed = tableProposalRules.map(rule => rule.message);
+  for (const message of [...Object.values(tableDefinitionMessages), ...Object.values(tableProposalMessages)])
+    assert.ok(listed.includes(message), message);
+  assert.ok(tableDefinitionRules.every(rule => tableProposalRules.includes(rule)));
 });

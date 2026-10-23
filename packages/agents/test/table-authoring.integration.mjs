@@ -8,6 +8,8 @@ import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations
 import { createChatTools } from '../src/tools.ts';
 import { AccessDenied } from '@tulipfarm/access';
 import { createChatTableProposals } from '../src/table-proposals.ts';
+import { tableDefinitionMessages } from '@tulipfarm/tables/definition';
+import { tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 
 test('chat distinguishes creation eligibility, validates proposal arguments, and enforces current authority', async t => {
   const db = await fixture();
@@ -120,6 +122,62 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.match(result.instruction, /not a permission denial/);
     }
     assert.equal(await count('tf_table_proposals'), 1);
+  });
+  await t.test('rule failures explain which rule was broken', async () => {
+    const proposals = await count('tf_table_proposals');
+    const [plan] = input.plans;
+    const [first, numeric] = plan.target.fields;
+    const invalid = {
+      plans: [
+        {
+          ...plan,
+          target: { ...plan.target, fields: [first, first, { ...numeric, id: randomUUID(), precision: 3, scale: 5 }] },
+        },
+      ],
+    };
+    const result = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'tables.propose', input: JSON.stringify(invalid) },
+      )
+    ).result;
+    assert.equal(result.error, 'invalid-arguments');
+    assert.match(result.instruction, /not a permission denial/);
+    assert.deepEqual(result.issues, [
+      {
+        path: ['plans', 0, 'target', 'fields', 2],
+        code: 'custom',
+        message: tableDefinitionMessages.decimalPrecisionScale,
+      },
+      { path: ['plans', 0, 'target', 'fields'], code: 'custom', message: tableDefinitionMessages.duplicateField },
+    ]);
+    const echoed = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'tables.propose', input: JSON.stringify({ plans: [{ ...plan, ['k'.repeat(5000)]: true }] }) },
+      )
+    ).result;
+    assert.equal(echoed.issues[0].code, 'unrecognized_keys');
+    assert.equal(echoed.issues[0].message.length, 200);
+    const malformed = (
+      await tools.invokeWithSources({ ...context, callId: randomUUID() }, { tool: 'tables.propose', input: '{' })
+    ).result;
+    assert.deepEqual(
+      malformed.issues.map(({ code }) => code),
+      ['invalid-json'],
+    );
+    const skill = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'skills.read', skillId: 'table-authoring' },
+      )
+    ).result;
+    for (const { rule, message } of tableProposalRules) {
+      assert.ok(skill.constraints.includes(rule), rule);
+      assert.ok(skill.constraints.includes(message), message);
+    }
+    assert.match(skill.constraints, /Call tables\.propose with input set to the plans as one JSON-encoded string\./);
+    assert.equal(await count('tf_table_proposals'), proposals);
   });
   await t.test('an admin sees creatable teams they do not belong to only as opaque ids', async () => {
     const hidden = randomUUID();

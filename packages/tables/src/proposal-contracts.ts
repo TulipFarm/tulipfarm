@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { humanActorSchema, sourceDependenciesSchema } from '@tulipfarm/access';
-import { definitionSchema, valueSchema, valuesSchema } from './definition.ts';
+import { definitionSchema, tableDefinitionRules, valueSchema, valuesSchema, type TableRule } from './definition.ts';
 import { transformsSchema, transformErrorSchema } from './transforms.ts';
 
 export const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -18,6 +18,25 @@ export const importSnapshotSchema = z.strictObject({
   sources: sourceDependenciesSchema,
   rows: z.array(z.record(z.string().min(1).max(120), valueSchema)).max(100000),
 });
+export const tableProposalMessages = {
+  planOrder: 'Plans must have unique table identities and depend only on earlier plans',
+  targetMismatch: 'Target table identity mismatch',
+  duplicateRow: 'Duplicate row identity',
+  duplicateImportField: 'Duplicate import mapping or match field',
+} as const;
+export const tableProposalRules: readonly TableRule[] = [
+  ...tableDefinitionRules,
+  {
+    message: tableProposalMessages.planOrder,
+    rule: 'Each plan must have a unique tableId, and dependsOn may only list tableIds of earlier plans.',
+  },
+  { message: tableProposalMessages.targetMismatch, rule: 'A schema plan target.id must equal its tableId.' },
+  { message: tableProposalMessages.duplicateRow, rule: 'A records plan must not change the same recordId twice.' },
+  {
+    message: tableProposalMessages.duplicateImportField,
+    rule: 'An import plan must not repeat a matchFieldIds entry or map two source columns to the same fieldId.',
+  },
+];
 const base = { tableId: z.uuid(), dependsOn: z.array(z.uuid()).max(20) };
 export const proposalPlanSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -55,19 +74,19 @@ export const proposeTableSchema = z
       if (seen.has(plan.tableId) || plan.dependsOn.some(id => !seen.has(id)))
         ctx.addIssue({
           code: 'custom',
-          message: 'Plans must have unique table identities and depend only on earlier plans',
+          message: tableProposalMessages.planOrder,
         });
       seen.add(plan.tableId);
       if (plan.kind === 'schema' && plan.target.id !== plan.tableId)
-        ctx.addIssue({ code: 'custom', message: 'Target table identity mismatch' });
+        ctx.addIssue({ code: 'custom', message: tableProposalMessages.targetMismatch });
       if (plan.kind === 'records' && new Set(plan.changes.map(change => change.recordId)).size !== plan.changes.length)
-        ctx.addIssue({ code: 'custom', message: 'Duplicate row identity' });
+        ctx.addIssue({ code: 'custom', message: tableProposalMessages.duplicateRow });
       if (
         plan.kind === 'import' &&
         (new Set(plan.matchFieldIds).size !== plan.matchFieldIds.length ||
           new Set(plan.mappings.map(mapping => mapping.fieldId)).size !== plan.mappings.length)
       )
-        ctx.addIssue({ code: 'custom', message: 'Duplicate import mapping or match field' });
+        ctx.addIssue({ code: 'custom', message: tableProposalMessages.duplicateImportField });
     }
   });
 export const effectSchema = z.strictObject({
