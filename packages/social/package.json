@@ -58,6 +58,14 @@
     "./posts": {
       "types": "./dist/posts.d.ts",
       "default": "./dist/posts.js"
+    },
+    "./origin": {
+      "types": "./dist/origin.d.ts",
+      "default": "./dist/origin.js"
+    },
+    "./publisher": {
+      "types": "./dist/publisher.d.ts",
+      "default": "./dist/publisher.js"
     }
   },
   "scripts": {

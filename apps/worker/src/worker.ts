@@ -45,6 +45,7 @@ import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
+import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier) });
@@ -86,6 +87,7 @@ async function run() {
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
+  let socialPublisher: ReturnType<typeof createSocialPublisherComposition> | undefined;
   try {
     email = emailEnabled ? await createEmailDeliveryComposition() : undefined;
     resources = isolatedStorageEnabled() ? createTableAuthoringComposition() : undefined;
@@ -93,6 +95,10 @@ async function run() {
       memberProfiles = createMemberProfileComposition({
         runtime: resources.runtime,
         source: resources.memberProfiles,
+        discover: resources.readyTaskWorkspaces,
+      });
+      socialPublisher = createSocialPublisherComposition({
+        runtime: resources.runtime,
         discover: resources.readyTaskWorkspaces,
       });
       const cleanup = (importCleanup = chatObjects
@@ -358,6 +364,7 @@ async function run() {
     if (failure?.status === 'rejected') throw failure.reason;
   } finally {
     await memberProfiles?.close();
+    await socialPublisher?.close();
     await recommendations?.close();
     await knowledgeEmbeddings?.close();
     clearInterval(importTimer);

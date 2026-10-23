@@ -408,11 +408,11 @@ export const settings: readonly Setting[] = [
   {
     name: 'BETTER_AUTH_URL',
     group: 'Public origins',
-    services: ['api'],
+    services: apiWorker,
     requirement: 'production',
     secret: false,
     description:
-      'Public API origin used for auth callbacks and as the Workspace MCP OAuth client ID and redirect origin.',
+      'Public API origin used for auth callbacks and as the Workspace MCP OAuth client ID and redirect origin. The worker needs it for social token refresh and skips social publishing in production without it.',
   },
   {
     name: 'WEB_ORIGIN',

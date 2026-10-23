@@ -139,15 +139,21 @@ export async function fixture() {
     for (const { id, userId } of workspaces) await registerPlatformWorkspace(platform, id, userId);
   }
   async function close() {
-    await platform.end();
-    await databaseAdmin.end();
-    await admin.query(`DROP DATABASE ${escapeIdentifier(database)} WITH (FORCE)`);
-    for (const workspace of workspaces) {
-      for (const key of ['runtime', 'migration', 'confirmation', 'customOwner'])
-        await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(workspace.names[key])}`);
+    try {
+      await platform.end();
+      await databaseAdmin.end();
+      // DROP DATABASE waits for a forced checkpoint, which can outlast the test statement timeout on a busy server.
+      await admin.query('SET statement_timeout = 0');
+      await admin.query(`DROP DATABASE ${escapeIdentifier(database)} WITH (FORCE)`);
+      for (const workspace of workspaces) {
+        for (const key of ['runtime', 'migration', 'confirmation', 'customOwner'])
+          await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(workspace.names[key])}`);
+      }
+      await admin.query(`DROP ROLE ${escapeIdentifier(owner)}`);
+    } finally {
+      // An open admin socket would keep the test process alive after a failed teardown.
+      await admin.end();
     }
-    await admin.query(`DROP ROLE ${escapeIdentifier(owner)}`);
-    await admin.end();
   }
   return {
     admin,
