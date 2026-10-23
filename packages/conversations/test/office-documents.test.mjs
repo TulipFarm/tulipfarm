@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
-import { OfficeSpecError, renderOfficeDocument } from '../src/office-documents.ts';
+import { OfficeSpecError, officeImageIds, officeImageInfo, renderOfficeDocument } from '../src/office-documents.ts';
 
 const entry = async (bytes, path) => (await JSZip.loadAsync(bytes)).file(path).async('string');
 
@@ -189,5 +189,102 @@ test('richer elements: a contents field, sheet merges, dropdowns, links, notes, 
       }),
     ),
     /one value per category/,
+  );
+});
+
+const png = (width, height) => {
+  const bytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return new Uint8Array(bytes);
+};
+const imageId = '5b0f6f8e-2f0a-4c3b-9d7e-1a2b3c4d5e6f';
+const images = (width, height) =>
+  new Map([[imageId, { ...officeImageInfo(png(width, height)), bytes: png(width, height) }]]);
+
+test('image headers give the type and pixel size, and anything else is refused', () => {
+  assert.deepEqual(officeImageInfo(png(640, 480)), { type: 'png', width: 640, height: 480 });
+  const gif = Buffer.from('GIF89a\0\0\0\0', 'binary');
+  gif.writeUInt16LE(320, 6);
+  gif.writeUInt16LE(200, 8);
+  assert.deepEqual(officeImageInfo(gif), { type: 'gif', width: 320, height: 200 });
+  const jpeg = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc4, 0x00, 0x02, 0xff, 0xc2, 0x00, 0x11, 0x08, 0x01, 0x2c,
+    0x02, 0x58, 0x03,
+  ]);
+  assert.deepEqual(officeImageInfo(jpeg), { type: 'jpg', width: 600, height: 300 });
+  assert.equal(officeImageInfo(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')), null);
+  assert.equal(officeImageInfo(png(0, 10)), null);
+  assert.equal(officeImageInfo(new Uint8Array([0xff, 0xd8, 0x00])), null);
+});
+
+test('image ids are listed once, in order, from document blocks and every slide column', () => {
+  const other = '6c1f7f9e-3f1b-4d4c-8e8f-2b3c4d5e6f70';
+  assert.deepEqual(
+    officeImageIds(
+      'pptx',
+      JSON.stringify({
+        slides: [
+          {
+            layout: 'two-column',
+            left: [{ type: 'image', fileId: other }],
+            right: [{ type: 'image', fileId: imageId }],
+          },
+          { layout: 'content', content: [{ type: 'image', fileId: other }] },
+        ],
+      }),
+    ),
+    [other, imageId],
+  );
+  assert.deepEqual(officeImageIds('docx', JSON.stringify({ blocks: [{ type: 'image', fileId: imageId }] })), [imageId]);
+  assert.deepEqual(officeImageIds('docx', 'not json'), []);
+  assert.deepEqual(officeImageIds('xlsx', JSON.stringify({ sheets: [{ name: 'A', rows: [] }] })), []);
+});
+
+test('a document image is embedded, fitted to the text width, and renders the same bytes again', async () => {
+  const spec = JSON.stringify({
+    blocks: [
+      { type: 'paragraph', text: 'Before' },
+      { type: 'image', fileId: imageId, alt: 'Revenue by quarter' },
+      { type: 'image', fileId: imageId, width: 25 },
+    ],
+  });
+  const first = await renderOfficeDocument('docx', spec, images(1204, 602));
+  const zip = await JSZip.loadAsync(first);
+  assert.equal(Object.keys(zip.files).filter(name => name.startsWith('word/media/')).length, 1);
+  const xml = await entry(first, 'word/document.xml');
+  // 602 × 301 px and 151 × 75 px, in EMUs (9525 per pixel at 96 dpi).
+  assert.match(xml, /<wp:extent cx="5734050" cy="2867025"\/>/);
+  assert.match(xml, /<wp:extent cx="1438275" cy="714375"\/>/);
+  assert.match(xml, /descr="Revenue by quarter"/);
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.deepEqual(await renderOfficeDocument('docx', spec, images(1204, 602)), first);
+});
+
+test('a slide image keeps its shape inside its block and is never enlarged', async () => {
+  const spec = JSON.stringify({
+    slides: [{ layout: 'content', title: 'Team', content: [{ type: 'image', fileId: imageId, alt: 'Team photo' }] }],
+  });
+  const first = await renderOfficeDocument('pptx', spec, images(200, 100));
+  const zip = await JSZip.loadAsync(first);
+  assert.equal(Object.keys(zip.files).filter(name => name.startsWith('ppt/media/')).length, 1);
+  const slide = await entry(first, 'ppt/slides/slide1.xml');
+  assert.match(slide, /descr="Team photo"/);
+  // 200 × 100 px at 96 dpi is 1905000 × 952500 EMU.
+  assert.match(slide, /<a:ext cx="1905000" cy="952500"\/>/);
+  assert.deepEqual(await renderOfficeDocument('pptx', spec, images(200, 100)), first);
+});
+
+test('an image block without its file is a spec error', async () => {
+  await assert.rejects(
+    renderOfficeDocument('docx', JSON.stringify({ blocks: [{ type: 'image', fileId: imageId }] })),
+    error => error instanceof OfficeSpecError && error.message.includes(imageId),
+  );
+  await assert.rejects(
+    renderOfficeDocument('docx', JSON.stringify({ blocks: [{ type: 'image', fileId: 'not-a-uuid' }] }), new Map()),
+    OfficeSpecError,
   );
 });

@@ -36,6 +36,7 @@ Every slide can have `notes` (speaker notes as plain text) and `background` (`#R
 - `{"type": "list", "ordered": false, "items": [...]}`: each item is text, or `{"text": ..., "items": [...]}` for a nested level.
 - `{"type": "table", "header": [...], "rows": [[...]]}`: the header row uses the accent colour.
 - `{"type": "chart", "kind": "column", "title": "Revenue", "categories": ["Q1", "Q2"], "series": [{"name": "2026", "values": [120, 150]}]}`: `kind` is `column`, `bar` (horizontal), `line`, `pie`, or `doughnut`. Each series needs one number per category. Use one series for a pie.
+- `{"type": "image", "fileId": "…", "width": 80, "alt": "Team photo"}`: a PNG, JPEG, or GIF from Files, centred in its space. `width` (10–100) is a percentage of the block's width; `alt` describes the image.
 
 Text is a string or an array of runs, such as `["Revenue ", {"text": "+12%", "bold": true, "color": "#15803D"}]`. A run can set `bold`, `italic`, `underline`, `strike`, `code`, `color`, and `link`.
 
@@ -110,4 +111,7 @@ Blocks on a slide share its height equally, so keep a slide to one or two blocks
 - Keep a dark `background` only with light text colours in runs; the theme text colour is dark.
 - Charts become native, editable charts in PowerPoint and Google Slides.
 
-Images, animations, transitions, and custom slide masters are not supported.
+- An `image` needs the Files id of a PNG, JPEG, or GIF the person can open, such as an attachment in the chat. Up to 20 images, each at most 8 MiB. Images keep their shape and are never enlarged past their own size.
+- Images work in Files only. Google Drive proposals reject image blocks for now.
+
+Animations, transitions, and custom slide masters are not supported.

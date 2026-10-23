@@ -47,9 +47,18 @@ test('a document proposal with an invalid spec, or without exactly one input, cr
   const invalid = await propose({ document: { name: 'Deck', format: 'pptx', content: '{"slides":[]}' } });
   assert.equal(invalid.result.error, 'invalid-operation');
   assert.match(invalid.result.message, /document spec is invalid/);
+  const image = await propose({
+    document: {
+      name: 'Brief',
+      format: 'docx',
+      content: JSON.stringify({ blocks: [{ type: 'image', fileId: '5b0f6f8e-2f0a-4c3b-9d7e-1a2b3c4d5e6f' }] }),
+    },
+  });
+  assert.equal(image.result.error, 'invalid-operation');
+  assert.match(image.result.message, /Images are not supported in Google Drive/);
   const neither = await propose({});
   assert.equal(neither.result.message, 'Set exactly one of operation or document.');
-  assert.deepEqual([...invalid.proposals, ...neither.proposals], []);
+  assert.deepEqual([...invalid.proposals, ...image.proposals, ...neither.proposals], []);
 });
 
 test('existing file edits keep the original target instead of rendering a replacement', async () => {
