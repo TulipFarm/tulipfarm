@@ -34,9 +34,11 @@ import {
   type GitHubCorpusProvider,
   type GitHubCorpusSelection,
   type GitHubItemObservation,
+  type GitHubKnowledgeChanges,
   type GitHubKnowledgeWork,
   type GitHubRepository,
   type GitHubRepositoryAccess,
+  type GitHubRepositoryMark,
 } from '../github-contracts.ts';
 import { KnowledgeParseError, KnowledgeParserBusy } from '../parser.ts';
 import { parseKnowledgeDocument } from './parse-document.ts';
@@ -52,6 +54,14 @@ const identity = (value: string) => {
   const h = digest(value);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
 };
+const markSchema = z.strictObject({
+  head: z
+    .string()
+    .regex(/^[a-f0-9]{40,64}$/)
+    .optional(),
+  issues: z.iso.datetime().optional(),
+  discussions: z.iso.datetime().optional(),
+});
 const cursorSchema = z.strictObject({
   phase: z.enum(['listing', 'sweep']),
   index: z.number().int().min(0).max(githubCorpusLimits.repositories),
@@ -61,8 +71,42 @@ const cursorSchema = z.strictObject({
   pages: z.number().int().min(0),
   // Repositories set aside for the rest of this pass after a transient failure. They are retried on the next pass.
   isolated: z.record(z.string().max(20), z.string().max(64)).optional(),
+  // A full pass lists and sweeps everything; an incremental pass lists only what changed since each repository's mark.
+  mode: z.enum(['full', 'incremental']).optional(),
+  // Per repository, where its last completed listing ended. Kept across passes.
+  marks: z.record(z.string().max(20), markSchema).optional(),
+  // The mark the repository being listed has reached so far; it becomes its mark once the repository's listing completes.
+  pending: markSchema.optional(),
+  // When the last full pass completed, and whether an incremental listing asked for the next pass to be full.
+  reconciledAt: z.iso.datetime().optional(),
+  reconcile: z.boolean().optional(),
 });
-const initialCursor = () => cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0 });
+type Cursor = z.infer<typeof cursorSchema>;
+const initialCursor = (carry: Pick<Cursor, 'marks' | 'reconciledAt' | 'reconcile'> = {}) =>
+  cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0, ...carry });
+// Even when webhooks deliver every change, a full pass this often catches missed events and silent deletions.
+const fullReconciliationMs = 24 * 60 * 60_000;
+const later = (a: string | undefined, b: string | undefined) =>
+  a === undefined ? b : b === undefined ? a : Date.parse(a) >= Date.parse(b) ? a : b;
+function mergeMark(base: GitHubRepositoryMark | undefined, next: GitHubRepositoryMark | undefined) {
+  const head = next?.head ?? base?.head;
+  const issues = later(base?.issues, next?.issues);
+  const discussions = later(base?.discussions, next?.discussions);
+  return markSchema.parse({
+    ...(head ? { head } : {}),
+    ...(issues ? { issues } : {}),
+    ...(discussions ? { discussions } : {}),
+  });
+}
+// Item failures that a later read may clear. Incremental passes re-read these, since an unchanged item is not listed.
+const retryableItemFailures = [
+  'transient',
+  'invalid-response',
+  'response-too-large',
+  'provider',
+  'resource-limited',
+  'source-changed',
+];
 const sourceSchema = z.object({
   source_id: uuidSchema,
   binding: githubCorpusBindingSchema,
@@ -928,12 +972,28 @@ export function createGitHubKnowledge({
     denyMcpEgress();
     return renew(workspaceId, userId, uuidSchema.parse(sourceId), 20, false);
   }
-  async function due(workspaceId: string): Promise<GitHubKnowledgeWork[]> {
+  /**
+   * Sources ready for a pass. `changes` names repositories GitHub reported as changed: their sources become due now,
+   * and a source mid-pass runs again as soon as that pass ends. An all-repositories source is due whenever its account
+   * gains or loses a repository, since a new repository has no row until its next pass adds it. Failed and rate-limited
+   * sources keep their backoff.
+   */
+  async function due(workspaceId: string, changes?: GitHubKnowledgeChanges): Promise<GitHubKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
     return transaction(workspaceId, async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
       );
+      const ids = changes?.repositories.filter(id => /^[1-9][0-9]{0,19}$/.test(id)) ?? [];
+      if (changes && (changes.all || ids.length))
+        await tx.client.query(
+          `UPDATE ${table(tx, 'github_sources')} g SET next_attempt_at=clock_timestamp() FROM ${table(tx, 'sources')} s
+          WHERE s.id=g.source_id AND s.state='active' AND g.sync_state<>'failed' AND g.failure IS DISTINCT FROM 'rate-limited'
+          AND (g.next_attempt_at>clock_timestamp() OR g.lease_token IS NOT NULL)
+          AND ($1 OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND NOT r.excluded AND r.repository_id=ANY($2::text[]))
+            OR (g.selection->>'scope'='all' AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND r.repository_id=ANY($2::text[]))))`,
+          [changes.all, ids],
+        );
       const rows = z
         .array(z.object({ source_id: uuidSchema, generation: z.number() }))
         .parse(
@@ -1381,15 +1441,31 @@ export function createGitHubKnowledge({
           s.binding,
         ]);
       }
-      await tx.client.query(
-        `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+$3::double precision*interval '1 millisecond',sync_state='syncing' WHERE source_id=$1`,
-        [s.source_id, token, leaseMs],
-      );
-      return s;
+      // The exact next_attempt_at at claim. A later value at the end of the pass means a change arrived during it.
+      const marker = z
+        .string()
+        .parse(
+          (
+            await tx.client.query(
+              `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+$3::double precision*interval '1 millisecond',sync_state='syncing' WHERE source_id=$1 RETURNING next_attempt_at::text AS marker`,
+              [s.source_id, token, leaseMs],
+            )
+          ).rows[0]?.marker,
+        );
+      return { ...s, marker };
     });
     if (typeof claimed === 'string') return { disposition: claimed };
     const claim = claimed;
     const cursor = claim.cursor;
+    if (!cursor.mode)
+      cursor.mode =
+        cursor.pages === 0 &&
+        !cursor.reconcile &&
+        cursor.reconciledAt !== undefined &&
+        clock.now() - Date.parse(cursor.reconciledAt) < fullReconciliationMs
+          ? 'incremental'
+          : 'full';
+    const incremental = cursor.mode === 'incremental';
     const started = performance.now();
     let renewed = started;
     // Heartbeats Temporal and, while work progresses, extends the lease so only a genuinely stuck run is restarted.
@@ -1447,8 +1523,10 @@ export function createGitHubKnowledge({
       const selection = history
         ? claim.selection
         : { ...claim.selection, kinds: claim.selection.kinds.filter(kind => kind !== 'commits') };
+      let listed = false;
       if (accessible && selection.kinds.length) {
         try {
+          const mark = cursor.marks?.[repository.repository_id];
           const page = await corpus.discover(
             work.workspaceId,
             claim.owner_user_id,
@@ -1456,20 +1534,34 @@ export function createGitHubKnowledge({
             repository.repository_id,
             selection,
             cursor.page,
-            ...(history ? [{ commitHead: history.commit_head }] : []),
+            {
+              commitHead: history?.commit_head ?? null,
+              ...(incremental && mark && Object.keys(mark).length ? { mark } : {}),
+              // The head this pass read for the repository's files; its other kinds pin to the same commit.
+              ...(cursor.pending?.head ? { head: cursor.pending.head } : {}),
+            },
           );
           // Stuck-loop guard: a repository that hands back a cursor it already returned cannot make progress.
           const key = `${repository.repository_id}\n${page.nextCursor}`;
           if (page.nextCursor && (page.nextCursor === cursor.page || seen.has(key)))
             throw new GitHubCorpusError('invalid-cursor');
           seen.add(key);
-          if (page.observations.some(item => item.repositoryId !== repository.repository_id))
+          const prefix = `:${repository.repository_id}:`;
+          if (
+            page.observations.some(item => item.repositoryId !== repository.repository_id) ||
+            page.removed?.some(id => !/^(doc|code):/.test(id) || !id.slice(id.indexOf(':')).startsWith(prefix))
+          )
             throw new GitHubCorpusError('invalid-response');
           const { failure } = await bounded(page.observations, tuning.concurrency, async item => {
             await ingest(work, token, claim, item);
             await beat();
           });
           if (failure) throw failure.error;
+          if (page.removed?.length)
+            await forget(
+              page.removed,
+              page.observations.map(item => item.nativeId),
+            );
           const commits = history ? page.commits : undefined;
           if (commits)
             await fenced(work, token, async tx => {
@@ -1487,7 +1579,10 @@ export function createGitHubKnowledge({
               );
             });
           await fenced(work, token, tx => project(tx, claim.source_id, repository.repository_id));
+          if (page.reconcile) cursor.reconcile = true;
+          cursor.pending = mergeMark(cursor.pending, page.mark);
           cursor.page = page.nextCursor;
+          listed = !page.nextCursor;
         } catch (error) {
           if (ownerDenied(error))
             await fenced(work, token, tx => unavailable(tx, claim.source_id, repository.repository_id, error.code));
@@ -1497,12 +1592,47 @@ export function createGitHubKnowledge({
         }
       } else cursor.page = null;
       if (!cursor.page) {
+        // Only a repository listed to the end advances its mark; an interrupted one lists from its old mark next time.
+        if (listed && !cursor.isolated?.[repository.repository_id])
+          cursor.marks = {
+            ...cursor.marks,
+            [repository.repository_id]: mergeMark(cursor.marks?.[repository.repository_id], cursor.pending),
+          };
+        delete cursor.pending;
         cursor.index++;
         if (cursor.index >= selected.length) cursor.phase = 'sweep';
       }
     }
+    // Files a comparison reported removed, renamed away or changed: every part not observed again leaves search now
+    // instead of at the next full pass. IDs are first parts; later parts carry a `/p/<part>/` prefix before the path.
+    async function forget(nativeIds: readonly string[], observed: readonly string[]) {
+      await fenced(work, token, async tx => {
+        const rows = await tx.client.query(
+          `SELECT native_id FROM ${table(tx, 'github_items')} WHERE source_id=$1
+          AND regexp_replace(native_id,'^((?:doc|code):[0-9]+:)/p/[0-9]+/','\\1')=ANY($2::text[]) AND NOT native_id=ANY($3::text[])`,
+          [claim.source_id, nativeIds, observed],
+        );
+        for (const row of z.array(z.object({ native_id: z.string() })).parse(rows.rows))
+          await clear(tx, identity(`${claim.source_id}:github:${row.native_id}`), true);
+      });
+    }
     // One batch of items not seen in this pass. Returns true when the pass is complete.
     async function sweep() {
+      const denied = new Set(
+        await fenced(work, token, async tx =>
+          z
+            .array(z.object({ repository_id: z.string(), kind: z.string() }))
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT repository_id,kind FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND failure=$2 AND document_id IS NULL AND seen_generation=$3`,
+                  [claim.source_id, deniedFailure, claim.reconciliation],
+                )
+              ).rows,
+            )
+            .map(row => `${row.repository_id}:${row.kind}`),
+        ),
+      );
       const rows = await fenced(work, token, async tx =>
         z
           .array(
@@ -1522,7 +1652,8 @@ export function createGitHubKnowledge({
           JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
           WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) AND i.failure IS DISTINCT FROM $4
-          AND NOT i.repository_id=ANY($5::text[]) ORDER BY i.native_id LIMIT $6`,
+          AND NOT i.repository_id=ANY($5::text[])
+          AND ($7::text[] IS NULL OR i.failure=ANY($7::text[]) OR i.repository_id||':'||i.kind=ANY($8::text[])) ORDER BY i.native_id LIMIT $6`,
                 [
                   claim.source_id,
                   claim.reconciliation,
@@ -1530,25 +1661,14 @@ export function createGitHubKnowledge({
                   deniedFailure,
                   Object.keys(cursor.isolated ?? {}),
                   sweepBatch,
+                  // An incremental pass lists only what changed, so it re-reads only items whose last read failed in a
+                  // way that may now succeed, and hides the kinds this pass could not read.
+                  incremental ? retryableItemFailures : null,
+                  [...denied],
                 ],
               )
             ).rows,
           ),
-      );
-      const denied = new Set(
-        await fenced(work, token, async tx =>
-          z
-            .array(z.object({ repository_id: z.string(), kind: z.string() }))
-            .parse(
-              (
-                await tx.client.query(
-                  `SELECT repository_id,kind FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND failure=$2 AND document_id IS NULL AND seen_generation=$3`,
-                  [claim.source_id, deniedFailure, claim.reconciliation],
-                )
-              ).rows,
-            )
-            .map(row => `${row.repository_id}:${row.kind}`),
-        ),
       );
       const verified = new Map<string, boolean>();
       for (const repositoryId of new Set(rows.map(row => row.repository_id)))
@@ -1614,9 +1734,25 @@ export function createGitHubKnowledge({
         if (cursor.phase === 'listing') await listing();
         else if (await sweep()) {
           await fenced(work, token, async tx => {
+            const kept = new Set(selected.map(repository => repository.repository_id));
+            // A change GitHub reported during the pass moved next_attempt_at past the claim's, so the next pass starts now.
             await tx.client.query(
-              `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1`,
-              [claim.source_id, initialCursor(), Object.keys(cursor.isolated ?? {}).length ? 'transient' : null],
+              `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,
+              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+interval '1 minute' END WHERE source_id=$1`,
+              [
+                claim.source_id,
+                initialCursor({
+                  marks: Object.fromEntries(Object.entries(cursor.marks ?? {}).filter(([id]) => kept.has(id))),
+                  ...(incremental
+                    ? {
+                        ...(cursor.reconciledAt ? { reconciledAt: cursor.reconciledAt } : {}),
+                        ...(cursor.reconcile ? { reconcile: true } : {}),
+                      }
+                    : { reconciledAt: new Date(clock.now()).toISOString() }),
+                }),
+                Object.keys(cursor.isolated ?? {}).length ? 'transient' : null,
+                claim.marker,
+              ],
             );
           });
           telemetry.recordImport('source', 'ready');
