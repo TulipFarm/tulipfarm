@@ -364,6 +364,10 @@ try {
   await page.getByRole('button', { name: 'Retry notes.txt' }).click();
   await page.getByText('notes.txt: Ready to send · Storage only, not read by this chat', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Keep this upload draft');
+  await page.getByRole('button', { name: 'Inspect notes.txt', exact: true }).click();
+  await page.getByRole('dialog').getByText('Customer notes', { exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page.getByRole('button', { name: 'Remove notes.txt' }).click();
   // Editor keys keep ProseMirror's state in step; a DOM fill('') can empty the text while the draft stays dirty.
   await page.getByLabel('Message', { exact: true }).focus();
@@ -760,6 +764,28 @@ try {
   assert.equal(writes.at(-1).body.parts[1].kind, 'attachment');
   // Leaving while the send is still in flight asks first (cloud private-conversations.tsx:377); an enabled Stop reply means it was accepted.
   await page.getByRole('button', { name: 'Stop reply', exact: true, disabled: false }).waitFor();
+  // A sent attachment sits on the sender's side and opens in the viewer instead of downloading.
+  await page.route('**/attachments/*/content', route =>
+    route.fulfill({
+      body: 'Draft attachment',
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
+    }),
+  );
+  const sentChip = page.getByRole('button', { name: 'Inspect draft.txt', exact: true });
+  const sentBubble = page.locator('[data-slot="message-bubble"]', { hasText: 'An attachment-first chat' });
+  const [chipBox, bubbleBox] = [await sentChip.boundingBox(), await sentBubble.boundingBox()];
+  assert.ok(
+    Math.abs(chipBox.x + chipBox.width - (bubbleBox.x + bubbleBox.width)) < 24,
+    'Sent attachments align with the sender',
+  );
+  let downloaded = false;
+  page.once('download', () => (downloaded = true));
+  await sentChip.click();
+  await page.getByRole('dialog').getByText('Draft attachment', { exact: true }).waitFor();
+  assert.equal(downloaded, false);
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page.getByRole('link', { name: 'New chat', exact: true }).click();
   await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).textContent(), '');
