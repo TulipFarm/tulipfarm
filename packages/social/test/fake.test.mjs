@@ -13,6 +13,7 @@ test('the fake implements every adapter member, including the optional ones', ()
     'scopes',
     'authorizationUrl',
     'exchangeCode',
+    'identity',
     'refresh',
     'revoke',
     'listChannels',
@@ -123,6 +124,7 @@ test('scripted results are copies, so callers cannot change the script', async (
 test('auth, channel, engagement, analytics and retention methods are scriptable', async () => {
   const adapter = createFakeAdapter()
     .script('exchangeCode', fakeToken)
+    .script('identity', { platformUserId: 'u1', handle: null, displayName: 'One' })
     .script('refresh', { throw: 'reconnect' })
     .script('revoke', 'failed')
     .script('listChannels', [])
@@ -133,6 +135,7 @@ test('auth, channel, engagement, analytics and retention methods are scriptable'
     .script('analytics', [{ name: 'likes', value: 1, status: 'ok' }])
     .script('retentionCheck', 'delete');
   assert.deepEqual(await adapter.exchangeCode({}), fakeToken);
+  assert.equal((await adapter.identity(fakeToken)).platformUserId, 'u1');
   await assert.rejects(adapter.refresh(fakeToken), { errorClass: 'reconnect' });
   assert.equal(await adapter.revoke(fakeToken), 'failed');
   assert.deepEqual(await adapter.listChannels(fakeToken), []);

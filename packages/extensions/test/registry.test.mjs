@@ -16,6 +16,7 @@ import {
   reportError,
   resetExtensions,
   shutdownExtensions,
+  socialPlatformApps,
   unlimitedCredits,
   providerCostPricing,
 } from '../src/index.ts';
@@ -49,6 +50,7 @@ test('every slot is a no-op by default', async () => {
   await creditGate().debit(tx, 1n, { id: 'r', activity: 'chat' });
   await creditGate().debit(tx, -1n, { id: 'r', activity: 'chat' });
   assert.equal(flagProvider(), undefined);
+  assert.equal(socialPlatformApps(), undefined);
   assert.deepEqual(extensionMigrations(), []);
   captureAnalytics({ event: 'e', distinctId: 'd' });
   reportError(new Error('x'));
@@ -186,6 +188,48 @@ test('credit gate and flag provider are single slots', async () => {
     ),
     /"twice" cannot set the flag provider: "twice" already set it/,
   );
+});
+
+test('social platform apps are a single slot for the hosted edition (social PRODUCT 3, 4)', async () => {
+  const resolver = {
+    resolve: platform => (platform === 'x' ? { kind: 'workspace-app-required' } : { kind: 'unavailable' }),
+  };
+  await registerExtension(
+    defineExtension({
+      name: 'hosted',
+      register(slots) {
+        slots.socialPlatformApps(resolver);
+      },
+    }),
+    context,
+  );
+  assert.equal(socialPlatformApps(), resolver);
+  await assert.rejects(
+    registerExtension(
+      defineExtension({
+        name: 'other',
+        register(slots) {
+          slots.socialPlatformApps(resolver);
+        },
+      }),
+      context,
+    ),
+    /"other" cannot set the social platform apps: "hosted" already set it/,
+  );
+  resetExtensions();
+  await assert.rejects(
+    registerExtension(
+      defineExtension({
+        name: 'broken',
+        register(slots) {
+          slots.socialPlatformApps({});
+        },
+      }),
+      context,
+    ),
+    /"broken" social platform apps need a resolve function/,
+  );
+  assert.equal(socialPlatformApps(), undefined);
 });
 
 test('credit pricing defaults to provider cost and is a single slot', async () => {

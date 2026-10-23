@@ -12,6 +12,7 @@ import type {
   HookSubscriber,
   ProductAnalytics,
   ServerExtension,
+  SocialPlatformApps,
   UsageRecord,
   UsageSink,
 } from './slots.ts';
@@ -38,6 +39,7 @@ type State = {
   creditGate?: Registered<CreditGate>;
   creditPricing?: Registered<CreditPricing>;
   flagProvider?: Registered<FlagProvider>;
+  socialPlatformApps?: Registered<SocialPlatformApps>;
   usageSinks: Registered<UsageSink>[];
   analytics: Registered<ProductAnalytics>[];
   errorReporters: Registered<ErrorReporter>[];
@@ -101,7 +103,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
     migrations: [],
   };
   const wrap = <T>(value: T): Registered<T> => ({ extension: extension.name, value });
-  const single = (slot: 'creditGate' | 'creditPricing' | 'flagProvider', label: string) => {
+  const single = (slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps', label: string) => {
     const owner = current[slot]?.extension ?? staged[slot]?.extension;
     if (owner)
       throw new ExtensionRegistrationError(
@@ -139,6 +141,14 @@ export async function registerExtension(extension: ServerExtension, context: Ext
       single('flagProvider', 'flag provider');
       staged.flagProvider = wrap(provider);
     }),
+    socialPlatformApps: guard(resolver => {
+      single('socialPlatformApps', 'social platform apps');
+      if (typeof resolver?.resolve !== 'function')
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" social platform apps need a resolve function`,
+        );
+      staged.socialPlatformApps = wrap(resolver);
+    }),
     usageSink: guard(sink => {
       staged.usageSinks.push(wrap(sink));
     }),
@@ -169,6 +179,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   if (staged.creditGate) current.creditGate = staged.creditGate;
   if (staged.creditPricing) current.creditPricing = staged.creditPricing;
   if (staged.flagProvider) current.flagProvider = staged.flagProvider;
+  if (staged.socialPlatformApps) current.socialPlatformApps = staged.socialPlatformApps;
   current.usageSinks.push(...staged.usageSinks);
   current.analytics.push(...staged.analytics);
   current.errorReporters.push(...staged.errorReporters);
@@ -198,6 +209,11 @@ export function creditUnitsForProviderCost(picoUsd: bigint): bigint {
 /** The registered flag provider, or undefined to use the built-in env defaults. */
 export function flagProvider(): FlagProvider | undefined {
   return state().flagProvider?.value;
+}
+
+/** The hosted social platform apps, or undefined when operator settings supply them. */
+export function socialPlatformApps(): SocialPlatformApps | undefined {
+  return state().socialPlatformApps?.value;
 }
 
 /** Extension migrations in load order, each tagged with its owning extension. */

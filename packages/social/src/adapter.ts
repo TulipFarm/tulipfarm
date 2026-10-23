@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type {
   AccessTier,
+  AccountIdentity,
   AnalyticsRead,
   Capability,
   Channel,
@@ -23,6 +24,7 @@ import type {
 
 export type {
   AccessTier,
+  AccountIdentity,
   AnalyticsRead,
   Capability,
   Channel,
@@ -145,8 +147,10 @@ export interface SocialPlatformAdapter {
   scopes(tier: AccessTier, capabilities: Capability[]): string[];
   authorizationUrl(input: AuthorizationInput): URL;
   exchangeCode(input: CodeExchangeInput): Promise<TokenSet>;
-  refresh?(token: TokenSet): Promise<TokenSet>;
-  revoke?(token: TokenSet): Promise<'revoked' | 'failed'>;
+  /** The platform account the token belongs to; a reconnect to a different one is refused. */
+  identity(token: TokenSet): Promise<AccountIdentity>;
+  refresh?(token: TokenSet, app: PlatformAppCredentials): Promise<TokenSet>;
+  revoke?(token: TokenSet, app: PlatformAppCredentials): Promise<'revoked' | 'failed'>;
   listChannels(token: TokenSet): Promise<DiscoveredChannel[]>;
   validate(variant: VariantInput, channel: Channel, tier: AccessTier): ValidationError[];
   targetRules?(channel: Channel, target: Target, token: TokenSet): Promise<TargetRules>;

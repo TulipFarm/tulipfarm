@@ -28,6 +28,7 @@ CREATE TABLE {{schema}}.tf_social_accounts (
   app_source text NOT NULL CHECK (app_source IN ('workspace','hosted','operator')),
   platform_app_id uuid,
   app_generation integer CHECK (app_generation > 0),
+  app_fingerprint text CHECK (app_fingerprint ~ '^[a-f0-9]{64}$'),
   generation integer NOT NULL DEFAULT 1 CHECK (generation > 0),
   grants_version integer NOT NULL DEFAULT 1 CHECK (grants_version > 0),
   state text NOT NULL CHECK (state IN ('authorizing','active','refreshing','reconnect-required','disabled','disconnected')),
@@ -43,6 +44,7 @@ CREATE TABLE {{schema}}.tf_social_accounts (
   CHECK ((ownership = 'business') = (owning_team_id IS NOT NULL)),
   CHECK ((app_source = 'workspace') = (platform_app_id IS NOT NULL)),
   CHECK (platform_app_id IS NULL OR app_generation IS NOT NULL),
+  CHECK (app_source = 'workspace' OR app_fingerprint IS NOT NULL),
   CHECK (state NOT IN ('active','refreshing') OR (credential IS NOT NULL AND identity IS NOT NULL)),
   CHECK (state <> 'refreshing' OR refresh_started_at IS NOT NULL)
 );
@@ -380,7 +382,7 @@ REVOKE ALL ON {{schema}}.tf_social_platform_apps, {{schema}}.tf_social_accounts,
 
 GRANT SELECT, INSERT ON {{schema}}.tf_social_platform_apps, {{schema}}.tf_social_accounts, {{schema}}.tf_social_account_attempts TO {{runtime}};
 GRANT UPDATE (name, client_secret, access_tier, generation) ON {{schema}}.tf_social_platform_apps TO {{runtime}};
-GRANT UPDATE (app_generation, generation, grants_version, state, identity, scopes, credential, credential_version, expires_at, refresh_started_at) ON {{schema}}.tf_social_accounts TO {{runtime}};
+GRANT UPDATE (app_generation, app_fingerprint, generation, grants_version, state, identity, scopes, credential, credential_version, expires_at, refresh_started_at) ON {{schema}}.tf_social_accounts TO {{runtime}};
 GRANT UPDATE (generation, state_hash, session_hash, membership_id, state, verifier, expires_at) ON {{schema}}.tf_social_account_attempts TO {{runtime}};
 GRANT SELECT, INSERT, DELETE ON {{schema}}.tf_social_account_grants, {{schema}}.tf_social_channel_grants TO {{runtime}};
 GRANT SELECT, INSERT ON {{schema}}.tf_social_channels TO {{runtime}};
