@@ -916,7 +916,7 @@
   color: var(--foreground);
 }
 .workflow-diagram .react-flow__controls-button:hover {
-  background: var(--accent);
+  background: linear-gradient(var(--accent) 0 0) var(--card);
 }
 .workflow-diagram .react-flow__controls-button:focus-visible {
   outline: 2px solid var(--ring);
@@ -1011,10 +1011,10 @@
   cursor: pointer;
 }
 .workflow-step-row:hover {
-  background: var(--muted);
+  background: linear-gradient(var(--muted) 0 0) var(--card);
 }
 .workflow-step-row:active {
-  background: var(--accent);
+  background: linear-gradient(var(--accent) 0 0) var(--card);
 }
 .workflow-step-row[aria-pressed='true'] {
   border-color: var(--ring);

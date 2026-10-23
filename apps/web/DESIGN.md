@@ -8,20 +8,20 @@ colors:
   primary-active: 'light-dark(#105825, #a6e2b6)'
   primary-text: 'light-dark(#146c2f, #75ce8e)'
   primary-subtle: 'light-dark(#edf7f0, #1b3323)'
-  background: 'light-dark(#f9f9fa, #101113)'
+  background: 'light-dark(#f9f9fa, #121213)'
   foreground: 'light-dark(#1b1b1b, #ffffff)'
   foreground-secondary: 'light-dark(#2f2f31, #e3e4e6)'
   faint-foreground: 'light-dark(#9c9d9f, #565759)'
-  card: 'light-dark(#ffffff, #16171a)'
-  card-raised: 'light-dark(#fafafb, #303134)'
-  popover: 'light-dark(#ffffff, #28292b)'
-  sidebar: 'light-dark(#efeff0, #09090b)'
-  secondary: 'light-dark(#f0f0f2, #28292e)'
-  muted: 'light-dark(#f5f5f7, #202125)'
-  muted-foreground: 'light-dark(#65666e, #a5a6af)'
-  accent: 'light-dark(#f5f5f7, #202125)'
-  border: 'light-dark(#e8e8e8, #2d2e31)'
-  input: 'light-dark(#dedee0, #26272b)'
+  card: 'light-dark(#ffffff, #161617)'
+  card-raised: 'light-dark(#ffffff, #1a1a1b)'
+  popover: 'light-dark(#ffffff, #212123)'
+  sidebar: 'light-dark(#efeff0, #09090a)'
+  secondary: 'light-dark(#00000012, #ffffff14)'
+  muted: 'light-dark(#0000000a, #ffffff0d)'
+  muted-foreground: 'light-dark(#5c5c5e, #949597)'
+  accent: 'light-dark(#0000000a, #ffffff0d)'
+  border: 'light-dark(#dedede, #232426)'
+  input: 'light-dark(#d3d3d3, #323336)'
   field: 'light-dark(#89898e, #727277)'
   ring: 'light-dark(#188038, #75ce8e)'
   destructive: 'light-dark(#b42332, #ff929d)'
@@ -146,9 +146,9 @@ Neutral navigation and clear text hierarchy keep records, conversations, and
 actions easy to scan. Controls are compact and restrained. Green identifies
 the main action within a region.
 
-The owner confirmed this description, the name "Action green", and the existing
-depth hierarchy on 29 September 2026. This snapshot was refreshed from code on
-1 October 2026 at revision `2e076cb2`. Every color, the font, the type scale,
+The owner confirmed this description and the name "Action green" on
+29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
+snapshot was refreshed from code on 23 October 2026 against Sprout 0.8.0. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -165,7 +165,8 @@ not a new browser verification. The broader implementation guide is
 - Compact controls with larger touch targets.
 - Neutral navigation and green primary actions.
 - Shared typography and semantic colors in both themes.
-- Flat content panels with elevation for controls and overlays.
+- Few backgrounds with small lightness steps; depth comes from hairlines, soft
+  shadows, and translucent hover overlays.
 
 ## Colors
 
@@ -236,7 +237,18 @@ the shell it renders a 24px heading in place.
 
 Ordinary panels stay flat. Spacing and thin borders separate content. Subtle shadows
 lift controls, stronger shadows distinguish popovers, and the largest shadows
-belong to dialogs. Exact shadow expressions live in the accompanying
+belong to dialogs.
+
+Solid backgrounds follow one short ladder, lighter meaning closer to the user:
+`sidebar`, `background`, `card`, `card-raised`, then `popover`. In dark mode each
+step is 0.02 to 0.03 OKLCH lightness; in light mode `card`, `card-raised` and
+`popover` are white and separate by border and shadow. `muted`, `accent` and
+`secondary` are translucent overlays (white in dark mode, black in light mode), so
+hover and selection read the same on every background. Anything that must hide
+content scrolling beneath it, such as sticky headers, pinned columns and floating
+controls, layers the overlay on an opaque base:
+`linear-gradient(var(--muted) 0 0) var(--card)`. Mixing an overlay into a base
+with `color-mix` stays translucent. Exact shadow expressions live in the accompanying
 design sidecar and originate in `src/index.css`.
 
 Transitions default to 150ms with `ease`; dialogs also use 150ms. Sidebar movement
@@ -285,8 +297,9 @@ feedback, with error text linked through `aria-describedby`.
 
 Cards have flat fills, a subtle ring, and 16px internal spacing. The small size uses
 12px spacing. Inside sheets, sibling settings groups can use `Card surface="raised"`.
-Its `card-raised` fill and foreground edge separate it from the sheet; light mode
-adds control elevation, while dark mode uses a lighter fill without a black shadow.
+Its `card-raised` fill and edge separate it from the sheet: in dark mode the fill is
+one small step lighter than `card`, and in light mode it stays white and lifts with
+control elevation.
 Do not nest raised cards. Keep account identity, status, and its outlined management
 button together; repository configuration belongs in a separate panel.
 Default badges have a tinted green fill and green text. Feedback
@@ -304,8 +317,9 @@ disclosure, and do not suppress keyboard focus rings on controls. Preserve Tab,
 Escape, and focus return to the opening control.
 
 Navigation uses compact 28px rows with 13px medium labels, 16px icons, and 8px gaps.
-The active row uses a neutral accent fill and 8px corners. Inactive rows use muted
-text; hover strengthens the text and adds a translucent accent fill. Mobile rows
+The active row uses the stronger translucent active fill and 8px corners. Inactive
+rows use muted text; hover strengthens the text and adds the lighter translucent
+hover fill. Mobile rows
 are at least 44px tall. The collapsed rail shows tooltips for navigation labels.
 
 `SearchField` (`@tulipfarm/sprout/search-field`) is a 384px-max list filter with

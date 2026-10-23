@@ -96,7 +96,7 @@
 .calendar-entry[data-kind='workflow'],
 .calendar-kind-mark[data-kind='workflow'] {
   --event-ink: var(--foreground-secondary);
-  --event-paper: var(--secondary);
+  --event-paper: linear-gradient(var(--secondary) 0 0) var(--card);
 }
 .calendar-kind-mark {
   display: grid;
