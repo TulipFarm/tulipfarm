@@ -9,11 +9,11 @@ import { UnsavedChanges } from '@/features/tables/feedback';
 import { useSettingsCommand } from '@/features/settings/use-settings-command';
 import { CommandFeedback } from '@/features/settings/command-feedback';
 import { availabilityApi, type Availability, type AvailabilityCommand } from './availability-api';
-import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
+import type { ModelCatalogFamily, ModelCatalogImageModel } from '@tulipfarm/config/model-catalog';
 import { modelAvailabilityCommandSchema } from '@tulipfarm/agents/model-policy-contracts';
 import { commandRecovery } from '@/features/settings/command-recovery';
 import { ModelRead } from './read';
-import { creditRates } from './credit-rates';
+import { creditRates, imageCreditRates } from './credit-rates';
 import { matchesModel } from './model-brand';
 import { ModelLogo } from './model-logo';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -55,6 +55,7 @@ export function ModelAvailability({
   userId,
   workspaceId,
   families,
+  imageModels = [],
   admin,
   concealed,
   writable,
@@ -66,6 +67,8 @@ export function ModelAvailability({
   userId: string;
   workspaceId: string;
   families: ModelCatalogFamily[];
+  /** Image models, listed after the chat families with the same access switch. */
+  imageModels?: ModelCatalogImageModel[];
   admin: boolean;
   concealed: boolean;
   writable: boolean;
@@ -138,11 +141,12 @@ export function ModelAvailability({
     read.state.refreshing ||
     !!read.state.error;
   const conflict = command.state.kind === 'conflict';
-  const listed = (items: Availability[]) => items.filter(row => families.some(family => family.id === row.familyId));
-  const shown = (items: Availability[]) =>
-    items.filter(row =>
-      matchesModel(families.find(family => family.id === row.familyId)?.displayName ?? row.familyId, query),
-    );
+  const isFamily = (row: Availability) => families.some(family => family.id === row.familyId);
+  const imageOf = (id: string) => imageModels.find(image => image.id === id);
+  const displayName = (id: string) =>
+    families.find(family => family.id === id)?.displayName ?? imageOf(id)?.displayName ?? id;
+  const listed = (items: Availability[]) => items.filter(row => isFamily(row) || imageOf(row.familyId));
+  const shown = (items: Availability[]) => items.filter(row => matchesModel(displayName(row.familyId), query));
   return (
     <>
       <UnsavedChanges dirty={conflict} />
@@ -170,7 +174,7 @@ export function ModelAvailability({
                       description="Policies appear here after model families are configured."
                     />
                   )}
-                  {!!items.length && items.every(row => !row.enabled) && (
+                  {items.some(isFamily) && items.filter(isFamily).every(row => !row.enabled) && (
                     <Alert>
                       <AlertDescription>
                         All model families are disabled. Model execution is unavailable until an admin enables an
@@ -184,14 +188,24 @@ export function ModelAvailability({
                     <DataList aria-label="Models" columns="settings" headings={modelHeadings}>
                       {shown(items).map(row => {
                         const family = families.find(family => family.id === row.familyId);
+                        const image = imageOf(row.familyId);
                         const pending =
                           command.state.kind === 'sending' && command.state.command.familyId === row.familyId;
-                        const name = family?.displayName ?? row.familyId;
+                        const name = displayName(row.familyId);
                         const parts: AccessRowParts = {
                           name,
-                          icon: <ModelLogo vendor={family?.vendor} size="sm" />,
-                          notes: <>{pending && <span>Saving…</span>}</>,
-                          rates: family && <span className="tabular-nums">{creditRates(family)}</span>,
+                          icon: <ModelLogo vendor={family?.vendor ?? image?.vendor} size="sm" />,
+                          notes: (
+                            <>
+                              {!family && image && <span>Creates images</span>}
+                              {pending && <span>Saving…</span>}
+                            </>
+                          ),
+                          rates: family ? (
+                            <span className="tabular-nums">{creditRates(family)}</span>
+                          ) : (
+                            image && <span className="tabular-nums">{imageCreditRates(image)}</span>
+                          ),
                           control: admin ? (
                             <Switch
                               aria-label={`Allow ${name}`}
@@ -240,8 +254,7 @@ export function ModelAvailability({
                         Reload model access
                       </Button>
                       <p>
-                        Requested change: {draft.enabled ? 'enable' : 'disable'}{' '}
-                        {families.find(family => family.id === draft.familyId)?.displayName ?? draft.familyId}.
+                        Requested change: {draft.enabled ? 'enable' : 'disable'} {displayName(draft.familyId)}.
                       </p>
                       <Button
                         disabled={

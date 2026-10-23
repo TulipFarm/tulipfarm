@@ -28,6 +28,14 @@ const family = z.strictObject({
     .describe(
       'Date-effective base-context output rate, before aggregate rounding; null when unknown or the family is unmetered',
     ),
+  imageInput: z
+    .boolean()
+    .default(false)
+    .describe('Reads attached images directly; otherwise it reads their recognised text'),
+  imageModelId: modelFamilyIdSchema
+    .nullable()
+    .default(null)
+    .describe("Image model paired with this family; null uses the workspace's default image model"),
 });
 
 export const modelCatalogFamilySchema = z.discriminatedUnion('available', [
@@ -51,8 +59,38 @@ export const modelCatalogFamilySchema = z.discriminatedUnion('available', [
   }),
 ]);
 
+const aspectCredits = z.strictObject({
+  square: z.number().nonnegative(),
+  portrait: z.number().nonnegative(),
+  landscape: z.number().nonnegative(),
+});
+export const modelCatalogImageModelSchema = z.strictObject({
+  id: modelFamilyIdSchema,
+  displayName: z.string().min(1),
+  vendor: modelIdentifierSchema,
+  provider: modelProviderSchema,
+  edits: z.boolean().describe('Can edit or combine source images'),
+  available: z.boolean(),
+  unavailableReason: z
+    .enum(['image-model-unavailable', 'image-model-paused', 'workspace-disabled'])
+    .nullable()
+    .describe(
+      'Null when available. Not served by this deployment, paused by the operator, or disabled by the workspace.',
+    ),
+  creditsPerImage: z
+    .strictObject({ standard: aspectCredits, high: aspectCredits })
+    .nullable()
+    .describe('Credits per generated image by quality and shape; null when priced by tokens or unmetered'),
+  outputCreditsPerMillionTokens: z
+    .number()
+    .nonnegative()
+    .nullable()
+    .describe('Date-effective base output rate for token-priced image models; null otherwise'),
+});
+
 export const modelCatalogSchema = z.strictObject({
   families: z.array(modelCatalogFamilySchema),
+  imageModels: z.array(modelCatalogImageModelSchema).default([]),
   defaultChatFamilyId: modelFamilyIdSchema
     .nullable()
     .optional()
@@ -60,3 +98,4 @@ export const modelCatalogSchema = z.strictObject({
 });
 export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
 export type ModelCatalogFamily = z.infer<typeof modelCatalogFamilySchema>;
+export type ModelCatalogImageModel = z.infer<typeof modelCatalogImageModelSchema>;

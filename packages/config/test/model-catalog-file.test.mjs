@@ -94,6 +94,125 @@ test('the document-vision model accepts image input and has a single owner', () 
   );
 });
 
+const imageModel = (overrides = {}) => ({
+  id: 'gpt-image',
+  name: 'GPT Image',
+  vendor: 'openai',
+  routes: [{ provider: 'openai', model: 'gpt-image-2', api: 'openai-images' }],
+  aspects: { square: '1024x1024', portrait: '1024x1536', landscape: '1536x1024' },
+  pricing: {
+    usdPerImage: {
+      standard: { square: 0.04, portrait: 0.06, landscape: 0.06 },
+      high: { square: 0.17, portrait: 0.25, landscape: 0.25 },
+    },
+  },
+  ...overrides,
+});
+
+test('image models take defaults, and a model pairs with one by id', () => {
+  const parsed = modelCatalogFileSchema.parse(
+    catalog([model({ imageModel: 'gpt-image', capabilities: { imageInput: true } })], {
+      imageModels: [imageModel()],
+    }),
+  );
+  assert.equal(parsed.models[0].imageModel, 'gpt-image');
+  assert.deepEqual(
+    [parsed.imageModels[0].default, parsed.imageModels[0].paused, parsed.imageModels[0].edits],
+    [false, false, false],
+  );
+  assert.equal(parsed.imageModels[0].maxSources, 1);
+  assert.deepEqual(modelCatalogFileSchema.parse(catalog([model()])).imageModels, []);
+  assert.equal(modelCatalogFileSchema.parse(catalog([model()])).models[0].imageModel, null);
+  rejects(
+    catalog([model({ imageModel: 'missing' })]),
+    /^models\.0\.imageModel: No entry in imageModels has id "missing"/,
+  );
+});
+
+test('image input limits need image input', () => {
+  const limits = { maxInputTokens: 200000, maxOutputTokens: 64000, imageInputTokens: 2000, maxImageBytes: 1048576 };
+  assert.deepEqual(problems(catalog([model({ limits, capabilities: { imageInput: true } })])), []);
+  rejects(
+    catalog([model({ limits })]),
+    /^models\.0\.limits\.imageInputTokens: Only for a model with "imageInput": true/,
+  );
+  rejects(catalog([model({ limits })]), /^models\.0\.limits\.maxImageBytes: Only for a model with "imageInput": true/);
+  rejects(
+    catalog([model({ limits: { ...limits, maxImageBytes: 1024 }, capabilities: { imageInput: true } })]),
+    /^models\.0\.limits\.maxImageBytes:/,
+  );
+});
+
+test('image models have unique ids, served routes and at most one unpaused default', () => {
+  const images = (...entries) => catalog([model()], { imageModels: entries });
+  assert.deepEqual(
+    problems(
+      images(
+        imageModel({ default: true }),
+        imageModel({ id: 'grok-image', routes: [{ provider: 'xai', model: 'grok-2-image', api: 'xai-images' }] }),
+      ),
+    ),
+    [],
+  );
+  rejects(images(imageModel(), imageModel()), /^imageModels\.1\.id: Duplicate model id "gpt-image"/);
+  rejects(images(imageModel({ id: 'claude-sonnet' })), /^imageModels\.0\.id: Duplicate model id "claude-sonnet"/);
+  rejects(
+    images(imageModel({ default: true }), imageModel({ id: 'other', default: true })),
+    /^imageModels: At most one image model can be the default; found 2/,
+  );
+  rejects(
+    images(imageModel({ default: true, paused: true })),
+    /^imageModels\.0\.paused: The default image model cannot be paused/,
+  );
+  rejects(
+    images(imageModel({ routes: [{ provider: 'anthropic', model: 'm', api: 'openai-images' }] })),
+    /^imageModels\.0\.routes\.0\.api: Provider type anthropic does not serve openai-images/,
+  );
+  rejects(
+    images(imageModel({ routes: [{ provider: 'nowhere', model: 'm', api: 'openai-images' }] })),
+    /^imageModels\.0\.routes\.0\.provider: Unknown provider "nowhere"/,
+  );
+  rejects(
+    images(
+      imageModel({
+        routes: [
+          { provider: 'openai', model: 'a', api: 'openai-images' },
+          { provider: 'openai', model: 'b', api: 'openai-images' },
+        ],
+      }),
+    ),
+    /^imageModels\.0\.routes\.1\.provider: Duplicate route provider "openai"/,
+  );
+  assert.deepEqual(
+    problems(images(imageModel({ routes: [{ provider: 'azure', model: 'm', api: 'openai-images' }] }))),
+    [],
+  );
+});
+
+test('only editing image models take more than one source, and prices are exact', () => {
+  const images = entry => catalog([model()], { imageModels: [entry] });
+  assert.deepEqual(problems(images(imageModel({ edits: true, maxSources: 4 }))), []);
+  rejects(
+    images(imageModel({ maxSources: 4 })),
+    /^imageModels\.0\.maxSources: Only a model with "edits": true takes source images/,
+  );
+  rejects(
+    images(
+      imageModel({
+        pricing: {
+          usdPerImage: {
+            standard: { square: 0.0400001, portrait: 0.06, landscape: 0.06 },
+            high: { square: 0.17, portrait: 0.25, landscape: 0.25 },
+          },
+        },
+      }),
+    ),
+    /^imageModels\.0\.pricing\.usdPerImage\.standard\.square: At most 6 decimal places/,
+  );
+  assert.deepEqual(problems(images(imageModel({ pricing: 'unmetered' }))), []);
+  assert.deepEqual(problems(images(imageModel({ pricing: [{ usdPerMillionTokens: { input: 5, output: 40 } }] }))), []);
+});
+
 const routes = (...providers) => ({
   routes: providers.map(provider => ({ provider, model: 'm' })),
 });

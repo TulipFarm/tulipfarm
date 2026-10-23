@@ -188,6 +188,8 @@ test('catalog prices and families are visible but disabled without trusted eligi
     pricingRevision: null,
     inputCreditsPerMillionTokens: 100,
     outputCreditsPerMillionTokens: 500,
+    imageInput: false,
+    imageModelId: null,
     fallbackFor: [],
   });
   for (const family of catalog.families) {
@@ -220,6 +222,8 @@ test('members and admins receive only eligible, directional non-self fallback pa
         unavailableReason: null,
         inputCreditsPerMillionTokens: 1000,
         outputCreditsPerMillionTokens: 5000,
+        imageInput: false,
+        imageModelId: null,
         mappingRevision: 'families-2026-10-19.1',
         pricingRevision: 'prices-2026-10-19.1',
         fallbackFor: ['claude-opus'],
@@ -313,6 +317,8 @@ test('trusted rollback supplies the displayed version and prices instead of the 
       pricingRevision: 'prices-2026-10-19.1',
       inputCreditsPerMillionTokens: 300,
       outputCreditsPerMillionTokens: 1500,
+      imageInput: false,
+      imageModelId: null,
       fallbackFor: [],
     },
   );
@@ -381,6 +387,8 @@ test('trusted future bundle versions and prices are projected without original-p
       pricingRevision: 'prices-future-2',
       inputCreditsPerMillionTokens: 400,
       outputCreditsPerMillionTokens: 1600,
+      imageInput: false,
+      imageModelId: null,
       fallbackFor: [],
     },
   );

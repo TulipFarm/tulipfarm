@@ -4,7 +4,9 @@ import type { z } from 'zod';
 import {
   modelCatalogFileSchema,
   modelProviderDefaults,
+  type ImageModelApi,
   type ModelCatalogFile,
+  type ModelCatalogFileImageModel,
   type ModelCatalogFileModel,
   type ModelCatalogRole,
 } from './model-catalog-file.ts';
@@ -116,6 +118,10 @@ export type ServedModel = Omit<ModelCatalogFileModel, 'pricing'> & {
   /** Rates of `pricing`; unmetered models record every token category at zero. */
   readonly rates: readonly ModelPrice[];
 };
+export type ServedImageModel = ModelCatalogFileImageModel & {
+  /** The first route whose key (and endpoint, where one is required) is set. */
+  readonly route: ServedModelRoute & { readonly api: ImageModelApi };
+};
 export type ServedModelCatalog = {
   /** Where the catalog came from: `MODEL_CATALOG_FILE=<path>`, `MODEL_CATALOG` or `shipped catalog`. */
   readonly source: string;
@@ -129,6 +135,11 @@ export type ServedModelCatalog = {
   model(id: string): ServedModel | undefined;
   /** The served model with `role`, or null when none has it. */
   role(role: ModelCatalogRole): ServedModel | null;
+  /** Served image models, in catalog order. */
+  readonly imageModels: readonly ServedImageModel[];
+  imageModel(id: string): ServedImageModel | undefined;
+  /** The served `"default": true` image model, or null. Another image model never replaces it. */
+  readonly defaultImageModel: ServedImageModel | null;
   /** Startup notes about skipped models and a moved default. */
   readonly warnings: readonly string[];
 };
@@ -155,7 +166,9 @@ function providerOf(catalog: ModelCatalogFile, key: string) {
 
 /** Variable names the catalog reads: provider keys and endpoints, including built-in defaults. */
 export function modelCatalogEnvNames(catalog: ModelCatalogFile): readonly string[] {
-  const providers = new Set(catalog.models.flatMap(model => model.routes.map(route => route.provider)));
+  const providers = new Set(
+    [...catalog.models, ...catalog.imageModels].flatMap(model => model.routes.map(route => route.provider)),
+  );
   return [...providers].flatMap(key => {
     const provider = providerOf(catalog, key);
     return [provider.apiKeyEnv, provider.endpointEnv];
@@ -200,30 +213,43 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     throw new Error(`Invalid server model configuration: ${(error as Error).message}`);
   }
   const fail = (detail: string) => new ModelCatalogError(source, detail);
-  const served: ServedModel[] = [];
-  const skipped: string[] = [];
-  for (const [index, model] of catalog.models.entries()) {
+  /** The first route of `routes` whose provider has its key (and endpoint) set, and the variables it needs. */
+  function firstRoute(at: string, routes: readonly { provider: string; model: string }[]) {
     let route: ServedModelRoute | undefined;
+    let routeIndex = -1;
     const needed: string[] = [];
-    for (const [routeIndex, { provider: key, model: name }] of model.routes.entries()) {
+    for (const [index, { provider: key, model: name }] of routes.entries()) {
       const provider = providerOf(catalog, key);
       const endpointRequired = provider.type === 'azure' || provider.type === 'openai-compatible';
       const configured = value(env, provider.endpointEnv);
       needed.push(endpointRequired ? `${provider.apiKeyEnv} and ${provider.endpointEnv}` : provider.apiKeyEnv);
       if (!value(env, provider.apiKeyEnv) || (endpointRequired && !configured)) continue;
-      const at = `models.${index}.routes.${routeIndex}: ${provider.endpointEnv}`;
+      const where = `${at}.routes.${index}: ${provider.endpointEnv}`;
       let endpoint: string | undefined = defaultModelEndpoints[provider.type as BaseUrlProvider];
       if (configured) {
         const shape = modelEndpointShapeProblem(configured);
-        if (shape) throw fail(`${at} ${shape}`);
+        if (shape) throw fail(`${where} ${shape}`);
         endpoint = normalizeModelEndpoint(configured);
         const problem = modelEndpointProblem(provider.type, endpoint, env);
-        if (problem) throw fail(`${at} ${problem}`);
+        if (problem) throw fail(`${where} ${problem}`);
         const appended = appendedPaths[provider.type as BaseUrlProvider];
-        if (appended && endpoint.endsWith(appended)) throw fail(`${at} must not end in ${appended}; it is appended`);
+        if (appended && endpoint.endsWith(appended)) throw fail(`${where} must not end in ${appended}; it is appended`);
       }
-      route ??= Object.freeze({ provider: key, ...provider, model: name, endpoint: endpoint! });
+      if (!route) {
+        route = Object.freeze({ provider: key, ...provider, model: name, endpoint: endpoint! });
+        routeIndex = index;
+      }
     }
+    return { route, routeIndex, needed };
+  }
+  const missing = (at: string, id: string, needed: string[]) =>
+    fail(
+      `${at} "${id}" has no route with its key set; set ${needed.join(', or ')}, remove the model, or set "missingKeys": "skip"`,
+    );
+  const served: ServedModel[] = [];
+  const skipped: string[] = [];
+  for (const [index, model] of catalog.models.entries()) {
+    const { route, needed } = firstRoute(`models.${index}`, model.routes);
     if (route)
       served.push(
         Object.freeze({
@@ -234,10 +260,17 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
         }),
       );
     else if (catalog.missingKeys === 'skip') skipped.push(model.id);
-    else
-      throw fail(
-        `models.${index} "${model.id}" has no route with its key set; set ${needed.join(', or ')}, remove the model, or set "missingKeys": "skip"`,
+    else throw missing(`models.${index}`, model.id, needed);
+  }
+  const servedImages: ServedImageModel[] = [];
+  for (const [index, image] of catalog.imageModels.entries()) {
+    const { route, routeIndex, needed } = firstRoute(`imageModels.${index}`, image.routes);
+    if (route)
+      servedImages.push(
+        Object.freeze({ ...image, route: Object.freeze({ ...route, api: image.routes[routeIndex]!.api }) }),
       );
+    else if (catalog.missingKeys === 'skip') skipped.push(image.id);
+    else throw missing(`imageModels.${index}`, image.id, needed);
   }
   if (!served.length)
     throw fail(
@@ -259,6 +292,9 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     defaultModel,
     model: (id: string) => served.find(model => model.id === id),
     role: (role: ModelCatalogRole) => served.find(model => model.roles.includes(role)) ?? null,
+    imageModels: Object.freeze(servedImages),
+    imageModel: (id: string) => servedImages.find(image => image.id === id),
+    defaultImageModel: servedImages.find(image => image.default) ?? null,
     warnings: Object.freeze(warnings),
   });
   cache.set(key, result);

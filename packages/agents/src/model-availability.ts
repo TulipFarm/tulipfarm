@@ -13,8 +13,9 @@ export async function modelAvailability(tx: AgentTransaction) {
         )
       ).rows,
     );
-  // Every catalog model, served or not, so workspace choices survive a missing key.
-  return readModelCatalog().catalog.models.map(
+  // Every catalog model and image model, served or not, so workspace choices survive a missing key.
+  const { catalog } = readModelCatalog();
+  return [...catalog.models, ...catalog.imageModels].map(
     family =>
       rows.find(row => row.familyId === family.id) ?? {
         familyId: family.id,

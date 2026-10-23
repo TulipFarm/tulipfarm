@@ -53,6 +53,12 @@ import {
 } from '@tulipfarm/agents/compaction-policy-contracts';
 import { createCompactionPolicyService } from '@tulipfarm/agents/compaction-policy';
 import {
+  imageSettingsCommandSchema,
+  imageSettingsReceiptSchema,
+  imageSettingsSchema,
+} from '@tulipfarm/agents/image-settings-contracts';
+import { createImageSettingsService } from '@tulipfarm/agents/image-settings';
+import {
   modelAvailabilityListSchema,
   modelAvailabilityCommandSchema,
   modelAvailabilityReceiptSchema,
@@ -92,6 +98,7 @@ export function registerAgents(
   const commands = createAgentAuthoring(dependencies.runtime, dependencies.modelFamilyEligibility);
   const models = createModelPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
   const compaction = createCompactionPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
+  const images = createImageSettingsService(dependencies.runtime);
   const schedules = createAgentSchedules(dependencies.runtime);
   const setup = createAgentSetup(dependencies.runtime, dependencies.modelFamilyEligibility, dependencies.agentSetup);
   const chat = createAgentChat(
@@ -305,6 +312,24 @@ export function registerAgents(
       request => {
         const p = modelCommand.parse(request.params);
         return models.availabilityCommandStatus(p.workspaceId, user(request), p.requestId);
+      },
+    );
+    routes.get(
+      `${modelBase}/images`,
+      { schema: schema('getImageSettingsV1', workspace, imageSettingsSchema) },
+      request => images.read(workspace.parse(request.params).workspaceId, user(request)),
+    );
+    routes.put(
+      `${modelBase}/images`,
+      { schema: schema('saveImageSettingsV1', workspace, imageSettingsReceiptSchema, imageSettingsCommandSchema) },
+      request => images.save(workspace.parse(request.params).workspaceId, user(request), request.body),
+    );
+    routes.get(
+      `${modelBase}/images/commands/:requestId`,
+      { schema: schema('getImageSettingsCommandV1', modelCommand, imageSettingsReceiptSchema) },
+      request => {
+        const p = modelCommand.parse(request.params);
+        return images.commandStatus(p.workspaceId, user(request), p.requestId);
       },
     );
     routes.get(

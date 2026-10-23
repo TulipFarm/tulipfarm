@@ -150,6 +150,23 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   shows. Its model must declare `"imageInput": true` in `capabilities`, or the
   catalog is invalid. Without it, images in Knowledge documents are left out
   and reported as coverage gaps. Calls are billed to the document's workspace.
+- **Image input.** A model with `"imageInput": true` may set
+  `limits.imageInputTokens` (the most input tokens one image may cost, used to
+  reserve credits; default 1600) and `limits.maxImageBytes` (larger images are
+  downscaled before sending; default 5 MiB). Other models reject both. A
+  workspace admin chooses the image reader that describes images for models
+  without image input; it defaults to the `document-vision` model.
+- **Image models.** `imageModels` lists the models that generate images. Each
+  has `routes` (chosen like a model's, with an `api` of `openai-images`,
+  `xai-images` or `gemini-images` that the route's provider type must serve),
+  the provider size for each of `aspects.square`, `portrait` and `landscape`,
+  `edits` and `maxSources` for source images, and `pricing`: `"unmetered"`,
+  `usdPerImage` by quality (`standard`, `high`) and shape, or token rates. At
+  most one is `"default": true`, and the default cannot be paused. A model's
+  `imageModel` pairs it with one image model; without a pair, work on it uses
+  the workspace's chosen image model, then the catalog default. A pair that is
+  unavailable falls back the same way. Without any served image model, image
+  generation is off.
 - **Completion checks.** The optional `completion-check` role checks whether a
   tool-using chat reply is a sufficient stopping point. Without it, checks keep
   using the active chat model (including a chat fallback). Assign the role to
