@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { backgroundSweeps, readyWorkspaces } from '../src/background-sweep.ts';
+import { backgroundSweeps, readyWorkspaces, sweepFailureBackoffMs } from '../src/background-sweep.ts';
 import { errorAttributes } from '@tulipfarm/observability';
 import { randomUUID } from 'node:crypto';
 import { taskActionWake, taskWake } from '../src/task-dispatch.ts';
@@ -70,6 +70,51 @@ test('independent sweeps never overlap and shutdown stops every loop before wait
   assert.deepEqual(runs, [1, 1]);
   for (const gate of release) gate.resolve();
   await closing;
+});
+
+test('a failing sweep backs off up to a minute and returns to every tick once it succeeds', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 });
+  const app = Fastify();
+  const errors = [];
+  t.mock.method(app.log, 'error', message => errors.push(message));
+  const runs = [];
+  let failing = true;
+  backgroundSweeps(app, [
+    {
+      job: 'workflow-dispatch',
+      failure: 'sweep failed',
+      run: async () => {
+        runs.push(Date.now());
+        if (failing) throw new Error('timeout exceeded when trying to connect');
+      },
+    },
+  ]);
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  async function advance(ms) {
+    for (let elapsed = 0; elapsed < ms; elapsed += 2000) {
+      t.mock.timers.tick(2000);
+      await settle();
+    }
+  }
+  await app.ready();
+  await settle();
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 50].map(sweepFailureBackoffMs), [0, 4000, 8000, 16_000, 32_000, 60_000, 60_000]);
+  await advance(150_000);
+  // 0 s, then 4, 8, 16, 32 and 60 s after each failure.
+  assert.deepEqual(
+    runs.map(at => at / 1000),
+    [0, 4, 12, 28, 60, 120],
+  );
+  assert.equal(errors.length, runs.length);
+  assert.deepEqual(new Set(errors), new Set(['sweep failed']));
+  failing = false;
+  await advance(30_000);
+  assert.equal(runs.at(-1), 180_000);
+  const recovered = runs.length;
+  await advance(6000);
+  assert.equal(runs.length, recovered + 3);
+  assert.equal(errors.length, 6);
+  await app.close();
 });
 
 test('task wake signals the stable workflow immediately and leaves committed commands successful on Temporal failure', async t => {
