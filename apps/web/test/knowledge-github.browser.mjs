@@ -771,6 +771,30 @@ test(
         }),
       );
 
+      await t.test('an all-repositories source names the chosen source that indexes a repository', () =>
+        fixture(async f => {
+          const chosen = source();
+          const item = source({
+            title: 'All repositories of octo-owner',
+            selection: { scope: 'all', repositories: [], kinds: ['docs', 'issues', 'pulls'] },
+            repositories: [
+              {
+                ...repositories[0],
+                status: 'indexed-elsewhere',
+                indexedBy: { sourceId: chosen.sourceId, title: chosen.title },
+              },
+              { ...repositories[1], state: 'active', failure: null, status: 'active' },
+            ],
+            repositoryCounts: { active: 1, excluded: 0, needsPermission: 0, accessLost: 0, indexedElsewhere: 1 },
+          });
+          f.sources.set(item.sourceId, item);
+          const row = () => f.page.getByRole('listitem', { name: item.title, exact: true });
+          await f.open();
+          await row().getByText(`Indexed by ${chosen.title}`, { exact: true }).waitFor();
+          assert.equal(await row().getByText('Active', { exact: true }).count(), 1);
+        }),
+      );
+
       await t.test('shared readers see that the owner must reconnect, without a reconnect button', () =>
         fixture(async f => {
           const item = source({ canManage: false, connection: 'reconnect-required', selection: null });

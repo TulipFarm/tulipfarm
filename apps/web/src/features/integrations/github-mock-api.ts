@@ -157,6 +157,7 @@ if (githubMockEnabled) {
           failure: null,
           excluded: false,
           status: 'active',
+          indexedBy: null,
           missingKinds: [],
         })),
         counts: { total: 12, ready: 12, failed: 0 },
@@ -180,6 +181,7 @@ if (githubMockEnabled) {
           excluded: 0,
           needsPermission: source.repositories.filter(item => item.status === 'needs-permission').length,
           accessLost: source.repositories.filter(item => item.status === 'access-lost').length,
+          indexedElsewhere: 0,
         };
       }
       sources.push(source);

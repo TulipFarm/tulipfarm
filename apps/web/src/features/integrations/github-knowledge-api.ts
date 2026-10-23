@@ -32,7 +32,10 @@ const sourceSchema = z.object({
         state: z.enum(['active', 'unavailable']),
         failure: z.string().nullable(),
         excluded: z.boolean().default(false),
-        status: z.enum(['active', 'excluded', 'needs-permission', 'access-lost']).default('active'),
+        status: z
+          .enum(['active', 'excluded', 'needs-permission', 'access-lost', 'indexed-elsewhere'])
+          .default('active'),
+        indexedBy: z.object({ sourceId: z.uuid(), title: z.string() }).nullable().default(null),
         missingKinds: z.array(githubCorpusKindSchema).default([]),
       }),
     )
@@ -53,6 +56,7 @@ const sourceSchema = z.object({
       excluded: z.number().int().nonnegative(),
       needsPermission: z.number().int().nonnegative(),
       accessLost: z.number().int().nonnegative(),
+      indexedElsewhere: z.number().int().nonnegative().default(0),
     })
     .nullable()
     .default(null),

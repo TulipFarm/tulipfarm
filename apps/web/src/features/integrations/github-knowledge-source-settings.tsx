@@ -75,7 +75,7 @@ export function GitHubSourceSettings({
             <h5 className="text-sm font-medium">Repositories</h5>
             <p className="text-sm text-muted-foreground">
               {all
-                ? 'Every repository this GitHub account can read is indexed, and new repositories are added automatically. Clear a repository to leave it out; it stays out until you select it again.'
+                ? 'Every repository this GitHub account can read is indexed, and new repositories are added automatically. Clear a repository to leave it out; it stays out until you select it again. A repository one of your chosen-repository sources indexes is indexed there instead, and comes back here when that source no longer indexes it.'
                 : 'Every repository in this source is indexed. Clear a repository to leave it out.'}
             </p>
             {!repositories.length ? (
@@ -114,7 +114,9 @@ export function GitHubSourceSettings({
                     value={visible.filter(item => !excluded.has(item.repositoryId)).map(item => item.repositoryId)}
                     options={visible.map(item => ({
                       value: item.repositoryId,
-                      label: `${item.fullName}${item.visibility === 'public' ? '' : ` (${item.visibility})`}`,
+                      label: `${item.fullName}${item.visibility === 'public' ? '' : ` (${item.visibility})`}${
+                        item.indexedBy ? ` · indexed by ${item.indexedBy.title}` : ''
+                      }`,
                     }))}
                     error={attempted && !included ? 'Keep at least one repository, or remove the source.' : undefined}
                     onValueChange={ids =>

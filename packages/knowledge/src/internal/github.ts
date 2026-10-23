@@ -438,16 +438,20 @@ export function createGitHubKnowledge({
         ).rows[0],
       );
     const denied = await deniedKinds(tx, s.source_id);
+    const elsewhere = await owned(tx, s.source_id);
     const selected = (await repositories(tx, s.source_id)).map(r => {
+      const indexedBy = r.excluded ? null : (elsewhere.get(r.repository_id) ?? null);
       const status = r.excluded
         ? ('excluded' as const)
-        : r.state === 'unavailable'
-          ? r.failure === 'insufficient-scope'
-            ? ('needs-permission' as const)
-            : ('access-lost' as const)
-          : s.selection.kinds.some(kind => denied.get(r.repository_id)?.has(kind))
-            ? ('needs-permission' as const)
-            : ('active' as const);
+        : indexedBy
+          ? ('indexed-elsewhere' as const)
+          : r.state === 'unavailable'
+            ? r.failure === 'insufficient-scope'
+              ? ('needs-permission' as const)
+              : ('access-lost' as const)
+            : s.selection.kinds.some(kind => denied.get(r.repository_id)?.has(kind))
+              ? ('needs-permission' as const)
+              : ('active' as const);
       return {
         repositoryId: r.repository_id,
         fullName: r.full_name,
@@ -457,6 +461,7 @@ export function createGitHubKnowledge({
         failure: r.failure ?? s.cursor.isolated?.[r.repository_id] ?? null,
         excluded: r.excluded,
         status,
+        indexedBy,
         missingKinds:
           status !== 'needs-permission'
             ? []
@@ -481,6 +486,7 @@ export function createGitHubKnowledge({
       repositoryCounts: {
         active: tally('active'),
         excluded: tally('excluded'),
+        indexedElsewhere: tally('indexed-elsewhere'),
         needsPermission: tally('needs-permission'),
         accessLost: tally('access-lost'),
       },
@@ -574,6 +580,11 @@ export function createGitHubKnowledge({
           [input.commandId, r.repositoryId, r.fullName, r.visibility, r.title.slice(0, 512) || r.fullName],
         );
       await store.source(tx, human, input.commandId, true);
+      await handOver(
+        tx,
+        human.membershipId,
+        inspected.repositories.map(r => r.repositoryId),
+      );
       return dto(tx, await source(tx, input.commandId));
     });
   }
@@ -619,6 +630,99 @@ export function createGitHubKnowledge({
       [sourceId, repositoryId, failure],
     );
     await invalidate(tx, sourceId, repositoryId);
+  }
+  // A repository in an all-repositories source is owned by another live source of the same owner that names it, so
+  // the all-repositories source skips it. The other source must reach every member of the all-repositories source,
+  // and its GitHub account must not be disconnected. Yields the owning source's ID and title, lowest ID first.
+  const ownerOf = (tx: Tx, sourceSql: string, repositorySql: string) =>
+    `SELECT o.id AS owner_id,og.title AS owner_title FROM ${table(tx, 'sources')} a
+    JOIN ${table(tx, 'github_sources')} ag ON ag.source_id=a.id AND ag.selection->>'scope'='all'
+    JOIN ${table(tx, 'sources')} o ON o.owner_membership_id=a.owner_membership_id AND o.provider='github' AND o.id<>a.id AND o.state IN ('active','paused')
+    JOIN ${table(tx, 'github_sources')} og ON og.source_id=o.id AND og.selection->>'scope' IS DISTINCT FROM 'all'
+    JOIN ${table(tx, 'github_repositories')} oc ON oc.source_id=o.id AND oc.repository_id=${repositorySql} AND NOT oc.excluded
+    WHERE a.id=${sourceSql}
+      AND EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_github_accounts')} x
+        WHERE x.owner_membership_id=o.owner_membership_id AND x.identity->>'id'=og.binding->>'githubUserId' AND x.state<>'disconnected')
+      AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_members')} am WHERE am.source_id=a.id
+        AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_members')} om WHERE om.source_id=o.id AND om.membership_id=am.membership_id))
+    ORDER BY o.id LIMIT 1`;
+  async function owned(tx: Tx, sourceId: string) {
+    const rows = z.array(z.object({ repository_id: z.string(), owner_id: uuidSchema, owner_title: z.string() })).parse(
+      (
+        await tx.client.query(
+          `SELECT c.repository_id,k.owner_id,k.owner_title FROM ${table(tx, 'github_repositories')} c
+            CROSS JOIN LATERAL (${ownerOf(tx, 'c.source_id', 'c.repository_id')}) k WHERE c.source_id=$1`,
+          [sourceId],
+        )
+      ).rows,
+    );
+    return new Map(rows.map(row => [row.repository_id, { sourceId: row.owner_id, title: row.owner_title }]));
+  }
+  // Withdraws what an all-repositories source still holds for repositories another source now owns: their documents
+  // leave search, their access evidence ends and their commit history is read again if they return. Idempotent.
+  async function yieldOwned(tx: Tx, sourceId: string) {
+    const ids = [...(await owned(tx, sourceId)).keys()];
+    if (!ids.length) return ids;
+    const pending = z
+      .array(z.object({ repository_id: z.string() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT c.repository_id FROM ${table(tx, 'github_repositories')} c WHERE c.source_id=$1 AND c.repository_id=ANY($2::text[])
+            AND (EXISTS (SELECT 1 FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
+                WHERE i.source_id=c.source_id AND i.repository_id=c.repository_id AND d.tombstoned_at IS NULL)
+              OR EXISTS (SELECT 1 FROM ${table(tx, 'github_access')} x WHERE x.source_id=c.source_id AND x.repository_id=c.repository_id AND x.binding IS NOT NULL))`,
+            [sourceId, ids],
+          )
+        ).rows,
+      )
+      .map(row => row.repository_id);
+    if (pending.length) {
+      await tx.client.query(
+        `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL
+        FROM ${table(tx, 'github_items')} i WHERE i.source_id=$1 AND d.id=i.document_id AND i.repository_id=ANY($2::text[])`,
+        [sourceId, pending],
+      );
+      for (const repositoryId of pending) await invalidate(tx, sourceId, repositoryId);
+    }
+    if (storesCommits(tx))
+      await tx.client.query(
+        `UPDATE ${table(tx, 'github_repositories')} SET commit_head=NULL WHERE source_id=$1 AND repository_id=ANY($2::text[]) AND commit_head IS NOT NULL`,
+        [sourceId, ids],
+      );
+    return ids;
+  }
+  // A chosen-repository source of the owner gained or lost these repositories. Each of the owner's all-repositories
+  // sources holding one of them gives up what is now owned elsewhere and restarts its pass, which lists every handed-back
+  // repository from the start.
+  async function handOver(tx: Tx, ownerMembershipId: string, repositoryIds: readonly string[]) {
+    if (!repositoryIds.length) return;
+    const affected = z.array(z.object({ source_id: uuidSchema, cursor: cursorSchema })).parse(
+      (
+        await tx.client.query(
+          `SELECT g.source_id,g.cursor FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id
+            WHERE s.owner_membership_id=$1 AND s.state<>'removed' AND g.selection->>'scope'='all'
+              AND EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} c WHERE c.source_id=g.source_id AND c.repository_id=ANY($2::text[]))
+            ORDER BY g.source_id`,
+          [ownerMembershipId, repositoryIds],
+        )
+      ).rows,
+    );
+    const moved = new Set(repositoryIds);
+    for (const row of affected) {
+      await yieldOwned(tx, row.source_id);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp(),sync_state='queued',failure=NULL WHERE source_id=$1`,
+        [
+          row.source_id,
+          initialCursor({
+            marks: Object.fromEntries(Object.entries(row.cursor.marks ?? {}).filter(([id]) => !moved.has(id))),
+            ...(row.cursor.reconciledAt ? { reconciledAt: row.cursor.reconciledAt } : {}),
+            ...(row.cursor.reconcile ? { reconcile: true } : {}),
+          }),
+        ],
+      );
+    }
   }
   // Copies a still-current authoritative repository check onto each current document revision. Expiry is never extended.
   async function project(tx: Tx, sourceId: string, repositoryId: string, membershipId?: string, documentId?: string) {
@@ -718,6 +822,12 @@ export function createGitHubKnowledge({
         );
         await store.source(tx, actor, sourceId, true);
       }
+      if (state === 'removed' && s.selection.scope !== 'all')
+        await handOver(
+          tx,
+          s.owner_membership_id,
+          (await repositories(tx, sourceId)).map(r => r.repository_id),
+        );
       await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
         input.commandId,
         sourceId,
@@ -786,10 +896,18 @@ export function createGitHubKnowledge({
           ).rows,
         )
         .map(row => row.repository_id);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[])`,
-        [sourceId, excluded],
-      );
+      const included = z
+        .array(z.object({ repository_id: z.string() }))
+        .parse(
+          (
+            await tx.client.query(
+              `UPDATE ${table(tx, 'github_repositories')} SET excluded=false WHERE source_id=$1 AND excluded AND NOT repository_id=ANY($2::text[]) RETURNING repository_id`,
+              [sourceId, excluded],
+            )
+          ).rows,
+        )
+        .map(row => row.repository_id);
+      if (s.selection.scope !== 'all') await handOver(tx, s.owner_membership_id, [...newlyExcluded, ...included]);
       const kinds = selection.kinds.map(kind => itemKinds[kind]);
       await tx.client.query(
         `UPDATE ${table(tx, 'documents')} d SET tombstoned_at=COALESCE(d.tombstoned_at,clock_timestamp()),retain_until=COALESCE(d.retain_until,clock_timestamp()+interval '30 days'),lexical_publication_id=NULL,vector_publication_id=NULL
@@ -950,6 +1068,7 @@ export function createGitHubKnowledge({
             `SELECT c.repository_id FROM ${table(tx, 'github_repositories')} c
         LEFT JOIN ${table(tx, 'github_access')} x ON x.source_id=c.source_id AND x.repository_id=c.repository_id AND x.membership_id=$2
         WHERE c.source_id=$1 AND c.state='active' AND NOT c.excluded AND (NOT $4 OR x.expires_at IS NULL OR x.expires_at<clock_timestamp()+interval '2 minutes')
+          AND NOT EXISTS (${ownerOf(tx, 'c.source_id', 'c.repository_id')})
         ORDER BY x.expires_at NULLS FIRST,c.repository_id LIMIT $3`,
             [sourceId, actor.membershipId, limit, staleOnly],
           )
@@ -998,8 +1117,11 @@ export function createGitHubKnowledge({
           `UPDATE ${table(tx, 'github_sources')} g SET next_attempt_at=clock_timestamp() FROM ${table(tx, 'sources')} s
           WHERE s.id=g.source_id AND s.state='active' AND g.sync_state<>'failed' AND g.failure IS DISTINCT FROM 'rate-limited'
           AND (g.next_attempt_at>clock_timestamp() OR g.lease_token IS NOT NULL)
-          AND ($1 OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND NOT r.excluded AND r.repository_id=ANY($2::text[]))
-            OR (g.selection->>'scope'='all' AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND r.repository_id=ANY($2::text[]))))`,
+          AND ($1 OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND NOT r.excluded AND r.repository_id=ANY($2::text[])
+              AND NOT EXISTS (${ownerOf(tx, 'g.source_id', 'r.repository_id')}))
+            OR (g.selection->>'scope'='all' AND EXISTS (SELECT 1 FROM unnest($2::text[]) u(id)
+              WHERE NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND r.repository_id=u.id)
+                AND NOT EXISTS (${ownerOf(tx, 'g.source_id', 'u.id')}))))`,
           [changes.all, ids],
         );
       const rows = z
@@ -1033,16 +1155,17 @@ export function createGitHubKnowledge({
       SELECT (SELECT count(*)::int FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'sources')} s ON s.id=i.source_id
         WHERE s.state='active' AND i.failure IS NOT NULL AND i.failure<>$1) AS "failedItems",
       (SELECT count(DISTINCT (r.source_id,r.repository_id))::int FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id
-        WHERE s.state='active' AND NOT r.excluded AND ((r.state='unavailable' AND r.failure='insufficient-scope') OR (r.state='active' AND EXISTS (
+        WHERE s.state='active' AND NOT r.excluded AND NOT EXISTS (${ownerOf(tx, 'r.source_id', 'r.repository_id')}) AND ((r.state='unavailable' AND r.failure='insufficient-scope') OR (r.state='active' AND EXISTS (
           SELECT 1 FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'github_sources')} g ON g.source_id=i.source_id
           WHERE i.source_id=r.source_id AND i.repository_id=r.repository_id AND i.failure=$1 AND i.document_id IS NULL AND i.seen_generation>=g.reconciliation-1)))) AS "permissionRepositories",
       (SELECT count(*)::int FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id
-        WHERE s.state='active' AND NOT r.excluded AND r.state='unavailable' AND r.failure IS DISTINCT FROM 'insufficient-scope') AS "lostRepositories",
+        WHERE s.state='active' AND NOT r.excluded AND r.state='unavailable' AND r.failure IS DISTINCT FROM 'insufficient-scope'
+          AND NOT EXISTS (${ownerOf(tx, 'r.source_id', 'r.repository_id')})) AS "lostRepositories",
       count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_github_accounts')} a
         WHERE a.owner_membership_id=s.owner_membership_id AND a.identity->>'id'=g.binding->>'githubUserId' AND a.state='active'
         AND a.credential IS NOT NULL AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp())))::int AS "reconnectSources",
       count(*) FILTER (WHERE g.sync_state='failed' OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r
-        WHERE r.source_id=g.source_id AND r.state='unavailable'))::int AS "failedSources",
+        WHERE r.source_id=g.source_id AND r.state='unavailable' AND NOT EXISTS (${ownerOf(tx, 'r.source_id', 'r.repository_id')})))::int AS "failedSources",
       count(*) FILTER (WHERE g.sync_state IN ('queued','syncing','ready') AND g.next_attempt_at<clock_timestamp()-interval '15 minutes')::int AS "stalledSources"
       FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active'`,
               [deniedFailure],
@@ -1461,7 +1584,8 @@ export function createGitHubKnowledge({
     }
   }
   // Adds every repository the owner's account can now read to an all-repositories source. Repositories the member
-  // excluded keep their row and stay excluded; repositories another of the member's live sources covers are left to it.
+  // excluded keep their row and stay excluded; repositories another all-repositories source of the member holds are
+  // left to it. A repository a chosen-repository source owns gets a row so settings can name that source, but is skipped.
   async function follow(work: GitHubKnowledgeWork, token: string, s: Source) {
     const found = new Map<string, GitHubRepository>();
     let page: string | undefined;
@@ -1482,7 +1606,9 @@ export function createGitHubKnowledge({
             (
               await tx.client.query(
                 `SELECT r.repository_id FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} o ON o.id=r.source_id
-            WHERE (r.source_id=$1 OR (o.owner_membership_id=$2 AND o.provider='github' AND o.state<>'removed' AND NOT r.excluded)) AND r.repository_id=ANY($3::text[])`,
+            JOIN ${table(tx, 'github_sources')} og ON og.source_id=o.id
+            WHERE (r.source_id=$1 OR (o.owner_membership_id=$2 AND o.provider='github' AND o.state<>'removed' AND NOT r.excluded AND og.selection->>'scope'='all'))
+              AND r.repository_id=ANY($3::text[])`,
                 [s.source_id, s.owner_membership_id, [...found.keys()]],
               )
             ).rows,
@@ -1603,6 +1729,8 @@ export function createGitHubKnowledge({
     // Files whose unseen parts this run's sweep already read again.
     const swept = new Set<string>();
     let selected: Repository[] = [];
+    // Repositories another of the owner's sources indexes; an all-repositories source neither lists nor sweeps them.
+    let deferred = new Set<string>();
     async function listing() {
       cursor.pages++;
       const repository: Repository | undefined = selected[cursor.index];
@@ -1611,7 +1739,7 @@ export function createGitHubKnowledge({
         cursor.page = null;
         return;
       }
-      const accessible = await verify(repository.repository_id);
+      const accessible = !deferred.has(repository.repository_id) && (await verify(repository.repository_id));
       const history = await fenced(work, token, async tx =>
         storesCommits(tx)
           ? z
@@ -1786,7 +1914,7 @@ export function createGitHubKnowledge({
                     claim.reconciliation,
                     after,
                     deniedFailure,
-                    Object.keys(cursor.isolated ?? {}),
+                    [...Object.keys(cursor.isolated ?? {}), ...deferred],
                     file ? null : sweepBatch,
                     // An incremental pass lists only what changed, so it re-reads only items whose last read failed in a
                     // way that may now succeed, and hides the kinds this pass could not read.
@@ -1887,6 +2015,10 @@ export function createGitHubKnowledge({
       if (cursor.phase === 'listing' && cursor.index === 0 && !cursor.page && claim.selection.scope === 'all')
         await follow(work, token, claim);
       selected = (await fenced(work, token, tx => repositories(tx, claim.source_id))).filter(r => !r.excluded);
+      if (claim.selection.scope === 'all') {
+        deferred = new Set(await fenced(work, token, tx => yieldOwned(tx, claim.source_id)));
+        for (const id of deferred) delete cursor.marks?.[id];
+      }
       // Time-boxed: page after page until the pass ends, the budget is spent or Temporal cancels the activity.
       for (;;) {
         await beat();
@@ -1897,7 +2029,7 @@ export function createGitHubKnowledge({
         if (cursor.phase === 'listing') await listing();
         else if (await sweep()) {
           await fenced(work, token, async tx => {
-            const kept = new Set(selected.map(repository => repository.repository_id));
+            const kept = new Set(selected.map(repository => repository.repository_id).filter(id => !deferred.has(id)));
             // A change GitHub reported during the pass moved next_attempt_at past the claim's, so the next pass starts now.
             await tx.client.query(
               `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,

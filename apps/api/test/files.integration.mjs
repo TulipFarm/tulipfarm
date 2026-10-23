@@ -616,6 +616,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
         '0007_knowledge_github_commits.sql',
         '0008_knowledge_freshness.sql',
         '0009_github_app_refresh.sql',
+        '0010_github_knowledge_commits_backfill.sql',
       ],
     );
     assert.equal(

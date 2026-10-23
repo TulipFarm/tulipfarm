@@ -40,7 +40,7 @@ test(
       await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
       const stream = await workspaceTableMigrations();
-      assert.equal(stream.length, 8);
+      assert.equal(stream.length, 10);
       assert.equal(new Set(stream.map(m => m.name.slice(0, 4))).size, stream.length);
       const ws = await db.create();
       const table = name => qualified(ws.names.schema, name.startsWith('tf_') ? name : `tf_knowledge_${name}`);
