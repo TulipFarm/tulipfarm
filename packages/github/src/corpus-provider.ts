@@ -327,6 +327,7 @@ function native(nativeId: string, repositoryId: string): Native {
   let rest = match[3] ?? '';
   // A commit is identified by its SHA alone and is never split into parts.
   if (kind === 'commit') {
+    if (rest === '/denied') return { kind, part: 1, ref: rest, hash: null, marker: true };
     if (!shaPattern.test(rest)) throw new GitHubCorpusError('invalid-selection');
     return { kind, part: 1, ref: rest, hash: null, marker: false };
   }
@@ -336,6 +337,8 @@ function native(nativeId: string, repositoryId: string): Native {
     part = Number(parted[1]);
     rest = parted[2] ?? '';
   }
+  // Marks a kind the connection cannot read in a repository it can still see.
+  if (!parted && rest === '/denied') return { kind, part, ref: rest, hash: null, marker: true };
   if (kind !== 'doc' && kind !== 'code') {
     if (!/^[1-9][0-9]{0,9}$/.test(rest)) throw new GitHubCorpusError('invalid-selection');
     return { kind, part, ref: rest, hash: null, marker: false };
@@ -752,7 +755,9 @@ export function createGitHubCorpusProvider(options: {
       `/repositories/${body.id}/commits/${encodeURIComponent(body.default_branch)}`,
       { accept: 'application/vnd.github.sha' },
     );
-    if (response.status === 409 || response.status === 404 || response.status === 422) return null;
+    if (response.status === 409 || response.status === 422) return null;
+    // The repository itself is readable, so a missing or forbidden branch means the contents permission is missing.
+    if (response.status === 403 || response.status === 404) throw new GitHubCorpusError('forbidden');
     if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
     return parse(z.string().regex(/^[a-f0-9]{40,64}$/), response.text().trim());
   }
@@ -819,6 +824,35 @@ export function createGitHubCorpusProvider(options: {
       'excluded',
     );
   }
+  // A kind the connection cannot read in a repository it can see. The marker is reported, never read, and the
+  // repository's other kinds keep syncing.
+  function denied(body: RepositoryBody, phase: Phase, accessedAt: string, selection: GitHubCorpusSelection) {
+    const kinds: GitHubItemObservation['kind'][] =
+      phase === 'docs'
+        ? ['doc']
+        : phase === 'code'
+          ? ['code']
+          : phase === 'discussions'
+            ? ['discussion']
+            : phase === 'commits'
+              ? ['commit']
+              : [
+                  ...(selection.kinds.includes('issues') ? (['issue'] as const) : []),
+                  ...(selection.kinds.includes('pulls') ? (['pull'] as const) : []),
+                ];
+    return kinds.map(kind =>
+      observation(
+        String(body.id),
+        kind,
+        '/denied',
+        `${body.full_name}: ${phase} not readable with this GitHub connection`,
+        `https://github.com/${body.full_name}`,
+        'denied',
+        accessedAt,
+        'denied',
+      ),
+    );
+  }
   // Without a cutoff the whole history is in scope.
   const inWindow = (selection: GitHubCorpusSelection, time: string) =>
     !selection.after || Date.parse(time) >= Date.parse(`${selection.after}T00:00:00Z`);
@@ -829,6 +863,7 @@ export function createGitHubCorpusProvider(options: {
       `/repositories/${body.id}/git/trees/${sha}${recursive ? '?recursive=1' : ''}`,
     );
     if ([404, 409, 422].includes(response.status)) throw new GitHubCorpusError('invalid-cursor');
+    if (response.status === 403) throw new GitHubCorpusError('forbidden');
     if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
     return parse(treeSchema, response.json());
   }
@@ -966,10 +1001,10 @@ export function createGitHubCorpusProvider(options: {
       'github-issues',
       `/repositories/${body.id}/issues?${new URLSearchParams({ state: 'all', sort: 'updated', direction: 'asc', ...(selection.after ? { since: `${selection.after}T00:00:00Z` } : {}), per_page: String(limits.issuePageSize), page: String(page) })}`,
     );
-    if (response.status === 410 || response.status === 404)
-      return { observations: [], nextCursor: nextPhase(selection, 'issues') };
+    // 410 means issues are turned off; 403 and 404 mean the connection cannot read them.
+    if (response.status === 410) return { observations: [], nextCursor: nextPhase(selection, 'issues') };
     if (response.status !== 200)
-      throw new GitHubCorpusError(response.status === 403 ? 'forbidden' : 'invalid-response');
+      throw new GitHubCorpusError([403, 404].includes(response.status) ? 'forbidden' : 'invalid-response');
     const issues = parse(z.array(issueSchema).max(100), response.json());
     const observations = issues
       .filter(
@@ -1351,7 +1386,7 @@ export function createGitHubCorpusProvider(options: {
     return finish(kind === 'code' ? `${fence(text)}\n${text}\n${fence(text)}` : text);
   }
   return {
-    async discover(workspaceId, userId, accountId, cursor) {
+    async discover(workspaceId, userId, accountId, cursor, options) {
       const page = cursor === undefined ? 1 : Number(parse(githubCorpusCursorTokenSchema, cursor, 'invalid-cursor'));
       if (!Number.isInteger(page) || page < 1 || page > 100) throw new GitHubCorpusError('invalid-cursor');
       return withAccount(workspaceId, userId, accountId, null, async (credential, binding) => {
@@ -1369,7 +1404,9 @@ export function createGitHubCorpusProvider(options: {
         });
         return {
           binding,
-          items: repositories.filter(repo => repo.visibility === 'public' || credential.scopes.includes('repo')),
+          items: repositories.filter(
+            repo => options?.includeUnreadable || repo.visibility === 'public' || credential.scopes.includes('repo'),
+          ),
           nextCursor: items.length === 50 ? String(page + 1) : null,
         };
       });
@@ -1441,14 +1478,24 @@ export function createGitHubCorpusProvider(options: {
         const state = value.slice(split + 1);
         if (split < 0 || !(phases(selection) as string[]).includes(phase))
           throw new GitHubCorpusError('invalid-cursor');
-        const page: GitHubCorpusPage =
-          phase === 'docs' || phase === 'code'
-            ? await listFiles(credential.accessToken, body, phase, state, accessedAt, selection)
-            : phase === 'issues'
-              ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
-              : phase === 'discussions'
-                ? await listDiscussions(credential.accessToken, body, state, accessedAt, selection)
-                : await listCommits(credential.accessToken, body, state, accessedAt, selection, history);
+        let page: GitHubCorpusPage;
+        try {
+          page =
+            phase === 'docs' || phase === 'code'
+              ? await listFiles(credential.accessToken, body, phase, state, accessedAt, selection)
+              : phase === 'issues'
+                ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
+                : phase === 'discussions'
+                  ? await listDiscussions(credential.accessToken, body, state, accessedAt, selection)
+                  : await listCommits(credential.accessToken, body, state, accessedAt, selection, history);
+        } catch (error) {
+          if (!(error instanceof GitHubCorpusError) || !['forbidden', 'insufficient-scope'].includes(error.code))
+            throw error;
+          page = {
+            observations: denied(body, phase as Phase, accessedAt, selection),
+            nextCursor: nextPhase(selection, phase as Phase),
+          };
+        }
         return {
           observations: page.observations,
           nextCursor: page.nextCursor ? parse(githubCorpusCursorTokenSchema, page.nextCursor) : null,

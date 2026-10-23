@@ -982,3 +982,74 @@ test('a commit over GitHub file limits records the gap instead of failing', asyn
   assert.ok(partial.markdown.includes('200 changed files listed'));
   assert.ok(partial.markdown.includes("the rest of this commit's changed files"));
 });
+
+test('a kind the connection cannot read becomes a denied marker while other kinds keep listing', async () => {
+  const { provider, binding, github } = setup();
+  const all = { ...selection, kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] };
+  github.state.failure = (_user, path) =>
+    path === '/repositories/7001/issues'
+      ? Response.json({ message: 'Resource not accessible' }, { status: 403 })
+      : null;
+  const items = await listAll(provider, binding, '7001', all);
+  const markers = items.filter(item => item.coverage === 'denied');
+  assert.deepEqual(
+    markers.map(item => [item.kind, item.nativeId, item.sourceRevision]),
+    [
+      ['issue', 'issue:7001:/denied', 'denied'],
+      ['pull', 'pull:7001:/denied', 'denied'],
+    ],
+  );
+  assert.equal(markers[0].canonicalURL, 'https://github.com/acme/handbook');
+  assert.ok(items.some(item => item.nativeId === 'doc:7001:README.md'));
+  assert.ok(items.some(item => item.nativeId === 'discussion:7001:5'));
+
+  github.state.failure = (_user, path) =>
+    path === '/repositories/7001/commits/main'
+      ? Response.json({ message: 'Not Found' }, { status: 404 })
+      : path === '/graphql'
+        ? Response.json({ data: { repository: null }, errors: [{ type: 'FORBIDDEN', message: 'denied' }] })
+        : null;
+  const blocked = await listAll(provider, binding, '7001', all);
+  assert.deepEqual(
+    blocked.filter(item => item.coverage === 'denied').map(item => item.nativeId),
+    ['doc:7001:/denied', 'code:7001:/denied', 'discussion:7001:/denied'],
+  );
+  assert.ok(blocked.some(item => item.nativeId === 'issue:7001:1'));
+  await assert.rejects(readAs(provider, binding, 'issue:7001:/denied', all), error => error.code === 'not-found');
+
+  github.state.failure = (_user, path) =>
+    path === '/repositories/7001/issues' ? Response.json({ message: 'Issues are disabled' }, { status: 410 }) : null;
+  const disabled = await listAll(provider, binding, '7001', all);
+  assert.ok(disabled.every(item => item.coverage !== 'denied' && !['issue', 'pull'].includes(item.kind)));
+});
+
+test('a commit history the connection cannot read becomes a commit denied marker', async () => {
+  const { provider, binding, repo, github } = setup();
+  github.push(repo, { message: 'Hidden' });
+  github.state.failure = (_user, path) =>
+    path === '/repositories/7001/commits'
+      ? Response.json({ message: 'Resource not accessible' }, { status: 403 })
+      : null;
+  const items = (await listPages(provider, binding, commitsOnly, { commitHead: null })).flatMap(
+    page => page.observations,
+  );
+  assert.deepEqual(
+    items.map(item => [item.kind, item.nativeId, item.coverage]),
+    [['commit', 'commit:7001:/denied', 'denied']],
+  );
+  await assert.rejects(
+    readAs(provider, binding, 'commit:7001:/denied', commitsOnly),
+    error => error.code === 'not-found',
+  );
+});
+
+test('access checks can include repositories the connection sees but cannot read', async () => {
+  const { provider } = setup({ scopes: ['read:user'] });
+  assert.deepEqual((await provider.discover(workspaceId, 'reader', accountId)).items, []);
+  assert.deepEqual(
+    (await provider.discover(workspaceId, 'reader', accountId, undefined, { includeUnreadable: true })).items.map(
+      item => item.repositoryId,
+    ),
+    ['7001'],
+  );
+});

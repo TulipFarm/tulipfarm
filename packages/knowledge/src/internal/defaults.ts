@@ -198,7 +198,7 @@ const intentSchema = z.object({
 const atlassianCursorSchema = z.strictObject({ site: z.number().int().min(0), page: z.string().nullable() });
 // A site that refuses access is skipped for this pass; the account's other sites still sync.
 const groupFailures = ['forbidden', 'not-found', 'insufficient-scope', 'invalid-selection'];
-const skippedFailures = ['too-large', 'unsupported', 'thread-too-large', 'item-too-large', 'excluded'];
+const skippedFailures = ['too-large', 'unsupported', 'thread-too-large', 'item-too-large', 'excluded', 'denied'];
 const quotaFailures = ['resource-limited', 'quota'];
 const failureCode = (error: unknown) => {
   const code =

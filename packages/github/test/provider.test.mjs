@@ -39,6 +39,8 @@ test('GitHub configuration distinguishes disabled, complete and partial configur
     GITHUB_OAUTH_SCOPES: config.scopes.join(' '),
   };
   assert.deepEqual(githubConfiguration(env), config);
+  assert.deepEqual(githubConfiguration({ ...env, GITHUB_OAUTH_SCOPES: 'read:user' }).scopes, ['read:user', 'repo']);
+  assert.throws(() => githubConfiguration({ ...env, GITHUB_OAUTH_SCOPES: ' ' }), /Invalid GitHub/);
   for (const redirect of [
     'http://remote.test/github/callback',
     'https://user:password@host/github/callback',

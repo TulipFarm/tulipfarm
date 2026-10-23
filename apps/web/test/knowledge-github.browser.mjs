@@ -60,6 +60,8 @@ test(
         state: 'active',
         failure: null,
         excluded: false,
+        status: 'active',
+        missingKinds: [],
       },
       {
         repositoryId: '7002',
@@ -69,6 +71,8 @@ test(
         state: 'unavailable',
         failure: 'forbidden',
         excluded: false,
+        status: 'access-lost',
+        missingKinds: [],
       },
     ];
     const source = (overrides = {}) => ({
@@ -83,6 +87,9 @@ test(
       nextAttemptAt: new Date().toISOString(),
       repositories,
       counts: { total: 9, ready: 8, failed: 1 },
+      connection: 'connected',
+      accountId: personal.id,
+      repositoryCounts: { active: 1, excluded: 0, needsPermission: 0, accessLost: 1 },
       ...overrides,
     });
 
@@ -261,6 +268,7 @@ test(
             repositories: old.repositories.map(item => ({
               ...item,
               excluded: body.excludedRepositories.includes(item.repositoryId),
+              status: body.excludedRepositories.includes(item.repositoryId) ? 'excluded' : item.status,
             })),
           };
           sources.set(id, json);
@@ -674,7 +682,8 @@ test(
           await row()
             .getByText('The source owner can no longer read this repository in GitHub.', { exact: false })
             .waitFor();
-          await row().getByText('Blocked', { exact: true }).waitFor();
+          await row().getByText('Access lost', { exact: true }).waitFor();
+          await row().getByText('1 active · 1 access lost', { exact: true }).waitFor();
           await row()
             .getByText('2 chosen repositories · docs, issues, pull requests · activity since', { exact: false })
             .waitFor();
@@ -724,6 +733,52 @@ test(
             new Set(f.writes.filter(write => write.kind === 'manage').map(write => write.body.commandId)).size,
             5,
           );
+        }),
+      );
+
+      await t.test('revoked access prompts a reconnect and repositories show missing permissions', () =>
+        fixture(async f => {
+          const item = source({
+            connection: 'reconnect-required',
+            failure: 'reconnect-required',
+            syncState: 'failed',
+            repositories: [
+              { ...repositories[0], status: 'needs-permission', missingKinds: ['issues', 'pulls'] },
+              {
+                ...repositories[1],
+                failure: 'insufficient-scope',
+                status: 'needs-permission',
+                missingKinds: ['docs', 'issues', 'pulls'],
+              },
+            ],
+            repositoryCounts: { active: 0, excluded: 0, needsPermission: 2, accessLost: 0 },
+          });
+          f.sources.set(item.sourceId, item);
+          const row = () => f.page.getByRole('listitem', { name: item.title, exact: true });
+          await f.open();
+          await row().getByText('GitHub access for this source needs to be reconnected.', { exact: false }).waitFor();
+          await row().getByText('0 active · 2 need permission', { exact: true }).waitFor();
+          assert.equal(await row().getByText('Needs permission', { exact: true }).count(), 2);
+          await row().getByText('cannot read issues, pull requests in this repository', { exact: false }).waitFor();
+          await row().getByText('Reconnect it with repository access, then retry.', { exact: false }).waitFor();
+          await row().getByRole('button', { name: 'Reconnect GitHub', exact: true }).click();
+          await delay(300);
+          assert.ok(
+            f.reads.some(
+              read => read.method === 'POST' && read.path.endsWith(`/github/accounts/${personal.id}/reconnect`),
+            ),
+          );
+        }),
+      );
+
+      await t.test('shared readers see that the owner must reconnect, without a reconnect button', () =>
+        fixture(async f => {
+          const item = source({ canManage: false, connection: 'reconnect-required', selection: null });
+          f.sources.set(item.sourceId, item);
+          const row = () => f.page.getByRole('listitem', { name: item.title, exact: true });
+          await f.open();
+          await row().getByText('may be out of date until the source owner reconnects', { exact: false }).waitFor();
+          assert.equal(await row().getByRole('button', { name: 'Reconnect GitHub', exact: true }).count(), 0);
         }),
       );
 

@@ -954,8 +954,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
               state: 'unavailable',
               failure: 'forbidden',
               excluded: false,
+              status: 'access-lost',
+              missingKinds: [],
             },
           );
+          assert.deepEqual(listed.repositoryCounts, { active: 1, excluded: 0, needsPermission: 0, accessLost: 1 });
+          assert.equal((await github.health(ws.id)).lostRepositories, 1);
           assert.equal(await live(), 2, 'blocked repository content is retained, not tombstoned');
           assert.deepEqual(await titles(ownerActor), ['acme/handbook: docs/vendors.md']);
           assert.equal((await query(ownerActor)).coverage, 'partial');
@@ -974,6 +978,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             ['active', 'acme/board'],
             'a renamed repository is tracked by its stable ID',
           );
+          assert.equal((await github.health(ws.id)).lostRepositories, 0);
           assert.equal((await query(ownerActor, 'acme')).hits.length, 2);
         },
       );

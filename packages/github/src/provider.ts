@@ -25,6 +25,10 @@ export const configurationSchema = z.strictObject({
   scopes: scopesSchema.refine(value => value.length > 0),
 });
 export type Configuration = z.infer<typeof configurationSchema>;
+// Knowledge reads private repositories and their contents, so connecting always asks for `repo`.
+export const githubRequiredScopes = ['repo'];
+const withRequired = (scopes: string[]) =>
+  scopes.length ? [...scopes, ...githubRequiredScopes.filter(s => !scopes.includes(s))] : scopes;
 export function githubConfiguration(env: NodeJS.ProcessEnv = process.env): Configuration | null {
   const values = [
     env.GITHUB_OAUTH_CLIENT_ID,
@@ -37,7 +41,7 @@ export function githubConfiguration(env: NodeJS.ProcessEnv = process.env): Confi
     clientId: values[0],
     clientSecret: values[1],
     redirectUri: values[2],
-    scopes: values[3]?.split(/\s+/).filter(Boolean),
+    scopes: values[3] === undefined ? undefined : withRequired(values[3].split(/\s+/).filter(Boolean)),
   });
   if (!parsed.success) throw new Error('Invalid GitHub OAuth configuration');
   return parsed.data;

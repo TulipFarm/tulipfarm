@@ -113,8 +113,11 @@ const skippable = [
   'source-changed',
   'response-too-large',
 ];
-const repositoryDenied = (error: unknown): error is GitHubCorpusError =>
-  error instanceof GitHubCorpusError && repositoryDenials.includes(error.code);
+// For the owner's sync, a private repository the connection's scopes cannot read needs permission rather than failing
+// the whole source.
+const ownerDenials = [...repositoryDenials, 'insufficient-scope'];
+const ownerDenied = (error: unknown): error is GitHubCorpusError =>
+  error instanceof GitHubCorpusError && ownerDenials.includes(error.code);
 
 // An optional cutoff only narrows history; it can be any past date.
 const cutoffValid = (after: string | null | undefined, now: number) => !after || Date.parse(after) <= now;
@@ -126,6 +129,12 @@ const itemKinds: Record<GitHubCorpusKind, string> = {
   issues: 'issue',
   pulls: 'pull',
 };
+const corpusKinds = Object.fromEntries(Object.entries(itemKinds).map(([kind, item]) => [item, kind])) as Record<
+  string,
+  GitHubCorpusKind
+>;
+// Listing records a kind the connection cannot read as one marker item with this failure; it is never a document.
+const deniedFailure = 'denied';
 
 export function createGitHubKnowledge({
   runtime,
@@ -220,7 +229,48 @@ export function createGitHubKnowledge({
       throw new AccessDenied();
     return value;
   }
+  // The owner's account for the source's GitHub identity. Reconnecting keeps the account ID and bumps its generation.
+  async function ownerAccount(tx: Tx, s: Pick<Source, 'owner_membership_id' | 'binding'>) {
+    return z
+      .object({ id: uuidSchema, generation: z.number().int(), login: z.string().nullable(), live: z.boolean() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT id,generation,identity->>'login' AS login,(state='active' AND credential IS NOT NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())) AS live
+        FROM ${qualified(tx.schema, 'tf_github_accounts')} WHERE owner_membership_id=$1 AND identity->>'id'=$2 LIMIT 1`,
+            [s.owner_membership_id, s.binding.githubUserId],
+          )
+        ).rows[0],
+      );
+  }
+  async function connection(tx: Tx, s: Source) {
+    const account = await ownerAccount(tx, s);
+    return {
+      accountId: account?.id ?? null,
+      connection: account?.live ? ('connected' as const) : ('reconnect-required' as const),
+    };
+  }
+  // Kinds that the latest listing could not read, per repository. A marker not listed again by the last completed
+  // pass no longer applies.
+  async function deniedKinds(tx: Tx, sourceId: string) {
+    const denied = new Map<string, Set<GitHubCorpusKind>>();
+    for (const row of z.array(z.object({ repository_id: z.string(), kind: z.string() })).parse(
+      (
+        await tx.client.query(
+          `SELECT DISTINCT i.repository_id,i.kind FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'github_sources')} g ON g.source_id=i.source_id
+        WHERE i.source_id=$1 AND i.failure=$2 AND i.document_id IS NULL AND i.seen_generation>=g.reconciliation-1`,
+          [sourceId, deniedFailure],
+        )
+      ).rows,
+    )) {
+      const kind = corpusKinds[row.kind];
+      if (kind) denied.set(row.repository_id, (denied.get(row.repository_id) ?? new Set()).add(kind));
+    }
+    return denied;
+  }
   async function dto(tx: Tx, s: Source, canManage = true) {
+    const linked = await connection(tx, s);
     if (!canManage)
       return githubKnowledgeSourceSchema.parse({
         sourceId: s.source_id,
@@ -229,11 +279,14 @@ export function createGitHubKnowledge({
         memberIds: [],
         counts: null,
         repositories: null,
+        repositoryCounts: null,
         canManage: false,
         state: s.state,
         syncState: s.sync_state,
         failure: s.failure ? 'unavailable' : null,
         nextAttemptAt: s.next_attempt_at.toISOString(),
+        connection: linked.connection,
+        accountId: null,
       });
     const members = z
       .array(z.object({ membership_id: uuidSchema }))
@@ -250,20 +303,40 @@ export function createGitHubKnowledge({
       .parse(
         (
           await tx.client.query(
-            `SELECT count(*)::int AS total,count(d.lexical_publication_id)::int AS ready,count(*) FILTER (WHERE i.failure IS NOT NULL)::int AS failed FROM ${table(tx, 'github_items')} i LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL WHERE i.source_id=$1`,
-            [s.source_id],
+            `SELECT count(*)::int AS total,count(d.lexical_publication_id)::int AS ready,count(*) FILTER (WHERE i.failure IS NOT NULL)::int AS failed FROM ${table(tx, 'github_items')} i LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL WHERE i.source_id=$1 AND i.failure IS DISTINCT FROM $2`,
+            [s.source_id, deniedFailure],
           )
         ).rows[0],
       );
-    const selected = (await repositories(tx, s.source_id)).map(r => ({
-      repositoryId: r.repository_id,
-      fullName: r.full_name,
-      visibility: r.visibility,
-      title: r.title,
-      state: r.state,
-      failure: r.failure,
-      excluded: r.excluded,
-    }));
+    const denied = await deniedKinds(tx, s.source_id);
+    const selected = (await repositories(tx, s.source_id)).map(r => {
+      const status = r.excluded
+        ? ('excluded' as const)
+        : r.state === 'unavailable'
+          ? r.failure === 'insufficient-scope'
+            ? ('needs-permission' as const)
+            : ('access-lost' as const)
+          : s.selection.kinds.some(kind => denied.get(r.repository_id)?.has(kind))
+            ? ('needs-permission' as const)
+            : ('active' as const);
+      return {
+        repositoryId: r.repository_id,
+        fullName: r.full_name,
+        visibility: r.visibility,
+        title: r.title,
+        state: r.state,
+        failure: r.failure,
+        excluded: r.excluded,
+        status,
+        missingKinds:
+          status !== 'needs-permission'
+            ? []
+            : r.state === 'unavailable'
+              ? s.selection.kinds
+              : s.selection.kinds.filter(kind => denied.get(r.repository_id)?.has(kind)),
+      };
+    });
+    const tally = (status: string) => selected.filter(r => r.status === status).length;
     return githubKnowledgeSourceSchema.parse({
       sourceId: s.source_id,
       selection: s.selection,
@@ -274,7 +347,14 @@ export function createGitHubKnowledge({
       syncState: s.sync_state,
       failure: s.failure,
       nextAttemptAt: s.next_attempt_at.toISOString(),
+      ...linked,
       repositories: selected,
+      repositoryCounts: {
+        active: tally('active'),
+        excluded: tally('excluded'),
+        needsPermission: tally('needs-permission'),
+        accessLost: tally('access-lost'),
+      },
       counts,
     });
   }
@@ -680,7 +760,7 @@ export function createGitHubKnowledge({
     if (!result) {
       const error = failure ?? new GitHubCorpusError('forbidden');
       await transaction(workspaceId, async tx => {
-        if (owner && repositoryDenials.includes(error.code)) await unavailable(tx, sourceId, repositoryId, error.code);
+        if (owner && ownerDenials.includes(error.code)) await unavailable(tx, sourceId, repositoryId, error.code);
         else await invalidate(tx, sourceId, repositoryId, actor.membershipId);
       });
       throw error;
@@ -790,17 +870,38 @@ export function createGitHubKnowledge({
   }
   async function health(workspaceId: string) {
     return transaction(workspaceId, async tx =>
-      z.object({ failedItems: z.number(), failedSources: z.number(), stalledSources: z.number() }).parse(
-        (
-          await tx.client.query(`
+      z
+        .object({
+          failedItems: z.number(),
+          failedSources: z.number(),
+          stalledSources: z.number(),
+          reconnectSources: z.number(),
+          permissionRepositories: z.number(),
+          lostRepositories: z.number(),
+        })
+        .parse(
+          (
+            await tx.client.query(
+              `
       SELECT (SELECT count(*)::int FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'sources')} s ON s.id=i.source_id
-        WHERE s.state='active' AND i.failure IS NOT NULL) AS "failedItems",
+        WHERE s.state='active' AND i.failure IS NOT NULL AND i.failure<>$1) AS "failedItems",
+      (SELECT count(DISTINCT (r.source_id,r.repository_id))::int FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id
+        WHERE s.state='active' AND NOT r.excluded AND ((r.state='unavailable' AND r.failure='insufficient-scope') OR (r.state='active' AND EXISTS (
+          SELECT 1 FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'github_sources')} g ON g.source_id=i.source_id
+          WHERE i.source_id=r.source_id AND i.repository_id=r.repository_id AND i.failure=$1 AND i.document_id IS NULL AND i.seen_generation>=g.reconciliation-1)))) AS "permissionRepositories",
+      (SELECT count(*)::int FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id
+        WHERE s.state='active' AND NOT r.excluded AND r.state='unavailable' AND r.failure IS DISTINCT FROM 'insufficient-scope') AS "lostRepositories",
+      count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_github_accounts')} a
+        WHERE a.owner_membership_id=s.owner_membership_id AND a.identity->>'id'=g.binding->>'githubUserId' AND a.state='active'
+        AND a.credential IS NOT NULL AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp())))::int AS "reconnectSources",
       count(*) FILTER (WHERE g.sync_state='failed' OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r
         WHERE r.source_id=g.source_id AND r.state='unavailable'))::int AS "failedSources",
       count(*) FILTER (WHERE g.sync_state IN ('queued','syncing','ready') AND g.next_attempt_at<clock_timestamp()-interval '15 minutes')::int AS "stalledSources"
-      FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active'`)
-        ).rows[0],
-      ),
+      FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active'`,
+              [deniedFailure],
+            )
+          ).rows[0],
+        ),
     );
   }
   async function fenced<T>(
@@ -1091,7 +1192,9 @@ export function createGitHubKnowledge({
     const found = new Map<string, GitHubRepository>();
     let page: string | undefined;
     for (let pages = 0; pages < 100 && found.size < githubCorpusLimits.repositories; pages++) {
-      const result = await provider.discover(work.workspaceId, s.owner_user_id, s.binding.accountId, page);
+      const result = await provider.discover(work.workspaceId, s.owner_user_id, s.binding.accountId, page, {
+        includeUnreadable: true,
+      });
       if (result.binding.githubUserId !== s.binding.githubUserId) throw new GitHubCorpusError('stale-integration');
       for (const r of result.items) found.set(r.repositoryId, r);
       if (!result.nextCursor || result.nextCursor === page) break;
@@ -1147,6 +1250,24 @@ export function createGitHubKnowledge({
       if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
       if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
+      // After the owner reconnects the same GitHub identity, sync resumes with the account's new generation.
+      const account = await ownerAccount(tx, s);
+      if (
+        account?.live &&
+        account.login &&
+        (account.id !== s.binding.accountId || account.generation !== s.binding.accountGeneration)
+      ) {
+        s.binding = githubCorpusBindingSchema.parse({
+          ...s.binding,
+          accountId: account.id,
+          accountGeneration: account.generation,
+          login: account.login,
+        });
+        await tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET binding=$2 WHERE source_id=$1`, [
+          s.source_id,
+          s.binding,
+        ]);
+      }
       await tx.client.query(
         `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
         [s.source_id, token],
@@ -1174,7 +1295,7 @@ export function createGitHubKnowledge({
           try {
             accessible = await check(work.workspaceId, owner, claim.source_id, repository.repository_id, true);
           } catch (error) {
-            if (!repositoryDenied(error)) throw error;
+            if (!ownerDenied(error)) throw error;
             accessible = false;
           }
           const history = await fenced(work, token, async tx =>
@@ -1229,7 +1350,7 @@ export function createGitHubKnowledge({
               await fenced(work, token, tx => project(tx, claim.source_id, repository.repository_id));
               cursor.page = page.nextCursor;
             } catch (error) {
-              if (!repositoryDenied(error)) throw error;
+              if (!ownerDenied(error)) throw error;
               await fenced(work, token, tx => unavailable(tx, claim.source_id, repository.repository_id, error.code));
               cursor.page = null;
             }
@@ -1258,25 +1379,44 @@ export function createGitHubKnowledge({
                   `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
           JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active' AND NOT c.excluded
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
-          WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) ORDER BY i.native_id LIMIT 20`,
-                  [claim.source_id, claim.reconciliation, cursor.after],
+          WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) AND i.failure IS DISTINCT FROM $4 ORDER BY i.native_id LIMIT 20`,
+                  [claim.source_id, claim.reconciliation, cursor.after, deniedFailure],
                 )
               ).rows,
             ),
         );
         const verified = new Map<string, boolean>();
+        const denied = new Set(
+          await fenced(work, token, async tx =>
+            z
+              .array(z.object({ repository_id: z.string(), kind: z.string() }))
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT repository_id,kind FROM ${table(tx, 'github_items')} WHERE source_id=$1 AND failure=$2 AND document_id IS NULL AND seen_generation=$3`,
+                    [claim.source_id, deniedFailure, claim.reconciliation],
+                  )
+                ).rows,
+              )
+              .map(row => `${row.repository_id}:${row.kind}`),
+          ),
+        );
         for (const row of rows) {
           let accessible = verified.get(row.repository_id);
           if (accessible === undefined) {
             try {
               accessible = await check(work.workspaceId, owner, claim.source_id, row.repository_id, true);
             } catch (error) {
-              if (!repositoryDenied(error)) throw error;
+              if (!ownerDenied(error)) throw error;
               accessible = false;
             }
             verified.set(row.repository_id, accessible);
           }
-          if (accessible)
+          // A kind this pass could not read stays hidden, without reading it, until the connection can read it again.
+          if (accessible && denied.has(`${row.repository_id}:${row.kind}`)) {
+            const documentId = row.document_id;
+            if (documentId) await fenced(work, token, tx => clear(tx, documentId));
+          } else if (accessible)
             try {
               const observed = await corpus.fetch(
                 work.workspaceId,
@@ -1291,7 +1431,7 @@ export function createGitHubKnowledge({
               await ingest(work, token, claim, observation);
               await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
             } catch (error) {
-              if (repositoryDenied(error)) {
+              if (ownerDenied(error)) {
                 await fenced(work, token, tx => unavailable(tx, claim.source_id, row.repository_id, error.code));
                 verified.set(row.repository_id, false);
               } else if (

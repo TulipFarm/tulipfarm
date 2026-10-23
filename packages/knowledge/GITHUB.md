@@ -22,6 +22,12 @@ dispatches source and proof checks to the adapter that owns each provider.
 account owned by the calling member. Without OAuth configuration or keys, every
 provider call fails with `not-configured`; API startup is unaffected.
 
+The connect flow always requests the `repo` scope, even when `GITHUB_OAUTH_SCOPES`
+omits it, so private repositories and their contents can be read. A blank
+`GITHUB_OAUTH_SCOPES` is still rejected. Production configuration already requires
+`repo` among the operation scopes. Adding `repo` to a deployment that lacked it
+changes the OAuth configuration hash, so existing accounts must reconnect once.
+
 The service exports `discover`, `configure`, `list`, `listDocuments`, `manage`,
 `due`, `process`, `refresh`, `evidence`, `original`, and `status`, with the same
 command and lease semantics as the Slack adapter.
@@ -132,8 +138,9 @@ resumes its sync.
 At the start of every pass, an all-repositories source lists the account's
 repositories and adds any it does not know yet, up to 1,000 repositories per
 source. Repositories that another live source of the same owner already covers
-are skipped. Private repositories are skipped when the account lacks the `repo`
-scope. A repository that cannot be resolved is skipped without failing the pass.
+are skipped. A private repository visible without the `repo` scope is added and
+reported as needing permission (see [Access status](#access-status)). A repository
+that cannot be resolved is skipped without failing the pass.
 
 `excludePaths` holds up to 20 regular expressions of at most 200 characters.
 Each is matched against a repository-relative file path for the `docs` and `code`
@@ -185,10 +192,57 @@ nothing implicitly. A changed OAuth configuration hash is not visible to SQL; th
 next credential use rejects the account and changes its generation.
 
 A repository the owner can no longer read is marked `unavailable` with reason
-`forbidden`. Its content stays retained but unreadable; other repositories continue
-to sync and the source is not revoked. The next sync or `retry` re-checks it and
-reactivates it if access returns. `retry` also rebinds the source to the owner's
-current active account for the same GitHub user.
+`forbidden`, or `insufficient-scope` when the account lacks the `repo` scope. Its
+content stays retained but hidden from search and is not tombstoned; other
+repositories continue to sync and the source is not revoked. The next sync or
+`retry` re-checks it and reactivates it if access returns. A claimed pass, like
+`retry`, rebinds the source to the owner's current active account for the same
+GitHub user once that account is live at a new generation, so reconnecting resumes
+syncing without another action.
+
+Repositories are keyed by GitHub repository ID. The check by ID updates the full
+name, visibility and title, so a renamed or transferred repository keeps its row,
+its selection and its documents. Existing documents keep their earlier canonical
+URL and title until the item itself changes; GitHub redirects those URLs.
+
+## Access status
+
+The source DTO reports:
+
+- `connection`: `active`, or `reconnect-required` when the owner's bound account is
+  not live (revoked, expired or rejected token, or a removed or suspended
+  installation). The Integrations page shows a reconnect prompt; only the owner
+  sees the Reconnect GitHub button, and shared readers are told the owner must
+  reconnect.
+- `repositoryCounts`: `active`, `excluded`, `needsPermission` and `accessLost`.
+
+Each repository has a `status` and `missingKinds`:
+
+| Status             | Meaning                                                                                                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `active`           | Every selected kind is readable.                                                                                                                                                   |
+| `excluded`         | The owner opted the repository out.                                                                                                                                                |
+| `needs-permission` | The repository is visible but at least one selected kind is not readable: the account lacks the `repo` scope (every kind is missing), or GitHub returned 403 or 404 for that kind. |
+| `access-lost`      | A repository that was readable is now forbidden or removed from the account or installation.                                                                                       |
+
+A kind the listing cannot read (403, 404, GraphQL `FORBIDDEN` or insufficient
+scopes) is recorded as an item row with failure `denied`, no document and a
+`{kind}:{repository}:/denied` native ID. Existing documents of that kind stay
+hidden, not tombstoned, until a later pass reads the kind again. A marker applies
+only while the latest completed pass or the current one listed it; it counts
+toward the source's item rows but not its document counts.
+
+`search_knowledge` adds the notice `github-access-needs-attention` when the member
+can read a GitHub source that is disconnected, whose owner must reconnect, or that
+has a repository needing permission or with lost access. The instruction tells the
+model to say GitHub knowledge may be out of date and to include
+`[Reconnect GitHub](#github-reconnect)`, which the chat renders as a link to the
+workspace Integrations page.
+
+`health` adds `reconnectSources`, `permissionRepositories` and `lostRepositories`,
+exported as the gauges `cloud_knowledge_reconnect_sources`,
+`cloud_knowledge_permission_repositories` and
+`cloud_knowledge_lost_repositories` with only the `provider` label (`github`).
 
 ## Reconciliation
 
@@ -250,6 +304,8 @@ active account, so existing accounts get their all-repositories source.
 
 ## Verification
 
+`test/github-access.integration.mjs` covers the missing `repo` scope, a denied kind,
+lost access, a rename or transfer, and reconnecting a rejected credential.
 `test/github-opt-out.integration.mjs` covers automatic creation, new repositories
 on later passes, repository, kind, path and cutoff opt-outs, full history and the
 1,000-repository bound. `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
