@@ -626,12 +626,15 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
         'error.code': code,
         ...(storageCode ? { 'error.storageCode': storageCode } : {}),
       });
+      // A pinned policy whose models left the catalog can never succeed, so the retry pins the current policy instead.
+      const repin = code === 'compaction-model-unavailable' || code === 'compaction-families-unavailable';
       await transaction(work.workspaceId, async tx => {
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_maintenance')} SET state=$3,error_code=$4,lease_until=NULL,dispatched_at=NULL,
+          compaction_policy=CASE WHEN $5 THEN NULL ELSE compaction_policy END,
           next_attempt_at=clock_timestamp()+LEAST(1800,30*power(2,LEAST(attempts,6)))*interval '1 second',updated_at=clock_timestamp()
           WHERE id=$1 AND epoch=$2 AND state IN ('running','publishing')`,
-          [work.jobId, fence.epoch, stale ? 'stale' : blocked ? 'blocked' : 'failed', code],
+          [work.jobId, fence.epoch, stale ? 'stale' : blocked ? 'blocked' : 'failed', code, repin],
         );
         await notifyConversationChange(tx, { workspaceId: work.workspaceId, conversationId: work.conversationId });
       });
