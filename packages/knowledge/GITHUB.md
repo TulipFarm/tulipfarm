@@ -289,6 +289,35 @@ only when a listing finishes, so an interrupted pass compares from the older hea
 A commit removed from the default branch by a force push stays indexed while GitHub
 still serves it by SHA.
 
+### Incremental passes
+
+A pass is full or incremental. A full pass lists every repository as above and
+re-reads every unseen item. An incremental pass lists only what changed since the
+repository's last completed listing, recorded per repository in the source cursor:
+
+- Files: the pass reads the default-branch head once. An unchanged head skips the
+  docs and code listings. A changed head is compared with the recorded one
+  (`GET /repositories/{id}/compare/{base}...{head}`); added, modified and renamed
+  files are listed with their blob revision, and removed files and the old path of a
+  rename are tombstoned. Path, kind and repository opt-outs apply as in a full
+  listing, so an excluded file is never listed. A missing base (force push),
+  diverged history, 300 or more changed files, a truncated directory, or a change
+  too large for one page falls back to a full listing of that repository and asks
+  for a full next pass. The commit listing reuses the head read for files, but keeps
+  its own `commit_head` described above.
+- Issues, pull requests and discussions: the listing starts from the previous
+  listing's start time less five minutes, using `since` for REST and `updatedAt` for
+  GraphQL, instead of the whole history.
+
+An incremental pass re-reads only unseen items that previously failed with a
+retryable failure, or whose kind was denied; tombstoning by absence happens only in
+full passes. A pass is full when the source has no completed full pass, the last one
+is 24 hours old, a fallback asked for one, or the cursor was reset (a settings
+change, reconnect, manual retry or an invalid cursor). A daily full pass therefore
+catches missed webhooks, deleted or transferred issues, and discussion comments that
+do not change a discussion's `updatedAt`. Repository marks live in the cursor, so no
+migration is needed.
+
 ### Failures, retries and rate limits
 
 The provider retries transient failures (5xx, timeouts, network errors) up to four
@@ -322,6 +351,42 @@ The API sweep starts due sources (20 per check) every two seconds. A workspace
 whose storage version the API cannot use is skipped and counted in
 `cloud_dispatch_skipped_workspaces` (labels `dispatcher` and
 `reason=incompatible_version`; no workspace label).
+
+A ready source is due again one minute after its pass. Polling remains the safety
+net; webhooks make changes appear within seconds.
+
+### Webhooks
+
+With `GITHUB_WEBHOOK_APP_ID` and `GITHUB_WEBHOOK_SECRET` set, the API accepts
+GitHub deliveries at `POST /v1/github/knowledge/events`. Configure the GitHub App
+(or an organization or repository webhook sharing the secret) with:
+
+- Webhook URL `https://<api host>/v1/github/knowledge/events`, content type
+  `application/json`, and a secret of 32 to 4,096 characters.
+- Events: `push`, `issues`, `issue_comment`, `pull_request`, `pull_request_review`,
+  `pull_request_review_comment`, `discussion`, `discussion_comment`, `repository`,
+  `installation` and `installation_repositories`.
+- Read-only repository permissions for metadata, contents, issues, pull requests
+  and discussions, which those events need.
+
+Each delivery's `X-Hub-Signature-256` is verified before anything is stored, and
+deliveries are deduplicated by `X-GitHub-Delivery`: a redelivery is acknowledged
+again, and a reused delivery ID with a different body is rejected with 409.
+Responses are 202 for accepted, 401 for a bad signature, 400 for malformed headers
+or bodies, 413 above 25 MiB, and 503 while webhooks are disabled.
+
+A delivery keeps only the numeric IDs of the repositories it changes, in the
+platform GitHub event inbox; its content is never indexed. Pushes count only on the
+default branch, `repository` events only for renames, deletions, transfers,
+visibility, archive and edit actions, and installation events for every repository
+they add or remove. The dispatch sweep reads pending deliveries and makes every
+active GitHub source due at once when it selects one of those repositories by ID
+and has not opted it out, or when it is an all-repositories source that does not
+know the repository yet (a new repository). It then closes the deliveries. A source
+already running is asked to start another pass as soon as it finishes. The pass
+re-reads GitHub with the source owner's own account. A delivery not dispatched
+within an hour expires; polling covers it. At most 10,000 deliveries are pending
+per App; beyond that, deliveries are recorded as rejected with `capacity-exceeded`.
 
 ## Reader-first rollout
 
@@ -358,7 +423,11 @@ on later passes, repository, kind, path and cutoff opt-outs, full history and th
 1,000-repository bound. `test/github.integration.mjs` uses restricted PostgreSQL logins, the actual parser,
 lexical search, embeddings, and the search coordinator with a fixture provider.
 `packages/github/test/corpus-provider.test.mjs` covers REST and GraphQL mapping
-against `packages/github/test/corpus-fixture.mjs`.
+against `packages/github/test/corpus-fixture.mjs`, including head-unchanged skips,
+compare listings with renames, removals and opt-outs, compare fallbacks and
+since-marks. `packages/github/test/knowledge-events.test.mjs` covers the
+event-to-repository mapping, and `knowledge-events.integration.mjs` signature
+checks, deduplication, capacity and expiry against PostgreSQL.
 `apps/api/test/knowledge-github-all-files.integration.mjs` runs the real provider and
 engine across head changes: formerly excluded files, a file in parts, a binary
 placeholder, a hashed long path, a truncated tree walk and deletions.

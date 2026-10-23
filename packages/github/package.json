@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./knowledge-events": {
+      "types": "./dist/knowledge-events.d.ts",
+      "default": "./dist/knowledge-events.js"
+    },
     "./event-inbox": {
       "types": "./dist/event-inbox.d.ts",
       "default": "./dist/event-inbox.js"

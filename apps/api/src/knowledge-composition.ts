@@ -34,6 +34,7 @@ import { createGitHubKnowledge, type GitHubCorpusProvider } from '@tulipfarm/kno
 import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { registerGitHubKnowledge, githubDocumentsResponseSchema } from './knowledge-github.ts';
 import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
+import { githubKnowledgeEventsFromEnvironment, registerGitHubKnowledgeEvents } from './knowledge-github-events.ts';
 import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import { atlassianDocumentsResponseSchema, registerAtlassianKnowledge } from './knowledge-atlassian.ts';
@@ -346,6 +347,8 @@ export function registerKnowledgeComposition(
       });
     },
   });
+  const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
+  registerGitHubKnowledgeEvents(app, githubEvents);
   registerDefaultKnowledge(app, {
     auth: dependencies.auth,
     service: defaults,
@@ -365,7 +368,12 @@ export function registerKnowledgeComposition(
     });
     registerGoogleKnowledgeDispatch(app, { pool: dependencies.pool, temporal: dependencies.temporal, service: google });
     registerSlackKnowledgeDispatch(app, { pool: dependencies.pool, temporal: dependencies.temporal, service: slack });
-    registerGitHubKnowledgeDispatch(app, { pool: dependencies.pool, temporal: dependencies.temporal, service: github });
+    registerGitHubKnowledgeDispatch(app, {
+      pool: dependencies.pool,
+      temporal: dependencies.temporal,
+      service: github,
+      events: githubEvents,
+    });
     registerAtlassianKnowledgeDispatch(app, {
       pool: dependencies.pool,
       temporal: dependencies.temporal,
