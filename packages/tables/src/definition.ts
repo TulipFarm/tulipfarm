@@ -17,12 +17,49 @@ export const teamIdSchema = z.uuid().toLowerCase().brand<'TeamId'>();
 export const optionIdSchema = z.uuid().toLowerCase().brand<'OptionId'>();
 export const fileIdSchema = z.uuid().toLowerCase().brand<'FileId'>();
 export const uniqueKeyIdSchema = z.uuid().toLowerCase().brand<'UniqueKeyId'>();
+export const tableDefinitionMessages = {
+  wellFormedText: 'Expected well-formed Unicode without null bytes',
+  duplicateOption: 'Duplicate option identity',
+  decimalPrecisionScale: 'Invalid decimal precision or scale',
+  duplicateField: 'Duplicate field identity',
+  duplicateUniqueKey: 'Duplicate unique key identity or fields',
+  uniqueKeyScalarFields: 'Unique keys require existing scalar fields',
+  reverseFieldUsed: 'Reverse field identity is already used',
+} as const;
+export type TableRule = { message: string; rule: string };
+export const tableDefinitionRules: readonly TableRule[] = [
+  {
+    message: tableDefinitionMessages.wellFormedText,
+    rule: 'Text such as labels must be well-formed Unicode without null bytes.',
+  },
+  {
+    message: tableDefinitionMessages.duplicateOption,
+    rule: 'Option IDs must be unique within a select field.',
+  },
+  {
+    message: tableDefinitionMessages.decimalPrecisionScale,
+    rule: 'Numeric scale must not exceed precision, and precision minus scale must be at most 20.',
+  },
+  { message: tableDefinitionMessages.duplicateField, rule: 'Field IDs must be unique within a table.' },
+  {
+    message: tableDefinitionMessages.duplicateUniqueKey,
+    rule: 'Unique-key IDs must be unique, no two unique keys may cover the same fields, and a unique key must not repeat a field.',
+  },
+  {
+    message: tableDefinitionMessages.uniqueKeyScalarFields,
+    rule: 'Unique keys may only use fields of the same table that are not multi-select, file, or many-cardinality relationship fields.',
+  },
+  {
+    message: tableDefinitionMessages.reverseFieldUsed,
+    rule: 'Relationship reverse field IDs must be unique per target table and must not reuse a field ID of a self-referencing table.',
+  },
+];
 const textSchema = z
   .string()
   .max(10000)
   .refine(
     value => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value),
-    'Expected well-formed Unicode without null bytes',
+    tableDefinitionMessages.wellFormedText,
   );
 const labelSchema = textSchema.trim().min(1).max(120);
 const cardinalitySchema = z.enum(['one', 'many']);
@@ -44,7 +81,10 @@ const optionsSchema = z
   .array(optionSchema)
   .min(1)
   .max(256)
-  .refine(options => new Set(options.map(option => option.id)).size === options.length, 'Duplicate option identity');
+  .refine(
+    options => new Set(options.map(option => option.id)).size === options.length,
+    tableDefinitionMessages.duplicateOption,
+  );
 const base = { id: fieldIdSchema, label: labelSchema, required: z.boolean() };
 export const fieldSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('text'), maxLength: z.int().min(1).max(10000) }),
@@ -57,7 +97,7 @@ export const fieldSchema = z.discriminatedUnion('kind', [
     })
     .refine(
       field => field.scale <= field.precision && field.precision - field.scale <= 20,
-      'Invalid decimal precision or scale',
+      tableDefinitionMessages.decimalPrecisionScale,
     ),
   z.strictObject({ ...base, kind: z.literal('boolean') }),
   z.strictObject({ ...base, kind: z.literal('date') }),
@@ -97,7 +137,7 @@ export const definitionSchema = z
   .superRefine((definition, context) => {
     const fields = new Map(definition.fields.map(field => [field.id, field]));
     if (fields.size !== definition.fields.length)
-      context.addIssue({ code: 'custom', message: 'Duplicate field identity', path: ['fields'] });
+      context.addIssue({ code: 'custom', message: tableDefinitionMessages.duplicateField, path: ['fields'] });
     const keyIds = new Set<string>();
     const keyFields = new Set<string>();
     for (const [index, key] of definition.uniqueKeys.entries()) {
@@ -105,7 +145,7 @@ export const definitionSchema = z
       if (keyIds.has(key.id) || keyFields.has(signature) || new Set(key.fieldIds).size !== key.fieldIds.length) {
         context.addIssue({
           code: 'custom',
-          message: 'Duplicate unique key identity or fields',
+          message: tableDefinitionMessages.duplicateUniqueKey,
           path: ['uniqueKeys', index],
         });
       }
@@ -121,7 +161,7 @@ export const definitionSchema = z
         ) {
           context.addIssue({
             code: 'custom',
-            message: 'Unique keys require existing scalar fields',
+            message: tableDefinitionMessages.uniqueKeyScalarFields,
             path: ['uniqueKeys', index, 'fieldIds'],
           });
         }
@@ -134,7 +174,7 @@ export const definitionSchema = z
       if (reverseIds.has(reverseId) || (field.targetTableId === definition.id && fields.has(field.reverse.fieldId))) {
         context.addIssue({
           code: 'custom',
-          message: 'Reverse field identity is already used',
+          message: tableDefinitionMessages.reverseFieldUsed,
           path: ['fields', index, 'reverse'],
         });
       }
@@ -145,7 +185,7 @@ export const definitionSchema = z
 const optionIdsSchema = z
   .array(optionIdSchema)
   .max(256)
-  .refine(ids => new Set(ids).size === ids.length, 'Duplicate option identity');
+  .refine(ids => new Set(ids).size === ids.length, tableDefinitionMessages.duplicateOption);
 const recordIdsSchema = z
   .array(recordIdSchema)
   .max(256)

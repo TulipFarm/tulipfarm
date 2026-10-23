@@ -47,7 +47,7 @@ import type { createGitHubInvestigation } from '@tulipfarm/github/investigation'
 import { requireInvestigationToolBoundary } from './investigation-boundary.ts';
 import { GitHubBatchError } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBatches } from '@tulipfarm/github/batches';
-import { proposeTableSchema } from '@tulipfarm/tables/proposal-contracts';
+import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 import { createChatTableProposals } from './table-proposals.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
@@ -83,6 +83,10 @@ export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
 
 const page = { after: z.uuid().optional(), limit: z.number().int().min(1).max(100).default(25) };
+const tableAuthoringConstraints = [
+  ...tableProposalRules.map(({ rule, message }) => `${rule} Otherwise tables.propose reports "${message}".`),
+  'Call tables.propose with input set to the plans as one JSON-encoded string.',
+].join('\n');
 const tableProposalInput = z
   .string()
   .max(1048576)
@@ -698,8 +702,10 @@ export function createChatTools(
             error: 'invalid-arguments',
             issues:
               error instanceof z.ZodError
-                ? error.issues.slice(0, 20).map(({ path, code }) => ({ path, code }))
-                : [{ path: [], code: 'invalid-json' }],
+                ? error.issues
+                    .slice(0, 20)
+                    .map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) }))
+                : [{ path: [], code: 'invalid-json', message: 'Input is not valid JSON' }],
             instruction:
               'No proposal was created. This is not a permission denial. Read skills.read(table-authoring) for proposalInputSchema, correct the JSON payload at the reported paths, and submit a new proposal for review.',
           };
@@ -1015,8 +1021,7 @@ export function createChatTools(
           ? {
               ...skill,
               proposalInputSchema: z.toJSONSchema(proposeTableSchema, { io: 'input' }),
-              constraints:
-                'Numeric precision-scale must be at most 20 and scale must not exceed precision. Plans have unique table IDs and depend only on earlier plans. Field IDs and unique-key IDs must be unique. Call tables.propose with input set to the plans as one JSON-encoded string.',
+              constraints: tableAuthoringConstraints,
             }
           : skill;
       }
