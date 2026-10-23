@@ -518,9 +518,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             selection: { ...input.selection, repositories: ['acme/handbook'] },
           });
           let expired = false;
+          // Expiry is injected mid-parse; one item at a time keeps it from landing between another item's check and publish.
           const importer = createGitHubKnowledge({
             runtime,
             provider,
+            sync: { ...fast, concurrency: 1 },
             parseDocument: async value => {
               const parsed = await parseKnowledgeDocument(value);
               if (!expired) {
