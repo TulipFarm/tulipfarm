@@ -1149,3 +1149,181 @@ test('issue listings request the GitHub maximum page size', async () => {
   assert.ok(issues.length);
   assert.ok(issues.every(call => call.query.per_page === '100'));
 });
+
+// Lists one repository to the end the way the sync engine does: the head read for the files is passed on to later
+// phases, and `mark` is the previous listing's mark.
+async function listPass(provider, binding, mark, value = selection) {
+  const pass = { observations: [], removed: [], mark: {}, reconcile: false };
+  let cursor = null;
+  for (let page = 0; page < 40; page++) {
+    const history = {
+      commitHead: null,
+      ...(mark ? { mark } : {}),
+      ...(pass.mark.head ? { head: pass.mark.head } : {}),
+    };
+    const result = await provider.list(workspaceId, 'reader', binding, '7001', value, cursor, history);
+    pass.observations.push(...result.observations);
+    pass.removed.push(...(result.removed ?? []));
+    pass.mark = { ...pass.mark, ...result.mark };
+    pass.reconcile ||= result.reconcile === true;
+    if (!result.nextCursor) return pass;
+    cursor = result.nextCursor;
+  }
+  assert.fail('listing did not finish');
+}
+const ids = pass => pass.observations.map(item => item.nativeId).sort();
+const filesSelection = { ...selection, kinds: ['code', 'docs'] };
+
+test('a full listing records the head commit and listing start as the next incremental mark', async () => {
+  const { provider, binding, github } = setup();
+  const pass = await listPass(provider, binding, undefined);
+  assert.match(pass.mark.head, /^[a-f0-9]{40}$/);
+  assert.ok(Date.parse(pass.mark.issues) > Date.now() - 60000);
+  assert.ok(Date.parse(pass.mark.discussions) > Date.now() - 60000);
+  assert.ok(ids(pass).includes('doc:7001:README.md'));
+  assert.equal(pass.reconcile, false);
+  assert.equal(github.calls.filter(call => call.path === '/repositories/7001/commits/main').length, 1);
+});
+
+test('an unchanged default-branch head skips the file listing entirely', async () => {
+  const { provider, binding, github } = setup();
+  const { mark } = await listPass(provider, binding, undefined, filesSelection);
+  github.calls.length = 0;
+  const pass = await listPass(provider, binding, mark, filesSelection);
+  assert.deepEqual(pass.observations, []);
+  assert.deepEqual(pass.removed, []);
+  assert.equal(pass.mark.head, mark.head);
+  assert.deepEqual(
+    github.calls.map(call => call.path),
+    ['/repositories/7001', '/repositories/7001/commits/main'],
+  );
+});
+
+test('a changed head lists only changed files, in parts, and reports every touched file for removal', async () => {
+  const { provider, binding, github, repo } = setup();
+  const { mark } = await listPass(provider, binding, undefined, filesSelection);
+  repo.files.set('docs/new.md', 'A new orchid page');
+  repo.files.set('README.md', '# Handbook\n\nUpdated orchid onboarding.');
+  repo.files.set('docs/huge.md', 'y'.repeat(300 * 1024));
+  repo.files.set('docs/moved.md', repo.files.get('docs/supplier.md'));
+  repo.files.delete('docs/supplier.md');
+  repo.files.delete('src/index.ts');
+  github.calls.length = 0;
+  const pass = await listPass(provider, binding, mark, filesSelection);
+  assert.deepEqual(ids(pass), [
+    'doc:7001:/p/2/docs/huge.md',
+    'doc:7001:/p/3/docs/huge.md',
+    'doc:7001:README.md',
+    'doc:7001:docs/huge.md',
+    'doc:7001:docs/moved.md',
+    'doc:7001:docs/new.md',
+  ]);
+  assert.deepEqual(pass.removed.sort(), [
+    'code:7001:src/index.ts',
+    'doc:7001:README.md',
+    'doc:7001:docs/huge.md',
+    'doc:7001:docs/moved.md',
+    'doc:7001:docs/new.md',
+    'doc:7001:docs/supplier.md',
+  ]);
+  assert.notEqual(pass.mark.head, mark.head);
+  assert.equal(pass.reconcile, false);
+  assert.ok(github.calls.some(call => call.path.startsWith(`/repositories/7001/compare/${mark.head}...`)));
+  assert.ok(pass.observations.every(item => item.sourceRevision.startsWith('blob:')));
+});
+
+test('incremental file listings keep excluded paths and unselected kinds out', async () => {
+  const { provider, binding, repo } = setup();
+  const value = { ...selection, kinds: ['docs'], excludePaths: ['^docs/private/'] };
+  const { mark } = await listPass(provider, binding, undefined, value);
+  repo.files.set('docs/private/salary.md', 'Excluded orchid budget');
+  repo.files.set('docs/public.md', 'Public orchid page');
+  repo.files.set('src/next.ts', 'export const next = 1;');
+  const pass = await listPass(provider, binding, mark, value);
+  assert.deepEqual(ids(pass), ['doc:7001:docs/public.md']);
+  assert.ok(!pass.removed.some(id => id.startsWith('code:')));
+});
+
+test('a truncated recursive tree still lists changes by reading only the changed directories', async () => {
+  const { provider, binding, github, repo } = setup();
+  const { mark } = await listPass(provider, binding, undefined, filesSelection);
+  repo.files.set('docs/new.md', 'A new orchid page');
+  github.state.truncate = true;
+  github.calls.length = 0;
+  const pass = await listPass(provider, binding, mark, filesSelection);
+  assert.deepEqual(ids(pass), ['doc:7001:docs/new.md']);
+  assert.equal(pass.reconcile, false);
+  assert.equal(github.calls.filter(call => call.path.includes('/git/trees/') && !call.query.recursive).length, 2);
+});
+
+test('incremental file listing falls back to a full listing and asks for reconciliation when compare cannot be used', async t => {
+  for (const [name, change] of [
+    [
+      'force-pushed base',
+      github => (github.state.compare = () => Response.json({ message: 'No common ancestor' }, { status: 404 })),
+    ],
+    ['diverged history', github => (github.state.compare = () => Response.json({ status: 'diverged', files: [] }))],
+    [
+      'too many changed files',
+      github =>
+        (github.state.compare = () =>
+          Response.json({
+            status: 'ahead',
+            files: Array.from({ length: 300 }, (_, i) => ({ filename: `docs/${i}.md`, status: 'added' })),
+          })),
+    ],
+    [
+      'truncated directories',
+      github => {
+        github.state.truncate = true;
+        github.state.truncateDirs.add('docs/');
+      },
+    ],
+  ])
+    await t.test(name, async () => {
+      const { provider, binding, github, repo } = setup();
+      const { mark } = await listPass(provider, binding, undefined, filesSelection);
+      repo.files.set('docs/new.md', 'A new orchid page');
+      change(github);
+      const pass = await listPass(provider, binding, mark, filesSelection);
+      assert.equal(pass.reconcile, true);
+      assert.ok(ids(pass).includes('doc:7001:README.md'), 'the full listing still includes unchanged files');
+      assert.notEqual(pass.mark.head, mark.head);
+    });
+});
+
+test('incremental issue and discussion listings start from the previous listing less a small overlap', async () => {
+  const { provider, binding, github, repo } = setup();
+  const value = { ...selection, kinds: ['discussions', 'issues'] };
+  const first = await listPass(provider, binding, undefined, value);
+  assert.deepEqual(ids(first), ['discussion:7001:5', 'issue:7001:1']);
+  // Nothing changed since the last listing started, beyond the overlap.
+  const old = new Date(Date.now() - 10 * 60000).toISOString();
+  repo.issues.get(1).updated_at = old;
+  repo.discussions.get(5).updatedAt = old;
+  github.calls.length = 0;
+  const quiet = await listPass(provider, binding, first.mark, value);
+  assert.deepEqual(ids(quiet), []);
+  const since = github.calls.find(call => call.path === '/repositories/7001/issues').query.since;
+  assert.ok(Math.abs(Date.parse(since) - (Date.parse(first.mark.issues) - 5 * 60000)) < 1000);
+  github.touch(repo, 1, { title: 'Orchid shipment arrived' });
+  repo.discussions.get(5).updatedAt = new Date().toISOString();
+  const changed = await listPass(provider, binding, first.mark, value);
+  assert.deepEqual(ids(changed), ['discussion:7001:5', 'issue:7001:1']);
+  assert.ok(Date.parse(changed.mark.issues) >= Date.parse(first.mark.issues));
+});
+
+test('without a cutoff or mark, issues are listed from the beginning', async () => {
+  const { provider, binding, github } = setup();
+  const { after: _after, ...value } = { ...selection, kinds: ['issues'] };
+  await listPass(provider, binding, undefined, value);
+  assert.equal(github.calls.find(call => call.path === '/repositories/7001/issues').query.since, undefined);
+});
+
+test('the commit listing pins to the head the file listing read', async () => {
+  const { provider, binding, github } = setup();
+  github.push(github.state.repos.get(7001), { message: 'First', files: [{ filename: 'README.md' }] });
+  const pass = await listPass(provider, binding, undefined, { ...selection, kinds: ['commits', 'docs'] });
+  assert.equal(github.calls.filter(call => call.path === '/repositories/7001/commits/main').length, 1);
+  assert.ok(ids(pass).some(id => id.startsWith('commit:7001:')));
+});

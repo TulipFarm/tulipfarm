@@ -203,9 +203,33 @@ export type GitHubCorpusPage = {
   // history is now listed; `retained` means only commits newer than the caller's `commitHead` were listed, so every
   // commit item already stored for the repository is still current.
   commits?: { head: string; retained: boolean };
+  // Files, by their first part's native ID, whose parts not observed on this page no longer exist: files removed or
+  // renamed away between two commits, and changed files that may now have fewer parts.
+  removed?: string[];
+  // Progress this page adds to the repository's mark.
+  mark?: GitHubRepositoryMark;
+  // The incremental listing could not be trusted, so the next pass must fully reconcile.
+  reconcile?: boolean;
 };
-// The caller's record of a repository's history: the last default-branch head whose every commit was listed.
-export type GitHubListHistory = { commitHead: string | null };
+/**
+ * Where one repository's last completed listing ended: the default-branch head whose files were listed, and when the
+ * listings of issues and pull requests and of discussions started. An incremental listing starts from it.
+ */
+export type GitHubRepositoryMark = {
+  head?: string | undefined;
+  issues?: string | undefined;
+  discussions?: string | undefined;
+};
+/** Repositories that GitHub reported as changed, by numeric ID; `all` stands for every repository of an installation. */
+export type GitHubKnowledgeChanges = { repositories: readonly string[]; all: boolean };
+export type GitHubListHistory = {
+  // The last default-branch head whose every commit was listed.
+  commitHead: string | null;
+  // When present, list only what changed since this mark; otherwise list everything in scope.
+  mark?: GitHubRepositoryMark;
+  // The default-branch head this pass already read for the repository's files; the commit listing pins to it too.
+  head?: string;
+};
 export type GitHubItemRead = GitHubItemObservation & { markdown: string };
 export type GitHubCorpusProvider = {
   discover(

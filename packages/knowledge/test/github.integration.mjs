@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -118,6 +118,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         accessError: null,
         accessGate: null,
         beforeRead: null,
+        lister: null,
       };
       const checks = [],
         reads = [],
@@ -176,8 +177,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             readable: repo.readers.has(b.githubUserId),
           };
         },
-        list: async (_w, userId, b, id, selection, _cursor, history) => {
+        list: async (_w, userId, b, id, selection, cursor, history) => {
           own(userId, b);
+          if (state.lister) return state.lister(id, cursor, history);
           const listError = typeof state.listError === 'function' ? state.listError(id) : state.listError;
           if (listError) throw listError;
           lists.push({ id, kinds: selection.kinds, history });
@@ -270,10 +272,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             filters: { kinds: ['github'], sourceIds: [sourceId] },
           }),
         );
+      // These passes reconcile fully: they forget the last full pass, as a daily reconciliation would.
       async function sync(id = sourceId) {
         for (let i = 0; i < 12; i++) {
           await db.platform.query(
-            `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+            `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp(),cursor=cursor-'reconciledAt' WHERE source_id=$1`,
             [id],
           );
           const work = (await github.due(ws.id)).find(w => w.sourceId === id);
@@ -613,7 +616,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           });
           const run = async () => {
             await db.platform.query(
-              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp(),cursor=cursor-'reconciledAt' WHERE source_id=$1`,
               [temporary.sourceId],
             );
             const work = (await importer.due(ws.id)).find(w => w.sourceId === temporary.sourceId);
@@ -894,7 +897,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await t.test('partial or failed listings never tombstone; renames and deletions reconcile', async () => {
         state.listError = new GitHubCorpusError('rate-limited', 120000);
         await db.platform.query(
-          `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+          `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp(),cursor=cursor-'reconciledAt' WHERE source_id=$1`,
           [sourceId],
         );
         await github.process((await github.due(ws.id)).find(w => w.sourceId === sourceId));
@@ -1081,7 +1084,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         try {
           for (; runs < 20 && result?.disposition !== 'ready'; runs++) {
             await db.platform.query(
-              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp(),cursor=cursor-'reconciledAt' WHERE source_id=$1`,
               [sourceId],
             );
             const work = (await stepped.due(ws.id)).find(w => w.sourceId === sourceId);
@@ -1100,7 +1103,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           'the lease is renewed to a full term while work progresses',
         );
         await db.platform.query(
-          `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+          `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp(),cursor=cursor-'reconciledAt' WHERE source_id=$1`,
           [sourceId],
         );
         const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
@@ -1333,6 +1336,91 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           for (const n of [1, 2, 3]) repo.items.delete(`commit:7001:${sha(n)}`);
           delete repo.commits;
           await github.manage(ws.id, ws.userId, commits.sourceId, { commandId: randomUUID(), action: 'remove' });
+        },
+      );
+
+      await t.test(
+        'webhook changes make matching sources due and incremental passes list only what changed',
+        async () => {
+          const items = state.repos.get('7001').items;
+          const listed = id => [...state.repos.get(id).items.keys()].map(nativeId => observation(id, nativeId));
+          const calls = [];
+          const head = (id, call) => createHash('sha1').update(`${id}:${call}`).digest('hex');
+          let removed = [];
+          let observations = listed;
+          let duringList = null;
+          state.lister = async (id, _cursor, history) => {
+            calls.push([id, history?.mark]);
+            await duringList?.();
+            return {
+              observations: observations(id),
+              ...(id === '7001' ? { removed } : {}),
+              mark: { head: head(id, calls.length) },
+              nextCursor: null,
+            };
+          };
+          const pass = async () => {
+            await db.platform.query(
+              `UPDATE ${table('github_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const work = (await github.due(ws.id)).find(w => w.sourceId === sourceId);
+            assert.equal((await github.process(work)).disposition, 'ready');
+          };
+          const dueNow = async () =>
+            (
+              await db.platform.query(
+                `SELECT next_attempt_at<=clock_timestamp() AS due FROM ${table('github_sources')} WHERE source_id=$1`,
+                [sourceId],
+              )
+            ).rows[0].due;
+          let before;
+          try {
+            await sync();
+            assert.ok(
+              calls.every(([, mark]) => mark === undefined),
+              'a full pass lists everything',
+            );
+            const first = Object.fromEntries(calls.map(([id], index) => [id, head(id, index + 1)]));
+            before = await live();
+            const gone = [...items.keys()].find(nativeId => nativeId.startsWith('doc:'));
+            calls.length = 0;
+            observations = () => [];
+            removed = [gone];
+            await pass();
+            assert.deepEqual(
+              Object.fromEntries(calls),
+              Object.fromEntries(Object.entries(first).map(([id, value]) => [id, { head: value }])),
+              'an incremental pass hands each repository the mark of its last listing',
+            );
+            assert.equal(await live(), before - 1, 'only reported removals tombstone in an incremental pass');
+            assert.equal(await dueNow(), false);
+
+            removed = [];
+            assert.equal(
+              (await github.due(ws.id, { repositories: ['9999'], all: false })).some(w => w.sourceId === sourceId),
+              false,
+            );
+            assert.equal(await dueNow(), false, 'a change to an unselected repository leaves the source waiting');
+            assert.ok(
+              (await github.due(ws.id, { repositories: ['7002'], all: false })).some(w => w.sourceId === sourceId),
+              'a change to a selected repository, matched by ID, makes the source due now',
+            );
+            assert.equal(await dueNow(), true);
+
+            calls.length = 0;
+            duringList = async () => {
+              duringList = null;
+              await github.due(ws.id, { repositories: ['7001'], all: false });
+            };
+            await pass();
+            assert.equal(calls[0][1].head, head(calls[0][0], 1), 'marks advance after each completed listing');
+            assert.equal(await dueNow(), true, 'a change during a pass starts another pass at once');
+          } finally {
+            state.lister = null;
+          }
+          await sync();
+          assert.equal(await live(), before, 'a full pass restores what the listing still holds');
         },
       );
 

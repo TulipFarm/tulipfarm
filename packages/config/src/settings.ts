@@ -1244,6 +1244,23 @@ export const settings: readonly Setting[] = [
     '`repo` is always requested so Knowledge can read private repositories and their contents.',
   ),
   {
+    name: 'GITHUB_WEBHOOK_APP_ID',
+    group: 'GitHub',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Numeric ID of the GitHub App that sends webhooks to `/v1/github/knowledge/events`. Unset disables GitHub webhooks; GitHub Knowledge then relies on polling.',
+  },
+  {
+    name: 'GITHUB_WEBHOOK_SECRET',
+    group: 'GitHub',
+    services: ['api'],
+    requirement: 'conditional',
+    secret: true,
+    description: 'Webhook secret of that GitHub App, 32 to 4096 characters. Required with `GITHUB_WEBHOOK_APP_ID`.',
+  },
+  {
     name: 'GITHUB_MCP_READ_BINDINGS',
     group: 'GitHub',
     services: apps,

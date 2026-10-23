@@ -22,6 +22,7 @@ import {
   type GitHubCorpusPage,
   type GitHubListHistory,
   type GitHubRepository,
+  type GitHubRepositoryMark,
 } from '@tulipfarm/knowledge/github-contracts';
 import {
   createGitHubAccounts,
@@ -125,6 +126,17 @@ const treeEntrySchema = z.object({
 });
 type TreeEntry = z.infer<typeof treeEntrySchema>;
 const treeSchema = z.object({ truncated: z.boolean().optional(), tree: z.array(treeEntrySchema).max(200000) });
+// A comparison lists changed files only on its first page, and never more than 300 for the whole comparison.
+const compareFileLimit = 300;
+const compareFilesSchema = z.object({
+  status: z.enum(['ahead', 'behind', 'diverged', 'identical']),
+  files: z
+    .array(z.object({ filename: z.string(), status: z.string(), previous_filename: z.string().optional() }))
+    .max(compareFileLimit)
+    .optional(),
+});
+// Incremental listings re-read anything updated this long before the previous listing started, absorbing clock skew.
+const markOverlapMs = 5 * 60 * 1000;
 const contentSchema = z.object({
   type: z.enum(['file', 'symlink']),
   sha: z.string().regex(shaPattern),
@@ -319,6 +331,22 @@ function nextPhase(selection: GitHubCorpusSelection, current: Phase) {
   const order = phases(selection);
   const next = order[order.indexOf(current) + 1];
   return next ? `${next}:` : null;
+}
+const filePhase = (phase: string): phase is 'docs' | 'code' => phase === 'docs' || phase === 'code';
+// The phase after every file phase, used when one comparison stands in for the docs and code listings.
+function afterFiles(selection: GitHubCorpusSelection) {
+  const next = phases(selection).find(phase => !filePhase(phase));
+  return next ? `${next}:` : null;
+}
+// The later of the selection's cutoff and the previous listing's start less a small overlap; undefined lists everything.
+function since(selection: GitHubCorpusSelection, mark: string | undefined) {
+  const time = Math.max(
+    ...[
+      selection.after ? Date.parse(`${selection.after}T00:00:00Z`) : NaN,
+      mark ? Date.parse(mark) - markOverlapMs : NaN,
+    ].filter(Number.isFinite),
+  );
+  return Number.isFinite(time) ? new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z') : undefined;
 }
 const hashPath = (path: string) => createHash('sha256').update(path).digest('hex');
 // Native IDs keep the full path up to 1,024 bytes; a longer path is identified by its hash and kept in `path`.
@@ -1067,13 +1095,15 @@ export function createGitHubCorpusProvider(options: {
     state: string,
     accessedAt: string,
     selection: GitHubCorpusSelection,
-  ) {
+    mark: GitHubRepositoryMark | undefined,
+  ): Promise<GitHubCorpusPage> {
     const page = state ? Number(state) : 1;
+    const from = since(selection, mark?.issues);
     if (!Number.isInteger(page) || page < 1 || page > 500) throw new GitHubCorpusError('invalid-cursor');
     const response = await call(
       token,
       'github-issues',
-      `/repositories/${body.id}/issues?${new URLSearchParams({ state: 'all', sort: 'updated', direction: 'asc', ...(selection.after ? { since: `${selection.after}T00:00:00Z` } : {}), per_page: String(limits.issuePageSize), page: String(page) })}`,
+      `/repositories/${body.id}/issues?${new URLSearchParams({ state: 'all', sort: 'updated', direction: 'asc', ...(from ? { since: from } : {}), per_page: String(limits.issuePageSize), page: String(page) })}`,
     );
     // 410 means issues are turned off; 403 and 404 mean the connection cannot read them.
     if (response.status === 410) return { observations: [], nextCursor: nextPhase(selection, 'issues') };
@@ -1101,6 +1131,8 @@ export function createGitHubCorpusProvider(options: {
       });
     return {
       observations,
+      // The listing's start is the next incremental listing's mark; later pages keep the first page's mark.
+      ...(page === 1 ? { mark: { issues: accessedAt } } : {}),
       nextCursor: issues.length === limits.issuePageSize ? `issues:${page + 1}` : nextPhase(selection, 'issues'),
     };
   }
@@ -1110,7 +1142,8 @@ export function createGitHubCorpusProvider(options: {
     state: string,
     accessedAt: string,
     selection: GitHubCorpusSelection,
-  ) {
+    mark: GitHubRepositoryMark | undefined,
+  ): Promise<GitHubCorpusPage> {
     const data = parse(
       z.object({
         node: z
@@ -1123,7 +1156,9 @@ export function createGitHubCorpusProvider(options: {
     );
     const connection = data.node?.discussions;
     if (!connection) return { observations: [], nextCursor: nextPhase(selection, 'discussions') };
-    const fresh = connection.nodes.filter(node => inWindow(selection, node.updatedAt));
+    // Discussions arrive most recently updated first, so the listing stops at the first one older than its start.
+    const from = since(selection, mark?.discussions);
+    const fresh = connection.nodes.filter(node => !from || Date.parse(node.updatedAt) >= Date.parse(from));
     const observations = fresh.flatMap(node => {
       const parts = commentParts(node.comments.totalCount);
       return Array.from({ length: parts }, (_, index) =>
@@ -1142,6 +1177,7 @@ export function createGitHubCorpusProvider(options: {
       connection.pageInfo.hasNextPage && fresh.length === connection.nodes.length && connection.pageInfo.endCursor;
     return {
       observations,
+      ...(state ? {} : { mark: { discussions: accessedAt } }),
       nextCursor: more ? `discussions:${connection.pageInfo.endCursor}` : nextPhase(selection, 'discussions'),
     };
   }
@@ -1226,7 +1262,7 @@ export function createGitHubCorpusProvider(options: {
     const sha = '[a-f0-9]{40,64}';
     const pageNumber = '[1-9][0-9]{0,6}';
     if (!state) {
-      const head = await headCommit(token, body);
+      const head = history?.head ?? (await headCommit(token, body));
       if (!head) return { observations: [], nextCursor: nextPhase(selection, 'commits') };
       const base = history?.commitHead;
       if (base === head)
@@ -1247,6 +1283,94 @@ export function createGitHubCorpusProvider(options: {
     const full = new RegExp(`^(${sha}):(${pageNumber})$`).exec(state);
     if (!full) throw new GitHubCorpusError('invalid-cursor');
     return commitHistory(token, body, full[1] ?? '', Number(full[2]), accessedAt, selection);
+  }
+  /**
+   * Only the files that changed on the default branch between `base` and `head`, in one page. Returns null when a
+   * comparison cannot stand in for a full listing: the base is gone after a force push, history diverged, GitHub cannot
+   * list every changed file, or the change does not fit one page.
+   */
+  async function listChanges(
+    token: string,
+    body: RepositoryBody,
+    base: string,
+    head: string,
+    accessedAt: string,
+    selection: GitHubCorpusSelection,
+  ): Promise<{ observations: GitHubItemObservation[]; removed: string[] } | null> {
+    let response;
+    try {
+      response = await call(token, 'github-compare', `/repositories/${body.id}/compare/${base}...${head}?per_page=1`);
+    } catch (error) {
+      if (error instanceof GitHubCorpusError && ['response-too-large', 'invalid-response'].includes(error.code))
+        return null;
+      throw error;
+    }
+    if (response.status !== 200) return null;
+    const compared = compareFilesSchema.safeParse(response.json());
+    if (!compared.success || compared.data.status !== 'ahead') return null;
+    const files = compared.data.files ?? [];
+    if (files.length >= compareFileLimit) return null;
+    const kinds = new Set(
+      phases(selection).flatMap(phase => (phase === 'docs' ? ['doc'] : phase === 'code' ? ['code'] : [])),
+    );
+    const ref = (path: string) => `${githubFileKind(path)}:${body.id}:${pathRef(path)}`;
+    const wanted = (path: string) =>
+      kinds.has(githubFileKind(path)) && githubPathIndexable(path) && !githubPathOptedOut(selection, path);
+    // Every touched path is listed as removed; the parts observed below are what remains of a changed file.
+    const removed = new Set<string>();
+    const changed = new Set<string>();
+    for (const file of files) {
+      if (file.status === 'unchanged') continue;
+      if (
+        file.previous_filename &&
+        file.previous_filename !== file.filename &&
+        kinds.has(githubFileKind(file.previous_filename))
+      )
+        removed.add(ref(file.previous_filename));
+      if (kinds.has(githubFileKind(file.filename))) removed.add(ref(file.filename));
+      if (file.status !== 'removed' && wanted(file.filename)) changed.add(file.filename);
+    }
+    const observations: GitHubItemObservation[] = [];
+    if (!changed.size) return { observations, removed: [...removed] };
+    // One recursive tree read when GitHub returns it whole; otherwise each changed file's directories, one request each.
+    const whole = await recursiveTree(token, body, head);
+    const directories = new Map<string, Map<string, TreeEntry>>();
+    if (whole)
+      directories.set('', new Map(whole.filter(entry => entry.type === 'blob').map(entry => [entry.path, entry])));
+    let requests = 0;
+    const lookup = async (path: string): Promise<TreeEntry | null | 'overflow'> => {
+      if (whole) return directories.get('')?.get(path) ?? null;
+      const segments = path.split('/');
+      let sha = head;
+      let prefix = '';
+      for (const [index, segment] of segments.entries()) {
+        let entries = directories.get(prefix);
+        if (!entries) {
+          if (++requests > limits.treeRequestsPerPage) return 'overflow';
+          const value = await tree(token, body, sha);
+          if (value.truncated) return 'overflow';
+          entries = new Map(value.tree.map(entry => [entry.path, entry]));
+          directories.set(prefix, entries);
+        }
+        const entry = entries.get(segment);
+        if (!entry) return null;
+        if (index === segments.length - 1) return entry.type === 'blob' ? entry : null;
+        if (entry.type !== 'tree') return null;
+        sha = entry.sha;
+        prefix = `${prefix}${segment}/`;
+      }
+      return null;
+    };
+    for (const path of [...changed].sort()) {
+      const entry = await lookup(path);
+      if (entry === 'overflow') return null;
+      if (!entry) continue;
+      const parts = fileParts(path, entry.size ?? 0);
+      for (let part = 1; part <= parts; part++)
+        observations.push(fileObservation(body, head, accessedAt, path, entry.sha, part, parts));
+      if (observations.length > limits.listPageSize) return null;
+    }
+    return { observations, removed: [...removed] };
   }
   // One commit with every changed file GitHub lists, following GitHub's pages of files up to its 3,000-file cap.
   async function readCommit(token: string, body: RepositoryBody, sha: string, accessedAt: string) {
@@ -1542,8 +1666,10 @@ export function createGitHubCorpusProvider(options: {
     async list(workspaceId, userId, expected, repositoryId, input, cursor, history) {
       const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
       if (cursor !== null) cursor = parse(githubCorpusCursorTokenSchema, cursor, 'invalid-cursor');
+      const known = history?.head ? parse(z.string().regex(shaPattern), history.head, 'invalid-cursor') : undefined;
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
-        const body = await byId(credential.accessToken, repositoryId);
+        const token = credential.accessToken;
+        const body = await byId(token, repositoryId);
         scoped(credential, repository(body));
         const accessedAt = new Date().toISOString();
         const value = cursor ?? `${phases(selection)[0] ?? 'docs'}:`;
@@ -1552,16 +1678,40 @@ export function createGitHubCorpusProvider(options: {
         const state = value.slice(split + 1);
         if (split < 0 || !(phases(selection) as string[]).includes(phase))
           throw new GitHubCorpusError('invalid-cursor');
+        const mark = history?.mark;
         let page: GitHubCorpusPage;
         try {
-          page =
-            phase === 'docs' || phase === 'code'
-              ? await listFiles(credential.accessToken, body, phase, state, accessedAt, selection)
-              : phase === 'issues'
-                ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
-                : phase === 'discussions'
-                  ? await listDiscussions(credential.accessToken, body, state, accessedAt, selection)
-                  : await listCommits(credential.accessToken, body, state, accessedAt, selection, history);
+          // The first file listing records the head it reads. A later listing with that mark skips the files when the
+          // head is unchanged and otherwise lists only the files a comparison reports, falling back to every file.
+          if (filePhase(phase) && !state) {
+            const head = known ?? (await headCommit(token, body));
+            if (!head) page = { observations: [], nextCursor: afterFiles(selection) };
+            else if (phases(selection)[0] !== phase)
+              page = await listFiles(token, body, phase, `${head}:0`, accessedAt, selection);
+            else if (mark?.head === head)
+              page = { observations: [], nextCursor: afterFiles(selection), mark: { head } };
+            else {
+              const changes = mark?.head
+                ? await listChanges(token, body, mark.head, head, accessedAt, selection)
+                : null;
+              page = changes
+                ? { ...changes, nextCursor: afterFiles(selection), mark: { head } }
+                : {
+                    ...(await listFiles(token, body, phase, `${head}:0`, accessedAt, selection)),
+                    mark: { head },
+                    // Files removed since the mark are found only by a full pass.
+                    ...(mark?.head ? { reconcile: true } : {}),
+                  };
+            }
+          } else
+            page =
+              phase === 'docs' || phase === 'code'
+                ? await listFiles(token, body, phase, state, accessedAt, selection)
+                : phase === 'issues'
+                  ? await listIssues(token, body, state, accessedAt, selection, mark)
+                  : phase === 'discussions'
+                    ? await listDiscussions(token, body, state, accessedAt, selection, mark)
+                    : await listCommits(token, body, state, accessedAt, selection, history);
         } catch (error) {
           if (!(error instanceof GitHubCorpusError) || !['forbidden', 'insufficient-scope'].includes(error.code))
             throw error;
@@ -1574,6 +1724,9 @@ export function createGitHubCorpusProvider(options: {
           observations: page.observations,
           nextCursor: page.nextCursor ? parse(githubCorpusCursorTokenSchema, page.nextCursor) : null,
           ...(page.commits ? { commits: page.commits } : {}),
+          ...(page.removed?.length ? { removed: page.removed } : {}),
+          ...(page.mark ? { mark: page.mark } : {}),
+          ...(page.reconcile ? { reconcile: true } : {}),
         };
       });
     },

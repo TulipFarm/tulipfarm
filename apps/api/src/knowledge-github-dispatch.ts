@@ -2,7 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { GitHubKnowledge } from '@tulipfarm/knowledge';
-import { githubKnowledgeWorkSchema, type GitHubKnowledgeWork } from '@tulipfarm/knowledge/github-contracts';
+import { mergeGitHubKnowledgeChanges, type GitHubKnowledgeEvents } from '@tulipfarm/github/knowledge-events';
+import {
+  githubKnowledgeWorkSchema,
+  type GitHubKnowledgeChanges,
+  type GitHubKnowledgeWork,
+} from '@tulipfarm/knowledge/github-contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createKnowledgeSyncMetrics, recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
@@ -34,9 +39,13 @@ export function registerGitHubKnowledgeDispatch(
     pool: Pick<Pool, 'query'>;
     service: Pick<GitHubKnowledge, 'due' | 'health'>;
     temporal: ReturnType<typeof createTemporalClient>;
+    // Webhook deliveries naming changed repositories. Each scan applies the deliveries pending when it began.
+    events?: Pick<GitHubKnowledgeEvents, 'pending' | 'settle'> | null;
   },
 ) {
   let after: string | null = null;
+  let deliveries: string[] = [];
+  let changes: GitHubKnowledgeChanges | undefined;
   const monitoring = createKnowledgeSyncMetrics();
   const empty = () => ({
     failedItems: 0,
@@ -52,13 +61,18 @@ export function registerGitHubKnowledgeDispatch(
   backgroundSweep(
     app,
     async stopped => {
+      if (after === null && dependencies.events) {
+        const pending = await dependencies.events.pending();
+        deliveries = pending.map(delivery => delivery.deliveryId);
+        changes = pending.length ? mergeGitHubKnowledgeChanges(pending) : undefined;
+      }
       const rows = await readyWorkspaces(dependencies.pool, after, 100);
       for (const row of rows) {
         if (stopped()) return;
         try {
           const health = await dependencies.service.health(row.workspace_id);
           for (const key of Object.keys(snapshot) as (keyof typeof snapshot)[]) snapshot[key] += health[key];
-          for (const work of await dependencies.service.due(row.workspace_id)) {
+          for (const work of await dependencies.service.due(row.workspace_id, changes)) {
             if (stopped()) return;
             await startGitHubKnowledgeWorkflow(dependencies.temporal, work);
           }
@@ -71,6 +85,11 @@ export function registerGitHubKnowledgeDispatch(
         after = row.workspace_id;
       }
       if (rows.length < 100) {
+        // A delivery closes once every workspace was scanned. A workspace that failed is left to polling rather than
+        // re-applying the delivery on every scan, which would keep its sources syncing back to back.
+        if (deliveries.length) await dependencies.events?.settle(deliveries);
+        deliveries = [];
+        changes = undefined;
         if (!scanFailed) monitoring.publish(snapshot);
         after = null;
         snapshot = empty();
