@@ -7,6 +7,10 @@
       "types": "./dist/knowledge-events.d.ts",
       "default": "./dist/knowledge-events.js"
     },
+    "./event-retention": {
+      "types": "./dist/event-retention.d.ts",
+      "default": "./dist/event-retention.js"
+    },
     "./event-inbox": {
       "types": "./dist/event-inbox.d.ts",
       "default": "./dist/event-inbox.js"
