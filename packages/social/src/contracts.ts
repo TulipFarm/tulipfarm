@@ -244,7 +244,10 @@ export const channelSchema = z
     platformChannelId: platformId,
     displayName: z.string().max(200),
     accountGeneration: version,
+    /** The channel's identity and configuration, which approvals bind (PRODUCT 21). */
     version,
+    /** Grant edits are checked against this, not `version`, so editing grants never voids an approval (PRODUCT 25). */
+    grantsVersion: version,
     enabled: z.boolean(),
     engagementPolicy: engagementPolicySchema,
     grants: channelGrantSetSchema,
@@ -860,6 +863,35 @@ export type Post = z.infer<typeof postSchema>;
 // Commands
 
 export const variantCommandSchema = z.strictObject({ variantId: z.uuid(), expectedState: variantStateSchema });
+/** The body of `resume` and `cancel` routes; the variant is in the path. */
+export const variantActionBodySchema = variantCommandSchema.omit({ variantId: true });
+/** The body of the settlement route; the variant is in the path. */
+export const settlementBodySchema = z.discriminatedUnion('settlement', [
+  z.strictObject({ settlement: z.literal('published'), platformPostId: platformId }),
+  z.strictObject({ settlement: z.literal('not-published') }),
+]);
+/** The platform's answer for an unknown outcome. Only a person turns a candidate into a settlement (PRODUCT 24). */
+export const reconcileResultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('found'),
+    platformPostId: platformId,
+    evidence: z.enum(['platform-ref', 'idempotency-key']),
+  }),
+  z.strictObject({ kind: z.literal('absent'), evidence: z.literal('platform-ref') }),
+  z.strictObject({
+    kind: z.literal('candidates'),
+    items: z
+      .array(
+        z.strictObject({
+          platformPostId: platformId,
+          permalink: z.string().max(2048).nullable(),
+          createdAt: z.string().max(64),
+        }),
+      )
+      .max(10),
+  }),
+  z.strictObject({ kind: z.literal('unknown') }),
+]);
 export const settleCommandSchema = z.discriminatedUnion('settlement', [
   z.strictObject({ variantId: z.uuid(), settlement: z.literal('published'), platformPostId: platformId }),
   z.strictObject({ variantId: z.uuid(), settlement: z.literal('not-published') }),
@@ -1039,6 +1071,52 @@ export const variantChecksSchema = z
   .min(1)
   .max(10);
 export const preparedPostSchema = z.strictObject({ post: postSchema, variants: variantChecksSchema });
+
+/** The states the schedule view lists by default (PRODUCT 39). */
+export const scheduleStates = [
+  'scheduled',
+  'sending',
+  'processing',
+  'blocked',
+  'outcome-unknown',
+  'published',
+  'failed',
+  'not-published',
+] as const satisfies readonly VariantState[];
+export const scheduleQuerySchema = z.strictObject({
+  channelId: z.uuid().optional(),
+  states: z.array(variantStateSchema).min(1).max(12).optional(),
+});
+export const scheduleLimit = 500;
+/**
+ * Variants by channel, newest first. Each carries the post it belongs to, so actions can name it. `canPublish` says
+ * whether the viewer holds `publish` there and so may resume or cancel; a channel listed only for the viewer's own
+ * posts has none, and no name when the viewer cannot read the channel.
+ */
+export const scheduleSchema = z.strictObject({
+  channels: z
+    .array(
+      z.strictObject({
+        channelId: z.uuid(),
+        platform: platformSchema,
+        displayName: z.string().nullable(),
+        canPublish: z.boolean(),
+        variants: z
+          .array(
+            z.strictObject({
+              postId: z.uuid(),
+              currentRevision: version,
+              authorMembershipId: z.uuid(),
+              variant: variantSchema,
+            }),
+          )
+          .max(scheduleLimit),
+      }),
+    )
+    .max(1000),
+  truncated: z.boolean(),
+});
+export type Schedule = z.infer<typeof scheduleSchema>;
 export type PreparedPost = z.infer<typeof preparedPostSchema>;
 
 export const agentToolInputSchemas = {

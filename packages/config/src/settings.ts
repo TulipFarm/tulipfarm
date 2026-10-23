@@ -1274,6 +1274,33 @@ export const settings: readonly Setting[] = [
   ...socialPlatformApp('SOCIAL_TIKTOK', 'TikTok', ['unaudited', 'audited']),
   ...socialPlatformApp('SOCIAL_X', 'X', ['paid']),
   ...socialPlatformApp('SOCIAL_REDDIT', 'Reddit', ['paid']),
+  {
+    name: 'SOCIAL_MEDIA_URL_KEY',
+    group: 'Social publishing',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: true,
+    description:
+      'A random secret of at least 32 characters that signs the short-lived media URLs pull-URL platforms fetch. The API and the worker need the same key. Unset makes media posts to those platforms block as `media-unreadable`.',
+  },
+  {
+    name: 'SOCIAL_MEDIA_PUBLIC_BASE_URL',
+    group: 'Social publishing',
+    services: ['worker'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Public origin of the API that serves media URLs, verified with TikTok where TikTok is offered. Defaults to `BETTER_AUTH_URL`.',
+  },
+  {
+    name: 'SOCIAL_DEVELOPMENT_FAKE_PLATFORM',
+    group: 'Social publishing',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Development and end-to-end tests only: a platform, such as `linkedin`, served by an in-memory fake adapter that publishes every approved step. Ignored when `NODE_ENV` is `production`. The platform still needs its `SOCIAL_<PLATFORM>_*` app settings.',
+  },
 
   {
     name: 'SLACK_CONFIGURATION',

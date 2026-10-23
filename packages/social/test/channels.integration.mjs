@@ -110,7 +110,7 @@ function service(options = {}) {
     channels.add(ws.id, user, { accountId, expectedAccountGeneration, platformChannelId });
   const grant = async (user, channel, grants) =>
     channels.setGrants(ws.id, user, channel.id, {
-      expectedVersion: (await channels.get(ws.id, user, channel.id)).version,
+      expectedVersion: (await channels.get(ws.id, user, channel.id)).grantsVersion,
       publish: none,
       analytics: none,
       engagement: none,
@@ -281,7 +281,8 @@ test('PRODUCT 11: publishing, analytics, engagement and management are each gran
     analytics: { memberIds: [], teamIds: [teamId] },
     manage: { memberIds: [member.membershipId], teamIds: [] },
   });
-  assert.equal(updated.version, 2);
+  assert.equal(updated.grantsVersion, 2);
+  assert.equal(updated.version, 1);
   const allowed = async (user, permission) =>
     channels.authorize(ws.id, user, channel.id, permission).then(
       () => true,
@@ -350,7 +351,7 @@ test('PRODUCT 11: publishing, analytics, engagement and management are each gran
   );
 });
 
-test('exit check, PRODUCT 11: grants are checked against the channel version', async () => {
+test('exit check, PRODUCT 11: grant edits are checked against the channel grants version', async () => {
   const { accounts, channels, connect: connectAccount, add, grant } = service();
   const accountId = await connectAccount({ platform: 'linkedin' });
   const channel = await add(admin().userId, accountId, profile.platformChannelId);
@@ -358,7 +359,9 @@ test('exit check, PRODUCT 11: grants are checked against the channel version', a
     publish: { memberIds: [admin().membershipId], teamIds: [] },
     manage: { memberIds: [admin().membershipId], teamIds: [] },
   });
-  assert.equal(granted.version, channel.version + 1);
+  assert.equal(granted.grantsVersion, channel.grantsVersion + 1);
+  // Grants are checked live, so editing them leaves the channel version that approvals bind (PRODUCT 25).
+  assert.equal(granted.version, channel.version);
   const read = await channels.authorize(ws.id, admin().userId, channel.id, 'publish', {
     channelVersion: granted.version,
     accountGeneration: 1,
@@ -369,7 +372,7 @@ test('exit check, PRODUCT 11: grants are checked against the channel version', a
   // A grant edit made from a stale read is refused, and nothing changes.
   await assert.rejects(
     channels.setGrants(ws.id, admin().userId, channel.id, {
-      expectedVersion: channel.version,
+      expectedVersion: channel.grantsVersion,
       publish: none,
       analytics: none,
       engagement: none,
@@ -379,23 +382,33 @@ test('exit check, PRODUCT 11: grants are checked against the channel version', a
   );
   assert.deepEqual((await channels.get(ws.id, admin().userId, channel.id)).grants, granted.grants);
 
-  // Work bound to an older version stops once the grants change, even when the caller still holds them.
+  // Work bound to the channel keeps its approval across grant edits while the caller still holds the grant.
   const regranted = await grant(admin().userId, channel, {
     publish: { memberIds: [admin().membershipId], teamIds: [] },
     analytics: { memberIds: [admin().membershipId], teamIds: [] },
     manage: { memberIds: [admin().membershipId], teamIds: [] },
   });
+  assert.equal(regranted.grantsVersion, granted.grantsVersion + 1);
+  await channels.authorize(ws.id, admin().userId, channel.id, 'publish', { channelVersion: granted.version });
+  // Removing the grant stops that work at once, whatever version it was bound to.
+  await grant(admin().userId, channel, {
+    analytics: { memberIds: [admin().membershipId], teamIds: [] },
+    manage: { memberIds: [admin().membershipId], teamIds: [] },
+  });
   await assert.rejects(
     channels.authorize(ws.id, admin().userId, channel.id, 'publish', { channelVersion: granted.version }),
+    deniedAccess,
+  );
+  await assert.rejects(
+    channels.authorize(ws.id, admin().userId, channel.id, 'analytics', { channelVersion: granted.version + 1 }),
     code('channel-conflict'),
   );
-  await channels.authorize(ws.id, admin().userId, channel.id, 'publish', { channelVersion: regranted.version });
   await assert.rejects(
-    channels.authorize(ws.id, admin().userId, channel.id, 'publish', { accountGrantsVersion: 2 }),
+    channels.authorize(ws.id, admin().userId, channel.id, 'analytics', { accountGrantsVersion: 2 }),
     code('account-conflict'),
   );
   await assert.rejects(
-    channels.authorize(ws.id, admin().userId, channel.id, 'publish', { accountGeneration: 2 }),
+    channels.authorize(ws.id, admin().userId, channel.id, 'analytics', { accountGeneration: 2 }),
     code('account-reconnect-required'),
   );
   assert.deepEqual((await accounts.status(ws.id, admin().userId, accountId)).generation, 1);
@@ -473,7 +486,8 @@ test('PRODUCT 9: a personal connection and its channels belong to one membership
     publish: { memberIds: [admin().membershipId], teamIds: [] },
     manage: { memberIds: [admin().membershipId], teamIds: [] },
   });
-  assert.equal(owned.version, 2);
+  assert.equal(owned.grantsVersion, 2);
+  assert.equal(owned.version, 1);
   // A channel grant row naming someone else, however it got there, gives them nothing.
   await db.platform.query(
     `INSERT INTO ${table('tf_social_channel_grants')} (channel_id,permission,membership_id) VALUES ($1,'publish',$2)`,

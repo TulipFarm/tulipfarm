@@ -129,7 +129,7 @@ async function harness({ flagged = () => true, withPosts = true } = {}) {
     const mine = { memberIds: [ws.membershipId], teamIds: [] };
     const none = { memberIds: [], teamIds: [] };
     return channels.setGrants(ws.id, ws.userId, added.id, {
-      expectedVersion: added.version,
+      expectedVersion: added.grantsVersion,
       publish: mine,
       analytics: none,
       engagement: none,

@@ -30,6 +30,7 @@ import { ChatRound } from 'reicon-react/icons/ChatRound';
 import { Search3 } from 'reicon-react/icons/Search3';
 import { Sun } from 'reicon-react/icons/Sun';
 import { Users } from 'reicon-react/icons/Users';
+import { CardSend } from 'reicon-react/icons/CardSend';
 import { workspaceRoute } from '@/router';
 import { WorkspaceSetup } from './workspace-setup';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -90,6 +91,8 @@ export type WorkspacePath =
   | '/$workspaceSlug/chat'
   | '/$workspaceSlug/inbox'
   | '/$workspaceSlug/calendar'
+  | '/$workspaceSlug/social/schedule'
+  | '/$workspaceSlug/settings/social'
   | '/$workspaceSlug/agents'
   | '/$workspaceSlug/projects'
   | '/$workspaceSlug/skills'
@@ -155,6 +158,9 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
   },
 ];
 const workspacePages = workspaceGroups.flatMap(group => group.pages);
+// Listed only while the `social-publishing` flag is on, so it stays out of search and the static groups.
+const socialSchedule: Page = { label: 'Social schedule', to: '/$workspaceSlug/social/schedule', icon: CardSend };
+const socialSettings: Page = { label: 'Social', to: '/$workspaceSlug/settings/social', icon: CardSend };
 const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
 // Usage exists only when a web extension supplies the page.
 const usage: Page[] = overrides.get('usage')
@@ -172,11 +178,14 @@ const settingsPages: Page[] = [
   models,
   ...usage,
   soul,
+  socialSettings,
 ];
 const pages = [
   newChat,
   chats,
   inbox,
+  socialSchedule,
+  socialSettings,
   account,
   models,
   ...usage,
@@ -438,9 +447,15 @@ function useSettingsMode() {
   return current === account || settingsPages.some(page => page.to === current.to);
 }
 
+/** Soul and Social are listed only when visible to this member; Social is hidden while its flag is off. */
+export function settingsNavigationPages(visible: { soul: boolean; social: boolean }) {
+  return settingsPages.filter(page => (page !== soul || visible.soul) && (page !== socialSettings || visible.social));
+}
+
 function SettingsNavigation() {
   const { workspace } = workspaceRoute.useRouteContext();
   const soulEnabled = useFlag('soul-repository-explorer');
+  const socialEnabled = useFlag('social-publishing');
   const settings = useWorkspaceSettings(workspace.id);
   const soulVisible =
     soulEnabled &&
@@ -477,11 +492,9 @@ function SettingsNavigation() {
           <SidebarGroup>
             <SidebarGroupLabel>{workspace.name}</SidebarGroupLabel>
             <SidebarMenu>
-              {settingsPages
-                .filter(page => page !== soul || soulVisible)
-                .map(page => (
-                  <NavItem key={page.to} page={page} />
-                ))}
+              {settingsNavigationPages({ soul: soulVisible, social: socialEnabled }).map(page => (
+                <NavItem key={page.to} page={page} />
+              ))}
             </SidebarMenu>
           </SidebarGroup>
         </nav>
@@ -494,6 +507,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
+  const socialEnabled = useFlag('social-publishing');
   return (
     <Sidebar collapsible="icon" label="Workspace sidebar">
       <>
@@ -536,6 +550,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                       {group.pages.map(page => (
                         <NavItem key={page.to} page={page} />
                       ))}
+                      {socialEnabled && group === workspaceGroups[0] && <NavItem page={socialSchedule} />}
                     </SidebarMenu>
                   </SidebarGroup>
                 ))}

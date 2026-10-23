@@ -299,6 +299,28 @@ export async function requireReadableFile(tx: AuthorizationTransaction, actor: H
 }
 
 /**
+ * Where the bytes of a file `actor` can read now are stored, for a caller that streams them itself under this same check.
+ * The caller must verify the bytes it reads against `sha256` and `size`.
+ */
+export async function requireReadableFileObject(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  workspaceId: string,
+  id: string,
+) {
+  await currentMember(tx, actor);
+  const { item } = await access(tx, actor, uuidSchema.parse(id));
+  if (item.kind !== 'file' || !item.object_key || !item.sha256 || item.size === null) throw new AccessDenied();
+  return Object.freeze({
+    id: item.id,
+    sha256: item.sha256,
+    size: item.size,
+    mediaType: item.media_type ?? 'application/octet-stream',
+    path: objectPath(uuidSchema.parse(workspaceId), item),
+  });
+}
+
+/**
  * For each id that `requireReadableFile` would admit for some of `readers`, its digest and the readers it admits, in one query.
  * Readers must be current members; this does not recheck membership.
  */

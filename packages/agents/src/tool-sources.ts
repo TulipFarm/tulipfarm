@@ -3,6 +3,7 @@ import { publicWebResultSchema } from '@tulipfarm/conversations/contracts';
 import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
 import { requiredScopes } from '@tulipfarm/google-workspace/operations';
 import { googleOperationSchema } from '@tulipfarm/google-workspace/operation-contracts';
+import { postSchema } from '@tulipfarm/social/contracts';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { blockedTableProposalSchema } from '@tulipfarm/tables/proposal-contracts';
 import { referencedRecordIds } from '@tulipfarm/tables/query';
@@ -402,7 +403,15 @@ export async function resultSources(
     case 'workflows.list':
     case 'workflows.draft':
     case 'skills.list':
+    case 'social.list.channels':
+    case 'social.prepare.post':
+    case 'social.revise.post':
       return [];
+    case 'social.read.post': {
+      // The post's text flows into the chat, so the chat now depends on what every revision depended on.
+      const post = postSchema.safeParse(result);
+      return post.success ? post.data.revisions.flatMap(revision => revision.sources.dependencies) : [];
+    }
     case 'bud.preference.ask':
     case 'bud.preference.propose':
     case 'present.choice':

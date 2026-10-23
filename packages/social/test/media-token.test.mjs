@@ -6,6 +6,7 @@ import { signMediaToken, verifyMediaToken } from '../dist/media.js';
 const key = 'k'.repeat(32);
 // Tokens carry whole seconds, rounded down so a URL never outlives its grant.
 const grant = (expiresAt = new Date(Math.floor(Date.now() / 1000) * 1000 + 60_000)) => ({
+  workspaceId: randomUUID(),
   variantId: randomUUID(),
   attemptId: randomUUID(),
   step: 'upload-media',

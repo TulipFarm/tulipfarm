@@ -34,6 +34,7 @@ import {
   type AtlassianTools,
 } from './atlassian-tools.ts';
 import { invokeGoogleTool, type GoogleOperationsFactory } from './google-tools.ts';
+import { invokeSocialTool, socialCallSchema, socialDescriptions, type SocialTools } from './social-tools.ts';
 import { googleAgentToolCallOptions } from './google-tool-contracts.ts';
 import { providerSources, resultSources } from './tool-sources.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -100,6 +101,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   ...toolCallSchema.options,
   createRecordBatchSchema,
   ...atlassianCallSchema.options,
+  ...socialCallSchema.options,
   slackResolveSchema,
   z.strictObject({ tool: z.literal('github.personal.execute'), batchId: z.uuid() }),
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
@@ -203,6 +205,8 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'atlassian.sources',
   'atlassian.read',
   'atlassian.proposal',
+  'social.list.channels',
+  'social.read.post',
   'web.fetch',
   'web.search',
   'knowledge.search',
@@ -323,6 +327,7 @@ const descriptions: Record<ToolName, string> = {
   'slack.reaction.add':
     'Add one reaction to a resolved Slack message, not a reply or new message. It checks access and audience, reacts without approval, and returns the action state. The call changes Slack; do not repeat it after an uncertain result because the reaction may already exist.',
   ...atlassianDescriptions,
+  ...socialDescriptions,
   'github.personal.account':
     'Show the private-chat GitHub account picker only after github.personal.read reports selection-required/conflict or when the human asks to switch. Returns the currently selected login or picker state, not account data; it cannot select an account. Otherwise read first and narrow an oversized query.',
   'github.personal.read':
@@ -440,33 +445,39 @@ export function toolDescription(tool: ToolName): string {
   return descriptions[tool];
 }
 export type ToolAccess = (
-  | { kind: 'chat'; earlierMessages?: boolean }
+  | { kind: 'chat'; earlierMessages?: boolean; social?: boolean }
   | { kind: 'agent'; tools: readonly ToolName[]; selectedSkills?: boolean; task?: boolean }
 ) & { mcp?: McpModelCatalog | undefined };
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
-  return frameworkCallSchema.options
-    .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
-    .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
-    .filter(schema =>
-      isMcpTool(schema.shape.tool.value)
-        ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
-        : access.kind === 'chat'
-          ? access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read'
-          : (access.task === true ||
-              (![
-                'tables.propose',
-                'tables.import.file',
-                'tables.import.attachments',
-                'conversation.messages.read',
-              ].includes(schema.shape.tool.value) &&
-                !schema.shape.tool.value.startsWith('github.personal.') &&
-                !schema.shape.tool.value.startsWith('github.investigation.') &&
-                !schema.shape.tool.value.startsWith('atlassian.') &&
-                !schema.shape.tool.value.startsWith('workflows.'))) &&
-            (access.tools.includes(schema.shape.tool.value) ||
-              (schema.shape.tool.value === 'skills.read' && access.selectedSkills === true)),
-    );
+  return (
+    frameworkCallSchema.options
+      .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
+      .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
+      // Social publishing is offered only in chats where the `social-publishing` flag is on.
+      .filter(
+        schema => !schema.shape.tool.value.startsWith('social.') || (access.kind === 'chat' && access.social === true),
+      )
+      .filter(schema =>
+        isMcpTool(schema.shape.tool.value)
+          ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
+          : access.kind === 'chat'
+            ? access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read'
+            : (access.task === true ||
+                (![
+                  'tables.propose',
+                  'tables.import.file',
+                  'tables.import.attachments',
+                  'conversation.messages.read',
+                ].includes(schema.shape.tool.value) &&
+                  !schema.shape.tool.value.startsWith('github.personal.') &&
+                  !schema.shape.tool.value.startsWith('github.investigation.') &&
+                  !schema.shape.tool.value.startsWith('atlassian.') &&
+                  !schema.shape.tool.value.startsWith('workflows.'))) &&
+              (access.tools.includes(schema.shape.tool.value) ||
+                (schema.shape.tool.value === 'skills.read' && access.selectedSkills === true)),
+      )
+  );
 }
 export function discoverToolNames(access: ToolAccess) {
   return admittedToolSchemas(access).map(schema => schema.shape.tool.value);
@@ -495,7 +506,8 @@ export function isExternalTool(tool: ToolName) {
     tool === 'github.issue.read' ||
     tool.startsWith('atlassian.') ||
     tool.startsWith('google.') ||
-    tool.startsWith('slack.')
+    tool.startsWith('slack.') ||
+    tool.startsWith('social.')
   );
 }
 
@@ -505,6 +517,8 @@ export type ChatFileOutputs = { files: FileOutputStore; autonomous: boolean };
 export type ChatToolsOptions = {
   integrations?: Pick<IntegrationService, 'readIssue'> | undefined;
   atlassian?: AtlassianTools | undefined;
+  /** Social publishing, present only where the `social-publishing` flag is on. */
+  social?: SocialTools | undefined;
   google?: GoogleOperationsFactory | undefined;
   slack?: SlackActionsFactory | undefined;
   github?:
@@ -527,6 +541,7 @@ export function createChatTools(
   {
     integrations,
     atlassian,
+    social,
     google,
     slack,
     github,
@@ -745,6 +760,29 @@ export function createChatTools(
       case 'atlassian.proposal':
       case 'atlassian.execute':
         return invokeAtlassianTool(atlassian, context, call);
+      case 'social.list.channels':
+      case 'social.prepare.post':
+      case 'social.read.post':
+      case 'social.revise.post':
+        return invokeSocialTool(
+          social,
+          {
+            workspaceId,
+            principal: actor,
+            callId,
+            ...(context.origin
+              ? {
+                  origin: {
+                    kind: 'conversation' as const,
+                    conversationId: context.origin.conversationId,
+                    messageId: context.origin.turnId,
+                    sources: context.origin.sources,
+                  },
+                }
+              : {}),
+          },
+          call,
+        );
       case 'google.read':
       case 'google.propose':
       case 'google.status':
@@ -1665,5 +1703,6 @@ export function parseToolCall(value: unknown, access: ToolAccess): FrameworkCall
       !access.tools.includes(call.tool))
   )
     throw new AccessDenied();
+  if (call.tool.startsWith('social.') && (access.kind !== 'chat' || access.social !== true)) throw new AccessDenied();
   return call;
 }

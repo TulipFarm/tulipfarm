@@ -60,8 +60,12 @@ export async function requireBoundMedia(tx: AuthorizationTransaction, reader: Hu
   }
 }
 
-/** What a media pull URL serves: one bound File, for one claimed step of one attempt (TECH, Media). */
+/**
+ * What a media pull URL serves: one bound File, for one claimed step of one attempt (TECH, Media). The workspace
+ * only locates the variant; it widens nothing.
+ */
 export type MediaGrant = {
+  workspaceId: string;
   variantId: string;
   attemptId: string;
   step: StepKind;
@@ -70,6 +74,7 @@ export type MediaGrant = {
   expiresAt: Date;
 };
 const mediaGrantSchema = z.strictObject({
+  workspaceId: z.uuid(),
   variantId: z.uuid(),
   attemptId: z.uuid(),
   step: stepKindSchema,
@@ -90,6 +95,7 @@ export function signMediaToken(key: string | Buffer, grant: MediaGrant): string 
   const payload = Buffer.from(
     JSON.stringify(
       mediaGrantSchema.parse({
+        workspaceId: grant.workspaceId,
         variantId: grant.variantId,
         attemptId: grant.attemptId,
         step: grant.step,
