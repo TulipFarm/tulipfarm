@@ -99,7 +99,7 @@ export function createKnowledgeSourceFailures({ runtime }: { runtime: KnowledgeO
               FROM ${table('github_items')} i
               LEFT JOIN ${table('documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL
               LEFT JOIN ${table('revisions')} r ON r.id=d.observed_revision_id
-              WHERE i.source_id=$1 AND i.failure IS NOT NULL AND i.failure<>$4
+              WHERE i.source_id=$1 AND i.failure IS NOT NULL AND i.failure<>$4 AND (i.document_id IS NULL OR d.id IS NOT NULL)
                 AND NOT EXISTS (SELECT 1 FROM docs WHERE docs.document_id=i.document_id)
             )
             SELECT * FROM (SELECT * FROM docs UNION ALL SELECT * FROM github) failures
