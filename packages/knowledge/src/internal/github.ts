@@ -120,6 +120,7 @@ const repositoryDenied = (error: unknown): error is GitHubCorpusError =>
 const cutoffValid = (after: string | null | undefined, now: number) => !after || Date.parse(after) <= now;
 const itemKinds: Record<GitHubCorpusKind, string> = {
   code: 'code',
+  commits: 'commit',
   discussions: 'discussion',
   docs: 'doc',
   issues: 'issue',
@@ -168,6 +169,9 @@ export function createGitHubKnowledge({
   const store = createKnowledgeStore({ runtime, ...authority });
   // Common migration 0005 adds `github_items.path`; a workspace not yet migrated keeps working without it.
   const storesPath = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 5;
+  // Common migration 0006 allows commit items and records each repository's indexed commit head; until a workspace
+  // is migrated, its sources index every selected kind except commits.
+  const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
   async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
@@ -589,6 +593,12 @@ export function createGitHubKnowledge({
         [sourceId, newlyExcluded, kinds],
       );
       for (const repositoryId of newlyExcluded) await invalidate(tx, sourceId, repositoryId);
+      // Commits left coverage, so a later pass that brings them back must list the whole history again.
+      if (storesCommits(tx))
+        await tx.client.query(
+          `UPDATE ${table(tx, 'github_repositories')} SET commit_head=NULL WHERE source_id=$1 AND ($2 OR repository_id=ANY($3::text[]))`,
+          [sourceId, !selection.kinds.includes('commits'), newlyExcluded],
+        );
       await tx.client.query(`INSERT INTO ${table(tx, 'github_commands')} VALUES ($1,$2,$3)`, [
         input.commandId,
         sourceId,
@@ -1167,21 +1177,55 @@ export function createGitHubKnowledge({
             if (!repositoryDenied(error)) throw error;
             accessible = false;
           }
-          if (accessible) {
+          const history = await fenced(work, token, async tx =>
+            storesCommits(tx)
+              ? z
+                  .object({ commit_head: z.string().nullable() })
+                  .parse(
+                    (
+                      await tx.client.query(
+                        `SELECT commit_head FROM ${table(tx, 'github_repositories')} WHERE source_id=$1 AND repository_id=$2`,
+                        [claim.source_id, repository.repository_id],
+                      )
+                    ).rows[0],
+                  )
+              : null,
+          );
+          const selection = history
+            ? claim.selection
+            : { ...claim.selection, kinds: claim.selection.kinds.filter(kind => kind !== 'commits') };
+          if (accessible && selection.kinds.length) {
             try {
               const page = await corpus.discover(
                 work.workspaceId,
                 claim.owner_user_id,
                 claim.binding,
                 repository.repository_id,
-                claim.selection,
+                selection,
                 cursor.page,
+                ...(history ? [{ commitHead: history.commit_head }] : []),
               );
               if (page.nextCursor && page.nextCursor === cursor.page) throw new GitHubCorpusError('invalid-cursor');
               for (const item of page.observations) {
                 if (item.repositoryId !== repository.repository_id) throw new GitHubCorpusError('invalid-response');
                 await ingest(work, token, claim, item);
               }
+              const commits = history ? page.commits : undefined;
+              if (commits)
+                await fenced(work, token, async tx => {
+                  // Commits never change, so a listing of only the newer commits keeps every indexed commit current.
+                  // A commit not yet indexed stays unseen, so the sweep reads it again.
+                  if (commits.retained)
+                    await tx.client.query(
+                      `UPDATE ${table(tx, 'github_items')} i SET seen_generation=$3 FROM ${table(tx, 'documents')} d
+                      WHERE i.source_id=$1 AND i.repository_id=$2 AND i.kind='commit' AND d.id=i.document_id AND d.tombstoned_at IS NULL AND d.lexical_publication_id IS NOT NULL`,
+                      [claim.source_id, repository.repository_id, claim.reconciliation],
+                    );
+                  await tx.client.query(
+                    `UPDATE ${table(tx, 'github_repositories')} SET commit_head=$3 WHERE source_id=$1 AND repository_id=$2`,
+                    [claim.source_id, repository.repository_id, commits.head],
+                  );
+                });
               await fenced(work, token, tx => project(tx, claim.source_id, repository.repository_id));
               cursor.page = page.nextCursor;
             } catch (error) {

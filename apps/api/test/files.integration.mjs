@@ -613,6 +613,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
         '0004_social.sql',
         '0005_knowledge_github_item_path.sql',
         '0006_github_knowledge_opt_out.sql',
+        '0007_knowledge_github_commits.sql',
       ],
     );
     assert.equal(

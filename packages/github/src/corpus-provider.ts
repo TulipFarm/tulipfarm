@@ -18,6 +18,8 @@ import {
   type GitHubCorpusSelection,
   type GitHubItemObservation,
   type GitHubItemRead,
+  type GitHubCorpusPage,
+  type GitHubListHistory,
   type GitHubRepository,
 } from '@tulipfarm/knowledge/github-contracts';
 import {
@@ -65,6 +67,44 @@ const commentSchema = z.object({
   updated_at: z.string(),
 });
 const shaPattern = /^[a-f0-9]{40,64}$/;
+const gitPersonSchema = z
+  .object({ name: z.string().max(1024).nullable().optional(), date: z.string().max(64).nullable().optional() })
+  .nullable()
+  .optional();
+const commitSchema = z.object({
+  sha: z.string().regex(shaPattern),
+  commit: z.object({
+    message: z.string().max(limits.responseBytes),
+    author: gitPersonSchema,
+    committer: gitPersonSchema,
+  }),
+  author: userSchema,
+  committer: userSchema,
+  parents: z.array(z.object({ sha: z.string().regex(shaPattern) })).max(1000),
+});
+type Commit = z.infer<typeof commitSchema>;
+const commitFileSchema = z.object({
+  filename: z.string().max(65536),
+  status: z.string().max(32),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+  previous_filename: z.string().max(65536).optional(),
+});
+export type GitHubCommitFile = z.infer<typeof commitFileSchema>;
+const commitDetailSchema = commitSchema.extend({ files: z.array(commitFileSchema).max(limits.commitFiles).optional() });
+// The Git database view of a commit has no GitHub logins or files; it stands in when GitHub cannot return the diff.
+const gitCommitSchema = z.object({
+  sha: z.string().regex(shaPattern),
+  message: z.string().max(limits.responseBytes),
+  author: gitPersonSchema,
+  committer: gitPersonSchema,
+  parents: z.array(z.object({ sha: z.string().regex(shaPattern) })).max(1000),
+});
+const compareSchema = z.object({
+  status: z.enum(['ahead', 'behind', 'diverged', 'identical']),
+  total_commits: z.number().int().nonnegative(),
+  commits: z.array(commitSchema).max(250),
+});
 const treeEntrySchema = z.object({
   path: z.string().max(65536),
   type: z.string(),
@@ -252,13 +292,15 @@ function repository(body: RepositoryBody): GitHubRepository {
     title: (body.description ? `${body.full_name} — ${oneLine(body.description)}` : body.full_name).slice(0, 512),
   };
 }
-type Phase = 'docs' | 'code' | 'issues' | 'discussions';
+type Phase = 'docs' | 'code' | 'issues' | 'discussions' | 'commits';
+// Commits come last: a long history never delays the other kinds of a repository.
 function phases(selection: GitHubCorpusSelection): Phase[] {
   return [
     ...(selection.kinds.includes('docs') ? ['docs' as const] : []),
     ...(selection.kinds.includes('code') ? ['code' as const] : []),
     ...(selection.kinds.includes('issues') || selection.kinds.includes('pulls') ? ['issues' as const] : []),
     ...(selection.kinds.includes('discussions') ? ['discussions' as const] : []),
+    ...(selection.kinds.includes('commits') ? ['commits' as const] : []),
   ];
 }
 function nextPhase(selection: GitHubCorpusSelection, current: Phase) {
@@ -272,17 +314,22 @@ const pathRef = (path: string) => (Buffer.byteLength(path) > 1024 ? `/h/${hashPa
 // Part 1 keeps the plain ID, so an item that later grows into parts keeps its first document.
 const partRest = (part: number, ref: string) => (part > 1 ? `/p/${part}/${ref}` : ref);
 type Native = {
-  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion';
+  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion' | 'commit';
   part: number;
   ref: string;
   hash: string | null;
   marker: boolean;
 };
 function native(nativeId: string, repositoryId: string): Native {
-  const match = /^(doc|code|issue|pull|discussion):([1-9][0-9]{0,19}):(.+)$/s.exec(nativeId);
+  const match = /^(doc|code|issue|pull|discussion|commit):([1-9][0-9]{0,19}):(.+)$/s.exec(nativeId);
   if (!match || match[2] !== repositoryId) throw new GitHubCorpusError('invalid-selection');
   const kind = match[1] as Native['kind'];
   let rest = match[3] ?? '';
+  // A commit is identified by its SHA alone and is never split into parts.
+  if (kind === 'commit') {
+    if (!shaPattern.test(rest)) throw new GitHubCorpusError('invalid-selection');
+    return { kind, part: 1, ref: rest, hash: null, marker: false };
+  }
   let part = 1;
   const parted = /^\/p\/([2-9]|[1-9][0-9]{1,6})\/(.+)$/s.exec(rest);
   if (parted) {
@@ -370,6 +417,69 @@ export function serializeGitHubDiscussion(full: string, discussion: GitHubDiscus
         reply.body.trim() || '_No text content._',
       );
   }
+  return `${lines.join('\n')}\n`;
+}
+
+// The parser accepts only line breaks and tabs among control characters.
+const printableText = (value: string) => value.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n\t]/gu, '\uFFFD');
+const inlineCode = (value: string) => {
+  const ticks = '`'.repeat(Math.max(1, ...[...value.matchAll(/`+/g)].map(match => match[0].length + 1)));
+  const pad = value.startsWith('`') || value.endsWith('`') ? ' ' : '';
+  return `${ticks}${pad}${printableText(value).replace(/\n/g, ' ')}${pad}${ticks}`;
+};
+const commitSubject = (commit: Commit) => oneLine(printableText(commit.commit.message).split('\n', 1)[0] ?? '');
+const commitTitle = (full: string, commit: Commit) =>
+  `${full}@${commit.sha.slice(0, 7)}: ${commitSubject(commit) || 'No commit message'}`;
+function commitPerson(git: z.infer<typeof gitPersonSchema>, user: z.infer<typeof userSchema>) {
+  const name = oneLine(printableText(git?.name ?? ''));
+  const login = user ? `@${user.login}` : '';
+  return name && login ? `${name} (${login})` : name || login || 'an unknown author';
+}
+/** Why a commit's file list is incomplete: GitHub's 3,000-file cap, or a page GitHub could not return. */
+export type GitHubCommitFilesTruncation = 'file-limit' | 'unavailable';
+// One commit: its full message, author and committer, parents and every changed file GitHub lists. Diffs are not included.
+export function serializeGitHubCommit(
+  full: string,
+  commit: Commit,
+  files: readonly GitHubCommitFile[],
+  truncation: GitHubCommitFilesTruncation | null = null,
+) {
+  const author = commitPerson(commit.commit.author, commit.author);
+  const committer = commitPerson(commit.commit.committer, commit.committer);
+  const authored = commit.commit.author?.date ? ` at ${iso(commit.commit.author.date)}` : '';
+  const committed = commit.commit.committer?.date ? ` at ${iso(commit.commit.committer.date)}` : '';
+  const parents = commit.parents.map(parent => parent.sha.slice(0, 7));
+  const additions = files.reduce((sum, file) => sum + file.additions, 0);
+  const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
+  const lines = [
+    `# ${commitTitle(full, commit)}`,
+    '',
+    `GitHub commit ${commit.sha} on the default branch of ${full}, authored by ${author}${authored} and committed by ${committer}${committed}. ${parents.length ? `${parents.length === 1 ? 'Parent' : 'Parents'} ${parents.join(', ')}` : 'No parents (root commit)'}. ${files.length} changed ${files.length === 1 ? 'file' : 'files'} listed, +${additions} −${deletions} lines.`,
+    '',
+    '## Message',
+    '',
+    printableText(commit.commit.message).trim() || '_No commit message._',
+    '',
+    '## Changed files',
+    '',
+  ];
+  if (!files.length && !truncation) lines.push('_No changed files._');
+  for (const file of files)
+    lines.push(
+      `- ${inlineCode(file.filename)} ${oneLine(file.status)}${file.previous_filename ? ` from ${inlineCode(file.previous_filename)}` : ''}, +${file.additions} −${file.deletions}`,
+    );
+  if (truncation === 'file-limit')
+    lines.push(
+      '',
+      `_GitHub lists at most ${limits.commitFiles.toLocaleString('en-US')} changed files for one commit; this commit may change more._`,
+    );
+  if (truncation === 'unavailable')
+    lines.push(
+      '',
+      files.length
+        ? "_GitHub could not return the rest of this commit's changed files; only the files listed above are included._"
+        : "_GitHub could not return this commit's changed files._",
+    );
   return `${lines.join('\n')}\n`;
 }
 
@@ -554,7 +664,8 @@ export function createGitHubCorpusProvider(options: {
         throw new GitHubCorpusError('invalid-response');
       }
     };
-    return { status: response.status, text, json };
+    const next = /<[^>]*>;\s*rel="next"/.test(response.headers.get('link') ?? '');
+    return { status: response.status, text, json, next };
   }
   // Streams a raw Git blob. The time allowed grows with the bytes needed, up to `blobTimeoutMs`.
   async function* blob(token: string, repositoryId: string, sha: string, bytes: number) {
@@ -902,7 +1013,7 @@ export function createGitHubCorpusProvider(options: {
       await graphql(token, DISCUSSIONS, { id: body.node_id, cursor: state || null }),
     );
     const connection = data.node?.discussions;
-    if (!connection) return { observations: [], nextCursor: null };
+    if (!connection) return { observations: [], nextCursor: nextPhase(selection, 'discussions') };
     const fresh = connection.nodes.filter(node => inWindow(selection, node.updatedAt));
     const observations = fresh.flatMap(node => {
       const parts = commentParts(node.comments.totalCount);
@@ -920,7 +1031,166 @@ export function createGitHubCorpusProvider(options: {
     });
     const more =
       connection.pageInfo.hasNextPage && fresh.length === connection.nodes.length && connection.pageInfo.endCursor;
-    return { observations, nextCursor: more ? `discussions:${connection.pageInfo.endCursor}` : null };
+    return {
+      observations,
+      nextCursor: more ? `discussions:${connection.pageInfo.endCursor}` : nextPhase(selection, 'discussions'),
+    };
+  }
+  const commitObservation = (body: RepositoryBody, commit: Commit, accessedAt: string) =>
+    observation(
+      String(body.id),
+      'commit',
+      commit.sha,
+      commitTitle(body.full_name, commit),
+      `https://github.com/${body.full_name}/commit/${commit.sha}`,
+      `commit:${commit.sha}`,
+      accessedAt,
+    );
+  // Every commit reachable from `head`, newest first, pinned to that head so the listing is stable across pages.
+  async function commitHistory(
+    token: string,
+    body: RepositoryBody,
+    head: string,
+    page: number,
+    accessedAt: string,
+    selection: GitHubCorpusSelection,
+  ): Promise<GitHubCorpusPage> {
+    const response = await call(
+      token,
+      'github-commits',
+      `/repositories/${body.id}/commits?${new URLSearchParams({ sha: head, per_page: String(limits.commitPageSize), page: String(page) })}`,
+    );
+    // An empty repository has no history; a head that no longer exists means the branch moved, so the pass restarts.
+    if (response.status === 409) return { observations: [], nextCursor: nextPhase(selection, 'commits') };
+    if (response.status === 404 || response.status === 422) throw new GitHubCorpusError('invalid-cursor');
+    if (response.status !== 200)
+      throw new GitHubCorpusError(response.status === 403 ? 'forbidden' : 'invalid-response');
+    const commits = parse(z.array(commitSchema).max(limits.commitPageSize), response.json());
+    const observations = commits.map(commit => commitObservation(body, commit, accessedAt));
+    return commits.length === limits.commitPageSize
+      ? { observations, nextCursor: `commits:${head}:${page + 1}` }
+      : { observations, nextCursor: nextPhase(selection, 'commits'), commits: { head, retained: false } };
+  }
+  // Only the commits `head` added since `base`, oldest first. Returns null when `head` does not simply extend `base`
+  // (a force push, or a comparison GitHub cannot make), so the caller lists the whole history instead.
+  async function commitsSince(
+    token: string,
+    body: RepositoryBody,
+    base: string,
+    head: string,
+    page: number,
+    accessedAt: string,
+    selection: GitHubCorpusSelection,
+  ): Promise<GitHubCorpusPage | null> {
+    let response;
+    try {
+      response = await call(
+        token,
+        'github-compare',
+        `/repositories/${body.id}/compare/${base}...${head}?${new URLSearchParams({ per_page: String(limits.commitPageSize), page: String(page) })}`,
+      );
+    } catch (error) {
+      if (
+        error instanceof GitHubCorpusError &&
+        ['response-too-large', 'transient', 'invalid-response'].includes(error.code)
+      )
+        return null;
+      throw error;
+    }
+    if (response.status !== 200) return null;
+    const compared = compareSchema.safeParse(response.json());
+    if (!compared.success || !['ahead', 'identical'].includes(compared.data.status)) return null;
+    const observations = compared.data.commits.map(commit => commitObservation(body, commit, accessedAt));
+    return compared.data.commits.length === limits.commitPageSize &&
+      page * limits.commitPageSize < compared.data.total_commits
+      ? { observations, nextCursor: `commits:${base}..${head}:${page + 1}` }
+      : { observations, nextCursor: nextPhase(selection, 'commits'), commits: { head, retained: true } };
+  }
+  async function listCommits(
+    token: string,
+    body: RepositoryBody,
+    state: string,
+    accessedAt: string,
+    selection: GitHubCorpusSelection,
+    history: GitHubListHistory | undefined,
+  ): Promise<GitHubCorpusPage> {
+    const sha = '[a-f0-9]{40,64}';
+    const pageNumber = '[1-9][0-9]{0,6}';
+    if (!state) {
+      const head = await headCommit(token, body);
+      if (!head) return { observations: [], nextCursor: nextPhase(selection, 'commits') };
+      const base = history?.commitHead;
+      if (base === head)
+        return { observations: [], nextCursor: nextPhase(selection, 'commits'), commits: { head, retained: true } };
+      if (base) {
+        const page = await commitsSince(token, body, base, head, 1, accessedAt, selection);
+        if (page) return page;
+      }
+      return commitHistory(token, body, head, 1, accessedAt, selection);
+    }
+    const since = new RegExp(`^(${sha})\\.\\.(${sha}):(${pageNumber})$`).exec(state);
+    if (since) {
+      const [, base = '', head = '', page = ''] = since;
+      const result = await commitsSince(token, body, base, head, Number(page), accessedAt, selection);
+      if (result) return result;
+      return commitHistory(token, body, head, 1, accessedAt, selection);
+    }
+    const full = new RegExp(`^(${sha}):(${pageNumber})$`).exec(state);
+    if (!full) throw new GitHubCorpusError('invalid-cursor');
+    return commitHistory(token, body, full[1] ?? '', Number(full[2]), accessedAt, selection);
+  }
+  // One commit with every changed file GitHub lists, following GitHub's pages of files up to its 3,000-file cap.
+  async function readCommit(token: string, body: RepositoryBody, sha: string, accessedAt: string) {
+    const files: GitHubCommitFile[] = [];
+    let commit: Commit | null = null;
+    let truncation: GitHubCommitFilesTruncation | null = null;
+    for (let page = 1; ; page++) {
+      let response;
+      try {
+        response = await call(
+          token,
+          'github-commit',
+          `/repositories/${body.id}/commits/${sha}?${new URLSearchParams({ per_page: String(limits.commitPageSize), page: String(page) })}`,
+        );
+      } catch (error) {
+        // The response carries every file's patch; a commit too large to return is described without its files.
+        if (error instanceof GitHubCorpusError && error.code === 'response-too-large') {
+          truncation = 'unavailable';
+          break;
+        }
+        throw error;
+      }
+      if ([404, 409, 410, 422].includes(response.status)) throw new GitHubCorpusError('not-found');
+      if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
+      const detail = parse(commitDetailSchema, response.json());
+      if (detail.sha !== sha) throw new GitHubCorpusError('invalid-response');
+      commit ??= detail;
+      files.push(...(detail.files ?? []));
+      if (files.length >= limits.commitFiles) {
+        files.splice(limits.commitFiles);
+        truncation = 'file-limit';
+        break;
+      }
+      if (!response.next || !detail.files?.length) break;
+    }
+    commit ??= await gitCommit(token, body, sha);
+    const markdown = serializeGitHubCommit(body.full_name, commit, files, truncation);
+    if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
+    return { ...commitObservation(body, commit, accessedAt), markdown };
+  }
+  async function gitCommit(token: string, body: RepositoryBody, sha: string): Promise<Commit> {
+    const response = await call(token, 'github-commit', `/repositories/${body.id}/git/commits/${sha}`);
+    if ([404, 409, 410, 422].includes(response.status)) throw new GitHubCorpusError('not-found');
+    if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
+    const found = parse(gitCommitSchema, response.json());
+    if (found.sha !== sha) throw new GitHubCorpusError('invalid-response');
+    return {
+      sha,
+      commit: { message: found.message, author: found.author, committer: found.committer },
+      author: null,
+      committer: null,
+      parents: found.parents,
+    };
   }
   // One part's page of issue comments; parts follow GitHub's own comment pages, so no comment count is too many.
   async function comments(token: string, repositoryId: string, issue: Issue, part: number) {
@@ -1158,7 +1428,7 @@ export function createGitHubCorpusProvider(options: {
         return { ...value, accessedAt, readable: true };
       });
     },
-    async list(workspaceId, userId, expected, repositoryId, input, cursor) {
+    async list(workspaceId, userId, expected, repositoryId, input, cursor, history) {
       const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
       if (cursor !== null) cursor = parse(githubCorpusCursorTokenSchema, cursor, 'invalid-cursor');
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
@@ -1171,15 +1441,18 @@ export function createGitHubCorpusProvider(options: {
         const state = value.slice(split + 1);
         if (split < 0 || !(phases(selection) as string[]).includes(phase))
           throw new GitHubCorpusError('invalid-cursor');
-        const page =
+        const page: GitHubCorpusPage =
           phase === 'docs' || phase === 'code'
             ? await listFiles(credential.accessToken, body, phase, state, accessedAt, selection)
             : phase === 'issues'
               ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
-              : await listDiscussions(credential.accessToken, body, state, accessedAt, selection);
+              : phase === 'discussions'
+                ? await listDiscussions(credential.accessToken, body, state, accessedAt, selection)
+                : await listCommits(credential.accessToken, body, state, accessedAt, selection, history);
         return {
           observations: page.observations,
           nextCursor: page.nextCursor ? parse(githubCorpusCursorTokenSchema, page.nextCursor) : null,
+          ...(page.commits ? { commits: page.commits } : {}),
         };
       });
     },
@@ -1197,7 +1470,9 @@ export function createGitHubCorpusProvider(options: {
                 ? 'issues'
                 : kind === 'pull'
                   ? 'pulls'
-                  : 'discussions',
+                  : kind === 'discussion'
+                    ? 'discussions'
+                    : 'commits',
         )
       )
         throw new GitHubCorpusError('outside-selection');
@@ -1217,6 +1492,7 @@ export function createGitHubCorpusProvider(options: {
         scoped(credential, repository(body));
         if (file !== null && (kind === 'doc' || kind === 'code'))
           return readFile(token, body, kind, file, id.part, accessedAt);
+        if (kind === 'commit') return readCommit(token, body, id.ref, accessedAt);
         if (kind === 'discussion') {
           const found = await discussion(token, body, Number(id.ref), id.part);
           if (!inWindow(selection, found.updatedAt)) throw new GitHubCorpusError('outside-selection');

@@ -120,7 +120,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         beforeRead: null,
       };
       const checks = [],
-        reads = [];
+        reads = [],
+        lists = [];
       const observation = (repositoryId, nativeId) => {
         const item = state.repos.get(repositoryId).items.get(nativeId);
         return {
@@ -175,14 +176,27 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             readable: repo.readers.has(b.githubUserId),
           };
         },
-        list: async (_w, userId, b, id) => {
+        list: async (_w, userId, b, id, selection, _cursor, history) => {
           own(userId, b);
           if (state.listError) throw state.listError;
+          lists.push({ id, kinds: selection.kinds, history });
+          const repo = state.repos.get(id);
+          const kinds = { doc: 'docs', code: 'code', issue: 'issues', pull: 'pulls', discussion: 'discussions' };
+          const listed = [...repo.items.entries()]
+            .filter(([, item]) => item.kind === 'commit' || selection.kinds.includes(kinds[item.kind]))
+            .map(([nativeId]) => nativeId);
+          const commits = repo.commits && selection.kinds.includes('commits') ? repo.commits : null;
+          // Like GitHub's comparison, a known head lists only the commits after it on the current branch.
+          const known = commits ? commits.indexOf(history?.commitHead) : -1;
+          const newer = commits?.slice(known + 1).map(sha => `commit:${id}:${sha}`) ?? [];
           return {
             observations: state.omit
               ? []
-              : [...state.repos.get(id).items.keys()].map(nativeId => observation(id, nativeId)),
+              : listed
+                  .filter(nativeId => !nativeId.startsWith('commit:') || newer.includes(nativeId))
+                  .map(nativeId => observation(id, nativeId)),
             nextCursor: null,
+            ...(commits?.length && !state.omit ? { commits: { head: commits.at(-1), retained: known >= 0 } } : {}),
           };
         },
         read: async (_w, userId, b, id, nativeId) => {
@@ -1074,6 +1088,108 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           const current = await github.status(ws.id, ws.userId, documentId);
           assert.deepEqual([current.parsing, current.failure, current.historical], ['ready', null, false]);
           assert.equal((await query(ownerActor, 'renewed')).hits[0].citation.documentId, documentId);
+        },
+      );
+
+      await t.test(
+        'commits are indexed once, and later passes list only newer commits without reading known ones',
+        async () => {
+          const repo = state.repos.get('7001');
+          const sha = n => String(n).repeat(40);
+          const commit = n => {
+            repo.items.set(`commit:7001:${sha(n)}`, {
+              kind: 'commit',
+              title: `acme/handbook@${sha(n).slice(0, 7)}: tulip commit ${n}`,
+              text: `tulip commit ${n} message`,
+              revision: `commit:${sha(n)}`,
+            });
+            repo.commits = [...(repo.commits ?? []), sha(n)];
+          };
+          commit(1);
+          commit(2);
+          const commits = await github.configure(ws.id, ws.userId, {
+            ...input,
+            commandId: randomUUID(),
+            selection: { ...input.selection, repositories: ['acme/handbook'], kinds: ['commits'] },
+            memberIds: [],
+          });
+          const items = async () =>
+            (
+              await db.platform.query(
+                `SELECT i.native_id,i.kind,d.lexical_publication_id IS NOT NULL AS published FROM ${table('github_items')} i LEFT JOIN ${table('documents')} d ON d.id=i.document_id AND d.tombstoned_at IS NULL WHERE i.source_id=$1 ORDER BY i.native_id`,
+                [commits.sourceId],
+              )
+            ).rows;
+          const head = async () =>
+            (
+              await db.platform.query(
+                `SELECT commit_head FROM ${table('github_repositories')} WHERE source_id=$1 AND repository_id='7001'`,
+                [commits.sourceId],
+              )
+            ).rows[0].commit_head;
+          const commitReads = () =>
+            reads.filter(read => read.nativeId.startsWith('commit:')).map(read => read.nativeId);
+          reads.length = 0;
+          lists.length = 0;
+          await sync(commits.sourceId);
+          assert.deepEqual(await items(), [
+            { native_id: `commit:7001:${sha(1)}`, kind: 'commit', published: true },
+            { native_id: `commit:7001:${sha(2)}`, kind: 'commit', published: true },
+          ]);
+          assert.equal(await head(), sha(2));
+          assert.deepEqual(lists, [{ id: '7001', kinds: ['commits'], history: { commitHead: null } }]);
+          assert.deepEqual(commitReads(), [`commit:7001:${sha(1)}`, `commit:7001:${sha(2)}`]);
+          const hits = await bounded(() =>
+            search.search(ws.id, ws.userId, {
+              kind: 'typing',
+              query: 'tulip',
+              filters: { kinds: ['github'], sourceIds: [commits.sourceId] },
+            }),
+          );
+          assert.deepEqual(hits.hits.map(hit => hit.title).sort(), [
+            `acme/handbook@${sha(1).slice(0, 7)}: tulip commit 1`,
+            `acme/handbook@${sha(2).slice(0, 7)}: tulip commit 2`,
+          ]);
+          commit(3);
+          reads.length = 0;
+          lists.length = 0;
+          await sync(commits.sourceId);
+          assert.deepEqual(lists, [{ id: '7001', kinds: ['commits'], history: { commitHead: sha(2) } }]);
+          assert.deepEqual(commitReads(), [`commit:7001:${sha(3)}`], 'known commits are neither listed nor read');
+          assert.equal(await head(), sha(3));
+          assert.equal((await items()).filter(item => item.published).length, 3);
+          reads.length = 0;
+          await sync(commits.sourceId);
+          await sync(commits.sourceId);
+          assert.deepEqual(commitReads(), [], 'an unchanged head reads nothing');
+          assert.equal((await items()).filter(item => item.published).length, 3);
+          // An interrupted or omitted listing keeps the recorded head, and never tombstones a commit.
+          state.omit = true;
+          await sync(commits.sourceId);
+          state.omit = false;
+          assert.equal(await head(), sha(3));
+          assert.equal((await items()).filter(item => item.published).length, 3);
+          // Turning commits off withdraws them; turning them back on lists and publishes the whole history again.
+          const settings = kinds =>
+            github.settings(ws.id, ws.userId, commits.sourceId, {
+              commandId: randomUUID(),
+              kinds,
+              excludePaths: [],
+              after: null,
+              excludedRepositories: [],
+            });
+          await settings(['docs']);
+          assert.equal(await head(), null);
+          assert.equal((await items()).filter(item => item.published).length, 0);
+          await settings(['commits']);
+          lists.length = 0;
+          await sync(commits.sourceId);
+          assert.deepEqual(lists, [{ id: '7001', kinds: ['commits'], history: { commitHead: null } }]);
+          assert.equal(await head(), sha(3));
+          assert.equal((await items()).filter(item => item.published).length, 3);
+          for (const n of [1, 2, 3]) repo.items.delete(`commit:7001:${sha(n)}`);
+          delete repo.commits;
+          await github.manage(ws.id, ws.userId, commits.sourceId, { commandId: randomUUID(), action: 'remove' });
         },
       );
 

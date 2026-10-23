@@ -52,6 +52,7 @@ with `invalid-selection`.
 | `code`            | Every other file in the default-branch tree                                                                                                 | `code:{repoId}:{path}`                    | `blob:{blobSha}`                      | 128 KiB of text each; a binary file is one part |
 | `issues`, `pulls` | `GET /repositories/{id}/issues?state=all` sorted by update, with `since={after}` only when a cutoff is set                                  | `issue:{repoId}:{n}`, `pull:{repoId}:{n}` | `issue:{updated_at}:{comments}`       | 100 comments each                               |
 | `discussions`     | GraphQL `repository.discussions` ordered by update                                                                                          | `discussion:{repoId}:{n}`                 | `discussion:{updatedAt}:{totalCount}` | 100 comments each, with every reply             |
+| `commits`         | `GET /repositories/{id}/commits?sha={head}`, 100 a page; later passes `GET /repositories/{id}/compare/{indexed}...{head}`                   | `commit:{repoId}:{sha}`                   | `commit:{sha}`                        | One per commit                                  |
 
 There is no file-type allowlist, built-in exclusion or per-repository count cap:
 `.env` files, keys, `node_modules`, build output, lockfiles, minified files, maps and
@@ -87,13 +88,25 @@ most 50 tree requests per page, and the cursor records the position in the walk.
 single directory that GitHub itself truncates is recorded as an excluded
 `/truncated/{treeSha}` item, so the gap is visible.
 
-Docs and code are not date-bounded; with a cutoff, issues, pull requests and
+Docs, code and commits are not date-bounded; with a cutoff, issues, pull requests and
 discussions must have been updated after `after`. Every document is Markdown in `tf_knowledge_github_originals`
 and starts with provenance: repository, numeric ID, path and the commit and blob SHAs
 for files; author login and UTC time of the description and every comment for
 issues, pull requests and discussions. Canonical URLs for files are commit-pinned
 `blob/{commit}/{path}` links. Pull requests import the description and conversation
-comments, not inline review comments. Every issue comment and every discussion comment
+comments, not inline review comments.
+
+A commit document holds the full SHA, the author and committer names, GitHub logins and
+dates, the parents, the full message and every changed file GitHub lists with its
+status, previous path for a rename, and line additions and deletions. It never holds
+diffs or email addresses. Its title is `{owner/name}@{short sha}: {first message line}`
+and its canonical URL is `https://github.com/{owner/name}/commit/{sha}`. Changed files
+come from `GET /repositories/{id}/commits/{sha}`, following GitHub's file pages up to
+its 3,000-file cap. A commit at that cap notes that it may change more files. When
+GitHub cannot return a commit's files (a response over 8 MiB, since GitHub includes
+every patch), the document notes the gap and falls back to
+`GET /repositories/{id}/git/commits/{sha}` for the message, names and dates. A commit
+never changes, so a known SHA is never read again. Every issue comment and every discussion comment
 and reply is paged through; only a single part whose Markdown would exceed 1 MiB is
 recorded as `too-large`, and a later part of a file found to be binary as
 `unsupported`. Neither is published.
@@ -182,13 +195,26 @@ current active account for the same GitHub user.
 Each work item lists one provider page for one repository, after an owner check.
 The provider cursor encodes the phase (`docs:{commit}:{offset}`, `docs:{commit}:w{index path}`
 while walking directories, either with `+{part}` inside a file, `issues:{page}`,
-`discussions:{endCursor}`), so a file listing stays pinned to one commit. The cursor
+`discussions:{endCursor}`, `commits:{head}:{page}` or `commits:{indexed}..{head}:{page}`),
+so a file or commit listing stays pinned to one commit. The cursor
 commits only after every item outcome is persisted. After all repositories are
 traversed, unseen items in available repositories get an exact read. Only a 404 or
 410 file or issue, a transferred issue (301), a missing discussion, or an item now
 outside the window tombstones a document. A file rename therefore tombstones the old
 path and publishes the new path. A partial, truncated or failed listing, or an
 unavailable repository, never tombstones.
+
+Commits are listed last, so a long history never delays a repository's other kinds.
+`tf_knowledge_github_repositories.commit_head` records the default-branch head whose
+whole history was last listed. The first pass lists every commit reachable from the
+head, with no date cutoff. Later passes compare the recorded head with the current one
+and list only the newer commits; every published commit item of the repository then
+counts as seen without a GitHub request, and one not yet published is read again by the
+sweep. When the head no longer extends the recorded one (a force push) or GitHub cannot
+make the comparison, the pass lists the whole history again. The recorded head moves
+only when a listing finishes, so an interrupted pass compares from the older head.
+A commit removed from the default branch by a force push stays indexed while GitHub
+still serves it by SHA.
 
 Rate limits (`429`, or `403` with `x-ratelimit-remaining: 0` or `retry-after`, or a
 GraphQL `RATE_LIMITED` error) fail the work item with `rate-limited`; the next
@@ -205,6 +231,10 @@ SQL is included in a search only when the member belongs to a GitHub source; its
 eligibility is read through `tf_knowledge_github_eligible_for()`, whose plan is
 cached per session.
 
+Common migration `0007_knowledge_github_commits.sql` allows the `commit` item kind and
+adds `commit_head`. Before a workspace reaches that version, its sources index every
+selected kind except commits.
+
 ## Automatic Knowledge
 
 Every authorization of a personal account creates one owner-only all-repositories
@@ -212,7 +242,7 @@ source with every content kind and full history, unless the owner already has on
 for that account. Indexing starts at once. Unlike other providers, GitHub ignores
 the `default-connection-knowledge` flag and the automatic Knowledge gate never
 holds its sources. Automatic sources include `code`: every file at the default-branch
-head, with no count cap.
+head, with no count cap, and `commits`: the full default-branch history.
 Issues, pull requests and discussions keep their full history. Migration
 `common/0006_github_knowledge_opt_out.sql` removes the earlier rolling 90-day window
 and its date from existing GitHub sources. It also records a default intent for every
@@ -228,5 +258,7 @@ lexical search, embeddings, and the search coordinator with a fixture provider.
 against `packages/github/test/corpus-fixture.mjs`.
 `apps/api/test/knowledge-github-all-files.integration.mjs` runs the real provider and
 engine across head changes: formerly excluded files, a file in parts, a binary
-placeholder, a hashed long path, a truncated tree walk and deletions. Live GitHub, GitHub rate limits
+placeholder, a hashed long path, a truncated tree walk and deletions.
+`apps/api/test/knowledge-github-commits.integration.mjs` runs both across a growing
+and force-pushed history. Live GitHub, GitHub rate limits
 under load, and throughput remain unverified.

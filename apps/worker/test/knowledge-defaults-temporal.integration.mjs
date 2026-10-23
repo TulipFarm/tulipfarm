@@ -127,7 +127,7 @@ test(
       const [source] = await created();
       assert.deepEqual(
         source.selection,
-        { scope: 'all', repositories: [], kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] },
+        { scope: 'all', repositories: [], kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'] },
         'every repository the account can read, every kind, full history',
       );
       const published = async path =>

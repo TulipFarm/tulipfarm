@@ -186,6 +186,9 @@ const dependencyEndpoints = [
   'github-comments',
   'github-content',
   'github-blob',
+  'github-commits',
+  'github-commit',
+  'github-compare',
   'github-graphql',
 ] as const;
 export type DependencyEndpoint = (typeof dependencyEndpoints)[number];

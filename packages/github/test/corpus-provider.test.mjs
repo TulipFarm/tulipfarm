@@ -793,3 +793,192 @@ test('an empty repository still indexes issues and discussions, then its files o
   assert.ok(later.some(item => item.nativeId === 'code:7001:src/index.ts'));
   assert.match((await readAs(provider, binding, 'doc:7001:README.md', all)).markdown, /Orchid onboarding steps/);
 });
+
+const commitsOnly = { ...selection, kinds: ['commits'] };
+async function listPages(provider, binding, value, history) {
+  const pages = [];
+  let cursor = null;
+  for (let page = 0; page < 200; page++) {
+    const result = await provider.list(workspaceId, 'reader', binding, '7001', value, cursor, history);
+    pages.push(result);
+    if (!result.nextCursor) return pages;
+    cursor = result.nextCursor;
+  }
+  assert.fail('listing did not finish');
+}
+
+test('commits are listed last, through the whole default-branch history in pages of 100', async () => {
+  const { provider, binding, repo, github } = setup();
+  for (let index = 0; index < 205; index++) github.push(repo, { message: `Change ${index}` });
+  const head = repo.history.at(-1).sha;
+  const all = { ...selection, kinds: ['commits', 'discussions', 'docs', 'issues', 'pulls'] };
+  const pages = await listPages(provider, binding, all, { commitHead: null });
+  const items = pages.flatMap(page => page.observations);
+  assert.deepEqual(
+    items.slice(-205).map(item => item.nativeId),
+    [...repo.history].reverse().map(item => `commit:7001:${item.sha}`),
+  );
+  assert.ok(items.slice(0, -205).every(item => item.kind !== 'commit'));
+  assert.deepEqual(pages.at(-1).commits, { head, retained: false });
+  assert.ok(pages.slice(0, -1).every(page => !page.commits));
+  const listed = github.calls.filter(call => call.path === '/repositories/7001/commits');
+  assert.deepEqual(
+    listed.map(call => [call.query.sha, call.query.per_page, call.query.page]),
+    [1, 2, 3].map(page => [head, '100', String(page)]),
+  );
+  const newest = items.at(-205);
+  assert.equal(newest.title, `acme/handbook@${head.slice(0, 7)}: Change 204`);
+  assert.equal(newest.canonicalURL, `https://github.com/acme/handbook/commit/${head}`);
+  assert.equal(newest.sourceRevision, `commit:${head}`);
+  // A selection without commits never lists them, and an empty repository has no history to record.
+  assert.ok((await listAll(provider, binding, '7001')).every(item => item.kind !== 'commit'));
+  const empty = setup();
+  const emptyPages = await listPages(empty.provider, empty.binding, commitsOnly, { commitHead: null });
+  assert.deepEqual(
+    emptyPages.map(page => [page.observations.length, page.commits]),
+    [[0, undefined]],
+  );
+});
+
+test('later passes list only commits newer than the indexed head, and the whole history after a force push', async () => {
+  const { provider, binding, repo, github } = setup();
+  for (let index = 0; index < 3; index++) github.push(repo, { message: `Base ${index}` });
+  const indexed = repo.history.at(-1).sha;
+  const same = await listPages(provider, binding, commitsOnly, { commitHead: indexed });
+  assert.deepEqual(
+    same.map(page => [page.observations.length, page.commits]),
+    [[0, { head: indexed, retained: true }]],
+  );
+  for (let index = 0; index < 120; index++) github.push(repo, { message: `New ${index}` });
+  const head = repo.history.at(-1).sha;
+  github.calls.length = 0;
+  const newer = await listPages(provider, binding, commitsOnly, { commitHead: indexed });
+  assert.deepEqual(
+    newer.flatMap(page => page.observations).map(item => item.nativeId),
+    repo.history.slice(3).map(item => `commit:7001:${item.sha}`),
+  );
+  assert.deepEqual(newer.at(-1).commits, { head, retained: true });
+  assert.equal(newer.length, 2);
+  assert.match(newer[0].nextCursor, new RegExp(`^commits:${indexed}\\.\\.${head}:2$`));
+  assert.ok(github.calls.every(call => call.path !== '/repositories/7001/commits'));
+  // A rewritten branch no longer extends the indexed head, so its whole history is listed again.
+  repo.history = repo.history.slice(0, 2);
+  github.push(repo, { message: 'Rewritten' });
+  const rewritten = await listPages(provider, binding, commitsOnly, { commitHead: head });
+  assert.deepEqual(
+    rewritten.flatMap(page => page.observations).map(item => item.nativeId),
+    [...repo.history].reverse().map(item => `commit:7001:${item.sha}`),
+  );
+  assert.deepEqual(rewritten.at(-1).commits, { head: repo.history.at(-1).sha, retained: false });
+  // A comparison GitHub cannot return also falls back to the whole history; rate limits still stop the pass.
+  github.state.failure = (_user, path) =>
+    path.includes('/compare/') ? new Response('x'.repeat(9 * 1024 * 1024)) : null;
+  const tooLarge = await listPages(provider, binding, commitsOnly, { commitHead: repo.history[0].sha });
+  assert.equal(tooLarge.at(-1).commits.retained, false);
+  assert.equal(tooLarge.flatMap(page => page.observations).length, repo.history.length);
+  github.state.failure = (_user, path) =>
+    path.includes('/compare/') ? Response.json({}, { status: 429, headers: { 'retry-after': '5' } }) : null;
+  await assert.rejects(
+    provider.list(workspaceId, 'reader', binding, '7001', commitsOnly, null, { commitHead: repo.history[0].sha }),
+    error => error.code === 'rate-limited',
+  );
+  github.state.failure = null;
+  for (const cursor of ['commits:nope', `commits:${head}:0`, `commits:${head}..${head}`])
+    await assert.rejects(
+      provider.list(workspaceId, 'reader', binding, '7001', commitsOnly, cursor),
+      error => error.code === 'invalid-cursor',
+    );
+  // A listing pinned to a head GitHub no longer has restarts from the current head.
+  await assert.rejects(
+    provider.list(workspaceId, 'reader', binding, '7001', commitsOnly, `commits:${'a'.repeat(40)}:2`),
+    error => error.code === 'invalid-cursor',
+  );
+});
+
+test('a commit reads as its message, people, parents and every changed file, without diffs', async () => {
+  const { provider, binding, repo, github } = setup();
+  const root = github.push(repo, { message: 'Initial import', files: [{ filename: 'README.md', status: 'added' }] });
+  const files = Array.from({ length: 650 }, (_, index) => ({
+    filename: `src/file-${index}.ts`,
+    additions: 2,
+    deletions: 1,
+  }));
+  files[0] = {
+    filename: 'docs/new`name.md',
+    previous_filename: 'docs/old.md',
+    status: 'renamed',
+    additions: 0,
+    deletions: 0,
+  };
+  const change = github.push(repo, {
+    message: 'Rename the handbook\n\nWhy: clearer\u0007 names.\r\nCo-authored-by: Someone',
+    author: 'alice',
+    name: 'Alice Example',
+    files,
+  });
+  const read = await readAs(provider, binding, `commit:7001:${change.sha}`, commitsOnly);
+  assert.equal(read.nativeId, `commit:7001:${change.sha}`);
+  assert.equal(read.kind, 'commit');
+  assert.equal(read.title, `acme/handbook@${change.sha.slice(0, 7)}: Rename the handbook`);
+  assert.equal(read.sourceRevision, `commit:${change.sha}`);
+  assert.equal(read.canonicalURL, `https://github.com/acme/handbook/commit/${change.sha}`);
+  assert.match(read.markdown, /^# acme\/handbook@[a-f0-9]{7}: Rename the handbook\n/);
+  assert.ok(read.markdown.includes(`GitHub commit ${change.sha} on the default branch of acme/handbook`));
+  assert.ok(read.markdown.includes('authored by Alice Example (@alice) at '));
+  assert.ok(read.markdown.includes('committed by GitHub (@web-flow) at '));
+  assert.ok(read.markdown.includes(`Parent ${root.sha.slice(0, 7)}.`));
+  assert.ok(read.markdown.includes('650 changed files listed, +1298 −649 lines.'));
+  assert.ok(
+    read.markdown.includes('## Message\n\nRename the handbook\n\nWhy: clearer\uFFFD names.\nCo-authored-by: Someone\n'),
+  );
+  assert.ok(read.markdown.includes('- ``docs/new`name.md`` renamed from `docs/old.md`, +0 −0'));
+  assert.ok(read.markdown.includes('- `src/file-649.ts` modified, +2 −1'));
+  assert.doesNotMatch(read.markdown, /@@|example\.test|noreply/);
+  assert.deepEqual(
+    github.calls.filter(call => call.path === `/repositories/7001/commits/${change.sha}`).map(call => call.query.page),
+    ['1', '2', '3', '4', '5', '6', '7'],
+  );
+  const first = await readAs(provider, binding, `commit:7001:${root.sha}`, commitsOnly);
+  assert.ok(first.markdown.includes('No parents (root commit). 1 changed file listed, +1 −0 lines.'));
+  assert.ok(first.markdown.includes('- `README.md` added, +1 −0'));
+  await assert.rejects(
+    readAs(provider, binding, `commit:7001:${root.sha}`, selection),
+    error => error.code === 'outside-selection',
+  );
+  await assert.rejects(
+    readAs(provider, binding, `commit:7001:${'b'.repeat(40)}`, commitsOnly),
+    error => error.code === 'not-found',
+  );
+  for (const id of ['commit:7001:1', `commit:7001:/p/2/${root.sha}`, `commit:7002:${root.sha}`])
+    await assert.rejects(readAs(provider, binding, id, commitsOnly), error => error.code === 'invalid-selection');
+});
+
+test('a commit over GitHub file limits records the gap instead of failing', async () => {
+  const { provider, binding, repo, github } = setup();
+  const many = github.push(repo, {
+    message: 'Vendor everything',
+    files: Array.from({ length: 3200 }, (_, index) => ({ filename: `vendor/${index}.js` })),
+  });
+  const capped = await readAs(provider, binding, `commit:7001:${many.sha}`, commitsOnly);
+  assert.ok(capped.markdown.includes('3000 changed files listed'));
+  assert.ok(
+    capped.markdown.includes('GitHub lists at most 3,000 changed files for one commit; this commit may change more.'),
+  );
+  assert.ok(!capped.markdown.includes('vendor/3000.js'));
+  const huge = github.push(repo, { message: 'Huge diff\n\nBody text', files: [{ filename: 'data.json' }] });
+  github.state.failure = (_user, path) =>
+    path === `/repositories/7001/commits/${huge.sha}` ? new Response('x'.repeat(9 * 1024 * 1024)) : null;
+  const fallback = await readAs(provider, binding, `commit:7001:${huge.sha}`, commitsOnly);
+  assert.equal(fallback.title, `acme/handbook@${huge.sha.slice(0, 7)}: Huge diff`);
+  assert.ok(fallback.markdown.includes('authored by Octo Cat at '));
+  assert.ok(fallback.markdown.includes('## Message\n\nHuge diff\n\nBody text\n'));
+  assert.ok(fallback.markdown.includes("_GitHub could not return this commit's changed files._"));
+  // A later page of files GitHub cannot return keeps the files already read.
+  github.state.failure = (_user, path, url) =>
+    path === `/repositories/7001/commits/${many.sha}` && url.searchParams.get('page') === '3'
+      ? new Response('x'.repeat(9 * 1024 * 1024))
+      : null;
+  const partial = await readAs(provider, binding, `commit:7001:${many.sha}`, commitsOnly);
+  assert.ok(partial.markdown.includes('200 changed files listed'));
+  assert.ok(partial.markdown.includes("the rest of this commit's changed files"));
+});

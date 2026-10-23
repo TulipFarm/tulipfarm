@@ -19,6 +19,11 @@ export const githubKindLabels: Record<GitHubKind, { label: string; short: string
   issues: { label: 'Issues and comments', short: 'issues' },
   pulls: { label: 'Pull request descriptions and comments', short: 'pull requests' },
   discussions: { label: 'Discussions', short: 'discussions' },
+  commits: {
+    label: 'Commit messages and changed files',
+    short: 'commits',
+    description: 'The full history of the default branch, without diffs.',
+  },
 };
 
 /** What to index from each repository. Everything is on by default; members opt content out. */
@@ -136,7 +141,7 @@ export function GitHubContentOptions({
           id={`${idPrefix}-after`}
           label="Only index activity after"
           optional
-          helper="Leave empty to index the full history of issues, pull requests and discussions. Dates use UTC."
+          helper="Leave empty to index the full history of issues, pull requests and discussions. Documentation, code and commits always use their full history. Dates use UTC."
           error={attempted ? errors.after : undefined}
         >
           <Input

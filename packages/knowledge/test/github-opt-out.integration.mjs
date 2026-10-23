@@ -15,7 +15,7 @@ import {
 import { githubPathOptedOut } from '../dist/github-contracts.js';
 
 const day = 86_400_000;
-const allKinds = ['code', 'discussions', 'docs', 'issues', 'pulls'];
+const allKinds = ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'];
 
 // A GitHub account whose repositories each hold docs and issues; tests add repositories between passes.
 function fakeGitHub(binding) {

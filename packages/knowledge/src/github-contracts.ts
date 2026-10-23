@@ -7,6 +7,10 @@ export const githubCorpusLimits = Object.freeze({
   excludePatternLength: 200,
   listPageSize: 50,
   issuePageSize: 20,
+  // GitHub's largest page of commits; each commit's changed files are read in pages of GitHub's own size.
+  commitPageSize: 100,
+  // GitHub lists at most this many changed files for one commit.
+  commitFiles: 3000,
   // Files are indexed in parts of about this many bytes, split at a line break, so any file size fits the parser.
   partBytes: 128 * 1024,
   // Issues and discussions are indexed in parts of this many top-level comments.
@@ -29,7 +33,7 @@ export const githubRepositoryNameSchema = z
 export const githubRepositoryIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
 export const githubCorpusCursorTokenSchema = z.string().min(1).max(4096).refine(printable);
 // Adding a kind here turns it on for automatic sources, which select every kind.
-export const githubCorpusKinds = ['code', 'discussions', 'docs', 'issues', 'pulls'] as const;
+export const githubCorpusKinds = ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'] as const;
 export const githubCorpusKindSchema = z.enum(githubCorpusKinds);
 // Opt-out patterns run on a backtracking engine, so only shapes with a small, bounded cost are accepted: no repeated
 // group whose body can itself repeat or branch (`(a+)+`, `(a|a)*`), no backreferences, at most one unbounded
@@ -109,7 +113,8 @@ export const githubCorpusSelectionSchema = z
     kinds: githubCorpusKindsSchema,
     // Repository-relative file paths matching any pattern are never indexed.
     excludePaths: z.array(githubExcludePatternSchema).max(githubCorpusLimits.excludePatterns).optional(),
-    // Issues, pull requests and discussions updated before this date are skipped. Absent means full history.
+    // Issues, pull requests and discussions updated before this date are skipped. Absent means full history. Files and
+    // commits are not date-bounded.
     after: z.iso.date().optional(),
   })
   .refine(
@@ -181,7 +186,7 @@ export type GitHubRepositoryAccess = GitHubRepository & { accessedAt: string; re
 export type GitHubItemObservation = {
   nativeId: string;
   repositoryId: string;
-  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion';
+  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion' | 'commit';
   title: string;
   canonicalURL: string;
   sourceRevision: string;
@@ -190,7 +195,16 @@ export type GitHubItemObservation = {
   // The full repository path of a file; `nativeId` carries only its hash when the path is longer than 1,024 bytes.
   path?: string;
 };
-export type GitHubCorpusPage = { observations: GitHubItemObservation[]; nextCursor: string | null };
+export type GitHubCorpusPage = {
+  observations: GitHubItemObservation[];
+  nextCursor: string | null;
+  // Set on the page that finishes a repository's commit listing. `head` is the default-branch commit whose whole
+  // history is now listed; `retained` means only commits newer than the caller's `commitHead` were listed, so every
+  // commit item already stored for the repository is still current.
+  commits?: { head: string; retained: boolean };
+};
+// The caller's record of a repository's history: the last default-branch head whose every commit was listed.
+export type GitHubListHistory = { commitHead: string | null };
 export type GitHubItemRead = GitHubItemObservation & { markdown: string };
 export type GitHubCorpusProvider = {
   discover(
@@ -218,6 +232,7 @@ export type GitHubCorpusProvider = {
     repositoryId: string,
     selection: GitHubCorpusSelection,
     cursor: string | null,
+    history?: GitHubListHistory,
   ): Promise<GitHubCorpusPage>;
   read(
     workspaceId: string,

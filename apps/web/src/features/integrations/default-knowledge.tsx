@@ -58,11 +58,11 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
     scopes: 'repositories',
     sources: 'Repositories below',
     scope:
-      'Every repository this GitHub account can read, including new ones: docs, code, issues, pull requests and discussions.',
+      'Every repository this GitHub account can read, including new ones: docs, code, issues, pull requests, discussions and commits.',
     coverage:
-      'Docs and code at the latest default-branch version. Issues, pull requests and discussions active in the last 90 days.',
+      'Docs and code at the latest default-branch version, and the full default-branch commit history. Issues, pull requests and discussions active in the last 90 days.',
     excluded:
-      'Other branches, commit history and diffs. Secret-like, generated, binary and oversized files are skipped and listed as skipped.',
+      'Other branches and diffs. Secret-like, generated, binary and oversized files are skipped and listed as skipped.',
   },
   jira: {
     name: 'Jira',
