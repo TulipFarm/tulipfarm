@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { observeFetch } from '@tulipfarm/observability';
 import { z } from 'zod';
-import { GitHubAccountError, identitySchema, scopesSchema } from './contracts.ts';
+import { GitHubAccountError, GitHubCredentialRejected, identitySchema, scopesSchema } from './contracts.ts';
 
 const secret = z
   .string()
@@ -117,6 +117,8 @@ export async function exchange(config: Configuration, code: string, verifier: st
       token_type: z.string().refine(value => value.toLowerCase() === 'bearer'),
       scope: z.string().max(4096),
       expires_in: z.number().int().positive().max(31536000).optional(),
+      refresh_token: secret.optional(),
+      refresh_token_expires_in: z.number().int().positive().max(31536000).optional(),
     })
     .parse(
       await request(
@@ -137,7 +139,48 @@ export async function exchange(config: Configuration, code: string, verifier: st
     );
   const scopes = scopesSchema.parse(token.scope.split(/[,\s]+/).filter(Boolean));
   if (!hasScopes(scopes, config.scopes)) throw new GitHubAccountError('account-reconnect-required');
-  return { accessToken: token.access_token, scopes, expiresIn: token.expires_in ?? null };
+  return {
+    accessToken: token.access_token,
+    scopes,
+    expiresIn: token.expires_in ?? null,
+    refreshToken: token.refresh_token ?? null,
+    refreshExpiresIn: token.refresh_token_expires_in ?? null,
+  };
+}
+// GitHub answers a bad or reused refresh token with HTTP 200 and an `error` field, and refresh tokens are single-use.
+export async function refresh(config: Configuration, refreshToken: string, fetcher: typeof fetch) {
+  const body = await request(
+    'https://github.com/login/oauth/access_token',
+    {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }).toString(),
+    },
+    fetcher,
+  );
+  if (typeof body === 'object' && body !== null && 'error' in body) {
+    throw new GitHubCredentialRejected();
+  }
+  const token = z
+    .object({
+      access_token: secret,
+      token_type: z.string().refine(value => value.toLowerCase() === 'bearer'),
+      expires_in: z.number().int().positive().max(31536000),
+      refresh_token: secret,
+      refresh_token_expires_in: z.number().int().positive().max(31536000),
+    })
+    .parse(body);
+  return {
+    accessToken: token.access_token,
+    expiresIn: token.expires_in,
+    refreshToken: token.refresh_token,
+    refreshExpiresIn: token.refresh_token_expires_in,
+  };
 }
 export async function identity(accessToken: string, fetcher: typeof fetch) {
   const profile = z

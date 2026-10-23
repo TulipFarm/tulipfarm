@@ -8,7 +8,7 @@ const bindingSchema = z.strictObject({
   accountId: uuidSchema,
   membershipId: uuidSchema,
   generation: z.number().int().positive(),
-  purpose: z.enum(['token', 'pkce']),
+  purpose: z.enum(['token', 'pkce', 'refresh']),
 });
 type Binding = z.infer<typeof bindingSchema>;
 const envelopeSchema = z.strictObject({

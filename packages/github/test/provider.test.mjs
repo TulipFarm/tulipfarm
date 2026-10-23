@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { authorizationUrl, exchange, githubConfiguration, hasScopes, identity } from '../src/provider.ts';
+import { authorizationUrl, exchange, githubConfiguration, hasScopes, identity, refresh } from '../src/provider.ts';
 import { credentialCipher } from '../src/credentials.ts';
 import { callbackSchema } from '../src/contracts.ts';
 
@@ -70,7 +70,13 @@ test('OAuth uses S256, account selection, form exchange and stable numeric ident
     });
     return Response.json({ access_token: 'synthetic-token', token_type: 'bearer', scope: 'repo,user' });
   });
-  assert.deepEqual(token, { accessToken: 'synthetic-token', scopes: ['repo', 'user'], expiresIn: null });
+  assert.deepEqual(token, {
+    accessToken: 'synthetic-token',
+    scopes: ['repo', 'user'],
+    expiresIn: null,
+    refreshToken: null,
+    refreshExpiresIn: null,
+  });
   assert.deepEqual(
     await identity(token.accessToken, async (url, init) => {
       assert.equal(url, 'https://api.github.com/user');
@@ -121,4 +127,37 @@ test('key rotation and authenticated encryption bind workspace, member, account,
     assert.throws(() => next.decrypt({ ...binding, ...change }, value));
   assert.throws(() => credentialCipher({ activeKeyId: 'new', keys: { new: 'cd'.repeat(32) } }).decrypt(binding, value));
   assert.equal(JSON.stringify(value).includes('private-token'), false);
+});
+
+test('refresh sends the single-use refresh token and treats an error body as a rejected credential', async () => {
+  const granted = await refresh(config, 'refresh-old', async (url, init) => {
+    assert.equal(url, 'https://github.com/login/oauth/access_token');
+    assert.deepEqual(Object.fromEntries(new URLSearchParams(init.body)), {
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: 'refresh-old',
+    });
+    return Response.json({
+      access_token: 'access-new',
+      token_type: 'bearer',
+      expires_in: 28800,
+      refresh_token: 'refresh-new',
+      refresh_token_expires_in: 15811200,
+    });
+  });
+  assert.deepEqual(granted, {
+    accessToken: 'access-new',
+    expiresIn: 28800,
+    refreshToken: 'refresh-new',
+    refreshExpiresIn: 15811200,
+  });
+  await assert.rejects(
+    refresh(config, 'refresh-old', async () => Response.json({ error: 'bad_refresh_token' })),
+    /github-credential-rejected/,
+  );
+  await assert.rejects(
+    refresh(config, 'refresh-old', async () => new Response('', { status: 502 })),
+    /account-unavailable/,
+  );
 });
