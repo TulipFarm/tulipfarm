@@ -10,13 +10,18 @@ export function securityServerOptions(): FastifyServerOptions {
   const proxy = z
     .enum(['direct', 'reverse-proxy', 'azure-container-apps'])
     .parse(process.env.API_PROXY_MODE ?? 'direct');
+  // A proxy reuses idle upstream connections. If the API closes one first, the proxy can send the next
+  // request into the closing socket and answer 502 itself, so the API never sees or logs it. Behind a
+  // proxy, keep idle connections open longer than common proxy idle timeouts (AWS ALB and nginx: 60 s).
+  // Direct clients keep the short timeout so idle sockets cannot pile up.
+  const proxied = proxy !== 'direct';
   return {
     // The single trusted proxy appends the client address as the rightmost forwarded hop.
-    trustProxy: proxy === 'direct' ? false : (_address, hop) => hop === 0,
+    trustProxy: proxied ? (_address, hop) => hop === 0 : false,
     bodyLimit: 1_048_576,
     requestTimeout: 30_000,
-    connectionTimeout: 60_000,
-    keepAliveTimeout: 5_000,
+    connectionTimeout: proxied ? 70_000 : 60_000,
+    keepAliveTimeout: proxied ? 65_000 : 5_000,
     maxRequestsPerSocket: 1_000,
     onProtoPoisoning: 'error',
     onConstructorPoisoning: 'error',
