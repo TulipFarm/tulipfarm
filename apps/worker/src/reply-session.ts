@@ -64,6 +64,8 @@ const leaseRenewalMilliseconds = 30_000;
 const holdSlackBytes = 128 * 1024;
 /** Tools that can change the workspace inventory the runtime reminder lists. Other tools never re-read it. */
 const inventoryTools = ['tables.', 'schema.', 'agents.', 'workflows.', 'skills.'];
+const databaseConflict = (error: unknown) =>
+  typeof error === 'object' && error !== null && 'code' in error && (error.code === '40P01' || error.code === '40001');
 
 const units = (providerPicoUsd: string) => creditUnitsForProviderCost(BigInt(providerPicoUsd));
 /** A call's worst-case provider cost, as its own reservation quoted it. */
@@ -349,15 +351,25 @@ export async function beginReplySession(input: {
     await settleHold(tx, hold);
   });
 
+  // Renewal is idempotent and only locks the reply's own rows, so a serialization or deadlock failure retries
+  // instead of ending the reply.
+  const renewOnce = () =>
+    runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
+      await lockAuthorization(tx);
+      await renewConversationReplyLease(tx, fence);
+    });
   const renewal = setInterval(() => {
-    runtime
-      .transaction(fence.workspaceId, commonCompatibility, async tx => {
-        await lockAuthorization(tx);
-        await renewConversationReplyLease(tx, fence);
-      })
-      .catch((error: unknown) => {
-        lost ??= error;
-      });
+    void (async () => {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          return await renewOnce();
+        } catch (error) {
+          if (attempt < 3 && databaseConflict(error)) continue;
+          lost ??= error;
+          return;
+        }
+      }
+    })();
   }, leaseRenewalMilliseconds);
   renewal.unref();
 

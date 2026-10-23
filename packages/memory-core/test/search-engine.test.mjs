@@ -100,6 +100,10 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
       assert.equal(value, context);
       return {
         readLive: async ([id]) => (sessions.has(id) ? result(sessions.get(id)) : result()),
+        lockOwner: async () => {
+          trace.push('lock-owner');
+          return result();
+        },
         pruneExpired: async () => {
           trace.push('prune');
           return result();
