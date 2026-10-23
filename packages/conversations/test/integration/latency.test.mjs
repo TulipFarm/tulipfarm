@@ -6,6 +6,7 @@ import { createConversationExecutor } from '../../src/runtime.ts';
 import { createReplyTextPublisher } from '../../src/event-publisher.ts';
 import { readChatLatency } from '../../src/latency.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { withChatMeasurements } from '@tulipfarm/observability';
 
 test(
   'chat timing persists first text, retries and waits without counting human time as latency',
@@ -186,6 +187,74 @@ test(
         snapshot.oldest.every(p => p.seconds === 0),
         'user-input wait is not unfinished active work',
       );
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'a send request arrival starts the reply time and its save time is the send segment',
+  { timeout: 60000 },
+  async t => {
+    const f = await conversationFixture();
+    try {
+      const w = f.workspace,
+        chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const turns = f.table('tf_conversation_turns');
+      const message = () => ({
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text: 'Hi' }],
+      });
+      const sent = await f.store.send(w.id, w.userId, chatId, message(), undefined, performance.now() - 1500);
+      const admin = f.db.databaseAdmin;
+      const row = (
+        await admin.query(
+          `SELECT extract(epoch FROM timing_started_at-timing_requested_at)::float8 AS send FROM ${turns} WHERE id=$1`,
+          [sent.turnId],
+        )
+      ).rows[0];
+      assert.ok(row.send >= 1.5 && row.send < 3, `send ${row.send}`);
+
+      const summaries = [];
+      const write = process.stdout.write;
+      t.mock.method(process.stdout, 'write', (line, ...rest) => {
+        if (typeof line === 'string' && line.includes('"chat.reply.summary"')) {
+          summaries.push(JSON.parse(line));
+          return true;
+        }
+        return write.call(process.stdout, line, ...rest);
+      });
+      const executor = createConversationExecutor(f.runtime, async input => {
+        const publisher = createReplyTextPublisher(f.runtime, input.fence, 0);
+        publisher.update(0, 'Hello');
+        await publisher.close();
+        return 'Hello';
+      });
+      const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+      assert.equal(await withChatMeasurements(() => executor.process(work), sent.turnId), 'completed');
+      assert.equal(summaries.length, 1);
+      const [summary] = summaries;
+      const send = summary['chat.reply.send_seconds'];
+      assert.ok(send >= 1.5 && send < 3, `send ${send}`);
+      assert.ok(summary['chat.reply.total_seconds'] >= send + summary['chat.reply.queue_seconds'] - 1e-9);
+      assert.ok(summary['chat.reply.first_text_seconds'] >= send);
+      assert.ok(summary['chat.reply.overhead_seconds'] >= send - 1e-9);
+
+      const unmeasured = await f.store.send(w.id, w.userId, chatId, message());
+      assert.equal(
+        (await admin.query(`SELECT timing_requested_at FROM ${turns} WHERE id=$1`, [unmeasured.turnId])).rows[0]
+          .timing_requested_at,
+        null,
+      );
+      assert.equal(
+        await withChatMeasurements(() => executor.process({ ...work, turnId: unmeasured.turnId }), unmeasured.turnId),
+        'completed',
+      );
+      assert.equal(summaries.length, 2);
+      assert.equal(summaries[1]['chat.reply.send_seconds'], undefined);
     } finally {
       await f.close();
     }

@@ -12,6 +12,7 @@ import { workflowReferences } from './workflow-receipts.ts';
 import { sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
+import { observeChatDetail } from '@tulipfarm/observability';
 import {
   AccessDenied,
   lockAuthorization,
@@ -155,8 +156,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
     lock: 'read' | 'write' = 'read',
   ) {
     return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, lock);
-      return operation(bindFileSources(tx), await resolveHuman(tx, userId));
+      const actor = await observeChatDetail('actor', async () => {
+        await lockAuthorization(tx, lock);
+        return resolveHuman(tx, userId);
+      });
+      return operation(bindFileSources(tx), actor);
     });
   }
 
@@ -277,12 +281,25 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
     );
   }
 
-  /** `recorded` runs only in the call that records the send, never in a replay of its command. */
-  async function send(workspaceId: string, userId: string, chatIdInput: string, value: unknown, recorded?: () => void) {
+  /**
+   * `recorded` runs only in the call that records the send, never in a replay of its command. `arrivedAt` is the
+   * `performance.now()` at which the send request reached this process; the turn keeps it so reply time includes the save.
+   */
+  async function send(
+    workspaceId: string,
+    userId: string,
+    chatIdInput: string,
+    value: unknown,
+    recorded?: () => void,
+    arrivedAt?: number,
+  ) {
     return human(
       workspaceId,
       userId,
-      (tx, actor) => sendInTransaction(tx, actor, workspaceId, chatIdInput, value, recorded),
+      (tx, actor) =>
+        observeChatDetail('send-write', () =>
+          sendInTransaction(tx, actor, workspaceId, chatIdInput, value, recorded, arrivedAt),
+        ),
       'write',
     );
   }
@@ -294,6 +311,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
     chatIdInput: string,
     value: unknown,
     recorded?: () => void,
+    arrivedAt?: number,
   ) {
     const chatId = uuidSchema.parse(chatIdInput);
     const input = sendMessageSchema.parse(value);
@@ -396,9 +414,18 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
       }
       const responder = input.model ?? loadModelCatalog().defaultModel.id;
       const turnId = randomUUID();
+      // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
+      const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''})`,
-        [turnId, chatId, input.messageId, chat.nextSequence, responder],
+        `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}${requested ? ', timing_requested_at' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''}${requested ? ', clock_timestamp() - make_interval(secs => $6::double precision / 1000)' : ''})`,
+        [
+          turnId,
+          chatId,
+          input.messageId,
+          chat.nextSequence,
+          responder,
+          ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
+        ],
       );
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,

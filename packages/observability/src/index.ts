@@ -131,6 +131,7 @@ const spanAttributes = new Set([
   'chat.reply.attempts',
   'chat.reply.total_seconds',
   'chat.reply.first_text_seconds',
+  'chat.reply.send_seconds',
   'chat.reply.queue_seconds',
   'chat.reply.model_seconds',
   'chat.reply.tools_seconds',
@@ -929,6 +930,11 @@ export const backgroundJobs = [
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 
+/** True inside a scheduled background job run, so shared resources can serve requests ahead of it. */
+export function inBackgroundJob() {
+  return backgroundContext.getStore() !== undefined;
+}
+
 export function createBackgroundJob(job: BackgroundJob, intervalSeconds: number) {
   const meter = metrics.getMeter(scope);
   const labels = { ...dimensions, background_job: job };
@@ -1202,6 +1208,9 @@ export function recordChatDispatch(
 export type ChatModelPurpose = 'reply' | 'completion' | 'title' | 'calendar' | 'compaction';
 export type ChatDetailPhase =
   | 'turn'
+  | 'send-request'
+  | 'send-write'
+  | 'actor'
   | 'request'
   | 'resume'
   | 'requester'
@@ -1247,6 +1256,8 @@ type ChatReplySums = Record<ChatReplyCategory, number> & { tools_used: boolean }
 export type ChatReplyFinal = {
   status: 'completed' | 'failed' | 'blocked' | 'cancelled';
   totalSeconds: number;
+  /** From the send request reaching the API until its message was saved; null when no send request was recorded. */
+  sendSeconds: number | null;
   queueSeconds: number;
   firstTextSeconds: number | null;
   attempts: number;
@@ -1262,12 +1273,12 @@ type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
   counter: { value: number };
   database: ChatDatabase;
-  purpose: ChatModelPurpose | 'turn';
+  purpose: ChatModelPurpose | 'turn' | 'send';
   sequence?: number;
   reply: ChatReplyClock;
 };
 const chatMeasurement = new AsyncLocalStorage<ChatMeasurement>();
-export const chatReplySegments = ['total', 'first_text', 'queue', 'model', 'tools', 'db', 'overhead'] as const;
+export const chatReplySegments = ['total', 'first_text', 'send', 'queue', 'model', 'tools', 'db', 'overhead'] as const;
 export const chatReplyBuckets = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 12, 20, 30, 60, 120, 300] as const;
 
 /**
@@ -1340,12 +1351,13 @@ function finishChatReply(clock: ChatReplyClock) {
     return;
   }
   if (clock.key !== undefined) chatReplyCarry.delete(clock.key);
-  const { status, totalSeconds: total, queueSeconds: queue, firstTextSeconds, attempts } = clock.final;
+  const { status, totalSeconds: total, sendSeconds, queueSeconds: queue, firstTextSeconds, attempts } = clock.final;
   const outcome = status === 'completed' ? 'success' : status === 'cancelled' ? 'cancelled' : 'failed';
   const tools = sums.tools_used ? 'yes' : 'no';
   const values: Partial<Record<(typeof chatReplySegments)[number], number>> = {
     total,
     ...(firstTextSeconds === null ? {} : { first_text: firstTextSeconds }),
+    ...(sendSeconds === null ? {} : { send: sendSeconds }),
     queue,
     model: sums.model,
     tools: sums.tools,
@@ -1396,8 +1408,30 @@ export async function withChatMeasurements<T>(call: () => Promise<T>, reply?: st
   });
 }
 
+/**
+ * Measures one chat send request: records `send-request` for the `waitedMs` the request spent before its handler
+ * (authentication, session and body parsing), then the storage and write phases inside `call` with purpose `send`.
+ */
+export async function withChatSendMeasurements<T>(waitedMs: number, call: () => Promise<T>): Promise<T> {
+  if (chatMeasurement.getStore()) return call();
+  const state: ChatMeasurement = {
+    counter: { value: 0 },
+    database: { transactions: 0, milliseconds: 0 },
+    purpose: 'send',
+    reply: {
+      key: undefined,
+      since: performance.now(),
+      active: { model: 0, tools: 0, db: 0 },
+      sums: { model: 0, tools: 0, db: 0, tools_used: false },
+    },
+  };
+  finishChatDetail('send-request', state, performance.now() - Math.max(0, waitedMs), 'success');
+  return chatMeasurement.run(state, call);
+}
+
 export function chatReplyMeasured() {
-  return chatMeasurement.getStore() !== undefined;
+  const state = chatMeasurement.getStore();
+  return state !== undefined && state.purpose !== 'send';
 }
 
 /** Call inside the transaction that moved the turn to a final state; `guardChatReplyFinal` drops it on rollback. */
@@ -1409,6 +1443,8 @@ export function noteChatReplyFinal(final: ChatReplyFinal) {
 /** Timing columns of a finished tf_conversation_turns row, as written by its timing trigger. */
 export type ChatReplyTiming = {
   status: ChatReplyFinal['status'];
+  /** When the send request reached the API; null for turns saved without one or before it was recorded. */
+  requestedAt: Date | null;
   startedAt: Date;
   claimedAt: Date | null;
   finishedAt: Date;
@@ -1420,19 +1456,25 @@ export type ChatReplyTiming = {
 };
 
 /**
- * Total runs from the saved user message to the final state, minus time waiting on a person (approvals, questions),
- * on Slack or MCP, and while inactive, so `total` and `overhead` only hold time the reply could make progress.
+ * Total runs from the send request reaching the API (or the saved user message when no request was recorded) to the
+ * final state, minus time waiting on a person (approvals, questions), on Slack or MCP, and while inactive, so `total`
+ * and `overhead` only hold time the reply could make progress. `send` is the request's time before the message was
+ * saved; `queue` starts at the save, so `send` counts toward `overhead`.
  */
 export function chatReplyFinal(timing: ChatReplyTiming): ChatReplyFinal {
-  const wall = (timing.finishedAt.getTime() - timing.startedAt.getTime()) / 1000;
+  const started = timing.startedAt.getTime();
+  const sendSeconds = timing.requestedAt === null ? null : Math.max(0, (started - timing.requestedAt.getTime()) / 1000);
+  const wall = (timing.finishedAt.getTime() - started) / 1000 + (sendSeconds ?? 0);
   const waits = timing.humanWaitSeconds + timing.externalWaitSeconds + timing.inactiveSeconds;
   const totalSeconds = Math.max(0, wall - waits);
-  const queued = timing.claimedAt ? (timing.claimedAt.getTime() - timing.startedAt.getTime()) / 1000 : totalSeconds;
+  const afterSave = Math.max(0, totalSeconds - (sendSeconds ?? 0));
+  const queued = timing.claimedAt ? (timing.claimedAt.getTime() - started) / 1000 : afterSave;
   return {
     status: timing.status,
     totalSeconds,
-    queueSeconds: Math.min(totalSeconds, Math.max(0, queued)),
-    firstTextSeconds: timing.firstTextSeconds,
+    sendSeconds: sendSeconds === null ? null : Math.min(totalSeconds, sendSeconds),
+    queueSeconds: Math.min(afterSave, Math.max(0, queued)),
+    firstTextSeconds: timing.firstTextSeconds === null ? null : timing.firstTextSeconds + (sendSeconds ?? 0),
     attempts: timing.attempts,
   };
 }

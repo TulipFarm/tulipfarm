@@ -251,3 +251,49 @@ test('a committed send starts its reply in the background and a failed send star
   assert.notEqual((await send()).statusCode, 200);
   assert.deepEqual(sent, [[workspaceId, chatId]], 'an uncommitted send must not start a reply');
 });
+
+test('a send records the time before its handler and passes its arrival to the saved turn', async t => {
+  const app = Fastify();
+  const details = [];
+  const write = process.stdout.write;
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (typeof line === 'string' && line.includes('"chat.detail.')) {
+      details.push(JSON.parse(line));
+      return true;
+    }
+    return write.call(process.stdout, line, ...rest);
+  });
+  let arrival;
+  registerConversations(app, {
+    auth: {
+      api: {
+        getSession: async () => {
+          await new Promise(resolve => setTimeout(resolve, 30));
+          return { user: { id: 'sender' } };
+        },
+      },
+    },
+    service: {
+      send: async (_workspaceId, _userId, _chatId, input, recorded, arrivedAt) => {
+        arrival = arrivedAt;
+        recorded();
+        return { messageId: input.messageId, turnId: randomUUID(), sequence: 1 };
+      },
+    },
+  });
+  t.after(() => app.close());
+  await app.ready();
+  const before = performance.now();
+  const response = await app.inject({
+    method: 'PUT',
+    url: `/workspaces/${randomUUID()}/conversations/${randomUUID()}/messages/${randomUUID()}`,
+    payload: { commandId: randomUUID(), parts: [{ kind: 'text', text: 'hey' }] },
+    headers: { origin: 'http://localhost:5173' },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.ok(arrival >= before && arrival <= before + 25, `arrival ${arrival - before}ms after inject`);
+  const request = details.find(line => line.operation === 'chat.detail.send-request');
+  assert.ok(request, 'send-request phase recorded');
+  assert.equal(request['chat.purpose'], 'send');
+  assert.ok(request.duration_ms >= 25, `send-request ${request.duration_ms}ms covers authentication`);
+});

@@ -115,6 +115,8 @@ Rotation closes idle old-generation pools and drains in-flight transactions befo
 Retired generations cannot be selected again during the router's lifetime.
 Transactions reset session state before reuse. Failed transactions destroy their integration.
 Shutdown rejects queued work and drains admitted work.
+Admission is work-conserving and request-first. Work started inside a background job (`createBackgroundJob`) queues separately and is admitted only while no request waits and fewer than `maxBackgroundTransactions` (default `maxConcurrentTransactions − 1`) jobs are active. A request skips queued jobs and is rejected as `queue_full` only by its own queue. Within a pool, a freed connection goes to a waiting request before a waiting job; a wait longer than `connectionTimeoutMs` fails as `wait_timeout`.
+Hosted services may set `WORKSPACE_STORAGE_MAX_POOLS`, `WORKSPACE_STORAGE_CONNECTIONS_PER_POOL`, `WORKSPACE_STORAGE_MAX_TRANSACTIONS`, `WORKSPACE_STORAGE_MAX_BACKGROUND_TRANSACTIONS` and `WORKSPACE_STORAGE_IDLE_TIMEOUT_MS`; the budget formula above still applies.
 
 ## Delivery limits
 

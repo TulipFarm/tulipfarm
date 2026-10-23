@@ -1,6 +1,11 @@
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { observeChatDetail, observeChatTransaction, observeWorkspaceConnection } from '@tulipfarm/observability';
+import {
+  inBackgroundJob,
+  observeChatDetail,
+  observeChatTransaction,
+  observeWorkspaceConnection,
+} from '@tulipfarm/observability';
 import { commonTables, qualified, workspaceIdSchema, workspaceNames } from './names.ts';
 import { inTransaction, resetClient, type SqlClient } from './transactions.ts';
 
@@ -17,7 +22,7 @@ export type { WorkspaceId } from './names.ts';
 export type { SqlClient } from './transactions.ts';
 
 // Readers must accept every shipped common migration; the migrations test pins this to the common/ file count.
-export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 2 });
+export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 3 });
 
 export const runtimeCredentialSchema = z.object({
   workspaceId: workspaceIdSchema,
@@ -29,6 +34,8 @@ const configSchema = z.object({
   maxPools: z.number().int().min(1).max(100).default(8),
   connectionsPerPool: z.number().int().min(1).max(20).default(2),
   maxConcurrentTransactions: z.number().int().min(1).default(8),
+  // Most admission slots scheduled jobs may hold (default: all but one), so a request is admitted at once.
+  maxBackgroundTransactions: z.number().int().min(1).optional(),
   maxQueue: z.number().int().nonnegative().default(100),
   waitTimeoutMs: z.number().int().min(1).default(5_000),
   connectionTimeoutMs: z.number().int().min(1).default(5_000),
@@ -45,6 +52,9 @@ type Entry = {
   claims: number;
   idleSince: number;
   retiring: boolean;
+  connections: number;
+  waiters: (() => void)[];
+  backgroundWaiters: (() => void)[];
 };
 type Waiter = { resolve: () => void; reject: (error: Error) => void };
 
@@ -137,6 +147,8 @@ export async function fenceWorkspaceAccess(client: SqlClient, workspaceId: strin
 export function createWorkspaceRuntime(
   options: z.input<typeof configSchema> & {
     resolveCredential: (workspaceId: string, signal: AbortSignal) => Promise<RuntimeCredential>;
+    /** Whether the calling work is a scheduled job; such work yields admission and pool connections to requests. */
+    background?: () => boolean;
   },
 ) {
   const config = configSchema.parse(options);
@@ -145,11 +157,18 @@ export function createWorkspaceRuntime(
     config.databaseConnectionBudget
   )
     throw new Error('Workspace pools exceed the deployment connection budget');
+  const isBackground = options.background ?? inBackgroundJob;
+  const maxBackground = Math.min(
+    config.maxConcurrentTransactions,
+    config.maxBackgroundTransactions ?? Math.max(1, config.maxConcurrentTransactions - 1),
+  );
   const entries = new Map<string, Entry>();
   const generations = new Map<string, number>();
   const queue: Waiter[] = [];
+  const backgroundQueue: Waiter[] = [];
   const closing = new Set<Promise<void>>();
   let active = 0;
+  let activeBackground = 0;
   let closed = false;
   let shutdownResolve: (() => void) | undefined;
 
@@ -172,20 +191,33 @@ export function createWorkspaceRuntime(
   );
   eviction.unref();
 
-  function admit(deadline: TransactionDeadline): Promise<void> {
+  function admissible(background: boolean) {
+    return active < config.maxConcurrentTransactions && (!background || activeBackground < maxBackground);
+  }
+
+  function take(background: boolean) {
+    active++;
+    if (background) activeBackground++;
+  }
+
+  function admit(deadline: TransactionDeadline, background: boolean): Promise<void> {
     deadline.check();
     if (closed) return Promise.reject(new StorageUnavailableError('closed'));
-    if (active < config.maxConcurrentTransactions) {
-      active++;
+    // Requests skip ahead of queued jobs; a job admits only while nothing waits ahead of it.
+    if (admissible(background) && (background ? !queue.length && !backgroundQueue.length : !queue.length)) {
+      take(background);
       return Promise.resolve();
     }
-    if (queue.length >= config.maxQueue) return Promise.reject(new StorageUnavailableError('queue_full'));
+    // Queued jobs never fill the queue for requests.
+    if ((background ? queue.length + backgroundQueue.length : queue.length) >= config.maxQueue)
+      return Promise.reject(new StorageUnavailableError('queue_full'));
+    const waiting = background ? backgroundQueue : queue;
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
         deadline.signal.removeEventListener('abort', abort);
-        const index = queue.indexOf(waiter);
-        if (index >= 0) queue.splice(index, 1);
+        const index = waiting.indexOf(waiter);
+        if (index >= 0) waiting.splice(index, 1);
       };
       const waiter: Waiter = {
         resolve: () => {
@@ -200,15 +232,52 @@ export function createWorkspaceRuntime(
       const abort = () => waiter.reject(new StorageUnavailableError('wait_timeout'));
       const timer = setTimeout(abort, config.waitTimeoutMs);
       deadline.signal.addEventListener('abort', abort, { once: true });
-      queue.push(waiter);
+      waiting.push(waiter);
     });
   }
 
-  function releaseAdmission() {
-    const waiter = queue.shift();
-    if (waiter) waiter.resolve();
-    else active--;
+  function releaseAdmission(background: boolean) {
+    active--;
+    if (background) activeBackground--;
+    while (active < config.maxConcurrentTransactions) {
+      const waiting = queue.length ? queue : backgroundQueue.length && admissible(true) ? backgroundQueue : undefined;
+      const waiter = waiting?.shift();
+      if (!waiter) break;
+      take(waiting === backgroundQueue);
+      waiter.resolve();
+    }
     if (closed && !active) shutdownResolve?.();
+  }
+
+  function acquireConnection(entry: Entry, deadline: TransactionDeadline, background: boolean) {
+    if (entry.connections < config.connectionsPerPool && !entry.waiters.length && !entry.backgroundWaiters.length) {
+      entry.connections++;
+      return Promise.resolve();
+    }
+    const waiting = background ? entry.backgroundWaiters : entry.waiters;
+    return deadline.wait(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const grant = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            const index = waiting.indexOf(grant);
+            if (index >= 0) waiting.splice(index, 1);
+            reject(new StorageUnavailableError('wait_timeout'));
+          }, config.connectionTimeoutMs);
+          waiting.push(grant);
+        }),
+      () => releaseConnection(entry),
+    );
+  }
+
+  // pg queues checkouts first come, first served; this gate hands a freed connection to a waiting request before a job.
+  function releaseConnection(entry: Entry) {
+    const next = entry.waiters.shift() ?? entry.backgroundWaiters.shift();
+    if (next) next();
+    else entry.connections--;
   }
 
   async function credentialFor(workspaceId: string, deadline: TransactionDeadline) {
@@ -292,6 +361,9 @@ export function createWorkspaceRuntime(
       claims: 1,
       idleSince: Date.now(),
       retiring: false,
+      connections: 0,
+      waiters: [],
+      backgroundWaiters: [],
     };
     entries.set(key, entry);
     return entry;
@@ -335,21 +407,26 @@ export function createWorkspaceRuntime(
       .refine(({ minimum, maximum }) => maximum >= minimum)
       .parse(compatibility);
     const deadline = new TransactionDeadline(versions.deadlineAt);
+    const background = isBackground();
     let admitted = false;
+    let pooled = false;
     let entry: Entry | undefined;
     try {
-      await observeChatDetail('storage-admission', () => admit(deadline));
+      await observeChatDetail('storage-admission', () => admit(deadline, background));
       admitted = true;
       const credential = await observeChatDetail('storage-credentials', () => credentialFor(workspaceId, deadline));
       entry = await observeChatDetail('storage-pool', () => claim(credential, deadline));
       const pool = entry.pool;
+      const claimed = entry;
       const client = await observeWorkspaceConnection('wait', () =>
-        observeChatDetail('storage-connect', () =>
-          deadline.wait(
+        observeChatDetail('storage-connect', async () => {
+          await acquireConnection(claimed, deadline, background);
+          pooled = true;
+          return deadline.wait(
             () => pool.connect(),
             late => late.release(true),
-          ),
-        ),
+          );
+        }),
       );
       return await observeWorkspaceConnection('hold', async () => {
         let destroy = false;
@@ -419,6 +496,7 @@ export function createWorkspaceRuntime(
     } finally {
       try {
         if (entry) {
+          if (pooled) releaseConnection(entry);
           releaseClaim(entry);
           if (!entry.claims && entry.retiring) {
             const removal = remove(entry);
@@ -426,7 +504,7 @@ export function createWorkspaceRuntime(
           }
         }
       } finally {
-        if (admitted) releaseAdmission();
+        if (admitted) releaseAdmission(background);
         deadline.dispose();
       }
     }
@@ -437,7 +515,8 @@ export function createWorkspaceRuntime(
     if (shutdown) return shutdown;
     closed = true;
     clearInterval(eviction);
-    for (const waiter of queue.splice(0)) waiter.reject(new StorageUnavailableError('closed'));
+    for (const waiter of [...queue.splice(0), ...backgroundQueue.splice(0)])
+      waiter.reject(new StorageUnavailableError('closed'));
     shutdown = (async () => {
       if (active)
         await new Promise<void>(resolve => {
@@ -455,7 +534,9 @@ export function createWorkspaceRuntime(
     stats: () => ({
       pools: entries.size,
       activeTransactions: active,
-      queuedTransactions: queue.length,
+      activeBackgroundTransactions: activeBackground,
+      queuedTransactions: queue.length + backgroundQueue.length,
+      queuedBackgroundTransactions: backgroundQueue.length,
       connections: [...entries.values()].reduce((total, entry) => total + entry.pool.totalCount, 0),
     }),
   };

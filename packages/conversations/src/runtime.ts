@@ -331,6 +331,7 @@ export async function renewConversationReplyLease(
 
 const replyTimingSchema = z.object({
   status: z.enum(['completed', 'failed', 'blocked', 'cancelled']),
+  timing_requested_at: z.date().nullable().default(null),
   timing_started_at: z.date(),
   timing_claimed_at: z.date().nullable(),
   timing_finished_at: z.date(),
@@ -343,15 +344,16 @@ const replyTimingSchema = z.object({
 
 /** Notes the reply's final timing for `cloud_chat_reply_duration`; the timing trigger has already run in this transaction. */
 async function noteReplyTiming(
-  tx: AuthorizationTransaction,
+  tx: AuthorizationTransaction & { commonVersion?: number },
   turnId: string,
   statuses: readonly string[] = ['completed', 'failed', 'blocked', 'cancelled'],
 ) {
   if (!chatReplyMeasured()) return;
+  const requested = (tx.commonVersion ?? 0) >= 3;
   const row = replyTimingSchema.optional().parse(
     (
       await tx.client.query(
-        `SELECT status,timing_started_at,timing_claimed_at,timing_finished_at,timing_first_text_seconds,
+        `SELECT status,${requested ? 'timing_requested_at,' : ''}timing_started_at,timing_claimed_at,timing_finished_at,timing_first_text_seconds,
           timing_human_wait_seconds,timing_external_wait_seconds,timing_inactive_seconds,timing_attempts
         FROM ${table(tx, 'tf_conversation_turns')}
         WHERE id=$1 AND status=ANY($2::text[])
@@ -364,6 +366,7 @@ async function noteReplyTiming(
   noteChatReplyFinal(
     chatReplyFinal({
       status: row.status,
+      requestedAt: row.timing_requested_at,
       startedAt: row.timing_started_at,
       claimedAt: row.timing_claimed_at,
       finishedAt: row.timing_finished_at,

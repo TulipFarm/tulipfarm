@@ -14,7 +14,7 @@ export async function apiMcpFixture(overrides = {}) {
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 1);
+    assert.equal(migrations.length, 2);
     const one = await db.create(migrations);
     const two = await db.create(migrations);
     const table = (name, workspace = one) =>
