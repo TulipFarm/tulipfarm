@@ -344,9 +344,12 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
     deadlineAt: number,
     persist: boolean,
   ): Promise<KnowledgeSearchResult> {
-    return transaction(workspaceId, userId, deadlineAt, persist, async (tx, actor) => {
+    // Saving a session admits in read mode. A chat tool's guarded transaction already holds the shared authorization
+    // lock and then its conversation row, so upgrading here deadlocks against a reply transaction waiting on that row.
+    return transaction(workspaceId, userId, deadlineAt, false, async (tx, actor) => {
       if (session.expires_at.getTime() <= clock.now()) throw new KnowledgeError('superseded');
       if (persist) {
+        await sessions(tx).lockOwner([actor.membershipId]);
         await sessions(tx).pruneExpired();
         const count = z
           .object({ count: z.number() })

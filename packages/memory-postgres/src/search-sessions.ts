@@ -15,6 +15,12 @@ export function createPostgresSearchSessions(
         values,
       );
     },
+    lockOwner(values: [membershipId: string]) {
+      return client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('${table('search_sessions').replaceAll("'", "''")}:' || $1, 0))`,
+        values,
+      );
+    },
     pruneExpired() {
       return client.query(
         `DELETE FROM ${table('search_sessions')} WHERE id IN (SELECT id FROM ${table('search_sessions')} WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT 100)`,
