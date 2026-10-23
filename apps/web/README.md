@@ -67,6 +67,10 @@ An analytics client must keep consent: report `configured()` as true only when i
 nothing until `choose(true)`, and honour Do Not Track / Global Privacy Control. The vendor-neutral
 consent cookie and URL scrubbing helpers are in `src/lib/browser-analytics.ts`.
 
+When the route error page ("Could not open TulipFarm") renders, the app calls
+`capture('route_error_shown', { kind, status?, errorType })` (`src/lib/route-error-report.ts`). The
+properties never include the error message, URL or stack. React errors also reach `captureException`.
+
 ## Self-hosting
 
 `apps/web/Dockerfile` builds the app and serves it with Caddy using `self-host/Caddyfile`, which

@@ -46,8 +46,9 @@ import { loadOwnMembership, GovernanceRequestError } from '@/lib/governance';
 import { SessionQueryProvider, type FeatureScope } from '@/lib/query';
 import { measureWorkspaceAdmission } from '@/lib/navigation-performance';
 import { UserVisitProvider } from '@/lib/user-visit';
-import { overrides } from '@/extensions';
+import { analytics, overrides } from '@/extensions';
 import { isAssetLoadError, reloadOnceForAssetError } from '@/lib/asset-recovery';
+import { routeErrorEvent, routeErrorProperties } from '@/lib/route-error-report';
 import { onWindowReturn } from '@/lib/window-return';
 
 // Admission and 401/403 responses already catch revocation; this only bounds how long a
@@ -289,6 +290,9 @@ function RouteErrorPage({ error }: ErrorComponentProps) {
   useEffect(() => {
     if (assetFailure) reloadOnceForAssetError();
   }, [assetFailure]);
+  useEffect(() => {
+    analytics.capture(routeErrorEvent, routeErrorProperties(error, assetFailure));
+  }, [error, assetFailure]);
   return (
     <main className="flex min-h-svh items-center justify-center">
       <StatePanel
