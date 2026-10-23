@@ -160,6 +160,7 @@ instead of messages. The same rules apply whatever the backend.
 | `CLOUD_TELEMETRY_OTLP_AUTHORIZATION`                  | Optional `Authorization` value, such as `Basic <base64>` or `Bearer <token>`.                              |
 | `CLOUD_TELEMETRY_OTLP_HEADERS`                        | Optional headers as `name=value,name2=value2`, values percent-encoded, as in `OTEL_EXPORTER_OTLP_HEADERS`. |
 | `CLOUD_TELEMETRY_{TRACES,METRICS,LOGS}_ENABLED`       | `false` stops one signal. All three are on by default.                                                     |
+| `CLOUD_TELEMETRY_ENVIRONMENT`                         | Deployment name, such as `staging`, on every metric and as `deployment.environment`. Default `production`. |
 | `CLOUD_TELEMETRY_SAMPLE_RATIO`                        | Share of new traces to keep, `0` to `1`. Default `0.1`.                                                    |
 | `CLOUD_TELEMETRY_OTLP_ALLOW_HTTP`                     | `true` allows plain `http` to a public host.                                                               |
 

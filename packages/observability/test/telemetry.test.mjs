@@ -1289,3 +1289,32 @@ test('observeTool logs one rich failure record and marks thrown errors as logged
   assert.deepEqual(records[1]['error.issues'], ['values.0:invalid_type']);
   assert.doesNotMatch(lines.join(''), /PRIVATE|private user text/);
 });
+
+test('a configured deployment environment names telemetry; invalid names stop export', () => {
+  const build = { app: 'api', version: '2026.10.2.7', commit: 'b'.repeat(40) };
+  try {
+    const staging = telemetryIdentity(build, true, { CLOUD_TELEMETRY_ENVIRONMENT: ' staging ' });
+    assert.equal(staging.attributes['deployment.environment'], 'staging');
+    assert.equal(telemetryIdentity(build, true, {}).attributes['deployment.environment'], 'production');
+    assert.equal(telemetryIdentity(build, false, {}).attributes['deployment.environment'], 'development');
+    assert.equal(
+      telemetryIdentity(build, true, { CLOUD_TELEMETRY_ENVIRONMENT: 'Staging!' }).attributes['deployment.environment'],
+      'production',
+    );
+    const config = {
+      NODE_ENV: 'production',
+      CLOUD_TELEMETRY_ENABLED: 'true',
+      CLOUD_TELEMETRY_OTLP_ENDPOINT: 'https://otlp.example.com/otlp',
+    };
+    assert.ok(telemetryConfig({ ...config, CLOUD_TELEMETRY_ENVIRONMENT: 'staging' }));
+    assert.ok(telemetryConfig({ ...config, CLOUD_TELEMETRY_ENVIRONMENT: '' }));
+    for (const name of ['Staging', 'prod env', '-staging', 'a'.repeat(33), 'user@example.com'])
+      assert.throws(
+        () => telemetryConfig({ ...config, CLOUD_TELEMETRY_ENVIRONMENT: name }),
+        error => error.name === 'TelemetryConfigError' && error.setting === 'CLOUD_TELEMETRY_ENVIRONMENT',
+        name,
+      );
+  } finally {
+    telemetryIdentity(build, true, {});
+  }
+});

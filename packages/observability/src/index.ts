@@ -398,6 +398,8 @@ export function telemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig | undef
   )
     throw new TelemetryConfigError('CLOUD_TELEMETRY_OTLP_AUTHORIZATION');
   const headers = otlpHeaders(env.CLOUD_TELEMETRY_OTLP_HEADERS, authorization);
+  if (setting(env.CLOUD_TELEMETRY_ENVIRONMENT) !== undefined && !configuredEnvironment(env))
+    throw new TelemetryConfigError('CLOUD_TELEMETRY_ENVIRONMENT');
   const rawRatio = setting(env.CLOUD_TELEMETRY_SAMPLE_RATIO) ?? '0.1';
   const ratio = Number(rawRatio);
   if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(rawRatio) || !(ratio >= 0 && ratio <= 1))
@@ -411,16 +413,31 @@ export function telemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig | undef
   };
 }
 
+// A short lowercase name such as staging or production; it becomes a label on every metric.
+function configuredEnvironment(env: NodeJS.ProcessEnv) {
+  const name = setting(env.CLOUD_TELEMETRY_ENVIRONMENT);
+  return name !== undefined && /^[a-z][a-z0-9-]{0,31}$/.test(name) ? name : undefined;
+}
+
 let dimensions: Attributes = {};
 let buildCommit = 'development';
 
-export function telemetryIdentity(build: BuildInfo, production = process.env.NODE_ENV === 'production') {
+/**
+ * Names the deployment in every metric (`environment`) and the `deployment.environment` resource attribute.
+ * CLOUD_TELEMETRY_ENVIRONMENT separates deployments, such as staging and production, that share one
+ * backend; without it, the name follows NODE_ENV. An invalid name stops export in telemetryConfig.
+ */
+export function telemetryIdentity(
+  build: BuildInfo,
+  production = process.env.NODE_ENV === 'production',
+  env: NodeJS.ProcessEnv = process.env,
+) {
   const identity = (production ? productionBuildSchema : buildInfoSchema).parse(build);
   const service = `tulipfarm-${identity.app}`;
   buildCommit = identity.commit;
   dimensions = {
     application: scope,
-    environment: production ? 'production' : 'development',
+    environment: configuredEnvironment(env) ?? (production ? 'production' : 'development'),
     service,
     service_version: identity.version,
   };

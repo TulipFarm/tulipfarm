@@ -1555,6 +1555,16 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'telemetry', commented: true },
   },
   {
+    name: 'CLOUD_TELEMETRY_ENVIRONMENT',
+    group: 'Telemetry and flags',
+    services: all,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Deployment name on every metric (`environment`) and the `deployment.environment` resource attribute, such as `staging`. Lowercase letters, digits and hyphens, up to 32 characters. Default `production` in production images.',
+    selfHost: { section: 'telemetry', commented: true },
+  },
+  {
     name: 'CLOUD_TELEMETRY_SAMPLE_RATIO',
     group: 'Telemetry and flags',
     services: all,
