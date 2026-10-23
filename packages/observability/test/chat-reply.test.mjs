@@ -19,12 +19,14 @@ import {
   trace,
   withChatMeasurements,
   withChatModelRequest,
+  withChatSendMeasurements,
 } from '../src/index.ts';
 
 const started = new Date('2026-10-22T15:30:00.000Z');
 const at = seconds => new Date(started.getTime() + seconds * 1000);
 const timing = overrides => ({
   status: 'completed',
+  requestedAt: null,
   startedAt: started,
   claimedAt: at(1.2),
   finishedAt: at(5),
@@ -209,8 +211,86 @@ test('reply timing without a claim counts the whole reply as queue', () => {
   assert.deepEqual(chatReplyFinal(timing({ claimedAt: null, firstTextSeconds: null })), {
     status: 'completed',
     totalSeconds: 5,
+    sendSeconds: null,
     queueSeconds: 5,
     firstTextSeconds: null,
     attempts: 1,
   });
+  assert.deepEqual(chatReplyFinal(timing({ requestedAt: at(-0.4), claimedAt: null, firstTextSeconds: null })), {
+    status: 'completed',
+    totalSeconds: 5.4,
+    sendSeconds: 0.4,
+    queueSeconds: 5,
+    firstTextSeconds: null,
+    attempts: 1,
+  });
+});
+
+test('a recorded send request moves total and first_text to its arrival and its time counts as overhead', async t => {
+  const { spend, collect } = harness(t);
+  await withChatMeasurements(async () => {
+    await withChatModelRequest('reply', () => observeChatDetail('provider', spend(2000)));
+    noteChatReplyFinal(chatReplyFinal(timing({ requestedAt: at(-1.6) })));
+  }, 'turn-sent');
+  const { points, summaries } = await collect();
+  assert.equal(points.length, 8);
+  const segments = bySegment(points);
+  close(segments.total.value.sum, 6.6);
+  close(segments.send.value.sum, 1.6);
+  close(segments.first_text.value.sum, 5.1);
+  close(segments.queue.value.sum, 1.2);
+  close(segments.model.value.sum, 2);
+  close(segments.overhead.value.sum, 6.6 - 1.2 - 2 - 0);
+  assert.ok(segments.overhead.value.sum >= segments.send.value.sum);
+  const [summary] = summaries;
+  close(summary['chat.reply.send_seconds'], 1.6);
+  close(summary['chat.reply.total_seconds'], 6.6);
+  close(summary['chat.reply.first_text_seconds'], 5.1);
+  close(
+    summary['chat.reply.overhead_seconds'],
+    summary['chat.reply.total_seconds'] -
+      summary['chat.reply.queue_seconds'] -
+      summary['chat.reply.model_seconds'] -
+      summary['chat.reply.tools_seconds'],
+  );
+  assert.ok(Object.keys(segments.send.attributes).every(key => !key.includes('id')));
+});
+
+test('a send request clock after the save records no negative send time', () => {
+  const final = chatReplyFinal(timing({ requestedAt: at(0.05) }));
+  assert.equal(final.sendSeconds, 0);
+  assert.equal(final.totalSeconds, 5);
+  assert.equal(final.firstTextSeconds, 3.5);
+});
+
+test('send measurements record the request wait and save phases without a reply duration', async t => {
+  const { spend, collect } = harness(t);
+  const details = [];
+  const write = process.stdout.write;
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (typeof line === 'string' && line.includes('"chat.detail.')) {
+      details.push(JSON.parse(line));
+      return true;
+    }
+    return write.call(process.stdout, line, ...rest);
+  });
+  const result = await withChatSendMeasurements(1600, async () => {
+    await observeChatDetail('storage-admission', spend(5));
+    await observeChatDetail('actor', spend(3));
+    await observeChatDetail('send-write', spend(7));
+    return 'sent';
+  });
+  assert.equal(result, 'sent');
+  assert.deepEqual(
+    details.map(line => [line.operation, line['chat.purpose'], line.duration_ms]),
+    [
+      ['chat.detail.send-request', 'send', 1600],
+      ['chat.detail.storage-admission', 'send', 5],
+      ['chat.detail.actor', 'send', 3],
+      ['chat.detail.send-write', 'send', 7],
+    ],
+  );
+  const { points, summaries } = await collect();
+  assert.deepEqual(points, []);
+  assert.deepEqual(summaries, []);
 });

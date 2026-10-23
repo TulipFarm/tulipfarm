@@ -148,6 +148,16 @@ const computedReads = {
     sites: 2,
     names: ['R2_SOUL_READ_ACCESS_KEY_ID', 'R2_SOUL_READ_SECRET_ACCESS_KEY', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'],
   },
+  'packages/workspaces/src/storage.ts': {
+    sites: 1,
+    names: [
+      'WORKSPACE_STORAGE_MAX_POOLS',
+      'WORKSPACE_STORAGE_CONNECTIONS_PER_POOL',
+      'WORKSPACE_STORAGE_MAX_TRANSACTIONS',
+      'WORKSPACE_STORAGE_MAX_BACKGROUND_TRANSACTIONS',
+      'WORKSPACE_STORAGE_IDLE_TIMEOUT_MS',
+    ],
+  },
   // Refuses conflicting endpoints and session tokens; the credentials it uses are read statically.
   'packages/workspaces/src/soul-read-qualification.ts': { sites: 3, names: [] },
   'packages/workspaces/src/credentials.ts': {

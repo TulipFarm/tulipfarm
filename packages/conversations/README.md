@@ -74,17 +74,20 @@ The ordinary worker registers `conversationReply` and `processConversationReply`
 
 When a reply reaches a final state (completed, failed, blocked or cancelled), the worker records `cloud_chat_reply_duration` (unit `s`; `cloud_chat_reply_duration_seconds_*` in Prometheus) once, with one observation per `segment`, labelled `outcome` (`success`, `failed` or `cancelled`; blocked counts as failed) and `tools` (`yes` when a real tool ran; `present.choice` and plan-only steps don't count), plus the service dimensions. Buckets run from 0.1 to 300 seconds.
 
-| Segment      | Meaning                                                                                                                                      |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `total`      | `timing_started_at` to `timing_finished_at`, minus `timing_human_wait_seconds`, `timing_external_wait_seconds` and `timing_inactive_seconds` |
-| `first_text` | `timing_first_text_seconds`; skipped when a failed reply showed no text                                                                      |
-| `queue`      | `timing_started_at` to the first claim, capped at `total`                                                                                    |
-| `model`      | Wall time inside provider calls of every purpose                                                                                             |
-| `tools`      | Wall time inside real tool execution, excluding model calls the tool makes                                                                   |
-| `db`         | Wall time inside reserve, settle, reply-start, checkpoint, `credit-*` and `storage-*` phases; nested phases count once                       |
-| `overhead`   | `max(0, total − queue − model − tools)`: our own time, including `db` and time re-queued between retries                                     |
+| Segment      | Meaning                                                                                                                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `total`      | `timing_requested_at` (or `timing_started_at` when not recorded) to `timing_finished_at`, minus `timing_human_wait_seconds`, `timing_external_wait_seconds` and `timing_inactive_seconds` |
+| `first_text` | `timing_first_text_seconds` plus `send`; skipped when a failed reply showed no text                                                                                                       |
+| `send`       | `timing_requested_at` to `timing_started_at`: request arrival to message saved; skipped when arrival was not recorded                                                                     |
+| `queue`      | `timing_started_at` to the first claim, capped at `total − send`                                                                                                                          |
+| `model`      | Wall time inside provider calls of every purpose                                                                                                                                          |
+| `tools`      | Wall time inside real tool execution, excluding model calls the tool makes                                                                                                                |
+| `db`         | Wall time inside reserve, settle, reply-start, checkpoint, `credit-*` and `storage-*` phases; nested phases count once                                                                    |
+| `overhead`   | `max(0, total − queue − model − tools)`: our own time, including `send`, `db` and time re-queued between retries                                                                          |
 
 Sums are wall-time unions, so nested or concurrent calls of one kind count once. Retried attempts on the same worker add their sums to the final record; an attempt that runs on another worker loses its sums. The same values, the attempt count and the trace ID go on one `chat.reply.summary` log line per reply. The `cloud_chat_latency_window_*` gauges remain a 24-hour snapshot published by each API instance.
+
+Request arrival is Fastify's request start, so `send` covers authentication, workspace resolution, storage admission and connection, the actor lookup and the insert, but not load balancer or TLS time. The web send handler stores it as `timing_requested_at` (common migration `0003_chat_send_timing.sql`); Slack and other senders leave it null, and workspaces below common version 3 omit it. The send request itself logs `chat.detail.send-request` (time before the handler), `actor`, `send-write` and `storage-*` phases with `chat.purpose=send`; these never count towards a reply's `db`.
 
 The API dispatcher also expires information requests, invokes the protected approval resolver for due requests, and cleans expired unbound attachments when the byte adapter is configured. The persistent browser UI uses bounded polling and explicit same-command recovery.
 

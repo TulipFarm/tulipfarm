@@ -24,6 +24,11 @@ export function workspaceRuntime(pool: Pool) {
   const key = credentialKeyring('runtime');
   const rowSchema = z.object({ generation: z.number().int(), runtime_credential: z.unknown() });
   return createWorkspaceRuntime({
+    maxPools: optionalNumber('WORKSPACE_STORAGE_MAX_POOLS'),
+    connectionsPerPool: optionalNumber('WORKSPACE_STORAGE_CONNECTIONS_PER_POOL'),
+    maxConcurrentTransactions: optionalNumber('WORKSPACE_STORAGE_MAX_TRANSACTIONS'),
+    maxBackgroundTransactions: optionalNumber('WORKSPACE_STORAGE_MAX_BACKGROUND_TRANSACTIONS'),
+    idleTimeoutMs: optionalNumber('WORKSPACE_STORAGE_IDLE_TIMEOUT_MS'),
     replicaCount: Number(process.env.WORKSPACE_RUNTIME_REPLICAS ?? 4),
     reservedConnections: 40,
     databaseConnectionBudget: Number(process.env.WORKSPACE_DATABASE_CONNECTION_BUDGET ?? 120),
@@ -46,4 +51,9 @@ export function workspaceRuntime(pool: Pool) {
       });
     },
   });
+}
+
+function optionalNumber(name: string) {
+  const value = process.env[name];
+  return value ? Number(value) : undefined;
 }

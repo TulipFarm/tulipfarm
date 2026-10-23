@@ -128,7 +128,14 @@ test('expired deadlines do not resolve credentials or acquire connections', { ti
     timeoutError,
   );
   assert.equal(resolved, false);
-  assert.deepEqual(runtime.stats(), { pools: 0, activeTransactions: 0, queuedTransactions: 0, connections: 0 });
+  assert.deepEqual(runtime.stats(), {
+    pools: 0,
+    activeTransactions: 0,
+    activeBackgroundTransactions: 0,
+    queuedTransactions: 0,
+    queuedBackgroundTransactions: 0,
+    connections: 0,
+  });
 });
 
 test('deadline aborts slow credential resolution and ignores late credentials', { timeout: 15000 }, async t => {
@@ -225,7 +232,7 @@ test('pg-pool saturation records checkout timeout while the holder remains usabl
   await entered.promise;
   await assert.rejects(
     run(compatibility, async () => assert.fail('queued callback ran')),
-    /timeout exceeded when trying to connect/,
+    timeoutError,
   );
   assert.deepEqual(
     completed.map(span => [span.name, span.outcome]),

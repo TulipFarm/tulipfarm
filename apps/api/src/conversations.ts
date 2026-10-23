@@ -48,6 +48,7 @@ import type {
   createTableApprovalResolver,
 } from '@tulipfarm/tables/conversation-approvals';
 import { TableError } from '@tulipfarm/tables/service-contracts';
+import { withChatSendMeasurements } from '@tulipfarm/observability';
 import { compactionDetailSchema } from '@tulipfarm/conversations/compaction';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
 import type { ConversationEventHub, ConversationStreamEvent } from './conversation-events.ts';
@@ -791,13 +792,25 @@ export function registerConversations(
           send,
         ),
       },
-      async request => {
+      async (request, reply) => {
         const { workspaceId, chatId, messageId } = messageParams.parse(request.params);
         const input = send.parse(request.body);
         let recorded = false;
-        const sent = await service.send(workspaceId, user(request), chatId, { ...input, messageId }, () => {
-          recorded = true;
-        });
+        // Authentication and body parsing ran before this handler; the turn's reply time starts at arrival.
+        const waited = reply.elapsedTime;
+        const arrivedAt = performance.now() - waited;
+        const sent = await withChatSendMeasurements(waited, () =>
+          service.send(
+            workspaceId,
+            user(request),
+            chatId,
+            { ...input, messageId },
+            () => {
+              recorded = true;
+            },
+            arrivedAt,
+          ),
+        );
         // The send has committed; a replayed send dispatches too, since the start is idempotent per turn.
         dependencies.replies?.sent(workspaceId, chatId);
         // Only the request that records the send publishes, so replaying it after the person deleted the file forever cannot bring the file back.
