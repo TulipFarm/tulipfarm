@@ -132,6 +132,7 @@ try {
     'packages/workspace-storage/common/0006_github_knowledge_opt_out.sql',
     'packages/workspace-storage/common/0007_knowledge_github_commits.sql',
     'packages/workspace-storage/common/0008_knowledge_freshness.sql',
+    'packages/workspace-storage/common/0009_github_app_refresh.sql',
   ];
   emit({
     event: 'sources',
@@ -167,6 +168,7 @@ try {
       '0006_github_knowledge_opt_out.sql',
       '0007_knowledge_github_commits.sql',
       '0008_knowledge_freshness.sql',
+      '0009_github_app_refresh.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

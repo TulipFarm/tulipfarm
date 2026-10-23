@@ -27,6 +27,7 @@ import {
   exchange,
   hash,
   identity,
+  refresh,
   type Configuration,
 } from './provider.ts';
 import { credentialCipher } from './credentials.ts';
@@ -47,6 +48,8 @@ const rowSchema = z.object({
   scopes: scopesSchema,
   credential: z.unknown(),
   expires_at: z.date().nullable(),
+  refresh_credential: z.unknown(),
+  access_expires_at: z.date().nullable(),
 });
 type Row = z.infer<typeof rowSchema>;
 const attemptSchema = z.object({
@@ -75,7 +78,7 @@ export function createGitHubAccounts(options: {
   if (configuration && !options.keyring) throw new Error('GitHub credentials require an encryption keyring');
   const cipher = options.keyring ? credentialCipher(options.keyring) : null;
   const fetcher = options.fetcher ?? fetch;
-  const binding = (workspaceId: string, row: Row, purpose: 'token' | 'pkce') => ({
+  const binding = (workspaceId: string, row: Row, purpose: 'token' | 'pkce' | 'refresh') => ({
     workspaceId,
     accountId: row.id,
     membershipId: row.owner_membership_id,
@@ -146,7 +149,7 @@ export function createGitHubAccounts(options: {
           id = row.id;
           const recommendations = await watchIntegrationRecommendations(tx, id, () => githubRecommendations(tx, id));
           await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET generation=generation+1,state='authorizing',credential=NULL,expires_at=NULL,config_hash=$2 WHERE id=$1`,
+            `UPDATE ${relation(tx, 'accounts')} SET generation=generation+1,state='authorizing',credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL,config_hash=$2 WHERE id=$1`,
             [id, configurationHash(configuration)],
           );
           await recommendations();
@@ -184,7 +187,7 @@ export function createGitHubAccounts(options: {
   async function invalidate(workspaceId: string, row: Row) {
     await options.runtime.transaction(workspaceId, githubCompatibility, async tx => {
       await tx.client.query(
-        `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',credential=NULL,expires_at=NULL WHERE id=$1 AND generation=$2 AND state='authorizing'`,
+        `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1 AND generation=$2 AND state='authorizing'`,
         [row.id, row.generation],
       );
       await tx.client.query(
@@ -290,12 +293,15 @@ export function createGitHubAccounts(options: {
           if (row.generation !== prepared.row.generation || row.state !== 'authorizing')
             throw new GitHubAccountError('account-conflict');
           const credential = cipher.encrypt(binding(workspaceId, row, 'token'), token.accessToken);
+          const refreshCredential = token.refreshToken
+            ? cipher.encrypt(binding(workspaceId, row, 'refresh'), token.refreshToken)
+            : null;
           const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
             githubRecommendations(tx, row.id),
           );
           await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET state='active',identity=$2,scopes=$3,credential=$4,expires_at=CASE WHEN $5::integer IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END WHERE id=$1`,
-            [row.id, who, token.scopes, credential, token.expiresIn],
+            `UPDATE ${relation(tx, 'accounts')} SET state='active',identity=$2,scopes=$3,credential=$4,refresh_credential=$6,access_expires_at=CASE WHEN $6::jsonb IS NULL OR $5::integer IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END,expires_at=CASE WHEN COALESCE($7::integer,$5::integer) IS NULL THEN NULL ELSE clock_timestamp()+COALESCE($7::integer,$5::integer)*interval '1 second' END WHERE id=$1`,
+            [row.id, who, token.scopes, credential, token.expiresIn, refreshCredential, token.refreshExpiresIn],
           );
           await tx.client.query(
             `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1 AND generation=$2`,
@@ -329,7 +335,7 @@ export function createGitHubAccounts(options: {
             githubRecommendations(tx, row.id),
           );
           await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,expires_at=NULL WHERE id=$1`,
+            `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1`,
             [row.id],
           );
           await tx.client.query(
@@ -352,55 +358,95 @@ export function createGitHubAccounts(options: {
     ): Promise<T> {
       workspaceId = uuidSchema.parse(workspaceId);
       const { configuration, cipher } = enabled();
-      const result = await authorized(workspaceId, principal, async (tx, actor) => {
-        await beforeAccount?.(tx, actor);
-        const row = await load(tx, actor, id);
-        if (
-          row.state !== 'active' ||
-          !row.identity ||
-          (expectedGeneration !== undefined && row.generation !== expectedGeneration)
-        )
-          throw new GitHubAccountError('account-reconnect-required');
-        const reject = async () => {
-          const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
-            githubRecommendations(tx, row.id),
-          );
+      const staleAccess = (row: Row, margin: number) =>
+        row.refresh_credential !== null &&
+        row.access_expires_at !== null &&
+        row.access_expires_at.getTime() <= Date.now() + margin;
+      const reject = async (tx: AuthorizationTransaction, actor: HumanActor, row: Row) => {
+        const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
+          githubRecommendations(tx, row.id),
+        );
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1`,
+          [row.id],
+        );
+        await audit(tx, actor, row.id, 'credential-rejected');
+        await recommendations();
+        return { kind: 'rejected' as const };
+      };
+      const available = (row: Row) =>
+        row.state === 'active' &&
+        row.identity !== null &&
+        (expectedGeneration === undefined || row.generation === expectedGeneration);
+      // A refresh token is single-use, so the row lock held here serializes concurrent refreshes. It keeps
+      // `generation` unchanged because Knowledge bindings, selections and batches are pinned to it.
+      const renew = () =>
+        authorized(workspaceId, principal, async (tx, actor) => {
+          const row = await load(tx, actor, id);
+          if (!available(row) || !row.refresh_credential) throw new GitHubAccountError('account-reconnect-required');
+          if (!staleAccess(row, 30 * 60 * 1000)) return { kind: 'renewed' as const };
+          let renewed: Awaited<ReturnType<typeof refresh>>;
+          try {
+            renewed = await refresh(
+              configuration,
+              cipher.decrypt(binding(workspaceId, row, 'refresh'), row.refresh_credential),
+              fetcher,
+            );
+          } catch (error) {
+            if (error instanceof GitHubCredentialRejected) return reject(tx, actor, row);
+            throw error;
+          }
           await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',generation=generation+1,credential=NULL,expires_at=NULL WHERE id=$1`,
-            [row.id],
+            `UPDATE ${relation(tx, 'accounts')} SET credential=$2,refresh_credential=$3,access_expires_at=clock_timestamp()+$4*interval '1 second',expires_at=clock_timestamp()+$5*interval '1 second' WHERE id=$1`,
+            [
+              row.id,
+              cipher.encrypt(binding(workspaceId, row, 'token'), renewed.accessToken),
+              cipher.encrypt(binding(workspaceId, row, 'refresh'), renewed.refreshToken),
+              renewed.expiresIn,
+              renewed.refreshExpiresIn,
+            ],
           );
-          await audit(tx, actor, row.id, 'credential-rejected');
-          await recommendations();
-          return { kind: 'rejected' as const };
-        };
-        if (
-          row.config_hash !== configurationHash(configuration) ||
-          (row.expires_at && row.expires_at.getTime() <= Date.now())
-        )
-          return reject();
-        const accessToken = cipher.decrypt(binding(workspaceId, row, 'token'), row.credential);
-        try {
-          return {
-            kind: 'success' as const,
-            value: await operation(
-              {
-                accessToken,
-                accountId: row.id,
-                membershipId: actor.membershipId,
-                generation: row.generation,
-                identity: row.identity,
-                scopes: row.scopes,
-              },
-              tx,
-            ),
-          };
-        } catch (error) {
-          if (error instanceof GitHubCredentialRejected) return reject();
-          throw error;
+          return { kind: 'renewed' as const };
+        });
+      for (let renewals = 0; ; renewals++) {
+        const result = await authorized(workspaceId, principal, async (tx, actor) => {
+          await beforeAccount?.(tx, actor);
+          const row = await load(tx, actor, id);
+          if (!available(row)) throw new GitHubAccountError('account-reconnect-required');
+          if (
+            row.config_hash !== configurationHash(configuration) ||
+            (row.expires_at && row.expires_at.getTime() <= Date.now())
+          )
+            return reject(tx, actor, row);
+          if (renewals === 0 && staleAccess(row, 30 * 60 * 1000)) return { kind: 'renew' as const };
+          const accessToken = cipher.decrypt(binding(workspaceId, row, 'token'), row.credential);
+          try {
+            return {
+              kind: 'success' as const,
+              value: await operation(
+                {
+                  accessToken,
+                  accountId: row.id,
+                  membershipId: actor.membershipId,
+                  generation: row.generation,
+                  identity: row.identity!,
+                  scopes: row.scopes,
+                },
+                tx,
+              ),
+            };
+          } catch (error) {
+            if (error instanceof GitHubCredentialRejected) return reject(tx, actor, row);
+            throw error;
+          }
+        });
+        if (result.kind === 'renew') {
+          if ((await renew()).kind === 'rejected') throw new GitHubAccountError('account-reconnect-required');
+          continue;
         }
-      });
-      if (result.kind === 'rejected') throw new GitHubAccountError('account-reconnect-required');
-      return result.value;
+        if (result.kind === 'rejected') throw new GitHubAccountError('account-reconnect-required');
+        return result.value;
+      }
     },
     // Use only with a top-level runtime: caller-bound transactions cannot release their outer locks.
     async withReadCredential<T>(
