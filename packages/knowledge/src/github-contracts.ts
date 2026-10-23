@@ -5,8 +5,8 @@ export const githubCorpusLimits = Object.freeze({
   repositories: 1000,
   excludePatterns: 20,
   excludePatternLength: 200,
-  listPageSize: 50,
-  issuePageSize: 20,
+  listPageSize: 100,
+  issuePageSize: 100,
   // GitHub's largest page of commits; each commit's changed files are read in pages of GitHub's own size.
   commitPageSize: 100,
   // GitHub lists at most this many changed files for one commit.

@@ -38,6 +38,7 @@ const repositoryFailures: Record<string, string> = {
     'The source owner can no longer read this repository in GitHub. It may have been made private, transferred or deleted. Its content stays hidden until access returns; other repositories keep syncing.',
   'insufficient-scope':
     'The connected GitHub account cannot read this repository. Reconnect it with repository access, then retry.',
+  transient: 'GitHub kept failing for this repository. Other repositories kept syncing; the next sync retries it.',
 };
 const missingContent = (kinds: GitHubKind[]) => kinds.map(kind => githubKindLabels[kind].short).join(', ');
 const sourceFailures: Record<string, string> = {
@@ -46,13 +47,15 @@ const sourceFailures: Record<string, string> = {
   ),
   'not-linked': 'The source owner must reconnect the same GitHub account, then retry this source.',
   'invalid-cursor': 'GitHub changed the listing. The next sync starts a full reconciliation without deleting anything.',
-  transient: 'GitHub was temporarily unavailable. The next sync retries automatically.',
+  transient: 'GitHub was temporarily unavailable for some repositories or items. The next sync retries them.',
+  'rate-limited': 'GitHub rate limit reached. Sync is paused and resumes where it stopped when the limit resets.',
 };
 const documentFailures: Record<string, string> = {
   'too-large': 'This part is larger than the 1 MB Knowledge limit and is not searchable.',
   unsupported: 'This part of the file is binary. Its path and details are indexed in its first part.',
   'source-changed': 'The item changed during import. The next sync imports the latest version.',
   'resource-limited': 'This item exceeds the Knowledge limit.',
+  transient: 'GitHub failed to return this item. The next sync retries it.',
 };
 
 function OriginalDownload({ api, document }: { api: GitHubKnowledgeApi; document: GitHubDocument }) {

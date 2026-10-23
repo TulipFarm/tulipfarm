@@ -4,7 +4,7 @@ import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { GitHubKnowledge } from '@tulipfarm/knowledge';
 import { githubKnowledgeWorkSchema, type GitHubKnowledgeWork } from '@tulipfarm/knowledge/github-contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
-import { createKnowledgeSyncMetrics } from '@tulipfarm/observability';
+import { createKnowledgeSyncMetrics, recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
@@ -64,8 +64,9 @@ export function registerGitHubKnowledgeDispatch(
           }
         } catch (error) {
           scanFailed = true;
-          if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
-            app.log.error({ workspaceId: row.workspace_id }, 'GitHub Knowledge dispatch will retry');
+          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
+            recordDispatchSkip('github');
+          else app.log.error({ workspaceId: row.workspace_id }, 'GitHub Knowledge dispatch will retry');
         }
         after = row.workspace_id;
       }

@@ -5,6 +5,7 @@ import { defaultKnowledgeFlagEnabled, recordDefaultKnowledgeIntent, type Default
 import { defaultKnowledgeWorkSchema, type DefaultKnowledgeWork } from '@tulipfarm/knowledge/default-contracts';
 import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
@@ -75,8 +76,9 @@ export function registerDefaultKnowledgeDispatch(
             await startDefaultKnowledgeWorkflow(dependencies.temporal, work);
           }
         } catch (error) {
-          if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
-            app.log.error({ workspaceId: row.workspace_id }, 'Default Knowledge dispatch will retry');
+          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
+            recordDispatchSkip('defaults');
+          else app.log.error({ workspaceId: row.workspace_id }, 'Default Knowledge dispatch will retry');
         }
         after = row.workspace_id;
       }

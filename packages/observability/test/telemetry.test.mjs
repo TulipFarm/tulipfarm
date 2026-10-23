@@ -20,6 +20,7 @@ import {
   recordChatRequestSizes,
   recordChatDiscovery,
   recordChatDispatch,
+  recordDispatchSkip,
   recordChatCompletionCheck,
   errorType,
   log,
@@ -464,6 +465,9 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     recordChatDispatch('send', 'success');
     recordChatDispatch('send', 'success');
     recordChatDispatch('sweep', 'error');
+    recordDispatchSkip('github');
+    recordDispatchSkip('github');
+    recordDispatchSkip('slack');
     assert.equal(await observeChatStage('context', async () => 42), 42);
     await assert.rejects(
       observeChatStage('model', async () => {
@@ -876,6 +880,16 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
         ['send', 'success', 2],
         ['sweep', 'error', 1],
       ],
+    );
+    assert.deepEqual(
+      data
+        .find(metric => metric.descriptor.name === 'cloud_dispatch_skipped_workspaces')
+        .dataPoints.map(p => [p.attributes.dispatcher, p.attributes.reason, p.value, p.attributes.workspace_id]),
+      [
+        ['github', 'incompatible_version', 2, undefined],
+        ['slack', 'incompatible_version', 1, undefined],
+      ],
+      'skips stay low-cardinality: dispatcher and reason only',
     );
     const checks = data.find(metric => metric.descriptor.name === 'cloud_chat_completion_checks');
     assert.deepEqual(

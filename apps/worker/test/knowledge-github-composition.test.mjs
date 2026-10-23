@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { asyncLocalStorage } from '@temporalio/activity';
 import { createGitHubKnowledgeWorker } from '../dist/knowledge-github-composition.js';
 import { createGitHubKnowledgeActivities } from '../dist/knowledge-github-activities.js';
 import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
@@ -71,8 +72,9 @@ test('GitHub composition without OAuth configuration or keys stays not-configure
 test('GitHub activity validates ID-only work, discards results, and sanitizes failures', async () => {
   const work = { workspaceId: randomUUID(), sourceId: randomUUID(), generation: 1 };
   const success = createGitHubKnowledgeActivities({
-    process: async value => {
+    process: async (value, options) => {
       assert.deepEqual(value, work);
+      assert.deepEqual(options, {}, 'outside an activity there is nothing to heartbeat');
       return { secret: 'private issue' };
     },
   });
@@ -93,4 +95,21 @@ test('GitHub activity validates ID-only work, discards results, and sanitizes fa
     assert.equal(error.cause, undefined);
     return true;
   });
+});
+
+test('GitHub activity heartbeats Temporal and passes cancellation while the run works', async () => {
+  const work = { workspaceId: randomUUID(), sourceId: randomUUID(), generation: 1 };
+  const signal = new AbortController().signal;
+  let beats = 0;
+  const activities = createGitHubKnowledgeActivities({
+    process: async (_value, options) => {
+      assert.equal(options.signal, signal);
+      options.heartbeat();
+      options.heartbeat();
+      return { disposition: 'retry' };
+    },
+  });
+  const context = { heartbeat: () => beats++, cancellationSignal: signal };
+  await asyncLocalStorage.run(context, () => activities.processGitHubKnowledge(work));
+  assert.equal(beats, 2);
 });
