@@ -142,6 +142,10 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/workspaces/{workspaceId}/social/channels/{channelId}/grants',
         '/v1/workspaces/{workspaceId}/social/platform-apps',
         '/v1/workspaces/{workspaceId}/social/platform-apps/{platformAppId}/replace-secret',
+        '/v1/workspaces/{workspaceId}/social/posts',
+        '/v1/workspaces/{workspaceId}/social/posts/{postId}',
+        '/v1/workspaces/{workspaceId}/social/posts/{postId}/decision',
+        '/v1/workspaces/{workspaceId}/social/posts/{postId}/revisions',
       ].sort(),
     );
     const flags = spec.paths['/v1/feature-flags'].get;
