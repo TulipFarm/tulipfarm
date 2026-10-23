@@ -47,7 +47,7 @@ const kindOptions: { value: GitHubKind; label: string; description?: string }[] 
   {
     value: 'docs',
     label: 'Documentation and text files',
-    description: 'Markdown and text files up to 256 KB on the default branch.',
+    description: 'Every Markdown and text file on the default branch, at any size.',
   },
   { value: 'issues', label: 'Issues and comments' },
   { value: 'pulls', label: 'Pull request descriptions and comments' },

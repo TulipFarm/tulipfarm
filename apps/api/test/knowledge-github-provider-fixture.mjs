@@ -78,11 +78,10 @@ export function githubProviderFixture() {
     connect,
     configuration,
     keyring,
-    provider: (runtime, codeBound) =>
+    provider: runtime =>
       createGitHubCorpusProvider({
         accounts: createGitHubAccounts({ runtime, configuration, keyring }),
         fetcher: github.fetcher,
-        ...(codeBound ? { codeBound } : {}),
       }),
   };
 }

@@ -5,15 +5,20 @@ export const githubCorpusLimits = Object.freeze({
   repositories: 20,
   listPageSize: 50,
   issuePageSize: 20,
-  documentBytes: 256 * 1024,
+  // Files are indexed in parts of about this many bytes, split at a line break, so any file size fits the parser.
+  partBytes: 128 * 1024,
+  // Issues and discussions are indexed in parts of this many top-level comments.
+  commentsPerPart: 100,
+  // One stored item's Markdown; larger issue or discussion parts are reported as too large.
   markdownBytes: 1024 * 1024,
-  comments: 500,
+  // JSON metadata responses only; file content is streamed and never buffered whole.
   responseBytes: 8 * 1024 * 1024,
   requestTimeoutMs: 10000,
+  blobTimeoutMs: 10 * 60 * 1000,
   windowDays: 366,
-  documentsPerRepository: 1000,
-  codeFilesPerRepository: 1000,
-  skippedCodeFilesPerRepository: 200,
+  // Larger or truncated recursive trees are walked one directory at a time.
+  recursiveTreeEntries: 10000,
+  treeRequestsPerPage: 50,
 });
 const printable = (value: string) => [...value].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127);
 export const githubRepositoryNameSchema = z
@@ -105,6 +110,8 @@ export type GitHubItemObservation = {
   sourceRevision: string;
   accessedAt: string;
   coverage: 'supported' | 'too-large' | 'unsupported' | 'excluded';
+  // The full repository path of a file; `nativeId` carries only its hash when the path is longer than 1,024 bytes.
+  path?: string;
 };
 export type GitHubCorpusPage = { observations: GitHubItemObservation[]; nextCursor: string | null };
 export type GitHubItemRead = GitHubItemObservation & { markdown: string };
@@ -142,16 +149,8 @@ export type GitHubCorpusProvider = {
     repositoryId: string,
     nativeId: string,
     selection: GitHubCorpusSelection,
+    path?: string | null,
   ): Promise<GitHubItemRead>;
-  // Returns the given code items that exist at the current head but fall outside its bounded code selection.
-  displacedCode(
-    workspaceId: string,
-    userId: string,
-    binding: GitHubCorpusBinding,
-    repositoryId: string,
-    selection: GitHubCorpusSelection,
-    nativeIds: string[],
-  ): Promise<string[]>;
 };
 
 export const githubKnowledgeConfigureSchema = z.strictObject({

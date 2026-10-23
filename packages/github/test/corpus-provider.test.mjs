@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import {
   createGitHubCorpusProvider,
+  githubFileKind,
+  githubPathIndexable,
+  isGitHubBinaryPath,
   isGitHubDocumentPath,
   serializeGitHubIssue,
   unconfiguredGitHubCorpusProvider,
@@ -15,7 +19,7 @@ const accountId = '22222222-2222-4222-8222-222222222222';
 const after = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
 const selection = { repositories: ['acme/handbook'], kinds: ['discussions', 'docs', 'issues', 'pulls'], after };
 
-function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages } = {}) {
+function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages, extractBinary } = {}) {
   const github = fakeGitHub();
   const token = github.token(101, 'reader');
   const repo = github.addRepo({
@@ -77,6 +81,7 @@ function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages 
   };
   const provider = createGitHubCorpusProvider({
     accounts,
+    ...(extractBinary ? { extractBinary } : {}),
     fetcher: discoveryPages
       ? async (input, init) => {
           const url = new URL(input);
@@ -92,7 +97,7 @@ function setup({ scopes = ['repo', 'read:user'], generation = 4, discoveryPages 
 async function listAll(provider, binding, repositoryId, value = selection) {
   const observations = [];
   let cursor = null;
-  for (let page = 0; page < 40; page++) {
+  for (let page = 0; page < 200; page++) {
     const result = await provider.list(workspaceId, 'reader', binding, repositoryId, value, cursor);
     observations.push(...result.observations);
     if (!result.nextCursor) return observations;
@@ -131,6 +136,19 @@ test('selection contract bounds repositories, kinds and ordering', () => {
     ['README.md', 'docs/a.mdx', 'notes/x.txt', 'LICENSE', 'src/a.ts', 'image.png'].map(isGitHubDocumentPath),
     [true, true, true, true, false, false],
   );
+  assert.deepEqual(
+    ['README.md', '.env', 'node_modules/x/index.js', 'logo.png'].map(githubFileKind),
+    ['doc', 'code', 'code', 'code'],
+    'the kind is a label only; every file is one or the other',
+  );
+  assert.deepEqual(['logo.png', 'docs/manual.PDF', 'a.zip', 'a.ts', 'Makefile'].map(isGitHubBinaryPath), [
+    true,
+    true,
+    true,
+    false,
+    false,
+  ]);
+  assert.ok(['.env', 'id_rsa', 'dist/app.min.js', 'pnpm-lock.yaml', 'a.map'].every(githubPathIndexable));
 });
 
 test('discovery and selection use the caller own account and resolve stable repository IDs', async () => {
@@ -198,7 +216,7 @@ test('discovery continues after a full provider page even when entries are unrea
   assert.equal(second.nextCursor, null);
 });
 
-test('listing yields bounded docs, issues, pull requests and discussions with stable provenance', async () => {
+test('listing yields every doc, issue, pull request and discussion with stable provenance', async () => {
   const { provider, binding } = setup();
   const items = await listAll(provider, binding, '7001');
   assert.deepEqual(
@@ -206,7 +224,9 @@ test('listing yields bounded docs, issues, pull requests and discussions with st
     [
       ['doc', 'doc:7001:README.md', 'supported'],
       ['doc', 'doc:7001:docs/binary.md', 'supported'],
-      ['doc', 'doc:7001:docs/huge.md', 'too-large'],
+      ['doc', 'doc:7001:docs/huge.md', 'supported'],
+      ['doc', 'doc:7001:/p/2/docs/huge.md', 'supported'],
+      ['doc', 'doc:7001:/p/3/docs/huge.md', 'supported'],
       ['doc', 'doc:7001:docs/supplier.md', 'supported'],
       ['doc', 'doc:7001:notes/plan.txt', 'supported'],
       ['issue', 'issue:7001:1', 'supported'],
@@ -217,6 +237,11 @@ test('listing yields bounded docs, issues, pull requests and discussions with st
   const doc = items.find(item => item.nativeId === 'doc:7001:docs/supplier.md');
   assert.match(doc.canonicalURL, /^https:\/\/github\.com\/acme\/handbook\/blob\/[a-f0-9]{40}\/docs\/supplier\.md$/);
   assert.match(doc.sourceRevision, /^blob:[a-f0-9]{40}$/);
+  assert.equal(doc.path, 'docs/supplier.md');
+  assert.deepEqual(
+    items.filter(item => item.path === 'docs/huge.md').map(item => item.title),
+    [1, 2, 3].map(part => `acme/handbook: docs/huge.md (part ${part} of 3)`),
+  );
   const onlyDocs = await listAll(provider, binding, '7001', { ...selection, kinds: ['docs'] });
   assert.ok(onlyDocs.every(item => item.kind === 'doc'));
   const onlyPulls = await listAll(provider, binding, '7001', { ...selection, kinds: ['pulls'] });
@@ -234,13 +259,24 @@ test('reads serialize author and time provenance and map deletions, renames and 
     /^# acme\/handbook: docs\/supplier\.md\n\nGitHub repository acme\/handbook \(ID 7001\), file `docs\/supplier\.md` at commit [a-f0-9]{40} \(blob [a-f0-9]{40}\)\./,
   );
   assert.match(doc.markdown, /Supplier orchid contract terms\./);
-  await assert.rejects(
-    provider.read(workspaceId, 'reader', binding, '7001', 'doc:7001:docs/binary.md', selection),
-    error => error.code === 'unsupported',
+  const binary = await provider.read(workspaceId, 'reader', binding, '7001', 'doc:7001:docs/binary.md', selection);
+  assert.match(
+    binary.markdown,
+    /Binary file, 9 bytes, media type application\/octet-stream\. Content extraction pending OCR; only its path and file details are indexed\.\n$/,
+    'a file with NUL bytes is indexed as a placeholder, not dropped',
   );
+  const huge = [];
+  for (const id of ['doc:7001:docs/huge.md', 'doc:7001:/p/2/docs/huge.md', 'doc:7001:/p/3/docs/huge.md'])
+    huge.push(await provider.read(workspaceId, 'reader', binding, '7001', id, selection));
+  assert.deepEqual(
+    huge.map(read => read.markdown.split('\n---\n\n')[1].trimEnd().length),
+    [128 * 1024, 128 * 1024, 44 * 1024],
+    'a large file is read in parts that together hold every byte',
+  );
+  assert.match(huge[1].markdown, /^# acme\/handbook: docs\/huge\.md \(part 2 of 3\)\n/);
   await assert.rejects(
-    provider.read(workspaceId, 'reader', binding, '7001', 'doc:7001:docs/huge.md', selection),
-    error => error.code === 'too-large',
+    provider.read(workspaceId, 'reader', binding, '7001', 'doc:7001:/p/4/docs/huge.md', selection),
+    error => error.code === 'not-found',
   );
   repo.files.set('docs/vendors.md', repo.files.get('docs/supplier.md'));
   repo.files.delete('docs/supplier.md');
@@ -401,157 +437,306 @@ test('issue serialization keeps author, time and edit provenance', () => {
   );
 });
 
-test('code selection indexes default-branch source and lists sensitive, generated and binary files as skipped', async () => {
+const code = { ...selection, kinds: ['code'] };
+const body = read => read.markdown.split('\n---\n\n').slice(1).join('\n---\n\n');
+const readAs = (provider, binding, id, value = code, path) =>
+  provider.read(workspaceId, 'reader', binding, '7001', id, value, path);
+
+test('code selection indexes every default-branch file, including ones GitHub users chose to commit', async () => {
   const { provider, binding, repo } = setup();
   for (const [path, content] of Object.entries({
     'src/app.py': 'def main():\n    return "```"\n',
-    '.env': 'TOKEN=secret',
+    '.env': 'TOKEN=example',
     'config/id_rsa': 'key',
     'deploy/server.pem': 'pem',
     'node_modules/x/index.js': 'x',
     'dist/bundle.min.js': 'x',
+    'dist/bundle.js.map': '{}',
     'pnpm-lock.yaml': 'lock',
-    'assets/logo.png': 'png',
+    'test/__snapshots__/a.snap': 'snap',
+    'assets/logo.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1]),
     'src/big.ts': 'y'.repeat(300 * 1024),
   }))
     repo.files.set(path, content);
-  const code = { ...selection, kinds: ['code'], window: 'rolling-90d' };
-  assert.equal(githubCorpusSelectionSchema.safeParse(code).success, true);
+  assert.equal(githubCorpusSelectionSchema.safeParse({ ...code, window: 'rolling-90d' }).success, true);
   const items = await listAll(provider, binding, '7001', code);
   assert.deepEqual(
     items.map(item => [item.nativeId, item.coverage]),
     [
-      ['code:7001:.env', 'excluded'],
-      ['code:7001:assets/logo.png', 'excluded'],
-      ['code:7001:config/id_rsa', 'excluded'],
-      ['code:7001:deploy/server.pem', 'excluded'],
-      ['code:7001:dist/bundle.min.js', 'excluded'],
-      ['code:7001:node_modules/x/index.js', 'excluded'],
-      ['code:7001:pnpm-lock.yaml', 'excluded'],
+      ['code:7001:.env', 'supported'],
+      ['code:7001:assets/logo.png', 'supported'],
+      ['code:7001:config/id_rsa', 'supported'],
+      ['code:7001:deploy/server.pem', 'supported'],
+      ['code:7001:dist/bundle.js.map', 'supported'],
+      ['code:7001:dist/bundle.min.js', 'supported'],
+      ['code:7001:node_modules/x/index.js', 'supported'],
+      ['code:7001:pnpm-lock.yaml', 'supported'],
       ['code:7001:src/app.py', 'supported'],
-      ['code:7001:src/big.ts', 'too-large'],
+      ['code:7001:src/big.ts', 'supported'],
+      ['code:7001:/p/2/src/big.ts', 'supported'],
+      ['code:7001:/p/3/src/big.ts', 'supported'],
       ['code:7001:src/index.ts', 'supported'],
+      ['code:7001:test/__snapshots__/a.snap', 'supported'],
     ],
   );
-  assert.ok(
-    items.every(item => item.kind === 'code'),
-    'documentation stays in the docs phase',
-  );
-  const read = await provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:src/app.py', code);
+  const read = await readAs(provider, binding, 'code:7001:src/app.py');
   assert.match(read.markdown, /file `src\/app\.py` at commit [a-f0-9]{40}/);
   assert.match(read.markdown, /\n````\ndef main\(\):\n {4}return "```"\n````\n$/);
-  await assert.rejects(
-    provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:.env', code),
-    error => error.code === 'outside-selection',
+  assert.match(body(await readAs(provider, binding, 'code:7001:.env')), /TOKEN=example/);
+  assert.match(
+    body(await readAs(provider, binding, 'code:7001:assets/logo.png')),
+    /^Binary file, 6 bytes, media type image\/png\. Content extraction pending OCR/,
   );
   await assert.rejects(
-    provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:README.md', code),
+    readAs(provider, binding, 'code:7001:README.md'),
     error => error.code === 'outside-selection',
+    'a file is read only under its own kind',
   );
   await assert.rejects(
-    provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:src/app.py', { ...code, kinds: ['docs'] }),
+    readAs(provider, binding, 'code:7001:src/app.py', { ...code, kinds: ['docs'] }),
     error => error.code === 'outside-selection',
   );
   repo.files.set('src/app.py', 'def main():\n    return 2\n');
-  const updated = await provider.read(workspaceId, 'reader', binding, '7001', 'code:7001:src/app.py', code);
+  const updated = await readAs(provider, binding, 'code:7001:src/app.py');
   assert.notEqual(updated.sourceRevision, read.sourceRevision, 'a new default-branch head is read at its new blob');
   const both = await listAll(provider, binding, '7001', { ...selection, kinds: ['code', 'docs'] });
   assert.deepEqual([...new Set(both.map(item => item.kind))], ['doc', 'code']);
 });
 
-test('code listing bounds indexed files and skipped entries per repository', async () => {
+test('listing has no per-repository file count cap and resumes across pages', async () => {
   const { provider, binding, repo } = setup();
-  for (let i = 0; i < 1005; i++) repo.files.set(`src/m${String(i).padStart(4, '0')}.ts`, `export const v = ${i};`);
-  const items = await listAll(provider, binding, '7001', { ...selection, kinds: ['code'] });
-  assert.equal(items.filter(item => item.coverage === 'supported').length, 1000);
-  assert.ok(items.filter(item => item.coverage === 'excluded').length >= 6);
+  for (let i = 0; i < 2105; i++) repo.files.set(`src/m${String(i).padStart(4, '0')}.ts`, `export const v = ${i};`);
+  const items = await listAll(provider, binding, '7001', code);
+  assert.equal(items.length, 2106);
+  assert.equal(new Set(items.map(item => item.nativeId)).size, 2106);
+  assert.ok(items.every(item => item.coverage === 'supported'));
 });
 
-test('reconciliation reports files a new head pushed beyond the code bound, and nothing when the tree is truncated', async () => {
+test('a truncated recursive tree is walked one directory at a time so every file is listed', async () => {
   const { github, provider, binding, repo } = setup();
-  const code = { ...selection, kinds: ['code'] };
-  const name = (prefix, i) => `${prefix}/${String(i).padStart(4, '0')}.ts`;
-  for (let i = 0; i < 1000; i++) repo.files.set(name('b', i), `export const b = ${i};`);
-  const first = await listAll(provider, binding, '7001', code);
-  assert.equal(
-    first.filter(item => item.coverage === 'supported' && item.nativeId.startsWith('code:7001:b/')).length,
-    1000,
-  );
-  const ids = Array.from({ length: 40 }, (_, i) => `code:7001:${name('b', i * 25)}`);
-  assert.deepEqual(
-    await provider.displacedCode(workspaceId, 'reader', binding, '7001', code, ids),
-    [],
-    'nothing is displaced while the files are within the bound',
-  );
-  for (let i = 0; i < 1000; i++) repo.files.set(name('a', i), `export const a = ${i};`);
-  const second = await listAll(provider, binding, '7001', code);
-  const listed = new Set(second.map(item => item.nativeId));
-  assert.equal(second.filter(item => item.coverage === 'supported').length, 1000);
-  assert.ok(
-    second.filter(item => item.coverage === 'supported').every(item => item.nativeId.startsWith('code:7001:a/')),
-  );
-  const unlisted = ids.filter(id => !listed.has(id));
-  assert.ok(unlisted.length > 0, 'some displaced files are beyond the listed skip sample');
-  assert.deepEqual(
-    await provider.displacedCode(workspaceId, 'reader', binding, '7001', code, [
-      ...ids,
-      'code:7001:a/0001.ts',
-      'code:7001:gone.ts',
-    ]),
-    ids,
-    'only existing files beyond the bound are displaced',
-  );
-  const read = await provider.read(workspaceId, 'reader', binding, '7001', unlisted[0], code);
-  assert.equal(
-    read.coverage,
-    'supported',
-    'an exact read alone cannot see the bound, so reconciliation must ask first',
+  for (let d = 0; d < 60; d++)
+    for (let f = 0; f < 3; f++)
+      repo.files.set(`pkg/d${String(d).padStart(2, '0')}/f${f}.ts`, `export const v = ${d * 3 + f};`);
+  const expected = (await listAll(provider, binding, '7001', { ...selection, kinds: ['code', 'docs'] })).map(
+    item => item.nativeId,
   );
   github.state.truncate = true;
-  assert.deepEqual(
-    await provider.displacedCode(workspaceId, 'reader', binding, '7001', code, ids),
-    [],
-    'a truncated tree proves nothing displaced',
+  const pages = [];
+  let cursor = null;
+  do {
+    const result = await provider.list(
+      workspaceId,
+      'reader',
+      binding,
+      '7001',
+      { ...selection, kinds: ['code', 'docs'] },
+      cursor,
+    );
+    pages.push(result);
+    cursor = result.nextCursor;
+  } while (cursor);
+  const walked = pages.flatMap(page => page.observations.map(item => item.nativeId));
+  assert.deepEqual(walked.toSorted(), expected.toSorted(), 'the walk lists the same files as the complete tree');
+  assert.ok(pages.some(page => /^code:[a-f0-9]{40}:w\d+(?:\.\d+)*(?:\+\d+)?$/.test(page.nextCursor ?? '')));
+  assert.ok(
+    pages.every(page => page.observations.length <= 50),
+    'each page stays within the list page size',
   );
-  github.state.truncate = false;
+  const huge = walked.filter(id => id.endsWith('docs/huge.md'));
+  assert.deepEqual(huge, ['doc:7001:docs/huge.md', 'doc:7001:/p/2/docs/huge.md', 'doc:7001:/p/3/docs/huge.md']);
+
+  github.state.truncateDirs.add('pkg/d07/');
+  const partial = await listAll(provider, binding, '7001', code);
+  const markers = partial.filter(item => item.coverage === 'excluded');
+  assert.equal(markers.length, 1, 'a directory GitHub truncates is a visible skip, listed once');
+  assert.match(markers[0].nativeId, /^code:7001:\/truncated\/[a-f0-9]{40}$/);
+  assert.match(markers[0].title, /truncated/);
+  for (const id of [markers[0].nativeId, 'code:7001:/truncated-tree'])
+    await assert.rejects(
+      readAs(provider, binding, id),
+      error => error.code === 'not-found',
+      'markers are never read as content',
+    );
   await assert.rejects(
-    provider.displacedCode(workspaceId, 'reader', binding, '7001', { ...code, kinds: ['docs'] }, ids),
-    error => error.code === 'outside-selection',
-  );
-  await assert.rejects(
-    provider.displacedCode(workspaceId, 'reader', binding, '7001', code, ['doc:7001:README.md']),
-    error => error.code === 'invalid-selection',
-  );
-  await assert.rejects(
-    provider.displacedCode(workspaceId, 'reader', binding, '7001', code, ['code:7002:x.ts']),
-    error => error.code === 'invalid-selection',
+    provider.list(workspaceId, 'reader', binding, '7001', code, `code:${'a'.repeat(40)}:w0.1`),
+    error => error.code === 'invalid-cursor',
   );
 });
 
-test('a truncated repository tree is listed as a visible skip, never as complete coverage', async () => {
-  const { github, provider, binding } = setup();
-  github.state.truncate = true;
-  for (const kinds of [['docs'], ['code']]) {
-    const items = await listAll(provider, binding, '7001', { ...selection, kinds });
-    const kind = kinds[0] === 'docs' ? 'doc' : 'code';
-    const marker = items.find(item => item.nativeId === `${kind}:7001:/truncated-tree`);
-    assert.equal(marker?.coverage, 'excluded', `${kind} listing records the omitted files`);
-    assert.match(marker.title, /repository tree truncated/);
-    assert.equal(
-      items.filter(item => item.nativeId.endsWith('/truncated-tree')).length,
-      1,
-      'the marker is listed once, not on every page',
-    );
-    await assert.rejects(
-      provider.read(workspaceId, 'reader', binding, '7001', marker.nativeId, { ...selection, kinds }),
-      error => error.code === 'outside-selection',
-      'the marker is never read as content',
-    );
-  }
-  github.state.truncate = false;
+test('a resumed listing continues inside a file with many parts', async () => {
+  const { provider, binding, repo } = setup();
+  repo.files.set('data/huge.csv', 'r,1\n'.repeat(1700 * 1024));
+  const first = await provider.list(workspaceId, 'reader', binding, '7001', code, null);
+  assert.equal(first.observations.length, 50);
+  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+51$/);
+  const items = await listAll(provider, binding, '7001', code);
+  const parts = items.filter(item => item.path === 'data/huge.csv');
+  assert.equal(parts.length, 54);
+  assert.equal(new Set(parts.map(item => item.nativeId)).size, 54);
+  assert.equal(parts.at(-1).nativeId, 'code:7001:/p/54/data/huge.csv');
+});
+
+test('large files are streamed from the blob API in line-aligned parts that cover every byte once', async () => {
+  const { github, provider, binding, repo } = setup();
+  const lines = Array.from({ length: 60000 }, (_, i) => `line ${String(i).padStart(5, '0')} é😀`);
+  const text = `${lines.join('\n')}\n`;
+  repo.files.set('logs/app.log', text);
+  assert.ok(Buffer.byteLength(text) > 1024 * 1024, 'over the 1 MB contents API inline limit');
+  github.state.chunk = 7777;
+  const ids = (await listAll(provider, binding, '7001', code))
+    .filter(item => item.path === 'logs/app.log')
+    .map(item => item.nativeId);
+  const reads = [];
+  for (const id of ids) reads.push(await readAs(provider, binding, id));
+  const contents = reads.map(read => /\n(`{3,})\n([\s\S]*)\n\1\n$/.exec(read.markdown)[2]);
+  assert.equal(contents.join('\n'), text.trimEnd(), 'parts join back into the file without loss or overlap');
   assert.ok(
-    (await listAll(provider, binding, '7001', { ...selection, kinds: ['code', 'docs'] })).every(
-      item => !item.nativeId.endsWith('/truncated-tree'),
-    ),
+    contents.every(content => content.startsWith('line ')),
+    'parts start at a line',
   );
+  assert.ok(github.calls.some(call => /\/git\/blobs\/[a-f0-9]{40}$/.test(call.path)));
+});
+
+test('a part boundary without a nearby line break never splits a character', async () => {
+  const { provider, binding, repo } = setup();
+  repo.files.set('data/one-line.txt', '😀'.repeat(100 * 1024));
+  const docs = { ...selection, kinds: ['docs'] };
+  const ids = (await listAll(provider, binding, '7001', docs))
+    .filter(item => item.path === 'data/one-line.txt')
+    .map(item => item.nativeId);
+  assert.equal(ids.length, 4);
+  let joined = '';
+  for (const id of ids) joined += body(await readAs(provider, binding, id, docs)).trimEnd();
+  assert.equal(joined, '😀'.repeat(100 * 1024));
+});
+
+test('text in UTF-16, UTF-8 with a BOM and Windows-1252 is decoded; NUL bytes mark a binary', async () => {
+  const { provider, binding, repo } = setup();
+  const utf16be = Buffer.from('Grüße\r\nwelt\n', 'utf16le').swap16();
+  repo.files.set('notes/le.txt', Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Grüße\r\nwelt\n', 'utf16le')]));
+  repo.files.set('notes/be.txt', Buffer.concat([Buffer.from([0xfe, 0xff]), utf16be]));
+  repo.files.set('notes/bom.txt', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('Grüße\n')]));
+  repo.files.set('notes/latin.txt', Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20, 0x80, 0x01, 0x0a]));
+  repo.files.set('notes/nul.txt', Buffer.from('a\0b'));
+  repo.files.set('notes/empty.txt', '');
+  const docs = { ...selection, kinds: ['docs'] };
+  const text = async path => body(await readAs(provider, binding, `doc:7001:${path}`, docs)).trimEnd();
+  assert.equal(await text('notes/le.txt'), 'Grüße\nwelt');
+  assert.equal(await text('notes/be.txt'), 'Grüße\nwelt');
+  assert.equal(await text('notes/bom.txt'), 'Grüße');
+  assert.equal(await text('notes/latin.txt'), 'café €\uFFFD');
+  assert.match(await text('notes/nul.txt'), /^Binary file, 3 bytes, media type application\/octet-stream\./);
+  assert.equal(await text('notes/empty.txt'), '_No text content._');
+});
+
+test('a binary extractor hook can supply text for binary files, streamed or inline', async () => {
+  const seen = [];
+  const { provider, binding, repo } = setup({
+    async extractBinary(file) {
+      let bytes = 0;
+      for await (const chunk of file.content()) bytes += chunk.byteLength;
+      seen.push([file.path, file.mediaType, file.size, bytes]);
+      return file.path.endsWith('.pdf') ? `Extracted ${bytes} bytes` : null;
+    },
+  });
+  repo.files.set('docs/manual.pdf', Buffer.alloc(2 * 1024 * 1024, 1));
+  repo.files.set('img/a.png', Buffer.from([0x89, 0x50, 0, 1]));
+  const items = await listAll(provider, binding, '7001', { ...selection, kinds: ['code'] });
+  assert.equal(items.filter(item => item.path === 'docs/manual.pdf').length, 1, 'a binary is one item at any size');
+  assert.equal(
+    body(await readAs(provider, binding, 'code:7001:docs/manual.pdf')).trimEnd(),
+    `Extracted ${2 * 1024 * 1024} bytes`,
+  );
+  assert.match(body(await readAs(provider, binding, 'code:7001:img/a.png')), /pending OCR/);
+  assert.deepEqual(seen, [
+    ['docs/manual.pdf', 'application/pdf', 2 * 1024 * 1024, 2 * 1024 * 1024],
+    ['img/a.png', 'image/png', 4, 4],
+  ]);
+});
+
+test('paths longer than 1,024 bytes use a hashed native ID and are read by their stored path', async () => {
+  const { provider, binding, repo } = setup();
+  const path = `${Array.from({ length: 12 }, (_, i) => `directory-${i}-${'n'.repeat(90)}`).join('/')}/file.ts`;
+  assert.ok(Buffer.byteLength(path) > 1024);
+  repo.files.set(path, 'export const deep = true;');
+  const items = await listAll(provider, binding, '7001', code);
+  const item = items.find(entry => entry.path === path);
+  const hash = createHash('sha256').update(path).digest('hex');
+  assert.equal(item.nativeId, `code:7001:/h/${hash}`);
+  assert.match(item.canonicalURL, /\/file\.ts$/);
+  const read = await readAs(provider, binding, item.nativeId, code, path);
+  assert.match(read.markdown, /export const deep = true;/);
+  assert.equal(read.nativeId, item.nativeId);
+  assert.equal(read.path, path);
+  for (const wrong of [undefined, null, `${path}x`, 'src/index.ts'])
+    await assert.rejects(
+      readAs(provider, binding, item.nativeId, code, wrong),
+      error => error.code === 'not-found',
+      'a hashed ID is read only with the path that produced it',
+    );
+});
+
+test('issues and pull requests are indexed with every comment, in parts of 100', async () => {
+  const { provider, binding, repo } = setup();
+  repo.issues.get(1).comments = Array.from({ length: 650 }, (_, i) => ({ body: `Comment ${i + 1}`, user: 'bob' }));
+  const items = await listAll(provider, binding, '7001', { ...selection, kinds: ['issues'] });
+  assert.deepEqual(
+    items.map(item => item.nativeId),
+    ['issue:7001:1', ...[2, 3, 4, 5, 6, 7].map(part => `issue:7001:/p/${part}/1`)],
+  );
+  const first = await readAs(provider, binding, 'issue:7001:1', selection);
+  assert.match(first.markdown, /## Description by @octo/);
+  assert.match(first.markdown, /This part holds comments 1–100\./);
+  const last = await readAs(provider, binding, 'issue:7001:/p/7/1', selection);
+  assert.match(last.title, /\(part 7 of 7\)$/);
+  assert.doesNotMatch(last.markdown, /## Description/);
+  assert.match(last.markdown, /This part holds comments 601–650\./);
+  assert.equal(last.markdown.match(/## Comment by @bob/g).length, 50);
+  assert.match(last.markdown, /Comment 650\n$/);
+  await assert.rejects(readAs(provider, binding, 'issue:7001:/p/8/1', selection), error => error.code === 'not-found');
+});
+
+test('discussions are indexed with every comment and reply, paged by cursor', async () => {
+  const { github, provider, binding, repo } = setup();
+  repo.discussions.get(5).comments = Array.from({ length: 150 }, (_, i) => ({
+    body: `Comment ${i + 1}`,
+    author: 'carol',
+    replies: i === 120 ? Array.from({ length: 230 }, (_, r) => ({ body: `Reply ${r + 1}`, author: 'dan' })) : [],
+  }));
+  const items = await listAll(provider, binding, '7001', { ...selection, kinds: ['discussions'] });
+  assert.deepEqual(
+    items.map(item => item.nativeId),
+    ['discussion:7001:5', 'discussion:7001:/p/2/5'],
+  );
+  const first = await readAs(provider, binding, 'discussion:7001:5', selection);
+  assert.equal(first.markdown.match(/## Comment by @carol/g).length, 100);
+  assert.match(first.markdown, /## Discussion by @octo/);
+  const second = await readAs(provider, binding, 'discussion:7001:/p/2/5', selection);
+  assert.equal(second.markdown.match(/## Comment by @carol/g).length, 50);
+  assert.equal(second.markdown.match(/### Reply by @dan/g).length, 230);
+  assert.match(second.markdown, /Comment 101\n[\s\S]*Reply 230\n[\s\S]*Comment 150\n$/);
+  assert.doesNotMatch(second.markdown, /## Discussion by/);
+  assert.equal(github.calls.filter(call => call.graph?.id?.startsWith('DC_')).length, 2, 'replies paged by cursor');
+  await assert.rejects(
+    readAs(provider, binding, 'discussion:7001:/p/3/5', selection),
+    error => error.code === 'not-found',
+  );
+});
+
+test('an empty repository still indexes issues and discussions, then its files once commits exist', async () => {
+  const { provider, binding, repo } = setup();
+  const files = new Map(repo.files);
+  repo.files.clear();
+  const all = { ...selection, kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] };
+  const empty = await listAll(provider, binding, '7001', all);
+  assert.deepEqual(
+    empty.map(item => item.nativeId),
+    ['issue:7001:1', 'pull:7001:2', 'discussion:7001:5'],
+  );
+  await assert.rejects(readAs(provider, binding, 'doc:7001:README.md', all), error => error.code === 'not-found');
+  for (const [path, content] of files) repo.files.set(path, content);
+  const later = await listAll(provider, binding, '7001', all);
+  assert.ok(later.some(item => item.nativeId === 'doc:7001:README.md'));
+  assert.ok(later.some(item => item.nativeId === 'code:7001:src/index.ts'));
+  assert.match((await readAs(provider, binding, 'doc:7001:README.md', all)).markdown, /Orchid onboarding steps/);
 });

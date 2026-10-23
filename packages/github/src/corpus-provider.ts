@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { observeFetch, type DependencyEndpoint } from '@tulipfarm/observability';
 import { AccessDenied } from '@tulipfarm/access';
@@ -62,22 +63,18 @@ const commentSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
-const treeSchema = z.object({
-  truncated: z.boolean().optional(),
-  tree: z
-    .array(
-      z.object({
-        path: z.string().max(4096),
-        type: z.string(),
-        sha: z.string().regex(/^[a-f0-9]{40,64}$/),
-        size: z.number().int().nonnegative().optional(),
-      }),
-    )
-    .max(200000),
+const shaPattern = /^[a-f0-9]{40,64}$/;
+const treeEntrySchema = z.object({
+  path: z.string().max(65536),
+  type: z.string(),
+  sha: z.string().regex(shaPattern),
+  size: z.number().int().nonnegative().optional(),
 });
+type TreeEntry = z.infer<typeof treeEntrySchema>;
+const treeSchema = z.object({ truncated: z.boolean().optional(), tree: z.array(treeEntrySchema).max(200000) });
 const contentSchema = z.object({
-  type: z.literal('file'),
-  sha: z.string().regex(/^[a-f0-9]{40,64}$/),
+  type: z.enum(['file', 'symlink']),
+  sha: z.string().regex(shaPattern),
   size: z.number().int().nonnegative(),
   encoding: z.string().optional(),
   content: z.string().optional(),
@@ -93,13 +90,22 @@ const discussionNode = z.object({
   url: z.url(),
   comments: z.object({ totalCount: z.number().int().nonnegative() }),
 });
+const pageInfo = z.object({ hasNextPage: z.boolean(), endCursor: z.string().max(1024).nullable() });
 const replySchema = z.object({
   body: z.string().max(262144),
   createdAt: z.string(),
   updatedAt: z.string(),
   author: graphAuthor,
 });
-const discussionSchema = discussionNode.extend({
+const commentNode = replySchema.extend({
+  id: z.string().min(1).max(256),
+  replies: z.object({
+    totalCount: z.number().int().nonnegative(),
+    pageInfo,
+    nodes: z.array(replySchema).max(100),
+  }),
+});
+const discussionPageSchema = discussionNode.extend({
   body: z.string().max(262144),
   createdAt: z.string(),
   author: graphAuthor,
@@ -107,40 +113,123 @@ const discussionSchema = discussionNode.extend({
     .object({ name: z.string().max(256) })
     .nullable()
     .optional(),
-  comments: z.object({
-    totalCount: z.number().int().nonnegative(),
-    nodes: z
-      .array(
-        replySchema.extend({
-          replies: z.object({ totalCount: z.number().int().nonnegative(), nodes: z.array(replySchema).max(50) }),
-        }),
-      )
-      .max(100),
-  }),
+  comments: z.object({ totalCount: z.number().int().nonnegative(), nodes: z.array(commentNode).max(100) }),
 });
+const commentCursorSchema = z.object({
+  node: z
+    .object({
+      discussion: z
+        .object({ comments: z.object({ pageInfo }) })
+        .nullable()
+        .optional(),
+    })
+    .nullable(),
+});
+type FileRef = { sha: string; size: number; content?: Uint8Array };
+type GitHubDiscussion = Omit<z.infer<typeof discussionPageSchema>, 'comments'> & {
+  comments: {
+    totalCount: number;
+    nodes: (z.infer<typeof replySchema> & { replies: { nodes: z.infer<typeof replySchema>[] } })[];
+  };
+};
 const documentExtensions = /\.(?:md|markdown|mdx|mdown|txt|text|rst|adoc|asciidoc|org)$/i;
 const documentNames = /(?:^|\/)(?:README|CHANGELOG|CHANGES|CONTRIBUTING|LICENSE|NOTICE|AUTHORS|CODEOWNERS|SECURITY)$/i;
+/** Labels a file as documentation (`doc`); every other file is `code`. The label never decides whether a file is indexed. */
 export const isGitHubDocumentPath = (path: string) => documentExtensions.test(path) || documentNames.test(path);
-const sensitivePath =
-  /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.htpasswd|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|credentials(?:\.[^/]*)?|secrets?(?:\.[^/]*)?)$|\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|der|asc|gpg|kdbx|tfstate|tfvars)$/i;
-const generatedPath =
-  /(?:^|\/)(?:node_modules|vendor|third_party|dist|build|out|target|coverage|\.next|\.nuxt|__pycache__|\.venv|venv|bower_components|Pods|\.gradle|\.git|generated|__generated__)\/|\.min\.(?:js|css)$|\.(?:map|snap|lock)$|(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|go\.sum|npm-shrinkwrap\.json)$|\.(?:generated|pb|g)\.[a-z0-9]+$|_pb2\.py$/i;
-const binaryPath =
-  /\.(?:png|jpe?g|gif|bmp|ico|icns|webp|tiff?|svgz|pdf|zip|gz|tgz|bz2|xz|7z|rar|jar|war|class|exe|dll|so|dylib|o|a|lib|bin|wasm|woff2?|ttf|otf|eot|mp[34]|m4a|mov|avi|mkv|wav|flac|ogg|webm|psd|sketch|fig|sqlite3?|db|parquet|pyc|pyo|npy|pkl|onnx|pt|h5)$/i;
-const codeExtensions =
-  /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi|go|rs|java|kt|kts|rb|php|cs|fs|c|h|cc|cpp|cxx|hpp|hh|m|mm|swift|scala|sh|bash|zsh|fish|ps1|sql|ya?ml|json|jsonc|toml|ini|cfg|conf|css|scss|sass|less|html?|vue|svelte|astro|graphql|gql|proto|tf|hcl|lua|r|dart|ex|exs|erl|hrl|hs|clj|cljs|el|vim|gradle|xml|cmake|nix|zig|jl|pl|pm|groovy|bzl|bazel|prisma)$/i;
-const codeNames =
-  /(?:^|\/)(?:Dockerfile|Containerfile|Makefile|Rakefile|Gemfile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE)$/;
-/** Default-branch code coverage: `null` is not code; `excluded` is sensitive, generated, vendored or binary and is listed as a visible skip. */
-export function githubCodeCoverage(path: string): 'supported' | 'excluded' | null {
-  if (isGitHubDocumentPath(path) || path.length > 1024) return null;
-  if (sensitivePath.test(path) || generatedPath.test(path) || binaryPath.test(path)) return 'excluded';
-  return codeExtensions.test(path) || codeNames.test(path) ? 'supported' : null;
-}
+export const githubFileKind = (path: string): 'doc' | 'code' => (isGitHubDocumentPath(path) ? 'doc' : 'code');
+const binaryExtensions: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  ico: 'image/vnd.microsoft.icon',
+  icns: 'image/icns',
+  webp: 'image/webp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  svgz: 'image/svg+xml',
+  heic: 'image/heic',
+  pdf: 'application/pdf',
+  zip: 'application/zip',
+  gz: 'application/gzip',
+  tgz: 'application/gzip',
+  bz2: 'application/x-bzip2',
+  xz: 'application/x-xz',
+  '7z': 'application/x-7z-compressed',
+  rar: 'application/vnd.rar',
+  jar: 'application/java-archive',
+  war: 'application/java-archive',
+  class: 'application/java-vm',
+  exe: 'application/vnd.microsoft.portable-executable',
+  dll: 'application/vnd.microsoft.portable-executable',
+  so: 'application/octet-stream',
+  dylib: 'application/octet-stream',
+  o: 'application/octet-stream',
+  a: 'application/octet-stream',
+  lib: 'application/octet-stream',
+  bin: 'application/octet-stream',
+  wasm: 'application/wasm',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  otf: 'font/otf',
+  eot: 'application/vnd.ms-fontobject',
+  mp3: 'audio/mpeg',
+  mp4: 'video/mp4',
+  m4a: 'audio/mp4',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  wav: 'audio/wav',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  webm: 'video/webm',
+  psd: 'image/vnd.adobe.photoshop',
+  sketch: 'application/octet-stream',
+  fig: 'application/octet-stream',
+  sqlite: 'application/vnd.sqlite3',
+  sqlite3: 'application/vnd.sqlite3',
+  db: 'application/octet-stream',
+  parquet: 'application/vnd.apache.parquet',
+  pyc: 'application/octet-stream',
+  pyo: 'application/octet-stream',
+  npy: 'application/octet-stream',
+  pkl: 'application/octet-stream',
+  onnx: 'application/octet-stream',
+  pt: 'application/octet-stream',
+  h5: 'application/x-hdf5',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
+const extension = (path: string) => /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
+/** Known binary formats get one metadata placeholder instead of text parts; other files are sniffed when read. */
+export const isGitHubBinaryPath = (path: string) => Object.hasOwn(binaryExtensions, extension(path));
+const mediaTypeOf = (path: string) => binaryExtensions[extension(path)] ?? 'application/octet-stream';
+/**
+ * Whether a default-branch file is indexed. Every file is, with no built-in exclusions; a source's own opt-out
+ * patterns compose with this check.
+ */
+export const githubPathIndexable = (path: string) => path.length > 0;
+// Content extraction for binary files (for example OCR). Without an extractor a binary file is a metadata placeholder.
+export type GitHubBinaryFile = {
+  path: string;
+  mediaType: string;
+  size: number;
+  content(): AsyncIterable<Uint8Array>;
+};
+export type GitHubBinaryExtractor = (file: GitHubBinaryFile) => Promise<string | null>;
 const fence = (content: string) =>
   '`'.repeat(Math.max(3, ...[...content.matchAll(/`+/g)].map(match => match[0].length + 1)));
 const DISCUSSIONS = `query($id:ID!,$cursor:String){node(id:$id){... on Repository{discussions(first:20,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{number title updatedAt url comments{totalCount}}}}}}`;
-const DISCUSSION = `query($id:ID!,$number:Int!){node(id:$id){... on Repository{discussion(number:$number){number title body url createdAt updatedAt author{login} category{name} comments(first:100){totalCount nodes{body createdAt updatedAt author{login} replies(first:50){totalCount nodes{body createdAt updatedAt author{login}}}}}}}}}`;
+const REPLY = 'body createdAt updatedAt author{login}';
+const DISCUSSION = `query($id:ID!,$number:Int!,$after:String){node(id:$id){... on Repository{discussion(number:$number){number title body url createdAt updatedAt author{login} category{name} comments(first:100,after:$after){totalCount nodes{id ${REPLY} replies(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{${REPLY}}}}}}}}}`;
+const DISCUSSION_COMMENT_CURSOR = `query($id:ID!,$number:Int!,$after:String){node(id:$id){... on Repository{discussion(number:$number){comments(first:100,after:$after){pageInfo{hasNextPage endCursor}}}}}}`;
+const DISCUSSION_REPLIES = `query($id:ID!,$after:String){node(id:$id){... on DiscussionComment{replies(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{${REPLY}}}}}}`;
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, code: GitHubCorpusErrorCode = 'invalid-response'): T {
   const result = schema.safeParse(value);
@@ -176,30 +265,71 @@ function nextPhase(selection: GitHubCorpusSelection, current: Phase) {
   const next = order[order.indexOf(current) + 1];
   return next ? `${next}:` : null;
 }
-function native(nativeId: string, repositoryId: string) {
+const hashPath = (path: string) => createHash('sha256').update(path).digest('hex');
+// Native IDs keep the full path up to 1,024 bytes; a longer path is identified by its hash and kept in `path`.
+const pathRef = (path: string) => (Buffer.byteLength(path) > 1024 ? `/h/${hashPath(path)}` : path);
+// Part 1 keeps the plain ID, so an item that later grows into parts keeps its first document.
+const partRest = (part: number, ref: string) => (part > 1 ? `/p/${part}/${ref}` : ref);
+type Native = {
+  kind: 'doc' | 'code' | 'issue' | 'pull' | 'discussion';
+  part: number;
+  ref: string;
+  hash: string | null;
+  marker: boolean;
+};
+function native(nativeId: string, repositoryId: string): Native {
   const match = /^(doc|code|issue|pull|discussion):([1-9][0-9]{0,19}):(.+)$/s.exec(nativeId);
   if (!match || match[2] !== repositoryId) throw new GitHubCorpusError('invalid-selection');
-  const [, kind, , rest] = match as unknown as [
-    string,
-    'doc' | 'code' | 'issue' | 'pull' | 'discussion',
-    string,
-    string,
-  ];
-  if (kind !== 'doc' && kind !== 'code' && !/^[1-9][0-9]{0,9}$/.test(rest))
-    throw new GitHubCorpusError('invalid-selection');
-  return { kind, rest };
+  const kind = match[1] as Native['kind'];
+  let rest = match[3] ?? '';
+  let part = 1;
+  const parted = /^\/p\/([2-9]|[1-9][0-9]{1,6})\/(.+)$/s.exec(rest);
+  if (parted) {
+    part = Number(parted[1]);
+    rest = parted[2] ?? '';
+  }
+  if (kind !== 'doc' && kind !== 'code') {
+    if (!/^[1-9][0-9]{0,9}$/.test(rest)) throw new GitHubCorpusError('invalid-selection');
+    return { kind, part, ref: rest, hash: null, marker: false };
+  }
+  if (!rest.startsWith('/')) {
+    if (Buffer.byteLength(rest) > 1024) throw new GitHubCorpusError('invalid-selection');
+    return { kind, part, ref: rest, hash: null, marker: false };
+  }
+  const hashed = /^\/h\/([a-f0-9]{64})$/.exec(rest);
+  if (hashed) return { kind, part, ref: rest, hash: hashed[1] ?? '', marker: false };
+  // Markers for an omitted tree; earlier versions listed `/truncated-tree`.
+  if (!parted && (rest === '/truncated-tree' || /^\/truncated\/[a-f0-9]{40,64}$/.test(rest)))
+    return { kind, part, ref: rest, hash: null, marker: true };
+  throw new GitHubCorpusError('invalid-selection');
 }
-export function serializeGitHubIssue(full: string, issue: Issue, comments: readonly z.infer<typeof commentSchema>[]) {
+const partTitle = (title: string, part: number, parts: number) => {
+  const suffix = parts > 1 ? ` (part ${part} of ${parts})` : '';
+  return `${title.slice(0, 512 - suffix.length)}${suffix}`;
+};
+const commentParts = (comments: number) => Math.max(1, Math.ceil(comments / limits.commentsPerPart));
+// Part `part` of an issue holds the description (part 1 only) and that part's page of comments.
+export function serializeGitHubIssue(
+  full: string,
+  issue: Issue,
+  comments: readonly z.infer<typeof commentSchema>[],
+  part = 1,
+) {
   const kind = issue.pull_request ? 'pull request' : 'issue';
+  const parts = commentParts(issue.comments);
+  const first = (part - 1) * limits.commentsPerPart;
   const lines = [
-    `# ${full}#${issue.number}: ${oneLine(issue.title)}`,
+    `# ${full}#${issue.number}: ${oneLine(issue.title)}${parts > 1 ? ` (part ${part} of ${parts})` : ''}`,
     '',
-    `GitHub ${kind} ${full}#${issue.number} by ${who(issue.user)}, opened ${iso(issue.created_at)}, state ${issue.state}, last updated ${iso(issue.updated_at)}. ${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}.`,
-    '',
-    `## Description by ${who(issue.user)} at ${iso(issue.created_at)}`,
-    '',
-    issue.body?.trim() || '_No description._',
+    `GitHub ${kind} ${full}#${issue.number} by ${who(issue.user)}, opened ${iso(issue.created_at)}, state ${issue.state}, last updated ${iso(issue.updated_at)}. ${issue.comments} ${issue.comments === 1 ? 'comment' : 'comments'}.${parts > 1 ? ` This part holds comments ${comments.length ? `${first + 1}–${first + comments.length}` : 'none'}.` : ''}`,
   ];
+  if (part === 1)
+    lines.push(
+      '',
+      `## Description by ${who(issue.user)} at ${iso(issue.created_at)}`,
+      '',
+      issue.body?.trim() || '_No description._',
+    );
   for (const comment of comments)
     lines.push(
       '',
@@ -209,16 +339,21 @@ export function serializeGitHubIssue(full: string, issue: Issue, comments: reado
     );
   return `${lines.join('\n')}\n`;
 }
-export function serializeGitHubDiscussion(full: string, discussion: z.infer<typeof discussionSchema>) {
+// Part `part` of a discussion holds the description (part 1 only) and that part's comments with all their replies.
+export function serializeGitHubDiscussion(full: string, discussion: GitHubDiscussion, part = 1) {
+  const parts = commentParts(discussion.comments.totalCount);
   const lines = [
-    `# ${full} discussion #${discussion.number}: ${oneLine(discussion.title)}`,
+    `# ${full} discussion #${discussion.number}: ${oneLine(discussion.title)}${parts > 1 ? ` (part ${part} of ${parts})` : ''}`,
     '',
     `GitHub discussion ${full}#${discussion.number}${discussion.category ? ` in ${discussion.category.name}` : ''} by ${who(discussion.author)}, opened ${iso(discussion.createdAt)}, last updated ${iso(discussion.updatedAt)}.`,
-    '',
-    `## Discussion by ${who(discussion.author)} at ${iso(discussion.createdAt)}`,
-    '',
-    discussion.body.trim() || '_No description._',
   ];
+  if (part === 1)
+    lines.push(
+      '',
+      `## Discussion by ${who(discussion.author)} at ${iso(discussion.createdAt)}`,
+      '',
+      discussion.body.trim() || '_No description._',
+    );
   for (const comment of discussion.comments.nodes) {
     lines.push(
       '',
@@ -237,16 +372,55 @@ export function serializeGitHubDiscussion(full: string, discussion: z.infer<type
   return `${lines.join('\n')}\n`;
 }
 
+type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'binary';
+const sniffBytes = 8000;
+// Byte-order marks pick UTF-8 or UTF-16; otherwise a NUL byte marks a binary file.
+function sniff(head: Uint8Array): { encoding: Encoding; bom: number } {
+  if (head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) return { encoding: 'utf-8', bom: 3 };
+  if (head[0] === 0xff && head[1] === 0xfe) return { encoding: 'utf-16le', bom: 2 };
+  if (head[0] === 0xfe && head[1] === 0xff) return { encoding: 'utf-16be', bom: 2 };
+  return { encoding: head.subarray(0, sniffBytes).includes(0) ? 'binary' : 'utf-8', bom: 0 };
+}
+const boundarySearchBytes = 16 * 1024;
+// The first part boundary at or after `position`: just past a line break within reach, else the next character start.
+function boundary(window: Uint8Array, offset: number, position: number, size: number, encoding: Encoding) {
+  if (position >= size) return size;
+  const at = (index: number) => window[index - offset] ?? 0;
+  const limit = Math.min(size, position + boundarySearchBytes, offset + window.byteLength);
+  if (encoding === 'utf-16le' || encoding === 'utf-16be') {
+    const start = position % 2 ? position + 1 : position;
+    const [low, high] = encoding === 'utf-16le' ? [0, 1] : [1, 0];
+    for (let index = start; index + 1 < limit; index += 2)
+      if (at(index + low) === 0x0a && at(index + high) === 0) return index + 2;
+    const unit = encoding === 'utf-16le' ? at(start) | (at(start + 1) << 8) : (at(start) << 8) | at(start + 1);
+    return Math.min(size, unit >= 0xdc00 && unit <= 0xdfff ? start + 2 : start);
+  }
+  for (let index = position; index < limit; index++) if (at(index) === 0x0a) return index + 1;
+  let index = position;
+  while (index < Math.min(size, position + 4) && (at(index) & 0xc0) === 0x80) index++;
+  return index;
+}
+function decode(bytes: Uint8Array, encoding: Encoding) {
+  let text: string;
+  if (encoding === 'utf-16le' || encoding === 'utf-16be') text = new TextDecoder(encoding).decode(bytes);
+  else
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      // Not UTF-8: read as Windows-1252 (a superset of Latin-1) so legacy text stays readable.
+      text = new TextDecoder('windows-1252').decode(bytes);
+    }
+  // The parser accepts only line breaks and tabs among control characters.
+  return text.replace(/\r\n?/g, '\n').replace(/[^\P{Cc}\n\t]/gu, '\uFFFD');
+}
+
 // Runs one operation with the caller's own personal GitHub account. Every corpus request is made with this identity only.
-// `codeBound` lets fixtures exercise the code-file bound at a small scale; production uses the documented limits.
 export function createGitHubCorpusProvider(options: {
   accounts: Accounts;
   fetcher?: typeof fetch;
-  codeBound?: { files: number; skipped: number };
+  extractBinary?: GitHubBinaryExtractor;
 }): GitHubCorpusProvider {
   const fetcher = options.fetcher ?? fetch;
-  const codeFiles = options.codeBound?.files ?? limits.codeFilesPerRepository;
-  const skippedCodeFiles = options.codeBound?.skipped ?? limits.skippedCodeFilesPerRepository;
   async function withAccount<T>(
     workspaceId: string,
     userId: string,
@@ -289,19 +463,19 @@ export function createGitHubCorpusProvider(options: {
       throw new GitHubCorpusError('transient');
     }
   }
-  async function call(
+  // Maps transport, credential, rate-limit and server failures before any body is read.
+  async function open(
     token: string,
     endpoint: DependencyEndpoint,
     path: string,
-    init: { accept?: string; body?: unknown } = {},
+    init: { accept?: string; body?: unknown; timeoutMs?: number } = {},
   ) {
-    const signal = AbortSignal.timeout(limits.requestTimeoutMs);
     let response: Response;
     try {
       response = await observeFetch('github', 'request', fetcher, { endpoint })(`https://api.github.com${path}`, {
         method: init.body === undefined ? 'GET' : 'POST',
         redirect: 'manual',
-        signal,
+        signal: AbortSignal.timeout(init.timeoutMs ?? limits.requestTimeoutMs),
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: init.accept ?? 'application/vnd.github+json',
@@ -314,6 +488,38 @@ export function createGitHubCorpusProvider(options: {
     } catch {
       throw new GitHubCorpusError('transient');
     }
+    const retry = Number(response.headers.get('retry-after'));
+    const reset = Number(response.headers.get('x-ratelimit-reset'));
+    const retryAfterMs =
+      Number.isFinite(retry) && response.headers.has('retry-after') && retry >= 0
+        ? Math.min(3_600_000, Math.ceil(retry * 1000))
+        : Number.isFinite(reset) && reset > 0
+          ? Math.min(3_600_000, Math.max(1000, reset * 1000 - Date.now()))
+          : null;
+    const failure =
+      response.status === 401
+        ? new GitHubCredentialRejected()
+        : response.status === 429 ||
+            (response.status === 403 &&
+              (response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after')))
+          ? new GitHubCorpusError('rate-limited', retryAfterMs)
+          : response.status >= 500
+            ? new GitHubCorpusError('transient', retryAfterMs)
+            : null;
+    if (failure) {
+      await response.body?.cancel().catch(() => undefined);
+      throw failure;
+    }
+    return response;
+  }
+  // JSON and other metadata responses are read whole up to `responseBytes`; file content uses `blob` instead.
+  async function call(
+    token: string,
+    endpoint: DependencyEndpoint,
+    path: string,
+    init: { accept?: string; body?: unknown } = {},
+  ) {
+    const response = await open(token, endpoint, path, init);
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;
@@ -333,22 +539,6 @@ export function createGitHubCorpusProvider(options: {
     } finally {
       await reader?.cancel().catch(() => undefined);
     }
-    const retry = Number(response.headers.get('retry-after'));
-    const reset = Number(response.headers.get('x-ratelimit-reset'));
-    const retryAfterMs =
-      Number.isFinite(retry) && response.headers.has('retry-after') && retry >= 0
-        ? Math.min(3_600_000, Math.ceil(retry * 1000))
-        : Number.isFinite(reset) && reset > 0
-          ? Math.min(3_600_000, Math.max(1000, reset * 1000 - Date.now()))
-          : null;
-    if (response.status === 401) throw new GitHubCredentialRejected();
-    if (
-      response.status === 429 ||
-      (response.status === 403 &&
-        (response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after')))
-    )
-      throw new GitHubCorpusError('rate-limited', retryAfterMs);
-    if (response.status >= 500) throw new GitHubCorpusError('transient', retryAfterMs);
     const text = () => {
       try {
         return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
@@ -364,6 +554,49 @@ export function createGitHubCorpusProvider(options: {
       }
     };
     return { status: response.status, text, json };
+  }
+  // Streams a raw Git blob. The time allowed grows with the bytes needed, up to `blobTimeoutMs`.
+  async function* blob(token: string, repositoryId: string, sha: string, bytes: number) {
+    const response = await open(token, 'github-blob', `/repositories/${repositoryId}/git/blobs/${sha}`, {
+      accept: 'application/vnd.github.raw',
+      timeoutMs: Math.min(limits.blobTimeoutMs, limits.requestTimeoutMs + Math.ceil(bytes / limits.partBytes) * 1000),
+    });
+    if (response.status !== 200) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new GitHubCorpusError([404, 409, 410, 422].includes(response.status) ? 'not-found' : 'invalid-response');
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new GitHubCorpusError('invalid-response');
+    try {
+      for (;;) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch {
+          throw new GitHubCorpusError('transient');
+        }
+        if (chunk.done) return;
+        yield chunk.value;
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+  // Keeps only the sniffed head and the byte range [start, end) of a streamed blob, so memory stays bounded by one part.
+  async function blobRange(token: string, repositoryId: string, file: FileRef, start: number, end: number) {
+    const head = new Uint8Array(Math.min(sniffBytes, file.size));
+    const window = new Uint8Array(end - start);
+    let offset = 0;
+    for await (const chunk of blob(token, repositoryId, file.sha, end)) {
+      const chunkEnd = offset + chunk.byteLength;
+      if (offset < head.byteLength) head.set(chunk.subarray(0, head.byteLength - offset), offset);
+      if (chunkEnd > start && offset < end)
+        window.set(chunk.subarray(Math.max(0, start - offset), end - offset), Math.max(0, offset - start));
+      offset = chunkEnd;
+      if (offset >= end && offset >= head.byteLength) break;
+    }
+    if (offset < end) throw new GitHubCorpusError('source-changed');
+    return { head, window };
   }
   async function graphql(token: string, query: string, variables: Record<string, unknown>) {
     const response = await call(token, 'github-graphql', '/graphql', { body: { query, variables } });
@@ -420,6 +653,7 @@ export function createGitHubCorpusProvider(options: {
     sourceRevision: string,
     accessedAt: string,
     coverage: GitHubItemObservation['coverage'] = 'supported',
+    path?: string,
   ): GitHubItemObservation {
     return {
       nativeId: `${kind}:${repositoryId}:${rest}`,
@@ -430,145 +664,178 @@ export function createGitHubCorpusProvider(options: {
       sourceRevision,
       accessedAt,
       coverage,
+      ...(path === undefined ? {} : { path }),
     };
   }
-  // GitHub omits entries from very large trees. The omission is a visible skip, so partial coverage never reads as complete.
-  function truncation(
+  const fileURL = (body: RepositoryBody, commit: string, path: string) => {
+    const url = `https://github.com/${body.full_name}/blob/${commit}/${encodePath(path)}`;
+    return url.length <= 2048 ? url : `https://github.com/${body.full_name}/tree/${commit}`;
+  };
+  const fileParts = (path: string, size: number) =>
+    isGitHubBinaryPath(path) ? 1 : Math.max(1, Math.ceil(size / limits.partBytes));
+  function fileObservation(
     body: RepositoryBody,
-    kind: 'doc' | 'code',
     commit: string,
     accessedAt: string,
-    truncated: boolean | undefined,
-    offset: number,
+    path: string,
+    sha: string,
+    part: number,
+    parts: number,
   ) {
-    return truncated && offset === 0
-      ? [
-          observation(
-            String(body.id),
-            kind,
-            '/truncated-tree',
-            `${body.full_name}: more files than GitHub lists (repository tree truncated)`,
-            `https://github.com/${body.full_name}/tree/${commit}`,
-            `tree:${commit}`,
-            accessedAt,
-            'excluded',
-          ),
-        ]
-      : [];
+    return observation(
+      String(body.id),
+      githubFileKind(path),
+      partRest(part, pathRef(path)),
+      partTitle(`${body.full_name}: ${path}`, part, parts),
+      fileURL(body, commit, path),
+      `blob:${sha}`,
+      accessedAt,
+      'supported',
+      path,
+    );
+  }
+  // GitHub can truncate one directory listing. The omission is a visible skip, so partial coverage never reads as complete.
+  function omitted(body: RepositoryBody, kind: 'doc' | 'code', commit: string, tree: string, accessedAt: string) {
+    return observation(
+      String(body.id),
+      kind,
+      `/truncated/${tree}`,
+      `${body.full_name}: a directory with more entries than GitHub lists (tree ${tree} truncated)`,
+      `https://github.com/${body.full_name}/tree/${commit}`,
+      `tree:${tree}`,
+      accessedAt,
+      'excluded',
+    );
   }
   const after = (selection: GitHubCorpusSelection) => `${selection.after}T00:00:00Z`;
   const inWindow = (selection: GitHubCorpusSelection, time: string) => Date.parse(time) >= Date.parse(after(selection));
-  async function listDocs(
-    token: string,
-    body: RepositoryBody,
-    state: string,
-    accessedAt: string,
-    selection: GitHubCorpusSelection,
-  ) {
-    const [pinned = '', offsetText = '0'] = state.split(':');
-    const commit = pinned || (await headCommit(token, body));
-    if (!commit || !/^[a-f0-9]{40,64}$/.test(commit) || !/^\d{1,6}$/.test(offsetText)) {
-      if (commit) throw new GitHubCorpusError('invalid-cursor');
-      return { observations: [], nextCursor: nextPhase(selection, 'docs') };
-    }
-    const response = await call(token, 'github-tree', `/repositories/${body.id}/git/trees/${commit}?recursive=1`);
-    if (response.status === 404 || response.status === 409) throw new GitHubCorpusError('invalid-cursor');
-    if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
-    const tree = parse(treeSchema, response.json());
-    const files = tree.tree
-      .filter(entry => entry.type === 'blob' && isGitHubDocumentPath(entry.path))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-      .slice(0, limits.documentsPerRepository);
-    const offset = Number(offsetText);
-    const observations = [
-      ...truncation(body, 'doc', commit, accessedAt, tree.truncated, offset),
-      ...files
-        .slice(offset, offset + limits.listPageSize)
-        .map(entry =>
-          observation(
-            String(body.id),
-            'doc',
-            entry.path,
-            `${body.full_name}: ${entry.path}`,
-            `https://github.com/${body.full_name}/blob/${commit}/${encodePath(entry.path)}`,
-            `blob:${entry.sha}`,
-            accessedAt,
-            (entry.size ?? 0) > limits.documentBytes ? 'too-large' : 'supported',
-          ),
-        ),
-    ];
-    return {
-      observations,
-      nextCursor:
-        offset + limits.listPageSize < files.length
-          ? `docs:${commit}:${offset + limits.listPageSize}`
-          : nextPhase(selection, 'docs'),
-    };
-  }
-  async function codeTree(token: string, body: RepositoryBody, commit: string) {
-    const response = await call(token, 'github-tree', `/repositories/${body.id}/git/trees/${commit}?recursive=1`);
-    if (response.status === 404 || response.status === 409) throw new GitHubCorpusError('invalid-cursor');
-    if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
-    const tree = parse(treeSchema, response.json());
-    const blobs = tree.tree
-      .filter(entry => entry.type === 'blob')
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    const code = blobs.flatMap(entry => {
-      const coverage = githubCodeCoverage(entry.path);
-      return coverage ? [{ ...entry, coverage }] : [];
-    });
-    return { tree, code, supported: code.filter(entry => entry.coverage === 'supported') };
-  }
-  async function listCode(
-    token: string,
-    body: RepositoryBody,
-    state: string,
-    accessedAt: string,
-    selection: GitHubCorpusSelection,
-  ) {
-    const [pinned = '', offsetText = '0'] = state.split(':');
-    const commit = pinned || (await headCommit(token, body));
-    if (!commit || !/^[a-f0-9]{40,64}$/.test(commit) || !/^\d{1,6}$/.test(offsetText)) {
-      if (commit) throw new GitHubCorpusError('invalid-cursor');
-      return { observations: [], nextCursor: nextPhase(selection, 'code') };
-    }
-    const { tree, code, supported } = await codeTree(token, body, commit);
-    // Bounded: the first files by path are indexed; skipped files beyond the count bound are listed up to a fixed limit.
-    const skipped = [
-      ...code.filter(entry => entry.coverage === 'excluded'),
-      ...supported.slice(codeFiles).map(entry => ({ ...entry, coverage: 'excluded' as const })),
-    ].slice(0, skippedCodeFiles);
-    const files = [...supported.slice(0, codeFiles), ...skipped].sort((a, b) =>
-      a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  async function tree(token: string, body: RepositoryBody, sha: string, recursive = false) {
+    const response = await call(
+      token,
+      'github-tree',
+      `/repositories/${body.id}/git/trees/${sha}${recursive ? '?recursive=1' : ''}`,
     );
-    const offset = Number(offsetText);
-    const observations = [
-      ...truncation(body, 'code', commit, accessedAt, tree.truncated, offset),
-      ...files
-        .slice(offset, offset + limits.listPageSize)
-        .map(entry =>
-          observation(
-            String(body.id),
-            'code',
-            entry.path,
-            `${body.full_name}: ${entry.path}`,
-            `https://github.com/${body.full_name}/blob/${commit}/${encodePath(entry.path)}`,
-            `blob:${entry.sha}`,
-            accessedAt,
-            entry.coverage === 'excluded'
-              ? 'excluded'
-              : (entry.size ?? 0) > limits.documentBytes
-                ? 'too-large'
-                : 'supported',
-          ),
-        ),
-    ];
+    if ([404, 409, 422].includes(response.status)) throw new GitHubCorpusError('invalid-cursor');
+    if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
+    return parse(treeSchema, response.json());
+  }
+  // The whole tree in one response when GitHub returns it complete and small enough; otherwise null, and the tree is walked.
+  async function recursiveTree(token: string, body: RepositoryBody, commit: string) {
+    try {
+      const value = await tree(token, body, commit, true);
+      return value.truncated || value.tree.length > limits.recursiveTreeEntries ? null : value.tree;
+    } catch (error) {
+      if (error instanceof GitHubCorpusError && ['response-too-large', 'invalid-response'].includes(error.code))
+        return null;
+      throw error;
+    }
+  }
+  // Lists every default-branch file of one kind, in parts. The cursor is `<commit>:<offset>` over the sorted recursive
+  // tree, or `<commit>:w<index path>` while walking directories one request at a time; `+<part>` resumes inside a file.
+  async function listFiles(
+    token: string,
+    body: RepositoryBody,
+    phase: 'docs' | 'code',
+    state: string,
+    accessedAt: string,
+    selection: GitHubCorpusSelection,
+  ) {
+    const kind = phase === 'docs' ? 'doc' : 'code';
+    const wanted = (path: string) => githubFileKind(path) === kind && githubPathIndexable(path);
+    let commit: string;
+    let walk: number[] | null = null;
+    let offset = 0;
+    let part = 1;
+    if (!state) {
+      const head = await headCommit(token, body);
+      if (!head) return { observations: [], nextCursor: nextPhase(selection, phase) };
+      commit = head;
+    } else {
+      const match = /^([a-f0-9]{40,64}):(?:(\d{1,9})|w(\d{1,9}(?:\.\d{1,9}){0,255}))(?:\+([2-9]|[1-9]\d{1,6}))?$/.exec(
+        state,
+      );
+      if (!match) throw new GitHubCorpusError('invalid-cursor');
+      commit = match[1] ?? '';
+      walk = match[3] === undefined ? null : match[3].split('.').map(Number);
+      offset = Number(match[2] ?? 0);
+      part = Number(match[4] ?? 1);
+    }
+    const observations: GitHubItemObservation[] = [];
+    // Adds a file's parts from `from` and returns the part to resume at when the page fills first.
+    const add = (path: string, entry: TreeEntry, from: number) => {
+      const parts = fileParts(path, entry.size ?? 0);
+      let next = from;
+      for (; next <= parts && observations.length < limits.listPageSize; next++)
+        observations.push(fileObservation(body, commit, accessedAt, path, entry.sha, next, parts));
+      return next <= parts ? next : null;
+    };
+    if (!walk) {
+      const entries = await recursiveTree(token, body, commit);
+      if (entries) {
+        const files = entries
+          .filter(entry => entry.type === 'blob' && wanted(entry.path))
+          .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+        for (let index = offset; index < files.length; index++) {
+          if (observations.length >= limits.listPageSize)
+            return { observations, nextCursor: `${phase}:${commit}:${index}` };
+          const entry = files[index] as TreeEntry;
+          const resume = add(entry.path, entry, index === offset ? part : 1);
+          if (resume) return { observations, nextCursor: `${phase}:${commit}:${index}+${resume}` };
+        }
+        return { observations, nextCursor: nextPhase(selection, phase) };
+      }
+      walk = [];
+      part = 1;
+    }
+    type Frame = { prefix: string; entries: TreeEntry[]; index: number };
+    const stack: Frame[] = [];
+    let requests = 0;
+    const enter = async (sha: string, prefix: string, index: number, fresh: boolean) => {
+      requests++;
+      const value = await tree(token, body, sha);
+      if (value.truncated && fresh) observations.push(omitted(body, kind, commit, sha, accessedAt));
+      stack.push({ prefix, entries: value.tree, index });
+    };
+    await enter(commit, '', walk[0] ?? 0, walk.length === 0);
+    for (let depth = 1; depth < walk.length; depth++) {
+      const parent = stack[depth - 1] as Frame;
+      const entry = parent.entries[parent.index];
+      if (!entry || entry.type !== 'tree') throw new GitHubCorpusError('invalid-cursor');
+      await enter(entry.sha, `${parent.prefix}${entry.path}/`, walk[depth] ?? 0, false);
+    }
+    // Resuming costs one request per directory level; the page budget counts only the requests that make progress.
+    const resumed = requests;
+    while (stack.length) {
+      const top = stack[stack.length - 1] as Frame;
+      const entry = top.entries[top.index];
+      if (!entry) {
+        stack.pop();
+        const parent = stack[stack.length - 1];
+        if (parent) parent.index++;
+        part = 1;
+        continue;
+      }
+      if (observations.length >= limits.listPageSize || requests - resumed >= limits.treeRequestsPerPage) break;
+      const path = `${top.prefix}${entry.path}`;
+      if (entry.type === 'tree') {
+        await enter(entry.sha, `${path}/`, 0, true);
+        continue;
+      }
+      if (entry.type === 'blob' && wanted(path)) {
+        const resume = add(path, entry, part);
+        if (resume) {
+          part = resume;
+          break;
+        }
+      }
+      top.index++;
+      part = 1;
+    }
     return {
       observations,
-      nextCursor:
-        offset + limits.listPageSize < files.length
-          ? `code:${commit}:${offset + limits.listPageSize}`
-          : nextPhase(selection, 'code'),
+      nextCursor: stack.length
+        ? `${phase}:${commit}:w${stack.map(frame => frame.index).join('.')}${part > 1 ? `+${part}` : ''}`
+        : nextPhase(selection, phase),
     };
   }
   async function listIssues(
@@ -595,18 +862,20 @@ export function createGitHubCorpusProvider(options: {
         issue =>
           selection.kinds.includes(issue.pull_request ? 'pulls' : 'issues') && inWindow(selection, issue.updated_at),
       )
-      .map(issue =>
-        observation(
-          String(body.id),
-          issue.pull_request ? 'pull' : 'issue',
-          String(issue.number),
-          `${body.full_name}#${issue.number}: ${oneLine(issue.title)}`,
-          issue.html_url,
-          `issue:${issue.updated_at}:${issue.comments}`,
-          accessedAt,
-          issue.comments > limits.comments ? 'too-large' : 'supported',
-        ),
-      );
+      .flatMap(issue => {
+        const parts = commentParts(issue.comments);
+        return Array.from({ length: parts }, (_, index) =>
+          observation(
+            String(body.id),
+            issue.pull_request ? 'pull' : 'issue',
+            partRest(index + 1, String(issue.number)),
+            partTitle(`${body.full_name}#${issue.number}: ${oneLine(issue.title)}`, index + 1, parts),
+            issue.html_url,
+            `issue:${issue.updated_at}:${issue.comments}`,
+            accessedAt,
+          ),
+        );
+      });
     return {
       observations,
       nextCursor: issues.length === limits.issuePageSize ? `issues:${page + 1}` : nextPhase(selection, 'issues'),
@@ -623,12 +892,7 @@ export function createGitHubCorpusProvider(options: {
       z.object({
         node: z
           .object({
-            discussions: z
-              .object({
-                pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().max(1024).nullable() }),
-                nodes: z.array(discussionNode).max(20),
-              })
-              .optional(),
+            discussions: z.object({ pageInfo, nodes: z.array(discussionNode).max(20) }).optional(),
           })
           .nullable(),
       }),
@@ -637,40 +901,181 @@ export function createGitHubCorpusProvider(options: {
     const connection = data.node?.discussions;
     if (!connection) return { observations: [], nextCursor: null };
     const fresh = connection.nodes.filter(node => inWindow(selection, node.updatedAt));
-    const observations = fresh.map(node =>
-      observation(
-        String(body.id),
-        'discussion',
-        String(node.number),
-        `${body.full_name} discussion #${node.number}: ${oneLine(node.title)}`,
-        node.url,
-        `discussion:${node.updatedAt}:${node.comments.totalCount}`,
-        accessedAt,
-        node.comments.totalCount > 100 ? 'too-large' : 'supported',
-      ),
-    );
+    const observations = fresh.flatMap(node => {
+      const parts = commentParts(node.comments.totalCount);
+      return Array.from({ length: parts }, (_, index) =>
+        observation(
+          String(body.id),
+          'discussion',
+          partRest(index + 1, String(node.number)),
+          partTitle(`${body.full_name} discussion #${node.number}: ${oneLine(node.title)}`, index + 1, parts),
+          node.url,
+          `discussion:${node.updatedAt}:${node.comments.totalCount}`,
+          accessedAt,
+        ),
+      );
+    });
     const more =
       connection.pageInfo.hasNextPage && fresh.length === connection.nodes.length && connection.pageInfo.endCursor;
     return { observations, nextCursor: more ? `discussions:${connection.pageInfo.endCursor}` : null };
   }
-  async function comments(token: string, repositoryId: string, issue: Issue) {
-    if (issue.comments > limits.comments) throw new GitHubCorpusError('too-large');
-    const all: z.infer<typeof commentSchema>[] = [];
-    for (let page = 1; page <= Math.ceil(limits.comments / 100) && all.length < issue.comments; page++) {
-      const response = await call(
-        token,
-        'github-comments',
-        `/repositories/${repositoryId}/issues/${issue.number}/comments?per_page=100&page=${page}`,
+  // One part's page of issue comments; parts follow GitHub's own comment pages, so no comment count is too many.
+  async function comments(token: string, repositoryId: string, issue: Issue, part: number) {
+    if (!issue.comments) return [];
+    const response = await call(
+      token,
+      'github-comments',
+      `/repositories/${repositoryId}/issues/${issue.number}/comments?per_page=${limits.commentsPerPart}&page=${part}`,
+    );
+    if (response.status !== 200)
+      throw new GitHubCorpusError(
+        response.status === 404 || response.status === 410 ? 'not-found' : 'invalid-response',
       );
-      if (response.status !== 200)
-        throw new GitHubCorpusError(
-          response.status === 404 || response.status === 410 ? 'not-found' : 'invalid-response',
-        );
-      const batch = parse(z.array(commentSchema).max(100), response.json());
-      all.push(...batch);
-      if (batch.length < 100) break;
+    return parse(z.array(commentSchema).max(limits.commentsPerPart), response.json());
+  }
+  // One part of a discussion: skips earlier comment pages by cursor, then pages through every reply of its comments.
+  async function discussion(token: string, body: RepositoryBody, number: number, part: number) {
+    let cursor: string | null = null;
+    for (let skipped = 1; skipped < part; skipped++) {
+      const info: z.infer<typeof pageInfo> | undefined = parse(
+        commentCursorSchema,
+        await graphql(token, DISCUSSION_COMMENT_CURSOR, { id: body.node_id, number, after: cursor }),
+      ).node?.discussion?.comments.pageInfo;
+      if (!info?.hasNextPage || !info.endCursor) throw new GitHubCorpusError('not-found');
+      cursor = info.endCursor;
     }
-    return all;
+    const data = parse(
+      z.object({ node: z.object({ discussion: discussionPageSchema.nullable().optional() }).nullable() }),
+      await graphql(token, DISCUSSION, { id: body.node_id, number, after: cursor }),
+    );
+    const found = data.node?.discussion;
+    if (!found) throw new GitHubCorpusError('not-found');
+    let bytes = 0;
+    const nodes: GitHubDiscussion['comments']['nodes'] = [];
+    for (const comment of found.comments.nodes) {
+      const replies = [...comment.replies.nodes];
+      let info = comment.replies.pageInfo;
+      while (info.hasNextPage && info.endCursor) {
+        let more;
+        try {
+          more = parse(
+            z.object({
+              node: z.object({ replies: z.object({ pageInfo, nodes: z.array(replySchema).max(100) }) }).nullable(),
+            }),
+            await graphql(token, DISCUSSION_REPLIES, { id: comment.id, after: info.endCursor }),
+          );
+        } catch (error) {
+          // A comment deleted while it is read is a changed source, not a lost repository.
+          if (error instanceof GitHubCorpusError && error.code === 'forbidden')
+            throw new GitHubCorpusError('source-changed');
+          throw error;
+        }
+        if (!more.node) throw new GitHubCorpusError('source-changed');
+        replies.push(...more.node.replies.nodes);
+        for (const reply of more.node.replies.nodes) bytes += Buffer.byteLength(reply.body);
+        if (bytes > limits.markdownBytes) throw new GitHubCorpusError('too-large');
+        info = more.node.replies.pageInfo;
+      }
+      nodes.push({ ...comment, replies: { nodes: replies } });
+    }
+    return { ...found, comments: { totalCount: found.comments.totalCount, nodes } };
+  }
+  async function contentFile(token: string, body: RepositoryBody, commit: string, path: string): Promise<FileRef> {
+    const response = await call(
+      token,
+      'github-content',
+      `/repositories/${body.id}/contents/${encodePath(path)}?ref=${commit}`,
+    );
+    if ([404, 410].includes(response.status)) throw new GitHubCorpusError('not-found');
+    if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
+    const file = parse(contentSchema, response.json(), 'not-found');
+    // GitHub inlines content only for files up to 1 MB; larger files are streamed from the blob.
+    const content =
+      file.encoding === 'base64' && file.content !== undefined ? Buffer.from(file.content, 'base64') : null;
+    return { sha: file.sha, size: file.size, ...(content?.byteLength === file.size ? { content } : {}) };
+  }
+  // A path too long for its native ID is resolved one directory at a time.
+  async function treeFile(token: string, body: RepositoryBody, commit: string, path: string): Promise<FileRef> {
+    const names = path.split('/');
+    let sha = commit;
+    for (const [index, name] of names.entries()) {
+      let value;
+      try {
+        value = await tree(token, body, sha);
+      } catch (error) {
+        if (error instanceof GitHubCorpusError && error.code === 'invalid-cursor')
+          throw new GitHubCorpusError('not-found');
+        throw error;
+      }
+      const entry = value.tree.find(item => item.path === name);
+      const last = index === names.length - 1;
+      if (!entry || entry.type !== (last ? 'blob' : 'tree')) throw new GitHubCorpusError('not-found');
+      if (last) return { sha: entry.sha, size: entry.size ?? 0 };
+      sha = entry.sha;
+    }
+    throw new GitHubCorpusError('not-found');
+  }
+  // A binary file is indexed by its path and details; an extractor (such as OCR) may supply its text instead.
+  async function binaryText(token: string, body: RepositoryBody, path: string, file: FileRef) {
+    const mediaType = mediaTypeOf(path);
+    const inline = file.content;
+    const extracted = options.extractBinary
+      ? await options.extractBinary({
+          path,
+          mediaType,
+          size: file.size,
+          content: () =>
+            inline
+              ? (async function* () {
+                  yield inline;
+                })()
+              : blob(token, String(body.id), file.sha, file.size),
+        })
+      : null;
+    if (extracted?.trim()) return decode(Buffer.from(extracted), 'utf-8').trim();
+    return `Binary file, ${file.size} bytes, media type ${mediaType}. Content extraction pending OCR; only its path and file details are indexed.`;
+  }
+  async function readFile(
+    token: string,
+    body: RepositoryBody,
+    kind: 'doc' | 'code',
+    path: string,
+    part: number,
+    accessedAt: string,
+  ): Promise<GitHubItemRead> {
+    const commit = await headCommit(token, body);
+    if (!commit) throw new GitHubCorpusError('not-found');
+    const file =
+      Buffer.byteLength(path) > 1024
+        ? await treeFile(token, body, commit, path)
+        : await contentFile(token, body, commit, path);
+    const parts = fileParts(path, file.size);
+    if (part > parts) throw new GitHubCorpusError('not-found');
+    const base = fileObservation(body, commit, accessedAt, path, file.sha, part, parts);
+    const finish = (content: string) => {
+      const markdown = `# ${body.full_name}: ${path}${parts > 1 ? ` (part ${part} of ${parts})` : ''}\n\nGitHub repository ${body.full_name} (ID ${body.id}), file \`${path.replaceAll('`', '')}\` at commit ${commit} (blob ${file.sha})${parts > 1 ? `, part ${part} of ${parts}` : ''}.\n\n---\n\n${content}\n`;
+      if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
+      return { ...base, markdown };
+    };
+    if (isGitHubBinaryPath(path)) return finish(await binaryText(token, body, path, file));
+    // Part `part` covers bytes [(part - 1) × partBytes, part × partBytes), each end moved forward to a line break.
+    const start = (part - 1) * limits.partBytes;
+    const end = Math.min(file.size, part * limits.partBytes + boundarySearchBytes);
+    const { head, window } = file.content
+      ? { head: file.content.subarray(0, sniffBytes), window: file.content.subarray(start, end) }
+      : await blobRange(token, String(body.id), file, start, end);
+    const { encoding, bom } = sniff(head);
+    if (encoding === 'binary') {
+      if (part > 1) throw new GitHubCorpusError('unsupported');
+      return finish(await binaryText(token, body, path, file));
+    }
+    const from = part === 1 ? bom : boundary(window, start, start, file.size, encoding);
+    const to = part === parts ? file.size : boundary(window, start, part * limits.partBytes, file.size, encoding);
+    const text = decode(window.subarray(from - start, Math.max(from, to) - start), encoding)
+      .replace(/^\s*\n/, '')
+      .trimEnd();
+    if (!text) return finish(parts > 1 ? '_No text content in this part._' : '_No text content._');
+    return finish(kind === 'code' ? `${fence(text)}\n${text}\n${fence(text)}` : text);
   }
   return {
     async discover(workspaceId, userId, accountId, cursor) {
@@ -764,54 +1169,21 @@ export function createGitHubCorpusProvider(options: {
         if (split < 0 || !(phases(selection) as string[]).includes(phase))
           throw new GitHubCorpusError('invalid-cursor');
         const page =
-          phase === 'docs'
-            ? await listDocs(credential.accessToken, body, state, accessedAt, selection)
-            : phase === 'code'
-              ? await listCode(credential.accessToken, body, state, accessedAt, selection)
-              : phase === 'issues'
-                ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
-                : await listDiscussions(credential.accessToken, body, state, accessedAt, selection);
+          phase === 'docs' || phase === 'code'
+            ? await listFiles(credential.accessToken, body, phase, state, accessedAt, selection)
+            : phase === 'issues'
+              ? await listIssues(credential.accessToken, body, state, accessedAt, selection)
+              : await listDiscussions(credential.accessToken, body, state, accessedAt, selection);
         return {
           observations: page.observations,
           nextCursor: page.nextCursor ? parse(githubCorpusCursorTokenSchema, page.nextCursor) : null,
         };
       });
     },
-    async displacedCode(workspaceId, userId, expected, repositoryId, input, nativeIds) {
+    async read(workspaceId, userId, expected, repositoryId, nativeId, input, path): Promise<GitHubItemRead> {
       const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
-      if (!selection.kinds.includes('code')) throw new GitHubCorpusError('outside-selection');
-      const ids = parse(z.array(z.string().max(1200)).max(limits.listPageSize), nativeIds, 'invalid-selection');
-      const paths = new Map(
-        ids.map(id => {
-          const { kind, rest } = native(id, repositoryId);
-          if (kind !== 'code') throw new GitHubCorpusError('invalid-selection');
-          return [rest, id] as const;
-        }),
-      );
-      return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
-        const token = credential.accessToken;
-        const body = await byId(token, repositoryId);
-        scoped(credential, repository(body));
-        const commit = await headCommit(token, body);
-        if (!commit || !paths.size) return [];
-        let selected;
-        try {
-          selected = await codeTree(token, body, commit);
-        } catch (error) {
-          if (error instanceof GitHubCorpusError && error.code === 'invalid-cursor') return [];
-          throw error;
-        }
-        // A truncated tree cannot prove which files are beyond the bound, so nothing is reported displaced.
-        if (selected.tree.truncated) return [];
-        return selected.supported.slice(codeFiles).flatMap(entry => {
-          const id = paths.get(entry.path);
-          return id ? [id] : [];
-        });
-      });
-    },
-    async read(workspaceId, userId, expected, repositoryId, nativeId, input): Promise<GitHubItemRead> {
-      const selection = parse(githubCorpusSelectionSchema, input, 'invalid-selection');
-      const { kind, rest } = native(nativeId, repositoryId);
+      const id = native(nativeId, repositoryId);
+      const { kind } = id;
       if (
         !selection.kinds.includes(
           kind === 'doc'
@@ -826,101 +1198,65 @@ export function createGitHubCorpusProvider(options: {
         )
       )
         throw new GitHubCorpusError('outside-selection');
+      if (id.marker) throw new GitHubCorpusError('not-found');
+      let file: string | null = null;
+      if (kind === 'doc' || kind === 'code') {
+        file = id.hash ? (path ?? null) : id.ref;
+        if (file === null || (id.hash && (Buffer.byteLength(file) <= 1024 || hashPath(file) !== id.hash)))
+          throw new GitHubCorpusError('not-found');
+        if (githubFileKind(file) !== kind || !githubPathIndexable(file))
+          throw new GitHubCorpusError('outside-selection');
+      }
       return withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
         const token = credential.accessToken;
         const accessedAt = new Date().toISOString();
         const body = await byId(token, repositoryId);
         scoped(credential, repository(body));
-        if (kind === 'doc' || kind === 'code') {
-          if (
-            kind === 'doc'
-              ? !isGitHubDocumentPath(rest) || rest.length > 1024
-              : githubCodeCoverage(rest) !== 'supported'
-          )
-            throw new GitHubCorpusError('outside-selection');
-          const commit = await headCommit(token, body);
-          if (!commit) throw new GitHubCorpusError('not-found');
-          const response = await call(
-            token,
-            'github-content',
-            `/repositories/${body.id}/contents/${encodePath(rest)}?ref=${commit}`,
-          );
-          if ([404, 410].includes(response.status)) throw new GitHubCorpusError('not-found');
-          if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
-          const file = parse(contentSchema, response.json(), 'not-found');
-          const base = observation(
-            repositoryId,
-            kind,
-            rest,
-            `${body.full_name}: ${rest}`,
-            `https://github.com/${body.full_name}/blob/${commit}/${encodePath(rest)}`,
-            `blob:${file.sha}`,
-            accessedAt,
-          );
-          if (file.size > limits.documentBytes || file.encoding !== 'base64' || file.content === undefined)
-            throw new GitHubCorpusError('too-large');
-          const bytes = Buffer.from(file.content, 'base64');
-          if (bytes.byteLength !== file.size) throw new GitHubCorpusError('invalid-response');
-          let content: string;
-          try {
-            content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-          } catch {
-            throw new GitHubCorpusError('unsupported');
-          }
-          if (content.includes('\0')) throw new GitHubCorpusError('unsupported');
-          const text = content
-            .replace(/^\uFEFF/, '')
-            .replace(/\r\n?/g, '\n')
-            .trim();
-          const body_ = kind === 'code' ? `${fence(text)}\n${text}\n${fence(text)}` : text;
-          const markdown = `# ${body.full_name}: ${rest}\n\nGitHub repository ${body.full_name} (ID ${body.id}), file \`${rest.replaceAll('`', '')}\` at commit ${commit} (blob ${file.sha}).\n\n---\n\n${body_}\n`;
-          if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
-          return { ...base, markdown };
-        }
+        if (file !== null && (kind === 'doc' || kind === 'code'))
+          return readFile(token, body, kind, file, id.part, accessedAt);
         if (kind === 'discussion') {
-          const data = parse(
-            z.object({ node: z.object({ discussion: discussionSchema.nullable().optional() }).nullable() }),
-            await graphql(token, DISCUSSION, { id: body.node_id, number: Number(rest) }),
-          );
-          const discussion = data.node?.discussion;
-          if (!discussion) throw new GitHubCorpusError('not-found');
-          if (!inWindow(selection, discussion.updatedAt)) throw new GitHubCorpusError('outside-selection');
-          if (
-            discussion.comments.totalCount > 100 ||
-            discussion.comments.nodes.some(comment => comment.replies.totalCount > 50)
-          )
-            throw new GitHubCorpusError('too-large');
-          const markdown = serializeGitHubDiscussion(body.full_name, discussion);
+          const found = await discussion(token, body, Number(id.ref), id.part);
+          if (!inWindow(selection, found.updatedAt)) throw new GitHubCorpusError('outside-selection');
+          const parts = commentParts(found.comments.totalCount);
+          if (id.part > parts) throw new GitHubCorpusError('not-found');
+          const markdown = serializeGitHubDiscussion(body.full_name, found, id.part);
           if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
           return {
             ...observation(
               repositoryId,
               'discussion',
-              rest,
-              `${body.full_name} discussion #${discussion.number}: ${oneLine(discussion.title)}`,
-              discussion.url,
-              `discussion:${discussion.updatedAt}:${discussion.comments.totalCount}`,
+              partRest(id.part, id.ref),
+              partTitle(`${body.full_name} discussion #${found.number}: ${oneLine(found.title)}`, id.part, parts),
+              found.url,
+              `discussion:${found.updatedAt}:${found.comments.totalCount}`,
               accessedAt,
             ),
             markdown,
           };
         }
-        const response = await call(token, 'github-issue', `/repositories/${body.id}/issues/${rest}`);
+        const response = await call(token, 'github-issue', `/repositories/${body.id}/issues/${id.ref}`);
         // Deleted (410), missing (404) and transferred (301) issues no longer belong to this repository.
         if ([301, 302, 307, 404, 410].includes(response.status)) throw new GitHubCorpusError('not-found');
         if (response.status !== 200) throw new GitHubCorpusError('invalid-response');
         const issue = parse(issueSchema, response.json());
-        if ((issue.pull_request ? 'pull' : 'issue') !== kind || String(issue.number) !== rest)
+        if ((issue.pull_request ? 'pull' : 'issue') !== kind || String(issue.number) !== id.ref)
           throw new GitHubCorpusError('not-found');
         if (!inWindow(selection, issue.updated_at)) throw new GitHubCorpusError('outside-selection');
-        const markdown = serializeGitHubIssue(body.full_name, issue, await comments(token, repositoryId, issue));
+        const parts = commentParts(issue.comments);
+        if (id.part > parts) throw new GitHubCorpusError('not-found');
+        const markdown = serializeGitHubIssue(
+          body.full_name,
+          issue,
+          await comments(token, repositoryId, issue, id.part),
+          id.part,
+        );
         if (Buffer.byteLength(markdown) > limits.markdownBytes) throw new GitHubCorpusError('too-large');
         return {
           ...observation(
             repositoryId,
             kind,
-            rest,
-            `${body.full_name}#${issue.number}: ${oneLine(issue.title)}`,
+            partRest(id.part, id.ref),
+            partTitle(`${body.full_name}#${issue.number}: ${oneLine(issue.title)}`, id.part, parts),
             issue.html_url,
             `issue:${issue.updated_at}:${issue.comments}`,
             accessedAt,
@@ -941,7 +1277,6 @@ export const unconfiguredGitHubCorpusProvider: GitHubCorpusProvider = {
   access: unconfigured,
   list: unconfigured,
   read: unconfigured,
-  displacedCode: unconfigured,
 };
 
 // Reuses the personal GitHub OAuth configuration and integration credential keys. Missing configuration reports not-configured instead of blocking startup.

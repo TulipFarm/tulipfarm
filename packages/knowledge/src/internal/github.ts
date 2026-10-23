@@ -157,6 +157,8 @@ export function createGitHubKnowledge({
   }
   const authority = { requireExternalSource, requireExternalProof } satisfies Partial<KnowledgeOptions>;
   const store = createKnowledgeStore({ runtime, ...authority });
+  // Common migration 0005 adds `github_items.path`; a workspace not yet migrated keeps working without it.
+  const storesPath = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 5;
   async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
@@ -757,8 +759,8 @@ export function createGitHubKnowledge({
       if (prior && (prior.source_revision !== item.sourceRevision || item.coverage !== 'supported'))
         await clear(tx, documentId);
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'github_items')} (source_id,native_id,repository_id,kind,source_revision,seen_generation,failure) VALUES ($1,$2,$3,$4,$5,$6,$7)
-        ON CONFLICT(source_id,native_id) DO UPDATE SET source_revision=EXCLUDED.source_revision,seen_generation=EXCLUDED.seen_generation,failure=CASE WHEN ${table(tx, 'github_items')}.source_revision=EXCLUDED.source_revision AND EXCLUDED.failure IS NULL THEN ${table(tx, 'github_items')}.failure ELSE EXCLUDED.failure END`,
+        `INSERT INTO ${table(tx, 'github_items')} (source_id,native_id,repository_id,kind,source_revision,seen_generation,failure${storesPath(tx) ? ',path' : ''}) VALUES ($1,$2,$3,$4,$5,$6,$7${storesPath(tx) ? ',$8' : ''})
+        ON CONFLICT(source_id,native_id) DO UPDATE SET source_revision=EXCLUDED.source_revision,seen_generation=EXCLUDED.seen_generation,${storesPath(tx) ? `path=COALESCE(EXCLUDED.path,${table(tx, 'github_items')}.path),` : ''}failure=CASE WHEN ${table(tx, 'github_items')}.source_revision=EXCLUDED.source_revision AND EXCLUDED.failure IS NULL THEN ${table(tx, 'github_items')}.failure ELSE EXCLUDED.failure END`,
         [
           s.source_id,
           item.nativeId,
@@ -767,6 +769,7 @@ export function createGitHubKnowledge({
           item.sourceRevision,
           s.reconciliation,
           item.coverage === 'supported' ? null : item.coverage,
+          ...(storesPath(tx) ? [item.path ?? null] : []),
         ],
       );
     });
@@ -809,6 +812,7 @@ export function createGitHubKnowledge({
         item.repositoryId,
         item.nativeId,
         s.selection,
+        item.path ?? null,
       );
       if (read.sourceRevision !== item.sourceRevision || read.nativeId !== item.nativeId)
         throw new GitHubCorpusError('source-changed');
@@ -1049,12 +1053,13 @@ export function createGitHubKnowledge({
                 kind: z.string(),
                 source_revision: z.string(),
                 document_id: uuidSchema.nullable(),
+                path: z.string().nullable(),
               }),
             )
             .parse(
               (
                 await tx.client.query(
-                  `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id FROM ${table(tx, 'github_items')} i
+                  `SELECT i.native_id,i.repository_id,i.kind,i.source_revision,i.document_id,${storesPath(tx) ? 'i.path' : 'NULL::text AS path'} FROM ${table(tx, 'github_items')} i
           JOIN ${table(tx, 'github_repositories')} c ON c.source_id=i.source_id AND c.repository_id=i.repository_id AND c.state='active'
           LEFT JOIN ${table(tx, 'documents')} d ON d.id=i.document_id
           WHERE i.source_id=$1 AND i.seen_generation<>$2 AND d.tombstoned_at IS NULL AND ($3::text IS NULL OR i.native_id>$3) ORDER BY i.native_id LIMIT 20`,
@@ -1064,7 +1069,6 @@ export function createGitHubKnowledge({
             ),
         );
         const verified = new Map<string, boolean>();
-        const displaced = new Map<string, Set<string>>();
         for (const row of rows) {
           let accessible = verified.get(row.repository_id);
           if (accessible === undefined) {
@@ -1078,40 +1082,6 @@ export function createGitHubKnowledge({
           }
           if (accessible)
             try {
-              if (row.kind === 'code') {
-                let beyond = displaced.get(row.repository_id);
-                if (!beyond) {
-                  beyond = new Set(
-                    await provider.displacedCode(
-                      work.workspaceId,
-                      claim.owner_user_id,
-                      claim.binding,
-                      row.repository_id,
-                      claim.selection,
-                      rows
-                        .filter(other => other.kind === 'code' && other.repository_id === row.repository_id)
-                        .map(other => other.native_id),
-                    ),
-                  );
-                  displaced.set(row.repository_id, beyond);
-                }
-                // Files pushed beyond the current head's count bound get the same excluded skip as listed ones; unproven files are read as before.
-                if (beyond.has(row.native_id)) {
-                  await ingest(work, token, claim, {
-                    nativeId: row.native_id,
-                    repositoryId: row.repository_id,
-                    kind: 'code',
-                    title: row.native_id,
-                    canonicalURL: '',
-                    sourceRevision: row.source_revision,
-                    accessedAt: new Date(clock.now()).toISOString(),
-                    coverage: 'excluded',
-                  });
-                  await fenced(work, token, tx => project(tx, claim.source_id, row.repository_id));
-                  cursor.after = row.native_id;
-                  continue;
-                }
-              }
               const observed = await corpus.fetch(
                 work.workspaceId,
                 claim.owner_user_id,
@@ -1119,6 +1089,7 @@ export function createGitHubKnowledge({
                 row.repository_id,
                 row.native_id,
                 claim.selection,
+                row.path,
               );
               const { markdown: _markdown, ...observation } = observed;
               await ingest(work, token, claim, observation);

@@ -51,8 +51,8 @@ const sourceFailures: Record<string, string> = {
   transient: 'GitHub was temporarily unavailable. The next sync retries automatically.',
 };
 const documentFailures: Record<string, string> = {
-  'too-large': 'This item exceeds the 256 KB file, 500-comment or 1 MB limit and is not searchable.',
-  unsupported: 'This file is not UTF-8 text and is not searchable.',
+  'too-large': 'This part is larger than the 1 MB Knowledge limit and is not searchable.',
+  unsupported: 'This part of the file is binary. Its path and details are indexed in its first part.',
   'source-changed': 'The item changed during import. The next sync imports the latest version.',
   'resource-limited': 'This item exceeds the Knowledge limit.',
 };
