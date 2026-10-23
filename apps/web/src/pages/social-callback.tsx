@@ -111,9 +111,9 @@ function SocialCallbackResult({ workspaceId }: { workspaceId: string }) {
         <Button
           role="link"
           nativeButton={false}
-          render={<Link to="/$workspaceSlug/social/schedule" params={{ workspaceSlug: slug }} />}
+          render={<Link to="/$workspaceSlug/settings/social" params={{ workspaceSlug: slug }} />}
         >
-          Open the social schedule
+          Open social settings
         </Button>
       </StatePanel>
     </main>

@@ -1,14 +1,29 @@
 import { z } from 'zod';
 import {
+  beginConnectionResultSchema,
+  beginConnectionSchema,
+  channelGrantsSchema,
   channelSchema,
   decisionSubmitSchema,
+  disconnectResultSchema,
+  discoveredChannelSchema,
+  platformAppCreateSchema,
+  platformAppMetadataSchema,
+  platformAvailabilitySchema,
+  socialAccountGrantsSchema,
+  socialAccountMetadataSchema,
   postSchema,
   reconcileResultSchema,
   scheduleSchema,
   settlementBodySchema,
   variantSchema,
+  type ChannelGrants,
   type DecisionReviewChoice,
+  type Ownership,
+  type Platform,
+  type PlatformAppCreate,
   type Post,
+  type SocialAccountGrants,
   type VariantState,
 } from '@tulipfarm/social/contracts';
 import { apiOrigin } from './auth';
@@ -18,6 +33,7 @@ export type SocialChannel = z.infer<typeof channelSchema>;
 export type SocialSchedule = z.infer<typeof scheduleSchema>;
 export type SocialCandidates = z.infer<typeof reconcileResultSchema>;
 export type SocialSettlement = z.infer<typeof settlementBodySchema>;
+export type SocialDisconnect = z.infer<typeof disconnectResultSchema>;
 
 export class SocialRequestError extends Error {
   constructor(
@@ -42,6 +58,13 @@ const messages: Record<string, string> = {
   'account-reconnect-required': 'A connected account needs reconnecting before this can continue.',
   'variant-conflict': 'The variant’s state changed. Refresh the schedule and try again.',
   'variant-not-found': 'This variant is unavailable or you no longer hold its publish grant.',
+  'platform-unavailable': 'This platform is not available in this workspace.',
+  'workspace-app-required': 'This platform needs a workspace app. Ask a workspace admin to add one.',
+  'platform-app-not-found': 'That platform app no longer exists. Refresh and choose again.',
+  'account-limit-reached': 'The connection limit is reached. Disconnect an unused connection first.',
+  'account-unavailable': 'The platform could not be reached. Try again in a few minutes.',
+  'account-authorization-denied': 'The platform refused the sign-in. Connect again.',
+  'channel-unreachable': 'This connection can no longer reach that channel. Refresh the list.',
   'settlement-unconfirmed':
     'The platform no longer lists that post as a candidate. Check the platform, then refresh the candidates.',
 };
@@ -79,6 +102,53 @@ async function request<T>(
 }
 
 const id = (value: string) => encodeURIComponent(z.uuid().parse(value));
+
+/** Social settings: connections, platform apps, channels and grants. Secrets are only ever sent, never read. */
+export const socialSettingsApi = {
+  availability: (workspaceId: string, signal?: AbortSignal) =>
+    request(workspaceId, '/availability', z.array(platformAvailabilitySchema), 'GET', undefined, signal),
+  apps: (workspaceId: string, signal?: AbortSignal) =>
+    request(workspaceId, '/platform-apps', z.array(platformAppMetadataSchema), 'GET', undefined, signal),
+  createApp: (workspaceId: string, input: PlatformAppCreate) =>
+    request(workspaceId, '/platform-apps', platformAppMetadataSchema, 'POST', platformAppCreateSchema.parse(input)),
+  replaceSecret: (workspaceId: string, appId: string, clientSecret: string) =>
+    request(workspaceId, `/platform-apps/${id(appId)}/replace-secret`, platformAppMetadataSchema, 'POST', {
+      clientSecret,
+    }),
+  accounts: (workspaceId: string, signal?: AbortSignal) =>
+    request(workspaceId, '/accounts', z.array(socialAccountMetadataSchema), 'GET', undefined, signal),
+  begin: (workspaceId: string, input: { platform: Platform; ownership: Ownership; platformAppId?: string }) =>
+    request(workspaceId, '/accounts/begin', beginConnectionResultSchema, 'POST', beginConnectionSchema.parse(input)),
+  reconnect: (workspaceId: string, accountId: string) =>
+    request(workspaceId, `/accounts/${id(accountId)}/reconnect`, beginConnectionResultSchema, 'POST'),
+  disconnect: (workspaceId: string, accountId: string) =>
+    request(workspaceId, `/accounts/${id(accountId)}/disconnect`, disconnectResultSchema, 'POST'),
+  accountGrants: (workspaceId: string, accountId: string, signal?: AbortSignal) =>
+    request(workspaceId, `/accounts/${id(accountId)}/grants`, socialAccountGrantsSchema, 'GET', undefined, signal),
+  saveAccountGrants: (workspaceId: string, accountId: string, grants: SocialAccountGrants) =>
+    request(
+      workspaceId,
+      `/accounts/${id(accountId)}/grants`,
+      socialAccountMetadataSchema,
+      'PUT',
+      socialAccountGrantsSchema.parse(grants),
+    ),
+  reachable: (workspaceId: string, accountId: string, signal?: AbortSignal) =>
+    request(
+      workspaceId,
+      `/accounts/${id(accountId)}/channels`,
+      z.array(discoveredChannelSchema),
+      'GET',
+      undefined,
+      signal,
+    ),
+  addChannel: (
+    workspaceId: string,
+    input: { accountId: string; expectedAccountGeneration: number; platformChannelId: string },
+  ) => request(workspaceId, '/channels', channelSchema, 'POST', input),
+  saveChannelGrants: (workspaceId: string, channelId: string, grants: ChannelGrants) =>
+    request(workspaceId, `/channels/${id(channelId)}/grants`, channelSchema, 'PUT', channelGrantsSchema.parse(grants)),
+};
 
 export const socialApi = {
   post: (workspaceId: string, postId: string, signal?: AbortSignal) =>

@@ -788,6 +788,19 @@ export const socialScheduleRoute = createRoute({
   path: 'social/schedule',
   component: lazyRouteComponent(() => import('./pages/social-schedule'), 'SocialSchedulePage'),
 });
+/** Connections, channels, grants and platform apps; the page checks `social-publishing` before any request. */
+export const socialSettingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'settings/social',
+  validateSearch: search =>
+    z
+      .object({
+        tab: z.enum(['connections', 'channels', 'apps']).optional().catch(undefined),
+        account: z.uuid().optional().catch(undefined),
+      })
+      .parse(search),
+  component: lazyRouteComponent(() => import('./pages/social-settings'), 'SocialSettingsPage'),
+});
 export const agentTaskRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'agent-tasks/$taskId',
@@ -1039,6 +1052,7 @@ export const router = createRouter({
       workspaceWorkflowsRoute,
       workspaceCalendarRoute,
       socialScheduleRoute,
+      socialSettingsRoute,
       workspaceSettingsRoute,
       workspaceSoulRoute,
       workspaceAccountRoute,
