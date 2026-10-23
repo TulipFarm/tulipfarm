@@ -6,6 +6,7 @@ import { magicLink } from 'better-auth/plugins';
 import type { Pool } from 'pg';
 import { loadModelCatalog, modelFamilyIdSchema } from '@tulipfarm/config';
 import { emitHook } from '@tulipfarm/extensions';
+import { identifyUser, trackEvent } from '@tulipfarm/observability';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { publicGuideOrigins } from './public-guide-config.ts';
 
@@ -164,6 +165,8 @@ export function createAuth(
           // Subscribers run in the background; their failures go to the error reporters.
           after: async user => {
             void emitHook('user.signed-up', { userId: user.id, email: user.email, name: user.name });
+            identifyUser({ id: user.id, email: user.email });
+            trackEvent('user_signed_up', { userId: user.id });
           },
         },
         update: {

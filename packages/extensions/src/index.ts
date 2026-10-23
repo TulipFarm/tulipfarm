@@ -9,6 +9,8 @@ export {
   ExtensionRegistrationError,
   flagProvider,
   flushExtensions,
+  identifyAnalyticsGroup,
+  identifyAnalyticsPerson,
   loadedExtensions,
   providerCostPricing,
   recordUsage,

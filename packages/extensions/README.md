@@ -137,8 +137,75 @@ FEATURE_FLAGS_OFF lists it ──▶ false
 declared default
 ```
 
-The provider receives the flag key and `{ user: { id, email? }, workspace?: { id, name? } }`.
-Unknown flags are off and never reach the provider.
+Each flag also declares a `scope`, which decides who it is evaluated for:
+
+| Scope       | Distinct id      | Subject sent to the provider                     | Use for                                                            |
+| ----------- | ---------------- | ------------------------------------------------ | ------------------------------------------------------------------ |
+| `user`      | the user id      | `user`, plus `workspace` when the caller has one | Per-person UI and features                                         |
+| `workspace` | `workspace:<id>` | `workspace` only; any user is ignored            | Features that background work also checks, so API and worker agree |
+| `global`    | `global`         | nothing                                          | Instance-wide switches                                             |
+
+The provider receives the flag key and a `FlagSubject`:
+
+```ts
+{
+  scope: 'user' | 'workspace' | 'global',
+  distinctId: string,
+  user?: { id, email?, emailDomain? },
+  workspace?: { id, slug?, name?, createdAt? },
+}
+```
+
+Callers pass ids. When a provider is registered, a subject resolver (registered
+by the api and worker with `registerFlagSubjectResolver`) fills the missing
+fields from trusted storage: user email in the api; workspace slug, name, and
+creation time in both. Values the caller passes win, and `emailDomain` comes from
+the final email. Lookups are cached for 60 seconds (at most 1000 entries),
+concurrent lookups share one query, a lookup taking over a second is skipped, and
+only UUIDs are looked up. The worker has no email, so user-scoped flags there see
+the id only. With no provider, nothing is looked up.
+
+A provider may implement `evaluateMany(flags, subject)`; `featureFlagSnapshot`
+then evaluates each scope's flags in one call, and any flag it leaves `undefined`
+falls back as above. A provider's `false` is a decision, not a fallback.
+
+Flags select features; they never grant access. Callers check membership, roles,
+and entitlements first. Target a specific customer by workspace id; slug and name
+can change. Unknown flags are off and never reach the provider.
+
+### Product analytics events
+
+Server product events are declared once in `@tulipfarm/config/analytics-events`,
+each with a description and its allowed properties: booleans, numbers, UUIDs,
+enumerated values, and lower-case identifiers. `trackEvent(name, { userId?,
+workspaceId? }, properties)` in `@tulipfarm/observability` drops undeclared
+events, undeclared properties, and values of the wrong type, then calls every
+`analytics` adapter with the user id (or `workspace:<id>` when there is no user)
+and the `workspace` group. Events carry no content, names, or email.
+
+| Event                      | Properties               | Emitted by                                           |
+| -------------------------- | ------------------------ | ---------------------------------------------------- |
+| `user_signed_up`           |                          | api, after better-auth creates the user              |
+| `workspace_created`        |                          | storage worker, when setup marks the workspace ready |
+| `member_invited`           | `resend`                 | api, when an email invitation is issued or resent    |
+| `member_joined`            |                          | api, the first time an invitation is redeemed        |
+| `conversation_started`     | `in_project`             | api, when a conversation commits                     |
+| `message_sent`             |                          | api, when a user message commits                     |
+| `agent_save_requested`     | `agent_id`, `created`    | api, when an agent save command is queued            |
+| `workflow_saved`           | `workflow_id`, `created` | api, when a workflow version commits                 |
+| `integration_connected`    | `provider`               | api, when an integration connection commits          |
+| `integration_disconnected` | `provider`               | api, when an integration is disconnected             |
+| `task_completed`           | `outcome`                | worker, on a task's terminal transition              |
+
+Each fires after its change commits; idempotent replays fire nothing. Workspace
+renames, workflow and agent runs, knowledge sources, and social posts have no
+event yet.
+
+Two calls store profile data through the optional `ProductAnalytics.group` and
+`ProductAnalytics.person` methods. `identifyWorkspace` stores the workspace's
+`name`, `slug`, and `created_at` on its `workspace` group when it becomes ready.
+`identifyUser` stores only `email_domain` on the person at sign-up; the email is
+never stored on a profile. Adapters without these methods skip them.
 
 ### Hook events
 
@@ -205,18 +272,26 @@ overrides.apply(webExtensions);
 export const analytics = guardBrowserAnalytics(overrides.get('analytics'));
 ```
 
+The app calls `identify(userId, { emailDomain })` on sign-in and
+`workspace({ id, slug, name })` when a workspace page opens, then
+`workspace(undefined)` when it closes. Each call replaces the previous context;
+a client must drop the old user or workspace targeting rather than add to it. A
+client sends this context only after consent, and only for targeting (surveys,
+replay rules); it never stores the email. App feature flags still come from
+`/v1/feature-flags`.
+
 ## Analytics and error-reporting vendors
 
 TulipFarm contains no analytics or error-reporting vendor code, and self-hosted
 installs send no telemetry. Traces, metrics, and logs use OpenTelemetry. A private
 extension adds a vendor by implementing the slots:
 
-| Side        | Slot                 | Implements                                      | Typical vendor call                                                      |
-| ----------- | -------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
-| api, worker | `analytics`          | `ProductAnalytics.capture/flush/shutdown`       | PostHog Node `capture`                                                   |
-| api, worker | `errorReporter`      | `ErrorReporter.captureException/flush/shutdown` | PostHog `captureException` or Sentry Node `captureException`             |
-| api, worker | `flagProvider`       | `FlagProvider.isEnabled/shutdown`               | PostHog `isFeatureEnabled` with `FlagSubject` as person/group properties |
-| web         | `analytics` override | `BrowserAnalytics`                              | `posthog-js` or Sentry Browser                                           |
+| Side        | Slot                 | Implements                                             | Typical vendor call                                                                    |
+| ----------- | -------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| api, worker | `analytics`          | `ProductAnalytics.capture/group/person/flush/shutdown` | PostHog Node `capture`, `groupIdentify`, `$set`                                        |
+| api, worker | `errorReporter`      | `ErrorReporter.captureException/flush/shutdown`        | PostHog `captureException` or Sentry Node `captureException`                           |
+| api, worker | `flagProvider`       | `FlagProvider.isEnabled/evaluateMany/shutdown`         | PostHog `isFeatureEnabled`/`getAllFlags` with `FlagSubject` as person/group properties |
+| web         | `analytics` override | `BrowserAnalytics`                                     | `posthog-js` or Sentry Browser                                                         |
 
 ```ts
 // In the private extension package, which owns the vendor dependency.
@@ -247,7 +322,8 @@ Rules for adapters:
 
 - Read keys, hosts, and DSNs from the extension's own environment; TulipFarm
   declares no vendor settings.
-- Server events carry identifiers and metrics only. `observeInference` sends
+- Server events carry identifiers and metrics only, and are sent without browser
+  consent; disclose them in the deployment's privacy notice. `observeInference` sends
   `$ai_generation`/`$ai_embedding` with model, latency, and token counts, never
   prompt or completion text.
 - Register one object for several slots; `flushExtensions()` and

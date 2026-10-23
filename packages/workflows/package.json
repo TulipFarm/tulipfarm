@@ -47,14 +47,15 @@
     "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
   },
   "dependencies": {
-    "@tulipfarm/github": "workspace:*",
-    "@tulipfarm/workflow-snippets": "workspace:*",
-    "cron-parser": "5.10.1",
     "@temporalio/workflow": "1.24.0",
     "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/github": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
+    "@tulipfarm/workflow-snippets": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
+    "cron-parser": "5.10.1",
     "zod": "4.3.6"
   },
   "devDependencies": {

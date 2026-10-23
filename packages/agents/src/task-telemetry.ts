@@ -1,5 +1,5 @@
 import { emitHook } from '@tulipfarm/extensions';
-import { recordTaskTransition } from '@tulipfarm/observability';
+import { recordTaskTransition, trackEvent } from '@tulipfarm/observability';
 import { afterCommit, workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentStorage, AgentTransaction } from './store.ts';
 
@@ -25,6 +25,7 @@ function completion(tx: AgentTransaction, status: Transition, taskId: string | u
     const workspaceId =
       'workspaceId' in tx && typeof tx.workspaceId === 'string' ? tx.workspaceId : workspaceIdFromSchema(tx.schema);
     void emitHook('task.completed', { workspaceId, taskId, outcome: status });
+    trackEvent('task_completed', { workspaceId }, { outcome: status });
   };
 }
 

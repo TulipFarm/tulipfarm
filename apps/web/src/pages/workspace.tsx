@@ -632,7 +632,10 @@ export function WorkspaceShell() {
 
 function WorkspaceShellContent() {
   const { user, workspace } = workspaceRoute.useRouteContext();
-  useEffect(() => setAnalyticsWorkspace({ id: workspace.id, name: workspace.name }), [workspace.id, workspace.name]);
+  useEffect(() => {
+    setAnalyticsWorkspace({ id: workspace.id, slug: workspace.slug, name: workspace.name });
+    return () => setAnalyticsWorkspace(undefined);
+  }, [workspace.id, workspace.slug, workspace.name]);
   useEffect(() => setFlagWorkspace(workspace.slug), [workspace.slug]);
   const [headerElement, setHeaderElement] = useState<HTMLDivElement | null>(null);
   const [actionsElement, setActionsElement] = useState<HTMLDivElement | null>(null);

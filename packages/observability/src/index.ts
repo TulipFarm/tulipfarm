@@ -3,15 +3,32 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { isIPv4, isIPv6 } from 'node:net';
 import { buildInfoSchema, productionBuildSchema, type BuildInfo } from '@tulipfarm/build-info';
 import {
+  emailDomain,
+  flagSubject,
+  resolveFlagContext,
+  type FlagUserInput,
+  type FlagWorkspaceInput,
+} from './flag-subjects.ts';
+import {
   configuredFeatureFlag,
   featureFlagNames,
+  featureFlags,
   isFeatureFlag,
   type FeatureFlag,
+  type FeatureFlagScope,
   type FeatureFlagSnapshot,
 } from '@tulipfarm/config/feature-flags';
 import {
+  analyticsEventProperties,
+  isAnalyticsEvent,
+  type AnalyticsEventName,
+  type AnalyticsEventProperties,
+} from '@tulipfarm/config/analytics-events';
+import {
   captureAnalytics,
   flagProvider,
+  identifyAnalyticsGroup,
+  identifyAnalyticsPerson,
   flushExtensions,
   reportError,
   shutdownExtensions,
@@ -70,6 +87,14 @@ export { context, ROOT_CONTEXT, SpanStatusCode, trace };
 export { alwaysSample, chatTurnSpan, TelemetryRootSampler, telemetrySampler } from './sampling.ts';
 export { errorAttributes, telemetryErrorCode };
 export { withErrorStage, type ErrorStage } from './error-codes.ts';
+export {
+  registerFlagSubjectResolver,
+  resetFlagSubjects,
+  type FlagSubjectResolver,
+  type FlagUserInput,
+  type FlagWorkspaceInput,
+  type ResolvedFlagContext,
+} from './flag-subjects.ts';
 export {
   fallbackEligibleClasses,
   ModelCallError,
@@ -2181,45 +2206,148 @@ export function captureEvent(
   captureAnalytics({ event, distinctId, properties, ...(groups ? { groups } : {}) });
 }
 
-type FlagUser = { id: string; email?: string };
-type FlagWorkspace = { id: string; name?: string };
+/**
+ * Records a product event declared in @tulipfarm/config/analytics-events. Undeclared properties
+ * and values of the wrong type are dropped, so free text never leaves the process. A workspace
+ * event is attached to the `workspace` group. Without the user, the workspace is the actor.
+ */
+export function trackEvent<E extends AnalyticsEventName>(
+  event: E,
+  actor: { readonly userId?: string | null; readonly workspaceId?: string | null },
+  properties: AnalyticsEventProperties<E> = {} as AnalyticsEventProperties<E>,
+) {
+  const distinctId = actor.userId || (actor.workspaceId ? `workspace:${actor.workspaceId}` : undefined);
+  if (!distinctId || !isAnalyticsEvent(event)) return;
+  captureAnalytics({
+    event,
+    distinctId,
+    properties: {
+      ...analyticsEventProperties(event, properties as Record<string, unknown>),
+      ...(actor.workspaceId ? { workspace_id: actor.workspaceId } : {}),
+    },
+    ...(actor.workspaceId ? { groups: { workspace: actor.workspaceId } } : {}),
+  });
+}
+
+/** Stores a workspace's analytics group properties: its name, slug and creation time. */
+export function identifyWorkspace(workspace: {
+  readonly id: string;
+  readonly name?: string;
+  readonly slug?: string;
+  readonly createdAt?: string | Date;
+}) {
+  const createdAt = workspace.createdAt instanceof Date ? workspace.createdAt.toISOString() : workspace.createdAt;
+  identifyAnalyticsGroup({
+    type: 'workspace',
+    key: workspace.id,
+    properties: {
+      ...(workspace.name !== undefined && { name: workspace.name }),
+      ...(workspace.slug !== undefined && { slug: workspace.slug }),
+      ...(createdAt !== undefined && { created_at: createdAt }),
+    },
+  });
+}
+
+/** Stores a person's analytics properties. Only the email's domain is stored, never the email. */
+export function identifyUser(user: { readonly id: string; readonly email?: string | null }) {
+  const domain = emailDomain(user.email ?? undefined);
+  identifyAnalyticsPerson({ distinctId: user.id, properties: { ...(domain && { email_domain: domain }) } });
+}
+
+const flagFailure = (operation: string) => (error: unknown) =>
+  log('warn', 'dependency', 'call_failed', { operation, outcome: 'fallback', ...errorAttributes(error) });
+
+// A workspace flag ignores the user, so its lookup and cache are shared by every member.
+function contextFor(scope: FeatureFlagScope, user: FlagUserInput | null, workspace: FlagWorkspaceInput | undefined) {
+  if (scope === 'global') return Promise.resolve({});
+  return resolveFlagContext(
+    scope === 'user' ? (user ?? undefined) : undefined,
+    workspace,
+    flagFailure('feature-flag.subject'),
+  );
+}
 
 /**
  * Resolves a flag: the registered flag provider when it returns a boolean, else the flag's env
  * override, FEATURE_FLAGS_OFF, and its declared default (see @tulipfarm/config/feature-flags).
+ * The flag's scope decides who it is evaluated for: a `workspace` flag ignores `user`, a `global`
+ * flag ignores both. Missing attributes come from the registered flag subject resolver.
  * A provider failure is logged and falls back. Unknown flags are off.
  */
 export async function isFeatureEnabled(
   flag: FeatureFlag,
-  user: FlagUser,
-  workspace?: FlagWorkspace,
+  user: FlagUserInput | null,
+  workspace?: FlagWorkspaceInput,
   env: NodeJS.ProcessEnv = process.env,
 ) {
   if (!isFeatureFlag(flag)) return false;
   const provider = flagProvider();
   if (provider) {
-    try {
-      const answer = await provider.isEnabled(flag, { user, ...(workspace ? { workspace } : {}) });
-      if (typeof answer === 'boolean') return answer;
-    } catch (error) {
-      log('warn', 'dependency', 'call_failed', {
-        operation: `feature-flag.${flag}`,
-        outcome: 'fallback',
-        ...errorAttributes(error),
-      });
+    const { scope } = featureFlags[flag];
+    const subject = flagSubject(scope, await contextFor(scope, user, workspace));
+    if (subject) {
+      try {
+        const answer = await provider.isEnabled(flag, subject);
+        if (typeof answer === 'boolean') return answer;
+      } catch (error) {
+        flagFailure(`feature-flag.${flag}`)(error);
+      }
     }
   }
   return configuredFeatureFlag(flag, env);
 }
 
-/** Every registered flag for one subject, as a serializable snapshot for a client such as the web app. */
+/**
+ * Every registered flag for one subject, as a serializable snapshot for a client such as the web
+ * app. Each scope is one provider call when the provider supports `evaluateMany`.
+ */
 export async function featureFlagSnapshot(
-  user: FlagUser,
-  workspace?: FlagWorkspace,
+  user: FlagUserInput,
+  workspace?: FlagWorkspaceInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<FeatureFlagSnapshot> {
-  const values = await Promise.all(featureFlagNames.map(flag => isFeatureEnabled(flag, user, workspace, env)));
-  return Object.fromEntries(featureFlagNames.map((flag, index) => [flag, values[index]])) as FeatureFlagSnapshot;
+  const provider = flagProvider();
+  const answers = new Map<FeatureFlag, boolean>();
+  if (provider) {
+    const scopes = [...new Set(featureFlagNames.map(flag => featureFlags[flag].scope))];
+    await Promise.all(
+      scopes.map(async scope => {
+        const flags = featureFlagNames.filter(flag => featureFlags[flag].scope === scope);
+        const subject = flagSubject(scope, await contextFor(scope, user, workspace));
+        if (!subject) return;
+        const evaluate = provider.evaluateMany
+          ? async () => {
+              try {
+                return await provider.evaluateMany!(flags, subject);
+              } catch (error) {
+                flagFailure('feature-flag.snapshot')(error);
+                return {};
+              }
+            }
+          : async () =>
+              Object.fromEntries(
+                await Promise.all(
+                  flags.map(async flag => {
+                    try {
+                      return [flag, await provider.isEnabled(flag, subject)] as const;
+                    } catch (error) {
+                      flagFailure(`feature-flag.${flag}`)(error);
+                      return [flag, undefined] as const;
+                    }
+                  }),
+                ),
+              );
+        const result = await evaluate();
+        for (const flag of flags) {
+          const answer = Object.hasOwn(result, flag) ? result[flag] : undefined;
+          if (typeof answer === 'boolean') answers.set(flag, answer);
+        }
+      }),
+    );
+  }
+  return Object.fromEntries(
+    featureFlagNames.map(flag => [flag, answers.get(flag) ?? configuredFeatureFlag(flag, env)]),
+  ) as FeatureFlagSnapshot;
 }
 
 /** Counts and logs what an optional fallback model did for one failed primary model call. */

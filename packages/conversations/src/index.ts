@@ -12,7 +12,7 @@ import { workflowReferences } from './workflow-receipts.ts';
 import { sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
-import { observeChatDetail } from '@tulipfarm/observability';
+import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
   AccessDenied,
   lockAuthorization,
@@ -22,6 +22,7 @@ import {
   type AuthorizationTransaction,
 } from '@tulipfarm/access';
 import {
+  afterCommit,
   qualified,
   StorageUnavailableError,
   commonCompatibility,
@@ -276,6 +277,13 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
           }
           await allowance(tx);
           await notifyConversationChange(tx, { workspaceId, conversationId: input.chatId });
+          afterCommit(tx.client, () =>
+            trackEvent(
+              'conversation_started',
+              { userId: actor.userId, workspaceId },
+              { in_project: Boolean(input.projectId) },
+            ),
+          );
           return { id: input.chatId };
         },
         true,
@@ -463,6 +471,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
       }
       await notifyConversationChange(tx, { workspaceId, conversationId: chatId, turnId });
       recorded?.();
+      afterCommit(tx.client, () => trackEvent('message_sent', { userId: actor.userId, workspaceId }));
       return {
         messageId: input.messageId,
         turnId,

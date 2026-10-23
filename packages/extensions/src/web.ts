@@ -74,6 +74,11 @@ export function createOverrideRegistry<Slots extends Record<string, unknown>>(
   };
 }
 
+/** Targeting traits for the signed-in user. Only the email's domain, never the address. */
+export type BrowserAnalyticsUser = { readonly emailDomain?: string };
+/** The open workspace, for group analytics and survey, replay and flag targeting. */
+export type BrowserAnalyticsWorkspace = { readonly id: string; readonly slug?: string; readonly name?: string };
+
 /**
  * Browser product analytics and error reporting. The web app declares it as the
  * `analytics` override with `noopBrowserAnalytics` as the default; a web extension
@@ -86,8 +91,13 @@ export type BrowserAnalytics = {
   choose(accepted: boolean): void;
   start(): void;
   pageview(): void;
-  identify(userId: string): void;
-  workspace(workspaceId: string): void;
+  /** Identifies the user. Each call replaces the previous user's traits. */
+  identify(userId: string, user?: BrowserAnalyticsUser): void;
+  /**
+   * Sets the open workspace, replacing any previous one; `undefined` clears it when the user
+   * leaves a workspace. Implementations send nothing before consent.
+   */
+  workspace(workspace: BrowserAnalyticsWorkspace | undefined): void;
   capture(event: string, properties?: Record<string, unknown>): void;
   captureException(error: unknown): void;
   /** Forgets the identified user. */

@@ -1,3 +1,4 @@
+import type { BrowserAnalyticsWorkspace } from '@tulipfarm/extensions/web';
 import { analytics } from '@/extensions';
 import { authClient } from './auth';
 import { scrubUrls, siteOrigins } from './browser-analytics';
@@ -8,7 +9,17 @@ export const redactOnboardingUrls = (value: unknown, appOrigin = siteOrigins().a
 
 let started = false;
 let userId: string | undefined;
-let workspaceId: string | undefined;
+let workspace: BrowserAnalyticsWorkspace | undefined;
+
+const emailDomain = (email: string | null | undefined) => {
+  const at = email?.lastIndexOf('@') ?? -1;
+  return at > 0
+    ? email!
+        .slice(at + 1)
+        .trim()
+        .toLowerCase() || undefined
+    : undefined;
+};
 
 export function startAnalytics() {
   if (started || !analytics.configured()) return;
@@ -19,19 +30,21 @@ export function startAnalytics() {
     const nextUser = data?.user.id;
     if (userId && nextUser !== userId) {
       analytics.logout();
-      workspaceId = undefined;
+      workspace = undefined;
     }
     if (nextUser && nextUser !== userId) {
-      analytics.identify(nextUser);
-      if (workspaceId) analytics.workspace(workspaceId);
+      const domain = emailDomain(data?.user.email);
+      analytics.identify(nextUser, domain ? { emailDomain: domain } : {});
+      if (workspace) analytics.workspace(workspace);
     }
     userId = nextUser;
   });
 }
 
-export function setAnalyticsWorkspace(next: { id: string; name: string }) {
-  workspaceId = next.id;
-  analytics.workspace(next.id);
+/** Sets the open workspace, or clears it with `undefined` when the user leaves the workspace. */
+export function setAnalyticsWorkspace(next: BrowserAnalyticsWorkspace | undefined) {
+  workspace = next;
+  analytics.workspace(next);
 }
 
 export function trackPage() {

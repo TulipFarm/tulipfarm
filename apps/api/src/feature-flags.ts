@@ -5,7 +5,7 @@ import { featureFlagNames } from '@tulipfarm/config/feature-flags';
 import { featureFlagSnapshot } from '@tulipfarm/observability';
 import type { registerAuth } from './auth.ts';
 
-type Workspace = { id: string; name: string } | null;
+type Workspace = { id: string; name: string; slug: string; createdAt: string } | null;
 
 const query = z.object({ workspace: z.string().trim().min(1).max(255).optional() });
 
@@ -46,7 +46,12 @@ export function registerFeatureFlags(
       const user = { id: session.user.id, ...(session.user.email ? { email: session.user.email } : {}) };
       const workspace =
         parsed.data.workspace && workspaceFor ? await workspaceFor(user.id, parsed.data.workspace) : null;
-      return featureFlagSnapshot(user, workspace ? { id: workspace.id, name: workspace.name } : undefined);
+      return featureFlagSnapshot(
+        user,
+        workspace
+          ? { id: workspace.id, name: workspace.name, slug: workspace.slug, createdAt: workspace.createdAt }
+          : undefined,
+      );
     },
   );
 }

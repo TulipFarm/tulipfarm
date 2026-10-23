@@ -91,9 +91,26 @@ export type AnalyticsEvent = {
   readonly groups?: Record<string, string>;
 };
 
+/** Stored properties of a group, such as a workspace's `name` and `slug`. */
+export type AnalyticsGroup = {
+  readonly type: string;
+  readonly key: string;
+  readonly properties: Readonly<Record<string, string | number | boolean | null>>;
+};
+
+/** Stored person properties. TulipFarm sends only non-identifying ones, such as `email_domain`. */
+export type AnalyticsPerson = {
+  readonly distinctId: string;
+  readonly properties: Readonly<Record<string, string | number | boolean | null>>;
+};
+
 /** Product analytics. Callers never send prompt, completion, or tool text. */
 export type ProductAnalytics = {
   capture(event: AnalyticsEvent): void;
+  /** Stores a group's properties (`identifyGroup` in @tulipfarm/observability). */
+  group?(group: AnalyticsGroup): void;
+  /** Stores a person's properties (`identifyPerson` in @tulipfarm/observability). */
+  person?(person: AnalyticsPerson): void;
   flush?(): Promise<void>;
   shutdown?(): Promise<void>;
 };
@@ -104,18 +121,51 @@ export type ErrorReporter = {
   shutdown?(): Promise<void>;
 };
 
+export type FlagScope = 'user' | 'workspace' | 'global';
+
+export type FlagUserContext = {
+  readonly id: string;
+  /** Evaluation only: a provider must not store it on a profile. */
+  readonly email?: string;
+  /** Lowercase domain of `email`. */
+  readonly emailDomain?: string;
+};
+
+export type FlagWorkspaceContext = {
+  readonly id: string;
+  readonly slug?: string;
+  readonly name?: string;
+  /** ISO 8601 creation time. */
+  readonly createdAt?: string;
+};
+
+/**
+ * Who one flag is evaluated for, shaped by the flag's declared scope:
+ * - `user`: `distinctId` is the user ID; `user` is set and `workspace` is the active one, if any.
+ * - `workspace`: `distinctId` is `workspace:<id>`; `workspace` is set and `user` never is.
+ * - `global`: `distinctId` is `global`; neither is set.
+ * Attributes come from trusted server data. Targeting by them restricts an already-authorized
+ * action; it never grants access.
+ */
 export type FlagSubject = {
-  readonly user: { readonly id: string; readonly email?: string };
-  readonly workspace?: { readonly id: string; readonly name?: string };
+  readonly scope: FlagScope;
+  readonly distinctId: string;
+  readonly user?: FlagUserContext;
+  readonly workspace?: FlagWorkspaceContext;
 };
 
 /**
  * Evaluates the flags declared in @tulipfarm/config/feature-flags. A boolean answer decides the
- * flag. `undefined` or a rejection (logged) falls back to the flag's env override, then its
- * declared default, as when no provider is registered.
+ * flag; `false` turns it off. `undefined` or a rejection (logged) falls back to the flag's env
+ * override, then its declared default, as when no provider is registered.
  */
 export type FlagProvider = {
   isEnabled(flag: string, subject: FlagSubject): Promise<boolean | undefined>;
+  /**
+   * Evaluates several flags for one subject in one call, for snapshots. A missing or `undefined`
+   * entry falls back like `isEnabled`; a rejection falls back for every flag.
+   */
+  evaluateMany?(flags: readonly string[], subject: FlagSubject): Promise<Readonly<Record<string, boolean | undefined>>>;
   shutdown?(): Promise<void>;
 };
 

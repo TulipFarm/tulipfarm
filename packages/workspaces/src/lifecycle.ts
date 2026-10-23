@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { emitHook } from '@tulipfarm/extensions';
+import { identifyWorkspace, trackEvent } from '@tulipfarm/observability';
 import {
   assertPublishedTarget,
   inTransaction,
@@ -180,15 +181,25 @@ export function createWorkspaceMaintenance(options: { migrations: readonly Migra
             await assertPublishedTarget(transaction, workspaceId);
             const ready = await transaction.query(
               `UPDATE app.workspaces SET soul_commit = $2, soul_bucket = $3, soul_key = $4, ready_at = CURRENT_TIMESTAMP
-              WHERE id = $1 AND ready_at IS NULL RETURNING name`,
+              WHERE id = $1 AND ready_at IS NULL RETURNING name, slug, created_at`,
               [workspaceId, soul.commit, soul.bucket, soul.key],
             );
-            const workspaceName = (ready.rows[0] as { name: string } | undefined)?.name;
-            if (workspaceName !== undefined)
-              afterCommit(
-                transaction,
-                () => void emitHook('workspace.created', { workspaceId, workspaceName, userId: seed.createdBy }),
-              );
+            const created = ready.rows[0] as { name: string; slug: string; created_at: Date } | undefined;
+            if (created !== undefined)
+              afterCommit(transaction, () => {
+                void emitHook('workspace.created', {
+                  workspaceId,
+                  workspaceName: created.name,
+                  userId: seed.createdBy,
+                });
+                identifyWorkspace({
+                  id: workspaceId,
+                  name: created.name,
+                  slug: created.slug,
+                  createdAt: created.created_at,
+                });
+                trackEvent('workspace_created', { userId: seed.createdBy, workspaceId });
+              });
             await transaction.query(
               `UPDATE app.workspace_storage SET stage = 'ready', error_code = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE workspace_id = $1 AND generation = $2`,

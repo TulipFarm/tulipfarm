@@ -3,7 +3,14 @@ import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
-import { captureException, createBackgroundJob, errorAttributes, log, startTelemetry } from '@tulipfarm/observability';
+import {
+  captureException,
+  createBackgroundJob,
+  errorAttributes,
+  log,
+  registerFlagSubjectResolver,
+  startTelemetry,
+} from '@tulipfarm/observability';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
@@ -92,6 +99,7 @@ async function run() {
     email = emailEnabled ? await createEmailDeliveryComposition() : undefined;
     resources = isolatedStorageEnabled() ? createTableAuthoringComposition() : undefined;
     if (resources) {
+      registerFlagSubjectResolver(resources.flagContext);
       memberProfiles = createMemberProfileComposition({
         runtime: resources.runtime,
         source: resources.memberProfiles,

@@ -24,6 +24,7 @@ export function createTableAuthoringComposition() {
     readyTaskWorkspaces: tables.readyTaskWorkspaces,
     convertTableName: tables.convertTableName,
     memberProfiles: tables.memberProfiles,
+    flagContext: tables.flagContext,
     activities: {
       async publishTableProposal(workspaceId: string, proposalId: string) {
         try {
