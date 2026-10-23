@@ -10,6 +10,7 @@ import {
 } from '@tulipfarm/access';
 import { observeDependency } from '@tulipfarm/observability';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
+import { requireReadableFileObject } from '@tulipfarm/files';
 import type {
   AwaitStep,
   FailurePhase,
@@ -437,6 +438,7 @@ export function createSocialPublisher(options: {
   }
 
   function stepInput(
+    workspaceId: string,
     context: Context,
     adapter: SocialPlatformAdapter,
     channel: Channel,
@@ -455,6 +457,7 @@ export function createSocialPublisher(options: {
         const item = context.content.media.find(media => media.fileId === fileId);
         if (!item || !options.mediaUrl || kind === 'await') throw new MediaUrlUnavailable();
         return options.mediaUrl({
+          workspaceId,
           variantId: context.id,
           attemptId,
           step: kind,
@@ -562,6 +565,7 @@ export function createSocialPublisher(options: {
     });
     if (!claimed || isBlocked(ready)) return;
     const input = stepInput(
+      workspaceId,
       claimed.context,
       adapter,
       claimed.channel.channel,
@@ -770,7 +774,7 @@ export function createSocialPublisher(options: {
     const channel = await transaction(workspaceId, tx =>
       channelOf(tx, context.channel_id, leased.account.account_generation),
     );
-    const input = stepInput(context, adapter, channel, token, last?.attempt_id ?? randomUUID(), 'await');
+    const input = stepInput(workspaceId, context, adapter, channel, token, last?.attempt_id ?? randomUUID(), 'await');
     let status;
     try {
       status = await observe(() => adapter.status(step, input));
@@ -1111,6 +1115,42 @@ export function createSocialPublisher(options: {
         if (adapter) await guarded(() => reconcile(workspaceId, row.id, adapter));
       }
       if (failures.length) throw new AggregateError(failures, 'Social publisher sweep incomplete');
+    },
+
+    /**
+     * The stored object a media pull URL serves, or null (TECH, Media). The grant must name the variant's current
+     * attempt, a step that attempt claimed, and a File bound to the variant with the same digest; the variant must
+     * still be sending or processing that attempt. The sponsor must still be able to read the File, so the URL
+     * never serves bytes its sponsor could not read.
+     */
+    async mediaObject(grant: MediaGrant) {
+      return transaction(grant.workspaceId, async tx => {
+        const context = await load(tx, grant.variantId, 'none');
+        if (!context || !['sending', 'processing'].includes(context.state) || context.attempt_id !== grant.attemptId)
+          return null;
+        if (
+          !context.receipts.some(
+            receipt =>
+              receipt.attempt_id === grant.attemptId &&
+              receipt.step === grant.step &&
+              ['executing', 'succeeded'].includes(receipt.status),
+          )
+        )
+          return null;
+        const item = context.content.media.find(
+          media => media.fileId === grant.fileId && media.contentDigest === grant.contentDigest,
+        );
+        if (!item) return null;
+        const origin = await originCheck(tx, context.origin, context.sponsor_membership_id);
+        if ('blocked' in origin) return null;
+        try {
+          const file = await requireReadableFileObject(tx, origin.sponsor, grant.workspaceId, item.fileId);
+          return file.sha256 === item.contentDigest ? file : null;
+        } catch (error) {
+          if (error instanceof AccessDenied || error instanceof z.ZodError) return null;
+          throw error;
+        }
+      });
     },
 
     /**

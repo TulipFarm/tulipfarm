@@ -112,6 +112,12 @@ function skillImportOutput(row: { tool: string; status: string; output?: unknown
   const output = z.object({ result: z.object({ importId: uuidSchema }) }).safeParse(row.output);
   return output.success ? { importId: output.data.result.importId } : {};
 }
+/** The post a social tool prepared. The card reads it under the viewer's own grants, so the id discloses nothing. */
+function socialPost(row: { tool: string; status: string; output?: unknown }) {
+  if (row.status !== 'completed' || !['social.prepare.post', 'social.revise.post'].includes(row.tool)) return {};
+  const output = z.object({ result: z.object({ postId: uuidSchema }) }).safeParse(row.output);
+  return output.success ? { socialPostId: output.data.result.postId } : {};
+}
 /** The Files item a completed files.create call published. The card reads it under the viewer's own Files access. */
 function createdFile(row: { tool: string; status: string; output?: unknown }) {
   if (row.tool === 'skills.execute' && row.status === 'completed') {
@@ -704,7 +710,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
                   output: row.output,
                   sources: row.sources,
                 }),
-                ...(hidden.size ? {} : { ...createdFile(row), ...skillImportOutput(row) }),
+                ...(hidden.size ? {} : { ...createdFile(row), ...skillImportOutput(row), ...socialPost(row) }),
                 ...(!hidden.size && row.google_proposal_id ? { googleProposalId: row.google_proposal_id } : {}),
                 ...(!hidden.size && row.row_draft_id ? { rowDraftId: row.row_draft_id } : {}),
               }),

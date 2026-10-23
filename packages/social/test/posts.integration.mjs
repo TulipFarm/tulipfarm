@@ -936,3 +936,45 @@ test('PRODUCT 21: the sources are checked again at approval, and kept on every r
   await assert.rejects(posts.decide(ws.id, admin().userId, submit(edited.post)), code('source-unreadable'));
   assert.equal(await count('decisions'), 0);
 });
+
+test('PRODUCT 39: the schedule lists variants by channel and state, only to people who may publish there and read the post', async () => {
+  const { posts, sharedPage } = service();
+  const page = await sharedPage();
+  const conversationId = await chat(member);
+  const { post } = await posts.prepare(
+    ws.id,
+    member.userId,
+    prepare(conversationId, [linkedin(page)]),
+    sourcesOf(conversationId),
+  );
+  // A revision waiting for approval is not on the schedule.
+  assert.deepEqual(
+    (await posts.schedule(ws.id, member.userId)).channels.map(channel => channel.variants.length),
+    [0],
+  );
+  const approved = await posts.decide(ws.id, member.userId, submit(post));
+  const variant = variantFor(approved, page);
+  await db.platform.query(
+    `UPDATE ${table('tf_social_variants')} SET state='blocked',blocked_reason='account-reconnect' WHERE id=$1`,
+    [variant.id],
+  );
+  const schedule = await posts.schedule(ws.id, member.userId);
+  assert.equal(schedule.truncated, false);
+  assert.deepEqual(
+    schedule.channels.map(channel => ({
+      channelId: channel.channelId,
+      platform: channel.platform,
+      variants: channel.variants.map(item => [item.postId, item.variant.state, item.variant.blockedReason]),
+    })),
+    [{ channelId: page.id, platform: 'linkedin', variants: [[post.id, 'blocked', 'account-reconnect']] }],
+  );
+  assert.deepEqual((await posts.schedule(ws.id, member.userId, { states: ['published'] })).channels[0].variants, []);
+  // `other` may publish to the page but cannot read the member's chat, so the post's content stays hidden.
+  assert.deepEqual(
+    (await posts.schedule(ws.id, other.userId)).channels.map(channel => [channel.channelId, channel.variants]),
+    [[page.id, []]],
+  );
+  // The workspace admin holds no grant on the page, so it is not listed at all.
+  assert.deepEqual((await posts.schedule(ws.id, admin().userId)).channels, []);
+  await assert.rejects(posts.schedule(ws.id, member.userId, { states: ['unknown'] }), zod);
+});

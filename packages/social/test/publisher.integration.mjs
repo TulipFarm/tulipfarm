@@ -845,3 +845,76 @@ test('PRODUCT 19: media is only pulled through a URL issued for the attempt, and
     ['failed'],
   );
 });
+
+/** Runs `read` while the File is in the trash, then restores it. */
+async function trashed(fileId, read) {
+  await db.platform.query(`UPDATE ${table('tf_files')} SET trashed_at=now() WHERE id=$1`, [fileId]);
+  try {
+    return await read();
+  } finally {
+    await db.platform.query(`UPDATE ${table('tf_files')} SET trashed_at=NULL WHERE id=$1`, [fileId]);
+  }
+}
+
+test('PRODUCT 19: a media URL serves only the File named for the running attempt’s step, and never more than its sponsor may read', async () => {
+  const seen = [];
+  let publisher;
+  const { personal, approved, ...rest } = service({
+    plan: () => [
+      { kind: 'upload-media', mode: 'mutate' },
+      { kind: 'create-post', mode: 'mutate' },
+    ],
+    mediaUrl: async grant => {
+      const served = await publisher.mediaObject(grant);
+      const other = { ...grant, fileId: randomUUID() };
+      seen.push({
+        grant,
+        served,
+        wrongFile: await publisher.mediaObject(other),
+        wrongDigest: await publisher.mediaObject({ ...grant, contentDigest: 'a'.repeat(64) }),
+        wrongAttempt: await publisher.mediaObject({ ...grant, attemptId: randomUUID() }),
+        wrongStep: await publisher.mediaObject({ ...grant, step: 'create-post' }),
+        wrongVariant: await publisher.mediaObject({ ...grant, variantId: randomUUID() }),
+        lostAccess: await trashed(grant.fileId, () => publisher.mediaObject(grant)),
+      });
+      return new URL(`https://media.example.test/${grant.fileId}`);
+    },
+    wrap: fake => ({
+      ...fake,
+      async mutate(step, input) {
+        const [media] = input.variant.content.media;
+        if (step.kind === 'upload-media' && media) await input.mediaUrl(media.fileId);
+        return fake.mutate(step, input);
+      },
+    }),
+  });
+  publisher = rest.publisher;
+  rest.fakes.linkedin.script(
+    'mutate',
+    { kind: 'done', platformRefs: { asset: 'urn:li:asset:1' } },
+    { kind: 'published', platformPostId: 'urn:li:share:1', permalink: null },
+  );
+  const profile = await personal();
+  const image = await file();
+  const { id } = await approved(admin(), [linkedin(profile, { media: [image] })]);
+  await publisher.sweep(ws.id);
+  assert.equal(await state(id), 'published');
+  assert.equal(seen.length, 1);
+  const [{ grant, served, ...refused }] = seen;
+  assert.equal(served.id, image.fileId);
+  assert.equal(served.sha256, image.contentDigest);
+  assert.equal(served.size, 10);
+  assert.equal(served.mediaType, 'image/png');
+  assert.ok(served.path.startsWith(`${ws.id}/`));
+  // A sponsor who can no longer read the File gets nothing through the URL, even during the attempt.
+  assert.deepEqual(refused, {
+    wrongFile: null,
+    wrongDigest: null,
+    wrongAttempt: null,
+    wrongStep: null,
+    wrongVariant: null,
+    lostAccess: null,
+  });
+  // Once the attempt is over, the same grant serves nothing.
+  assert.equal(await publisher.mediaObject(grant), null);
+});

@@ -283,6 +283,8 @@ export const toolReceiptSchema = z.object({
   fileIds: z.array(uuidSchema).max(64).optional(),
   importId: uuidSchema.optional(),
   googleProposalId: uuidSchema.optional(),
+  /** The social post a completed social.prepare.post or social.revise.post call prepared; its review card reads it. */
+  socialPostId: uuidSchema.optional(),
   rowDraftId: uuidSchema.optional(),
   rowView: rowViewSchema.optional(),
   rowChange: rowChangeSchema.optional(),

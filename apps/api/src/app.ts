@@ -20,7 +20,13 @@ import { slackDependencies } from './slack-composition.ts';
 import { registerAtlassianAccounts } from './atlassian-accounts.ts';
 import { atlassianAccounts } from './atlassian-composition.ts';
 import { registerSocialAccounts } from './social-accounts.ts';
-import { socialAccounts, socialChannels, socialPosts } from './social-composition.ts';
+import {
+  socialAccounts,
+  socialChannels,
+  socialMediaBytes,
+  socialPosts,
+  socialPublisher,
+} from './social-composition.ts';
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
@@ -119,7 +125,18 @@ export function buildApp(
         const channels = socialChannels(social, runtime);
         const posts = socialPosts(social, channels, runtime);
         if (posts) business.addHook('onClose', posts.close);
-        registerSocialAccounts(business, auth.auth, social, undefined, channels, posts?.posts ?? null);
+        const socialMedia = socialMediaBytes();
+        if (socialMedia) business.addHook('onClose', async () => socialMedia.close());
+        registerSocialAccounts(
+          business,
+          auth.auth,
+          social,
+          undefined,
+          channels,
+          posts?.posts ?? null,
+          socialPublisher(social, channels, runtime),
+          socialMedia?.read ?? null,
+        );
         const github = githubAccounts(runtime, process.env, defaultKnowledge.hook);
         registerGitHubAccounts(
           business,

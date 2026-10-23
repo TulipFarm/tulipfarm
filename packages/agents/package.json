@@ -171,6 +171,10 @@
       "types": "./dist/workspace-skill-contracts.d.ts",
       "default": "./dist/workspace-skill-contracts.js"
     },
+    "./social-tools": {
+      "types": "./dist/social-tools.d.ts",
+      "default": "./dist/social-tools.js"
+    },
     "./tools": {
       "types": "./dist/tools.d.ts",
       "default": "./dist/tools.js"
@@ -260,6 +264,7 @@
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
+    "@tulipfarm/social": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflow-snippets": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",

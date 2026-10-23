@@ -14,7 +14,7 @@
     "test:security": "node --test test/security.integration.mjs",
     "test:files": "node --test test/files.integration.mjs",
     "test:atlassian": "node --test test/atlassian-callback.test.mjs test/atlassian-accounts.integration.mjs test/atlassian-operations.integration.mjs",
-    "test:social": "node --test --test-concurrency=1 test/social-accounts.integration.mjs test/social-posts.integration.mjs",
+    "test:social": "node --test --test-concurrency=1 test/social-accounts.integration.mjs test/social-posts.integration.mjs test/social-surfaces.integration.mjs",
     "test:integration": "node --test test/health.test.mjs test/auth.test.mjs test/password-auth.test.mjs test/workspaces.integration.mjs",
     "test:governance": "node --test test/governance.integration.mjs test/team-upgrade.integration.mjs",
     "test:google-workspace": "node --test test/google-workspace.integration.mjs",

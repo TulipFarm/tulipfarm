@@ -82,6 +82,7 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/slack/link/consent',
         '/v1/slack/link/identity',
         '/v1/slack/oauth/callback',
+        '/v1/social/media/{*}',
         '/v1/social/oauth/callback',
         '/v1/workspace-setups/{id}',
         '/v1/workspaces',
@@ -146,8 +147,46 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/workspaces/{workspaceId}/social/posts/{postId}',
         '/v1/workspaces/{workspaceId}/social/posts/{postId}/decision',
         '/v1/workspaces/{workspaceId}/social/posts/{postId}/revisions',
+        '/v1/workspaces/{workspaceId}/social/schedule',
+        '/v1/workspaces/{workspaceId}/social/variants/{variantId}/cancel',
+        '/v1/workspaces/{workspaceId}/social/variants/{variantId}/candidates',
+        '/v1/workspaces/{workspaceId}/social/variants/{variantId}/resume',
+        '/v1/workspaces/{workspaceId}/social/variants/{variantId}/settlement',
       ].sort(),
     );
+    const schedule = spec.paths['/v1/workspaces/{workspaceId}/social/schedule'].get;
+    assert.equal(schedule.operationId, 'listSocialScheduleV1');
+    assert.deepEqual(
+      schedule.parameters
+        .filter(item => item.in === 'query')
+        .map(item => item.name)
+        .sort(),
+      ['channelId', 'states'],
+    );
+    const scheduleResponse = schedule.responses['200'].content['application/json'].schema;
+    assert.deepEqual(scheduleResponse.required.sort(), ['channels', 'truncated']);
+    for (const [path, operationId] of [
+      ['resume', 'resumeSocialVariantV1'],
+      ['cancel', 'cancelSocialVariantV1'],
+      ['settlement', 'settleSocialVariantV1'],
+    ]) {
+      const operation = spec.paths[`/v1/workspaces/{workspaceId}/social/variants/{variantId}/${path}`].post;
+      assert.equal(operation.operationId, operationId);
+      // The variant is named only by the path.
+      assert.doesNotMatch(JSON.stringify(operation.requestBody.content['application/json'].schema), /variantId/);
+    }
+    assert.equal(
+      spec.paths['/v1/workspaces/{workspaceId}/social/variants/{variantId}/candidates'].get.operationId,
+      'listSocialVariantCandidatesV1',
+    );
+    // The media URL has no session; it answers bytes, a range or one uniform refusal.
+    const media = spec.paths['/v1/social/media/{*}'].get;
+    assert.equal(media.operationId, 'readSocialMediaV1');
+    for (const status of ['200', '206', '404', '416']) assert.ok(media.responses[status], status);
+    assert.equal(media.responses['401'], undefined);
+    const unsignedMedia = await app.inject('/v1/social/media/not-a-token');
+    assert.equal(unsignedMedia.statusCode, 404);
+    assert.equal(unsignedMedia.headers['cache-control'], 'no-store');
     const flags = spec.paths['/v1/feature-flags'].get;
     assert.equal(flags.operationId, 'getFeatureFlagsV1');
     assert.deepEqual(

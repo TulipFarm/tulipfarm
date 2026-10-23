@@ -766,6 +766,11 @@ export const workspaceCalendarRoute = createRoute({
   validateSearch: search => calendarSearchSchema.parse(search),
   component: lazyRouteComponent(() => import('./pages/calendar')),
 });
+export const socialScheduleRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'social/schedule',
+  component: lazyRouteComponent(() => import('./pages/social-schedule'), 'SocialSchedulePage'),
+});
 export const agentTaskRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'agent-tasks/$taskId',
@@ -1015,6 +1020,7 @@ export const router = createRouter({
       skillDetailRoute,
       workspaceWorkflowsRoute,
       workspaceCalendarRoute,
+      socialScheduleRoute,
       workspaceSettingsRoute,
       workspaceSoulRoute,
       workspaceAccountRoute,

@@ -30,6 +30,7 @@ import { ChatRound } from 'reicon-react/icons/ChatRound';
 import { Search3 } from 'reicon-react/icons/Search3';
 import { Sun } from 'reicon-react/icons/Sun';
 import { Users } from 'reicon-react/icons/Users';
+import { CardSend } from 'reicon-react/icons/CardSend';
 import { workspaceRoute } from '@/router';
 import { WorkspaceSetup } from './workspace-setup';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -90,6 +91,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/chat'
   | '/$workspaceSlug/inbox'
   | '/$workspaceSlug/calendar'
+  | '/$workspaceSlug/social/schedule'
   | '/$workspaceSlug/agents'
   | '/$workspaceSlug/projects'
   | '/$workspaceSlug/skills'
@@ -155,6 +157,8 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
   },
 ];
 const workspacePages = workspaceGroups.flatMap(group => group.pages);
+// Listed only while the `social-publishing` flag is on, so it stays out of search and the static groups.
+const socialSchedule: Page = { label: 'Social schedule', to: '/$workspaceSlug/social/schedule', icon: CardSend };
 const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
 // Usage exists only when a web extension supplies the page.
 const usage: Page[] = overrides.get('usage')
@@ -177,6 +181,7 @@ const pages = [
   newChat,
   chats,
   inbox,
+  socialSchedule,
   account,
   models,
   ...usage,
@@ -494,6 +499,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
+  const socialEnabled = useFlag('social-publishing');
   return (
     <Sidebar collapsible="icon" label="Workspace sidebar">
       <>
@@ -536,6 +542,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                       {group.pages.map(page => (
                         <NavItem key={page.to} page={page} />
                       ))}
+                      {socialEnabled && group === workspaceGroups[0] && <NavItem page={socialSchedule} />}
                     </SidebarMenu>
                   </SidebarGroup>
                 ))}

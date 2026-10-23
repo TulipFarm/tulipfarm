@@ -18,7 +18,9 @@ import {
 } from '@tulipfarm/observability';
 import { atlassianChatOperations } from './atlassian-composition.ts';
 import { githubChatReads } from './github-composition.ts';
+import { socialChatEnabled, socialChatTools } from './social-chat-composition.ts';
 import { mergeSources } from '@tulipfarm/conversations/results';
+import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import {
@@ -172,6 +174,22 @@ export function meteredReply(
       }),
     );
     const { requester, destinations } = session;
+    // The social tools are offered only in a member's own chat, never through Slack or a project, and only while
+    // `social-publishing` is on for them. Each call checks the flag again.
+    const social =
+      !externalContext && !project
+        ? await observeChatDetail('requester', async () =>
+            socialChatEnabled(
+              (
+                requester ??
+                (await runtime.transaction(fence.workspaceId, commonCompatibility, tx =>
+                  turnRequester(tx, fence.conversationId, fence.turnId),
+                ))
+              ).userId,
+              fence.workspaceId,
+            ),
+          )
+        : false;
     const context = observeChatDetailSync('render', () => [
       ...projectReminder(project),
       ...(destinations
@@ -242,8 +260,15 @@ export function meteredReply(
                 if (call.tool === 'mcp.describe') describedHandles = [call.handle];
                 return { ...output, receiptId: context.callId };
               }
+              const socialTools =
+                call.tool.startsWith('social.') &&
+                social &&
+                (await socialChatEnabled(context.actor.userId, fence.workspaceId))
+                  ? socialChatTools(context.runtime)
+                  : undefined;
               const invoke = () =>
                 createChatTools(context.runtime, {
+                  social: socialTools,
                   integrations:
                     call.tool === 'github.issue.read'
                       ? createIntegrationService({ runtime: context.runtime, keyring: integrationCredentialKeyring() })
@@ -292,6 +317,7 @@ export function meteredReply(
               priorCalls,
               priorToolCalls,
               earlierMessages,
+              social,
               ...(answerText ? { answerText } : {}),
               progress,
               ...replyContext,
@@ -316,6 +342,7 @@ export function meteredReply(
               priorCalls,
               priorToolCalls,
               earlierMessages,
+              social,
               ...(answerText ? { answerText } : {}),
               progress,
               ...replyContext,

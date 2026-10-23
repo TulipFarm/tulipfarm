@@ -96,6 +96,7 @@ import { GitHubAccountCard } from './github-account-card';
 import { GitHubInvestigationCard } from './github-investigation-card';
 import { GitHubBatches } from './github-batches';
 import { TableProposalCard } from './table-proposal-card';
+import { SocialPostCard } from '@/features/social/post-review';
 import { ApprovalDock, ApprovalDockProvider } from './approval-dock';
 import { ChoiceDock, ChoiceDockProvider, usePendingQuestion } from './choice-dock';
 import { McpChatActions } from '@/features/workspace-mcp/selection';
@@ -1797,6 +1798,9 @@ function ConversationTools({
           <ChatGoogleProposal key={proposalId} workspaceId={workspace.id} proposalId={proposalId} />
         ),
       )}
+      {[...new Set(message.tools.flatMap(tool => (tool.socialPostId ? [tool.socialPostId] : [])))].map(postId => (
+        <SocialPostCard key={postId} workspaceId={workspace.id} slug={slug} postId={postId} />
+      ))}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.tool === 'tables.propose')
         .map(tool => (

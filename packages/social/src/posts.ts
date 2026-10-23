@@ -23,6 +23,10 @@ import {
   platformContentSchema,
   postSchema,
   prepareInputSchema,
+  scheduleLimit,
+  scheduleQuerySchema,
+  scheduleSchema,
+  scheduleStates,
   reviewChoiceEntrySchema,
   reviewChoiceFieldSchema,
   reviseInputSchema,
@@ -38,6 +42,7 @@ import {
   type Post,
   type PreparedPost,
   type ReviewChoiceField,
+  type Schedule,
   type Target,
   type ValidationError,
   type VariantInput,
@@ -142,7 +147,7 @@ type Checked = {
 export function createSocialPosts(options: {
   runtime: SocialRuntime;
   accounts: Pick<SocialAccounts, 'accessToken'>;
-  channels: Pick<SocialChannels, 'authorize' | 'authorizeWithin' | 'principal' | 'checkTarget'>;
+  channels: Pick<SocialChannels, 'authorize' | 'authorizeWithin' | 'principal' | 'checkTarget' | 'list'>;
   adapters: Partial<Record<Platform, SocialPlatformAdapter>>;
   /** The chat source check, `requireDraftSources` in the composition. */
   requireSources: SourceCheck;
@@ -477,6 +482,20 @@ export function createSocialPosts(options: {
     return options.channels.principal(tx, principal);
   }
 
+  /** Whether a revision's content may be shown to `viewer`: always to its author, else under `get`'s source rule. */
+  async function revisionVisible(tx: AuthorizationTransaction, viewer: HumanActor, post: Post, number: number) {
+    if (post.authorMembershipId === viewer.membershipId) return true;
+    const revision = await loadRevision(tx, post.id, number);
+    if (revision.mcp_derived || revision.private_task_derived) return false;
+    try {
+      await options.requireSources(tx, viewer, revision.sources.dependencies);
+      return true;
+    } catch (error) {
+      if (error instanceof AccessDenied) return false;
+      throw error;
+    }
+  }
+
   /** Applies a recorded decision to the revision's variants; replaying it changes nothing more. */
   async function applyDecision(
     tx: AuthorizationTransaction,
@@ -645,6 +664,81 @@ export function createSocialPosts(options: {
           await options.requireSources(tx, sponsor, revision.sources.dependencies);
         }
         return view(tx, post);
+      });
+    },
+
+    /**
+     * The schedule view: variants by channel and state (PRODUCT 39). A channel is listed only while the person
+     * holds `publish` on it and can read its connection. Another member's revision is listed only when the
+     * person could read every source, as for `get`, so the view never discloses more than the post would.
+     */
+    async schedule(workspaceId: string, userId: string, raw: unknown = {}): Promise<Schedule> {
+      const query = scheduleQuerySchema.parse(raw);
+      const readable = await options.channels.list(workspaceId, userId);
+      return transaction(workspaceId, async tx => {
+        const { sponsor } = await principalIn(tx, userId);
+        const published = z
+          .array(z.object({ channel_id: z.uuid() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT DISTINCT g.channel_id FROM ${relation(tx, 'channel_grants')} g
+                   LEFT JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=g.team_id AND mt.membership_id=$1
+                  WHERE g.permission='publish' AND g.channel_id=ANY($2::uuid[])
+                    AND (g.membership_id=$1 OR mt.membership_id IS NOT NULL)`,
+                [sponsor.membershipId, readable.map(channel => channel.id)],
+              )
+            ).rows,
+          )
+          .map(row => row.channel_id);
+        const channels = readable.filter(
+          channel => published.includes(channel.id) && (!query.channelId || channel.id === query.channelId),
+        );
+        const rows = z
+          .array(z.object({ id: z.uuid(), post_id: z.uuid(), revision: z.number().int().positive() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT id,post_id,revision FROM ${relation(tx, 'variants')}
+                  WHERE channel_id=ANY($1::uuid[]) AND state=ANY($2::text[])
+                  ORDER BY COALESCE(due_at,created_at) DESC,id LIMIT $3`,
+                [channels.map(channel => channel.id), query.states ?? [...scheduleStates], scheduleLimit + 1],
+              )
+            ).rows,
+          );
+        const truncated = rows.length > scheduleLimit;
+        const visible = new Map<string, boolean>();
+        const items: Schedule['channels'][number]['variants'] = [];
+        const posts = new Map<string, Post>();
+        for (const row of rows.slice(0, scheduleLimit)) {
+          const key = `${row.post_id}:${row.revision}`;
+          let post = posts.get(row.post_id);
+          if (!post) {
+            post = await view(tx, await loadPost(tx, row.post_id));
+            posts.set(row.post_id, post);
+          }
+          if (!visible.has(key)) visible.set(key, await revisionVisible(tx, sponsor, post, row.revision));
+          if (!visible.get(key)) continue;
+          const variant = post.revisions
+            .find(revision => revision.number === row.revision)
+            ?.variants.find(item => item.id === row.id);
+          if (variant)
+            items.push({
+              postId: post.id,
+              currentRevision: post.currentRevision,
+              authorMembershipId: post.authorMembershipId,
+              variant,
+            });
+        }
+        return scheduleSchema.parse({
+          channels: channels.map(channel => ({
+            channelId: channel.id,
+            platform: channel.platform,
+            displayName: channel.displayName,
+            variants: items.filter(item => item.variant.channelId === channel.id),
+          })),
+          truncated,
+        });
       });
     },
 

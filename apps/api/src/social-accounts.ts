@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -5,7 +6,10 @@ import { AccessDenied } from '@tulipfarm/access';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { SocialAccounts } from '@tulipfarm/social/accounts';
 import type { SocialChannels } from '@tulipfarm/social/channels';
+import { mediaUrlKey, mediaUrlPath } from '@tulipfarm/social/environment';
+import { verifyMediaToken } from '@tulipfarm/social/media';
 import type { SocialPosts } from '@tulipfarm/social/posts';
+import type { SocialPublisher } from '@tulipfarm/social/publisher';
 import {
   addChannelSchema,
   beginConnectionResultSchema,
@@ -22,9 +26,17 @@ import {
   postSchema,
   preparedPostSchema,
   prepareBodySchema,
+  reconcileResultSchema,
   reviseBodySchema,
+  scheduleQuerySchema,
+  scheduleSchema,
+  scheduleStates,
+  settlementBodySchema,
   socialAccountGrantsSchema,
   socialAccountMetadataSchema,
+  variantActionBodySchema,
+  variantSchema,
+  variantStateSchema,
 } from '@tulipfarm/social/contracts';
 import { SocialError } from '@tulipfarm/social/credentials';
 import { authConfig, type registerAuth } from './auth.ts';
@@ -41,6 +53,18 @@ const accountParams = workspaceParams.extend({ accountId: z.uuid() });
 const appParams = workspaceParams.extend({ platformAppId: z.uuid() });
 const channelParams = workspaceParams.extend({ channelId: z.uuid() });
 const postParams = workspaceParams.extend({ postId: z.uuid() });
+const variantParams = workspaceParams.extend({ variantId: z.uuid() });
+/** `states` is a comma-separated list in the query string; omitted, the schedule shows every listed state. */
+const scheduleQuery = z
+  .strictObject({ channelId: z.uuid().optional(), states: z.string().max(256).optional() })
+  .transform(query =>
+    scheduleQuerySchema.parse({
+      ...(query.channelId ? { channelId: query.channelId } : {}),
+      ...(query.states ? { states: query.states.split(',').map(state => variantStateSchema.parse(state)) } : {}),
+    }),
+  );
+/** A wildcard, since a token is longer than a route parameter may be. */
+const mediaParams = z.strictObject({ '*': z.string().regex(/^[A-Za-z0-9_-]{1,1024}\.[A-Za-z0-9_-]{43}$/) });
 const channelFilter = z.strictObject({ accountId: z.uuid().optional(), platform: platformSchema.optional() });
 const callbackState = z.string().regex(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
 const callbackSchema = z.union([
@@ -55,6 +79,23 @@ const callbackSchema = z.union([
 const completionSchema = z.strictObject({ workspaceId: z.uuid(), account: socialAccountMetadataSchema });
 const replaceSecretSchema = z.strictObject({ clientSecret: z.string().min(1).max(4096) });
 const callbackPath = '/social/oauth/callback';
+
+/** Reads one stored object, at most `maximumBytes`; the files object store. */
+export type SocialMediaBytes = (key: string, maximumBytes: number, signal?: AbortSignal) => Promise<Uint8Array>;
+
+/** One satisfiable `bytes=` range, or null for the whole object; `false` when the range cannot be served. */
+function byteRange(header: string | undefined, size: number): { start: number; end: number } | null | false {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return false;
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    return suffix > 0 ? { start: Math.max(0, size - suffix), end: size - 1 } : false;
+  }
+  const start = Number(match[1]);
+  const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  return start < size && start <= end ? { start, end } : false;
+}
 
 const validation = routeValidation({
   target: 'openapi-3.0',
@@ -124,7 +165,11 @@ export function registerSocialAccounts(
     isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId }),
   channels: SocialChannels | null = null,
   posts: SocialPosts | null = null,
+  publisher: SocialPublisher | null = null,
+  mediaBytes: SocialMediaBytes | null = null,
+  env: NodeJS.ProcessEnv = process.env,
 ) {
+  registerSocialMedia(app, enabled, publisher, mediaBytes, env);
   app.register(async routes => {
     validation.install(routes, true);
     routes.addHook('onSend', async (request, reply, payload) => {
@@ -175,7 +220,9 @@ export function registerSocialAccounts(
             ? 'channel-not-found'
             : request.routeOptions.url?.includes('/social/posts')
               ? 'post-not-found'
-              : 'account-not-found',
+              : request.routeOptions.url?.includes('/social/variants')
+                ? 'variant-not-found'
+                : 'account-not-found',
         });
       if (error.statusCode === 400 || error.validation || error instanceof z.ZodError)
         return reply.code(400).send({ error: 'invalid-request' });
@@ -198,6 +245,11 @@ export function registerSocialAccounts(
       const session = sessions.get(request);
       if (!session || !posts) throw new SocialError('account-unavailable');
       return { ...session, posts };
+    };
+    const publisherContext = (request: FastifyRequest) => {
+      const session = sessions.get(request);
+      if (!session || !publisher) throw new SocialError('account-unavailable');
+      return { ...session, publisher };
     };
     const social = '/workspaces/:workspaceId/social';
     routes.get(
@@ -561,6 +613,106 @@ export function registerSocialAccounts(
       },
     );
     routes.get(
+      `${social}/schedule`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'listSocialScheduleV1',
+            `List variants by channel and state (${scheduleStates.join(', ')}) on channels the caller may publish to`,
+            scheduleSchema,
+          ),
+          params: json(workspaceParams),
+          querystring: json(scheduleQuery),
+        },
+      },
+      async request => {
+        const { posts, userId } = postContext(request);
+        return posts.schedule(
+          workspaceParams.parse(request.params).workspaceId,
+          userId,
+          // Validation already parsed the query string into the schedule query.
+          scheduleQuerySchema.parse(request.query),
+        );
+      },
+    );
+    const variantBase = `${social}/variants/:variantId`;
+    routes.post(
+      `${variantBase}/resume`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'resumeSocialVariantV1',
+            'Rerun every check for a blocked variant; it is due again only if they pass',
+            variantSchema,
+          ),
+          params: json(variantParams),
+          body: json(variantActionBodySchema),
+        },
+      },
+      async request => {
+        const { publisher, userId } = publisherContext(request);
+        const { workspaceId, variantId } = variantParams.parse(request.params);
+        return publisher.resume(workspaceId, userId, { ...variantActionBodySchema.parse(request.body), variantId });
+      },
+    );
+    routes.post(
+      `${variantBase}/cancel`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('cancelSocialVariantV1', 'Cancel a blocked variant; it is not published', variantSchema),
+          params: json(variantParams),
+          body: json(variantActionBodySchema),
+        },
+      },
+      async request => {
+        const { publisher, userId } = publisherContext(request);
+        const { workspaceId, variantId } = variantParams.parse(request.params);
+        return publisher.cancel(workspaceId, userId, { ...variantActionBodySchema.parse(request.body), variantId });
+      },
+    );
+    routes.get(
+      `${variantBase}/candidates`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'listSocialVariantCandidatesV1',
+            'Ask the platform what became of a variant whose outcome is unknown',
+            reconcileResultSchema,
+          ),
+          params: json(variantParams),
+        },
+      },
+      async request => {
+        const { publisher, userId } = publisherContext(request);
+        const { workspaceId, variantId } = variantParams.parse(request.params);
+        return publisher.candidates(workspaceId, userId, variantId);
+      },
+    );
+    routes.post(
+      `${variantBase}/settlement`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'settleSocialVariantV1',
+            'Settle an unknown outcome: confirm the platform post it became, or that it was not published',
+            variantSchema,
+          ),
+          params: json(variantParams),
+          body: json(settlementBodySchema),
+        },
+      },
+      async request => {
+        const { publisher, userId } = publisherContext(request);
+        const { workspaceId, variantId } = variantParams.parse(request.params);
+        return publisher.settle(workspaceId, userId, { ...settlementBodySchema.parse(request.body), variantId });
+      },
+    );
+    routes.get(
       callbackPath,
       {
         logLevel: 'silent',
@@ -577,6 +729,84 @@ export function registerSocialAccounts(
         const { accounts, userId, sessionId } = context(request);
         const callback = callbackSchema.parse(request.query);
         return accounts.complete('code' in callback ? callback.code : null, callback.state, sessionId, userId);
+      },
+    );
+  });
+}
+
+/**
+ * `GET /v1/social/media/:token`: the bytes of the one File a signed media URL names, for the platform to pull while
+ * the attempt's step runs (TECH, Media). There is no session; the token is the only authority, and it widens
+ * nothing: the publisher rechecks the attempt, step, binding and the sponsor's read access on every request. Every
+ * refusal is the same 404, so a token reveals nothing about why it failed.
+ */
+function registerSocialMedia(
+  app: FastifyInstance,
+  enabled: (userId: string, workspaceId: string) => Promise<boolean>,
+  publisher: SocialPublisher | null,
+  mediaBytes: SocialMediaBytes | null,
+  env: NodeJS.ProcessEnv,
+) {
+  app.register(async routes => {
+    const media = routeValidation({
+      target: 'openapi-3.0',
+      missing: 'Missing social media validator',
+      invalid: () => new Error('invalid-request'),
+    });
+    media.install(routes);
+    const notFound = { error: 'not-found' };
+    routes.setErrorHandler((_error, _request, reply) =>
+      reply.code(404).header('Cache-Control', 'no-store').send(notFound),
+    );
+    routes.get(
+      `${mediaUrlPath.replace(/^\/v1/, '')}*`,
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'readSocialMediaV1',
+          summary: 'Serve the File a signed social media URL names, while its publish step runs',
+          tags: ['Social accounts'],
+          params: media.json(mediaParams),
+          response: {
+            200: { type: 'string', format: 'binary' },
+            206: { type: 'string', format: 'binary' },
+            404: errorSchema,
+            416: errorSchema,
+          },
+        },
+      },
+      async (request, reply) => {
+        reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer');
+        const key = mediaUrlKey(env);
+        if (!key || !publisher || !mediaBytes) return reply.code(404).send(notFound);
+        const grant = verifyMediaToken(key, mediaParams.parse(request.params)['*']);
+        if (!grant || !(await enabled('social-publisher', grant.workspaceId))) return reply.code(404).send(notFound);
+        const file = await publisher.mediaObject(grant);
+        if (!file) return reply.code(404).send(notFound);
+        const reader = new AbortController();
+        reply.raw.once('close', () => {
+          if (!reply.raw.writableFinished) reader.abort();
+        });
+        const bytes = await mediaBytes(file.path, file.size, reader.signal);
+        // The object must be the bytes the File records, which are the bytes the person approved.
+        if (bytes.byteLength !== file.size || createHash('sha256').update(bytes).digest('hex') !== file.sha256)
+          return reply.code(404).send(notFound);
+        const range = byteRange(
+          typeof request.headers.range === 'string' ? request.headers.range : undefined,
+          file.size,
+        );
+        reply.header('Accept-Ranges', 'bytes');
+        if (range === false)
+          return reply.code(416).header('Content-Range', `bytes */${file.size}`).send({ error: 'invalid-range' });
+        reply
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Content-Disposition', 'attachment')
+          .type(file.mediaType);
+        if (!range) return reply.send(Buffer.from(bytes));
+        return reply
+          .code(206)
+          .header('Content-Range', `bytes ${range.start}-${range.end}/${file.size}`)
+          .send(Buffer.from(bytes.subarray(range.start, range.end + 1)));
       },
     );
   });

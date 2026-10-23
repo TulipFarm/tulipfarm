@@ -129,8 +129,13 @@ export type ChatCatalog = NativeCatalog & {
  * Builds the native chat catalog: one function per admitted MCP handle and per offered chat tool.
  * With `loaded`, only the core tools, the loaded tools, and `tools_search` are sent; `search` adds to `loaded`.
  */
-export function nativeChatTools(mcp?: McpModelCatalog, earlierMessages = false, loaded?: Set<string>): ChatCatalog {
-  const full = nativeTools({ kind: 'chat', mcp, earlierMessages }, chatCallSchema);
+export function nativeChatTools(
+  mcp?: McpModelCatalog,
+  earlierMessages = false,
+  loaded?: Set<string>,
+  social = false,
+): ChatCatalog {
+  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, social }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');
   if (!loaded) return { ...full, search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));

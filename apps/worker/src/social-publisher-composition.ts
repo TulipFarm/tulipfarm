@@ -7,6 +7,7 @@ import { createSocialAccounts, type SocialRuntime } from '@tulipfarm/social/acco
 import type { SocialPlatformAdapter } from '@tulipfarm/social/adapter';
 import { createSocialChannels } from '@tulipfarm/social/channels';
 import type { Platform } from '@tulipfarm/social/contracts';
+import { developmentAdapters, mediaUrlSigner } from '@tulipfarm/social/environment';
 import { createPlatformApps, operatorPlatformApps } from '@tulipfarm/social/platform-apps';
 import { createSocialPublisher, type MediaUrlSigner } from '@tulipfarm/social/publisher';
 import { hasGrant } from '@tulipfarm/workflows/authorization';
@@ -15,7 +16,9 @@ export type SocialPublisherOptions = {
   runtime: SocialRuntime;
   /** Ready workspaces after a cursor, one page at a time. */
   discover(after: string | null): Promise<string[]>;
+  /** Defaults to the development fake when `SOCIAL_DEVELOPMENT_FAKE_PLATFORM` is set outside production. */
   adapters?: Partial<Record<Platform, SocialPlatformAdapter>>;
+  /** Defaults to signing with `SOCIAL_MEDIA_URL_KEY` for the API's public media route. */
   mediaUrl?: MediaUrlSigner;
   /** Whether social publishing is on for a workspace; the worker checks it as the API does. */
   enabled?(workspaceId: string): Promise<boolean>;
@@ -42,7 +45,8 @@ function socialCallbackUrl(env: NodeJS.ProcessEnv) {
  */
 export function createSocialPublisherComposition(options: SocialPublisherOptions) {
   const env = options.env ?? process.env;
-  const adapters = options.adapters ?? {};
+  const adapters = options.adapters ?? developmentAdapters(env);
+  const mediaUrl = options.mediaUrl ?? mediaUrlSigner(env);
   const callbackUrl = socialCallbackUrl(env);
   if (!callbackUrl) {
     log('error', 'lifecycle', 'integration_unconfigured', { provider: 'social', status: 'missing' });
@@ -73,7 +77,7 @@ export function createSocialPublisherComposition(options: SocialPublisherOptions
       adapters,
       requireSources: requireDraftSources,
       workflowGrant: (tx, membershipId, workflowId) => hasGrant(tx, membershipId, workflowId, 'invoke'),
-      ...(options.mediaUrl ? { mediaUrl: options.mediaUrl } : {}),
+      ...(mediaUrl ? { mediaUrl } : {}),
     });
     services = { accounts, publisher };
   } catch {

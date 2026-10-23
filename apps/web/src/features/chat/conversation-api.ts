@@ -95,6 +95,7 @@ const messageSchema = z.object({
         fileIds: z.array(z.uuid()).max(64).optional(),
         importId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
+        socialPostId: z.uuid().optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),
         rowChange: rowChangeSchema.optional(),
