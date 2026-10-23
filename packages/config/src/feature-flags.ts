@@ -47,6 +47,11 @@ export const featureFlags = {
     default: false,
     env: 'FEATURE_FLAG_BUD_AVATAR',
   },
+  'social-publishing': {
+    description: 'Social account connections, approved social posts, scheduling, engagement and analytics.',
+    default: 'development',
+    env: 'FEATURE_FLAG_SOCIAL_PUBLISHING',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

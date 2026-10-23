@@ -27,6 +27,10 @@
       "types": "./dist/operations.d.ts",
       "default": "./dist/operations.js"
     },
+    "./operation-digest": {
+      "types": "./dist/operation-contracts.d.ts",
+      "default": "./dist/operation-contracts.js"
+    },
     "./operation-approval": {
       "types": "./dist/operation-approval.d.ts",
       "default": "./dist/operation-approval.js"

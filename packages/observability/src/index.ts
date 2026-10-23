@@ -1045,7 +1045,7 @@ export function createBackgroundJob(job: BackgroundJob, intervalSeconds: number)
   };
 }
 
-export type DependencyProvider = 'google' | 'github' | 'slack' | 'atlassian' | 'mcp' | 'email' | 'turnstile';
+export type DependencyProvider = 'google' | 'github' | 'slack' | 'atlassian' | 'social' | 'mcp' | 'email' | 'turnstile';
 export type DependencyOperation = 'request' | 'oauth' | 'rpc' | 'send' | 'verify' | 'download';
 export async function observeDependency<T>(
   provider: DependencyProvider,

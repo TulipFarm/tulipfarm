@@ -127,6 +127,7 @@ try {
     ]),
     'packages/workspace-storage/common/0001_baseline.sql',
     'packages/workspace-storage/common/0003_chat_send_timing.sql',
+    'packages/workspace-storage/common/0004_social.sql',
   ];
   emit({
     event: 'sources',
@@ -153,7 +154,7 @@ try {
   const migrations = await workspaceTableMigrations();
   assert.deepEqual(
     migrations.map(row => row.name),
-    ['0001_baseline.sql', '0002_turn_trace.sql', '0003_chat_send_timing.sql'],
+    ['0001_baseline.sql', '0002_turn_trace.sql', '0003_chat_send_timing.sql', '0004_social.sql'],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));
   emit({ event: 'objects', database, owner, logins, workspaceId, names });

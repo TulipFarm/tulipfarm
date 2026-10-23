@@ -6,7 +6,7 @@ const { workspaceTableMigrations } = await import(require.resolve('@tulipfarm/wo
 const migrations = await workspaceTableMigrations();
 assert.deepEqual(
   migrations.map(migration => migration.name),
-  ['0001_baseline.sql'],
+  ['0001_baseline.sql', '0002_turn_trace.sql', '0003_chat_send_timing.sql', '0004_social.sql'],
 );
 if (process.argv[2] === 'api') {
   const { buildApp } = await import('/app/dist/app.js');
