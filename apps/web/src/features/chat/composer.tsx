@@ -3,11 +3,14 @@ import type { Extensions } from '@tiptap/core';
 import { editorDocument, type ChatDraft } from './editor-document';
 import { usePendingQuestion } from './choice-dock';
 import { ArrowUp } from 'reicon-react/icons/ArrowUp';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
 import { Stop3 } from 'reicon-react/icons/Stop3';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
+import { Map as MapIcon } from 'reicon-react/icons/Map';
 import { Paperclip } from 'reicon-react/icons/Paperclip';
+import { Plus } from 'reicon-react/icons/Plus';
+import { Sliders } from 'reicon-react/icons/Sliders';
 import { Sparkle } from 'reicon-react/icons/Sparkle';
+import { X } from 'reicon-react/icons/X';
 import {
   Command,
   CommandEmpty,
@@ -26,11 +29,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuGroup,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { ModelSelector, type ModelSelectorModel } from '@tulipfarm/sprout/model-selector';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 
@@ -63,8 +67,6 @@ type ComposerProps = {
   mode?: { value: 'normal' | 'plan'; onChange: (mode: 'normal' | 'plan') => void } | undefined;
   scope?: ((disabled: boolean) => ReactNode) | undefined;
   /** Offers the three things a file can become here, so a person knows before choosing whether this chat reads it. */
-  fileChoices?: { read: () => void; knowledge: () => void };
-  onSkill?: (() => void) | undefined;
   extensions?: Extensions;
   /** Integration names typed in the message show as chips; a disconnected one offers Connect. */
   integrations?: { keywords: readonly RichTextKeyword[]; onConnect: (keyword: RichTextKeyword) => void } | undefined;
@@ -99,8 +101,6 @@ export function Composer({
   persona,
   mode,
   scope,
-  fileChoices,
-  onSkill,
   extensions,
   integrations,
   picker,
@@ -186,86 +186,33 @@ export function Composer({
             onChange={doc => onContentChange({ version: 1, doc })}
             onSend={send}
             toolbarAddon={
-              <>
-                {!compact && !condensed && (
-                  <>
-                    {fileChoices ? (
-                      <FileChoices
-                        disabled={disabled || sending}
-                        store={() => fileInput.current?.click()}
-                        read={fileChoices.read}
-                        knowledge={fileChoices.knowledge}
-                      />
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <InputGroupButton
-                              size="icon"
-                              variant="ghost"
-                              aria-label="Attach files"
-                              disabled={disabled || sending}
-                              onClick={() => fileInput.current?.click()}
-                            />
-                          }
-                        >
-                          <Paperclip size={16} aria-hidden="true" />
-                        </TooltipTrigger>
-                        <TooltipContent>Attach files from your device</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {onSkill && (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <InputGroupButton
-                              size="md"
-                              variant="ghost"
-                              aria-label="Use a skill"
-                              disabled={disabled || sending}
-                              onClick={onSkill}
-                            />
-                          }
-                        >
-                          <BookOpen size={16} aria-hidden="true" />
-                          <span className="hidden sm:inline">Skills</span>
-                        </TooltipTrigger>
-                        <TooltipContent>Skills are saved procedures the agent follows · /</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {scope?.(disabled || sending)}
-                    {mode && (
-                      <Select
-                        value={mode.value}
-                        disabled={disabled || sending}
-                        onValueChange={value => {
-                          if (value === 'normal' || value === 'plan') mode.onChange(value);
-                        }}
-                      >
-                        <Tooltip>
-                          <TooltipTrigger render={<SelectTrigger size="sm" aria-label="Chat mode" />}>
-                            <SelectValue>{mode.value === 'plan' ? 'Plan' : 'Normal'}</SelectValue>
-                          </TooltipTrigger>
-                          <TooltipContent>Normal acts on your request. Plan only proposes steps first.</TooltipContent>
-                        </Tooltip>
-                        <SelectContent>
-                          <SelectItem value="normal">Normal</SelectItem>
-                          <SelectItem value="plan">Plan only</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {persona && (
-                      <PersonaPicker
-                        value={persona.value}
-                        onChange={persona.onChange}
-                        modes={persona.modes}
-                        agents={persona.agents}
-                        disabled={disabled || sending}
-                      />
-                    )}
-                  </>
-                )}
-                <div className="ml-auto flex items-center gap-1.5">
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-0.5">
+                  {!compact && !condensed && (
+                    <>
+                      <AddMenu disabled={disabled || sending} upload={() => fileInput.current?.click()} />
+                      {mode && <ModeMenu value={mode.value} onChange={mode.onChange} disabled={disabled || sending} />}
+                      {persona && (
+                        <PersonaPicker
+                          value={persona.value}
+                          onChange={persona.onChange}
+                          modes={persona.modes}
+                          agents={persona.agents}
+                          disabled={disabled || sending}
+                        />
+                      )}
+                      {scope && (
+                        <>
+                          <span aria-hidden="true" className="mx-1.5 h-5 w-px shrink-0 self-center bg-border" />
+                          <div className="flex min-w-0 items-center *:min-w-0 *:shrink">
+                            {scope(disabled || sending)}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
                   {!compact && !condensed && (
                     <ModelPicker
                       model={model}
@@ -311,7 +258,7 @@ export function Composer({
                     </Tooltip>
                   )}
                 </div>
-              </>
+              </div>
             }
           />
         </InputGroup>
@@ -460,56 +407,120 @@ function selectorModel(model: ComposerModel): ModelSelectorModel {
   };
 }
 
-const fileChoiceCopy = {
-  store: {
-    title: 'Store a private file',
-    detail: 'Saved for download. This chat doesn’t read it. Up to 5 files, 10 MiB each.',
-  },
-  read: {
-    title: 'Let the assistant read a file',
-    detail: 'Type @ and pick a saved file. The assistant reads it with your message.',
-  },
-  knowledge: {
-    title: 'Add a file to Knowledge',
-    detail: 'Opens Files. Your chats and agents can search Knowledge; other people can’t.',
-  },
-} as const;
-
-function FileChoices({
-  disabled,
-  store,
-  read,
-  knowledge,
-}: {
-  disabled: boolean;
-  store: () => void;
-  read: () => void;
-  knowledge: () => void;
-}) {
-  const choice = (key: keyof typeof fileChoiceCopy, run: () => void) => (
-    <DropdownMenuItem onClick={run}>
-      <span className="flex flex-col gap-0.5 py-0.5">
-        <span>{fileChoiceCopy[key].title}</span>
-        <span className="text-xs text-muted-foreground">{fileChoiceCopy[key].detail}</span>
-      </span>
-    </DropdownMenuItem>
-  );
+/** The `+` menu. Upload is the only choice today; the menu leaves room for more. */
+function AddMenu({ disabled, upload }: { disabled: boolean; upload: () => void }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<InputGroupButton size="md" variant="ghost" aria-label="Add a file" disabled={disabled} />}
-      >
-        <Paperclip size={16} aria-hidden="true" />
-        <span className="hidden sm:inline">Files</span>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent size="menu" side="top">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>What should happen to the file?</DropdownMenuLabel>
-          {choice('read', read)}
-          {choice('store', store)}
-          {choice('knowledge', knowledge)}
-        </DropdownMenuGroup>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <InputGroupButton size="icon" variant="ghost" aria-label="Add files and more" disabled={disabled} />
+              }
+            />
+          }
+        >
+          <Plus size={16} aria-hidden="true" />
+        </TooltipTrigger>
+        <TooltipContent>Add files and more</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent size="menu" side="top" align="start">
+        <DropdownMenuItem onClick={upload}>
+          <Paperclip size={16} aria-hidden="true" />
+          Upload from computer
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+type ChatMode = 'normal' | 'plan';
+
+/** Plan is the one mode today; the menu leaves room for more, and an active mode shows as a removable chip. */
+function ModeMenu({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ChatMode;
+  onChange: (mode: ChatMode) => void;
+  disabled: boolean;
+}) {
+  return (
+    <>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <DropdownMenuTrigger
+                render={
+                  <InputGroupButton
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`Mode: ${value === 'plan' ? 'Plan' : 'Default'}`}
+                    disabled={disabled}
+                  />
+                }
+              />
+            }
+          >
+            <Sliders size={16} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Mode</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent size="menu" side="top" align="start">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Mode</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={value} onValueChange={next => onChange(next === 'plan' ? 'plan' : 'normal')}>
+              <DropdownMenuRadioItem value="normal" closeOnClick>
+                <span className="flex items-start gap-2 py-0.5">
+                  <span className="mt-0.5 flex shrink-0">
+                    <Sparkle size={16} aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>Default</span>
+                    <span className="text-xs text-muted-foreground">Acts on your request</span>
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="plan" closeOnClick>
+                <span className="flex items-start gap-2 py-0.5">
+                  <span className="mt-0.5 flex shrink-0 text-info">
+                    <MapIcon size={16} aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span>Plan</span>
+                    <span className="text-xs text-muted-foreground">Proposes steps before it acts</span>
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {value === 'plan' && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <InputGroupButton
+                size="md"
+                variant="secondary"
+                aria-label="Turn off Plan"
+                disabled={disabled}
+                onClick={() => onChange('normal')}
+              />
+            }
+          >
+            <span className="flex text-info">
+              <MapIcon size={16} aria-hidden="true" />
+            </span>
+            <span className="hidden sm:inline">Plan</span>
+            <X size={12} aria-hidden="true" />
+          </TooltipTrigger>
+          <TooltipContent>Plan proposes steps before it acts. Select to turn off.</TooltipContent>
+        </Tooltip>
+      )}
+    </>
   );
 }

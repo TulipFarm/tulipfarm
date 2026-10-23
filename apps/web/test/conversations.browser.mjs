@@ -355,14 +355,14 @@ try {
     await route.fulfill({ json: uploaded.get(id) });
   });
   const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Add a file', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^Store a private file/ }).click();
+  await page.getByRole('button', { name: 'Add files and more', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Upload from computer/ }).click();
   await (await chooser).setFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Customer notes') });
   await page.getByRole('button', { name: 'Retry notes.txt' }).waitFor();
   await page.getByLabel('Message', { exact: true }).fill('Keep this upload draft');
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
   await page.getByRole('button', { name: 'Retry notes.txt' }).click();
-  await page.getByText('notes.txt: Ready to send · Storage only, not read by this chat', { exact: true }).waitFor();
+  await page.locator('[data-state="ready"]', { hasText: 'notes.txt' }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Keep this upload draft');
   await page.getByRole('button', { name: 'Inspect notes.txt', exact: true }).click();
   await page.getByRole('dialog').getByText('Customer notes', { exact: true }).waitFor();
@@ -748,12 +748,12 @@ try {
   await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
   const beforeAttachment = chats.length;
   const draftChooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Add a file', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^Store a private file/ }).click();
+  await page.getByRole('button', { name: 'Add files and more', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Upload from computer/ }).click();
   await (
     await draftChooser
   ).setFiles({ name: 'draft.txt', mimeType: 'text/plain', buffer: Buffer.from('Draft attachment') });
-  await page.getByText('draft.txt: Ready to send · Storage only, not read by this chat', { exact: true }).waitFor();
+  await page.locator('[data-state="ready"]', { hasText: 'draft.txt' }).waitFor();
   assert.equal(chats.length, beforeAttachment + 1);
   const attachmentChatId = chats[0].id;
   assert.equal(page.url(), `${origin}/acme`);

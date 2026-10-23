@@ -296,7 +296,7 @@ test(
       await popup.waitFor();
       assert.equal(await popup.getByRole('combobox').count(), 0, 'no position selector');
       assert.equal(
-        await popup.getByRole('button', { name: /canvas|Model:|Add a file|Use a skill|Chat actions/i }).count(),
+        await popup.getByRole('button', { name: /canvas|Model:|Add files and more|Mode:|Chat actions/i }).count(),
         0,
         'full-chat controls are absent',
       );
@@ -349,7 +349,7 @@ test(
         'full chat has no empty Canvas',
       );
       await page.getByRole('combobox', { name: /^Model:/ }).waitFor();
-      await page.getByRole('button', { name: 'Add a file', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Add files and more', exact: true }).waitFor();
       await composer.fill('');
       await page.goBack();
       await page.getByRole('button', { name: 'Open Bud', exact: true }).click();

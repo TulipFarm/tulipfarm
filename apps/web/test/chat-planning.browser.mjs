@@ -182,8 +182,8 @@ test(
       await page.goto(url);
       await page.getByRole('textbox', { name: 'Message' }).waitFor();
       await page.getByRole('status', { name: 'Loading plans' }).waitFor({ state: 'detached' });
-      await page.getByRole('combobox', { name: 'Chat mode' }).click();
-      await page.getByRole('option', { name: 'Plan only' }).click();
+      await page.getByRole('button', { name: 'Mode: Default' }).click();
+      await page.getByRole('menuitemradio', { name: /^Plan/ }).click();
       await page.getByRole('textbox', { name: 'Message' }).fill('Check access before making the plan.');
       await page.getByRole('button', { name: 'Send message' }).click();
       await page.getByRole('button', { name: 'Retry same operation' }).click();
@@ -191,7 +191,7 @@ test(
       assert.equal(sends.length, 2);
       assert.deepEqual(sends[0], sends[1], 'failed sends retain the exact request and mode');
       assert.equal(sends[0].mode, 'plan');
-      assert.equal(await page.getByRole('combobox', { name: 'Chat mode' }).innerText(), 'Plan');
+      await page.getByRole('button', { name: 'Turn off Plan' }).waitFor();
       await page.getByText('Plan only · no setup actions').first().waitFor();
 
       listed = [plan];
@@ -214,8 +214,8 @@ test(
       await reference.getByRole('button', { name: 'Pause plan' }).waitFor();
       assert.deepEqual(starts[0], starts[1], 'uncertain Start retries keep the exact version and request ID');
       assert.equal(
-        await page.getByRole('combobox', { name: 'Chat mode' }).innerText(),
-        'Plan',
+        await page.getByRole('button', { name: 'Mode: Plan' }).count(),
+        1,
         'Start does not change composer intent',
       );
 
