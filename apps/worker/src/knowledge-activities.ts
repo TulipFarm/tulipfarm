@@ -8,13 +8,18 @@ import {
   type KnowledgeWork,
 } from '@tulipfarm/knowledge';
 
-export function createKnowledgeActivities(runtime: LocalKnowledgeOptions['runtime'], objects?: FileBytes) {
+export function createKnowledgeActivities(
+  runtime: LocalKnowledgeOptions['runtime'],
+  objects?: FileBytes,
+  media: Pick<LocalKnowledgeOptions, 'recognition' | 'recognitionAvailable'> = {},
+) {
   const unavailable = async (): Promise<never> => {
     throw new KnowledgeError('adapter-required');
   };
   const service = createLocalKnowledge({
     runtime,
     files: createFiles(runtime, objects ?? { read: unavailable, putIfAbsent: unavailable, remove: unavailable }),
+    ...media,
   });
   return {
     async processKnowledge(value: KnowledgeWork): Promise<void> {

@@ -1,5 +1,10 @@
+import { walk } from './charts.js';
+import { gapLabels } from './collector.js';
+import type { MediaCollector } from './collector.js';
 import { KnowledgeParseError } from './contracts.js';
-import { readXml, xmlName } from './xml.js';
+import type { KnowledgeLocation } from './media-contracts.js';
+import { escapeMarkdown } from './tokens.js';
+import { readXml, readXmlSource, rewriteXml, xmlName } from './xml.js';
 import type { XmlElement } from './xml.js';
 
 const office = 'urn:oasis:names:tc:opendocument:xmlns:office:1.0';
@@ -7,7 +12,13 @@ const text = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
 const style = 'urn:oasis:names:tc:opendocument:xmlns:style:1.0';
 const fo = 'urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0';
 const manifest = 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0';
+const draw = 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0';
+const svg = 'urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0';
+const xlink = 'http://www.w3.org/1999/xlink';
 const odt = 'application/vnd.oasis.opendocument.text';
+const frame = xmlName(draw, 'frame');
+/** Package parts that embedded frames may refer to. They are read only as media, never parsed as ODF. */
+const mediaPart = /^(?:Pictures|ObjectReplacements)\/[^/]+$|^Object \d+\/(?:[^/]+\/)?[^/]+$/;
 type Rule = { children: string[]; attributes: Map<string, RegExp>; text?: boolean };
 const name = /^[A-Za-z_][\w.-]*$/;
 const inline = [xmlName(text, 'span')];
@@ -25,9 +36,12 @@ const grammar = new Map<string, Rule>([
   [xmlName(office, 'text'), { children: paragraphs, attributes: new Map() }],
   [
     xmlName(text, 'h'),
-    { children: inline, attributes: new Map([[xmlName(text, 'outline-level'), /^[1-6]$/]]), text: true },
+    { children: [...inline, frame], attributes: new Map([[xmlName(text, 'outline-level'), /^[1-6]$/]]), text: true },
   ],
-  [xmlName(text, 'p'), { children: [...inline, xmlName(office, 'annotation')], attributes: new Map(), text: true }],
+  [
+    xmlName(text, 'p'),
+    { children: [...inline, frame, xmlName(office, 'annotation')], attributes: new Map(), text: true },
+  ],
   [xmlName(office, 'annotation'), { children: [xmlName(text, 'p')], attributes: new Map() }],
   [xmlName(text, 'span'), { children: [], attributes: new Map([[xmlName(text, 'style-name'), name]]), text: true }],
   [
@@ -61,8 +75,11 @@ const grammar = new Map<string, Rule>([
     {
       children: [],
       attributes: new Map([
-        [xmlName(manifest, 'full-path'), /^(?:\/|content\.xml)$/],
-        [xmlName(manifest, 'media-type'), /^(?:application\/vnd\.oasis\.opendocument\.text|text\/xml)$/],
+        [
+          xmlName(manifest, 'full-path'),
+          /^(?:\/|content\.xml|(?:Pictures|ObjectReplacements)\/[^/]+|Object \d+\/(?:[^/]+\/?)?(?:[^/]+)?)$/,
+        ],
+        [xmlName(manifest, 'media-type'), /^(?:[\w.+-]+\/[\w.+-]+)?$/],
       ]),
     },
   ],
@@ -76,11 +93,13 @@ export function checkOpenDocument(parts: Map<string, Buffer>): void {
   if (!root || root.name !== xmlName(office, 'document-content')) unsupported();
   if (!declared) unsupported();
   for (const path of parts.keys()) {
-    if (!['mimetype', 'content.xml', 'META-INF/manifest.xml'].includes(path)) unsupported();
+    if (!['mimetype', 'content.xml', 'META-INF/manifest.xml'].includes(path) && !mediaPart.test(path)) unsupported();
   }
   const styles = new Set<string>();
   const references: string[] = [];
   function inspect(node: XmlElement): void {
+    // Frames hold pictures, objects and drawings, which become media or coverage gaps rather than text.
+    if (node.name === frame) return;
     const rule = grammar.get(node.name);
     if (!rule || (!rule.text && node.text.trim())) unsupported();
     for (const [key, value] of node.attributes) {
@@ -122,6 +141,71 @@ export function checkOpenDocument(parts: Map<string, Buffer>): void {
     inspect(tree);
   }
 }
+
+function textOf(node: XmlElement): string {
+  return [...walk(node)]
+    .map(value => value.text)
+    .join('')
+    .replace(/[^\P{Cc}\t]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Replaces each frame in a qualified ODF text document with tokens for its picture, embedded object, media or
+ * text box. Text documents have no slide or sheet boundaries, so no boundaries are returned.
+ */
+export function rewriteOpenDocument(
+  parts: Map<string, Buffer>,
+  collector: MediaCollector,
+): { boundary: string; key: string; location: KnowledgeLocation }[] {
+  const content = parts.get('content.xml');
+  if (!content || parts.get('mimetype')?.toString('utf8') !== odt) return [];
+  const { text: source, root } = readXmlSource(content);
+  const edits: { start: number; end: number; value: string }[] = [];
+  const visit = (node: XmlElement): void => {
+    if (node.name !== frame) {
+      for (const child of node.children) visit(child);
+      return;
+    }
+    const described = (local: string) => {
+      const child = node.children.find(value => value.name === xmlName(svg, local));
+      return child ? textOf(child) : '';
+    };
+    const alt = described('desc') || described('title');
+    const tokens: string[] = [];
+    const image = node.children.find(child => child.name === xmlName(draw, 'image'));
+    const object = node.children.find(
+      child => child.name === xmlName(draw, 'object') || child.name === xmlName(draw, 'object-ole'),
+    );
+    const plugin = node.children.find(child => child.name === xmlName(draw, 'plugin'));
+    const box = node.children.find(child => child.name === xmlName(draw, 'text-box'));
+    if (plugin) {
+      const audio = /^audio\//i.test(plugin.attributes.get(xmlName(draw, 'mime-type')) ?? '');
+      tokens.push(collector.gapToken(audio ? 'audio' : 'video', audio ? gapLabels.audio : gapLabels.video));
+    } else if (image) {
+      const href = (image.attributes.get(xmlName(xlink, 'href')) ?? '').replace(/^\.\//, '');
+      const bytes = parts.get(href);
+      if (bytes && mediaPart.test(href)) tokens.push(collector.image({ kind: 'part', path: href }, alt, bytes));
+      else if (href) tokens.push(collector.gapToken('image', gapLabels.linkedImage));
+      else tokens.push(collector.gapToken('image', gapLabels.drawing));
+    } else if (object) tokens.push(collector.gapToken('object', gapLabels.object));
+    else if (box) {
+      const paragraphs = [...walk(box)]
+        .filter(child => paragraphNames.has(child.name))
+        .map(textOf)
+        .filter(Boolean)
+        .map(escapeMarkdown);
+      if (paragraphs.length) tokens.push(collector.block(paragraphs.join('\n\n')));
+    } else tokens.push(collector.gapToken('other', gapLabels.drawing));
+    edits.push({ start: node.start, end: node.end, value: tokens.length ? ` ${tokens.join(' ')} ` : '' });
+  };
+  visit(root);
+  if (edits.length) parts.set('content.xml', rewriteXml(source, edits));
+  return [];
+}
+
+const paragraphNames = new Set(paragraphs);
 
 function unsupported(): never {
   throw new KnowledgeParseError('unsupported');

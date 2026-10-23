@@ -3,6 +3,12 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
+/** Parts of a document that could not be read: the full count and the first few. */
+export const knowledgeGapsSchema = z.object({
+  count: z.number().int().min(0),
+  items: z.array(z.object({ kind: z.string(), reason: z.string(), label: z.string() })),
+});
+
 const documentSchema = z.object({
   documentId: z.uuid(),
   revisionId: z.uuid(),
@@ -10,6 +16,7 @@ const documentSchema = z.object({
   parsing: z.enum(['queued', 'parsing', 'ready', 'failed', 'ocr-unavailable']),
   failure: z.string().nullable(),
   canRetry: z.boolean(),
+  gaps: knowledgeGapsSchema.optional(),
   kind: z.enum(['note', 'file']),
   fileId: z.uuid().optional(),
 });

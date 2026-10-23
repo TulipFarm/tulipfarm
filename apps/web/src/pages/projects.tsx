@@ -23,6 +23,7 @@ import { workspaceRoute, workspaceProjectsRoute, projectDetailRoute, projectSett
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { AttachmentDropzone, FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { formatFileSize } from '@/lib/file-viewer';
+import { knowledgeGapSummary } from '@/features/files/knowledge-labels';
 import { DataList, DataListCell, DataListLink, DataListRow, DataListSecondary } from '@/components/data-list';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -1095,6 +1096,11 @@ function ProjectFiles({
                 {file.source && !file.source.available && (
                   <p className="text-xs text-warning">
                     Source unavailable. Chats don’t use it.{canEdit ? ' Share the file again, or remove it.' : ''}
+                  </p>
+                )}
+                {file.gaps && file.gaps.count > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {knowledgeGapSummary(file.gaps)} Chats use the rest of the text.
                   </p>
                 )}
               </div>

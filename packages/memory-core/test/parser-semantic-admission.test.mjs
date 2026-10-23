@@ -51,8 +51,6 @@ for (const control of [
   'scaps',
   'rtlch',
   'field',
-  'pict',
-  'object',
   'supermarket',
   'Super',
   'futuresemantic',
@@ -61,6 +59,20 @@ for (const control of [
     await assert.rejects(parse(Buffer.from(`{\\rtf1\\ansi Limit {\\${control} 450} 500}`), 'rtf'), unsupported);
   });
 }
+
+test('RTF pictures and objects without picture data become coverage gaps instead of text', async () => {
+  for (const [control, kind] of [
+    ['pict', 'image'],
+    ['object', 'object'],
+  ]) {
+    const result = await parse(Buffer.from(`{\\rtf1\\ansi Limit {\\${control} 450} 500}`), 'rtf');
+    assert.equal(result.markdown, 'Limit 500\n');
+    assert.deepEqual(
+      result.gaps.map(gap => [gap.kind, gap.reason]),
+      [[kind, 'unsupported-media']],
+    );
+  }
+});
 
 for (const source of [
   String.raw`{\rtf1\ansi\uc1 {\upr{Balance 450}{\*\ud Balance \u8722?450}}}`,

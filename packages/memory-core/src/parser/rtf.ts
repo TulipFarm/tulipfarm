@@ -83,3 +83,110 @@ function unsupported(): never {
 function malformed(): never {
   throw new KnowledgeParseError('malformed');
 }
+
+export interface RtfPicture {
+  index: number;
+  /** Picture format control word, such as `pngblip` or `emfblip`. */
+  format: string;
+  start: number;
+  end: number;
+}
+
+export interface RtfMediaGroup {
+  start: number;
+  end: number;
+  /** Pictures shown for the group; empty for an object without a result picture. */
+  pictures: RtfPicture[];
+  kind: 'picture' | 'object' | 'alternate';
+}
+
+const pictureFormats = /\\(pngblip|jpegblip|emfblip|wmetafile|dibitmap|wbitmap|macpict|pmmetafile)/;
+
+function groupEnd(text: string, start: number): number {
+  let depth = 0;
+  let position = start;
+  while (position < text.length) {
+    const character = text[position++];
+    if (character === '\\') {
+      const binary = /^bin(\d{1,9}) ?/.exec(text.slice(position, position + 16));
+      if (binary) position += binary[0].length + Number(binary[1]);
+      else position += 1;
+    } else if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (!depth) return position;
+    }
+  }
+  malformed();
+}
+
+/**
+ * Finds pictures and objects in RTF. `\shppict` pictures are kept and their `\nonshppict` fallbacks dropped; an
+ * object shows its `\result` picture. Picture indexes are stable for the same bytes, so they address media later.
+ */
+export function scanRtfMedia(text: string): RtfMediaGroup[] {
+  const groups: RtfMediaGroup[] = [];
+  let index = 0;
+  const pictures = (start: number, end: number): RtfPicture[] => {
+    const result: RtfPicture[] = [];
+    let position = start;
+    while ((position = text.indexOf('{\\pict', position)) !== -1 && position < end) {
+      const close = groupEnd(text, position);
+      const format = pictureFormats.exec(text.slice(position, Math.min(close, position + 4096)))?.[1] ?? 'unknown';
+      result.push({ index: index++, format, start: position, end: close });
+      position = close;
+    }
+    return result;
+  };
+  const pattern = /\{(?:\\\*)?\\(pict|shppict|nonshppict|object)(?![a-zA-Z])/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text))) {
+    // Escaped braces such as `\{` are text.
+    let slashes = 0;
+    while (text[match.index - 1 - slashes] === '\\') slashes += 1;
+    if (slashes % 2) continue;
+    const start = match.index;
+    const end = groupEnd(text, start);
+    const kind = match[1];
+    if (kind === 'nonshppict') groups.push({ start, end, pictures: [], kind: 'alternate' });
+    else if (kind === 'object') {
+      const result = text.indexOf('{\\result', start);
+      groups.push({ start, end, pictures: result !== -1 && result < end ? pictures(result, end) : [], kind: 'object' });
+    } else groups.push({ start, end, pictures: pictures(start, end), kind: 'picture' });
+    pattern.lastIndex = end;
+    if (groups.length > 100_000) throw new KnowledgeParseError('resource-limited');
+  }
+  return groups;
+}
+
+/** Binary data of a picture group: hexadecimal digits or a `\bin` run after the control words. */
+export function rtfPictureData(text: string, picture: RtfPicture): Buffer {
+  const body = text.slice(picture.start + 1, picture.end - 1);
+  let position = 0;
+  const parts: Buffer[] = [];
+  let hex = '';
+  while (position < body.length) {
+    const character = body[position] ?? '';
+    if (character === '{') {
+      const end = groupEnd(body, position);
+      position = end;
+      continue;
+    }
+    if (character === '\\') {
+      const binary = /^\\bin(\d{1,9}) ?/.exec(body.slice(position, position + 16));
+      if (binary) {
+        const start = position + binary[0].length;
+        parts.push(Buffer.from(body.slice(start, start + Number(binary[1])), 'latin1'));
+        position = start + Number(binary[1]);
+        continue;
+      }
+      const word = /^\\(?:[a-zA-Z]+-?\d* ?|.)/.exec(body.slice(position));
+      position += word?.[0].length ?? 1;
+      continue;
+    }
+    if (/[0-9a-fA-F]/.test(character)) hex += character;
+    position += 1;
+  }
+  if (hex.length % 2) hex = hex.slice(0, -1);
+  return Buffer.concat([...parts, Buffer.from(hex, 'hex')]);
+}

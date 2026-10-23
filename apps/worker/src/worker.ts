@@ -30,6 +30,7 @@ import { createObjectCleanupSweep, createTableSearchSweep } from './table-cleanu
 import { githubRuntimeConfiguration } from '@tulipfarm/github/configuration';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createKnowledgeActivities } from './knowledge-activities.ts';
+import { knowledgeMediaRecognition } from './media-recognition.ts';
 import { createFiles } from '@tulipfarm/files';
 import { createKnowledgeEmbeddingWorker } from './knowledge-embedding-composition.ts';
 import { createGoogleKnowledgeWorker } from './knowledge-google-composition.ts';
@@ -264,7 +265,11 @@ async function run() {
           workflowsPath: fileURLToPath(
             new URL(`./knowledge-workflows${extname(import.meta.filename)}`, import.meta.url),
           ),
-          activities: createKnowledgeActivities(resources.runtime, chatObjects ?? undefined),
+          activities: createKnowledgeActivities(
+            resources.runtime,
+            chatObjects ?? undefined,
+            knowledgeMediaRecognition(resources.runtime),
+          ),
           maxConcurrentActivityTaskExecutions: 2,
           shutdownGraceTime: '40 seconds',
         })
@@ -289,6 +294,7 @@ async function run() {
           connection,
           telemetry,
           gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
+          ...knowledgeMediaRecognition(resources.runtime),
         })
       : undefined;
     const slackKnowledge = resources

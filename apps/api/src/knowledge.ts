@@ -4,7 +4,10 @@ import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
 import { FileError } from '@tulipfarm/files';
 import {
+  KnowledgeAdminRequired,
   KnowledgeError,
+  knowledgeSettingsSchema,
+  knowledgeSettingsUpdateSchema,
   knowledgeSaveSchema,
   knowledgeCommandSchema,
   knowledgeListSchema,
@@ -59,6 +62,7 @@ const citationEvidenceSchema = z.object({
   heading: z.string(),
   text: z.string(),
   truncated: z.boolean(),
+  location: z.string().optional(),
   source: z.enum(['note', 'file', 'google', 'slack', 'github', 'confluence', 'jira', 'conversation']),
 });
 const errorSchema = {
@@ -153,6 +157,7 @@ export function registerKnowledge(
       if (error instanceof SourceAuthorizationUnavailable || error instanceof StorageUnavailableError)
         return reply.code(503).send({ error: 'knowledge-unavailable' });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'knowledge-not-found' });
+      if (error instanceof KnowledgeAdminRequired) return reply.code(403).send({ error: 'knowledge-admin-required' });
       if (error instanceof KnowledgeError) {
         const status = {
           conflict: 409,
@@ -243,6 +248,39 @@ export function registerKnowledge(
         const { workspaceId, sourceId } = sourceParams.parse(request.params);
         if (!dependencies.sourceFailures) throw new StorageUnavailableError('disabled');
         return dependencies.sourceFailures.list(workspaceId, user(request), sourceId);
+      },
+    );
+    routes.get(
+      `${base}/settings`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'readKnowledgeSettingsV1',
+          'Read workspace Knowledge settings',
+          workspaceParams,
+          knowledgeSettingsSchema,
+        ),
+      },
+      request => {
+        const { workspaceId } = workspaceParams.parse(request.params);
+        return service.settings(workspaceId, user(request));
+      },
+    );
+    routes.put(
+      `${base}/settings`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'updateKnowledgeSettingsV1',
+          'Change workspace Knowledge settings. Admins only',
+          workspaceParams,
+          knowledgeSettingsSchema,
+          knowledgeSettingsUpdateSchema,
+        ),
+      },
+      request => {
+        const { workspaceId } = workspaceParams.parse(request.params);
+        return service.updateSettings(workspaceId, user(request), knowledgeSettingsUpdateSchema.parse(request.body));
       },
     );
     const document = `${base}/documents/:documentId`;

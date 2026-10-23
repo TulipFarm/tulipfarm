@@ -5,6 +5,11 @@ export interface XmlElement {
   attributes: Map<string, string>;
   children: XmlElement[];
   text: string;
+  /** Qualified name as written in the source, such as `w:r`. */
+  raw: string;
+  /** Offsets of the element's start and end in the decoded source text. */
+  start: number;
+  end: number;
 }
 
 export function xmlName(namespace: string, local: string): string {
@@ -12,9 +17,18 @@ export function xmlName(namespace: string, local: string): string {
 }
 
 export function readXml(bytes: Buffer): XmlElement {
+  return readXmlSource(bytes).root;
+}
+
+export function decodeXml(bytes: Buffer): string {
   const encoding =
     bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
-  const text = new TextDecoder(encoding, { fatal: true }).decode(bytes);
+  return new TextDecoder(encoding, { fatal: true }).decode(bytes);
+}
+
+/** Parses XML and keeps the decoded text so callers can rewrite elements by offset. */
+export function readXmlSource(bytes: Buffer): { text: string; root: XmlElement } {
+  const text = decodeXml(bytes);
   const stack: { raw: string; element: XmlElement; namespaces: Map<string, string> }[] = [];
   let root: XmlElement | undefined;
   let position = 0;
@@ -42,7 +56,9 @@ export function readXml(bytes: Buffer): XmlElement {
       continue;
     }
     if (value.startsWith('</')) {
-      if (stack.pop()?.raw !== value.slice(2, -1).trim()) malformed();
+      const open = stack.pop();
+      if (open?.raw !== value.slice(2, -1).trim()) malformed();
+      open.element.end = position;
       continue;
     }
     if (++count > 250_000 || stack.length > 256) throw new KnowledgeParseError('resource-limited');
@@ -75,7 +91,15 @@ export function readXml(bytes: Buffer): XmlElement {
         pieces.at(-1) ?? '',
       );
     };
-    const element: XmlElement = { name: qualify(raw), attributes: new Map(), children: [], text: '' };
+    const element: XmlElement = {
+      name: qualify(raw),
+      attributes: new Map(),
+      children: [],
+      text: '',
+      raw,
+      start: position - value.length,
+      end: position,
+    };
     for (const [name, content] of attributes) {
       if (name === 'xmlns' || name.startsWith('xmlns:')) continue;
       const key = qualify(name, true);
@@ -90,7 +114,29 @@ export function readXml(bytes: Buffer): XmlElement {
     if (!value.endsWith('/>')) stack.push({ raw, element, namespaces });
   }
   if (!root || stack.length) malformed();
-  return root;
+  return { text, root };
+}
+
+/** Applies non-overlapping replacements of source ranges; a range inside another replaced range is dropped. */
+export function rewriteXml(text: string, edits: { start: number; end: number; value: string }[]): Buffer {
+  const sorted = [...edits].sort((a, b) => a.start - b.start || b.end - a.end);
+  let result = '';
+  let position = 0;
+  for (const edit of sorted) {
+    if (edit.start < position) continue;
+    result += text.slice(position, edit.start) + edit.value;
+    position = edit.end;
+  }
+  result += text.slice(position);
+  // The rewrite is UTF-8, so a declared UTF-16 encoding must go.
+  return Buffer.from(
+    result.replace(/^\uFEFF/, '').replace(/^(<\?xml[^>]*?)\s+encoding\s*=\s*(["'])[^"']*\2/, '$1'),
+    'utf8',
+  );
+}
+
+export function escapeXml(value: string): string {
+  return value.replace(/[<>&"']/g, character => `&#${character.charCodeAt(0)};`);
 }
 
 function entities(text: string): string {

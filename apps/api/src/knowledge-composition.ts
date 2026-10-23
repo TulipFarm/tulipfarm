@@ -59,6 +59,8 @@ export function registerKnowledgeComposition(
     temporal?: ReturnType<typeof createTemporalClient>;
     env?: NodeJS.ProcessEnv;
     provider?: Parameters<typeof createKnowledgeEmbeddings>[0]['provider'];
+    /** Whether document-vision recognition could run for a workspace now; lets dispatch re-parse unread images. */
+    recognitionAvailable?: LocalKnowledgeOptions['recognitionAvailable'];
     googleService?: ReturnType<typeof createGoogleWorkspaceService>;
     providerFetch?: typeof fetch;
     slackCorpus?: SlackCorpusProvider;
@@ -74,7 +76,11 @@ export function registerKnowledgeComposition(
   const files =
     dependencies.files ??
     createFiles(dependencies.runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
-  const service = createLocalKnowledge({ runtime: dependencies.runtime, files });
+  const service = createLocalKnowledge({
+    runtime: dependencies.runtime,
+    files,
+    ...(dependencies.recognitionAvailable ? { recognitionAvailable: dependencies.recognitionAvailable } : {}),
+  });
   const conversations = createConversationKnowledge({ runtime: dependencies.runtime });
   const google = createGoogleKnowledge({
     runtime: dependencies.runtime,

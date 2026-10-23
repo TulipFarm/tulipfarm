@@ -313,66 +313,91 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         });
       },
     );
-    await t.test('real Office and PDF originals reach search while scans remain terminal and retained', async () => {
-      for (const [filename, bytes] of [
-        ['harvest.docx', docx()],
-        ['harvest.pdf', await pdf(['text'])],
-      ]) {
+    await t.test(
+      'real Office and PDF originals reach search, unread pages become gaps and scans wait for recognition',
+      async () => {
+        for (const [filename, bytes] of [
+          ['harvest.docx', docx()],
+          ['harvest.pdf', await pdf(['text'])],
+        ]) {
+          const fileId = randomUUID();
+          await files.upload(
+            one.id,
+            owner.userId,
+            fileId,
+            { name: filename, parentId: null, mediaType: 'application/octet-stream' },
+            bytes,
+          );
+          const item = save('', { title: filename, input: { kind: 'file', fileId } });
+          await api.save(one.id, owner.userId, item);
+          await run(item.commandId);
+          const hits = (await api.search(one.id, owner.userId, { query: 'Harvest apples Tuesday' })).hits;
+          assert.ok(hits.some(hit => hit.citation.documentId === item.documentId));
+          assert.deepEqual(
+            Buffer.from((await api.original(one.id, owner.userId, item.documentId)).bytes),
+            Buffer.from(bytes),
+          );
+        }
+        const mixedBytes = await pdf(['text', 'scan']);
+        const mixedFileId = randomUUID();
+        await files.upload(
+          one.id,
+          owner.userId,
+          mixedFileId,
+          { name: 'mixed.pdf', parentId: null, mediaType: 'application/pdf' },
+          mixedBytes,
+        );
+        const mixed = save('', { title: 'Mixed scan', input: { kind: 'file', fileId: mixedFileId } });
+        await api.save(one.id, owner.userId, mixed);
+        await run(mixed.commandId);
+        const published = await api.get(one.id, owner.userId, mixed.documentId);
+        assert.equal(published.parsing, 'ready');
+        assert.equal(published.gaps.count, 1);
+        assert.equal(published.gaps.items[0].reason, 'recognition-unavailable');
+        assert.deepEqual(published.gaps.items[0].location, { kind: 'page', page: 2 });
+        const mixedHit = (await api.search(one.id, owner.userId, { query: 'Harvest apples Tuesday' })).hits.find(
+          hit => hit.citation.documentId === mixed.documentId,
+        );
+        assert.deepEqual(mixedHit.location, { kind: 'page', page: 1 });
+        assert.equal(mixedHit.coverageGaps, true);
+        const bytes = await pdf(['scan']);
         const fileId = randomUUID();
         await files.upload(
           one.id,
           owner.userId,
           fileId,
-          { name: filename, parentId: null, mediaType: 'application/octet-stream' },
+          { name: 'scan.pdf', parentId: null, mediaType: 'application/pdf' },
           bytes,
         );
-        const item = save('', { title: filename, input: { kind: 'file', fileId } });
+        const item = save('', { title: 'Scanned page', input: { kind: 'file', fileId } });
         await api.save(one.id, owner.userId, item);
-        await run(item.commandId);
-        const hits = (await api.search(one.id, owner.userId, { query: 'Harvest apples Tuesday' })).hits;
-        assert.ok(hits.some(hit => hit.citation.documentId === item.documentId));
+        const work = (await api.due(one.id)).find(entry => entry.revisionId === item.commandId);
+        assert.equal((await api.process(work)).disposition, 'failed');
+        const current = await api.get(one.id, owner.userId, item.documentId);
+        assert.equal(current.parsing, 'ocr-unavailable');
+        assert.equal(current.failure, 'ocr-required');
+        assert.equal(current.canRetry, false);
+        assert.equal(current.publicationId, null);
+        await assert.rejects(
+          api.retry(one.id, owner.userId, {
+            documentId: item.documentId,
+            expectedRevisionId: item.commandId,
+            commandId: randomUUID(),
+          }),
+          error => error instanceof KnowledgeError && error.code === 'conflict',
+        );
+        assert.ok(!(await api.due(one.id)).some(entry => entry.revisionId === item.commandId));
         assert.deepEqual(
           Buffer.from((await api.original(one.id, owner.userId, item.documentId)).bytes),
           Buffer.from(bytes),
         );
-      }
-      const bytes = await pdf(['text', 'scan']);
-      const fileId = randomUUID();
-      await files.upload(
-        one.id,
-        owner.userId,
-        fileId,
-        { name: 'mixed.pdf', parentId: null, mediaType: 'application/pdf' },
-        bytes,
-      );
-      const item = save('', { title: 'Mixed scan', input: { kind: 'file', fileId } });
-      await api.save(one.id, owner.userId, item);
-      const work = (await api.due(one.id)).find(entry => entry.revisionId === item.commandId);
-      assert.equal((await api.process(work)).disposition, 'failed');
-      const current = await api.get(one.id, owner.userId, item.documentId);
-      assert.equal(current.parsing, 'ocr-unavailable');
-      assert.equal(current.failure, 'ocr-required');
-      assert.equal(current.canRetry, false);
-      assert.equal(current.publicationId, null);
-      await assert.rejects(
-        api.retry(one.id, owner.userId, {
-          documentId: item.documentId,
-          expectedRevisionId: item.commandId,
-          commandId: randomUUID(),
-        }),
-        error => error instanceof KnowledgeError && error.code === 'conflict',
-      );
-      assert.ok(!(await api.due(one.id)).some(entry => entry.revisionId === item.commandId));
-      assert.deepEqual(
-        Buffer.from((await api.original(one.id, owner.userId, item.documentId)).bytes),
-        Buffer.from(bytes),
-      );
-      assert.ok(
-        !(await api.search(one.id, owner.userId, { query: 'Mixed scan' })).hits.some(
-          hit => hit.citation.documentId === item.documentId,
-        ),
-      );
-    });
+        assert.ok(
+          !(await api.search(one.id, owner.userId, { query: 'Scanned page' })).hits.some(
+            hit => hit.citation.documentId === item.documentId,
+          ),
+        );
+      },
+    );
     await t.test(
       'dispatch acknowledgement recovery changes generation once and retry commands are idempotent',
       async () => {
@@ -470,7 +495,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           },
           { status: 'raw-text', reason: 'unsupported' },
         );
-        const scan = listed.items.find(entry => entry.title === 'Mixed scan');
+        const scan = listed.items.find(entry => entry.title === 'Scanned page');
         assert.equal(scan?.status, 'ocr-unavailable');
         assert.equal(scan?.reason, 'ocr-required');
         assert.ok(

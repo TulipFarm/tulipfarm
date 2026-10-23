@@ -127,7 +127,7 @@
           },
           "roles": {
             "default": [],
-            "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation, fallback, completion-check. Each role on at most one model.",
+            "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation, fallback, completion-check, document-vision. Each role on at most one model.",
             "type": "array",
             "items": {
               "type": "string",
@@ -141,7 +141,8 @@
                 "table-search",
                 "recommendation",
                 "fallback",
-                "completion-check"
+                "completion-check",
+                "document-vision"
               ]
             }
           },
@@ -198,6 +199,10 @@
               },
               "streaming": {
                 "description": "Chat steps stream the response",
+                "type": "boolean"
+              },
+              "imageInput": {
+                "description": "Accepts images in user messages; required for the document-vision role",
                 "type": "boolean"
               },
               "responseModelAliases": {

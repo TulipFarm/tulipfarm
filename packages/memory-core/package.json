@@ -84,8 +84,10 @@
   },
   "dependencies": {
     "@firecrawl/anydoc": "0.2.4",
+    "@napi-rs/canvas": "1.0.13",
     "js-tiktoken": "1.0.21",
     "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299",
     "zod": "4.3.6"
   },
   "devDependencies": {

@@ -21,15 +21,39 @@ import {
   knowledgeSaveSchema,
   knowledgeSearchSchema,
   knowledgeWorkSchema,
+  knowledgeLocationOf,
   type KnowledgeDocument,
+  type KnowledgeLocation,
   type KnowledgeWork,
 } from '../contracts.ts';
 import { citationSchema, knowledgeLimits, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions } from './store.ts';
 import { normalizeIdentifier } from './identifiers.ts';
+import {
+  gappedPublications,
+  mediaLimitsForStorage,
+  publicationGaps,
+  readKnowledgeSettings,
+  recognitionFailed,
+  recognitionOptions,
+  recordParse,
+  publicationSeed,
+  requeueLocalRecognition,
+  resetRecognitionRetries,
+  writeKnowledgeSettings,
+  type KnowledgeRecognitionAvailability,
+  type KnowledgeRecognitionPort,
+} from './media.ts';
 import { recordRecommendationChange } from '@tulipfarm/workspace-storage/recommendations';
 
-export type LocalKnowledgeOptions = { runtime: KnowledgeOptions['runtime']; files: ReturnType<typeof createFiles> };
+export type LocalKnowledgeOptions = {
+  runtime: KnowledgeOptions['runtime'];
+  files: ReturnType<typeof createFiles>;
+  /** Supplies the document-vision recognizer; without it, images in documents become coverage gaps. */
+  recognition?: KnowledgeRecognitionPort;
+  /** Whether recognition could run now; when it can, revisions waiting for it are parsed again. */
+  recognitionAvailable?: KnowledgeRecognitionAvailability;
+};
 type Store = ReturnType<typeof createKnowledgeStore>;
 type Transaction = Parameters<Store['bind']>[0];
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_knowledge_${name}`);
@@ -63,7 +87,7 @@ const retryable = (work: z.infer<typeof workRow>) =>
   work.parsing === 'failed' && work.failure === 'provider' && work.attempts < knowledgeLimits.attemptsPerRevision;
 const hidden = (error: unknown) => error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable);
 
-export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) {
+export function createLocalKnowledge({ runtime, files, recognition, recognitionAvailable }: LocalKnowledgeOptions) {
   const store = createKnowledgeStore({ runtime });
   async function transaction<T>(
     workspaceId: string,
@@ -131,6 +155,8 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       publicationId: doc.lexical_publication_id,
       canRetry: retryable(work),
     };
+    const gaps = await publicationGaps(tx, doc.lexical_publication_id);
+    if (gaps) Object.assign(base, { gaps });
     if (revision.original.kind === 'file') return { ...base, kind: 'file', fileId: revision.original.fileId };
     return {
       ...base,
@@ -310,7 +336,14 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
   async function search(workspaceId: string, userId: string, value: unknown) {
     const input = knowledgeSearchSchema.parse(value);
     return transaction(workspaceId, userId, false, async (tx, actor) => {
-      const hits: { title: string; text: string; heading: string; citation: z.infer<typeof citationSchema> }[] = [];
+      const hits: {
+        title: string;
+        text: string;
+        heading: string;
+        citation: z.infer<typeof citationSchema>;
+        location?: KnowledgeLocation;
+        coverageGaps?: boolean;
+      }[] = [];
       for (let offset = 0; offset < knowledgeLimits.documents && hits.length < 20; offset += 100) {
         const rows = z
           .array(
@@ -324,13 +357,14 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
               revision_id: uuidSchema,
               publication_id: uuidSchema,
               access_epoch: z.number().int(),
+              source_offset: z.unknown(),
             }),
           )
           .parse(
             (
               await tx.client.query(
                 `WITH matches AS (
-        SELECT k.search_title AS title,k.heading,k.passage,k.ordinal,d.source_id,d.id AS document_id,d.observed_revision_id AS revision_id,k.publication_id,s.access_epoch,
+        SELECT k.search_title AS title,k.heading,k.passage,k.ordinal,k.source_offset,d.source_id,d.id AS document_id,d.observed_revision_id AS revision_id,k.publication_id,s.access_epoch,
           (k.identifiers @> ARRAY[$4]::text[]) AS exact_match,ts_rank_cd(k.search_vector,websearch_to_tsquery('english',$3)) AS rank
         FROM ${table(tx, 'chunks')} k JOIN ${table(tx, 'documents')} d ON d.lexical_publication_id=k.publication_id
         JOIN ${table(tx, 'local_revisions')} l ON l.revision_id=d.observed_revision_id
@@ -357,7 +391,14 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
           });
           try {
             await store.eligible(tx, actor, citation);
-            hits.push({ title: row.title, text: row.passage, heading: row.heading, citation });
+            const location = knowledgeLocationOf(row.source_offset);
+            hits.push({
+              title: row.title,
+              text: row.passage,
+              heading: row.heading,
+              citation,
+              ...(location ? { location } : {}),
+            });
             if (hits.length === 20) break;
           } catch (error) {
             if (!hidden(error)) throw error;
@@ -371,6 +412,11 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
         hits.map(hit => hit.citation.documentId),
       );
       for (const hit of hits) await store.eligible(tx, actor, hit.citation);
+      const gapped = await gappedPublications(
+        tx,
+        hits.map(hit => hit.citation.publicationId),
+      );
+      for (const hit of hits) if (gapped.has(hit.citation.publicationId)) hit.coverageGaps = true;
       return {
         mode: 'keyword-only',
         reason: 'semantic-not-enabled',
@@ -385,12 +431,12 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       const { revision } = await store.eligible(tx, actor, citation);
       await localRevision(tx, actor, revision.id);
       const chunk = z
-        .object({ heading: z.string(), passage: z.string() })
+        .object({ heading: z.string(), passage: z.string(), source_offset: z.unknown() })
         .optional()
         .parse(
           (
             await tx.client.query(
-              `SELECT heading,passage FROM ${table(tx, 'chunks')} WHERE publication_id=$1 AND ordinal=$2`,
+              `SELECT heading,passage,source_offset FROM ${table(tx, 'chunks')} WHERE publication_id=$1 AND ordinal=$2`,
               [citation.publicationId, citation.ordinal],
             )
           ).rows[0],
@@ -399,11 +445,15 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       await store.eligible(tx, actor, citation);
       const original: { kind: 'file'; fileId: string } | { kind: 'note' } =
         revision.original.kind === 'file' ? { kind: 'file', fileId: revision.original.fileId } : { kind: 'note' };
+      const location = knowledgeLocationOf(chunk.source_offset);
+      const gapped = await gappedPublications(tx, [citation.publicationId]);
       return {
         title: revision.title,
         text: chunk.passage,
         heading: chunk.heading,
         citation,
+        ...(location ? { location } : {}),
+        ...(gapped.size ? { coverageGaps: true } : {}),
         original,
         validUntil: new Date((await clock(tx)).getTime() + knowledgeLimits.permissionAgeMs).toISOString(),
       };
@@ -518,7 +568,9 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
     });
   }
   async function due(workspaceId: string): Promise<KnowledgeWork[]> {
+    const available = recognitionAvailable ? await recognitionAvailable(workspaceId) : false;
     return jobTransaction(workspaceId, async tx => {
+      if (available) await requeueLocalRecognition(tx, mediaLimitsForStorage.sweepBatch);
       await tx.client
         .query(`UPDATE ${table(tx, 'work')} w SET parsing=CASE WHEN w.attempts>=8 THEN 'failed' ELSE 'queued' END,failure=CASE WHEN w.attempts>=8 THEN 'provider' ELSE NULL END
         FROM ${table(tx, 'jobs')} j WHERE w.revision_id=j.revision_id AND w.parsing='parsing' AND j.lease_until<=clock_timestamp()`);
@@ -585,9 +637,11 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       const revision = store.revisionRow.parse(
         (await tx.client.query(`SELECT * FROM ${table(tx, 'revisions')} WHERE id=$1`, [work.revisionId])).rows[0],
       );
+      let sourceId: string;
       try {
         const ctx = await context(tx, actor, revision.document_id);
         if (ctx.revision.id !== work.revisionId || ctx.source.state !== 'active') return 'stale';
+        sourceId = ctx.source.id;
       } catch (error) {
         if (!hidden(error)) throw error;
         await tx.client.query(
@@ -604,7 +658,7 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
         `UPDATE ${table(tx, 'work')} SET parsing='parsing',attempts=attempts+1,failure=NULL WHERE revision_id=$1`,
         [work.revisionId],
       );
-      return { actor, revision, local };
+      return { actor, revision, local, sourceId };
     });
     if (typeof claim === 'string') return { disposition: z.enum(['stale', 'ready', 'busy', 'failed']).parse(claim) };
     try {
@@ -614,14 +668,23 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
         digest(content.bytes) !== claim.revision.original.sha256
       )
         throw new KnowledgeError('superseded');
-      const parsed = await parseKnowledgeDocument(content);
+      const parsed = await parseKnowledgeDocument(
+        content,
+        await recognitionOptions(runtime, recognition, {
+          workspaceId: work.workspaceId,
+          sourceId: claim.sourceId,
+          documentId: claim.revision.document_id,
+          revisionId: work.revisionId,
+          membershipId: claim.actor.membershipId,
+        }),
+      );
       return await transaction(work.workspaceId, claim.actor, true, async (tx, actor) => {
         const owned = await tx.client.query(
           `SELECT 1 FROM ${table(tx, 'jobs')} WHERE revision_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
           [work.revisionId, work.generation, token],
         );
         if (!owned.rowCount) return { disposition: 'stale' };
-        const publicationId = identity(`publication:${work.revisionId}`);
+        const publicationId = identity(publicationSeed('', work.revisionId, parsed));
         const publication = lexicalInput.parse({
           id: publicationId,
           documentId: claim.revision.document_id,
@@ -632,10 +695,7 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
           chunks: parsed.chunks,
         });
         await store.publish(tx, actor, publication, { filename: claim.local.filename });
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'parse_profiles')} (publication_id,profile) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [publicationId, parsed.profile],
-        );
+        await recordParse(tx, publicationId, parsed);
         const finished = await tx.client.query(
           `UPDATE ${table(tx, 'jobs')} SET lease_token=NULL,lease_until=NULL WHERE revision_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
           [work.revisionId, work.generation, token],
@@ -644,8 +704,9 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
         return { disposition: 'ready' };
       });
     } catch (error) {
-      const failure =
-        error instanceof KnowledgeParseError
+      const failure = recognitionFailed(error)
+        ? 'provider'
+        : error instanceof KnowledgeParseError
           ? error.failure
           : error instanceof KnowledgeError && error.code === 'quota'
             ? 'resource-limited'
@@ -666,10 +727,23 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
           hidden(error) || (error instanceof KnowledgeError && ['superseded', 'conflict'].includes(error.code));
         // Provider and transient parser failures retry with exponential backoff until the attempt bound.
         const again = (failure === 'provider' || transientParseFailure(error)) && state.attempts < 8 && !stale;
+        // A re-parse that fails for good leaves the revision's earlier publication in place.
+        const published = z
+          .object({ id: uuidSchema.nullable() })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT d.lexical_publication_id AS id FROM ${table(tx, 'documents')} d JOIN ${table(tx, 'publications')} p
+                  ON p.id=d.lexical_publication_id AND p.revision_id=$1 WHERE d.observed_revision_id=$1`,
+                [work.revisionId],
+              )
+            ).rows[0],
+          )?.id;
         await tx.client.query(`UPDATE ${table(tx, 'work')} SET parsing=$2,failure=$3 WHERE revision_id=$1`, [
           work.revisionId,
-          again ? 'queued' : failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
-          failure,
+          again ? 'queued' : published ? 'ready' : failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
+          again || !published ? failure : null,
         ]);
         await tx.client.query(
           `UPDATE ${table(tx, 'jobs')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,dispatched_at=NULL,dispatch_after=clock_timestamp()+least(interval '1 hour',interval '30 seconds'*power(2,greatest($2::int-1,0))) WHERE revision_id=$1`,
@@ -679,5 +753,33 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
       });
     }
   }
-  return { save, list, get, search, evidence, original, retry, remove, due, acknowledge, process };
+  async function settings(workspaceId: string, userId: string) {
+    return transaction(workspaceId, userId, false, (tx, actor) => readKnowledgeSettings(tx, actor));
+  }
+  async function updateSettings(workspaceId: string, userId: string, value: unknown) {
+    const available = recognitionAvailable ? await recognitionAvailable(workspaceId) : true;
+    return transaction(workspaceId, userId, true, async (tx, actor) => {
+      const changed = await writeKnowledgeSettings(tx, actor, value);
+      if (changed.turnedOn) {
+        await resetRecognitionRetries(tx);
+        if (available) await requeueLocalRecognition(tx, mediaLimitsForStorage.enableBatch);
+      }
+      return readKnowledgeSettings(tx, actor);
+    });
+  }
+  return {
+    save,
+    list,
+    get,
+    search,
+    evidence,
+    original,
+    retry,
+    remove,
+    due,
+    acknowledge,
+    process,
+    settings,
+    updateSettings,
+  };
 }

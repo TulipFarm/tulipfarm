@@ -5,6 +5,7 @@ import { resolveHuman } from '@tulipfarm/access';
 import { conversationFixture } from '../fixture.mjs';
 import { createProjects, captureProjectContext } from '../../src/projects.ts';
 import { docx, paragraph } from '../knowledge-extraction-fixtures.mjs';
+import { mixedInlinePdf } from '../../../knowledge/test/fixtures/parser-completeness.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 test('project knowledge saves revisions, pins, removes, rejects conflicts and feeds the turn context', async () => {
@@ -169,8 +170,8 @@ test('native Projects uploads retain project storage, authorization and revision
     assert.deepEqual(await projects.upload(w.id, w.userId, projectId, id, input, bytes), { id });
     const detail = await projects.read(w.id, w.userId, projectId);
     assert.deepEqual(
-      detail.files.map(file => [file.id, file.revisionId, file.filename, file.bytes]),
-      [[id, revisionId, 'budget.docx', bytes.length]],
+      detail.files.map(file => [file.id, file.revisionId, file.filename, file.bytes, file.gaps]),
+      [[id, revisionId, 'budget.docx', bytes.length, null]],
     );
     const saved = await projects.source(w.id, w.userId, projectId, revisionId);
     assert.equal(saved.content.trim(), 'Marketing budget 450');
@@ -189,6 +190,44 @@ test('native Projects uploads retain project storage, authorization and revision
     assert.deepEqual(
       (await projects.read(w.id, w.userId, projectId)).files.map(file => file.id),
       [id],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('project uploads keep readable text and record the parts they could not read', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      projects = createProjects(f.runtime);
+    const projectId = randomUUID(),
+      id = randomUUID(),
+      revisionId = randomUUID();
+    await projects.create(w.id, w.userId, { id: projectId, name: 'Scans' });
+    const input = { revisionId, expectedRevision: null, filename: 'policy.pdf' };
+    assert.deepEqual(await projects.upload(w.id, w.userId, projectId, id, input, mixedInlinePdf()), { id });
+    assert.deepEqual(await projects.upload(w.id, w.userId, projectId, id, input, mixedInlinePdf()), { id });
+    const gaps = {
+      count: 1,
+      items: [
+        { kind: 'image', reason: 'recognition-unavailable', label: 'Page image', location: { kind: 'page', page: 1 } },
+      ],
+    };
+    assert.deepEqual(
+      (await projects.read(w.id, w.userId, projectId)).files.map(file => [file.id, file.gaps]),
+      [[id, gaps]],
+    );
+    assert.equal(
+      (await projects.source(w.id, w.userId, projectId, revisionId)).content,
+      'Native heading and explanatory budget policy text\n',
+    );
+    const context = await f.runtime.transaction(w.id, commonCompatibility, async tx =>
+      captureProjectContext(tx, await resolveHuman(tx, w.userId), projectId, 'budget policy'),
+    );
+    assert.deepEqual(
+      context.files.map(file => file.content),
+      ['Native heading and explanatory budget policy text\n'],
     );
   } finally {
     await f.close();

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { knowledgeFreshnessSchema, knowledgeSearchFiltersSchema } from './knowledge.ts';
+import { knowledgeFreshnessSchema, knowledgeLocationSchema, knowledgeSearchFiltersSchema } from './knowledge.ts';
 
 export const knowledgeRetrievalLimits = Object.freeze({
   initialDocuments: 8,
@@ -46,6 +46,8 @@ export const knowledgeRetrievalDocumentSchema = z.strictObject({
   indexedAt: knowledgeFreshnessSchema.shape.indexedAt,
   sourceRevision: knowledgeFreshnessSchema.shape.sourceRevision,
   sourceSyncedAt: knowledgeFreshnessSchema.shape.sourceSyncedAt,
+  /** True when the revision has parts Knowledge could not read, such as images. */
+  coverageGaps: z.boolean().optional(),
   passages: z
     .array(
       z.strictObject({
@@ -53,6 +55,7 @@ export const knowledgeRetrievalDocumentSchema = z.strictObject({
         heading: z.string().max(2048),
         text: z.string().max(knowledgeRetrievalLimits.initialCharacters),
         truncated: z.boolean(),
+        location: knowledgeLocationSchema.optional(),
       }),
     )
     .max(knowledgeRetrievalLimits.passagesPerDocument),

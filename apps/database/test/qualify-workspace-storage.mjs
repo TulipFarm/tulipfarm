@@ -279,6 +279,7 @@ try {
     'packages/workspace-storage/common/0008_knowledge_freshness.sql',
     'packages/workspace-storage/common/0009_github_app_refresh.sql',
     'packages/workspace-storage/common/0010_github_knowledge_commits_backfill.sql',
+    'packages/workspace-storage/common/0011_knowledge_media.sql',
     ...['table-migrations', 'table-registry', 'credentials', 'operators'].map(
       name => `packages/workspaces/src/${name}.ts`,
     ),
@@ -303,6 +304,7 @@ try {
       '0008_knowledge_freshness.sql',
       '0009_github_app_refresh.sql',
       '0010_github_knowledge_commits_backfill.sql',
+      '0011_knowledge_media.sql',
     ],
   );
   emit({

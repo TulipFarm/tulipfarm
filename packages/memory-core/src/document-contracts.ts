@@ -28,5 +28,11 @@ export const chunkSchema = z.strictObject({
   offset: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('passage') }),
     z.strictObject({ kind: z.literal('page'), page: z.number().int().min(1).max(knowledgeLimits.pages) }),
+    z.strictObject({ kind: z.literal('slide'), slide: z.number().int().min(1).max(knowledgeLimits.pages) }),
+    z.strictObject({
+      kind: z.literal('sheet'),
+      sheet: z.number().int().min(1).max(knowledgeLimits.pages),
+      name: z.string().max(256),
+    }),
   ]),
 });

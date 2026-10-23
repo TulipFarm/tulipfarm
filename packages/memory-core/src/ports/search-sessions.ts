@@ -35,4 +35,6 @@ export interface SearchSessions {
       remainingDocuments: string[],
     ],
   ): Promise<RepositoryResult>;
+  /** Publications among these that have coverage gaps, as `publication_id` rows; absent where gaps are not stored. */
+  readGaps?(values: [publicationIds: string[]]): Promise<RepositoryResult>;
 }

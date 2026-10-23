@@ -42,39 +42,98 @@ test('DOCX closed grammar rejects unknown attributes, parts, properties and orph
     'empty hyperlink label',
     'orphan footnote body',
     'orphan endnote body',
-    'numbering inside footnote',
-    'numbering inside endnote',
   ])
     await assert.rejects(parse(await fixtures.get(name), 'facts.docx'), failure('unsupported'), name);
+  // A numbered list inside a note reads as the note's plain paragraphs.
+  for (const name of ['numbering inside footnote', 'numbering inside endnote'])
+    assert.equal(
+      (await parse(await fixtures.get(name), 'facts.docx')).markdown,
+      'Budget[^1]\n\n[^1]: 450. Pay supplier\n',
+      name,
+    );
   assert.equal((await parse(await fixtures.get('struck out amount'), 'facts.docx')).markdown, 'Limit ~~450~~ 500\n');
 });
 
-test('DOCX special hyphens, revisions and unqualified semantic properties reject', async () => {
-  for (const construct of [
-    '<w:noBreakHyphen/>',
-    '<w:softHyphen/>',
-    '<w:sym w:font="Symbol" w:char="F02D"/>',
-    '<w:rPr><w:vanish/></w:rPr>',
-    '<w:rPr><w:webHidden/></w:rPr>',
-    '<w:rPr><w:rtl/></w:rPr>',
-    '<w:rPr><w:u/></w:rPr>',
-    '<w:rPr><w:strike w:val="0"/></w:rPr>',
-    '<w:rPr><w:b w:unknown="450"/></w:rPr>',
-    '<w:rPr><w:rPrChange w:id="1"/></w:rPr>',
-  ]) {
-    const bytes = replacePart(docx(), 'word/document.xml', xml =>
-      xml.replace('<w:t>Harvest apples on Tuesday.</w:t>', `${construct}<w:t>Balance 450</w:t>`),
+const wordRun = construct =>
+  replacePart(docx(), 'word/document.xml', xml =>
+    xml.replace('<w:t>Harvest apples on Tuesday.</w:t>', `${construct}<w:t>Balance 450</w:t>`),
+  );
+const wordText = text => `Orchard policy\n\n${text}\n\n| Fruit | Count |\n| --- | --- |\n| Apple | 12 |\n`;
+
+test('DOCX special hyphens, symbols, right-to-left and double strike read as their text', async () => {
+  for (const [construct, text] of [
+    ['<w:noBreakHyphen/>', '-Balance 450'],
+    ['<w:softHyphen/>', 'Balance 450'],
+    ['<w:sym w:font="Symbol" w:char="F02D"/>', '−Balance 450'],
+    ['<w:sym w:font="Symbol" w:char="2D"/>', '−Balance 450'],
+    ['<w:sym w:font="Symbol" w:char="F061"/>', 'αBalance 450'],
+    ['<w:sym w:font="Symbol" w:char="F0B3"/>', '≥Balance 450'],
+    ['<w:sym w:font="Wingdings" w:char="F0FC"/>', '✓Balance 450'],
+    ['<w:sym w:font="Arial" w:char="2212"/>', '−Balance 450'],
+    ['<w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:sym w:font="Symbol" w:char="F0B0"/>', '^°Balance 450'],
+    ['<w:rPr><w:rtl/></w:rPr>', 'Balance 450'],
+    ['<w:rPr><w:rtl w:val="0"/><w:cs/></w:rPr>', 'Balance 450'],
+    ['<w:rPr><w:dstrike/></w:rPr>', '~~Balance 450~~'],
+  ])
+    assert.equal((await parse(wordRun(construct), 'facts.docx')).markdown, wordText(text), construct);
+  for (const container of ['bdo', 'dir'])
+    assert.equal(
+      (
+        await parse(
+          replacePart(docx(), 'word/document.xml', xml =>
+            xml.replace(
+              '<w:r><w:t>Harvest apples on Tuesday.</w:t></w:r>',
+              `<w:${container} w:val="rtl"><w:r><w:t>Balance 450</w:t></w:r></w:${container}>`,
+            ),
+          ),
+          'facts.docx',
+        )
+      ).markdown,
+      wordText('Balance 450'),
+      container,
     );
-    await assert.rejects(parse(bytes, 'facts.docx'), failure('unsupported'), construct);
-  }
-  for (const revision of ['ins', 'del', 'moveFrom', 'moveTo']) {
+  // A hidden symbol is hidden text; unmapped symbol-font and private-use characters cannot become a wrong letter.
+  const hidden = await parse(wordRun('<w:rPr><w:vanish/></w:rPr><w:sym w:font="Symbol" w:char="F02D"/>'), 'facts.docx');
+  assert.deepEqual(
+    hidden.gaps.map(gap => gap.label),
+    ['Hidden text'],
+  );
+  for (const construct of [
+    '<w:sym w:font="Wingdings" w:char="F021"/>',
+    '<w:sym w:font="Webdings" w:char="F061"/>',
+    '<w:sym w:font="Arial" w:char="E000"/>',
+    '<w:sym w:font="Arial" w:char="0007"/>',
+    '<w:sym w:font="Symbol"/>',
+    '<w:sym w:font="Symbol" w:char="F02D"><w:t>450</w:t></w:sym>',
+    '<w:sym w:font="Symbol" w:char="F02D" w:unknown="450"/>',
+    '<w:noBreakHyphen w:unknown="450"/>',
+    '<w:rPr><w:b w:unknown="450"/></w:rPr>',
+  ])
+    await assert.rejects(parse(wordRun(construct), 'facts.docx'), failure('unsupported'), construct);
+});
+
+test('DOCX unqualified semantic properties reject while revisions read as current text', async () => {
+  // Tracked changes read as the current text: insertions and move targets stay, deletions and move sources go.
+  for (const [revision, kept] of [
+    ['ins', true],
+    ['del', false],
+    ['moveFrom', false],
+    ['moveTo', true],
+  ]) {
     const bytes = replacePart(docx(), 'word/document.xml', xml =>
       xml.replace(
         '<w:r><w:t>Harvest apples on Tuesday.</w:t></w:r>',
-        `<w:${revision} w:id="1" w:author="Reviewer"><w:r><w:t>450</w:t></w:r></w:${revision}>`,
+        `<w:${revision} w:id="1" w:author="Reviewer"><w:r><w:${kept ? 't' : 'delText'}>450</w:${kept ? 't' : 'delText'}></w:r></w:${revision}><w:r><w:t> kept</w:t></w:r>`,
       ),
     );
-    await assert.rejects(parse(bytes, 'facts.docx'), failure('unsupported'), revision);
+    assert.ok((await parse(bytes, 'facts.docx')).markdown.split('\n').includes(kept ? '450 kept' : 'kept'), revision);
+  }
+  for (const construct of ['<w:vanish/>', '<w:webHidden/>', '<w:u/>', '<w:rPrChange w:id="1"><w:rPr/></w:rPrChange>']) {
+    const bytes = replacePart(docx(), 'word/document.xml', xml =>
+      xml.replace('<w:t>Harvest apples on Tuesday.</w:t>', `<w:rPr>${construct}</w:rPr><w:t>Balance 450</w:t>`),
+    );
+    const markdown = (await parse(bytes, 'facts.docx')).markdown;
+    assert.equal(markdown.includes('Balance 450'), construct !== '<w:vanish/>', construct);
   }
   assert.equal(
     (await parse(symbolDocx(false), 'plain.docx')).markdown,
@@ -98,21 +157,27 @@ test('DOCX qualified numbering and textbox grammar preserve literal facts', asyn
   assert.equal((await parse(drawingTextBox(), 'textbox.docx')).markdown, 'Budget\n\nMaximum is 450\n');
 });
 
-test('XLSX inline and shared rich properties reject rather than flatten emphasis', async () => {
-  for (const property of [
-    '<strike/>',
-    '<u val="single"/>',
-    '<b/>',
-    '<i/>',
-    '<vertAlign val="subscript"/>',
-    '<unknown val="450"/>',
+test('XLSX inline and shared rich text reads as plain text with raised and lowered marks', async () => {
+  for (const [property, text] of [
+    ['<strike/>', 'H2O'],
+    ['<u val="single"/>', 'H2O'],
+    ['<b/>', 'H2O'],
+    ['<i/>', 'H2O'],
+    ['<rFont val="Arial"/><charset val="0"/><family val="2"/><sz val="11"/><color rgb="FFFF0000"/>', 'H2O'],
+    ['<vertAlign val="subscript"/>', 'H_2O'],
+    ['<vertAlign val="superscript"/>', 'H^2O'],
+    ['<unknown val="450"/>'],
+    ['<b unknown="450"/>'],
   ]) {
-    const content = `<r><rPr>${property}</rPr><t>450</t></r>`;
+    const content = `<r><t>H</t></r><r><rPr>${property}</rPr><t>2</t></r><r><t>O</t></r>`;
     for (const [cell, strings] of [
       [`<c r="B2" t="inlineStr"><is>${content}</is></c>`],
       ['<c r="B2" t="s"><v>0</v></c>', `<si>${content}</si>`],
-    ])
-      await assert.rejects(parse(cellXlsx(cell, strings), 'rich.xlsx'), failure('unsupported'), property);
+    ]) {
+      const parsed = parse(cellXlsx(cell, strings), 'rich.xlsx');
+      if (text) assert.ok((await parsed).markdown.includes(`| Apple | ${text} |`), property);
+      else await assert.rejects(parsed, failure('unsupported'), property);
+    }
   }
   for (const [cell, strings] of [
     ['<c r="B2" t="inlineStr"><is><r><t>Limit </t></r><r><rPr/><t>450</t></r></is></c>'],
@@ -148,18 +213,40 @@ test('XLSX closes cell, row, worksheet and workbook semantic attributes and chil
     '<c r="B2" t="inlineStr" unknown="450"><is><t>Budget</t></is></c>',
     '<c r="B2" t="inlineStr"><is><r><t unknown="450">Budget</t></r></is></c>',
     '<c r="B2" t="inlineStr"><is><r><unknown/><t>Budget</t></r></is></c>',
-    '<c r="B2"><f t="shared" si="0">200+250</f><v>450</v></c>',
+    '<c r="B2"><f t="shared" si="0" unknown="450">200+250</f><v>450</v></c>',
+    '<c r="B2"><f t="dataTable">200+250</f><v>450</v></c>',
   ])
     await assert.rejects(parse(cellXlsx(cell), 'facts.xlsx'), failure('unsupported'));
+  // Shared formulas, the master and its followers, read their saved values.
+  for (const cell of [
+    '<c r="B2"><f t="shared" ref="B2:B3" si="0">200+250</f><v>450</v></c>',
+    '<c r="B2"><f t="shared" si="0"/><v>450</v></c>',
+  ])
+    assert.match((await parse(cellXlsx(cell), 'shared.xlsx')).markdown, /\| Apple \| 450 \|/, cell);
+  const names = definitions =>
+    replacePart(cellXlsx('<c r="B2"><v>450</v></c>'), 'xl/workbook.xml', xml =>
+      xml.replace('</sheets>', `</sheets><definedNames>${definitions}</definedNames>`),
+    );
+  // A workbook's own defined names are ignored; macro names stay unsupported.
+  assert.equal(
+    (
+      await parse(
+        names(
+          '<definedName name="Limit">450</definedName><definedName name="Range" comment="Budget">Inventory!$B$2</definedName>',
+        ),
+        'names.xlsx',
+      )
+    ).markdown,
+    '## Inventory\n\n| Fruit | Count |\n| --- | --- |\n| Apple | 450 |\n',
+  );
+  for (const definition of [
+    '<definedName name="Limit" function="1">450</definedName>',
+    '<definedName name="Limit" vbProcedure="1">450</definedName>',
+    '<definedName name="Limit" unknown="450">450</definedName>',
+  ])
+    await assert.rejects(parse(names(definition), 'names.xlsx'), failure('unsupported'), definition);
   for (const [part, before, after] of [
-    ['xl/worksheets/sheet1.xml', '<row r="2">', '<row r="2" hidden="1">'],
     ['xl/worksheets/sheet1.xml', '</sheetData>', '</sheetData><unknown>450</unknown>'],
-    ['xl/workbook.xml', 'name="Inventory"', 'name="Inventory" state="hidden"'],
-    [
-      'xl/workbook.xml',
-      '</sheets>',
-      '</sheets><definedNames><definedName name="Limit">450</definedName></definedNames>',
-    ],
   ])
     await assert.rejects(
       parse(
@@ -171,9 +258,9 @@ test('XLSX closes cell, row, worksheet and workbook semantic attributes and chil
   assert.match((await parse(cellXlsx('<c r="B2"><v>450</v></c>'), 'plain.xlsx')).markdown, /\| Apple \| 450 \|/);
 });
 
-function styledWorkbook(formatCode = undefined, property = '') {
+function styledWorkbook(formatCode = undefined, property = '', value = '450') {
   const office = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-  const parts = officeParts(cellXlsx('<c r="B2" s="0"><v>450</v></c>')).map(([path, xml]) => [
+  const parts = officeParts(cellXlsx(`<c r="B2" s="0"><v>${value}</v></c>`)).map(([path, xml]) => [
     path,
     path === 'xl/_rels/workbook.xml.rels'
       ? xml.replace(
@@ -189,52 +276,91 @@ function styledWorkbook(formatCode = undefined, property = '') {
   return zip(parts);
 }
 
-test('XLSX ordinary styles remain supported while unqualified numeric formats and font semantics reject', async () => {
+test('XLSX ordinary styles and fonts remain supported and custom number formats show the saved value', async () => {
   assert.match((await parse(styledWorkbook(), 'styles.xlsx')).markdown, /\| Apple \| 450 \|/);
-  for (const property of ['<strike/>', '<b/>', '<i/>', '<u/>', '<vertAlign val="superscript"/>']) {
-    await assert.rejects(parse(styledWorkbook(undefined, property), 'styles.xlsx'), failure('unsupported'), property);
-  }
-  for (const format of ['0&quot; kg&quot;', '[Red]0', '0.00E+00', ';;;']) {
-    await assert.rejects(parse(styledWorkbook(format), 'format.xlsx'), failure('unsupported'), format);
-  }
-  await assert.rejects(
-    parse(
-      replacePart(styledWorkbook(), 'xl/styles.xml', xml => xml.replace('numFmtId="0"', 'numFmtId="999"')),
-      'format.xlsx',
-    ),
-    failure('unsupported'),
-  );
+  // Whole-cell fonts read as plain text, whatever their emphasis, strike, underline or raised position.
+  for (const property of ['<b/>', '<i/>', '<strike/>', '<u/>', '<u val="double"/>', '<vertAlign val="superscript"/>'])
+    assert.match((await parse(styledWorkbook(undefined, property), 'styles.xlsx')).markdown, /\| Apple \| 450 \|/);
+  // A custom format other than a date, a time or `0%` shows the saved value rather than invented formatting.
+  for (const [format, value, text] of [
+    ['0&quot; kg&quot;', '450', '450'],
+    ['[Red]0', '450', '450'],
+    ['0.00E+00', '450', '450'],
+    [';;;', '450', '450'],
+    ['&quot;$&quot;#,##0.00', '1234.5', '1234.5'],
+    ['#,##0', '1234.5', '1234.5'],
+    ['0.0%', '0.4567', '0.4567'],
+    ['#,##0 \\h', '450', '450'],
+    ['0%', '0.45', '45%'],
+    ['dd/mm/yyyy', '45292', '2024-01-01'],
+    ['[$-409]d-mmm-yyyy;@', '45292', '2024-01-01'],
+    ['yyyy-mm-dd hh:mm', '45292.5', '2024-01-01 12:00:00'],
+  ])
+    assert.ok(
+      (await parse(styledWorkbook(format, '', value), 'format.xlsx')).markdown.includes(`| Apple | ${text} |`),
+      format,
+    );
+  // Unknown built-in formats are not invented.
+  for (const id of ['11', '44', '999'])
+    await assert.rejects(
+      parse(
+        replacePart(styledWorkbook(), 'xl/styles.xml', xml =>
+          xml.replace(
+            '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>',
+            `<xf numFmtId="${id}" fontId="0" fillId="0" borderId="0" xfId="0"/>`,
+          ),
+        ),
+        'format.xlsx',
+      ),
+      error => error instanceof KnowledgeParseError,
+      id,
+    );
 });
 
-test('PPTX closes text content and rejects semantic run properties including defaults', async () => {
+test('PPTX reads run emphasis, raised and lowered text and fields while closing unknown content', async () => {
   const run = '<a:r><a:t>Orchard harvest briefing</a:t></a:r>';
-  for (const property of [
-    'baseline="-25000"',
-    'baseline="25000"',
-    'strike="sngStrike"',
-    'strike="dblStrike"',
-    'u="sng"',
-    'b="1"',
-    'unknown="450"',
+  const slide = content => replacePart(pptx(), 'ppt/slides/slide1.xml', xml => xml.replace(run, content));
+  for (const [property, own, inherited] of [
+    ['baseline="-25000"', '_450', '_450'],
+    ['baseline="25000"', '^450', '^450'],
+    ['baseline="0"', '450', '450'],
+    ['strike="sngStrike"', '~~450~~', '450'],
+    ['strike="dblStrike"', '~~450~~', '450'],
+    ['u="sng"', '450', '450'],
+    ['u="dbl"', '450', '450'],
+    ['b="1"', '**450**', '450'],
   ]) {
-    for (const content of [
-      `<a:r><a:rPr ${property}/><a:t>450</a:t></a:r>`,
-      `<a:pPr><a:defRPr ${property}/></a:pPr><a:r><a:t>450</a:t></a:r>`,
-    ]) {
-      await assert.rejects(
-        parse(
-          replacePart(pptx(), 'ppt/slides/slide1.xml', xml => xml.replace(run, content)),
-          'facts.pptx',
-        ),
-        failure('unsupported'),
-        property,
-      );
-    }
+    assert.equal(
+      (await parse(slide(`<a:r><a:t>Budget </a:t></a:r><a:r><a:rPr ${property}/><a:t>450</a:t></a:r>`), 'f.pptx'))
+        .markdown,
+      `## Budget ${own}\n`,
+      property,
+    );
+    assert.equal(
+      (await parse(slide(`<a:pPr><a:defRPr ${property}/></a:pPr><a:r><a:t>450</a:t></a:r>`), 'f.pptx')).markdown,
+      `## ${inherited}\n`,
+      property,
+    );
   }
+  // Fields such as the slide number and date read as their saved text.
+  for (const [content, text] of [
+    [
+      '<a:r><a:t>Slide </a:t></a:r><a:fld id="{1}" type="slidenum"><a:rPr lang="en-US"/><a:t>4</a:t></a:fld>',
+      'Slide 4',
+    ],
+    ['<a:fld id="1" type="datetime1"><a:t>1/2/2024</a:t></a:fld>', '1/2/2024'],
+    ['<a:fld id="1"><a:rPr baseline="30000"/><a:t>2</a:t></a:fld>', '^2'],
+  ])
+    assert.equal((await parse(slide(content), 'f.pptx')).markdown, `## ${text}\n`, content);
   for (const content of [
+    '<a:r><a:rPr unknown="450"/><a:t>450</a:t></a:r>',
+    '<a:pPr><a:defRPr unknown="450"/></a:pPr><a:r><a:t>450</a:t></a:r>',
+    '<a:r><a:rPr baseline="up"/><a:t>450</a:t></a:r>',
     '<a:unknown><a:t>450</a:t></a:unknown>',
     '<a:r><a:rPr><a:t>450</a:t></a:rPr><a:t>Budget</a:t></a:r>',
-    '<a:fld id="1" type="slidenum"><a:t>450</a:t></a:fld>',
+    '<a:fld type="slidenum"><a:t>450</a:t></a:fld>',
+    '<a:fld id="1" unknown="450"><a:t>4</a:t></a:fld>',
+    '<a:fld id="1"><a:unknown/><a:t>4</a:t></a:fld>',
   ]) {
     await assert.rejects(
       parse(
@@ -247,15 +373,25 @@ test('PPTX closes text content and rejects semantic run properties including def
   assert.equal((await parse(pptx(), 'plain.pptx')).markdown, '## Orchard harvest briefing\n');
 });
 
-test('mixed inline PDF with native heading and raster 450 requires OCR before publication', async () => {
-  await assert.rejects(parse(mixedInlinePdf(), 'mixed.pdf'), failure('ocr-required'));
+// A page that paints an image becomes page media; without a recognizer its native text is kept and the page is a gap.
+async function imagePage(bytes, filename) {
+  const result = await parse(bytes, filename);
+  assert.deepEqual(
+    result.gaps.map(gap => [gap.kind, gap.reason, gap.location]),
+    [['image', 'recognition-unavailable', { kind: 'page', page: 1 }]],
+  );
+  return result;
+}
+
+test('mixed inline PDF with native heading and raster 450 becomes page media before publication', async () => {
+  assert.equal((await imagePage(mixedInlinePdf(), 'mixed.pdf')).markdown, `${nativeHeading}\n`);
   assert.equal((await parse(pdf([textStream(nativeHeading)]), 'native.pdf')).markdown, `${nativeHeading}\n`);
 });
 
 for (const kind of ['inline', 'xobject', 'mask']) {
   for (const container of ['page', 'compressed', 'form']) {
-    test(`${container} PDF ${kind} paint cannot produce partial native success`, async () => {
-      await assert.rejects(parse(await paintedPdf(kind, container), 'mixed.pdf'), failure('ocr-required'));
+    test(`${container} PDF ${kind} paint becomes page media rather than partial native success`, async () => {
+      await imagePage(await paintedPdf(kind, container), 'mixed.pdf');
     });
   }
 }
@@ -266,12 +402,12 @@ test('PDF image operator lookalikes in comments, strings, names and dictionaries
 });
 
 test('PDF content arrays share paint operands and preserve ordinary native text', async () => {
-  await assert.rejects(parse(await splitPaintPdf(true), 'painted.pdf'), failure('ocr-required'));
+  await imagePage(await splitPaintPdf(true), 'painted.pdf');
   assert.equal((await parse(await splitPaintPdf(false), 'unused.pdf')).markdown, `${nativeHeading}\n`);
 });
 
-test('PDF applied ExtGState soft-mask Form raster 450 requires OCR, not partial native success', async () => {
-  await assert.rejects(parse(await softMaskPdf(), 'masked.pdf'), failure('ocr-required'));
+test('PDF applied ExtGState soft-mask Form raster 450 becomes page media, not partial native success', async () => {
+  await imagePage(await softMaskPdf(), 'masked.pdf');
 });
 
 test('PDF ordinary graphics state, SMask None and unused soft masks preserve native text', async () => {
@@ -283,10 +419,11 @@ test('PDF ordinary graphics state, SMask None and unused soft masks preserve nat
 for (const appearance of ['N', 'R', 'D']) {
   for (const stateful of [false, true]) {
     for (const kind of ['inline', 'xobject', 'mask']) {
-      test(`PDF annotation ${appearance} ${stateful ? 'state dictionary' : 'stream'} nested Form ${kind} requires OCR`, async () => {
+      test(`PDF annotation ${appearance} ${stateful ? 'state dictionary' : 'stream'} nested Form ${kind} is unsupported`, async () => {
+        // Annotations stay unsupported; page renders leave them out.
         await assert.rejects(
           parse(await annotationPdf(kind, appearance, stateful), 'annotation.pdf'),
-          failure('ocr-required'),
+          failure('unsupported'),
         );
       });
     }
@@ -298,16 +435,28 @@ test('PDF annotation Form cycles fail closed and unqualified text appearances re
   await assert.rejects(parse(await annotationPdf(''), 'native.pdf'), failure('unsupported'));
 });
 
-test('DOCX embedded HTML and Symbol-font minus are unsupported, ordinary minus survives', async () => {
-  await assert.rejects(parse(altChunkDocx(), 'chunk.docx'), failure('unsupported'));
-  await assert.rejects(parse(symbolDocx(), 'symbol.docx'), failure('unsupported'));
+test('DOCX embedded HTML becomes a gap, Symbol-font minus reads as minus, ordinary minus survives', async () => {
+  const chunkText = wordText('Harvest apples on Tuesday.');
+  const chunkGaps = [['object', 'unsupported-media', 'Embedded document']];
+  const chunk = await parse(altChunkDocx(), 'chunk.docx');
+  assert.equal(chunk.markdown, chunkText);
+  assert.deepEqual(
+    chunk.gaps.map(gap => [gap.kind, gap.reason, gap.label]),
+    chunkGaps,
+  );
+  assert.equal((await parse(symbolDocx(), 'symbol.docx')).markdown, wordText('Balance −450'));
   const aliases = zip(
     officeParts(altChunkDocx()).map(([path, text]) => [
       path,
       text.replaceAll('w:', 'word:').replace('xmlns:w=', 'xmlns:word='),
     ]),
   );
-  await assert.rejects(parse(aliases, 'chunk.docx'), failure('unsupported'));
+  const aliased = await parse(aliases, 'chunk.docx');
+  assert.equal(aliased.markdown, chunkText);
+  assert.deepEqual(
+    aliased.gaps.map(gap => [gap.kind, gap.reason, gap.label]),
+    chunkGaps,
+  );
   assert.equal(
     (await parse(symbolDocx(false), 'minus.docx')).markdown,
     'Orchard policy\n\nBalance -450\n\n| Fruit | Count |\n| --- | --- |\n| Apple | 12 |\n',
@@ -338,6 +487,33 @@ for (const [name, cell, strings] of [
 for (const cell of [
   '<c r="B2"><f>450+50</f></c>',
   '<c r="B2"><f>450+50</f><v/></c>',
+  '<c r="B2" t="str"><f>A1</f></c>',
+]) {
+  test(`XLSX formula without a saved value is a sheet gap ${cell}`, async () => {
+    const result = await parse(cellXlsx(cell), 'uncached.xlsx');
+    assert.equal(result.markdown, '## Inventory\n\n| Fruit | Count |\n| --- | --- |\n| Apple |  |\n');
+    assert.deepEqual(
+      result.gaps.map(gap => [gap.kind, gap.reason, gap.label, gap.location]),
+      [['other', 'unsupported-media', 'Formula without a saved value', { kind: 'sheet', sheet: 1, name: 'Inventory' }]],
+    );
+  });
+}
+
+test('XLSX records one uncached-formula gap per sheet', async () => {
+  const result = await parse(
+    replacePart(cellXlsx('<c r="B2"><f>450+50</f></c>'), 'xl/worksheets/sheet1.xml', xml =>
+      xml.replace('</sheetData>', '<row r="3"><c r="B3"><f>B2*2</f></c></row></sheetData>'),
+    ),
+    'uncached.xlsx',
+  );
+  assert.deepEqual(
+    result.gaps.map(gap => gap.label),
+    ['Formula without a saved value'],
+  );
+});
+
+for (const cell of [
+  '<c r="B2" t="e"><f>1/0</f></c>',
   '<c r="B2" t="unknown"><v>450</v></c>',
   '<c r="B2" t="d"><v>2026-10-03</v></c>',
   '<c r="B2" t="e"><v>#DIV/0!</v></c>',
@@ -378,33 +554,16 @@ test('RTF superscript, subscript and baseline shifts reject before flattening nu
   );
 });
 
-test('raw native conversion reproduces all five blockers while guarded parsing rejects them', async () => {
+test('raw native conversion reproduces all five blockers while guarded parsing handles them', async () => {
   const { toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
+  assert.equal(await toMarkdownBytes(mixedInlinePdf()), `${nativeHeading}\n`);
+  await imagePage(mixedInlinePdf(), 'mixed.pdf');
   for (const [bytes, filename, raw, code] of [
-    [mixedInlinePdf(), 'mixed.pdf', `${nativeHeading}\n`, 'ocr-required'],
-    [
-      altChunkDocx(),
-      'chunk.docx',
-      'Orchard policy\n\nHarvest apples on Tuesday.\n\n| Fruit | Count |\n| --- | --- |\n| Apple | 12 |\n',
-      'unsupported',
-    ],
-    [
-      symbolDocx(),
-      'symbol.docx',
-      'Orchard policy\n\nBalance 450\n\n| Fruit | Count |\n| --- | --- |\n| Apple | 12 |\n',
-      'unsupported',
-    ],
     [
       cellXlsx('<c r="B2" t="s"><v>0</v></c>'),
       'shared.xlsx',
       '| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
       'malformed',
-    ],
-    [
-      cellXlsx('<c r="B2"><f>450+50</f></c>'),
-      'formula.xlsx',
-      '| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
-      'unsupported',
     ],
     [
       Buffer.from('{\\rtf1\\ansi Area 10{\\super 2} square metres}'),
@@ -415,6 +574,33 @@ test('raw native conversion reproduces all five blockers while guarded parsing r
   ]) {
     assert.equal(await toMarkdownBytes(bytes), raw);
     await assert.rejects(parse(bytes, filename), failure(code));
+  }
+  // Raw conversion drops embedded HTML, the Symbol-font minus and an uncached formula without a trace.
+  for (const [bytes, filename, raw, markdown, labels] of [
+    [
+      altChunkDocx(),
+      'chunk.docx',
+      wordText('Harvest apples on Tuesday.'),
+      wordText('Harvest apples on Tuesday.'),
+      ['Embedded document'],
+    ],
+    [symbolDocx(), 'symbol.docx', wordText('Balance 450'), wordText('Balance −450'), []],
+    [
+      cellXlsx('<c r="B2"><f>450+50</f></c>'),
+      'formula.xlsx',
+      '| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
+      '## Inventory\n\n| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
+      ['Formula without a saved value'],
+    ],
+  ]) {
+    assert.equal(await toMarkdownBytes(bytes), raw);
+    const result = await parse(bytes, filename);
+    assert.equal(result.markdown, markdown, filename);
+    assert.deepEqual(
+      result.gaps.map(gap => gap.label),
+      labels,
+      filename,
+    );
   }
 });
 

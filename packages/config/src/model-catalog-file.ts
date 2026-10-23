@@ -9,8 +9,8 @@ export const modelCatalogSchemaUrl = 'https://tulipfarm.ai/schemas/model-catalog
 
 /**
  * Background features that use a model nobody chose. Without a model that has the role, titles come from the chat's
- * model, completion checks use the active chat model, table search, recommendations and the chat fallback are off,
- * and the other features use the default model.
+ * model, completion checks use the active chat model, table search, recommendations, the chat fallback and image
+ * recognition in Knowledge documents are off, and the other features use the default model.
  */
 export const modelCatalogRoles = Object.freeze([
   'title',
@@ -23,6 +23,7 @@ export const modelCatalogRoles = Object.freeze([
   'recommendation',
   'fallback',
   'completion-check',
+  'document-vision',
 ] as const);
 export type ModelCatalogRole = (typeof modelCatalogRoles)[number];
 
@@ -246,6 +247,11 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
       issues.push({
         path: at('roles'),
         message: 'The public-guide model needs an Azure route using the chat-completions API',
+      });
+    if (model.roles.includes('document-vision') && model.capabilities?.imageInput !== true)
+      issues.push({
+        path: at('roles'),
+        message: 'The document-vision model needs "capabilities": { "imageInput": true }',
       });
     for (const [roleIndex, role] of model.roles.entries()) {
       if (model.roles.indexOf(role) !== roleIndex)

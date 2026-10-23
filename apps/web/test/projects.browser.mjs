@@ -848,6 +848,40 @@ test('archive and upload results reach cached project views after the page close
   }
 });
 
+test('project files say how many parts could not be read', { timeout: 60000 }, async () => {
+  const api = projectServer();
+  const id = '55555555-5555-4555-8555-555555555555';
+  api.state.files.set(id, {
+    id,
+    title: 'policy.pdf',
+    pinned: false,
+    revisionId: '66666666-6666-4666-8666-666666666666',
+    filename: 'policy.pdf',
+    bytes: 2048,
+    updatedAt: '2026-10-05T09:00:00.000Z',
+    source: null,
+    gaps: {
+      count: 2,
+      items: [
+        { kind: 'image', reason: 'recognition-unavailable', label: 'Page image', location: { kind: 'page', page: 1 } },
+        { kind: 'image', reason: 'recognition-unavailable', label: 'Chart' },
+      ],
+    },
+  });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+  await context.route('**/v1/**', api.handle);
+  try {
+    const { page, errors } = await open(context, detailPath);
+    await page
+      .getByRole('list', { name: 'Project files' })
+      .getByText('2 images couldn’t be read. Chats use the rest of the text.', { exact: true })
+      .waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test(
   'upload results, Retry, and the busy file picker survive leaving the project page',
   { timeout: 120000 },

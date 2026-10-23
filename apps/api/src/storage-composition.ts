@@ -1,3 +1,4 @@
+import { loadModelCatalog } from '@tulipfarm/config';
 import type { FastifyInstance } from 'fastify';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { createWorkspaceTableConfirmation } from '@tulipfarm/workspaces/table-confirmation';
@@ -145,6 +146,8 @@ export function registerStorageComposition(
     pool: dependencies.pool,
     temporal,
     googleService,
+    // Recognition runs in the worker; the API only needs to know a model can read images to queue re-parses.
+    recognitionAvailable: async () => loadModelCatalog().role('document-vision') !== undefined,
     ...(files ? { files } : {}),
     ...(defaultKnowledge ? { defaultKnowledge } : {}),
   });

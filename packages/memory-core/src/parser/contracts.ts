@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { chunkSchema, knowledgeLimits } from '../document-contracts.js';
+import { coverageGapSchema } from './media-contracts.js';
 
 export const parserLimits = Object.freeze({
   timeoutMs: 30_000,
@@ -30,6 +31,7 @@ export const parseReasonSchema = z.enum([
   'cancelled',
   'invalid-output',
   'unsupported-platform',
+  'recognition-failed',
 ]);
 export type KnowledgeParseReason = z.infer<typeof parseReasonSchema>;
 
@@ -60,9 +62,15 @@ export class KnowledgeParseError extends Error {
     this.reason = parseReasonSchema.parse(
       options.reason ?? (failure === 'resource-limited' ? 'content-limit' : 'document-rejected'),
     );
-    this.retryable = ['timeout', 'rss-limit', 'memory-monitor', 'spawn', 'abnormal-exit', 'invalid-output'].includes(
-      this.reason,
-    );
+    this.retryable = [
+      'timeout',
+      'rss-limit',
+      'memory-monitor',
+      'spawn',
+      'abnormal-exit',
+      'invalid-output',
+      'recognition-failed',
+    ].includes(this.reason);
     const diagnostics: KnowledgeParseDiagnostics = {};
     for (const key of [
       'elapsedMs',
@@ -109,15 +117,27 @@ export const resultSchema = z
     pages: z.number().int().min(0).max(knowledgeLimits.pages),
     tokens: z.number().int().min(1).max(knowledgeLimits.tokens),
     chunks: z.array(chunkSchema).min(1).max(knowledgeLimits.chunksPerRevision),
-    profile: z.strictObject({
-      id: z.string(),
-      engine: z.enum(['text', 'anydoc']),
-      version: z.string(),
-      normalization: z.string(),
-      ocr: z.literal('disabled'),
-      // The converter failure that raw-text indexing replaced, when the original could not be converted.
-      fallback: z.enum(['unsupported', 'malformed']).optional(),
-    }),
+    gaps: z.array(coverageGapSchema).max(10_000),
+    profile: z.union([
+      z.strictObject({
+        id: z.string(),
+        engine: z.enum(['text', 'anydoc']),
+        version: z.string(),
+        normalization: z.string(),
+        ocr: z.literal('disabled'),
+        // The converter failure that raw-text indexing replaced, when the original could not be converted.
+        fallback: z.enum(['unsupported', 'malformed']).optional(),
+      }),
+      z.strictObject({
+        id: z.string(),
+        engine: z.enum(['text', 'anydoc']),
+        version: z.string(),
+        normalization: z.string(),
+        ocr: z.literal('vision'),
+        ocrModel: z.string().min(1).max(256),
+        ocrPrompt: z.string().min(1).max(64),
+      }),
+    ]),
   })
   .refine(value => value.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0) <= knowledgeLimits.tokens);
 export type KnowledgeParseResult = z.infer<typeof resultSchema>;

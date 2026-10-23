@@ -42,6 +42,17 @@ import {
   revisionInput,
 } from './contracts.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
+import {
+  externalRecognitionDue,
+  googleRecognitionDue,
+  markRecognitionRetry,
+  publicationSeed,
+  recognitionFailed,
+  recognitionOptions,
+  recordParse,
+  type KnowledgeRecognitionAvailability,
+  type KnowledgeRecognitionPort,
+} from './media.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type Tx = Parameters<ReturnType<typeof createKnowledgeStore>['bind']>[0];
@@ -100,7 +111,16 @@ export function createGoogleKnowledge({
   clock = systemClock,
   now = () => clock.now(),
   gate,
-}: { runtime: Runtime; provider: GoogleCorpusProvider } & EngineClock) {
+  recognition,
+  recognitionAvailable,
+}: {
+  runtime: Runtime;
+  provider: GoogleCorpusProvider;
+  /** Supplies the document-vision recognizer; without it, images in documents become coverage gaps. */
+  recognition?: KnowledgeRecognitionPort;
+  /** Whether recognition could run now; when it can, unchanged items with unread images are parsed again. */
+  recognitionAvailable?: KnowledgeRecognitionAvailability;
+} & EngineClock) {
   const corpus = createGoogleCorpusAdapter(provider);
   async function requireExternalSource(tx: AuthorizationTransaction, actor: HumanActor, source: ExternalSource) {
     if (source.provider !== 'google') throw new AccessDenied();
@@ -647,11 +667,25 @@ export function createGoogleKnowledge({
         ),
     );
     const actor: HumanActor = { kind: 'human', userId: s.owner_user_id, membershipId: s.owner_membership_id };
-    if (previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) {
+    // An unchanged item whose images could not be read is parsed again once recognition is available.
+    const reparse =
+      previous?.source_revision === item.sourceRevision &&
+      recognition !== undefined &&
+      (await fenced(work, token, tx => externalRecognitionDue(tx, previous.id))) &&
+      (recognitionAvailable ? await recognitionAvailable(work.workspaceId) : true);
+    if (reparse && previous)
+      await fenced(work, token, async tx => {
+        await markRecognitionRetry(tx, previous.id);
+        await tx.client.query(
+          `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND parsing='ocr-unavailable'`,
+          [previous.id],
+        );
+      });
+    if (!reparse && previous?.source_revision === item.sourceRevision && previous.lexical_publication_id) {
       await proof(work.workspaceId, actor, s.source_id, documentId, item.nativeId);
       return;
     }
-    if (previous?.source_revision === item.sourceRevision) {
+    if (!reparse && previous?.source_revision === item.sourceRevision) {
       const terminal = await fenced(
         work,
         token,
@@ -741,7 +775,7 @@ export function createGoogleKnowledge({
             read.mediaType,
             read.normalizedContent,
           ]);
-        } else
+        } else if (prior?.observed_revision_id !== revisionId)
           await tx.client.query(
             `UPDATE ${table(tx, 'documents')} SET observed_revision_id=$2,lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
             [documentId, revisionId],
@@ -753,110 +787,162 @@ export function createGoogleKnowledge({
       });
       if (!(await proof(work.workspaceId, actor, s.source_id, documentId, item.nativeId)))
         throw new GoogleCorpusError('source-changed');
-      const content = await fenced(work, token, async tx =>
-        z
-          .object({
-            bytes: z.instanceof(Uint8Array),
-            filename: z.string(),
-            media_type: z.string(),
-            normalized_content: z.string().nullable(),
-          })
-          .parse(
-            (await tx.client.query(`SELECT * FROM ${table(tx, 'google_originals')} WHERE revision_id=$1`, [revisionId]))
-              .rows[0],
-          ),
-      );
-      const original = await fenced(
-        work,
-        token,
-        async tx =>
-          store.revisionRow.parse(
-            (await tx.client.query(`SELECT * FROM ${table(tx, 'revisions')} WHERE id=$1`, [revisionId])).rows[0],
-          ).original,
-      );
-      if (content.bytes.byteLength !== original.bytes || digest(content.bytes) !== original.sha256)
-        throw new KnowledgeError('integrity');
-      const parsed = await parseKnowledgeDocument(
-        content.normalized_content === null
-          ? { bytes: content.bytes, filename: content.filename, mediaType: content.media_type }
-          : { bytes: Buffer.from(content.normalized_content), filename: 'message.md', mediaType: 'text/markdown' },
-      );
-      await fenced(work, token, async (tx, _s, human) => {
-        const publicationId = identity(`google-publication:${revisionId}`);
-        await store.publish(
-          tx,
-          human,
-          lexicalInput.parse({
-            id: publicationId,
-            documentId,
-            revisionId,
-            markdown: parsed.markdown,
-            pages: parsed.pages,
-            tokens: parsed.tokens,
-            chunks: parsed.chunks,
-          }),
-          { filename: content.filename },
-        );
-        await tx.client.query(`INSERT INTO ${table(tx, 'parse_profiles')} VALUES ($1,$2) ON CONFLICT DO NOTHING`, [
-          publicationId,
-          parsed.profile,
-        ]);
-        await tx.client.query(
-          `UPDATE ${table(tx, 'google_items')} SET failure=NULL WHERE source_id=$1 AND native_id=$2`,
-          [s.source_id, item.nativeId],
-        );
-      });
+      await publishStored(work, token, s, documentId, revisionId, item.nativeId);
     } catch (error) {
-      if (error instanceof KnowledgeError && error.code === 'superseded') throw error;
-      await fenced(work, token, async tx => {
-        if (denial(error)) {
-          await invalidate(tx, documentId);
-          if (error instanceof GoogleCorpusError && ['not-found', 'outside-selection'].includes(error.code))
-            await clear(tx, documentId, true);
-        }
-        const failure =
-          error instanceof KnowledgeParseError
+      await recordFailure(work, token, s, documentId, item.nativeId, error);
+    }
+  }
+  /** Parses the stored original of a Google revision and publishes it. */
+  async function publishStored(
+    work: GoogleKnowledgeWork,
+    token: string,
+    s: Source,
+    documentId: string,
+    revisionId: string,
+    nativeId: string,
+  ) {
+    const content = await fenced(work, token, async tx =>
+      z
+        .object({
+          bytes: z.instanceof(Uint8Array),
+          filename: z.string(),
+          media_type: z.string(),
+          normalized_content: z.string().nullable(),
+        })
+        .parse(
+          (await tx.client.query(`SELECT * FROM ${table(tx, 'google_originals')} WHERE revision_id=$1`, [revisionId]))
+            .rows[0],
+        ),
+    );
+    const original = await fenced(
+      work,
+      token,
+      async tx =>
+        store.revisionRow.parse(
+          (await tx.client.query(`SELECT * FROM ${table(tx, 'revisions')} WHERE id=$1`, [revisionId])).rows[0],
+        ).original,
+    );
+    if (content.bytes.byteLength !== original.bytes || digest(content.bytes) !== original.sha256)
+      throw new KnowledgeError('integrity');
+    const parsed = await parseKnowledgeDocument(
+      content.normalized_content === null
+        ? { bytes: content.bytes, filename: content.filename, mediaType: content.media_type }
+        : { bytes: Buffer.from(content.normalized_content), filename: 'message.md', mediaType: 'text/markdown' },
+      await recognitionOptions(runtime, recognition, {
+        workspaceId: work.workspaceId,
+        sourceId: s.source_id,
+        documentId,
+        revisionId,
+        membershipId: s.owner_membership_id,
+      }),
+    );
+    await fenced(work, token, async (tx, _s, human) => {
+      const publicationId = identity(publicationSeed('google-', revisionId, parsed));
+      await store.publish(
+        tx,
+        human,
+        lexicalInput.parse({
+          id: publicationId,
+          documentId,
+          revisionId,
+          markdown: parsed.markdown,
+          pages: parsed.pages,
+          tokens: parsed.tokens,
+          chunks: parsed.chunks,
+        }),
+        { filename: content.filename },
+      );
+      await recordParse(tx, publicationId, parsed);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'google_items')} SET failure=NULL WHERE source_id=$1 AND native_id=$2`,
+        [s.source_id, nativeId],
+      );
+    });
+  }
+  /** Records why an item could not be published; rethrows errors that should fail the whole sync step. */
+  async function recordFailure(
+    work: GoogleKnowledgeWork,
+    token: string,
+    s: Source,
+    documentId: string,
+    nativeId: string,
+    error: unknown,
+  ) {
+    if (error instanceof KnowledgeError && error.code === 'superseded') throw error;
+    await fenced(work, token, async tx => {
+      if (denial(error)) {
+        await invalidate(tx, documentId);
+        if (error instanceof GoogleCorpusError && ['not-found', 'outside-selection'].includes(error.code))
+          await clear(tx, documentId, true);
+      }
+      const failure = recognitionFailed(error)
+        ? 'provider'
+        : error instanceof KnowledgeParseError
+          ? error.failure
+          : error instanceof KnowledgeError && error.code === 'quota'
+            ? 'resource-limited'
+            : error instanceof GoogleCorpusError
+              ? error.code
+              : 'provider';
+      await tx.client.query(`UPDATE ${table(tx, 'google_items')} SET failure=$3 WHERE source_id=$1 AND native_id=$2`, [
+        s.source_id,
+        nativeId,
+        failure,
+      ]);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'work')} w SET parsing=$2,failure=$3 FROM ${table(tx, 'documents')} d WHERE d.id=$1 AND w.revision_id=d.observed_revision_id AND d.lexical_publication_id IS NULL`,
+        [
+          documentId,
+          failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
+          error instanceof KnowledgeParseError && !recognitionFailed(error)
             ? error.failure
-            : error instanceof KnowledgeError && error.code === 'quota'
+            : failure === 'resource-limited'
               ? 'resource-limited'
-              : error instanceof GoogleCorpusError
-                ? error.code
-                : 'provider';
-        await tx.client.query(
-          `UPDATE ${table(tx, 'google_items')} SET failure=$3 WHERE source_id=$1 AND native_id=$2`,
-          [s.source_id, item.nativeId, failure],
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'work')} w SET parsing=$2,failure=$3 FROM ${table(tx, 'documents')} d WHERE d.id=$1 AND w.revision_id=d.observed_revision_id AND d.lexical_publication_id IS NULL`,
-          [
-            documentId,
-            failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
-            error instanceof KnowledgeParseError
-              ? error.failure
-              : failure === 'resource-limited'
-                ? 'resource-limited'
-                : 'provider',
-          ],
-        );
-      });
-      if (
-        !(error instanceof KnowledgeParseError) &&
-        !(error instanceof KnowledgeError && error.code === 'quota') &&
-        !(
-          error instanceof GoogleCorpusError &&
-          [
-            'unsupported',
-            'restricted',
-            'resource-key-required',
-            'attachments-unsupported',
-            'mime-unsupported',
-            'not-found',
-            'outside-selection',
-            'response-too-large',
-          ].includes(error.code)
-        )
+              : 'provider',
+        ],
+      );
+    });
+    if (
+      !(error instanceof KnowledgeParseError) &&
+      !(error instanceof KnowledgeError && error.code === 'quota') &&
+      !(
+        error instanceof GoogleCorpusError &&
+        [
+          'unsupported',
+          'restricted',
+          'resource-key-required',
+          'attachments-unsupported',
+          'mime-unsupported',
+          'not-found',
+          'outside-selection',
+          'response-too-large',
+        ].includes(error.code)
       )
-        throw error;
+    )
+      throw error;
+  }
+  /**
+   * Re-parses one stored revision of this source that waits for recognition, once recognition is available. A sync
+   * lease handles one, so recognition time stays within the lease; the retry backoff spaces out repeated attempts.
+   */
+  async function recognizeWaiting(work: GoogleKnowledgeWork, token: string, s: Source) {
+    if (!recognition || (recognitionAvailable && !(await recognitionAvailable(work.workspaceId)))) return;
+    const waiting = await fenced(work, token, tx => googleRecognitionDue(tx, s.source_id));
+    if (!waiting) return;
+    const actor: HumanActor = { kind: 'human', userId: s.owner_user_id, membershipId: s.owner_membership_id };
+    await fenced(work, token, async tx => {
+      await markRecognitionRetry(tx, waiting.revisionId);
+      await tx.client.query(
+        `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND parsing='ocr-unavailable'`,
+        [waiting.revisionId],
+      );
+    });
+    try {
+      if (!(await proof(work.workspaceId, actor, s.source_id, waiting.documentId, waiting.nativeId)))
+        throw new GoogleCorpusError('source-changed');
+      await publishStored(work, token, s, waiting.documentId, waiting.revisionId, waiting.nativeId);
+    } catch (error) {
+      await recordFailure(work, token, s, waiting.documentId, waiting.nativeId, error);
     }
   }
   async function process(value: GoogleKnowledgeWork): Promise<{ disposition: 'ready' | 'retry' | 'stale' | 'busy' }> {
@@ -879,6 +965,7 @@ export function createGoogleKnowledge({
     try {
       await fenced(work, token, async () => undefined);
       await refresh(work.workspaceId, claim.owner_user_id, claim.source_id);
+      await recognizeWaiting(work, token, claim);
       const cursor = claim.cursor;
       if (cursor.phase === 'listing') {
         if (cursor.pages >= 20000) throw new KnowledgeError('quota');

@@ -1,6 +1,7 @@
 import type { SearchSessions } from '@tulipfarm/memory-core/ports/search-sessions';
 import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
+import { readCoverageGaps } from './coverage-gaps.ts';
 
 export function createPostgresSearchSessions(
   client: MemoryQueryClient,
@@ -83,7 +84,7 @@ export function createPostgresSearchSessions(
           SELECT e.* FROM (${eligibility()}) e WHERE e.document_id=ANY($9::uuid[])),
         candidates AS (SELECT c.*, (a.ordinality-1)::int AS position FROM jsonb_array_elements($6::jsonb) WITH ORDINALITY a(value,ordinality)
           CROSS JOIN LATERAL jsonb_to_record(a.value) AS c(document_id uuid,source_id uuid,revision_id uuid,publication_id uuid,access_epoch int,ordinal int,vector_publication_id uuid,exact boolean))
-        SELECT c.*,e.expires_at,k.search_title AS title,k.heading,left(k.passage,2400) AS passage,
+        SELECT c.*,e.expires_at,k.search_title AS title,k.heading,left(k.passage,2400) AS passage,k.source_offset,
           CASE WHEN r.original->>'kind'='file' THEN (r.original->>'fileId')::uuid END AS file_id,
           p.created_at AS indexed_at,r.created_at AS observed_at,s.synced_at,
           CASE WHEN s.provider IN ('google','slack','github','confluence','jira') THEN left(r.source_revision,200) END AS source_revision
@@ -100,5 +101,6 @@ export function createPostgresSearchSessions(
         values,
       );
     },
+    readGaps: values => readCoverageGaps(client, table('coverage_gaps'), values),
   };
 }
