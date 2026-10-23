@@ -1659,6 +1659,7 @@ export function createConversationExecutor(
         const captureOutput =
           durable ||
           name === 'present.choice' ||
+          name === 'agents.delegate' ||
           ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
           (interactiveChat &&
             (isCalendarReadCall(name, call) ||

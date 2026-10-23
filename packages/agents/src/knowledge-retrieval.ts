@@ -23,7 +23,12 @@ import { errorAttributes, log } from '@tulipfarm/observability';
 const relation = (tx: AgentTransaction, name: string) => qualified(tx.schema, name);
 
 export type KnowledgeRootOrigin =
-  | { kind: 'chat-call'; callId: string; tool: 'agents.task.start' | KnowledgeToolCall['tool']; turnId?: string }
+  | {
+      kind: 'chat-call';
+      callId: string;
+      tool: 'agents.task.start' | 'agents.delegate' | KnowledgeToolCall['tool'];
+      turnId?: string;
+    }
   | { kind: 'plan-attempt'; attemptId: string };
 
 export async function knowledgeRootForRequest(

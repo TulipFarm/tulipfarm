@@ -10,8 +10,10 @@ import {
 } from '@tulipfarm/conversations/events';
 import { applyStreamAvatar, streamAvatarSchema, type StreamAvatar } from '@tulipfarm/conversations/events';
 import { applyStreamTool, streamToolSchema, type StreamTool } from '@tulipfarm/conversations/events';
+import { applyStreamSubagents, streamSubagentsSchema, type StreamSubagents } from '@tulipfarm/conversations/events';
 import { flushSync } from 'react-dom';
 
+export type LiveSubagents = StreamSubagents & { receivedAt: number };
 export type ConversationStreamStatus = 'connecting' | 'open' | 'unavailable';
 /** What a burst of changes asks the owner to read again. A change naming only a plan leaves history alone. */
 export type ConversationStreamChange = { history: boolean; plans: boolean };
@@ -21,6 +23,8 @@ export type ConversationStreamSnapshot = {
   progress: ReadonlyMap<string, StreamProgress>;
   avatars?: ReadonlyMap<string, StreamAvatar>;
   tools?: ReadonlyMap<string, StreamTool>;
+  /** Live sub-agent cards, keyed by the `agents.delegate` call id. `receivedAt` lets the page advance run times. */
+  subagents?: ReadonlyMap<string, LiveSubagents>;
 };
 
 type Source = {
@@ -100,7 +104,7 @@ export function createConversationStream(
       if (source !== current) return;
       failures = 0;
       opened = true;
-      publish({ status: 'open', tools: new Map() });
+      publish({ status: 'open', tools: new Map(), subagents: new Map() });
       invalidate();
     });
     current.addEventListener('error', () => {
@@ -139,7 +143,7 @@ export function createConversationStream(
     });
     current.addEventListener(conversationStreamEvents.resync, () => {
       if (source === current) {
-        publish({ tools: new Map() });
+        publish({ tools: new Map(), subagents: new Map() });
         invalidate();
       }
     });
@@ -160,6 +164,22 @@ export function createConversationStream(
       if (environment.commit) environment.commit(() => publish({ tools }));
       else publish({ tools });
       invalidate({ history: true, plans: false });
+    });
+    current.addEventListener(conversationStreamEvents.subagents, event => {
+      if (source !== current) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const update = streamSubagentsSchema.safeParse(data);
+      if (!update.success) return;
+      const previous = snapshot.subagents?.get(update.data.id);
+      if (applyStreamSubagents(previous, update.data) === previous) return;
+      publish({
+        subagents: new Map(snapshot.subagents).set(update.data.id, { ...update.data, receivedAt: Date.now() }),
+      });
     });
     current.addEventListener(conversationStreamEvents.avatar, event => {
       if (source !== current) return;

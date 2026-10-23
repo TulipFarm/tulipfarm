@@ -10,6 +10,7 @@ import { calendarHistoryResultSchema } from '@tulipfarm/google-workspace/calenda
 import { googleFileBindingSchema, googleFileIdSchema } from '@tulipfarm/google-workspace/public-contracts';
 import { chatDocumentReferences, chatDocumentSchema, chatDocumentText } from './rich-content.ts';
 import { rowChangeSchema, rowViewSchema } from './row-view.ts';
+import { subagentCardSchema, subagentResultSchema } from './events.ts';
 
 const unicodeText = z
   .string()
@@ -287,7 +288,12 @@ export const toolReceiptSchema = z.object({
   rowView: rowViewSchema.optional(),
   rowChange: rowChangeSchema.optional(),
   workflows: z.array(workflowReferenceSchema).optional(),
+  /** The final sub-agent cards and reports of an `agents.delegate` call. */
+  subagents: subagentResultSchema.optional(),
 });
+/** Stops one sub-agent of a running `agents.delegate` call. `id` is the call's receipt ID. */
+export const stopSubagentSchema = z.strictObject({ id: uuidSchema, key: subagentCardSchema.shape.key });
+export const stopSubagentResultSchema = z.object({ requested: z.boolean() });
 export const messageSchema = z.object({
   id: uuidSchema,
   sequence: z.number().int().positive(),

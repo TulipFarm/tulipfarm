@@ -73,7 +73,9 @@ import {
   turnStatusSchema,
   toolReceiptSchema,
   timeZoneSchema,
+  stopSubagentSchema,
 } from './contracts.ts';
+import { conversationEventChannel, subagentResultSchema, type ConversationNotification } from './events.ts';
 
 export {
   ConversationConflict,
@@ -676,12 +678,17 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
               }
             }
             const workflows = hidden.size ? undefined : await workflowReferences(tx, actor, row);
+            const subagents =
+              !hidden.size && row.tool === 'agents.delegate'
+                ? subagentResultSchema.safeParse(row.output?.result).data
+                : undefined;
             message.tools.push(
               toolReceiptSchema.parse({
                 ...row,
                 rowView,
                 rowChange,
                 workflows,
+                subagents,
                 activityStatus: await storedToolStatus(tx, row),
                 presentation: hidden.size
                   ? toolPresentation(row.tool)
@@ -976,10 +983,48 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
     );
   }
 
+  /**
+   * Asks the worker running a reply's `agents.delegate` call to stop one sub-agent. The stop is best effort: it is a
+   * notification, so a sub-agent that already ended is unaffected.
+   */
+  async function stopSubagent(
+    workspaceId: string,
+    userId: string,
+    chatIdInput: string,
+    turnIdInput: string,
+    value: unknown,
+  ) {
+    const chatId = uuidSchema.parse(chatIdInput);
+    const turnId = uuidSchema.parse(turnIdInput);
+    const input = stopSubagentSchema.parse(value);
+    return human(workspaceId, userId, async (tx, actor) => {
+      await owned(tx, actor, chatId, true, 'turn');
+      const running = (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=c.turn_id
+          WHERE c.id=$1 AND c.turn_id=$2 AND c.conversation_id=$3 AND c.tool='agents.delegate' AND c.status='running' AND t.status='processing'`,
+          [input.id, turnId, chatId],
+        )
+      ).rowCount;
+      if (!running) return { requested: false };
+      const payload: ConversationNotification = {
+        kind: 'subagent-stop',
+        workspaceId,
+        conversationId: chatId,
+        turnId,
+        id: input.id,
+        key: input.key,
+      };
+      await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
+      return { requested: true };
+    });
+  }
+
   return {
     create,
     send,
     sendInTransaction,
+    stopSubagent,
     read,
     compaction,
     maintenance,

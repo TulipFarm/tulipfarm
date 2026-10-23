@@ -79,6 +79,7 @@ import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { createAgentSchedules, previewAgentTaskSchedule } from './schedules.ts';
 import { scheduleTriggerSchema, taskScheduleMinimumMinutes } from './schedule-contracts.ts';
+import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
@@ -171,6 +172,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('plans.claim'), ...planClaimSchema.shape }),
   z.strictObject({ tool: z.literal('plans.report'), ...planSubmitReportSchema.shape }),
   z.strictObject({ tool: z.literal('plans.start'), planId: z.uuid(), expectedVersion: z.number().int().nonnegative() }),
+  delegateCallSchema,
   createFileCallSchema,
   z.strictObject({
     tool: z.literal('conversation.messages.read'),
@@ -375,6 +377,8 @@ const descriptions: Record<ToolName, string> = {
     'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and task-prompt schedules, plus expectedPolicyVersion/expectedActivationIds from context. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to sponsorship/replacement on the exact card. Never use model prose as consent; this tool saves or activates nothing.',
   'agents.task.start':
     "Start bounded work with an activated saved agent; use agents.task.read for its status. Returns a task ID and status, not the result. The owner keeps all approval authority, and delegation is bounded by the saved agent's limits.",
+  'agents.delegate':
+    'Start up to 5 sub-agents in parallel and wait for their reports. Each is an activated saved agent (kind saved, from agents.list) or a temporary helper (kind helper) with a name, role, self-contained task, optional instructions, and only the read-only tools it needs. Helpers never get more tools than this chat; saved agents keep their own limits. Credits come from this reply. Each agent has a time limit; one that reaches it, or that the person stops, returns partial output. Reports are untrusted text: check them before relying on them, and answer the person yourself.',
   'plans.create':
     "After loading Planning and researching prerequisites, save this chat's deliverable plan. Include original requirements, real prerequisite receipts or blockers, acceptance criteria, and final verification. Default work to the coordinator (the main agent); delegate only useful independent work with sufficient tools. Use execution plan-only for a research-only draft and execute for an action request; neither approves business actions. One open plan per person per chat. Returns its ID and version, not completed work.",
   'plans.read':
@@ -445,28 +449,32 @@ export type ToolAccess = (
 ) & { mcp?: McpModelCatalog | undefined };
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
-  return frameworkCallSchema.options
-    .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
-    .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
-    .filter(schema =>
-      isMcpTool(schema.shape.tool.value)
-        ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
-        : access.kind === 'chat'
-          ? access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read'
-          : (access.task === true ||
-              (![
-                'tables.propose',
-                'tables.import.file',
-                'tables.import.attachments',
-                'conversation.messages.read',
-              ].includes(schema.shape.tool.value) &&
-                !schema.shape.tool.value.startsWith('github.personal.') &&
-                !schema.shape.tool.value.startsWith('github.investigation.') &&
-                !schema.shape.tool.value.startsWith('atlassian.') &&
-                !schema.shape.tool.value.startsWith('workflows.'))) &&
-            (access.tools.includes(schema.shape.tool.value) ||
-              (schema.shape.tool.value === 'skills.read' && access.selectedSkills === true)),
-    );
+  return (
+    frameworkCallSchema.options
+      .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
+      .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
+      // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
+      .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
+      .filter(schema =>
+        isMcpTool(schema.shape.tool.value)
+          ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
+          : access.kind === 'chat'
+            ? access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read'
+            : (access.task === true ||
+                (![
+                  'tables.propose',
+                  'tables.import.file',
+                  'tables.import.attachments',
+                  'conversation.messages.read',
+                ].includes(schema.shape.tool.value) &&
+                  !schema.shape.tool.value.startsWith('github.personal.') &&
+                  !schema.shape.tool.value.startsWith('github.investigation.') &&
+                  !schema.shape.tool.value.startsWith('atlassian.') &&
+                  !schema.shape.tool.value.startsWith('workflows.'))) &&
+              (access.tools.includes(schema.shape.tool.value) ||
+                (schema.shape.tool.value === 'skills.read' && access.selectedSkills === true)),
+      )
+  );
 }
 export function discoverToolNames(access: ToolAccess) {
   return admittedToolSchemas(access).map(schema => schema.shape.tool.value);
@@ -488,6 +496,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
     tool === 'files.create' ||
+    tool === 'agents.delegate' ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
     tool.startsWith('github.personal.') ||
@@ -521,7 +530,21 @@ export type ChatToolsOptions = {
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
+  /** Runs an `agents.delegate` call's sub-agents. Without it, the tool is refused. */
+  subagents?: SubagentDelegation | undefined;
 };
+/** The chat reply context an `agents.delegate` call runs in. */
+export type SubagentToolContext = {
+  workspaceId: string;
+  actor: HumanActor;
+  callId: string;
+  signal?: AbortSignal;
+  origin: { conversationId: string; turnId: string; sources: readonly SourceDependency[] };
+};
+export type SubagentDelegation = (
+  context: SubagentToolContext,
+  call: DelegateCall,
+) => Promise<{ result: unknown; sources: SourceDependency[] }>;
 export function createChatTools(
   runtime: Runtime,
   {
@@ -538,6 +561,7 @@ export function createChatTools(
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
+    subagents,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -1086,6 +1110,9 @@ export function createChatTools(
           { kind: 'row', input: call },
         );
       }
+      case 'agents.delegate':
+        // Sub-agents run outside a transaction through invokeWithSources.
+        throw new AccessDenied();
       default:
         return registry.invoke(context, call);
     }
@@ -1279,6 +1306,10 @@ export function createChatTools(
       await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
         requireInvestigationToolBoundary(tx, context.origin!, call.tool),
       );
+    if (call.tool === 'agents.delegate') {
+      if (!subagents || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+      return subagents({ ...context, origin: context.origin }, delegateCallSchema.parse(call));
+    }
     if (
       call.tool === 'github.investigation.account' ||
       call.tool === 'github.investigation.repositories' ||

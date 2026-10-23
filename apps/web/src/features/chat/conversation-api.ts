@@ -16,6 +16,7 @@ import {
   compactionPartSchema,
 } from '@tulipfarm/conversations/compaction-contracts';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
+import { subagentResultSchema } from '@tulipfarm/conversations/events';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
@@ -99,6 +100,7 @@ const messageSchema = z.object({
         rowView: rowViewSchema.optional(),
         rowChange: rowChangeSchema.optional(),
         workflows: z.array(workflowReferenceSchema).optional(),
+        subagents: subagentResultSchema.optional(),
       }),
     )
     .default([]),
@@ -372,6 +374,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
       return compactionDetailSchema.parse(
         await request(`/${chatId}/compactions/${compactionId}`, 'GET', signal, undefined, true),
       );
+    },
+    /** Asks a running reply to stop one sub-agent. Its card turns to stopped with partial output. */
+    async stopSubagent(chatId: string, turnId: string, id: string, key: string, signal: AbortSignal) {
+      return z
+        .object({ requested: z.boolean() })
+        .parse(await request(`/${chatId}/turns/${turnId}/subagents/stop`, 'POST', signal, { id, key }, true));
     },
     async maintenance(chatId: string, signal: AbortSignal): Promise<MaintenanceView> {
       return maintenanceViewSchema.parse(await request(`/${chatId}/maintenance`, 'GET', signal, undefined, true));

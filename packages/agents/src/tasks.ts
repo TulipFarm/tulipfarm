@@ -48,6 +48,7 @@ import {
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { taskTransition, withTaskTelemetry } from './task-telemetry.ts';
 import { visiblePage } from './visible-page.ts';
+import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
 
 const columns = `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
 const storedSchema = taskSummarySchema
@@ -361,6 +362,8 @@ export function createAgentTasks(
       parentTask?: Task;
       delegationTools?: string[];
       flowId?: string;
+      /** A chat's sub-agent starts one level below the chat. */
+      delegationDepth?: number;
     },
   ) {
     const id = randomUUID();
@@ -377,7 +380,7 @@ export function createAgentTasks(
         activation.id,
         activation.revision,
         input.parentTask?.id ?? null,
-        input.parentTask ? input.parentTask.delegationDepth + 1 : 0,
+        input.parentTask ? input.parentTask.delegationDepth + 1 : (input.delegationDepth ?? 0),
         input.delegationTools ? JSON.stringify(input.delegationTools) : null,
         JSON.stringify(activation.definition.skills ?? []),
         JSON.stringify(input.scope),
@@ -400,15 +403,22 @@ export function createAgentTasks(
     inherited: unknown = [],
     guard?: (tx: AgentTransaction) => Promise<void>,
     knowledgeOrigin?: KnowledgeRootOrigin,
+    /** A chat sub-agent's tools never exceed the tools its chat is offered. */
+    chatTools?: readonly string[],
   ) {
     const input = startTaskSchema.parse(value);
     const carried = taskSourcesSchema.parse(inherited);
+    const subagent = knowledgeOrigin?.kind === 'chat-call' && knowledgeOrigin.tool === 'agents.delegate';
     if (
-      knowledgeOrigin &&
-      (input.requestId !==
-        (knowledgeOrigin.kind === 'chat-call' ? knowledgeOrigin.callId : knowledgeOrigin.attemptId) ||
-        (knowledgeOrigin.kind === 'chat-call' &&
-          (knowledgeOrigin.tool !== 'agents.task.start' || !knowledgeOrigin.turnId)))
+      (knowledgeOrigin &&
+        (subagent
+          ? !Array.from({ length: subagentLimits.children }, (_, index) =>
+              delegatedRequestId(knowledgeOrigin.callId, index),
+            ).includes(input.requestId)
+          : input.requestId !==
+            (knowledgeOrigin.kind === 'chat-call' ? knowledgeOrigin.callId : knowledgeOrigin.attemptId))) ||
+      (knowledgeOrigin?.kind === 'chat-call' &&
+        ((knowledgeOrigin.tool !== 'agents.task.start' && !subagent) || !knowledgeOrigin.turnId))
     )
       throw new AccessDenied();
     if (input.mcpSelection && !claimMcpSelection) throw new AccessDenied();
@@ -434,6 +444,18 @@ export function createAgentTasks(
         limits: await clampLimits(tx, input.agentId, input.limits),
         sources,
         scheduleId: null,
+        ...(subagent
+          ? {
+              delegationDepth: 1,
+              // Selected skills load through skills.read even when the definition does not list it.
+              delegationTools: [
+                ...new Set([
+                  ...activation.definition.tools,
+                  ...(activation.definition.skills?.length ? ['skills.read' as const] : []),
+                ]),
+              ].filter(tool => !chatTools || chatTools.includes(tool)),
+            }
+          : {}),
       });
       if (tx.commonVersion >= 1 && knowledgeOrigin) {
         const root = await knowledgeRootForRequest(tx, actor, knowledgeOrigin);

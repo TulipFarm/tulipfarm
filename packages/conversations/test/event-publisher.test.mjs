@@ -283,3 +283,54 @@ test('change notifications carry a parseable changed payload', async () => {
     ],
   ]);
 });
+
+test('sub-agent cards coalesce per call, carry the reply fence, and flush on close', async () => {
+  const sent = [];
+  const runtime = {
+    async transaction(_workspaceId, _range, operation) {
+      await operation({
+        client: {
+          query: async (_sql, values) => sent.push(conversationNotificationSchema.parse(JSON.parse(values[1]))),
+        },
+      });
+    },
+  };
+  const card = (status, step) => ({
+    key: 'a0',
+    kind: 'helper',
+    name: 'Scout',
+    role: 'Researcher',
+    status,
+    ...(step ? { step } : {}),
+    credits: 0.5,
+    elapsedMs: 10,
+  });
+  const callId = '00000000-0000-4000-8000-000000000009';
+  const publisher = createReplyTextPublisher(runtime, fence, 20);
+  publisher.subagents(callId, [card('queued')]);
+  publisher.subagents(callId, [card('running', 'Searching the web')]);
+  await delay(40);
+  publisher.subagents(callId, [card('done')]);
+  await publisher.close();
+  publisher.subagents(callId, [card('failed')]);
+  await delay(40);
+  assert.deepEqual(
+    sent.map(({ kind, id, turnId, generation, epoch, seq, agents }) => ({
+      kind,
+      id,
+      turnId,
+      generation,
+      epoch,
+      seq,
+      states: agents.map(agent => [agent.status, agent.step]),
+    })),
+    [
+      { kind: 'subagents', id: callId, ...fenceOf(), seq: 0, states: [['running', 'Searching the web']] },
+      { kind: 'subagents', id: callId, ...fenceOf(), seq: 1, states: [['done', undefined]] },
+    ],
+  );
+});
+
+function fenceOf() {
+  return { turnId: identity.turnId, generation: 2, epoch: 3 };
+}

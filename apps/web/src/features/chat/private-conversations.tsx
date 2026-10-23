@@ -50,6 +50,7 @@ import { Message, MessageBubble, MessageContent, MessageFooter } from '@tulipfar
 import { GitHubChatResponse } from './github-download';
 import { MessageActions } from '@tulipfarm/sprout/message-actions';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
+import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { ActivityResultCard } from './activity-result-card';
@@ -991,6 +992,28 @@ function ConversationDetail({
                               setAwayFromLatest(true);
                             }}
                           />
+                          {message.tools.map(tool => {
+                            const replyTurn = message.turn;
+                            return tool.tool === 'agents.delegate' ? (
+                              <SubagentFanout
+                                key={`subagents:${tool.id}`}
+                                tool={tool}
+                                live={stream.subagents?.get(tool.id)}
+                                stop={
+                                  replyTurn?.status === 'processing'
+                                    ? key =>
+                                        api.stopSubagent(
+                                          chatId,
+                                          replyTurn.id,
+                                          tool.id,
+                                          key,
+                                          AbortSignal.timeout(15_000),
+                                        )
+                                    : undefined
+                                }
+                              />
+                            ) : null;
+                          })}
                           <ConversationTools
                             api={api}
                             chatId={chatId}
@@ -1058,6 +1081,18 @@ function ConversationDetail({
                               setAwayFromLatest(true);
                             }}
                           />
+                          {incoming.tools.map(tool =>
+                            tool.tool === 'agents.delegate' ? (
+                              <SubagentFanout
+                                key={`subagents:${tool.id}`}
+                                tool={tool}
+                                live={stream.subagents?.get(tool.id)}
+                                stop={key =>
+                                  api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
+                                }
+                              />
+                            ) : null,
+                          )}
                         </li>
                       )),
                     ]}

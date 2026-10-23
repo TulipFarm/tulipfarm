@@ -5,6 +5,7 @@ import {
   type StreamIdentity,
   type StreamProgress,
   type StreamTool,
+  type SubagentCard,
 } from './events.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -81,6 +82,8 @@ export type ReplyTextPublisher = {
   update(step: number, text: string): void;
   progress(update: ReplyProgress): void;
   avatar(step: number, avatar: AvatarSnapshot): void;
+  /** Live sub-agent cards of the `agents.delegate` call `id`. Bursts coalesce into the latest cards. */
+  subagents(id: string, cards: readonly SubagentCard[]): void;
   close(): Promise<void>;
 };
 
@@ -105,6 +108,39 @@ export function createReplyTextPublisher(
   let progressed: Promise<void> = Promise.resolve();
   let avatarSeq = 0;
   let progressSeq = 0;
+  const subagentCards = new Map<string, { seq: number; cards: readonly SubagentCard[] | null }>();
+  let subagentTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function flushSubagents() {
+    subagentTimer = null;
+    const payloads: ConversationNotification[] = [];
+    for (const [id, entry] of subagentCards) {
+      if (!entry.cards) continue;
+      payloads.push({
+        kind: 'subagents',
+        ...address,
+        turnId: fence.turnId,
+        generation: fence.generation,
+        epoch: fence.epoch,
+        id,
+        seq: entry.seq++,
+        agents: [...entry.cards],
+      });
+      entry.cards = null;
+    }
+    const fitting = payloads.filter(payload => payloadBytes(payload) < notificationPayloadLimit);
+    if (!fitting.length) return;
+    progressed = progressed
+      .then(() =>
+        runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
+          for (const payload of fitting)
+            await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
+        }),
+      )
+      .catch(() => {
+        /* Sub-agent cards are a preview; the saved result is unaffected. */
+      });
+  }
 
   const pending = () => latest !== null && (latest.step !== sent?.step || latest.text !== sent.text);
 
@@ -178,6 +214,15 @@ export function createReplyTextPublisher(
           log('warn', 'activity', 'call_failed', { operation: 'chat.avatar-stream', 'error.type': 'publish-failed' });
         });
     },
+    subagents(id, cards) {
+      if (closed) return;
+      const entry = subagentCards.get(id) ?? { seq: 0, cards: null };
+      entry.cards = cards;
+      subagentCards.set(id, entry);
+      if (subagentTimer) return;
+      subagentTimer = setTimeout(flushSubagents, interval);
+      subagentTimer.unref?.();
+    },
     update(step, text) {
       if (closed) return;
       latest = { step, text };
@@ -211,6 +256,10 @@ export function createReplyTextPublisher(
       closed = true;
       if (timer) clearTimeout(timer);
       timer = null;
+      if (subagentTimer) {
+        clearTimeout(subagentTimer);
+        flushSubagents();
+      }
       let expire: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<void>(resolve => {
         expire = setTimeout(resolve, closeTimeout);
