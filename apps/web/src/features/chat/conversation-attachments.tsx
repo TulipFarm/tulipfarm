@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AttachmentGroup, FileAttachment } from '@tulipfarm/sprout/attachment';
 import { Button } from '@tulipfarm/sprout/button';
+import { FileRenderersProvider, FileViewer } from '@tulipfarm/sprout/file-viewer';
+import { fileRenderers } from '@/features/files/viewer/renderers';
 import { formatFileSize } from '@/lib/file-viewer';
 import type { ConversationApi } from './conversation-api';
 import type { FileReference } from './draft-files';
@@ -114,24 +116,28 @@ export function StagedAttachments({
   return (
     <div className="space-y-2">
       {!!uploads.files.length && (
-        <AttachmentGroup variant="carousel" aria-label="Attached files">
-          {uploads.files.map(item => (
-            <FileAttachment
-              key={item.id}
-              variant="chip"
-              file={{
-                id: item.id,
-                name: item.file.name,
-                mediaType: item.file.type,
-                size: formatFileSize(item.file.size),
-                state: item.kind,
-                source: { kind: 'local', file: item.file },
-              }}
-              onRemove={disabled ? undefined : () => uploads.remove(item.id)}
-              onRetry={disabled ? undefined : () => void uploads.retry(item)}
-            />
-          ))}
-        </AttachmentGroup>
+        <FileRenderersProvider renderers={fileRenderers}>
+          <AttachmentGroup variant="carousel" aria-label="Attached files">
+            {uploads.files.map(item => (
+              <FileAttachment
+                key={item.id}
+                variant="chip"
+                viewable
+                preview
+                file={{
+                  id: item.id,
+                  name: item.file.name,
+                  mediaType: item.file.type,
+                  size: formatFileSize(item.file.size),
+                  state: item.kind,
+                  source: { kind: 'local', file: item.file },
+                }}
+                onRemove={disabled ? undefined : () => uploads.remove(item.id)}
+                onRetry={disabled ? undefined : () => void uploads.retry(item)}
+              />
+            ))}
+          </AttachmentGroup>
+        </FileRenderersProvider>
       )}
       {!!referenced.length && (
         <p className="text-xs text-muted-foreground">
@@ -180,37 +186,41 @@ export function StagedAttachments({
 
 export function ConversationAttachment({ api, chatId, id }: { api: ConversationApi; chatId: string; id: string }) {
   const read = useConversationAttachment(api, chatId, id);
-  const [download, setDownload] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [fetching, setFetching] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [loaded, setLoaded] = useState<File | null>(null);
+  const [open, setOpen] = useState(false);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => active.current?.abort(), []);
-  async function save(filename: string) {
+  async function view(filename: string, mediaType: string) {
+    if (loaded) {
+      setOpen(true);
+      return;
+    }
     if (active.current) return;
     const controller = new AbortController();
     active.current = controller;
-    setDownload('loading');
+    setFetching('loading');
     try {
       const blob = await api.download(chatId, id, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
       controller.signal.throwIfAborted();
-      const url = URL.createObjectURL(blob);
-      try {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.click();
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-      setDownload('idle');
+      setLoaded(new File([blob], filename, { type: mediaType || blob.type }));
+      setOpen(true);
+      setFetching('idle');
     } catch {
-      if (!controller.signal.aborted) setDownload('error');
+      if (!controller.signal.aborted) setFetching('error');
     } finally {
       active.current = null;
     }
   }
-  if (read.state.kind === 'loading') return <p role="status">Loading attachment…</p>;
+  if (read.state.kind === 'loading')
+    return (
+      <p data-slot="conversation-attachment" role="status">
+        Loading attachment…
+      </p>
+    );
   if (read.state.kind !== 'ready')
     return (
-      <div>
+      <div data-slot="conversation-attachment">
         <p role="alert">Attachment unavailable. Your messages remain saved.</p>
         <Button size="sm" variant="outline" onClick={() => void read.refresh()}>
           Retry attachment
@@ -219,22 +229,27 @@ export function ConversationAttachment({ api, chatId, id }: { api: ConversationA
     );
   const file = read.state.data;
   return (
-    <div className="space-y-2">
+    <div data-slot="conversation-attachment" className="space-y-2">
       <FileAttachment
         variant="chip"
-        actionLabel="Download"
-        onOpen={() => void save(file.filename)}
+        onOpen={() => void view(file.filename, file.mediaType)}
         file={{
           id,
           name: file.filename,
           mediaType: file.mediaType,
           size: formatFileSize(file.size),
-          state: download === 'loading' ? 'processing' : 'ready',
+          state: fetching === 'loading' ? 'processing' : 'ready',
         }}
       />
-      {download === 'error' && (
-        <p role="alert">Download failed. Select the file to retry. Your messages remain saved.</p>
+      {fetching === 'error' && (
+        <p role="alert">Couldn't open the file. Select it to retry. Your messages remain saved.</p>
       )}
+      <FileViewer
+        file={loaded && { name: loaded.name, mediaType: loaded.type, source: { kind: 'local', file: loaded } }}
+        open={open && !!loaded}
+        onOpenChange={setOpen}
+        renderers={fileRenderers}
+      />
     </div>
   );
 }
