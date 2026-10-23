@@ -79,6 +79,8 @@ function eventJson(data: string): { ok: true; value: unknown } | { ok: false } {
 }
 
 const record = z.record(z.string(), z.unknown());
+const presentFields = (value: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(value).filter(([, field]) => field !== null && field !== undefined));
 const anthropicEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('message_start'), message: record }),
   z.object({
@@ -252,7 +254,9 @@ function chatAssembler(): Assembler {
       }
       const chunk = parsed.data;
       model ||= chunk.model;
-      if (chunk.usage) finalUsage = chunk.usage;
+      // Usage arrives on the last content chunk (DeepSeek) or on a final chunk with no choices (OpenAI, Azure). A later
+      // chunk with an empty or partial usage object must not erase counts an earlier chunk reported.
+      if (chunk.usage) finalUsage = { ...finalUsage, ...presentFields(chunk.usage) };
       if (chunk.error) error = { error: chunk.error };
       for (const choice of chunk.choices ?? []) {
         if (choice.index !== 0) continue;
@@ -298,7 +302,7 @@ function chatAssembler(): Assembler {
               message: { content, refusal, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) },
             },
           ],
-          ...(finalUsage ? { usage: finalUsage } : {}),
+          ...(finalUsage && Object.keys(finalUsage).length ? { usage: finalUsage } : {}),
         },
         error,
       };

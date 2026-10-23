@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { observeInference } from '@tulipfarm/observability';
 import {
   inferenceRouteSchema,
+  openAiUsage,
   openAiWire,
   routeCapabilities,
   type InferenceRoute,
@@ -138,48 +139,7 @@ function usage(route: Route, body: unknown): InferenceUsage {
       cacheRead: u.cachedContentTokenCount,
     };
   }
-  const capabilities = routeCapabilities(route);
-  if (capabilities.api === 'responses') {
-    const parsed = z
-      .object({
-        usage: z.object({
-          input_tokens: count,
-          output_tokens: count,
-          total_tokens: count,
-          input_tokens_details: z.object({ cached_tokens: count }),
-        }),
-      })
-      .safeParse(body);
-    if (!parsed.success) return unknown;
-    const u = parsed.data.usage;
-    if (u.input_tokens_details.cached_tokens > u.input_tokens || u.input_tokens + u.output_tokens !== u.total_tokens)
-      return unknown;
-    return {
-      ...empty,
-      input: u.input_tokens - u.input_tokens_details.cached_tokens,
-      cacheRead: u.input_tokens_details.cached_tokens,
-      output: u.output_tokens,
-    };
-  }
-  const parsed = z
-    .object({
-      usage: z.object({
-        prompt_tokens: count,
-        completion_tokens: count,
-        total_tokens: count,
-        prompt_tokens_details: z.object({ cached_tokens: count }).optional(),
-        completion_tokens_details: z.object({ reasoning_tokens: count }).optional(),
-      }),
-    })
-    .safeParse(body);
-  if (!parsed.success) return unknown;
-  const u = parsed.data.usage,
-    cache = u.prompt_tokens_details?.cached_tokens ?? 0;
-  const output =
-    u.completion_tokens +
-    (capabilities.reasoningTokensInOutput ? (u.completion_tokens_details?.reasoning_tokens ?? 0) : 0);
-  if (cache > u.prompt_tokens || u.prompt_tokens + output !== u.total_tokens) return unknown;
-  return { ...empty, input: u.prompt_tokens - cache, output, cacheRead: cache };
+  return openAiUsage(routeCapabilities(route), body);
 }
 
 function text(route: Route, body: unknown): string {

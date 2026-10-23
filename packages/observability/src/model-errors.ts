@@ -64,6 +64,42 @@ export const fallbackEligibleClasses: ReadonlySet<ModelErrorClass> = new Set([
 export const modelFallbackOutcomes = Object.freeze(['used', 'not_configured', 'not_eligible', 'failed'] as const);
 export type ModelFallbackOutcome = (typeof modelFallbackOutcomes)[number];
 
+/** Whether a successful model call reported token usage the runtime could read. */
+export const modelUsageOutcomes = Object.freeze(['reported', 'unknown'] as const);
+export type ModelUsageOutcome = (typeof modelUsageOutcomes)[number];
+/** Why usage is unknown: the response had no usage object, or its usage did not parse or add up. */
+export const modelUsageUnknownReasons = Object.freeze(['missing', 'invalid'] as const);
+export type ModelUsageUnknownReason = (typeof modelUsageUnknownReasons)[number];
+const usageShapePattern =
+  /^[a-z0-9_.]{1,96}=(?:\d{1,16}|null|[a-z]{1,8})(?:,[a-z0-9_.]{1,96}=(?:\d{1,16}|null|[a-z]{1,8})){0,31}$/;
+
+/**
+ * The key names and counts of a provider usage object, for diagnosing usage the runtime cannot read.
+ * Only lowercase field names and numbers are kept, so no text from the response can reach a log line.
+ */
+export function usageShape(usage: unknown): string | undefined {
+  const fields: string[] = [];
+  const visit = (value: unknown, path: string, depth: number) => {
+    if (fields.length >= 32) return;
+    if (value === null) fields.push(`${path}=null`);
+    else if (typeof value === 'number')
+      fields.push(`${path}=${Number.isSafeInteger(value) && value >= 0 ? value : 'nan'}`);
+    else if (typeof value === 'object' && !Array.isArray(value) && depth < 2) {
+      for (const [key, inner] of Object.entries(value))
+        if (/^[a-z0-9_]{1,40}$/.test(key)) visit(inner, path ? `${path}.${key}` : key, depth + 1);
+    } else fields.push(`${path}=${Array.isArray(value) ? 'array' : typeof value}`);
+  };
+  if (usage === null || typeof usage !== 'object' || Array.isArray(usage)) return undefined;
+  visit(usage, '', 0);
+  const shape = fields.join(',');
+  return usageShapePattern.test(shape) ? shape : undefined;
+}
+
+/** A shape `usageShape` produced; anything else stays off log lines. */
+export function safeUsageShape(value: unknown): boolean {
+  return typeof value === 'string' && usageShapePattern.test(value);
+}
+
 const providerCodePattern = /^[A-Za-z0-9._:-]{1,64}$/;
 export const providerMessageLimit = 200;
 
