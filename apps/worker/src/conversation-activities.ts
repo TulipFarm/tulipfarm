@@ -148,7 +148,11 @@ export function meteredReply(
               ).text,
           }
         : {}),
-    } satisfies Pick<ToolInferenceContext, 'context' | 'compactToolResults'>;
+      // Without a completion-check model, the check runs on whichever chat route answered, chat or fallback.
+      completionCheckWindow:
+        completionCheck?.price.maxInputTokens ??
+        Math.min(chat.price.maxInputTokens, fallback?.price.maxInputTokens ?? chat.price.maxInputTokens),
+    } satisfies Pick<ToolInferenceContext, 'context' | 'compactToolResults' | 'completionCheckWindow'>;
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
     const session = await observeChatDetail('reply-start', () =>

@@ -713,3 +713,76 @@ test('a skipped check ends the reply in the same state as a check that returns d
     avatar: { name: 'Bud', state: 'Idle' },
   });
 });
+
+test('completion evidence is trimmed oldest first to fit, keeping the latest request and the candidate', () => {
+  const old = 'old context '.repeat(2000);
+  const items = [
+    { kind: 'turn', turn: { role: 'user', text: `First question. ${old}` } },
+    { kind: 'turn', turn: { role: 'assistant', text: `First answer. ${old}` } },
+    { kind: 'turn', turn: { role: 'user', text: 'Count the open incidents.' } },
+    ...Array.from({ length: 6 }, (_, index) => [
+      { kind: 'model', text: '', calls: [{ id: `call-${index}`, name: 'tables_query', input: {}, providerId: true }] },
+      {
+        kind: 'results',
+        results: [
+          { id: `call-${index}`, name: 'tables_query', output: `rows-${index} ${'x'.repeat(30_000)}`, error: false },
+        ],
+      },
+    ]).flat(),
+  ];
+  const whole = completionCheckEvidence(items, 'There are 4 open incidents.', 3);
+  assert.equal(completionCheckEvidence(items, 'There are 4 open incidents.', 3, whole.length), whole);
+  // Results are cut to previews first.
+  const previews = JSON.parse(completionCheckEvidence(items, 'There are 4 open incidents.', 3, 40_000));
+  assert.equal(previews.history.length, items.length);
+  assert.ok(
+    previews.history.filter(item => item.kind === 'results').every(item => item.results[0].output.length < 500),
+  );
+  assert.match(previews.history.at(-1).results[0].output, /^rows-5 x+… \[cut from 30007 characters\]$/);
+  // Then the oldest entries go, except the person's latest request.
+  for (const max of [4000, 1500]) {
+    const serialized = completionCheckEvidence(items, 'There are 4 open incidents.', 3, max);
+    assert.ok(Buffer.byteLength(serialized) <= max, `${Buffer.byteLength(serialized)} <= ${max}`);
+    const evidence = JSON.parse(serialized);
+    assert.equal(evidence.history[0].kind, 'omitted');
+    assert.ok(evidence.history.some(item => item.turn?.text === 'Count the open incidents.'));
+    assert.ok(!serialized.includes('First question'));
+    assert.equal(evidence.candidate, 'There are 4 open incidents.');
+    assert.equal(evidence.workBudgetRemaining, 3);
+  }
+  // Even a request and candidate larger than the budget are cut rather than refused.
+  const huge = 'y'.repeat(50_000);
+  const cut = completionCheckEvidence([{ kind: 'turn', turn: { role: 'user', text: huge } }], huge, 0, 4096);
+  assert.ok(Buffer.byteLength(cut) <= 4096);
+  assert.ok(JSON.parse(cut).candidate.startsWith('yyy'));
+});
+
+test('the completion check request stays within its model window however long the reply grew', async t => {
+  const window = 16000;
+  let rounds = 0;
+  let checked;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) {
+      checked = init.body.length;
+      return Response.json(selectReply('anthropic', verdict()));
+    }
+    rounds++;
+    if (rounds <= 3)
+      return Response.json(
+        nativeReply('azure', { calls: [use('tables.definitions', {}, 'Reading', { id: `t${rounds}` })] }),
+      );
+    return Response.json(nativeReply('azure', { text: 'Done.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: `Describe the tables. ${'context '.repeat(8000)}` }],
+    async () => ({ tables: ['z'.repeat(40_000)] }),
+    undefined,
+    false,
+    null,
+    { completionCheck: nativeRoutes.anthropic, completionCheckWindow: window },
+  );
+  assert.equal(result.text, 'Done.');
+  assert.ok(Math.ceil(checked / 4) < window * 0.9, `${Math.ceil(checked / 4)} estimated tokens`);
+});

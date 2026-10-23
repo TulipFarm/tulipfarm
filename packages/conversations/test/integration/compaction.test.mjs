@@ -200,7 +200,7 @@ test(
 );
 
 test(
-  'repeated summary failures open the circuit breaker; an oversized chat then fails as paused and compact-and-retry recovers with a recorded budget fallback',
+  'repeated summary failures open the circuit breaker; an oversized chat still compacts once, falls back to leaving out old messages, and replies',
   { timeout: 60_000 },
   async () => {
     const f = await conversationFixture();
@@ -220,9 +220,13 @@ test(
           };
         },
       });
+      const seen = [];
       const executor = createConversationExecutor(
         f.runtime,
-        async () => 'ok',
+        async input => {
+          seen.push(input);
+          return 'ok';
+        },
         undefined,
         undefined,
         undefined,
@@ -239,47 +243,147 @@ test(
           'completed',
           'a failed compaction still replies when the context fits',
         );
-      const statuses = (await f.store.history(w.id, w.userId, chatId)).messages
-        .flatMap(message => message.parts)
-        .filter(part => part.kind === 'compaction');
+      const statuses = () =>
+        f.store
+          .history(w.id, w.userId, chatId)
+          .then(history =>
+            history.messages.flatMap(message => message.parts).filter(part => part.kind === 'compaction'),
+          );
       assert.deepEqual(
-        statuses.map(part => [part.trigger, part.state, part.errorCode]),
+        (await statuses()).map(part => [part.trigger, part.state, part.errorCode]),
         Array(3).fill(['automatic', 'failed', 'compaction-model-failed']),
       );
       const attempts = calls.length;
-      const { sent } = await exchange(f, chatId, executor, [{ kind: 'text', text: `four ${'x'.repeat(3000)}` }]);
-      assert.equal(calls.length, attempts, 'the open breaker stops automatic attempts');
-      const paused = (await f.store.history(w.id, w.userId, chatId)).messages.find(
-        message => message.turn?.id === sent.turnId,
-      );
-      assert.deepEqual([paused.turn.status, paused.turn.errorCode], ['failed', 'compaction-paused']);
-      broken = false;
-      const retried = await f.store.retry(w.id, w.userId, chatId, sent.turnId, {
-        commandId: randomUUID(),
-        expectedGeneration: paused.turn.generation,
-      });
       assert.equal(
-        await executor.process({
-          workspaceId: w.id,
-          conversationId: chatId,
-          turnId: sent.turnId,
-          generation: retried.generation,
-        }),
+        (await exchange(f, chatId, executor, [{ kind: 'text', text: `small ${'x'.repeat(100)}` }])).outcome,
         'completed',
-        'compact and retry bypasses the open breaker once',
       );
+      assert.equal(calls.length, attempts, 'the open breaker stops threshold compaction while the request fits');
+      const { outcome } = await exchange(f, chatId, executor, [{ kind: 'text', text: `four ${'x'.repeat(3000)}` }]);
+      assert.equal(outcome, 'completed', 'an oversized request never stops the reply');
+      assert.equal(calls.length, attempts + 1, 'the open breaker still allows one compaction when it would not fit');
+      assert.deepEqual(
+        (await statuses()).at(-1).state,
+        'failed',
+        'the failed summary is recorded and the breaker semantics are unchanged',
+      );
+      const trimmed = seen.at(-1);
+      assert.ok(bytes(trimmed.messages) <= 10_000, 'the request fits the window');
+      assert.equal(trimmed.earlierMessages, true);
+      assert.match(trimmed.messages[0].text, /^Earlier conversation messages omitted to fit the context window\./);
+      assert.match(trimmed.messages[0].text, /conversation\.messages\.read/);
+      assert.ok(trimmed.messages.at(-1).text.startsWith('four '));
+      assert.ok(!trimmed.messages.some(message => message.text.startsWith('one ')));
       const history = await f.store.history(w.id, w.userId, chatId);
-      const status = history.messages
-        .flatMap(message => message.parts)
-        .filter(part => part.kind === 'compaction')
-        .at(-1);
-      assert.deepEqual([status.trigger, status.state], ['manual', 'compacted']);
-      assert.equal(history.messages.at(-1).parts[0].text, 'ok');
+      const one = history.messages.find(message => message.parts[0]?.text?.startsWith('one '));
+      assert.ok(trimmed.messages[0].text.includes(one.id), 'left-out messages are listed by ID');
+      assert.ok(one, 'the transcript is unchanged');
+
+      broken = false;
+      assert.equal(
+        (await exchange(f, chatId, executor, [{ kind: 'text', text: `five ${'x'.repeat(3000)}` }])).outcome,
+        'completed',
+      );
+      const status = (await statuses()).at(-1);
+      assert.deepEqual([status.trigger, status.state], ['automatic', 'compacted']);
+      assert.ok(seen.at(-1).messages[0].text.startsWith('Working summary of earlier conversation.'));
       const detail = await f.store.compaction(w.id, w.userId, chatId, status.compactionId);
       assert.deepEqual(
         [detail.modelFamilyId, detail.fallbackFromFamilyId],
         ['deepseek-flash', 'claude-haiku'],
         'a budget fallback is recorded, never hidden',
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'with automatic compaction off, a request that fits is untouched and one that does not is compacted anyway',
+  { timeout: 60_000 },
+  async () => {
+    const f = await conversationFixture();
+    try {
+      const w = f.workspace,
+        chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const { calls, compactor } = fakeCompactor({ window: 10_000, policy: { automatic: false } });
+      const seen = [];
+      const executor = createConversationExecutor(
+        f.runtime,
+        async input => {
+          seen.push(input);
+          return 'ok';
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        compactor,
+      );
+      for (const word of ['one', 'two'])
+        await exchange(f, chatId, executor, [{ kind: 'text', text: `${word} ${'x'.repeat(3000)}` }]);
+      assert.equal(calls.length, 0, 'past the trigger but within the window, nothing is compacted');
+      const { outcome } = await exchange(f, chatId, executor, [{ kind: 'text', text: `three ${'x'.repeat(4500)}` }]);
+      assert.equal(outcome, 'completed');
+      assert.deepEqual(
+        calls.map(call => call.purpose),
+        ['summary'],
+      );
+      assert.ok(seen.at(-1).messages[0].text.startsWith('Working summary of earlier conversation.'));
+      assert.equal(seen.at(-1).earlierMessages, true);
+      const status = (await f.store.history(w.id, w.userId, chatId)).messages
+        .flatMap(message => message.parts)
+        .filter(part => part.kind === 'compaction')
+        .at(-1);
+      assert.deepEqual([status.trigger, status.state], ['automatic', 'compacted']);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'without a summary model, an oversized request leaves out the oldest messages behind a reread note instead of failing',
+  { timeout: 60_000 },
+  async () => {
+    const f = await conversationFixture();
+    try {
+      const w = f.workspace,
+        chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const { calls, compactor } = fakeCompactor({ window: 10_000, policy: { families: [] } });
+      const seen = [];
+      const executor = createConversationExecutor(
+        f.runtime,
+        async input => {
+          seen.push(input);
+          return 'ok';
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        compactor,
+      );
+      for (const word of ['one', 'two', 'three'])
+        await exchange(f, chatId, executor, [{ kind: 'text', text: `${word} ${'x'.repeat(2900)}` }]);
+      const { outcome } = await exchange(f, chatId, executor, [{ kind: 'text', text: `four ${'x'.repeat(2900)}` }]);
+      assert.equal(outcome, 'completed');
+      assert.equal(calls.length, 0);
+      const { messages, earlierMessages } = seen.at(-1);
+      assert.equal(earlierMessages, true);
+      assert.ok(bytes(messages) <= 10_000, 'the request fits the window');
+      assert.match(messages[0].text, /conversation\.messages\.read/);
+      assert.deepEqual(
+        messages.slice(1).map(message => message.text.split(' ')[0]),
+        ['three', 'ok', 'four'],
+        'the current message and the latest completed exchange are kept',
       );
     } finally {
       await f.close();

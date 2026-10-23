@@ -35,8 +35,23 @@ export async function respondToConversation(
   const sources: SourceDependency[] = [...retainedSources];
   let widenedWebSearch = false;
   const checkpoint = tools?.checkpoint;
+  const summarise = tools?.compactToolResults;
   const context = tools && {
     ...tools,
+    /**
+     * The summariser reads only this reply's own tool outputs, which the next model round would send anyway, and its
+     * notes stay in memory for this reply. It passes the same source check as every model request first, so a Slack or
+     * other external-context reply never summarises content its audience may no longer see.
+     */
+    ...(summarise
+      ? {
+          compactToolResults: async (input: Parameters<typeof summarise>[0]) => {
+            sources.push(...tools.sources());
+            await observeChatDetail('authorize', async () => authorizeSources?.(mergeSources(sources)));
+            return summarise(input);
+          },
+        }
+      : {}),
     ...(checkpoint
       ? {
           beforeRound: async () => {

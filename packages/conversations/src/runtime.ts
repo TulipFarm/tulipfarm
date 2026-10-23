@@ -106,8 +106,9 @@ import {
   recordCleanups,
   replaceWorkingSummary,
   summarize,
+  omittedBlock,
+  refersToEarlierMessages,
   summaryBlock,
-  summaryHeading,
   updateBreaker,
   workingSummarySchema,
   type ChatMessage,
@@ -212,7 +213,10 @@ export type ConversationReply = (input: {
   retainedSources?: SourceDependency[];
   describedHandles?: string[];
   project?: ProjectContext;
-  /** The managed chat's compaction policy, which also sets when a long reply compacts its own tool results. */
+  /**
+   * The workspace compaction policy, which also sets when a long reply compacts its own tool results. Slack and
+   * external-context chats receive it too, though only private chats keep a working summary.
+   */
   compactionPolicy?: EffectiveCompactionPolicy;
   executeTool: (
     name: string,
@@ -783,7 +787,12 @@ export function createConversationExecutor(
     return ids.map(id => ({ id, text: known.get(id)! }));
   };
 
-  /** Applies cleanup, then a rolling summary, when the measured next request crosses the workspace trigger. Returns the model context or 'stale'. */
+  /**
+   * Applies cleanup, then a rolling summary, when the measured next request crosses the workspace trigger. Returns the
+   * model context or 'stale'. Size never stops the reply: a request that does not fit the window is compacted even when
+   * automatic compaction is off or paused, and when no summary makes it fit, the oldest messages are left out behind a
+   * note that `conversation.messages.read` can reread them.
+   */
   async function automaticContext(
     fence: ReplyFence,
     source: CompactionSource,
@@ -797,17 +806,20 @@ export function createConversationExecutor(
     let summary = state.summary;
     let wording = state.wording;
     const cleaned = new Set<string>();
+    const omitted: string[] = [];
     const current = source.messages.at(-1)!;
     const prior = source.messages.slice(0, -1);
+    const shown = () =>
+      source.messages.filter(
+        message =>
+          message === current ||
+          ((!summary || message.acceptedSequence > summary.coveredThrough) && !omitted.includes(message.id)),
+      );
     const build = () =>
       observeChatDetailSync('render', () => [
         ...(summary ? [summaryBlock(summary.summary, wording)] : []),
-        ...render(
-          source.messages.filter(
-            message => message === current || !summary || message.acceptedSequence > summary.coveredThrough,
-          ),
-          cleaned,
-        ),
+        ...(omitted.length ? [omittedBlock(omitted)] : []),
+        ...render(shown(), cleaned),
         ...tail,
       ]);
     const measure = (messages: ChatMessage[]) =>
@@ -827,15 +839,38 @@ export function createConversationExecutor(
     if (!before) return context;
     const threshold = Math.floor((before.window * policy.triggerPercent) / 100);
     if (before.tokens < threshold && !state.requested) return context;
-    // Failing the turn ends this attempt either way; the caller only needs to stop.
-    const stop = async (code: string) => {
-      await guarded(fence, tx => failTurn(tx, fence, code));
-      return 'stale' as const;
-    };
-    if (state.completed) return fits(before) ? context : stop('context-limit');
-    if (!state.requested && (!policy.automatic || breakerOpen(state.breaker)))
-      return fits(before) ? context : stop(policy.automatic ? 'compaction-paused' : 'context-limit');
     const latest = latestSequence(prior);
+    /**
+     * The last resort when nothing else fits: leaves out the oldest shown messages, keeping the current message and the
+     * latest completed exchange, until the request is within the target or at least the window. The latest exchange
+     * goes last. Nothing is deleted; each left-out message stays readable by ID.
+     */
+    const trim = async () => {
+      const goal = Math.floor((before.window * policy.targetPercent) / 100);
+      let measured = await measure(context);
+      for (const keepLatest of [true, false]) {
+        for (let pass = 0; measured && measured.tokens > goal && pass < 8; pass++) {
+          const candidates = shown().filter(
+            message => message !== current && !(keepLatest && message.acceptedSequence === latest),
+          );
+          if (!candidates.length) break;
+          let excess = measured.tokens - goal;
+          for (const message of candidates) {
+            omitted.push(message.id);
+            excess -= Math.ceil(Buffer.byteLength(message.text) / 4) + 8;
+            if (excess <= 0) break;
+          }
+          context = build();
+          measured = await measure(context);
+        }
+        if (!measured || fits(measured)) break;
+      }
+      return context;
+    };
+    // An earlier attempt of this turn already compacted; it only needs to fit now.
+    if (state.completed) return fits(before) ? context : trim();
+    // Paused or disabled automatic compaction still compacts once when the request would not fit at all.
+    if (!state.requested && (!policy.automatic || breakerOpen(state.breaker)) && fits(before)) return context;
     const record: CompactionRecord = {
       id: randomUUID(),
       conversationId: fence.conversationId,
@@ -884,7 +919,7 @@ export function createConversationExecutor(
       wording = state.wording;
       context = build();
       if ((await persist(code)) === 'stale') return 'stale' as const;
-      return fits(before) ? context : stop('compaction-failed');
+      return fits(before) ? context : trim();
     };
     // Source-backed cleanup first: older file contents leave context while their originals stay attached to the message.
     for (const message of prior)
@@ -903,7 +938,7 @@ export function createConversationExecutor(
       const after = await measure(context);
       Object.assign(record, { state: 'cleaned', afterTokens: after?.tokens ?? null });
       if ((await persist(after && after.tokens < threshold ? 'effective' : 'ineffective')) === 'stale') return 'stale';
-      return after && fits(after) ? context : stop('context-limit');
+      return !after || fits(after) ? context : trim();
     }
     if (!policy.families.length) return failed('compaction-model-unavailable');
     let result: Awaited<ReturnType<typeof summarize>>;
@@ -940,7 +975,7 @@ export function createConversationExecutor(
       })) === 'stale'
     )
       return 'stale';
-    return !after || fits(after) ? context : stop('context-limit');
+    return !after || fits(after) ? context : trim();
   }
 
   /** A `/compact` turn: compacts everything before the latest completed exchange and writes a separate handoff. It never calls the chat responder. */
@@ -1167,7 +1202,9 @@ export function createConversationExecutor(
             await failTurn(tx, fence, 'compaction-unavailable');
             return null;
           }
-          const compactionPolicy = compaction && compactor ? await compactor.policy(tx) : null;
+          // Slack and external-context chats keep no working summary, but a long reply still compacts its own tool
+          // results with the workspace policy.
+          const compactionPolicy = compactor ? await compactor.policy(tx) : null;
           const summarySources: SourceDependency[] = [];
           if (compaction?.summary)
             try {
@@ -2135,7 +2172,7 @@ export function createConversationExecutor(
             timeZone: source.timeZone,
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
-            earlierMessages: prepared.some(message => message.text.startsWith(summaryHeading)),
+            earlierMessages: refersToEarlierMessages(prepared),
             retainedSources: mergeSources(inheritedSources),
             describedHandles,
             ...(source.project ? { project: source.project } : {}),

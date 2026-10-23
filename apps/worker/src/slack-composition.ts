@@ -16,6 +16,8 @@ import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
 import { createSlackDefault } from '@tulipfarm/agents/slack-default';
 import { meteredReply } from './conversation-activities.ts';
+import { conversationCompactor } from './conversation-compactor.ts';
+import { conversationModel } from './conversation-model.ts';
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
@@ -90,11 +92,14 @@ export async function createSlackPromptComposition(
   };
   const channels =
     process.env.SLACK_CHANNEL_AGENTS_ENABLED === 'true' ? createSlackChannelAgents(channelOptions) : undefined;
+  // Channel replies compact a long reply's tool results with the workspace policy and summary models, as a chat does.
+  const compactor = conversationCompactor(runtime, family => conversationModel(family));
   const defaults = channels
     ? createSlackDefault({
         ...channelOptions,
         channels,
-        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack }),
+        compactor,
+        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
       })
     : undefined;
   const replies = createConversationExecutor(runtime);

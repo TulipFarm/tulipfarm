@@ -102,10 +102,28 @@ for (const edited of [false, true])
       );
       const options = { runtime: f.runtime, appId: 'ATEST', cipher, fetcher, model: null, publicDelivery: true };
       const channels = createSlackChannelAgents(options);
+      const policy = {
+        automatic: true,
+        triggerPercent: 55,
+        targetPercent: 25,
+        outputPrompt: null,
+        revision: 3,
+        families: ['claude-haiku'],
+      };
       const defaults = createSlackDefault({
         ...options,
         channels,
+        compactor: {
+          policy: async () => policy,
+          measure: async () => null,
+          window: async () => 200_000,
+          summarize: async () => {
+            throw new Error('a channel reply keeps no working summary');
+          },
+        },
         reply: () => async input => {
+          // A channel reply compacts its own tool results with the workspace policy, like a private chat.
+          assert.deepEqual(input.compactionPolicy, policy);
           const prompt = input.messages.at(-1).text;
           prompts.push(prompt);
           assert.match(prompt, /Database lock could not be acquired/);
