@@ -116,6 +116,7 @@ const channel = {
   displayName: 'TulipFarm',
   accountGeneration: 1,
   version: 1,
+  grantsVersion: 1,
   enabled: true,
   engagementPolicy: 'approve-each',
   grants: grantSet,

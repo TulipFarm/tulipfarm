@@ -82,6 +82,7 @@ CREATE TABLE {{schema}}.tf_social_channels (
   avatar_url text CHECK (length(avatar_url) <= 2048),
   account_generation integer NOT NULL CHECK (account_generation > 0),
   version integer NOT NULL DEFAULT 1 CHECK (version > 0),
+  grants_version integer NOT NULL DEFAULT 1 CHECK (grants_version > 0),
   enabled boolean NOT NULL DEFAULT true,
   engagement_policy text NOT NULL DEFAULT 'approve-each' CHECK (engagement_policy IN ('approve-each','automatic-within-authorization')),
   removed_at timestamptz,
@@ -386,7 +387,7 @@ GRANT UPDATE (app_generation, app_fingerprint, generation, grants_version, state
 GRANT UPDATE (generation, state_hash, session_hash, membership_id, state, verifier, expires_at) ON {{schema}}.tf_social_account_attempts TO {{runtime}};
 GRANT SELECT, INSERT, DELETE ON {{schema}}.tf_social_account_grants, {{schema}}.tf_social_channel_grants TO {{runtime}};
 GRANT SELECT, INSERT ON {{schema}}.tf_social_channels TO {{runtime}};
-GRANT UPDATE (display_name, handle, avatar_url, account_generation, version, enabled, engagement_policy, removed_at) ON {{schema}}.tf_social_channels TO {{runtime}};
+GRANT UPDATE (display_name, handle, avatar_url, account_generation, version, grants_version, enabled, engagement_policy, removed_at) ON {{schema}}.tf_social_channels TO {{runtime}};
 
 GRANT SELECT ON {{schema}}.tf_social_posts, {{schema}}.tf_social_revisions, {{schema}}.tf_social_decisions,
   {{schema}}.tf_social_variants, {{schema}}.tf_social_receipts TO {{runtime}};

@@ -10,12 +10,19 @@ let flags: Partial<FeatureFlagSnapshot> = {};
 let user: string | undefined;
 let workspace: string | undefined;
 let context = '';
+// The context whose evaluation has answered, or failed and so uses the build defaults.
+let known = '';
 let request: Promise<void> | undefined;
 let controller: AbortController | undefined;
 let started = false;
 
 const notify = () => {
   for (const listener of listeners) listener();
+};
+
+const settle = (evaluated: string) => {
+  known = evaluated;
+  notify();
 };
 
 export function refreshFlags() {
@@ -25,6 +32,7 @@ export function refreshFlags() {
   if (context !== next) {
     controller?.abort();
     flags = {};
+    known = '';
     notify();
   }
   context = next;
@@ -40,6 +48,7 @@ export function refreshFlags() {
     .then(async response => {
       if (!response.ok) {
         console.warn(`Feature flag evaluation failed (HTTP ${response.status})`);
+        if (!current.signal.aborted && context === next) settle(next);
         return;
       }
       const result = (await response.json()) as Record<string, unknown>;
@@ -47,11 +56,12 @@ export function refreshFlags() {
       flags = Object.fromEntries(
         Object.entries(result).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'),
       );
-      notify();
+      settle(next);
     })
     .catch(error => {
-      if (!current.signal.aborted)
-        console.warn(`Feature flag evaluation failed (${error instanceof Error ? error.name : 'UnknownError'})`);
+      if (current.signal.aborted) return;
+      console.warn(`Feature flag evaluation failed (${error instanceof Error ? error.name : 'UnknownError'})`);
+      if (context === next) settle(next);
     })
     .finally(() => {
       if (controller === current) request = undefined;
@@ -73,6 +83,7 @@ function start() {
     if (!user) {
       controller?.abort();
       context = '';
+      known = '';
       flags = {};
       notify();
       return;
@@ -104,5 +115,17 @@ export function useFlag(flag: FeatureFlag) {
     subscribe,
     () => flags[flag] ?? fallback(flag),
     () => fallback(flag),
+  );
+}
+
+/**
+ * A flag's value once the API has evaluated it for this workspace (by slug), or undefined until then. Use it to
+ * hold back requests that only exist behind the flag, so a workspace without it never sends them.
+ */
+export function useKnownFlag(flag: FeatureFlag, workspaceSlug: string): boolean | undefined {
+  return useSyncExternalStore(
+    subscribe,
+    () => (user && known === `${user}\n${workspaceSlug}` ? (flags[flag] ?? fallback(flag)) : undefined),
+    () => undefined,
   );
 }

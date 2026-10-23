@@ -58,6 +58,7 @@ const channelRowSchema = z.object({
   display_name: z.string(),
   account_generation: z.number().int().positive(),
   version: z.number().int().positive(),
+  grants_version: z.number().int().positive(),
   enabled: z.boolean(),
   engagement_policy: engagementPolicySchema,
   removed_at: z.date().nullable(),
@@ -217,6 +218,7 @@ export function createSocialChannels(options: {
       displayName: row.display_name,
       accountGeneration: row.account_generation,
       version: row.version,
+      grantsVersion: row.grants_version,
       enabled: row.enabled,
       engagementPolicy: row.engagement_policy,
       grants: await grantSet(tx, row.id),
@@ -467,14 +469,16 @@ export function createSocialChannels(options: {
       });
     },
     /**
-     * Replaces every grant on a channel. The channel's `version` must match and increases, so work bound to
-     * the old grants stops. A personal connection's channels can be granted only to its owner (PRODUCT 9, 11).
+     * Replaces every grant on a channel. The channel's `grantsVersion` must match and increases. The channel's own
+     * `version`, which approvals bind, is unchanged: grants are checked live before every step, so a removed grant
+     * blocks work and a restored one lets it resume (PRODUCT 11, 25). A personal connection's channels can be
+     * granted only to its owner (PRODUCT 9).
      */
     async setGrants(workspaceId: string, userId: string, channelId: string, input: unknown): Promise<Channel> {
       const value = channelGrantsSchema.parse(input);
       return transaction(workspaceId, 'write', async tx => {
         const { sponsor: actor, channel, account } = await authorizeIn(tx, userId, channelId, 'manage', {}, true);
-        if (channel.version !== value.expectedVersion) throw new SocialError('channel-conflict');
+        if (channel.grants_version !== value.expectedVersion) throw new SocialError('channel-conflict');
         const grants = {
           publish: value.publish,
           analytics: value.analytics,
@@ -509,7 +513,9 @@ export function createSocialChannels(options: {
               [channel.id, permission, teamId],
             );
         }
-        await tx.client.query(`UPDATE ${relation(tx, 'channels')} SET version=version+1 WHERE id=$1`, [channel.id]);
+        await tx.client.query(`UPDATE ${relation(tx, 'channels')} SET grants_version=grants_version+1 WHERE id=$1`, [
+          channel.id,
+        ]);
         await audit(tx, actor, channel.id, 'grants');
         const updated = channelRowSchema.parse(
           (await tx.client.query(`SELECT * FROM ${relation(tx, 'channels')} WHERE id=$1`, [channel.id])).rows[0],

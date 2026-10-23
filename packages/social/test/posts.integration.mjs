@@ -135,7 +135,7 @@ function service({ now, validate } = {}) {
   };
   const grant = async (user, channel, grants) =>
     channels.setGrants(ws.id, user, channel.id, {
-      expectedVersion: (await channels.get(ws.id, user, channel.id)).version,
+      expectedVersion: (await channels.get(ws.id, user, channel.id)).grantsVersion,
       publish: none,
       analytics: none,
       engagement: none,
@@ -938,7 +938,7 @@ test('PRODUCT 21: the sources are checked again at approval, and kept on every r
 });
 
 test('PRODUCT 39: the schedule lists variants by channel and state, only to people who may publish there and read the post', async () => {
-  const { posts, sharedPage } = service();
+  const { posts, sharedPage, grant } = service();
   const page = await sharedPage();
   const conversationId = await chat(member);
   const { post } = await posts.prepare(
@@ -964,9 +964,17 @@ test('PRODUCT 39: the schedule lists variants by channel and state, only to peop
     schedule.channels.map(channel => ({
       channelId: channel.channelId,
       platform: channel.platform,
+      canPublish: channel.canPublish,
       variants: channel.variants.map(item => [item.postId, item.variant.state, item.variant.blockedReason]),
     })),
-    [{ channelId: page.id, platform: 'linkedin', variants: [[post.id, 'blocked', 'account-reconnect']] }],
+    [
+      {
+        channelId: page.id,
+        platform: 'linkedin',
+        canPublish: true,
+        variants: [[post.id, 'blocked', 'account-reconnect']],
+      },
+    ],
   );
   assert.deepEqual((await posts.schedule(ws.id, member.userId, { states: ['published'] })).channels[0].variants, []);
   // `other` may publish to the page but cannot read the member's chat, so the post's content stays hidden.
@@ -977,4 +985,26 @@ test('PRODUCT 39: the schedule lists variants by channel and state, only to peop
   // The workspace admin holds no grant on the page, so it is not listed at all.
   assert.deepEqual((await posts.schedule(ws.id, admin().userId)).channels, []);
   await assert.rejects(posts.schedule(ws.id, member.userId, { states: ['unknown'] }), zod);
+
+  // The author loses the publish grant: their own blocked variant stays listed, without the right to act on it.
+  await grant(member.userId, page, { publish: only(other), manage: only(member) });
+  const authored = await posts.schedule(ws.id, member.userId);
+  assert.deepEqual(
+    authored.channels.map(channel => ({
+      channelId: channel.channelId,
+      displayName: channel.displayName,
+      canPublish: channel.canPublish,
+      variants: channel.variants.map(item => item.variant.id),
+    })),
+    [{ channelId: page.id, displayName: page.displayName, canPublish: false, variants: [variant.id] }],
+  );
+  assert.deepEqual(
+    (await posts.schedule(ws.id, member.userId, { channelId: page.id, states: ['blocked'] })).channels.map(
+      channel => channel.variants.length,
+    ),
+    [1],
+  );
+  assert.deepEqual((await posts.schedule(ws.id, member.userId, { channelId: randomUUID() })).channels, []);
+  // Someone else's posts on a channel the person cannot publish to stay hidden.
+  assert.deepEqual((await posts.schedule(ws.id, admin().userId)).channels, []);
 });

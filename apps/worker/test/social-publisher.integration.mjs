@@ -78,7 +78,7 @@ async function approvedPost(fake) {
     platformChannelId: 'urn:li:person:founder',
   });
   const channel = await channels.setGrants(ws.id, ws.userId, added.id, {
-    expectedVersion: added.version,
+    expectedVersion: added.grantsVersion,
     publish: only(ws.membershipId),
     analytics: none,
     engagement: none,

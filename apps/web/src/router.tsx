@@ -37,6 +37,7 @@ import { reconcileMembership } from '@/features/governance/queries';
 import { invitationTokenSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { RecoveryNotice, WorkspaceRecoveryPage } from '@/pages/workspace-recovery';
 import { accountCallbackResultSchema } from '@tulipfarm/atlassian/callback-contracts';
+import { platformSchema } from '@tulipfarm/social/contracts';
 import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback-contracts';
 import { workflowPageSearch } from '@/features/workflows/page-search';
 import { calendarSearchSchema } from '@/features/calendar/model';
@@ -77,6 +78,7 @@ const SlackLinkPage = lazyRouteComponent(() => import('@/pages/slack-link'), 'Sl
 const GoogleCallbackPage = lazyRouteComponent(() => import('@/pages/google-callback'), 'GoogleCallbackPage');
 const GitHubCallbackPage = lazyRouteComponent(() => import('@/pages/github-callback'), 'GitHubCallbackPage');
 const AtlassianCallbackPage = lazyRouteComponent(() => import('@/pages/atlassian-callback'), 'AtlassianCallbackPage');
+const SocialCallbackPage = lazyRouteComponent(() => import('@/pages/social-callback'), 'SocialCallbackPage');
 const WorkspaceHomePage = lazyRouteComponent(() => import('@/pages/workspace-home'), 'WorkspaceHomePage');
 const WorkspaceChatsPage = lazyRouteComponent(() => import('@/pages/workspace-chats'), 'WorkspaceChatsPage');
 const TeamsPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamsPage');
@@ -345,6 +347,21 @@ export const atlassianCallbackRoute = createRoute({
   validateSearch: search => {
     const result = accountCallbackResultSchema.safeParse(search);
     return result.success ? result.data : accountCallbackResultSchema.parse({ outcome: 'error' });
+  },
+});
+const socialCallbackSearchSchema = z.object({
+  outcome: z.enum(['connected', 'denied', 'reconnect-required', 'expired', 'sign-in-required', 'error']),
+  workspaceId: z.uuid().optional(),
+  platform: platformSchema.optional(),
+});
+/** Where the API sends a person after a social account's OAuth sign-in; the page checks `social-publishing`. */
+export const socialCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/social/callback',
+  component: SocialCallbackPage,
+  validateSearch: search => {
+    const result = socialCallbackSearchSchema.safeParse(search);
+    return result.success ? result.data : { outcome: 'error' as const };
   },
 });
 export const googleCallbackRoute = createRoute({
@@ -981,6 +998,7 @@ export const router = createRouter({
     googleCallbackRoute,
     githubCallbackRoute,
     atlassianCallbackRoute,
+    socialCallbackRoute,
     slackLinkRoute,
     createWorkspaceRoute,
     onboardingRoute,

@@ -108,7 +108,7 @@ async function harness({ platformApps, flagged = () => true } = {}) {
     if (expected !== undefined) assert.deepEqual(value, expected);
     return value;
   };
-  return { ws, app, base, admin, origin, request };
+  return { ws, app, base, admin, origin, request, adapters };
 }
 
 test('PRODUCT 1-11 routes require the social-publishing flag, a session and the trusted origin', async () => {
@@ -217,7 +217,7 @@ test('PRODUCT 4 exit check: hosted X needs a workspace app over HTTP even when o
 });
 
 test('PRODUCT 7 and 8: begin, callback, reconnect and disconnect over HTTP', async () => {
-  const { ws, app, base, request } = await harness();
+  const { ws, app, base, request, adapters } = await harness();
   try {
     const begin = { platform: 'linkedin', ownership: { kind: 'personal' } };
     const started = await request({ method: 'POST', url: `${base}/accounts/begin`, payload: begin }, 200);
@@ -261,6 +261,31 @@ test('PRODUCT 7 and 8: begin, callback, reconnect and disconnect over HTTP', asy
       headers: { cookie: 'session=admin', accept: 'text/html' },
     });
     assert.equal(new URL(denied.headers.location).searchParams.get('outcome'), 'denied');
+    assert.equal(new URL(denied.headers.location).searchParams.get('workspaceId'), ws.id);
+
+    // The person granted fewer permissions than requested: the page asks them to connect again.
+    const partial = await request({ method: 'POST', url: `${base}/accounts/begin`, payload: begin }, 200);
+    adapters.linkedin.script('exchangeCode', {
+      accessToken: 'partial-access',
+      refreshToken: null,
+      expiresAt: null,
+      scopes: [],
+    });
+    const missing = await app.inject({
+      url: `/v1/social/oauth/callback?code=platform-code&state=${new URL(partial.authorizationUrl).searchParams.get('state')}`,
+      headers: { cookie: 'session=admin', accept: 'text/html' },
+    });
+    const missingUrl = new URL(missing.headers.location);
+    assert.equal(missingUrl.searchParams.get('outcome'), 'reconnect-required');
+    assert.equal(missingUrl.searchParams.get('workspaceId'), ws.id);
+    // A replayed or unknown attempt names no workspace.
+    const replayed = await app.inject({
+      url: `/v1/social/oauth/callback?code=platform-code&state=${state}`,
+      headers: { cookie: 'session=admin', accept: 'text/html' },
+    });
+    const replayedUrl = new URL(replayed.headers.location);
+    assert.equal(replayedUrl.searchParams.get('outcome'), 'error');
+    assert.equal(replayedUrl.searchParams.get('workspaceId'), null);
 
     await request({ method: 'POST', url: `${base}/accounts/${started.attemptId}/disconnect` }, 200);
     assert.equal((await request({ url: `${base}/accounts/${started.attemptId}` }, 200)).state, 'disconnected');
@@ -315,7 +340,7 @@ test('exit check, PRODUCT 9-11: channels are added by managers, granted separate
     });
 
     const grants = {
-      expectedVersion: channel.version,
+      expectedVersion: channel.grantsVersion,
       publish: { memberIds: [ws.membershipId], teamIds: [] },
       analytics: { memberIds: [], teamIds: [] },
       engagement: { memberIds: [], teamIds: [] },
@@ -330,7 +355,9 @@ test('exit check, PRODUCT 9-11: channels are added by managers, granted separate
       { method: 'PUT', url: `${base}/channels/${channel.id}/grants`, payload: grants },
       200,
     );
-    assert.equal(updated.version, channel.version + 1);
+    assert.equal(updated.grantsVersion, channel.grantsVersion + 1);
+    // Editing grants leaves the channel version, which approvals bind, unchanged (PRODUCT 25).
+    assert.equal(updated.version, channel.version);
     assert.deepEqual(updated.grants.publish, grants.publish);
     // The same edit from a stale read is refused.
     await request({ method: 'PUT', url: `${base}/channels/${channel.id}/grants`, payload: grants }, 409, {

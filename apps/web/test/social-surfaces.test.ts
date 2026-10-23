@@ -16,7 +16,7 @@ const server = await createServer({
 after(() => server.close());
 const { SocialPostReview } = (await server.ssrLoadModule('/src/features/social/post-review.tsx')) as typeof Review;
 const { SocialScheduleView } = (await server.ssrLoadModule('/src/features/social/schedule.tsx')) as typeof Schedule;
-const { reviewChoice, variantFields } = (await server.ssrLoadModule(
+const { reviewChoice, variantFields, variantTiming } = (await server.ssrLoadModule(
   '/src/features/social/presentation.ts',
 )) as typeof Presentation;
 const { postSchema, scheduleSchema } = await import('@tulipfarm/social/contracts');
@@ -97,6 +97,7 @@ const channels = [
     displayName: 'Ada on LinkedIn',
     accountGeneration: 1,
     version: 1,
+    grantsVersion: 1,
     enabled: true,
     engagementPolicy: 'approve-each',
     grants: { publish: { memberIds: [], teamIds: [] }, manage: { memberIds: [id(80)], teamIds: [] } },
@@ -139,9 +140,11 @@ test('PRODUCT 38: the review card shows every variant exactly as it will publish
     variantFields(linkedin as never).map(field => [field.label, field.value]),
     [
       ['Text', linkedin.text],
-      ['Visibility', 'public'],
+      ['Visibility', 'Anyone'],
     ],
   );
+  // Values are shown in words, never as raw platform values.
+  assert.doesNotMatch(html, />public</);
 });
 
 test('PRODUCT 20: sources that may not leave the workspace block approval on the card', () => {
@@ -225,27 +228,68 @@ test('PRODUCT 38: a decided or expired revision offers no decision', () => {
   });
   assert.match(decided, /Approved/);
   assert.doesNotMatch(decided, /Approve and publish/);
+  // Once published, the card says so: no pending timing and no stale "Approved".
+  const published = review({
+    post: post({
+      variants: [
+        variant(2, linkedin, {
+          state: 'published',
+          platformPostId: 'urn:li:share:1',
+          permalink: 'https://www.linkedin.com/feed/update/urn:li:share:1',
+          receipts: [receipt({ variantId: id(2) })],
+        }),
+      ],
+      decision: {
+        id: id(50),
+        postId: id(1),
+        revision: 1,
+        batchDigest: digest,
+        decision: 'approve',
+        deciderMembershipId: id(80),
+        decidedAt: '2026-10-01T11:00:00.000Z',
+      },
+    }),
+  });
+  assert.match(published, /Published to every channel/);
+  // The card folds once settled; the link to the published post stays in its footer.
+  assert.match(published, /href="https:\/\/www\.linkedin\.com\/feed\/update\/urn:li:share:1"/);
+  assert.match(published, /View the post on Ada on LinkedIn/);
+  assert.doesNotMatch(published, />Approved</);
+  const publishedVariant = post({
+    variants: [
+      variant(2, linkedin, {
+        state: 'published',
+        platformPostId: 'urn:li:share:1',
+        receipts: [receipt({ variantId: id(2) })],
+      }),
+    ],
+  }).revisions[0].variants[0];
+  const timing = variantTiming(publishedVariant, now);
+  assert.equal(timing.label, 'Published');
+  assert.notEqual(timing.value, 'When approved');
   const expired = review({ now: new Date('2026-10-06T00:00:00Z') });
   assert.match(expired, /This review expired/);
   assert.doesNotMatch(expired, /Approve and publish/);
 });
 
-const receipt = (fields: object) => ({
-  id: id(40),
-  variantId: id(4),
-  revision: 1,
-  decisionId: id(50),
-  step: 'create-post',
-  attemptId: id(41),
-  status: 'succeeded',
-  startedAt: '2026-10-01T11:00:00.000Z',
-  settledAt: '2026-10-01T11:00:01.000Z',
-  platformRefs: {},
-  platformPostId: 'urn:li:share:1',
-  platformRequestId: 'req-1',
-  error: null,
-  ...fields,
-});
+function receipt(fields: object) {
+  return {
+    id: id(40),
+    variantId: id(4),
+    revision: 1,
+    decisionId: id(50),
+    step: 'create-post',
+    attemptId: id(41),
+    status: 'succeeded',
+    startedAt: '2026-10-01T11:00:00.000Z',
+    settledAt: '2026-10-01T11:00:01.000Z',
+    platformRefs: {},
+    platformPostId: 'urn:li:share:1',
+    platformRequestId: 'req-1',
+    error: null,
+    ...fields,
+  };
+}
 const scheduled = (n: number, fields: object) => ({
   postId: id(1),
   currentRevision: 1,
@@ -253,8 +297,8 @@ const scheduled = (n: number, fields: object) => ({
   variant: variant(n, linkedin, { channelId: id(102), ...fields }),
 });
 const actions = {
-  resume: async () => undefined,
-  cancel: async () => undefined,
+  resume: async () => undefined as never,
+  cancel: async () => undefined as never,
   candidates: async () => ({ kind: 'unknown' as const }),
   settle: async () => undefined,
 };
@@ -266,6 +310,7 @@ test('PRODUCT 39: the schedule lists scheduled, blocked, published, failed and u
         channelId: id(102),
         platform: 'linkedin',
         displayName: 'Ada on LinkedIn',
+        canPublish: true,
         variants: [
           scheduled(4, { state: 'scheduled', publishAt: later, dueAt: later }),
           scheduled(5, { state: 'blocked', blockedReason: 'grant-removed' }),
@@ -312,6 +357,12 @@ test('PRODUCT 39: the schedule lists scheduled, blocked, published, failed and u
   // A blocked variant waiting on a person can be resumed or cancelled; a temporary block only cancelled.
   assert.equal(html.match(/>Resume</g)?.length, 1);
   assert.equal(html.match(/>Cancel variant</g)?.length, 2);
+  // Each action names the channel it acts on.
+  assert.equal(html.match(/aria-label="Resume variant on Ada on LinkedIn"/g)?.length, 1);
+  assert.equal(html.match(/aria-label="Cancel variant on Ada on LinkedIn"/g)?.length, 2);
+  // A blocked variant never shows a past publish time.
+  assert.match(html, /Publishes Once resumed/);
+  assert.match(html, /Publishes When the limit resets/);
   assert.match(html, /View the published post/);
   assert.match(html, /Receipts \(1\)/);
   // PRODUCT 24: an unknown outcome is never retried; a person checks the platform and confirms.
@@ -324,4 +375,48 @@ test('PRODUCT 39: an empty schedule says how to start', () => {
     createElement(SocialScheduleView, { schedule: { channels: [], truncated: false }, actions }),
   );
   assert.match(html, /Nothing scheduled or published yet/);
+  assert.match(html, /channels you can publish to and posts you prepared/);
+});
+
+test('PRODUCT 25, 39: without the publish grant, an author sees their blocked variant but cannot act on it', () => {
+  const schedule = scheduleSchema.parse({
+    channels: [
+      {
+        channelId: id(102),
+        platform: 'linkedin',
+        displayName: null,
+        canPublish: false,
+        variants: [scheduled(5, { state: 'blocked', blockedReason: 'grant-removed' })],
+      },
+    ],
+    truncated: false,
+  });
+  const html = renderToStaticMarkup(createElement(SocialScheduleView, { schedule, actions }));
+  assert.match(html, /LinkedIn channel/);
+  assert.match(html, /The publish grant on this channel was removed/);
+  assert.match(html, /Only someone with the publish grant on this channel can resume or cancel it/);
+  assert.doesNotMatch(html, />Resume</);
+  assert.doesNotMatch(html, />Cancel variant</);
+});
+
+test('PRODUCT 25: the chat card offers resume and cancel on a blocked variant only where the viewer may publish', () => {
+  const blocked = post({
+    variants: [variant(2, linkedin, { channelId: id(102), state: 'blocked', blockedReason: 'grant-removed' })],
+    decision: {
+      id: id(50),
+      postId: id(1),
+      revision: 1,
+      batchDigest: digest,
+      decision: 'approve',
+      deciderMembershipId: id(80),
+      decidedAt: '2026-10-01T11:00:00.000Z',
+    },
+  });
+  const allowed = review({ post: blocked, publishable: new Set([id(102)]), variantActions: actions });
+  assert.match(allowed, /Needs attention/);
+  assert.match(allowed, /aria-label="Resume variant on Ada on LinkedIn"/);
+  assert.match(allowed, /aria-label="Cancel variant on Ada on LinkedIn"/);
+  const denied = review({ post: blocked, publishable: new Set(), variantActions: actions });
+  assert.doesNotMatch(denied, />Resume</);
+  assert.match(denied, /Only someone with the publish grant on this channel can resume or cancel it/);
 });

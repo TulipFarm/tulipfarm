@@ -21,6 +21,7 @@ import {
   decisionSubmitSchema,
   originSchema,
   platformContentSchema,
+  platformSchema,
   postSchema,
   prepareInputSchema,
   scheduleLimit,
@@ -668,9 +669,11 @@ export function createSocialPosts(options: {
     },
 
     /**
-     * The schedule view: variants by channel and state (PRODUCT 39). A channel is listed only while the person
-     * holds `publish` on it and can read its connection. Another member's revision is listed only when the
-     * person could read every source, as for `get`, so the view never discloses more than the post would.
+     * The schedule view: variants by channel and state (PRODUCT 39). A channel is listed while the person holds
+     * `publish` on it and can read its connection. A person also sees the variants of posts they prepared on any
+     * channel, as `get` already shows them, so a lost grant never hides their own blocked work; only a publisher
+     * may act on it. Another member's revision is listed only when the person could read every source, as for
+     * `get`, so the view never discloses more than the post would.
      */
     async schedule(workspaceId: string, userId: string, raw: unknown = {}): Promise<Schedule> {
       const query = scheduleQuerySchema.parse(raw);
@@ -695,14 +698,31 @@ export function createSocialPosts(options: {
           channel => published.includes(channel.id) && (!query.channelId || channel.id === query.channelId),
         );
         const rows = z
-          .array(z.object({ id: z.uuid(), post_id: z.uuid(), revision: z.number().int().positive() }))
+          .array(
+            z.object({
+              id: z.uuid(),
+              post_id: z.uuid(),
+              revision: z.number().int().positive(),
+              channel_id: z.uuid(),
+              platform: platformSchema,
+            }),
+          )
           .parse(
             (
               await tx.client.query(
-                `SELECT id,post_id,revision FROM ${relation(tx, 'variants')}
-                  WHERE channel_id=ANY($1::uuid[]) AND state=ANY($2::text[])
-                  ORDER BY COALESCE(due_at,created_at) DESC,id LIMIT $3`,
-                [channels.map(channel => channel.id), query.states ?? [...scheduleStates], scheduleLimit + 1],
+                `SELECT v.id,v.post_id,v.revision,v.channel_id,c.platform FROM ${relation(tx, 'variants')} v
+                   JOIN ${relation(tx, 'posts')} p ON p.id=v.post_id
+                   JOIN ${relation(tx, 'channels')} c ON c.id=v.channel_id
+                  WHERE (v.channel_id=ANY($1::uuid[]) OR p.author_membership_id=$4)
+                    AND ($5::uuid IS NULL OR v.channel_id=$5) AND v.state=ANY($2::text[])
+                  ORDER BY COALESCE(v.due_at,v.created_at) DESC,v.id LIMIT $3`,
+                [
+                  channels.map(channel => channel.id),
+                  query.states ?? [...scheduleStates],
+                  scheduleLimit + 1,
+                  sponsor.membershipId,
+                  query.channelId ?? null,
+                ],
               )
             ).rows,
           );
@@ -710,6 +730,7 @@ export function createSocialPosts(options: {
         const visible = new Map<string, boolean>();
         const items: Schedule['channels'][number]['variants'] = [];
         const posts = new Map<string, Post>();
+        const authored = new Map<string, Platform>();
         for (const row of rows.slice(0, scheduleLimit)) {
           const key = `${row.post_id}:${row.revision}`;
           let post = posts.get(row.post_id);
@@ -722,20 +743,33 @@ export function createSocialPosts(options: {
           const variant = post.revisions
             .find(revision => revision.number === row.revision)
             ?.variants.find(item => item.id === row.id);
-          if (variant)
-            items.push({
-              postId: post.id,
-              currentRevision: post.currentRevision,
-              authorMembershipId: post.authorMembershipId,
-              variant,
-            });
+          if (!variant) continue;
+          if (!channels.some(channel => channel.id === row.channel_id)) authored.set(row.channel_id, row.platform);
+          items.push({
+            postId: post.id,
+            currentRevision: post.currentRevision,
+            authorMembershipId: post.authorMembershipId,
+            variant,
+          });
         }
-        return scheduleSchema.parse({
-          channels: channels.map(channel => ({
+        const listed = [
+          ...channels.map(channel => ({
             channelId: channel.id,
             platform: channel.platform,
             displayName: channel.displayName,
-            variants: items.filter(item => item.variant.channelId === channel.id),
+            canPublish: true,
+          })),
+          ...[...authored].map(([channelId, platform]) => ({
+            channelId,
+            platform,
+            displayName: readable.find(channel => channel.id === channelId)?.displayName ?? null,
+            canPublish: false,
+          })),
+        ];
+        return scheduleSchema.parse({
+          channels: listed.map(channel => ({
+            ...channel,
+            variants: items.filter(item => item.variant.channelId === channel.channelId),
           })),
           truncated,
         });

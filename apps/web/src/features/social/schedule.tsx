@@ -5,14 +5,12 @@ import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { Receipt, Variant } from '@tulipfarm/social/contracts';
-import { temporaryBlockedReasons } from '@tulipfarm/social/contracts';
 import { Disclosure } from '@/components/disclosure';
 import { socialError, type SocialCandidates, type SocialSchedule, type SocialSettlement } from '@/lib/social';
-import { blockedReasons, formatTime, platformNames, variantFields, variantStates } from './presentation';
+import { blockedReasons, formatTime, platformNames, variantFields, variantStates, variantTiming } from './presentation';
+import { BlockedVariant, type BlockedVariantActions } from './variant-actions';
 
-export type ScheduleActions = {
-  resume: (variantId: string) => Promise<unknown>;
-  cancel: (variantId: string) => Promise<unknown>;
+export type ScheduleActions = BlockedVariantActions & {
   candidates: (variantId: string) => Promise<SocialCandidates>;
   settle: (variantId: string, settlement: SocialSettlement) => Promise<unknown>;
 };
@@ -36,7 +34,7 @@ export function SocialScheduleView({ schedule, actions }: { schedule: SocialSche
         kind="empty"
         icon={CardSend}
         title="Nothing scheduled or published yet"
-        description="Ask chat to prepare a social post. Approved variants appear here by channel."
+        description="This lists channels you can publish to and posts you prepared. Ask chat to prepare a social post."
       />
     );
   return (
@@ -46,20 +44,33 @@ export function SocialScheduleView({ schedule, actions }: { schedule: SocialSche
           <AlertDescription>Only the newest variants are shown. Filter by channel to see older ones.</AlertDescription>
         </Alert>
       )}
-      {channels.map(channel => (
-        <section key={channel.channelId} aria-label={channel.displayName} className="space-y-2">
-          <h2 className="text-base font-medium">
-            {channel.displayName} <span className="text-muted-foreground">· {platformNames[channel.platform]}</span>
-          </h2>
-          <ul className="divide-y rounded-lg border">
-            {channel.variants.map(({ variant }) => (
-              <li key={variant.id} className="space-y-2 p-3">
-                <ScheduledVariant variant={variant} actions={actions} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      {channels.map(channel => {
+        const name = channel.displayName ?? `${platformNames[channel.platform]} channel`;
+        return (
+          <section key={channel.channelId} aria-label={name} className="space-y-2">
+            <h2 className="text-base font-medium">
+              {name} <span className="text-muted-foreground">· {platformNames[channel.platform]}</span>
+            </h2>
+            {!channel.canPublish && (
+              <p className="text-sm text-muted-foreground">
+                You no longer have the publish grant here. Only your own posts are shown.
+              </p>
+            )}
+            <ul className="divide-y rounded-lg border">
+              {channel.variants.map(({ variant }) => (
+                <li key={variant.id} className="space-y-2 p-3">
+                  <ScheduledVariant
+                    variant={variant}
+                    channel={name}
+                    canPublish={channel.canPublish}
+                    actions={actions}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -71,22 +82,19 @@ function summary(variant: Variant) {
   return value.length > 160 ? `${value.slice(0, 159)}…` : value;
 }
 
-function ScheduledVariant({ variant, actions }: { variant: Variant; actions: ScheduleActions }) {
+function ScheduledVariant({
+  variant,
+  channel,
+  canPublish,
+  actions,
+}: {
+  variant: Variant;
+  channel: string;
+  canPublish: boolean;
+  actions: ScheduleActions;
+}) {
   const state = variantStates[variant.state];
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (failure) {
-      setError(socialError(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const temporary = variant.blockedReason !== null && temporaryBlockedReasons.has(variant.blockedReason);
+  const timing = variantTiming(variant, new Date());
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -94,8 +102,7 @@ function ScheduledVariant({ variant, actions }: { variant: Variant; actions: Sch
         <Badge variant={state.variant}>{state.label}</Badge>
       </div>
       <p className="text-xs text-muted-foreground">
-        {variant.state === 'published' ? 'Published' : 'Publishes'}{' '}
-        {formatTime(variant.dueAt ?? variant.publishAt, 'when approved')}
+        {timing.label} {timing.value}
       </p>
       {variant.blockedReason && (
         <p className="text-sm">
@@ -108,24 +115,15 @@ function ScheduledVariant({ variant, actions }: { variant: Variant; actions: Sch
           View the published post
         </a>
       )}
-      {variant.state === 'blocked' && (
-        <div className="flex flex-wrap gap-2">
-          {!temporary && (
-            <Button variant="outline" disabled={busy} onClick={() => void run(() => actions.resume(variant.id))}>
-              Resume
-            </Button>
-          )}
-          <Button variant="ghost" disabled={busy} onClick={() => void run(() => actions.cancel(variant.id))}>
-            Cancel variant
-          </Button>
-        </div>
-      )}
-      {variant.state === 'outcome-unknown' && <UnknownOutcome variant={variant} actions={actions} />}
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <BlockedVariant variant={variant} channel={channel} canPublish={canPublish} actions={actions} />
+      {variant.state === 'outcome-unknown' &&
+        (canPublish ? (
+          <UnknownOutcome variant={variant} actions={actions} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Only someone with the publish grant on this channel can confirm what happened. Ask a channel manager.
+          </p>
+        ))}
       {variant.receipts.length > 0 && (
         <Disclosure title={`Receipts (${variant.receipts.length})`}>
           <ul aria-label="Receipts" className="grid gap-2 text-xs text-muted-foreground">

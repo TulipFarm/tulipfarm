@@ -156,6 +156,13 @@ function requestWorkspace(request: FastifyRequest) {
   return query.success ? query.data.state.slice(0, 36) : null;
 }
 
+/** What the web callback page tells the person after an OAuth callback fails for a known reason. */
+const callbackOutcomes: Partial<Record<string, 'denied' | 'reconnect-required' | 'expired'>> = {
+  'account-authorization-denied': 'denied',
+  'account-reconnect-required': 'reconnect-required',
+  'account-conflict': 'expired',
+};
+
 /** Social connection routes. Every route, including the OAuth callback, sits behind `social-publishing`. */
 export function registerSocialAccounts(
   app: FastifyInstance,
@@ -177,23 +184,24 @@ export function registerSocialAccounts(
         return payload;
       const value: unknown = typeof payload === 'string' ? JSON.parse(payload) : null;
       const result = completionSchema.safeParse(value);
+      const failure = z.object({ error: z.string() }).safeParse(value);
       const destination = new URL('/social/callback', authConfig().webOrigin);
+      const failed = failure.success ? callbackOutcomes[failure.data.error] : undefined;
       destination.searchParams.set(
         'outcome',
         reply.statusCode === 200 && result.success
           ? 'connected'
           : reply.statusCode === 401
             ? 'sign-in-required'
-            : typeof value === 'object' &&
-                value !== null &&
-                'error' in value &&
-                value.error === 'account-authorization-denied'
-              ? 'denied'
-              : 'error',
+            : (failed ?? 'error'),
       );
       if (reply.statusCode === 200 && result.success) {
         destination.searchParams.set('workspaceId', result.data.workspaceId);
         destination.searchParams.set('platform', result.data.account.platform);
+      } else if (failed) {
+        // The workspace comes from the person's own OAuth state; a missing or hidden attempt names none.
+        const workspaceId = requestWorkspace(request);
+        if (workspaceId) destination.searchParams.set('workspaceId', workspaceId);
       }
       reply.code(302).header('Location', destination.href).type('text/plain');
       return '';

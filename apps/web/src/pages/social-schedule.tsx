@@ -5,7 +5,7 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { workspaceRoute } from '@/router';
-import { useFlag } from '@/lib/feature-flags';
+import { useKnownFlag } from '@/lib/feature-flags';
 import { useFeatureRead } from '@/lib/query';
 import { socialApi } from '@/lib/social';
 import { SocialScheduleView, type ScheduleActions } from '@/features/social/schedule';
@@ -14,11 +14,12 @@ const moving = new Set(['scheduled', 'sending', 'processing']);
 
 export function SocialSchedulePage() {
   const { workspace } = workspaceRoute.useRouteContext();
-  const enabled = useFlag('social-publishing');
+  // Nothing is requested until the workspace's flag is known to be on.
+  const enabled = useKnownFlag('social-publishing', workspace.slug);
   const read = useFeatureRead({
     key: ['social', 'schedule'],
     load: signal => socialApi.schedule(workspace.id, {}, signal),
-    enabled,
+    enabled: enabled === true,
     pollWhile: data => data.channels.some(channel => channel.variants.some(({ variant }) => moving.has(variant.state))),
     interval: 10_000,
   });
@@ -41,6 +42,14 @@ export function SocialSchedulePage() {
       ),
     };
   }, [workspace.id, read.refresh]);
+  if (enabled === undefined)
+    return (
+      <div className="min-h-0 flex-1 overflow-auto">
+        <PageContent>
+          <StatePanel kind="loading" title="Loading the schedule" description="Checking this workspace." />
+        </PageContent>
+      </div>
+    );
   if (!enabled)
     return (
       <div className="min-h-0 flex-1 overflow-auto">
@@ -55,7 +64,7 @@ export function SocialSchedulePage() {
       <PageContent>
         <PageHeader
           title="Social schedule"
-          description="Scheduled, blocked, published, failed and unknown-outcome variants on channels you can publish to. Prepare posts in chat."
+          description="Scheduled, blocked, published, failed and unknown-outcome variants on channels you can publish to, and on your own posts. Prepare posts in chat."
         />
         {state.kind === 'loading' && (
           <StatePanel kind="loading" title="Loading the schedule" description="Checking your channels." />

@@ -831,13 +831,14 @@ export function createSocialPublisher(options: {
         platform_channel_id: z.string(),
         display_name: z.string(),
         version: z.number().int().positive(),
+        grants_version: z.number().int().positive(),
         enabled: z.boolean(),
         engagement_policy: engagementPolicySchema,
       })
       .parse(
         (
           await tx.client.query(
-            `SELECT id,account_id,platform,channel_kind,platform_channel_id,display_name,version,enabled,engagement_policy
+            `SELECT id,account_id,platform,channel_kind,platform_channel_id,display_name,version,grants_version,enabled,engagement_policy
                FROM ${relation(tx, 'channels')} WHERE id=$1`,
             [channelId],
           )
@@ -853,6 +854,7 @@ export function createSocialPublisher(options: {
       displayName: row.display_name,
       accountGeneration: generation,
       version: row.version,
+      grantsVersion: row.grants_version,
       enabled: row.enabled,
       engagementPolicy: row.engagement_policy,
       grants: { publish: none, analytics: none, engagement: none, manage: none },

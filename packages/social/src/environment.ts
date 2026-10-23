@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { SocialPlatformAdapter } from './adapter.ts';
+import type { PlatformAppCredentials, SocialPlatformAdapter } from './adapter.ts';
 import { channelKindsByPlatform, platformSchema, type Platform } from './contracts.ts';
 import { signMediaToken } from './media.ts';
+import { capabilitiesFor } from './platform-apps.ts';
 import { createFakeAdapter } from './platforms/fake.ts';
 import type { MediaUrlSigner } from './publisher.ts';
 
@@ -31,7 +32,8 @@ export function mediaUrlSigner(env: NodeJS.ProcessEnv = process.env): MediaUrlSi
 
 /**
  * Development and end-to-end tests only: one platform served by an in-memory fake that connects one channel and
- * publishes every changing step (ROLLOUT, rule 7). Never offered in production.
+ * publishes every changing step (ROLLOUT, rule 7). Never offered in production. Like a consenting person on the
+ * real platform, the fake grants exactly the scopes the configured app's access tier requests.
  */
 export function developmentAdapters(
   env: NodeJS.ProcessEnv = process.env,
@@ -39,19 +41,7 @@ export function developmentAdapters(
   if (env.NODE_ENV === 'production' || !env.SOCIAL_DEVELOPMENT_FAKE_PLATFORM) return {};
   const platform = platformSchema.parse(env.SOCIAL_DEVELOPMENT_FAKE_PLATFORM);
   const fake = createFakeAdapter({ platform })
-    .fallback('exchangeCode', {
-      accessToken: 'development-access',
-      refreshToken: 'development-refresh',
-      expiresAt: new Date(Date.now() + 365 * 24 * 3_600_000),
-      scopes: ['fake.read', 'fake.publish'],
-    })
     .fallback('identity', { platformUserId: 'development-person', handle: 'development', displayName: 'Development' })
-    .fallback('refresh', {
-      accessToken: 'development-access',
-      refreshToken: 'development-refresh',
-      expiresAt: null,
-      scopes: ['fake.read', 'fake.publish'],
-    })
     .fallback('revoke', 'revoked')
     .fallback('listChannels', [
       {
@@ -66,9 +56,27 @@ export function developmentAdapters(
     .fallback('reviewChoices', [])
     .fallback('status', { kind: 'ready' })
     .fallback('reconcile', { kind: 'unknown' });
+  const granted = (app: Pick<PlatformAppCredentials, 'accessTier'>) =>
+    fake.scopes(app.accessTier, capabilitiesFor(platform, app.accessTier));
   return {
     [platform]: {
       ...fake,
+      async exchangeCode(input) {
+        return {
+          accessToken: 'development-access',
+          refreshToken: 'development-refresh',
+          expiresAt: new Date(Date.now() + 365 * 24 * 3_600_000),
+          scopes: granted(input.app),
+        };
+      },
+      async refresh(_token, app) {
+        return {
+          accessToken: 'development-access',
+          refreshToken: 'development-refresh',
+          expiresAt: null,
+          scopes: granted(app),
+        };
+      },
       async mutate() {
         const id = `development-${randomUUID()}`;
         return { kind: 'published', platformPostId: id, permalink: `https://${fake.hosts[0]}/posts/${id}` };

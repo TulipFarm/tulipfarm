@@ -163,7 +163,13 @@ async function harness({ flagged = () => true, plan, wrap = adapter => adapter, 
       {
         method: 'PUT',
         url: `${base}/channels/${added.id}/grants`,
-        payload: { expectedVersion: added.version, publish: mine, analytics: none, engagement: none, manage: mine },
+        payload: {
+          expectedVersion: added.grantsVersion,
+          publish: mine,
+          analytics: none,
+          engagement: none,
+          manage: mine,
+        },
       },
       200,
     );

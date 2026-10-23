@@ -9,7 +9,7 @@ import { ReviewCard, ReviewRow, ReviewRows, type ReviewCardBadge } from '@tulipf
 import { Skeleton, SkeletonGroup } from '@tulipfarm/sprout/skeleton';
 import type { DecisionReviewChoice, Post, Revision, TikTokReviewChoices, Variant } from '@tulipfarm/social/contracts';
 import { Disclosure } from '@/components/disclosure';
-import { useFlag } from '@/lib/feature-flags';
+import { useKnownFlag } from '@/lib/feature-flags';
 import { useFeatureRead } from '@/lib/query';
 import { socialApi, socialError, type SocialChannel } from '@/lib/social';
 import {
@@ -24,9 +24,11 @@ import {
   sourceLabel,
   variantFields,
   variantStates,
+  variantTiming,
   type ChoiceDraft,
   type ReviewStatus,
 } from './presentation';
+import { BlockedVariant, type BlockedVariantActions } from './variant-actions';
 
 type CreatorInfo = TikTokReviewChoices['creatorInfo'];
 
@@ -36,12 +38,19 @@ const badges: Record<ReviewStatus, ReviewCardBadge> = {
   rejected: { label: 'Rejected', variant: 'secondary' },
   expired: { label: 'Expired', variant: 'secondary' },
   'checks-failed': { label: 'Needs changes', variant: 'warning' },
+  'needs-attention': { label: 'Needs attention', variant: 'warning' },
+  published: { label: 'Published', variant: 'success' },
+  'partly-published': { label: 'Partly published', variant: 'warning' },
+  failed: { label: 'Not published', variant: 'destructive' },
+  cancelled: { label: 'Cancelled', variant: 'secondary' },
 };
+const finished = new Set<ReviewStatus>(['rejected', 'expired', 'published', 'partly-published', 'failed', 'cancelled']);
 const unsettled = new Set(['scheduled', 'sending', 'processing']);
 
 /** The post a social tool prepared, read under the viewer's own grants; hidden while the flag is off. */
 export function SocialPostCard({ workspaceId, slug, postId }: { workspaceId: string; slug: string; postId: string }) {
-  const enabled = useFlag('social-publishing');
+  // Nothing is requested until the workspace's flag is known to be on.
+  const enabled = useKnownFlag('social-publishing', slug) === true;
   const post = useFeatureRead({
     key: ['social', 'post', postId],
     load: signal => socialApi.post(workspaceId, postId, signal),
@@ -53,6 +62,15 @@ export function SocialPostCard({ workspaceId, slug, postId }: { workspaceId: str
     key: ['social', 'channels'],
     load: signal => socialApi.channels(workspaceId, signal),
     enabled,
+  });
+  // Who may resume or cancel a blocked variant: the schedule lists the channels the viewer can publish to.
+  const blocked =
+    post.state.kind === 'ready' &&
+    currentRevision(post.state.data).variants.some(variant => variant.state === 'blocked');
+  const publishable = useFeatureRead({
+    key: ['social', 'schedule', 'blocked', postId],
+    load: signal => socialApi.schedule(workspaceId, { states: ['blocked'] }, signal),
+    enabled: enabled && blocked,
   });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +108,13 @@ export function SocialPostCard({ workspaceId, slug, postId }: { workspaceId: str
       await post.refresh();
     }
   };
+  const after = (action: (workspaceId: string, variantId: string) => Promise<Variant>) => async (variantId: string) => {
+    try {
+      return await action(workspaceId, variantId);
+    } finally {
+      await Promise.all([post.refresh(), publishable.refresh()]);
+    }
+  };
   return (
     <SocialPostReview
       post={state.data}
@@ -99,6 +124,14 @@ export function SocialPostCard({ workspaceId, slug, postId }: { workspaceId: str
       sending={sending}
       error={error ?? state.error}
       onDecide={decide}
+      publishable={
+        publishable.state.kind === 'ready'
+          ? new Set(publishable.state.data.channels.filter(item => item.canPublish).map(item => item.channelId))
+          : publishable.state.kind === 'unavailable'
+            ? new Set()
+            : undefined
+      }
+      variantActions={{ resume: after(socialApi.resume), cancel: after(socialApi.cancel) }}
     />
   );
 }
@@ -117,6 +150,8 @@ export function SocialPostReview({
   error,
   onDecide,
   creatorInfo = {},
+  publishable,
+  variantActions,
 }: {
   post: Post;
   channels: readonly SocialChannel[];
@@ -127,6 +162,9 @@ export function SocialPostReview({
   onDecide: (decision: 'approve' | 'reject', choices: DecisionReviewChoice[]) => void;
   /** The creator's current TikTok options by variant, when a platform read supplied them. */
   creatorInfo?: Readonly<Record<string, CreatorInfo>>;
+  /** Channels the viewer may publish to, once known, so a blocked variant offers resume and cancel there. */
+  publishable?: ReadonlySet<string> | undefined;
+  variantActions?: BlockedVariantActions | undefined;
 }) {
   const revision = currentRevision(post);
   const status = reviewStatus(revision, now);
@@ -147,7 +185,7 @@ export function SocialPostReview({
       icon={<CardSend size={16} />}
       title={`Publish to ${revision.variants.length} ${revision.variants.length === 1 ? 'channel' : 'channels'}`}
       badge={badges[status]}
-      settled={status === 'rejected' || status === 'expired'}
+      settled={finished.has(status)}
       actions={
         pending ? (
           <>
@@ -178,6 +216,21 @@ export function SocialPostReview({
             </p>
           )}
           {status === 'approved' && <p>Approved. Each variant publishes, or fails, on its own.</p>}
+          {status === 'needs-attention' && <p>A variant could not publish. The reason is on the variant.</p>}
+          {status === 'published' && <p>Published to every channel.</p>}
+          {status === 'partly-published' && <p>Some variants were published. See each one below.</p>}
+          {status === 'failed' && <p>Not published. See each variant below.</p>}
+          {status === 'cancelled' && <p>Cancelled. Nothing was published.</p>}
+          {revision.variants.map(
+            variant =>
+              variant.permalink && (
+                <p key={variant.id}>
+                  <a className="underline" href={variant.permalink} target="_blank" rel="noreferrer noopener">
+                    View the post on {channelName(variant)}
+                  </a>
+                </p>
+              ),
+          )}
           {status === 'rejected' && <p>Rejected. Nothing was published.</p>}
           {status === 'expired' && <p>This review expired. Nothing was published. Ask chat to prepare it again.</p>}
           {status === 'checks-failed' && (
@@ -201,7 +254,18 @@ export function SocialPostReview({
       }
     >
       {revision.variants.map(variant => (
-        <VariantPreview key={variant.id} variant={variant} channel={channelName(variant)} slug={slug} />
+        <VariantPreview
+          key={variant.id}
+          variant={variant}
+          channel={channelName(variant)}
+          slug={slug}
+          now={now}
+          blocked={
+            variantActions && publishable
+              ? { canPublish: publishable.has(variant.channelId), actions: variantActions }
+              : undefined
+          }
+        />
       ))}
       <Sources revision={revision} blocked={blocked} />
       {required.map(entry => (
@@ -228,8 +292,21 @@ export function SocialPostReview({
   );
 }
 
-function VariantPreview({ variant, channel, slug }: { variant: Variant; channel: string; slug: string }) {
+function VariantPreview({
+  variant,
+  channel,
+  slug,
+  now,
+  blocked,
+}: {
+  variant: Variant;
+  channel: string;
+  slug: string;
+  now: Date;
+  blocked: { canPublish: boolean; actions: BlockedVariantActions } | undefined;
+}) {
   const state = variantStates[variant.state];
+  const timing = variantTiming(variant, now);
   const { content } = variant;
   return (
     <section aria-label={`${channel} variant`} className="space-y-2">
@@ -240,7 +317,7 @@ function VariantPreview({ variant, channel, slug }: { variant: Variant; channel:
         <Badge variant={state.variant}>{state.label}</Badge>
       </div>
       <ReviewRows>
-        <ReviewRow label="Publishes">{formatTime(variant.publishAt, 'When approved')}</ReviewRow>
+        <ReviewRow label={timing.label}>{timing.value}</ReviewRow>
         {variant.target && (
           <ReviewRow label={variant.target.kind === 'board' ? 'Board' : 'Community'}>
             {variant.target.kind === 'board' ? variant.target.boardId : `r/${variant.target.name}`}
@@ -269,6 +346,9 @@ function VariantPreview({ variant, channel, slug }: { variant: Variant; channel:
         <a className="text-sm underline" href={variant.permalink} target="_blank" rel="noreferrer noopener">
           View the published post
         </a>
+      )}
+      {blocked && (
+        <BlockedVariant variant={variant} channel={channel} canPublish={blocked.canPublish} actions={blocked.actions} />
       )}
     </section>
   );

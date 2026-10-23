@@ -6,9 +6,10 @@ import type {
   Post,
   Revision,
   TikTokReviewChoices,
+  Variant,
   VariantState,
 } from '@tulipfarm/social/contracts';
-import { tiktokReviewChoicesSchema } from '@tulipfarm/social/contracts';
+import { temporaryBlockedReasons, tiktokReviewChoicesSchema } from '@tulipfarm/social/contracts';
 import type { BadgeVariant } from '@tulipfarm/sprout/badge';
 
 type SourceDependency = Revision['sources']['dependencies'][number];
@@ -79,6 +80,20 @@ const fieldLabels: Record<string, string> = {
   spoiler: 'Spoiler',
 };
 const textFields = new Set(['title', 'text', 'caption', 'description', 'body']);
+const replyLabels = { everyone: 'Everyone', following: 'Accounts you follow', mentioned: 'Mentioned accounts only' };
+/** Words for each platform's enumerated settings, so a person reads what the setting means, not its code. */
+const valueLabels: Record<string, Record<string, string>> = {
+  visibility: { public: 'Anyone', connections: 'Connections only' },
+  privacy: { public: 'Public', unlisted: 'Unlisted', private: 'Private' },
+  format: { feed: 'Feed', story: 'Story', carousel: 'Carousel', reel: 'Reel' },
+  replyControl: {
+    everyone: replyLabels.everyone,
+    'accounts-you-follow': replyLabels.following,
+    'mentioned-only': replyLabels.mentioned,
+  },
+  replySettings: replyLabels,
+  kind: { self: 'Text', link: 'Link', image: 'Image', video: 'Video' },
+};
 
 export type PreviewField = { name: string; label: string; value: string; text: boolean };
 
@@ -89,7 +104,14 @@ export type PreviewField = { name: string; label: string; value: string; text: b
 export function variantFields(content: PlatformContent): PreviewField[] {
   return Object.entries(content).flatMap(([name, value]) => {
     if (name === 'platform' || name === 'media' || value === undefined) return [];
-    const shown = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : Array.isArray(value) ? value.join(', ') : value;
+    const shown =
+      typeof value === 'boolean'
+        ? value
+          ? 'Yes'
+          : 'No'
+        : Array.isArray(value)
+          ? value.join(', ')
+          : (valueLabels[name]?.[String(value)] ?? value);
     return [{ name, label: fieldLabels[name] ?? name, value: String(shown), text: textFields.has(name) }];
   });
 }
@@ -100,11 +122,70 @@ export function currentRevision(post: Post): Revision {
   return revision;
 }
 
-export type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'checks-failed';
+export type ReviewStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'expired'
+  | 'checks-failed'
+  | 'needs-attention'
+  | 'published'
+  | 'partly-published'
+  | 'failed'
+  | 'cancelled';
+const moving = new Set<VariantState>(['scheduled', 'sending', 'processing']);
+/** The card's status: the decision, then once approved what became of its variants together. */
 export function reviewStatus(revision: Revision, now: Date): ReviewStatus {
-  if (revision.decision) return revision.decision.decision === 'approve' ? 'approved' : 'rejected';
+  if (revision.decision) {
+    if (revision.decision.decision !== 'approve') return 'rejected';
+    const states = revision.variants.map(variant => variant.state);
+    if (states.some(state => state === 'blocked' || state === 'outcome-unknown')) return 'needs-attention';
+    if (states.some(state => moving.has(state))) return 'approved';
+    if (states.every(state => state === 'published')) return 'published';
+    if (states.includes('published')) return 'partly-published';
+    return states.includes('failed') ? 'failed' : 'cancelled';
+  }
   if (Date.parse(revision.expiresAt) <= now.getTime()) return 'expired';
   return revision.variants.every(variant => variant.state === 'awaiting-approval') ? 'pending' : 'checks-failed';
+}
+
+/** When a variant publishes or published, in words that fit its state (PRODUCT 25, 39). */
+export function variantTiming(variant: Variant, now: Date): { label: string; value: string } {
+  const last = variant.receipts.at(-1);
+  const due = variant.dueAt ?? variant.publishAt;
+  const overdue = due !== null && Date.parse(due) <= now.getTime();
+  switch (variant.state) {
+    case 'draft':
+    case 'awaiting-approval':
+      return { label: 'Publishes', value: formatTime(variant.publishAt, 'When approved') };
+    case 'scheduled':
+      return overdue ? { label: 'Publishes', value: 'Shortly' } : { label: 'Publishes', value: formatTime(due, '') };
+    case 'sending':
+    case 'processing':
+      return { label: 'Publishes', value: 'Publishing now' };
+    case 'blocked':
+      // A blocked variant never publishes at a past time; it waits for the block to clear or for a person.
+      if (due && !overdue) return { label: 'Due', value: formatTime(due, '') };
+      return {
+        label: 'Publishes',
+        value:
+          variant.blockedReason && temporaryBlockedReasons.has(variant.blockedReason)
+            ? 'When the limit resets'
+            : 'Once resumed',
+      };
+    case 'published': {
+      const sent = variant.receipts.filter(receipt => receipt.status === 'succeeded').at(-1);
+      return { label: 'Published', value: formatTime(sent?.settledAt ?? due, 'Yes') };
+    }
+    case 'outcome-unknown':
+      return { label: 'Last attempt', value: formatTime(last?.startedAt ?? due, '—') };
+    case 'failed':
+      return { label: 'Failed', value: formatTime(last?.settledAt ?? due, '—') };
+    case 'not-published':
+    case 'superseded':
+    case 'cancelled':
+      return { label: 'Publishes', value: 'Not publishing' };
+  }
 }
 
 /** Sources that block approval: content that may not leave the workspace (PRODUCT 20). */

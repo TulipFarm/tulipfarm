@@ -113,7 +113,7 @@ function service({ plan, mediaUrl, wrap = adapter => adapter } = {}) {
   });
   const grant = async (user, channel, grants) =>
     channels.setGrants(ws.id, user, channel.id, {
-      expectedVersion: (await channels.get(ws.id, user, channel.id)).version,
+      expectedVersion: (await channels.get(ws.id, user, channel.id)).grantsVersion,
       publish: none,
       analytics: none,
       engagement: none,
@@ -731,6 +731,64 @@ test('exit check, PRODUCT 25: a lost grant waits for a person to resume or cance
     'social-post.resume',
     'social-post.resume',
   ]);
+});
+
+test('exit check, PRODUCT 25: editing a channel’s grants never voids an approval; only a channel change does', async () => {
+  const { fakes, accounts, channels, publisher, personal, approved } = service();
+  const fake = fakes.linkedin;
+  fake.fallback('mutate', { kind: 'published', platformPostId: 'restored', permalink: null });
+  const profile = await personal();
+  const regrant = publish =>
+    channels.get(ws.id, admin().userId, profile.id).then(current =>
+      channels.setGrants(ws.id, admin().userId, profile.id, {
+        expectedVersion: current.grantsVersion,
+        publish,
+        analytics: none,
+        engagement: none,
+        manage: only(admin()),
+      }),
+    );
+  const command = id => ({ variantId: id, expectedState: 'blocked' });
+
+  // A manager removes the approver's publish grant on the channel: the approved variant blocks.
+  const restored = await approved(admin(), [linkedin(profile, { text: 'Restored' })]);
+  const revoked = await regrant(none);
+  assert.equal(revoked.version, profile.version);
+  await publisher.sweep(ws.id);
+  assert.equal((await variant(restored.id)).blocked_reason, 'grant-removed');
+  await assert.rejects(publisher.resume(ws.id, admin().userId, command(restored.id)), deniedAccess);
+
+  // The grant is restored: the approval still stands, so resuming publishes it.
+  const regranted = await regrant(only(admin()));
+  assert.equal(regranted.version, profile.version);
+  const resumed = await publisher.resume(ws.id, admin().userId, command(restored.id));
+  assert.equal(resumed.state, 'scheduled');
+  assert.equal(resumed.blockedReason, null);
+  await publisher.sweep(ws.id);
+  assert.equal(await state(restored.id), 'published');
+  assert.equal(calls(fake, 'mutate').length, 1);
+
+  // A real change to the channel, here a reconnect and the channel added again, still voids the approval.
+  const changed = await approved(admin(), [linkedin(profile, { text: 'Changed' })]);
+  const started = await accounts.reconnect(ws.id, admin().userId, session, profile.accountId);
+  await accounts.complete(
+    'platform-code-2',
+    new URL(started.authorizationUrl).searchParams.get('state'),
+    session,
+    admin().userId,
+  );
+  const rebound = await channels.add(ws.id, admin().userId, {
+    accountId: profile.accountId,
+    expectedAccountGeneration: 2,
+    platformChannelId: profile.platformChannelId,
+  });
+  assert.equal(rebound.version, profile.version + 1);
+  await publisher.sweep(ws.id);
+  assert.equal((await variant(changed.id)).blocked_reason, 'channel-changed');
+  const still = await publisher.resume(ws.id, admin().userId, command(changed.id));
+  assert.equal(still.state, 'blocked');
+  assert.equal(still.blockedReason, 'channel-changed');
+  assert.equal(calls(fake, 'mutate').length, 1);
 });
 
 test('PRODUCT 25: an expired revision that nobody decided is cancelled', async () => {

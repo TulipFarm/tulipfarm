@@ -244,7 +244,10 @@ export const channelSchema = z
     platformChannelId: platformId,
     displayName: z.string().max(200),
     accountGeneration: version,
+    /** The channel's identity and configuration, which approvals bind (PRODUCT 21). */
     version,
+    /** Grant edits are checked against this, not `version`, so editing grants never voids an approval (PRODUCT 25). */
+    grantsVersion: version,
     enabled: z.boolean(),
     engagementPolicy: engagementPolicySchema,
     grants: channelGrantSetSchema,
@@ -1085,14 +1088,19 @@ export const scheduleQuerySchema = z.strictObject({
   states: z.array(variantStateSchema).min(1).max(12).optional(),
 });
 export const scheduleLimit = 500;
-/** Variants by channel, newest first. Each carries the post it belongs to, so actions can name it. */
+/**
+ * Variants by channel, newest first. Each carries the post it belongs to, so actions can name it. `canPublish` says
+ * whether the viewer holds `publish` there and so may resume or cancel; a channel listed only for the viewer's own
+ * posts has none, and no name when the viewer cannot read the channel.
+ */
 export const scheduleSchema = z.strictObject({
   channels: z
     .array(
       z.strictObject({
         channelId: z.uuid(),
         platform: platformSchema,
-        displayName: z.string(),
+        displayName: z.string().nullable(),
+        canPublish: z.boolean(),
         variants: z
           .array(
             z.strictObject({
