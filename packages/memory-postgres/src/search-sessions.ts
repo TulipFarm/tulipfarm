@@ -84,10 +84,15 @@ export function createPostgresSearchSessions(
         candidates AS (SELECT c.*, (a.ordinality-1)::int AS position FROM jsonb_array_elements($6::jsonb) WITH ORDINALITY a(value,ordinality)
           CROSS JOIN LATERAL jsonb_to_record(a.value) AS c(document_id uuid,source_id uuid,revision_id uuid,publication_id uuid,access_epoch int,ordinal int,vector_publication_id uuid,exact boolean))
         SELECT c.*,e.expires_at,k.search_title AS title,k.heading,left(k.passage,2400) AS passage,
-          CASE WHEN r.original->>'kind'='file' THEN (r.original->>'fileId')::uuid END AS file_id FROM candidates c
+          CASE WHEN r.original->>'kind'='file' THEN (r.original->>'fileId')::uuid END AS file_id,
+          p.created_at AS indexed_at,r.created_at AS observed_at,s.synced_at,
+          CASE WHEN s.provider IN ('google','slack','github','confluence','jira') THEN left(r.source_revision,200) END AS source_revision
+          FROM candidates c
           JOIN eligible e ON e.document_id=c.document_id AND e.source_id=c.source_id AND e.revision_id=c.revision_id
             AND e.publication_id=c.publication_id AND e.access_epoch=c.access_epoch
           JOIN ${table('revisions')} r ON r.id=c.revision_id
+          JOIN ${table('publications')} p ON p.id=c.publication_id
+          JOIN ${table('sources')} s ON s.id=c.source_id
           JOIN ${table('chunks')} k ON k.publication_id=c.publication_id AND k.ordinal=c.ordinal
           WHERE c.position >= $7 AND (c.vector_publication_id IS NULL OR (e.vector_publication_id=c.vector_publication_id AND EXISTS (
             SELECT 1 FROM ${table('vector_publications')} p WHERE p.id=c.vector_publication_id AND p.lexical_publication_id=c.publication_id

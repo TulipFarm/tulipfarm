@@ -19,6 +19,7 @@ import {
   type ManageGoogle,
 } from './google-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand, useExpired } from './slack-knowledge-shared';
+import { KnowledgeSourceFailures } from './knowledge-source-failures';
 
 const statusLabels = {
   queued: 'Queued for import',
@@ -142,12 +143,14 @@ function GoogleSourceDocuments({ api, sourceId }: { api: GoogleKnowledgeApi; sou
 }
 
 function GoogleSourceRow({
+  workspaceId,
   api,
   source,
   disabled,
   changed,
   checkStatus,
 }: {
+  workspaceId: string;
   api: GoogleKnowledgeApi;
   source: GoogleSource;
   disabled: boolean;
@@ -295,6 +298,9 @@ function GoogleSourceRow({
         <p className="text-sm text-muted-foreground">Only the source owner can pause, resume, retry, or remove it.</p>
       )}
       {showDocuments && source.state === 'active' && <GoogleSourceDocuments api={api} sourceId={source.sourceId} />}
+      {showDocuments && source.state === 'active' && source.canManage && (
+        <KnowledgeSourceFailures workspaceId={workspaceId} sourceId={source.sourceId} />
+      )}
       {busy && <p role="status">Updating source…</p>}
       {refresh.kind === 'done' && (
         <p role="status" className="text-sm">
@@ -443,6 +449,7 @@ export function GoogleKnowledgeSources({ workspaceId, kinds }: { workspaceId: st
               {visibleSources.map(source => (
                 <GoogleSourceRow
                   key={source.sourceId}
+                  workspaceId={workspaceId}
                   api={api}
                   source={source}
                   disabled={sources.state.kind !== 'ready' || !!sources.state.error || sources.state.refreshing}

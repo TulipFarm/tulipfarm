@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { knowledgeSearchFiltersSchema } from './knowledge.ts';
+import { knowledgeFreshnessSchema, knowledgeSearchFiltersSchema } from './knowledge.ts';
 
 export const knowledgeRetrievalLimits = Object.freeze({
   initialDocuments: 8,
@@ -43,6 +43,9 @@ export const knowledgeRetrievalDocumentSchema = z.strictObject({
   source: provider,
   completeness: z.enum(['complete', 'partial']),
   omitted: z.boolean(),
+  indexedAt: knowledgeFreshnessSchema.shape.indexedAt,
+  sourceRevision: knowledgeFreshnessSchema.shape.sourceRevision,
+  sourceSyncedAt: knowledgeFreshnessSchema.shape.sourceSyncedAt,
   passages: z
     .array(
       z.strictObject({

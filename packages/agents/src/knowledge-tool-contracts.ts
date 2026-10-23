@@ -54,12 +54,19 @@ export const knowledgeToolCallSchema = z.discriminatedUnion('tool', [
         });
     }),
 ]);
+// When the cited revision was indexed and when its source last finished a sync, so answers can say "indexed as of".
+const freshness = {
+  indexedAt: z.string().optional(),
+  sourceRevision: z.string().nullable().optional(),
+  sourceSyncedAt: z.string().nullable().optional(),
+};
 const hitSchema = z.strictObject({
   citationId: z.string().max(48),
   title: z.string(),
   heading: z.string(),
   excerpt: z.string().max(600),
   source: kinds,
+  ...freshness,
 });
 const sources = z.array(knowledgeSourceDependencySchema).max(12);
 const budget = z
@@ -89,6 +96,7 @@ export const knowledgeToolResultSchema = z.union([
     source: kinds,
     text: z.string().max(4000),
     truncated: z.boolean(),
+    ...freshness,
     instruction: z.string(),
     sources,
     budget,
@@ -131,6 +139,7 @@ export const knowledgeToolResultSchema = z.union([
                 source: kinds,
                 completeness: z.enum(['complete', 'partial']),
                 omitted: z.boolean(),
+                ...freshness,
                 passages: z.array(
                   z.strictObject({
                     citationId: knowledgeCitationIdSchema,

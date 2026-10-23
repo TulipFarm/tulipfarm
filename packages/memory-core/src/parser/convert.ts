@@ -6,7 +6,7 @@ import { checkOpenDocument } from './opendocument.js';
 import { checkPdf } from './pdf.js';
 import { checkRtf } from './rtf.js';
 import { chunkMarkdown, normalizeMarkdown } from './chunks.js';
-import { KnowledgeParseError } from './contracts.js';
+import { KnowledgeParseError, parseFailure } from './contracts.js';
 import type { KnowledgeParseInput, KnowledgeParseResult } from './contracts.js';
 
 const textExtensions = new Set([
@@ -78,7 +78,65 @@ const nativeMediaTypes = new Set([
   'application/vnd.oasis.opendocument.presentation',
 ]);
 
+// A document the converter rejects as unsupported or malformed is still indexed from its raw text when the bytes are
+// plain UTF-8 text, so it stays searchable. The profile records the original failure.
 export async function convertDocument(input: KnowledgeParseInput): Promise<KnowledgeParseResult> {
+  try {
+    return await convertNative(input);
+  } catch (error) {
+    const failure = parseFailure(error);
+    if (failure !== 'unsupported' && failure !== 'malformed') throw error;
+    const text = rawText(Buffer.from(input.bytes));
+    if (text === undefined) throw error;
+    try {
+      return textResult(text, failure);
+    } catch {
+      throw error;
+    }
+  }
+}
+
+function rawText(bytes: Buffer): string | undefined {
+  if (
+    bytes.includes(Buffer.from('%PDF-')) ||
+    bytes.includes(Buffer.from('PK\x03\x04')) ||
+    bytes.includes(Buffer.from('d0cf11e0a1b11ae1', 'hex')) ||
+    bytes.subarray(0, 5).toString('ascii') === '{\\rtf'
+  )
+    return undefined;
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+  // Control characters other than tab, line breaks and form feed mean binary data, not text.
+  // oxlint-disable-next-line no-control-regex
+  if (/[\u0000-\u0008\u000b\u000e-\u001f\u007f]/.test(text)) return undefined;
+  return text.trim() ? text : undefined;
+}
+
+function textResult(text: string, fallback: 'unsupported' | 'malformed'): KnowledgeParseResult {
+  const markdown = normalizeMarkdown(text);
+  const { chunks, tokens } = chunkMarkdown(markdown);
+  const normalization = 'nfc-lf-v1-cl100k_base-800-100';
+  return {
+    markdown,
+    pages: 0,
+    tokens,
+    chunks,
+    profile: {
+      id: `text-1-${normalization}-fallback`,
+      engine: 'text',
+      version: '1',
+      normalization,
+      ocr: 'disabled',
+      fallback,
+    },
+  };
+}
+
+async function convertNative(input: KnowledgeParseInput): Promise<KnowledgeParseResult> {
   const bytes = Buffer.from(input.bytes);
   const extension = input.filename.split('.').at(-1)?.toLowerCase() ?? '';
   const mediaType = input.mediaType.split(';')[0]?.trim().toLowerCase() ?? '';

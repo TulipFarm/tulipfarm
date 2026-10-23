@@ -7,7 +7,12 @@ import {
   type LocalKnowledgeOptions,
 } from '@tulipfarm/knowledge';
 import { parseKnowledgeEmbeddingsConfig } from '@tulipfarm/config';
-import { createKnowledgeAgentTools, createKnowledgeEmbeddings, createKnowledgeSearch } from '@tulipfarm/knowledge';
+import {
+  createKnowledgeAgentTools,
+  createKnowledgeEmbeddings,
+  createKnowledgeSearch,
+  createKnowledgeSourceFailures,
+} from '@tulipfarm/knowledge';
 import { createKnowledgeEmbeddingCapacity } from '@tulipfarm/knowledge/embedding-capacity';
 import type { Pool } from 'pg';
 import { registerKnowledge } from './knowledge.ts';
@@ -211,6 +216,7 @@ export function registerKnowledgeComposition(
     search,
     documentAdapter,
     citations: createKnowledgeAgentTools({ runtime: dependencies.runtime, search }),
+    sourceFailures: createKnowledgeSourceFailures({ runtime: dependencies.runtime }),
   });
   registerGoogleKnowledge(app, {
     auth: dependencies.auth,

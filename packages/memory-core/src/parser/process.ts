@@ -14,8 +14,34 @@ import type {
 
 let active = 0;
 
-export function parseKnowledgeDocument(input: KnowledgeParseInput): Promise<KnowledgeParseResult> {
-  return runParserProcess(input);
+export const parserRetry = Object.freeze({ attempts: 3, initialDelayMs: 500 });
+
+// Transient process failures (spawn, crash, garbled output, a failed memory sample) are retried with exponential
+// backoff. Timeouts and memory limits are deterministic for the same bytes, so they fail at once.
+export async function parseKnowledgeDocument(
+  input: KnowledgeParseInput,
+  options: {
+    attempts?: number;
+    initialDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    run?: (input: KnowledgeParseInput) => Promise<KnowledgeParseResult>;
+  } = {},
+): Promise<KnowledgeParseResult> {
+  const attempts = options.attempts ?? parserRetry.attempts;
+  const run = options.run ?? runParserProcess;
+  const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run(input);
+    } catch (error) {
+      if (attempt >= attempts || !transient(error)) throw error;
+      await sleep((options.initialDelayMs ?? parserRetry.initialDelayMs) * 2 ** (attempt - 1));
+    }
+  }
+}
+
+export function transient(error: unknown) {
+  return error instanceof KnowledgeParseError && error.retryable && !['timeout', 'rss-limit'].includes(error.reason);
 }
 
 export async function runParserProcess(

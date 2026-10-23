@@ -12,7 +12,7 @@ import {
 } from '@tulipfarm/access';
 import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
+import { KnowledgeParseError, parseKnowledgeDocument, transientParseFailure } from '../parser.ts';
 import {
   knowledgeCommandSchema,
   knowledgeDocumentSchema,
@@ -663,15 +663,16 @@ export function createLocalKnowledge({ runtime, files }: LocalKnowledgeOptions) 
         );
         const stale =
           hidden(error) || (error instanceof KnowledgeError && ['superseded', 'conflict'].includes(error.code));
-        const again = failure === 'provider' && state.attempts < 8 && !stale;
+        // Provider and transient parser failures retry with exponential backoff until the attempt bound.
+        const again = (failure === 'provider' || transientParseFailure(error)) && state.attempts < 8 && !stale;
         await tx.client.query(`UPDATE ${table(tx, 'work')} SET parsing=$2,failure=$3 WHERE revision_id=$1`, [
           work.revisionId,
           again ? 'queued' : failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
           failure,
         ]);
         await tx.client.query(
-          `UPDATE ${table(tx, 'jobs')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,dispatched_at=NULL,dispatch_after=clock_timestamp()+interval '30 seconds' WHERE revision_id=$1`,
-          [work.revisionId],
+          `UPDATE ${table(tx, 'jobs')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,dispatched_at=NULL,dispatch_after=clock_timestamp()+least(interval '1 hour',interval '30 seconds'*power(2,greatest($2::int-1,0))) WHERE revision_id=$1`,
+          [work.revisionId, state.attempts],
         );
         return { disposition: stale ? 'stale' : again ? 'retry' : 'failed' };
       });

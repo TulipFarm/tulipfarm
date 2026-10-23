@@ -135,6 +135,10 @@ function fixture({ count = 2048, duplicateAnn = false, semantic = false } = {}) 
             heading: '',
             expires_at: null,
             file_id: null,
+            indexed_at: new Date(500),
+            observed_at: new Date(400),
+            source_revision: null,
+            synced_at: null,
           });
         },
       };
@@ -167,6 +171,12 @@ test('typing search uses opaque context, keeps reader admission order, and retur
   assert.equal(value.mode, 'keyword-only');
   assert.equal(value.reason, 'typing');
   assert.equal(value.hits[0].text, 'evidence');
+  assert.deepEqual(value.hits[0].freshness, {
+    indexedAt: new Date(500).toISOString(),
+    observedAt: new Date(400).toISOString(),
+    sourceRevision: null,
+    sourceSyncedAt: null,
+  });
   assert.equal(value.continuation, null);
   assert.equal(value.validUntil, new Date(301000).toISOString());
   assert.deepEqual(f.trace.slice(0, 5), [['transaction', 20600], 'bind', 'admit', 'readers', 'lexical-eligible']);

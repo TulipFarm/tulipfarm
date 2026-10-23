@@ -8,8 +8,10 @@ import {
   createGoogleKnowledge,
   createKnowledgeEmbeddings,
   createKnowledgeSearch,
+  createKnowledgeSourceFailures,
   createLocalKnowledge,
 } from '../dist/index.js';
+import { AccessDenied } from '@tulipfarm/access';
 import { GoogleCorpusError } from '@tulipfarm/google-workspace/corpus';
 import { createFiles } from '@tulipfarm/files';
 import { knowledgeEmbeddingProfile as profile } from '@tulipfarm/config';
@@ -169,6 +171,24 @@ test('Google corpus persists through real restricted PostgreSQL and enforces rea
       });
       assert.equal(hit.mode, 'hybrid');
       assert.equal(hit.hits.length, 1);
+      const { synced_at: syncedAt } = (
+        await db.platform.query(`SELECT synced_at FROM ${table('sources')} WHERE id=$1`, [source.sourceId])
+      ).rows[0];
+      assert.ok(syncedAt, 'completed provider sync records synced_at');
+      assert.equal(hit.hits[0].freshness.sourceSyncedAt, syncedAt.toISOString());
+      assert.ok(hit.hits[0].freshness.indexedAt);
+      assert.equal(typeof hit.hits[0].freshness.sourceRevision, 'string');
+      const sourceFailures = await createKnowledgeSourceFailures({ runtime }).list(ws.id, ws.userId, source.sourceId);
+      assert.deepEqual(sourceFailures, {
+        sourceId: source.sourceId,
+        syncedAt: syncedAt.toISOString(),
+        items: [],
+        truncated: false,
+      });
+      await assert.rejects(
+        createKnowledgeSourceFailures({ runtime }).list(ws.id, reader.userId, source.sourceId),
+        AccessDenied,
+      );
       assert.equal(
         (
           await google.original(ws.id, ws.userId, hit.hits[0].citation.documentId, hit.hits[0].citation.revisionId)

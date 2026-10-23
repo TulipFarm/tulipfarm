@@ -67,7 +67,8 @@ test(
       const page = await context.newPage();
       page.setDefaultTimeout(15_000);
       const sources = new Map(),
-        documents = new Map();
+        documents = new Map(),
+        failures = new Map();
       const faults = {
         slackState: 'active',
         discovery: 200,
@@ -194,6 +195,9 @@ test(
           writes.push({ kind: 'refresh', path });
           status = faults.refresh;
           json = { refreshed: 1, unavailable: 1, bounded: true };
+        } else if (/\/knowledge\/sources\/[^/]+\/failures$/.test(path)) {
+          const sourceId = path.split('/sources/')[1].split('/')[0];
+          json = failures.get(sourceId) ?? { sourceId, syncedAt: null, items: [], truncated: false };
         } else if (path.includes('/knowledge/slack/sources/') && path.endsWith('/documents')) {
           const pages = documents.get(path.split('/sources/')[1].split('/')[0]) ?? [];
           const index = Number(url.searchParams.get('cursor') ?? 0);
@@ -246,7 +250,7 @@ test(
         await page.getByLabel('Conversation type', { exact: true }).waitFor();
       };
       try {
-        await run({ page, context, faults, sources, documents, writes, reads, open, select });
+        await run({ page, context, faults, sources, documents, failures, writes, reads, open, select });
         assert.deepEqual(errors, []);
         assert.deepEqual(unknown, []);
       } finally {
@@ -493,6 +497,31 @@ test(
                 },
               ],
             ]);
+            f.failures.set(item.sourceId, {
+              sourceId: item.sourceId,
+              syncedAt: '2026-10-16T09:00:00.000Z',
+              items: [
+                {
+                  documentId: randomUUID(),
+                  title: '#general · Oversized thread',
+                  canonicalUrl: null,
+                  status: 'failed',
+                  reason: 'resource-limited',
+                  attempts: 3,
+                  observedAt: '2026-10-16T08:00:00.000Z',
+                },
+                {
+                  documentId: randomUUID(),
+                  title: '#general · Plain export',
+                  canonicalUrl: null,
+                  status: 'raw-text',
+                  reason: 'unsupported',
+                  attempts: 1,
+                  observedAt: '2026-10-16T08:00:00.000Z',
+                },
+              ],
+              truncated: false,
+            });
             await f.open();
             await f.page
               .getByRole('listitem', { name: item.title, exact: true })
@@ -517,6 +546,14 @@ test(
             await current.getByText('Searchable', { exact: true }).waitFor();
             await current.getByRole('button', { name: 'Download thread' }).waitFor();
             assert.equal(await current.getByText('this download is the earlier version', { exact: false }).count(), 0);
+            const problems = f.page.getByRole('region', { name: 'Items with import problems', exact: true });
+            await problems.getByText('Last sync completed', { exact: false }).waitFor();
+            const failed = problems.getByRole('listitem').filter({ hasText: '#general · Oversized thread' });
+            await failed.getByText('Not searchable', { exact: true }).waitFor();
+            await failed.getByText('The file is too large or too complex to read.').waitFor();
+            await failed.getByText('3 attempts', { exact: false }).waitFor();
+            const fallback = problems.getByRole('listitem').filter({ hasText: '#general · Plain export' });
+            await fallback.getByText('Searchable as plain text', { exact: true }).waitFor();
           }),
       );
 

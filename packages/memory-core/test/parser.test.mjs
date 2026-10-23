@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { getEncoding } from 'js-tiktoken';
-import { parseKnowledgeDocument, KnowledgeParseError } from '../dist/parser.js';
+import { parseKnowledgeDocument, KnowledgeParseError, parserRetry, transientParseFailure } from '../dist/parser.js';
 import { chunkMarkdown } from '../dist/parser/chunks.js';
 import {
   docx,
@@ -287,9 +287,89 @@ test('rejects empty, malformed UTF-8, binary text, unsupported and oversized inp
   await assert.rejects(parse(''), failure('malformed'));
   await assert.rejects(parse(Buffer.from([0xff])), failure('malformed'));
   await assert.rejects(parse('apple\0tree'), failure('malformed'));
-  await assert.rejects(parse('arbitrary', 'file.bin', 'application/octet-stream'), failure('unsupported'));
+  await assert.rejects(
+    parse(Buffer.from([0x00, 0x01, 0x02, 0x03]), 'file.bin', 'application/octet-stream'),
+    failure('unsupported'),
+  );
   await assert.rejects(parse(Buffer.alloc(10 * 1024 * 1024 + 1)), failure('resource-limited'));
   await assert.rejects(parse('# ' + 'heading '.repeat(1000)), failure('resource-limited'));
+});
+
+test('unsupported or malformed text falls back to indexing its raw text', async () => {
+  const unsupported = await parse(
+    'Harvest apples on Tuesday.\nStore pears in the cellar.',
+    'notes.bin',
+    'application/octet-stream',
+  );
+  assert.equal(unsupported.profile.fallback, 'unsupported');
+  assert.match(unsupported.profile.id, /-fallback$/);
+  assert.ok(unsupported.markdown.includes('Harvest apples on Tuesday.'));
+  assert.ok(unsupported.chunks.length > 0);
+  const mislabeled = await parse('Harvest apples on Tuesday.', 'notes.docx', 'application/octet-stream');
+  assert.ok(['unsupported', 'malformed'].includes(mislabeled.profile.fallback), mislabeled.profile.fallback);
+  assert.ok(mislabeled.markdown.includes('Harvest apples on Tuesday.'));
+  await assert.rejects(parse('%PDF-1.7\nbroken', 'bad.pdf', 'application/pdf'), failure('malformed'));
+  await assert.rejects(
+    parse(
+      Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('Harvest apples')]),
+      'bad.docx',
+      'application/octet-stream',
+    ),
+    error => error instanceof KnowledgeParseError,
+  );
+});
+
+test('transient parser failures retry with exponential backoff and stop at the attempt limit', async () => {
+  const input = { bytes: Buffer.from('Harvest apples.'), filename: 'policy.md', mediaType: 'text/markdown' };
+  const delays = [];
+  const sleep = async ms => void delays.push(ms);
+  let calls = 0;
+  const result = await parseKnowledgeDocument(input, {
+    sleep,
+    run: async value => {
+      calls++;
+      if (calls < 3) throw new KnowledgeParseError('resource-limited', { reason: 'abnormal-exit' });
+      return parseKnowledgeDocument(value, { attempts: 1 });
+    },
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [500, 1000]);
+  assert.ok(result.markdown.includes('Harvest apples.'));
+  assert.equal(parserRetry.attempts, 3);
+
+  calls = 0;
+  delays.length = 0;
+  await assert.rejects(
+    parseKnowledgeDocument(input, {
+      sleep,
+      run: async () => {
+        calls++;
+        throw new KnowledgeParseError('malformed', { reason: 'spawn' });
+      },
+    }),
+    error => error.reason === 'spawn',
+  );
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [500, 1000]);
+  for (const error of [
+    new KnowledgeParseError('resource-limited', { reason: 'timeout' }),
+    new KnowledgeParseError('resource-limited', { reason: 'rss-limit' }),
+    new KnowledgeParseError('unsupported'),
+  ]) {
+    calls = 0;
+    await assert.rejects(
+      parseKnowledgeDocument(input, {
+        sleep,
+        run: async () => {
+          calls++;
+          throw error;
+        },
+      }),
+    );
+    assert.equal(calls, 1, error.reason);
+    assert.equal(transientParseFailure(error), false);
+  }
+  assert.equal(transientParseFailure(new KnowledgeParseError('malformed', { reason: 'invalid-output' })), true);
 });
 
 for (const [extension, create, expected] of [

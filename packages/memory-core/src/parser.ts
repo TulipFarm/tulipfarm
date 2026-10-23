@@ -1,4 +1,4 @@
-export { parseKnowledgeDocument } from './parser/process.js';
+export { parseKnowledgeDocument, parserRetry, transient as transientParseFailure } from './parser/process.js';
 export { KnowledgeParseError, KnowledgeParserBusy } from './parser/contracts.js';
 export type {
   KnowledgeParseInput,

@@ -112,6 +112,8 @@ export const resultSchema = z
       version: z.string(),
       normalization: z.string(),
       ocr: z.literal('disabled'),
+      // The converter failure that raw-text indexing replaced, when the original could not be converted.
+      fallback: z.enum(['unsupported', 'malformed']).optional(),
     }),
   })
   .refine(value => value.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0) <= knowledgeLimits.tokens);

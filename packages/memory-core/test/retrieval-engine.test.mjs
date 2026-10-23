@@ -28,6 +28,10 @@ function fixture() {
     source_id: randomUUID(),
     access_epoch: 1,
     ordinal: 0,
+    indexed_at: new Date('2026-01-02T03:04:05.000Z'),
+    observed_at: new Date('2026-01-02T03:04:00.000Z'),
+    source_revision: null,
+    synced_at: null,
   };
   const state = {
     chunks: [
@@ -166,6 +170,8 @@ test('bounded retrieval uses opaque ports, ordered passages, and both eligibilit
   const branch = output.result.branches[0];
   assert.equal(branch.status, 'evidence');
   assert.equal(branch.documents[0].completeness, 'complete');
+  assert.equal(branch.documents[0].indexedAt, '2026-01-02T03:04:05.000Z');
+  assert.equal(branch.documents[0].sourceSyncedAt, null);
   assert.deepEqual(
     branch.documents[0].passages.map(passage => passage.text),
     ['first', 'second'],

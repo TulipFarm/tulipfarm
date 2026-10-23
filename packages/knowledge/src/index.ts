@@ -22,6 +22,13 @@ export * from './retrieval-contracts.ts';
 export * from './embeddings.ts';
 export { createKnowledgeEmbeddings } from './internal/embeddings.ts';
 export { createKnowledgeSearch } from './internal/search.ts';
+export {
+  createKnowledgeSourceFailures,
+  knowledgeSourceFailureLimit,
+  knowledgeSourceFailureSchema,
+  knowledgeSourceFailuresSchema,
+  type KnowledgeSourceFailures,
+} from './internal/source-failures.ts';
 export { createGoogleKnowledge, type GoogleKnowledge } from './internal/google.ts';
 export * from './google-contracts.ts';
 export { createSlackKnowledge, type SlackKnowledge } from './internal/slack.ts';

@@ -18,7 +18,9 @@ import {
   embeddingRetrySchema,
   embeddingDocumentRetrySchema,
   embeddingDocumentStatusSchema,
+  knowledgeSourceFailuresSchema,
   type createKnowledgeEmbeddings,
+  type createKnowledgeSourceFailures,
   type createLocalKnowledge,
 } from '@tulipfarm/knowledge';
 import {
@@ -44,6 +46,7 @@ import type {
 
 const workspaceParams = z.strictObject({ workspaceId: uuidSchema });
 const documentParams = workspaceParams.extend({ documentId: uuidSchema });
+const sourceParams = workspaceParams.extend({ sourceId: uuidSchema });
 const originalQuery = z.strictObject({ revisionId: uuidSchema });
 const saveBody = knowledgeSaveSchema.omit({ documentId: true });
 const commandBody = knowledgeCommandSchema.omit({ documentId: true });
@@ -73,6 +76,7 @@ export function registerKnowledge(
     embeddings: ReturnType<typeof createKnowledgeEmbeddings>;
     search?: ReturnType<typeof createKnowledgeSearch>;
     citations?: Pick<KnowledgeAgentTools, 'read'>;
+    sourceFailures?: ReturnType<typeof createKnowledgeSourceFailures>;
     documentAdapter?: (
       workspaceId: string,
       userId: string,
@@ -222,6 +226,23 @@ export function registerKnowledge(
           deadlines.get(request),
           cancellations.get(request)?.signal,
         );
+      },
+    );
+    routes.get(
+      `${base}/sources/:sourceId/failures`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'listKnowledgeSourceFailuresV1',
+          'List documents in an owned Knowledge source that failed to parse or were indexed from raw text',
+          sourceParams,
+          knowledgeSourceFailuresSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, sourceId } = sourceParams.parse(request.params);
+        if (!dependencies.sourceFailures) throw new StorageUnavailableError('disabled');
+        return dependencies.sourceFailures.list(workspaceId, user(request), sourceId);
       },
     );
     const document = `${base}/documents/:documentId`;
