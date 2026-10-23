@@ -75,17 +75,17 @@ const publishFailures = {
 } as const;
 const isPublishFailure = (code: string): code is keyof typeof publishFailures => code in publishFailures;
 
-type ReadImage = OfficeImage & { fileId: string; sha256: string; readAt: string };
+export type ReadOfficeImage = OfficeImage & { fileId: string; sha256: string; readAt: string };
 
-/** Reads each image a spec places as the author, or says which one cannot be used. */
-async function readImages(
-  files: FileOutputStore,
-  context: FileOutputContext,
+/** Reads each image a spec places as its author, or says which one cannot be used. */
+export async function readOfficeImages(
+  files: Pick<ReturnType<typeof createFiles>, 'download'>,
+  context: { workspaceId: string; actor: HumanActor },
   ids: readonly string[],
-): Promise<ReadImage[] | string> {
+): Promise<ReadOfficeImage[] | string> {
   if (ids.length > officeImageLimits.images)
     return `A document can place at most ${officeImageLimits.images} different images.`;
-  const images: ReadImage[] = [];
+  const images: ReadOfficeImage[] = [];
   for (const fileId of ids) {
     let bytes: Uint8Array;
     try {
@@ -145,7 +145,7 @@ export async function createFileOutput(
     }
   }
   const images = isOffice(call.format)
-    ? await readImages(files, context, officeImageIds(call.format, call.content))
+    ? await readOfficeImages(files, context, officeImageIds(call.format, call.content))
     : [];
   if (typeof images === 'string') return { error: 'invalid-content', instruction: `No file was created. ${images}` };
   let content: Uint8Array;

@@ -91,6 +91,6 @@ A run has `text` and any of `bold`, `italic`, `underline`, `strike`, `code` (mon
 - Long tables split across pages automatically, and the header row repeats on each page.
 
 - An `image` needs the Files id of a PNG, JPEG, or GIF the person can open, such as an attachment in the chat. Up to 20 images, each at most 8 MiB. Images are never enlarged past their own size. Write `alt` text that says what the image shows.
-- Images work in Files only. Google Drive proposals reject image blocks for now.
+- In Google Drive, images are copied into the converted file. The whole file must stay under 1 MiB, so use few, small images there. Images can't be added to an existing Google file.
 
 Charts, footnotes, comments, and tracked changes are not supported. Describe a chart's data in a table instead.
