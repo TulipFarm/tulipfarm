@@ -18,7 +18,7 @@ function Table({
       className={cn(
         'w-full caption-bottom text-sm',
         variant === 'grid' &&
-          '[&_tr]:border-input [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-muted [&_th]:border-r [&_th]:border-input [&_th]:px-3 [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-input [&_td]:px-3 [&_td]:py-2.5 [&_td:last-child]:border-r-0',
+          '[&_tr]:border-input [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card [&_thead]:bg-[linear-gradient(var(--muted)_0_0)] [&_th]:border-r [&_th]:border-input [&_th]:px-3 [&_th:last-child]:border-r-0 [&_td]:border-r [&_td]:border-input [&_td]:px-3 [&_td]:py-2.5 [&_td:last-child]:border-r-0',
         className,
       )}
       {...props}
@@ -53,7 +53,7 @@ function TableRow({
       data-slot="table-row"
       className={cn(
         'border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-primary-subtle data-[state=selected]:[&>td:first-child]:relative data-[state=selected]:[&>td:first-child]:before:absolute data-[state=selected]:[&>td:first-child]:before:inset-y-0 data-[state=selected]:[&>td:first-child]:before:start-0 data-[state=selected]:[&>td:first-child]:before:w-1 data-[state=selected]:[&>td:first-child]:before:bg-primary',
-        '[--table-row-bg:var(--card)] hover:[--table-row-bg:color-mix(in_srgb,var(--muted)_50%,var(--card))] has-aria-expanded:[--table-row-bg:color-mix(in_srgb,var(--muted)_50%,var(--card))] data-[state=selected]:[--table-row-bg:var(--muted)]',
+        '[--table-row-bg:transparent] hover:[--table-row-bg:color-mix(in_srgb,var(--muted)_50%,transparent)] has-aria-expanded:[--table-row-bg:color-mix(in_srgb,var(--muted)_50%,transparent)] data-[state=selected]:[--table-row-bg:var(--muted)]',
         interactive && 'cursor-pointer',
         className,
       )}
@@ -78,7 +78,7 @@ function TableHead({
         align === 'right' ? 'text-right' : 'text-left',
         selection && 'w-12 min-w-12',
         stickyEnd &&
-          'sticky right-0 z-20 w-px bg-muted before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-input',
+          'sticky right-0 z-20 w-px bg-card bg-[linear-gradient(var(--muted)_0_0)] before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-input',
         className,
       )}
       {...props}
@@ -142,7 +142,7 @@ function TableCell({
         align === 'right' && 'text-right tabular-nums',
         selection && 'w-12 min-w-12',
         stickyEnd &&
-          'sticky right-0 z-1 w-px bg-(--table-row-bg) transition-colors before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-input',
+          'sticky right-0 z-1 w-px bg-card bg-[linear-gradient(var(--table-row-bg)_0_0)] before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-input',
         className,
       )}
       {...props}
