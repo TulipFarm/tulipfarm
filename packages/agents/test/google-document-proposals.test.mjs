@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { AccessDenied } from '@tulipfarm/access';
 import { invokeGoogleTool } from '../src/google-tools.ts';
 
 const context = {
@@ -7,7 +8,7 @@ const context = {
   actor: { kind: 'human', userId: 'user', membershipId: '00000000-0000-4000-8000-000000000002' },
   callId: '00000000-0000-4000-8000-000000000003',
 };
-function propose(call) {
+function propose(call, files) {
   const proposals = [];
   const factory = () => ({
     propose: async (_workspaceId, _userId, input) => {
@@ -15,7 +16,7 @@ function propose(call) {
       return { id: 'proposal', operation: input.operation };
     },
   });
-  return invokeGoogleTool({}, factory, context, { tool: 'google.propose', ...call }).then(result => ({
+  return invokeGoogleTool({}, factory, context, { tool: 'google.propose', ...call }, files).then(result => ({
     result,
     proposals,
   }));
@@ -55,7 +56,7 @@ test('a document proposal with an invalid spec, or without exactly one input, cr
     },
   });
   assert.equal(image.result.error, 'invalid-operation');
-  assert.match(image.result.message, /Images are not supported in Google Drive/);
+  assert.match(image.result.message, /Images can only be placed from a chat/);
   const neither = await propose({});
   assert.equal(neither.result.message, 'Set exactly one of operation or document.');
   assert.deepEqual([...invalid.proposals, ...image.proposals, ...neither.proposals], []);
@@ -95,4 +96,35 @@ test('existing file edits keep the original target instead of rendering a replac
     assert.deepEqual(proposals, [{ commandId: context.callId, operation }]);
     assert.deepEqual(result.data.operation, operation);
   }
+});
+
+test('a document proposal copies the images its author can read into the upload, and refuses others', async () => {
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const logo = '5b0f6f8e-2f0a-4c3b-9d7e-1a2b3c4d5e6f';
+  const hidden = '6c1f7f9e-3f1b-4d4c-8e8f-2b3c4d5e6f70';
+  const reads = [];
+  const files = {
+    download: async (workspaceId, userId, id) => {
+      reads.push([workspaceId, userId, id]);
+      if (id === hidden) throw new AccessDenied();
+      return { bytes: new Uint8Array(png) };
+    },
+  };
+  const spec = fileId =>
+    JSON.stringify({ slides: [{ layout: 'content', content: [{ type: 'image', fileId, alt: 'Logo' }] }] });
+  const { result, proposals } = await propose(
+    { document: { name: 'Deck', format: 'pptx', content: spec(logo) } },
+    files,
+  );
+  assert.equal(result.error, undefined);
+  assert.deepEqual(reads, [[context.workspaceId, context.actor.userId, logo]]);
+  assert.match(Buffer.from(proposals[0].operation.contentBase64, 'base64').toString('latin1'), /ppt\/media\/image/);
+
+  const refused = await propose({ document: { name: 'Deck', format: 'pptx', content: spec(hidden) } }, files);
+  assert.equal(refused.result.error, 'invalid-operation');
+  assert.match(refused.result.message, /can't be read/);
+  assert.deepEqual(refused.proposals, []);
 });
