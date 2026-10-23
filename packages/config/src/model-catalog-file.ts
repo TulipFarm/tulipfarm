@@ -9,7 +9,8 @@ export const modelCatalogSchemaUrl = 'https://tulipfarm.ai/schemas/model-catalog
 
 /**
  * Background features that use a model nobody chose. Without a model that has the role, titles come from the chat's
- * model, table search, recommendations and the chat fallback are off, and the other features use the default model.
+ * model, completion checks use the active chat model, table search, recommendations and the chat fallback are off,
+ * and the other features use the default model.
  */
 export const modelCatalogRoles = Object.freeze([
   'title',
@@ -21,6 +22,7 @@ export const modelCatalogRoles = Object.freeze([
   'table-search',
   'recommendation',
   'fallback',
+  'completion-check',
 ] as const);
 export type ModelCatalogRole = (typeof modelCatalogRoles)[number];
 

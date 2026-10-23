@@ -44,11 +44,11 @@ export function chatReplyModel(family: string, env: NodeJS.ProcessEnv = process.
 
 /**
  * The model with `role` in the model catalog. Without one, the title role has no model (the chat's own model titles the
- * chat) and every other role uses the default model.
+ * chat), completion checks use the active chat model, and every other role uses the default model.
  */
 export function roleModel(role: ModelCatalogRole, env: NodeJS.ProcessEnv = process.env): ConversationModel | null {
   const catalog = loadModelCatalog(env);
-  const model = catalog.role(role) ?? (role === 'title' ? null : catalog.defaultModel);
+  const model = catalog.role(role) ?? (role === 'title' || role === 'completion-check' ? null : catalog.defaultModel);
   return model ? conversationModel(model.id, env) : null;
 }
 

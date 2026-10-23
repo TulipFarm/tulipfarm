@@ -121,6 +121,7 @@ export function meteredReply(
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const fallback = chatFallbackModel(chat.price.familyId);
+    const completionCheck = roleModel('completion-check') ?? undefined;
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
     const session = await observeChatDetail('reply-start', () =>
@@ -129,6 +130,7 @@ export function meteredReply(
         fence,
         chat,
         fallback,
+        completionCheck,
         externalContext,
         slack,
         mcp,
@@ -265,6 +267,7 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
+              completionCheck: completionCheck?.route,
               ...(fallback
                 ? {
                     fallback: {
@@ -287,6 +290,7 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
+              completionCheck: completionCheck?.route,
               ...(fallback
                 ? {
                     fallback: {

@@ -103,6 +103,8 @@ export async function beginReplySession(input: {
   chat: ConversationModel;
   /** The model a failed chat call may retry on once; its calls are billed as that model. */
   fallback?: ConversationModel | undefined;
+  /** The optional completion-check role's calls are authorized and billed like chat calls. */
+  completionCheck?: ConversationModel | undefined;
   externalContext: ExternalConversationContext | undefined;
   slack: SlackActionsFactory | undefined;
   mcp: McpExecutionFactory | null | undefined;
@@ -375,7 +377,7 @@ export async function beginReplySession(input: {
 
   const meter: ToolModelMeter = async attempt => {
     if (lost) throw lost instanceof AccessDenied ? lost : new AccessDenied();
-    const model = [chat, input.fallback].find(
+    const model = [chat, input.fallback, input.completionCheck].find(
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
     );
     if (!model) throw new Error('conversation-model-unpriced');

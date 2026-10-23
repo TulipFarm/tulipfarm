@@ -69,6 +69,17 @@ test('ids are unique and each role is on one model', () => {
   rejects(catalog([model({ roles: ['default-chat'] })]), /^models\.0\.roles\.0:/);
 });
 
+test('the optional completion-check role is provider-neutral and has a single owner', () => {
+  assert.deepEqual(problems(catalog([model({ roles: ['completion-check'] })])), []);
+  rejects(
+    catalog([
+      model({ roles: ['completion-check'] }),
+      model({ id: 'claude-haiku', default: false, roles: ['completion-check'] }),
+    ]),
+    /^models\.1\.roles\.0: Role "completion-check" is already on models\[0\]/,
+  );
+});
+
 const routes = (...providers) => ({
   routes: providers.map(provider => ({ provider, model: 'm' })),
 });

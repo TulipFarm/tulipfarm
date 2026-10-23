@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inferWithTools } from '../src/inference.ts';
+import { completionCheckEvidence, inferWithTools } from '../src/inference.ts';
+import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
   formats,
   isCompletionRequest,
@@ -211,7 +212,7 @@ test('completion checks cannot bypass source authorization or credit admission',
       },
       false,
       null,
-      resumed,
+      { ...resumed, completionCheck: nativeRoutes.anthropic },
     ),
     /source-unavailable/,
   );
@@ -239,7 +240,10 @@ test('completion checks use the prepared context once, not the unbounded pre-com
   const check = JSON.stringify(requests[1]);
   assert.equal(check.split('prepared-context-marker').length - 1, 1);
   assert.ok(!check.includes('original-history-must-stay-compacted'));
-  assert.equal(requests[1].max_completion_tokens, requests[0].max_completion_tokens);
+  const evidence = JSON.parse(requests[1].messages.at(-1).content);
+  assert.ok(!('context' in evidence), 'the runtime reminder is not repeated in the check');
+  assert.equal(requests[1].max_completion_tokens, 384);
+  assert.equal(requests[0].max_completion_tokens, 4096);
 });
 
 test('completion evidence excludes raw provider replay fields but retains tool receipts', async t => {
@@ -405,6 +409,226 @@ test('continue results after real tool work still fail closed after two correcti
   );
   assert.equal(requests, 7);
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
+});
+
+test('completion evidence retains all requests, clarifications, inputs and receipts without provider replay', () => {
+  const input = { activity: 'Querying records', filter: { status: 'open' } };
+  const output = JSON.stringify({ rows: ['x'.repeat(20_000)], error: 'important error at the end' });
+  const items = [
+    { kind: 'turn', turn: { role: 'user', text: 'List every open incident and owner.' } },
+    { kind: 'turn', turn: { role: 'assistant', text: 'Which project?' } },
+    { kind: 'turn', turn: { role: 'user', text: 'The support project.' } },
+    {
+      kind: 'model',
+      text: 'Reading the records.',
+      calls: [{ id: 'call-1', name: 'tables_query', input, providerId: true }],
+      raw: { replay: 'provider-only'.repeat(1000) },
+    },
+    {
+      kind: 'results',
+      results: [{ id: 'call-1', name: 'tables_query', output, error: true, providerId: true }],
+    },
+  ];
+  const serialized = completionCheckEvidence(items, 'There are no incidents.', 4);
+  const evidence = JSON.parse(serialized);
+  assert.deepEqual(evidence.history.slice(0, 3), items.slice(0, 3));
+  assert.deepEqual(evidence.history[3].calls, [{ id: 'call-1', name: 'tables_query', input }]);
+  assert.deepEqual(evidence.history[4].results, [{ id: 'call-1', name: 'tables_query', output, error: true }]);
+  assert.equal(evidence.candidate, 'There are no incidents.');
+  assert.equal(evidence.workBudgetRemaining, 4);
+  assert.ok(!serialized.includes('provider-only'));
+  assert.ok(!serialized.includes('providerId'));
+  assert.equal(JSON.parse(completionCheckEvidence(items, 'Budget spent.', 0)).workBudgetRemaining, 0);
+});
+
+for (const format of formats)
+  test(`${format} uses a separate completion route and meters its bounded output without changing the reply route`, async t => {
+    const requests = [],
+      meters = [];
+    const replies = [
+      nativeReply('azure', { text: promise }),
+      selectReply(format, verdict('continue')),
+      nativeReply('azure', { text: 'No permitted sender is configured.' }),
+      selectReply(format, verdict('blocked')),
+    ];
+    const completionCheck = { ...nativeRoutes[format], maxOutputTokens: 300 };
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      requests.push({ url, body: JSON.parse(init.body) });
+      return Response.json(replies.shift());
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      messages,
+      () => assert.fail('No forced tool'),
+      async attempt => {
+        meters.push(attempt);
+        return async () => {};
+      },
+      false,
+      null,
+      { ...resumed, completionCheck },
+    );
+    assert.equal(result.text, 'No permitted sender is configured.');
+    assert.deepEqual(
+      meters.map(({ model }) => model),
+      [nativeRoutes.azure.model, completionCheck.model, nativeRoutes.azure.model, completionCheck.model],
+    );
+    assert.deepEqual(
+      meters.map(({ maxOutputTokens }) => maxOutputTokens),
+      [4096, 300, 4096, 300],
+    );
+    assert.equal(requests[1].body.model ?? completionCheck.model, completionCheck.model);
+    assert.equal(replies.length, 0);
+  });
+
+test('completion checks keep the active chat model by default and disable reasoning only with its capability', async t => {
+  const requests = [];
+  const replies = [nativeReply('azure', { text: 'Finished.' }), selectReply('azure', verdict())];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  await inferWithTools(
+    { ...nativeRoutes.azure, model: 'gpt-6-sol' },
+    messages,
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    resumed,
+  );
+  assert.deepEqual(
+    requests.map(({ model }) => model),
+    ['gpt-6-sol', 'gpt-6-sol'],
+  );
+  assert.equal(requests[1].reasoning_effort, 'none');
+  assert.equal(requests[1].max_completion_tokens, 384);
+});
+
+test('a completion check without its own role follows the active fallback model', async t => {
+  const models = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const request = JSON.parse(init.body);
+    models.push(request.model);
+    if (models.length === 1) return Response.json({ error: { code: 'DeploymentNotFound' } }, { status: 404 });
+    return Response.json(
+      isCompletionRequest(request)
+        ? selectReply('anthropic', verdict())
+        : nativeReply('anthropic', { text: 'The answer is 42.' }),
+    );
+  });
+  const result = await inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, {
+    ...resumed,
+    fallback: { route: nativeRoutes.anthropic, label: 'synthetic-fallback' },
+  });
+  assert.equal(result.fallback, 'synthetic-fallback');
+  assert.deepEqual(models, [nativeRoutes.azure.model, nativeRoutes.anthropic.model, nativeRoutes.anthropic.model]);
+});
+
+test('completion output cut off by the provider fails closed', async t => {
+  const outcomes = checkOutcomes(t);
+  const truncated = selectReply('azure', verdict());
+  truncated.choices[0].finish_reason = 'length';
+  const replies = [nativeReply('azure', { text: 'Finished.' }), truncated];
+  t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+  await assert.rejects(
+    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
+    /model-output-limit/,
+  );
+  assert.deepEqual(outcomes, ['error']);
+});
+
+test('completion input is smaller on the synthetic evaluation without losing request or receipt evidence', async t => {
+  const sizes = [];
+  for (const example of completionEvaluation) {
+    const requests = [];
+    const replies = [nativeReply('azure', { text: example.candidate }), selectReply('azure', verdict())];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return Response.json(replies.shift());
+    });
+    await inferWithTools(
+      nativeRoutes.azure,
+      evaluationMessages(example),
+      () => assert.fail(),
+      undefined,
+      false,
+      null,
+      resumed,
+    );
+    const evidence = requests[1].messages.at(-1).content;
+    const oldEvidence = JSON.stringify({
+      context: requests[0].messages[1].content,
+      ...JSON.parse(evidence),
+    });
+    const before = Buffer.byteLength(oldEvidence);
+    const after = Buffer.byteLength(evidence);
+    assert.ok(after < before / 4, example.name);
+    sizes.push({ case: example.name, before, after });
+    t.mock.restoreAll();
+  }
+  t.diagnostic(`Synthetic completion-evidence bytes (same turns and receipts): ${JSON.stringify(sizes)}`);
+});
+
+for (const value of [
+  { status: 'done', reason: 'Unsupported status' },
+  { status: 'completed', reason: '' },
+  { status: 'completed', reason: 'x'.repeat(241) },
+  { status: 'completed', reason: 'OK', extra: true },
+  null,
+])
+  test(`invalid completion output fails closed: ${JSON.stringify(value)?.slice(0, 60)}`, async t => {
+    const outcomes = checkOutcomes(t);
+    const replies = [nativeReply('azure', { text: 'Finished.' }), selectReply('azure', value)];
+    t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+    await assert.rejects(
+      inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
+      /model-invalid-decision/,
+    );
+    assert.deepEqual(outcomes, ['error']);
+  });
+
+test('synthetic evaluation replays expected decisions without heuristically accepting unfinished replies', async t => {
+  for (const example of completionEvaluation) {
+    const outcomes = checkOutcomes(t);
+    const requests = [];
+    const replies = [
+      nativeReply('azure', { text: example.candidate }),
+      selectReply('azure', { status: example.status, reason: example.name }),
+      ...(example.status === 'continue'
+        ? [
+            nativeReply('azure', { text: 'Which missing input should I use to finish?' }),
+            selectReply('azure', { status: 'waiting', reason: 'A necessary input is missing.' }),
+          ]
+        : []),
+    ];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return Response.json(replies.shift());
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      evaluationMessages(example),
+      () => assert.fail('No tool should run in decision replay'),
+      undefined,
+      false,
+      null,
+      resumed,
+    );
+    const evidence = JSON.parse(requests[1].messages.at(-1).content);
+    assert.equal(evidence.candidate, example.candidate, example.name);
+    assert.ok(JSON.stringify(evidence).includes(example.request), example.name);
+    assert.ok(JSON.stringify(evidence).includes(example.tool), example.name);
+    if (example.clarification) assert.ok(JSON.stringify(evidence).includes(example.clarification), example.name);
+    assert.equal(outcomes[0], example.status === 'continue' ? 'continue' : 'done', example.name);
+    assert.equal(
+      result.text,
+      example.status === 'continue' ? 'Which missing input should I use to finish?' : example.candidate,
+      example.name,
+    );
+    assert.equal(replies.length, 0, example.name);
+    t.mock.restoreAll();
+  }
 });
 
 test('earlier tool-using replies in the chat do not force the check; receipts of this turn do', async t => {

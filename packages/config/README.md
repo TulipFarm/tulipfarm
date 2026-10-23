@@ -133,6 +133,15 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   model, that feature is off. `compaction`, `review`, `plan`, `heartbeat` and
   `public-guide` use the default model; the public guide still needs an Azure
   chat-completions route.
+- **Completion checks.** The optional `completion-check` role checks whether a
+  tool-using chat reply is a sufficient stopping point. Without it, checks keep
+  using the active chat model (including a chat fallback). Assign the role to
+  a model in your catalog to choose another provider-neutral route; no new
+  environment variable is needed. Calls keep source authorization, credit
+  admission and usage billing for that model. Check output is capped at 384
+  tokens, or the model's smaller limit. Reasoning is disabled only where the
+  existing `reasoningOffForTools` capability permits it; qualify a model's
+  decisions and output budget before assigning it this role.
 - **Fallback.** The `fallback` role is off unless a model has it. Then a chat
   model call that fails before producing any output, with a failure another
   model can fix (`not_found`, `auth`, `quota_exceeded`, `rate_limited`,
