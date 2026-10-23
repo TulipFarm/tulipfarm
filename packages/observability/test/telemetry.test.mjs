@@ -20,6 +20,7 @@ import {
   recordChatRequestSizes,
   recordChatDiscovery,
   recordChatDispatch,
+  recordChatCompletionCheck,
   errorType,
   log,
   observeCall,
@@ -525,6 +526,9 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
           clock += 600;
         });
         recordChatDiscovery({ offered: 2, loaded: 8, added: 6, matched: 6, query: 'PRIVATE QUERY' });
+        recordChatCompletionCheck('skipped_no_tools');
+        recordChatCompletionCheck('continue');
+        recordChatCompletionCheck('done');
       });
       await withChatMeasurements(() =>
         assert.rejects(
@@ -852,6 +856,23 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
         ['sweep', 'error', 1],
       ],
     );
+    const checks = data.find(metric => metric.descriptor.name === 'cloud_chat_completion_checks');
+    assert.deepEqual(
+      checks.dataPoints.map(p => [p.attributes.outcome, p.value]),
+      [
+        ['skipped_no_tools', 1],
+        ['continue', 1],
+        ['done', 1],
+      ],
+    );
+    for (const point of checks.dataPoints)
+      assert.deepEqual(Object.keys(point.attributes).sort(), [
+        'application',
+        'environment',
+        'outcome',
+        'service',
+        'service_version',
+      ]);
     for (const metric of [details, sizes, requests]) {
       for (const point of metric.dataPoints) assert.equal(point.attributes['chat.request.sequence'], undefined);
     }

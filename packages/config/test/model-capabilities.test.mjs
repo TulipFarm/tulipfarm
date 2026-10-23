@@ -1,38 +1,37 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   modelCapabilities,
   modelCapabilitiesSchema,
-  modelFamilies,
-  modelFamilyCatalogSchema,
-  modelPricing,
+  modelCatalogFileSchema,
   providerModelCapabilities,
   resolveModelCapabilities,
 } from '../dist/index.js';
 
+const shippedCatalog = JSON.parse(readFileSync(new URL('../catalog/models.json', import.meta.url), 'utf8'));
+
+// The wire behaviour each shipped model had before the catalog file, on every route.
 const shipped = {
-  'claude-haiku-4-5': { toolChoice: 'forced', responseModelAliases: ['claude-haiku-4-5-20251001'] },
-  'claude-sonnet-5': { toolChoice: 'auto' },
-  'claude-opus-5-5': { toolChoice: 'auto' },
-  'claude-fable-5-1': { toolChoice: 'auto' },
-  'gpt-6-luna': { reasoningOffForTools: true },
-  'gpt-6-sol': { reasoningOffForTools: true },
-  'gpt-6-astra': { api: 'responses' },
-  'grok-4-6': { reasoningTokensInOutput: true },
-  'grok-4': { reasoningTokensInOutput: true },
-  'grok-4.3': { reasoningTokensInOutput: true },
-  'gpt-6-luna-openai': { reasoningOffForTools: true },
-  'gpt-6-sol-openai': { reasoningOffForTools: true },
-  'gpt-6-astra-openai': { api: 'responses' },
-  'grok-4-6-xai': { reasoningTokensInOutput: true },
-  'grok-4.3-xai': { reasoningTokensInOutput: true },
+  'claude-haiku': { toolChoice: 'forced', responseModelAliases: ['claude-haiku-4-5-20251001'] },
+  'claude-sonnet': { toolChoice: 'auto' },
+  'claude-opus': { toolChoice: 'auto' },
+  'claude-fable': { toolChoice: 'auto' },
+  'gpt-luna': { reasoningOffForTools: true },
+  'gpt-sol': { reasoningOffForTools: true },
+  'gpt-astra': { api: 'responses' },
+  grok: { reasoningTokensInOutput: true },
+  'grok-fast': { reasoningTokensInOutput: true },
 };
 
 test('every shipped model resolves the capabilities that reproduce its previous wire behaviour', () => {
-  for (const model of modelPricing.models) {
-    const expected = { ...providerModelCapabilities[model.provider], ...shipped[model.id] };
-    assert.deepEqual(modelCapabilities(model.provider, model.providerModelId), expected, model.id);
-  }
+  for (const model of shippedCatalog.models)
+    for (const route of model.routes)
+      assert.deepEqual(
+        modelCapabilities(route.provider, route.model),
+        { ...providerModelCapabilities[route.provider], ...shipped[model.id] },
+        `${model.id} ${route.provider}`,
+      );
   assert.deepEqual(providerModelCapabilities.anthropic, {
     api: 'anthropic-messages',
     toolChoice: 'forced',
@@ -68,11 +67,12 @@ test('unknown models use provider defaults and later layers override earlier one
 });
 
 test('capabilities are optional, strict and checked against the provider', () => {
-  const rows = structuredClone(modelFamilies).map(family => {
-    delete family.capabilities;
-    return family;
+  const models = structuredClone(shippedCatalog.models).map(model => {
+    delete model.capabilities;
+    return model;
   });
-  assert.equal(modelFamilyCatalogSchema.safeParse(rows).success, true);
+  const parse = rows => modelCatalogFileSchema.safeParse({ ...shippedCatalog, models: rows });
+  assert.equal(parse(models).success, true);
   assert.equal(modelCapabilitiesSchema.safeParse({}).success, true);
   for (const invalid of [
     { api: 'completions' },
@@ -82,15 +82,12 @@ test('capabilities are optional, strict and checked against the provider', () =>
     { unknown: true },
   ])
     assert.equal(modelCapabilitiesSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
-  const wrongApi = rows.map(family =>
-    family.id === 'claude-opus' ? { ...family, capabilities: { api: 'responses' } } : family,
+  const wrongApi = models.map(model =>
+    model.id === 'claude-opus' ? { ...model, capabilities: { api: 'responses' } } : model,
   );
-  assert.match(
-    modelFamilyCatalogSchema.safeParse(wrongApi).error.message,
-    /Model API must be supported by its provider/,
+  assert.match(JSON.stringify(parse(wrongApi).error.issues), /does not support this API/);
+  const azureResponses = models.map(model =>
+    model.id === 'kimi' ? { ...model, capabilities: { api: 'responses' } } : model,
   );
-  const azureResponses = rows.map(family =>
-    family.id === 'kimi' ? { ...family, capabilities: { api: 'responses' } } : family,
-  );
-  assert.equal(modelFamilyCatalogSchema.safeParse(azureResponses).success, true);
+  assert.equal(parse(azureResponses).success, true);
 });

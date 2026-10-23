@@ -15,7 +15,7 @@ import {
 } from '@tulipfarm/workspace-storage/credits';
 import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
-import { readConversationInventory } from './conversation-inventory.ts';
+import { readConversationInventory, type ConversationInventoryReads } from './conversation-inventory.ts';
 import { requireMaintenanceFence, maintenanceCompatibility } from '@tulipfarm/conversations/maintenance';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
@@ -40,6 +40,7 @@ export function projectReminder(project: ProjectContext | undefined): ChatMessag
 export function conversationCompactor(
   runtime: ConversationRuntime,
   resolve: (family: string) => ConversationModel | null,
+  inventoryReads?: ConversationInventoryReads,
 ): ConversationCompactor {
   return {
     policy: tx => effectiveCompactionPolicy(tx as Parameters<typeof effectiveCompactionPolicy>[0]),
@@ -48,7 +49,11 @@ export function conversationCompactor(
       if (!resolved) return null;
       const inventory = project
         ? undefined
-        : (await observeChatDetail('inventory', () => readConversationInventory(runtime, fence)))?.inventory;
+        : (
+            await observeChatDetail('inventory', () =>
+              inventoryReads ? inventoryReads.read(fence) : readConversationInventory(runtime, fence),
+            )
+          )?.inventory;
       return {
         tokens:
           measureToolRequest(

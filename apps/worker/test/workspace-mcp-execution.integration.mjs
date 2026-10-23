@@ -29,7 +29,7 @@ import {
   anthropicText,
   isTitleRequest,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { modelCatalogOf, useModelCatalog } from './model-catalog-fixture.mjs';
 
 const tool = {
   name: 'write',
@@ -187,7 +187,7 @@ for (const orphaned of [false, true])
         if (oldKey === undefined) delete process.env.ANTHROPIC_API_KEY;
         else process.env.ANTHROPIC_API_KEY = oldKey;
       });
-      t.after(useModelFamilies('claude-haiku,claude-sonnet,claude-opus'));
+      t.after(useModelCatalog(['claude-haiku', 'claude-sonnet', 'claude-opus']));
       const integration = await f.connect(actor),
         chatId = randomUUID();
       const chats = () => createConversations(f.runtime);
@@ -301,8 +301,7 @@ test(
       w = f.workspace,
       actor = f.members[0];
     const environment = {
-      MODEL_FAMILIES: 'claude-opus',
-      MODEL_DEFAULT_FAMILY: 'claude-opus',
+      MODEL_CATALOG: modelCatalogOf(['claude-opus']),
       ANTHROPIC_API_KEY: 'synthetic-model-key',
     };
     const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
@@ -475,8 +474,7 @@ for (const orphaned of [false, true])
       const f = await setup(t),
         w = f.workspace;
       const environment = {
-        MODEL_FAMILIES: 'claude-opus',
-        MODEL_DEFAULT_FAMILY: 'claude-opus',
+        MODEL_CATALOG: modelCatalogOf(['claude-opus']),
         ANTHROPIC_API_KEY: 'synthetic-model-key',
       };
       const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
@@ -698,8 +696,7 @@ test(
       w = f.workspace,
       actor = f.members[0];
     const environment = {
-      MODEL_FAMILIES: 'claude-opus',
-      MODEL_DEFAULT_FAMILY: 'claude-opus',
+      MODEL_CATALOG: modelCatalogOf(['claude-opus']),
       ANTHROPIC_API_KEY: 'synthetic-model-key',
     };
     const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));

@@ -3,14 +3,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, currentMember, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
 import {
-  selectableModelFamilies as modelFamilies,
+  loadModelCatalog,
   modelFamilyIdSchema,
   modelIdentifierSchema,
   modelPriceSchema,
-  modelPricing,
   modelProviderSchema,
-  modelRoleDefault,
   type ResolvedModel,
+  type ServedModelCatalog,
 } from '@tulipfarm/config';
 import {
   modelCatalogFamilySchema,
@@ -46,6 +45,8 @@ export type ModelCatalogSnapshot = {
   modelFamilyResolution: ModelFamilyResolution;
   /** Families the operator paused: listed, but not offered for new chats, agents or fallback targets. */
   modelFamilyPaused?: (familyId: string) => boolean;
+  /** The served model catalog; the catalog of the server environment unless given. */
+  catalog?: ServedModelCatalog;
 };
 
 const projectionResolutionSchema = z.object({
@@ -69,21 +70,21 @@ export type ModelCatalogDependencies = {
   modelFamilyEligibility?: ModelCatalogEligibility;
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
-  /** The family new chats default to; the server's default-chat role unless given. */
-  defaultChatFamilyId?: string | null;
 };
 
 function projectCatalog(
   workspaceId: string,
   date: string,
+  catalog: ServedModelCatalog,
   eligible: ModelCatalogEligibility,
   resolve: ModelFamilyResolution,
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
-  defaultChatFamilyId: string | null,
 ): ModelCatalog {
+  // Models that are not selectable serve their roles and existing chats, but are never offered.
+  const selectable = catalog.models.filter(model => model.selectable);
   const resolutions = new Map(
-    modelFamilies.map(family => {
+    selectable.map(family => {
       const input = { workspaceId, modelFamilyId: family.id };
       const resolution = eligible({ ...input, existing: true }) === true ? resolve(input) : null;
       const parsed = resolution === null ? null : projectionResolutionSchema.parse(resolution);
@@ -93,27 +94,25 @@ function projectCatalog(
     }),
   );
   return {
-    families: modelFamilies.map((family): ModelCatalogFamily => {
+    families: selectable.map((family): ModelCatalogFamily => {
       const platformResolution = resolutions.get(family.id);
       const resolution = disabled.has(family.id) || paused(family.id) ? null : platformResolution;
-      const model = modelPricing.models.find(candidate => candidate.id === family.currentModelId);
-      const rates = (resolution?.rates ?? model?.rates)?.filter(
+      const rates = (resolution?.rates ?? family.rates).filter(
         rate =>
           rate.promptTokensAbove === null &&
           (rate.validFrom === null || date >= rate.validFrom) &&
           (rate.validUntilExclusive === null || date < rate.validUntilExclusive),
       );
       // Unmetered families have no credit rates, although their models meter at zero cost.
-      const rate = family.pricing !== 'unmetered' && rates?.length === 1 ? rates[0] : undefined;
-      if (!model) throw new Error('Catalog pricing unavailable');
+      const rate = family.pricing !== 'unmetered' && rates.length === 1 ? rates[0] : undefined;
       // 10^12 pico-USD per USD and 10^12 units per credit cancel, so credits per USD equals units per pico-USD.
       const creditsPerUsd = Number(creditPricing().unitsPerPicoUsd);
       const entry = {
         id: family.id,
         displayName: family.name,
         vendor: family.vendor,
-        currentVersion: resolution?.modelId ?? model.id,
-        provider: resolution?.route.provider ?? model.provider,
+        currentVersion: resolution?.modelId ?? family.route.model,
+        provider: resolution?.route.provider ?? family.route.type,
         inputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.input * creditsPerUsd : null,
         outputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.output * creditsPerUsd : null,
       };
@@ -125,7 +124,7 @@ function projectCatalog(
               unavailableReason: null,
               mappingRevision: resolution.mappingRevision,
               pricingRevision: resolution.pricingRevision,
-              fallbackFor: modelFamilies
+              fallbackFor: selectable
                 .filter(
                   source =>
                     source.id !== family.id &&
@@ -150,17 +149,13 @@ function projectCatalog(
             },
       );
     }),
-    defaultChatFamilyId: defaultChatFamilyId !== null && paused(defaultChatFamilyId) ? null : defaultChatFamilyId,
+    defaultChatFamilyId: catalog.defaultModel.id,
   };
 }
 
 export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCatalogDependencies) {
   const eligible = dependencies.modelFamilyEligibility ?? (() => false);
   const resolve = dependencies.modelFamilyResolution ?? (() => null);
-  const defaultChatFamilyId =
-    dependencies.defaultChatFamilyId === undefined
-      ? (modelRoleDefault('default-chat')?.familyId ?? null)
-      : dependencies.defaultChatFamilyId;
   const params = z.object({ workspaceId: uuidSchema });
   const json = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'draft-7', io: 'input' });
   const error = json(z.object({ error: z.string() }));
@@ -198,11 +193,11 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
           return projectCatalog(
             workspaceId,
             new Date().toISOString().slice(0, 10),
+            snapshot.catalog ?? loadModelCatalog(),
             snapshot.modelFamilyEligibility,
             snapshot.modelFamilyResolution,
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
-            defaultChatFamilyId,
           );
         });
       },

@@ -9,6 +9,7 @@ import { registerAuthoringDrafts } from '../../api/dist/authoring-drafts.js';
 import { registerSkills } from '../../api/dist/skills.js';
 import { registerModelCatalog } from '../../api/dist/model-catalog.js';
 import { resolveModelBundle } from '../../../packages/config/dist/index.js';
+import { useModelCatalog } from '../../worker/test/model-catalog-fixture.mjs';
 
 export async function taskAuthoring({ runtime, db, w, table, teamId, definition }) {
   let agentId;
@@ -33,7 +34,7 @@ export async function taskAuthoring({ runtime, db, w, table, teamId, definition 
   const activities = createConversationActivities(runtime);
   let calls, step;
   process.env.ANTHROPIC_API_KEY = 'synthetic-authoring-only';
-  process.env.MODEL_FAMILIES = 'claude-haiku,claude-sonnet';
+  useModelCatalog();
   return {
     initial: initial.commit,
     activities: {

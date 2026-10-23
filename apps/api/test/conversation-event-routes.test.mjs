@@ -7,6 +7,9 @@ import { AccessDenied } from '@tulipfarm/access';
 import { registerConversations } from '../src/conversations.ts';
 import { registerSecurity } from '../src/security.ts';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 const origin = 'http://localhost:5173';
 const workspaceId = randomUUID();
 const chatId = randomUUID();

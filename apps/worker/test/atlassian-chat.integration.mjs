@@ -32,7 +32,6 @@ async function chatFixture(t) {
   t.after(() => f.close());
   const env = {
     ANTHROPIC_API_KEY: 'synthetic-model-key',
-    MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
     INTEGRATION_CREDENTIAL_KEY_ID: f.keyring.activeKeyId,
     INTEGRATION_CREDENTIAL_KEY: f.keyring.keys.test,
     INTEGRATION_CREDENTIAL_PREVIOUS_KEYS: '{}',

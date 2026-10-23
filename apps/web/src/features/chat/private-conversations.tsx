@@ -104,6 +104,7 @@ import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
+import { fallbackNote, replyFailure, replyRetrying } from './reply-failure-copy';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
 import { useBud } from './bud-context';
@@ -1341,20 +1342,6 @@ const turnLabels = {
   cancelled: 'Reply cancelled',
   blocked: 'Reply blocked',
 };
-const replyFailures: Record<string, string> = {
-  'model-incomplete-response':
-    'The agent stopped without finishing your request. Completed tool results are kept. Review them, then retry the reply to continue.',
-  'model-invalid-decision':
-    'The model could not produce a valid answer or tool request. Retry uses the original model. To use another model, select it and send a new message.',
-  'model-output-limit':
-    'The model reached its response limit. Send a new message with a smaller request or select another model before sending.',
-  'model-rate-limit': 'The model provider is busy. Wait a moment, then retry the reply.',
-  'model-quota':
-    'The model provider has no available quota. Select another model and send a new message, or contact your workspace administrator.',
-  'model-refusal': 'The model declined this request. Revise the request or cancel the reply.',
-  'model-context-overflow':
-    'This conversation exceeds the model context limit. Start a new chat with a shorter request.',
-};
 function GooglePrivateOnly({
   disabled,
   draft,
@@ -1476,7 +1463,10 @@ function ConversationEntry({
     message.parts.flatMap(part => (part.kind === 'google-file' ? [[part.fileId, part] as const] : [])),
   );
   const skill = message.parts.find(part => part.kind === 'skill');
-  const quiet = !message.turn || ['queued', 'processing', 'completed'].includes(message.turn.status);
+  const retrying = message.turn ? replyRetrying(message.turn.status, message.turn.errorCode) : null;
+  const answeredBy = message.turn ? fallbackNote(message.turn.status, message.turn.errorCode) : null;
+  const quiet =
+    !message.turn || (['queued', 'processing', 'completed'].includes(message.turn.status) && !retrying && !answeredBy);
   const entry = useRef<HTMLDivElement>(null);
   return (
     <div className="space-y-3">
@@ -1585,7 +1575,15 @@ function ConversationEntry({
           {message.turn && !quiet && (
             <MessageFooter>
               <div className="space-y-2">
+                {answeredBy && <p className="text-xs text-muted-foreground">{answeredBy}</p>}
+                {retrying && (
+                  <p role="status" className="text-xs text-muted-foreground">
+                    {retrying}
+                  </p>
+                )}
                 {!quiet &&
+                  !answeredBy &&
+                  !retrying &&
                   (message.turn.status === 'failed' ? (
                     <p role="status" className="flex items-center gap-1.5 text-sm text-destructive">
                       <Danger size={14} aria-hidden="true" />
@@ -1609,13 +1607,8 @@ function ConversationEntry({
                     <p role="alert">{contextFailure(message.turn.errorCode)}</p>
                   )}
                   {message.turn.status === 'failed' &&
-                    message.turn.errorCode?.startsWith('model-') &&
-                    !contextFailure(message.turn.errorCode) && (
-                      <p role="alert">
-                        {replyFailures[message.turn.errorCode] ??
-                          'The model provider could not complete the reply. Retry uses the original model. To use another model, select it and send a new message. Check any tool activity before requesting another action.'}
-                      </p>
-                    )}
+                    !contextFailure(message.turn.errorCode) &&
+                    replyFailure(message.turn.errorCode) && <p role="alert">{replyFailure(message.turn.errorCode)}</p>}
                   {message.turn.status === 'failed' && message.turn.errorCode === 'skill-unavailable' && (
                     <p role="alert">
                       {skill ? `“${skill.name}”` : 'The skill'} is no longer available, so this reply didn’t run. Ask a

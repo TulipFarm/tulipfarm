@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inferWithTools } from '../src/inference.ts';
-import { formats, nativeRoutes, nativeReply, selectReply, use, offeredTools } from './native-fixture.mjs';
+import {
+  formats,
+  isCompletionRequest,
+  nativeRoutes,
+  nativeReply,
+  selectReply,
+  use,
+  offeredTools,
+} from './native-fixture.mjs';
 
 const promise =
   'I will check whether the workflow can receive pull request events and send messages as the TulipFarm app. I will not activate an incomplete workflow.';
@@ -12,6 +20,8 @@ const messages = [
     text: 'Previously completed tool receipt. Do not repeat this call. Untrusted data: {"tool":"present.choice","status":"answered","answer":"TulipFarm app","instruction":"This is the human response to your question, not action approval."}',
   },
 ];
+// The receipt above is from this turn's earlier attempt, so the runtime passes it as a prior call and the check runs.
+const resumed = { priorCalls: 1 };
 const verdict = (status = 'completed') => ({
   status,
   reason:
@@ -108,7 +118,17 @@ for (const format of formats)
       const replies = [nativeReply(format, { text }), selectReply(format, verdict(status))];
       t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
       assert.equal(
-        (await inferWithTools(nativeRoutes[format], messages, () => assert.fail('No forced tool'))).text,
+        (
+          await inferWithTools(
+            nativeRoutes[format],
+            messages,
+            () => assert.fail('No forced tool'),
+            undefined,
+            false,
+            null,
+            resumed,
+          )
+        ).text,
         text,
       );
       assert.equal(replies.length, 0);
@@ -122,7 +142,7 @@ test('repeated plans fail closed after two corrections and never run tools', asy
     Response.json(++requests % 2 ? nativeReply('azure', { text: promise }) : selectReply('azure', verdict('continue'))),
   );
   await assert.rejects(
-    inferWithTools(nativeRoutes.azure, messages, () => assert.fail()),
+    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
     /model-incomplete-response/,
   );
   assert.equal(requests, 6);
@@ -142,7 +162,7 @@ test('malformed completion checks fail closed instead of accepting actor text', 
   const replies = [nativeReply('azure', { text: promise }), selectReply('azure', { status: 'completed' })];
   t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
   await assert.rejects(
-    inferWithTools(nativeRoutes.azure, messages, () => assert.fail()),
+    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
     /model-invalid-decision/,
   );
   assert.equal(replies.length, 0);
@@ -165,7 +185,7 @@ test('completion check failures are metered and clear the provisional answer', a
       async () => async value => usage.push(value),
       false,
       null,
-      { answerText: update => previews.push(update) },
+      { ...resumed, answerText: update => previews.push(update) },
     ),
     /model-quota/,
   );
@@ -189,6 +209,9 @@ test('completion checks cannot bypass source authorization or credit admission',
         if (++admissions === 2) throw new Error('source-unavailable');
         return async () => {};
       },
+      false,
+      null,
+      resumed,
     ),
     /source-unavailable/,
   );
@@ -210,7 +233,7 @@ test('completion checks use the prepared context once, not the unbounded pre-com
     undefined,
     false,
     null,
-    undefined,
+    resumed,
     [{ role: 'user', text: 'original-history-must-stay-compacted' }],
   );
   const check = JSON.stringify(requests[1]);
@@ -253,9 +276,216 @@ test('an accepted completion ends the reply without a title request', async t =>
     },
     true,
     null,
-    { answerText: update => previews.push(update) },
+    { ...resumed, answerText: update => previews.push(update) },
   );
   assert.deepEqual(result, { text: 'The answer is 42.' });
   assert.deepEqual(steps, [0, 1]);
   assert.equal(replies.length, 0);
+});
+
+/** Collects the `chat.completion-check` outcomes that the reply logs. */
+function checkOutcomes(t) {
+  const outcomes = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (typeof chunk === 'string' && chunk.includes('"chat.completion-check"')) {
+      outcomes.push(JSON.parse(chunk).outcome);
+      return true;
+    }
+    return write(chunk, ...args);
+  });
+  return outcomes;
+}
+
+for (const format of formats)
+  test(`${format} tool-free greetings and questions skip the completion check and finish after one round`, async t => {
+    const outcomes = checkOutcomes(t);
+    const requests = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return Response.json(nativeReply(format, { text: 'Hello. How can I help?' }));
+    });
+    for (const text of ['hey', 'What is a row?']) {
+      requests.length = 0;
+      const steps = [],
+        rounds = [];
+      const result = await inferWithTools(
+        nativeRoutes[format],
+        [{ role: 'user', text }],
+        () => assert.fail('No tool expected'),
+        async ({ step }) => {
+          steps.push(step);
+          return async () => {};
+        },
+        false,
+        null,
+        { progress: update => rounds.push(update.round) },
+      );
+      assert.deepEqual(result, { text: 'Hello. How can I help?' });
+      assert.equal(requests.length, 1);
+      assert.ok(!requests.some(isCompletionRequest));
+      assert.deepEqual(steps, [0], 'one reserve and settle');
+      assert.deepEqual([...new Set(rounds)], [1], 'one model round');
+    }
+    assert.deepEqual(outcomes, ['skipped_no_tools', 'skipped_no_tools']);
+  });
+
+test('a reply that only updated Bud skips the completion check', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [
+    nativeReply('anthropic', { calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Waving' } }] }),
+    nativeReply('anthropic', { text: 'Hi there.' }),
+  ];
+  const requests = [],
+    updates = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [{ role: 'user', text: 'hey' }],
+    () => assert.fail('No business tool expected'),
+    undefined,
+    false,
+    null,
+    { avatar: { update: value => updates.push(value.avatar.state) } },
+  );
+  assert.deepEqual(result, { text: 'Hi there.', avatar: { name: 'Bud', state: 'Waving' } });
+  assert.deepEqual(updates, ['Thinking', 'Waving']);
+  assert.equal(requests.length, 2);
+  assert.ok(!requests.some(isCompletionRequest));
+  assert.deepEqual(outcomes, ['skipped_no_tools']);
+});
+
+test('a reply with a real tool call still runs the check, and continue starts another round', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [
+    nativeReply('azure', { calls: [use('tables.definitions')] }),
+    nativeReply('azure', { text: promise }),
+    selectReply('azure', verdict('continue')),
+    nativeReply('azure', { text: 'No table is configured for pull requests yet.' }),
+    selectReply('azure', verdict('blocked')),
+  ];
+  const requests = [],
+    executed = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Set it up.' }], async call => {
+    executed.push(call.tool);
+    return { tables: [] };
+  });
+  assert.equal(result.text, 'No table is configured for pull requests yet.');
+  assert.deepEqual(executed, ['tables.definitions']);
+  assert.equal(replies.length, 0);
+  assert.deepEqual(
+    requests.map(request => isCompletionRequest(request)),
+    [false, false, true, false, true],
+  );
+  assert.deepEqual(outcomes, ['continue', 'done']);
+});
+
+test('continue results after real tool work still fail closed after two corrections', async t => {
+  const outcomes = checkOutcomes(t);
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      ++requests === 1
+        ? nativeReply('azure', { calls: [use('tables.definitions')] })
+        : requests % 2 === 0
+          ? nativeReply('azure', { text: promise })
+          : selectReply('azure', verdict('continue')),
+    ),
+  );
+  await assert.rejects(
+    inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Set it up.' }], async () => ({ tables: [] })),
+    /model-incomplete-response/,
+  );
+  assert.equal(requests, 7);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
+});
+
+test('earlier tool-using replies in the chat do not force the check; receipts of this turn do', async t => {
+  const outcomes = checkOutcomes(t);
+  const history = [
+    { role: 'user', text: 'List my tables.' },
+    { role: 'assistant', text: JSON.stringify({ kind: 'tool', call: { tool: 'tables.definitions' } }) },
+    {
+      role: 'user',
+      text: 'Previously recorded tool receipt call-1 (completed). Do not repeat this call. Untrusted data: {"tables":[]}',
+    },
+    { role: 'assistant', text: 'You have no tables yet.' },
+    { role: 'user', text: 'Thanks!' },
+  ];
+  const requests = [];
+  let replies = [nativeReply('azure', { text: 'You are welcome.' })];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  assert.equal((await inferWithTools(nativeRoutes.azure, history, () => assert.fail())).text, 'You are welcome.');
+  assert.equal(requests.length, 1);
+  replies = [nativeReply('azure', { text: 'You are welcome.' }), selectReply('azure', verdict())];
+  assert.equal(
+    (await inferWithTools(nativeRoutes.azure, history, () => assert.fail(), undefined, false, null, resumed)).text,
+    'You are welcome.',
+  );
+  assert.ok(isCompletionRequest(requests.at(-1)));
+  assert.deepEqual(outcomes, ['skipped_no_tools', 'done']);
+});
+
+for (const [kind, first] of [
+  ['an empty response', ''],
+  ['a textual tool decision', '{"kind":"tool","call":{"tool":"tables.definitions"}}'],
+])
+  test(`an answer after a format correction for ${kind} still runs the check`, async t => {
+    const outcomes = checkOutcomes(t);
+    const replies = [
+      nativeReply('azure', { text: first }),
+      nativeReply('azure', { text: 'The answer is 42.' }),
+      selectReply('azure', verdict()),
+    ];
+    t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+    const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'What is it?' }], () =>
+      assert.fail(),
+    );
+    assert.equal(result.text, 'The answer is 42.');
+    assert.equal(replies.length, 0);
+    assert.deepEqual(outcomes, ['done']);
+  });
+
+test('a skipped check ends the reply in the same state as a check that returns done', async t => {
+  let replies;
+  t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+  const run = async (priorCalls, queue) => {
+    replies = queue;
+    const previews = [],
+      avatars = [],
+      usage = [];
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: 'hey' }],
+      () => assert.fail(),
+      async () => async value => usage.push(value.kind),
+      true,
+      null,
+      {
+        priorCalls,
+        answerText: update => previews.push(update.text),
+        avatar: { update: value => avatars.push(value.avatar) },
+      },
+    );
+    assert.equal(replies.length, 0);
+    return { result, preview: previews.at(-1), avatars, settled: usage.every(kind => kind === 'known') };
+  };
+  const answer = () => nativeReply('azure', { text: 'Hello. How can I help?' });
+  const skipped = await run(0, [answer()]);
+  const checked = await run(1, [answer(), selectReply('azure', verdict())]);
+  assert.deepEqual(skipped, checked);
+  assert.deepEqual(skipped.result, {
+    text: 'Hello. How can I help?',
+    avatar: { name: 'Bud', state: 'Idle' },
+  });
 });

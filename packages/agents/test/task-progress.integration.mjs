@@ -24,6 +24,7 @@ import { savedTaskAgent } from './task-fixture.mjs';
 import { createAuth } from '../../../apps/api/dist/auth.js';
 import { encryptCredential } from '../../workspaces/src/credentials.ts';
 import { nativeReply, useCall } from './native-fixture.mjs';
+import { modelCatalogOf } from '../../../apps/worker/test/model-catalog-fixture.mjs';
 
 const route = {
   id: 'task-progress',
@@ -287,8 +288,7 @@ test(
         stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
         env: {
           PATH: originalEnv.PATH,
-          MODEL_FAMILIES: 'claude-opus',
-          MODEL_DEFAULT_FAMILY: 'claude-opus',
+          MODEL_CATALOG: modelCatalogOf(['claude-opus']),
           ANTHROPIC_API_KEY: 'synthetic-only',
           TASK_PROGRESS_INPUT: JSON.stringify({
             address: process.env.TEMPORAL_ADDRESS,
@@ -614,7 +614,7 @@ test(
         actualModelIds: () => [route.modelId],
         health: createModelRouteHealth(identity, () => 'task-progress-lease'),
         budgetPicoUsd: () => '10000000000000',
-        legacyFamily: () => 'claude-opus',
+        defaultFamily: () => 'claude-opus',
         infer: async () => {
           entered.resolve();
           await release.promise;

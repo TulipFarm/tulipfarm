@@ -20,7 +20,6 @@ for (const revoke of [false, true])
     await f.connect();
     const values = {
       ANTHROPIC_API_KEY: 'synthetic-model-key',
-      MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
       INTEGRATION_CREDENTIAL_KEY_ID: 'test',
       INTEGRATION_CREDENTIAL_KEY: 'ab'.repeat(32),
     };

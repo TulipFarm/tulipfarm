@@ -103,9 +103,27 @@ const computedReads = {
     ],
   },
   'apps/worker/src/worker.ts': { sites: 1, names: [] },
+  // Reads the API key that the model catalog names for each served route; the built-in providers' keys by default.
   'packages/agents/src/model-environment.ts': {
-    sites: 2,
+    sites: 1,
     names: ['ANTHROPIC_API_KEY', 'AZURE_FOUNDRY_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY'],
+  },
+  // Reads the key and endpoint variables the model catalog names (the built-in providers' by default), and checks that no
+  // removed model setting is set and no model variable has a public prefix; those names are deliberately undeclared.
+  'packages/config/src/model-catalog-loader.ts': {
+    sites: 2,
+    names: [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_BASE_URL',
+      'OPENAI_API_KEY',
+      'OPENAI_BASE_URL',
+      'XAI_API_KEY',
+      'XAI_BASE_URL',
+      'GEMINI_API_KEY',
+      'GEMINI_BASE_URL',
+      'AZURE_FOUNDRY_API_KEY',
+      'AZURE_FOUNDRY_ENDPOINT',
+    ],
   },
   'packages/atlassian/src/account-provider.ts': {
     sites: 4,

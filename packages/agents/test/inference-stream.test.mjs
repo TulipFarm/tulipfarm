@@ -494,7 +494,7 @@ test('the Responses API streams output text deltas and uses the completed respon
     { step: 0, text: 'Astra ' },
     { step: 0, text: 'Astra says hi' },
   ]);
-  assert.deepEqual(metered, [known, known]);
+  assert.deepEqual(metered, [known]);
   assert.equal(requests[0].body.stream, true);
   assert.equal(requests[0].body.stream_options, undefined);
 });
@@ -599,7 +599,7 @@ test('a JSON reply to a streaming request still parses and reports no streamed t
     ),
     { text: 'From JSON.' },
   );
-  assert.deepEqual({ updates, metered }, { updates: [], metered: [known, known] });
+  assert.deepEqual({ updates, metered }, { updates: [], metered: [known] });
 });
 
 test('malformed streams take the empty-or-malformed correction path', async t => {
@@ -734,7 +734,7 @@ test('a real HTTP event stream reports chat-completions text as it arrives', asy
         { step: 0, text: 'Hold' },
         { step: 0, text: 'Hold on' },
       ],
-      metered: [known, known],
+      metered: [known],
     },
   );
 });

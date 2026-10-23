@@ -1,7 +1,8 @@
+import { loadModelCatalog } from '@tulipfarm/config';
 import { z } from 'zod';
 import { AccessDenied, currentMember, lockAuthorization, uuidSchema } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { chatTitleSchema, defaultConversationModel } from './contracts.ts';
+import { chatTitleSchema } from './contracts.ts';
 import { notifyConversationChange } from './event-publisher.ts';
 import { replyWorkSchema, type ConversationRuntime } from './runtime.ts';
 
@@ -54,7 +55,7 @@ export function createConversationTitles(runtime: ConversationRuntime) {
       }
       return {
         text: chat.text,
-        model: chat.responder === 'reverse-text-v1' ? defaultConversationModel : chat.responder,
+        model: chat.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : chat.responder,
       };
     });
   }

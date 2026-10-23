@@ -131,7 +131,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     restrictions: () => ({ allowedProviders: ['anthropic'], allowedLocations: ['test'] }),
     allowed: () => true,
     actualModelIds: () => [route.modelId],
-    legacyFamily: () => 'claude-opus',
+    defaultFamily: () => 'claude-opus',
     budgetPicoUsd: () => '10000000000000',
     health: createModelRouteHealth(db.platform, () => 'accounting-test'),
     infer: async (_resolution, input) => {

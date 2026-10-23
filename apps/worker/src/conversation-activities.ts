@@ -1,16 +1,13 @@
 import {
   createConversationExecutor,
-  renewConversationReplyLease,
   replyWorkSchema,
-  type ConversationReply,
   type ReplyWork,
+  type ConversationReply,
   type ConversationRuntime,
   type ExternalConversationContext,
 } from '@tulipfarm/conversations/runtime';
 import { inferenceRouteSchema, type InferenceRoute, type ToolInferenceContext } from '@tulipfarm/agents/inference';
 import { respondToConversation } from './conversation-responder.ts';
-import { conversationTitleActivity } from './conversation-title.ts';
-import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationPlanning, createChatTools, isExternalTool, toolObservation } from '@tulipfarm/agents/tools';
 import {
   observeChatStage,
@@ -21,40 +18,30 @@ import {
 } from '@tulipfarm/observability';
 import { atlassianChatOperations } from './atlassian-composition.ts';
 import { githubChatReads } from './github-composition.ts';
-import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
+import { mergeSources } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
 import {
+  chatFallbackModel,
+  chatReplyModel,
   conversationFamilyPaused,
   conversationModel,
   roleModel,
   type ConversationModel,
 } from './conversation-model.ts';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { recordUsage } from '@tulipfarm/extensions';
-import { CreditAttemptAlreadyDispatched, settleCredits } from '@tulipfarm/workspace-storage/credits';
-import { lockAuthorization, withMcpSourceContext } from '@tulipfarm/access';
-import {
-  requireCurrentConversationSources,
-  requireGitHubSources,
-  requireGoogleSources,
-  requireKnowledgeSources,
-  requireResultSources,
-  requireMcpSources,
-} from '@tulipfarm/conversations/source-access';
+import { withMcpSourceContext } from '@tulipfarm/access';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import type { KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { slackActionsFromEnvironment, slackAgentSetupFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import type { SlackActionsFactory } from '@tulipfarm/agents/slack-actions';
-import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import type { TableImportOptions } from '@tulipfarm/tables/imports';
 import { workspaceMcpFromEnvironment } from './workspace-mcp-composition.ts';
 import type { McpExecutionFactory } from '@tulipfarm/agents/mcp-runtime';
 import { isMcpCall, mcpCallSchema } from '@tulipfarm/agents/mcp-contracts';
-import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { conversationCompactor, projectReminder } from './conversation-compactor.ts';
 import type { ConversationCompactor } from '@tulipfarm/conversations/compaction';
@@ -62,10 +49,11 @@ import { withFileSources, type FileContent, type GoogleFileReader } from '@tulip
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
-import { readConversationInventory } from './conversation-inventory.ts';
 import { isFeatureEnabled } from '@tulipfarm/observability';
-import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
-import { recordCoordinatorModelTime, reserveCoordinatorModel } from '@tulipfarm/agents/plan-runtime';
+import { beginReplySession } from './reply-session.ts';
+import { conversationTitleActivity } from './conversation-title.ts';
+import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
+import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -89,6 +77,8 @@ export type MeteredReplyOptions = {
   outputs?: FileOutputStore | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
   wakePlan?: PlanWake | undefined;
+  /** The inventory read context measurement already made for this attempt, reused instead of read again. */
+  inventory?: ConversationInventoryReads | undefined;
 };
 export function meteredReply(
   runtime: ConversationRuntime,
@@ -101,6 +91,7 @@ export function meteredReply(
     outputs,
     skillExecution,
     wakePlan,
+    inventory,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   return async ({
@@ -109,6 +100,8 @@ export function meteredReply(
     sourceMessages = messages,
     executeTool,
     readPersonalMemory,
+    personalMemory,
+    settle,
     fence,
     timeZone,
     priorCalls = 0,
@@ -124,22 +117,32 @@ export function meteredReply(
           pausedFamilyReplacement(tx, model, conversationFamilyPaused),
         )
       : null;
-    const chat = conversationModel(replacement ?? model);
+    const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
-    // A Slack turn linked to a member is that member's request. Every step's admission requires the same requester, so a sender
-    // removed mid-turn fails the turn here, as admission would, instead of answering without their destinations and tools.
-    const { requester, destinations } = await observeChatDetail('requester', async () => {
-      const requester =
-        slack || mcp || outputs
-          ? await runtime.transaction(fence.workspaceId, commonCompatibility, tx =>
-              turnRequester(tx, fence.conversationId, fence.turnId),
-            )
-          : null;
-      const destinations =
-        requester && slack ? await slack(runtime).destinations(fence.workspaceId, requester.userId) : null;
-      return { requester, destinations };
-    });
+    const fallback = chatFallbackModel(chat.price.familyId);
+    // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
+    // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
+    const session = await observeChatDetail('reply-start', () =>
+      beginReplySession({
+        runtime,
+        fence,
+        chat,
+        fallback,
+        externalContext,
+        slack,
+        mcp,
+        outputs: Boolean(outputs),
+        requester: !externalContext && !project,
+        inventory: !externalContext && !project,
+        inventoryRead: inventory?.take(fence),
+        retainedSources,
+        describedHandles: () => describedHandles,
+        contextBytes: Buffer.byteLength(JSON.stringify(messages)),
+        settle,
+      }),
+    );
+    const { requester, destinations } = session;
     const context = observeChatDetailSync('render', () => [
       ...projectReminder(project),
       ...(destinations
@@ -152,16 +155,6 @@ export function meteredReply(
         : []),
       ...messages,
     ]);
-    let catalogSources: SourceDependency[] = [];
-    let inventorySources: SourceDependency[] = [];
-    const readWorkspaceInventory =
-      externalContext || project
-        ? undefined
-        : async () => {
-            const result = await readConversationInventory(runtime, fence);
-            inventorySources = result?.sources ?? [];
-            return result?.inventory;
-          };
     const publisher = createReplyTextPublisher(runtime, fence);
     // Previews reach every project member before the saved answer's audience check, so project chats show only the saved answer.
     const answerText = project
@@ -169,15 +162,7 @@ export function meteredReply(
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
     // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
-    const budUser =
-      externalContext || project
-        ? null
-        : (requester ??
-          (await runtime
-            .transaction(fence.workspaceId, commonCompatibility, tx =>
-              turnRequester(tx, fence.conversationId, fence.turnId),
-            )
-            .catch(() => null)));
+    const budUser = externalContext || project ? null : requester;
     const budAvatar =
       !!budUser && (await isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }));
     const avatar = budAvatar
@@ -195,8 +180,10 @@ export function meteredReply(
       return await respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
         context,
-        (call, sources, activity) =>
-          executeTool(
+        async (call, sources, activity) => {
+          session.toolRan(call.tool);
+          await session.beforeTool();
+          return executeTool(
             call.tool,
             isExternalTool(call.tool),
             async context => {
@@ -264,114 +251,10 @@ export function meteredReply(
             sources,
             call,
             activity,
-          ),
-        async ({ step, inputBytes, maxOutputTokens, provider, model: providerModel }) => {
-          const priced =
-            chat.route.provider === provider && chat.route.model === providerModel ? chat.price : undefined;
-          if (!priced) throw new Error('conversation-model-unpriced');
-          const maxInputTokens = inputBytes + 4096;
-          if (maxInputTokens > priced.maxInputTokens) throw new Error('conversation-context-overflow');
-          const quote = {
-            modelId: priced.modelId,
-            pricingRevision: priced.pricingRevision,
-            rates: priced.rates,
-            maxInputTokens,
-            maxOutputTokens,
-            date: new Date().toISOString().slice(0, 10),
-          };
-          const id = `chat:${fence.turnId}:${fence.generation}:${fence.epoch}:${step}`;
-          let coordinatorAttempt: string | null = null;
-          const admitted = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-            await observeChatDetail('authorize', async () => {
-              await lockAuthorization(tx);
-              await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
-              await renewConversationReplyLease(tx, fence);
-              if ((mcp || readWorkspaceInventory) && !externalContext) {
-                await tx.client.query(
-                  `INSERT INTO ${qualified(tx.schema, 'tf_conversation_model_sources')} (turn_id,epoch,step,sources) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-                  [
-                    fence.turnId,
-                    fence.epoch,
-                    step,
-                    JSON.stringify(mergeSources([...retainedSources, ...catalogSources, ...inventorySources])),
-                  ],
-                );
-              }
-              await externalContext?.(tx, fence);
-            });
-            const reserved = reserveModelCost(quote);
-            const reservation = await reserveCoordinatorModel(tx, fence, {
-              id,
-              modelId: priced.modelId,
-              agentId: null,
-              activity: 'chat',
-              providerPicoUsd: reserved,
-              pricingRevision: quote.pricingRevision,
-            });
-            coordinatorAttempt = reservation.attemptId;
-            return reservation.admitted;
-          });
-          if (!admitted) throw new CreditAttemptAlreadyDispatched();
-          const started = performance.now();
-          return async usage => {
-            const settled = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-              if (coordinatorAttempt)
-                await recordCoordinatorModelTime(tx, id, coordinatorAttempt, performance.now() - started);
-              if (usage.kind !== 'known') return null;
-              const { kind, ...tokens } = usage;
-              const cost = calculateUsageCost({ ...quote, usage: { kind, tokens } });
-              if (cost.kind !== 'known') return null;
-              await settleCredits(tx, id, cost.providerPicoUsd);
-              return { tokens, providerPicoUsd: cost.providerPicoUsd };
-            });
-            if (settled)
-              void recordUsage({
-                workspaceId: fence.workspaceId,
-                flowId: fence.conversationId,
-                modelId: priced.modelId,
-                agentId: null,
-                activity: 'chat',
-                ...usageTokenCounts(settled.tokens),
-                providerPicoUsd: settled.providerPicoUsd,
-                at: new Date(),
-              });
-          };
+          );
         },
-        async sources => {
-          await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-            await lockAuthorization(tx);
-            const actor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
-            if (readWorkspaceInventory)
-              await requireDraftSources(
-                tx,
-                await turnRequester(tx, fence.conversationId, fence.turnId),
-                inventorySources,
-              );
-            await requireGitHubSources(
-              tx,
-              actor ?? (await turnRequester(tx, fence.conversationId, fence.turnId)),
-              sources,
-            );
-            await requireGoogleSources(
-              tx,
-              actor ?? (await turnRequester(tx, fence.conversationId, fence.turnId)),
-              sources,
-            );
-            await requireKnowledgeSources(
-              tx,
-              actor ?? (await turnRequester(tx, fence.conversationId, fence.turnId)),
-              sources,
-            );
-            await requireMcpSources(
-              tx,
-              actor ?? (await turnRequester(tx, fence.conversationId, fence.turnId)),
-              fence.conversationId,
-              sources,
-            );
-            if (actor) await requireResultSources(tx, actor, fence.conversationId, sources);
-            await externalContext?.(tx, fence, sources);
-          });
-        },
+        session.meter,
+        session.authorizeSources,
         false,
         timeZone,
         mcp && requester && !externalContext
@@ -382,27 +265,20 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              readPersonalMemory,
-              readWorkspaceInventory,
-              projectInstructions: project?.instructions,
-              sources: () => mergeSources([...catalogSources, ...inventorySources]),
-              catalog: async () => {
-                const catalog = await mcp(runtime).catalog(
-                  {
-                    workspaceId: fence.workspaceId,
-                    actor: requester,
-                    origin: {
-                      kind: 'private-chat',
-                      conversationId: fence.conversationId,
-                      turnId: fence.turnId,
-                      stepId: fence.turnId,
+              ...(fallback
+                ? {
+                    fallback: {
+                      route: { ...fallback.route, maxOutputTokens: fallback.price.maxOutputTokens },
+                      label: fallback.price.familyId,
                     },
-                  },
-                  describedHandles,
-                );
-                catalogSources = mergeSources([...catalogSources, ...catalog.sources]);
-                return catalog.model;
-              },
+                  }
+                : {}),
+              readPersonalMemory: personalMemory ?? readPersonalMemory,
+              readWorkspaceInventory: session.readWorkspaceInventory,
+              projectInstructions: project?.instructions,
+              sources: session.sources,
+              checkpoint: session.checkpoint,
+              ...(session.catalog ? { catalog: session.catalog } : {}),
             }
           : {
               ...(avatar ? { avatar } : {}),
@@ -411,15 +287,25 @@ export function meteredReply(
               earlierMessages,
               ...(answerText ? { answerText } : {}),
               progress,
-              readPersonalMemory: externalContext ? undefined : readPersonalMemory,
-              readWorkspaceInventory,
+              ...(fallback
+                ? {
+                    fallback: {
+                      route: { ...fallback.route, maxOutputTokens: fallback.price.maxOutputTokens },
+                      label: fallback.price.familyId,
+                    },
+                  }
+                : {}),
+              readPersonalMemory: externalContext ? undefined : (personalMemory ?? readPersonalMemory),
+              readWorkspaceInventory: session.readWorkspaceInventory,
               projectInstructions: project?.instructions,
-              sources: () => inventorySources,
+              sources: session.sources,
+              checkpoint: session.checkpoint,
             },
         retainedSources,
         sourceMessages,
       );
     } finally {
+      session.close();
       await observeChatDetail('publisher-close', () => publisher.close());
     }
   };
@@ -451,6 +337,7 @@ export function createConversationActivities(
       const parsed = replyWorkSchema.parse(work);
       if (mcp) await observeChatStage('recovery', () => mcp(runtime).recover(parsed.workspaceId));
       const execution = mcp ?? null;
+      const inventory = compactor ? undefined : conversationInventoryReads(runtime);
       const executor = createConversationExecutor(
         runtime,
         conversationReply ??
@@ -461,6 +348,7 @@ export function createConversationActivities(
             outputs: files,
             skillExecution,
             wakePlan,
+            inventory,
           }),
         undefined,
         slack?.resumeConversation,
@@ -484,7 +372,7 @@ export function createConversationActivities(
         files,
         googleFiles,
         chatSkills,
-        compactor ?? conversationCompactor(runtime, family => conversationModel(family)),
+        compactor ?? conversationCompactor(runtime, family => conversationModel(family), inventory),
         conversationPlanning,
       );
       return process(executor, parsed);

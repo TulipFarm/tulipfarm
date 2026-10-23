@@ -24,12 +24,28 @@ export async function respondToConversation(
   authorizeSources?: (sources: SourceDependency[]) => Promise<void>,
   _generateTitle = false,
   timeZone: string | null = null,
-  tools?: ToolInferenceContext & { sources: () => SourceDependency[] },
+  tools?: ToolInferenceContext & {
+    sources: () => SourceDependency[];
+    /** Saves a finished tool round with every source the reply has used so far; see `beforeRound`. */
+    checkpoint?: (sources: SourceDependency[]) => Promise<void>;
+  },
   retainedSources: SourceDependency[] = [],
   sourceMessages?: Parameters<typeof inferWithTools>[1],
 ): Promise<ConversationResult> {
   const sources: SourceDependency[] = [...retainedSources];
   let widenedWebSearch = false;
+  const checkpoint = tools?.checkpoint;
+  const context = tools && {
+    ...tools,
+    ...(checkpoint
+      ? {
+          beforeRound: async () => {
+            sources.push(...tools.sources());
+            await checkpoint(mergeSources(sources));
+          },
+        }
+      : {}),
+  };
   const answer = await inferWithTools(
     route,
     messages,
@@ -60,7 +76,7 @@ export async function respondToConversation(
     },
     false,
     timeZone,
-    tools,
+    context,
     sourceMessages,
   );
   const text = widenedWebSearch ? `${answer.text}\n\nSearch coverage was widened to the past seven days.` : answer.text;

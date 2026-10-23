@@ -40,7 +40,7 @@ try {
       restrictions: () => ({ allowedProviders: ['anthropic'], allowedLocations: ['test'] }),
       allowed: () => true,
       actualModelIds: () => [input.route.modelId],
-      legacyFamily: () => 'claude-opus',
+      defaultFamily: () => 'claude-opus',
       budgetPicoUsd: () => '10000000000000',
       health: createModelRouteHealth(registry, () => 'accounting-test'),
       infer: async () => {

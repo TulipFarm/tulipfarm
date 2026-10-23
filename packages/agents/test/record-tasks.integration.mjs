@@ -255,7 +255,7 @@ test('named-agent task records preserve exact protected approval with typed reco
       actualModelIds: () => [route.modelId],
       health: createModelRouteHealth(db.platform, () => 'record-task-test'),
       budgetPicoUsd: () => '10000000000000',
-      legacyFamily: () => 'claude-opus',
+      defaultFamily: () => 'claude-opus',
       infer: async (_resolution, input) => {
         const context = JSON.parse(input.prompt);
         let decision;
@@ -378,7 +378,7 @@ test('named-agent task records preserve exact protected approval with typed reco
         actualModelIds: () => [route.modelId],
         health: createModelRouteHealth(db.platform, () => 'record-task-test'),
         budgetPicoUsd: () => '10000000000000',
-        legacyFamily: () => 'claude-opus',
+        defaultFamily: () => 'claude-opus',
         infer: async (_resolution, input) => {
           const { results } = JSON.parse(input.prompt);
           contexts.push(results);
@@ -687,7 +687,7 @@ test('named-agent task records preserve exact protected approval with typed reco
         actualModelIds: () => [route.modelId],
         health: createModelRouteHealth(db.platform, () => 'record-task-test'),
         budgetPicoUsd: () => '10000000000000',
-        legacyFamily: () => 'claude-opus',
+        defaultFamily: () => 'claude-opus',
         infer: async (_resolution, input) => {
           offered.push(input.definition.tools);
           const results = input.prompt.startsWith('{') ? JSON.parse(input.prompt).results : [];

@@ -117,7 +117,6 @@ test(
         TEMPORAL_ADDRESS: `127.0.0.1:${port}`,
         TEMPORAL_TASK_QUEUE: taskQueue,
         ANTHROPIC_API_KEY: 'synthetic-model-key',
-        MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
       });
       const provider = await memberProviderFixture(config);
       const providerHttp = createServer(async (request, response) => {

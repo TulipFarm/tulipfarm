@@ -98,7 +98,7 @@ test(
         actualModelIds: () => [route.modelId],
         health: createModelRouteHealth(f.db.platform, () => 'builder-schedule'),
         budgetPicoUsd: () => '10000000000000',
-        legacyFamily: () => 'claude-opus',
+        defaultFamily: () => 'claude-opus',
         infer: async (_resolution, request) => {
           prompts.push(JSON.parse(request.prompt).history.map(message => [message.role, message.text]));
           return {

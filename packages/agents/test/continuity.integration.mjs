@@ -1254,7 +1254,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           config(async () => answer),
         );
         await assert.rejects(submit(unresolved), error => error.code === 'legacy-model-binding-required');
-        const explicit = createAgentChat(runtime, { ...config(async () => answer), legacyFamily: () => 'claude-opus' });
+        const explicit = createAgentChat(runtime, {
+          ...config(async () => answer),
+          defaultFamily: () => 'claude-opus',
+        });
         const id = await submit(explicit);
         await clearWait();
         await explicit.processTurn(workspaceId, id);
@@ -1265,7 +1268,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         const Fastify = require('fastify');
         const { registerAgents } = await import('../../../apps/api/src/agents.ts');
         const { authConfig } = await import('../../../apps/api/src/auth.ts');
-        const settings = { ...config(async () => unavailable), legacyFamily: () => 'claude-opus' };
+        const settings = { ...config(async () => unavailable), defaultFamily: () => 'claude-opus' };
         const chat = createAgentChat(runtime, settings);
         const id = await submit(chat);
         await exhaust(chat, id);
@@ -1318,7 +1321,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             lateDone();
             return answer;
           }),
-          legacyFamily: () => 'claude-opus',
+          defaultFamily: () => 'claude-opus',
         };
         const chat = createAgentChat(runtime, settings);
         const id = await submit(chat);

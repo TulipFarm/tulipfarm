@@ -51,10 +51,30 @@ import {
   safeErrorType,
   telemetryErrorCode,
 } from './error-codes.ts';
+import {
+  modelCallDiagnostics,
+  modelFallbackOutcomes,
+  providerMessageLimit,
+  safeProviderCode,
+  type ModelFallbackOutcome,
+} from './model-errors.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
 export { errorAttributes, telemetryErrorCode };
 export { withErrorStage, type ErrorStage } from './error-codes.ts';
+export {
+  fallbackEligibleClasses,
+  ModelCallError,
+  modelCallDiagnostics,
+  modelErrorClass,
+  modelErrorClasses,
+  modelFailureClasses,
+  modelFallbackOutcomes,
+  sanitizeProviderMessage,
+  type ModelCallDiagnostics,
+  type ModelErrorClass,
+  type ModelFallbackOutcome,
+} from './model-errors.ts';
 
 const scope = 'tulipfarm';
 const spanAttributes = new Set([
@@ -95,6 +115,15 @@ const spanAttributes = new Set([
   'chat.discovery.loaded',
   'chat.discovery.added',
   'chat.discovery.matched',
+  'chat.reply.tools',
+  'chat.reply.attempts',
+  'chat.reply.total_seconds',
+  'chat.reply.first_text_seconds',
+  'chat.reply.queue_seconds',
+  'chat.reply.model_seconds',
+  'chat.reply.tools_seconds',
+  'chat.reply.db_seconds',
+  'chat.reply.overhead_seconds',
   'provider',
   'status_class',
   'job',
@@ -112,7 +141,13 @@ const spanAttributes = new Set([
   'parser.rssBytes',
   'parser.outputBytes',
   'parser.diagnosticBytes',
+  'output_started',
+  'model_fallback',
+  'fallback.provider',
+  'fallback.model',
 ]);
+// Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
+const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message']);
 
 const dependencyEndpoints = [
   'github-repository',
@@ -132,8 +167,14 @@ const titleGenerationOutcomeValues = ['generated', 'skipped', 'failed', 'timeout
 export type TitleGenerationOutcome = (typeof titleGenerationOutcomeValues)[number];
 const titleGenerationOutcomes = new Set<string>(titleGenerationOutcomeValues);
 
-function safeAttribute(key: string, value: unknown): boolean {
+function safeAttribute(key: string, value: unknown, logLine = false): boolean {
+  if (logLine && logOnlyAttributes.has(key)) {
+    if (key === 'provider.error_code') return safeProviderCode(value) === value;
+    return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
+  }
   if (!spanAttributes.has(key)) return false;
+  if (key === 'output_started') return typeof value === 'boolean';
+  if (key === 'model_fallback') return (modelFallbackOutcomes as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
@@ -531,6 +572,13 @@ export function startTelemetry(build: BuildInfo) {
         },
       })),
       {
+        instrumentName: 'cloud_chat_reply_duration',
+        aggregation: {
+          type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
+          options: { boundaries: [...chatReplyBuckets] },
+        },
+      },
+      {
         instrumentName: 'cloud_chat_request_size',
         aggregation: {
           type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
@@ -732,7 +780,7 @@ export function createKnowledgeSyncMetrics() {
 }
 
 export function log(level: Level, category: Category, event: Event, attributes: Attributes = {}) {
-  const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value)));
+  const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value, true)));
   const active = trace.getSpan(context.active())?.spanContext();
   const fields = { ...dimensions, ...backgroundContext.getStore(), ...safe, category, commit: buildCommit };
   process.stdout.write(
@@ -1070,6 +1118,9 @@ export type ChatDetailPhase =
   | 'request'
   | 'resume'
   | 'requester'
+  | 'reply-start'
+  | 'checkpoint'
+  | 'credit-top-up'
   | 'publisher-close'
   | 'history'
   | 'render'
@@ -1103,12 +1154,244 @@ export type ChatDetailPhase =
   | 'storage-reset'
   | 'credit-account-lock'
   | 'credit-usage-lock';
-type ChatMeasurement = { counter: { value: number }; purpose: ChatModelPurpose | 'turn'; sequence?: number };
+type ChatReplyCategory = 'model' | 'tools' | 'db';
+type ChatReplySums = Record<ChatReplyCategory, number> & { tools_used: boolean };
+/** Final turn timing read from tf_conversation_turns after the transition that ended the reply. */
+export type ChatReplyFinal = {
+  status: 'completed' | 'failed' | 'blocked' | 'cancelled';
+  totalSeconds: number;
+  queueSeconds: number;
+  firstTextSeconds: number | null;
+  attempts: number;
+};
+type ChatReplyClock = {
+  key: string | undefined;
+  since: number;
+  active: Record<ChatReplyCategory, number>;
+  sums: ChatReplySums;
+  final?: ChatReplyFinal | undefined;
+};
+type ChatDatabase = { transactions: number; milliseconds: number };
+type ChatMeasurement = {
+  counter: { value: number };
+  database: ChatDatabase;
+  purpose: ChatModelPurpose | 'turn';
+  sequence?: number;
+  reply: ChatReplyClock;
+};
 const chatMeasurement = new AsyncLocalStorage<ChatMeasurement>();
+export const chatReplySegments = ['total', 'first_text', 'queue', 'model', 'tools', 'db', 'overhead'] as const;
+export const chatReplyBuckets = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 8, 12, 20, 30, 60, 120, 300] as const;
 
-export function withChatMeasurements<T>(call: () => Promise<T>): Promise<T> {
+/**
+ * Sums are a union of intervals: nested or concurrent phases of one category count once, and tool time excludes model
+ * calls made inside a tool, so `model` and `tools` never overlap. Database time may overlap tools.
+ */
+function tickChatReply(clock: ChatReplyClock) {
+  const now = performance.now();
+  const seconds = (now - clock.since) / 1000;
+  clock.since = now;
+  if (clock.active.model > 0) clock.sums.model += seconds;
+  else if (clock.active.tools > 0) clock.sums.tools += seconds;
+  if (clock.active.db > 0) clock.sums.db += seconds;
+}
+
+async function inChatReplyCategory<T>(category: ChatReplyCategory | undefined, call: () => Promise<T>) {
+  const clock = chatMeasurement.getStore()?.reply;
+  if (!clock || !category) return call();
+  tickChatReply(clock);
+  clock.active[category]++;
+  try {
+    return await call();
+  } finally {
+    tickChatReply(clock);
+    clock.active[category]--;
+  }
+}
+
+function chatReplyCategory(phase: ChatDetailPhase): ChatReplyCategory | undefined {
+  if (phase === 'provider') return 'model';
+  if (
+    phase === 'reserve' ||
+    phase === 'settle' ||
+    phase === 'reply-start' ||
+    phase === 'checkpoint' ||
+    phase.startsWith('storage-') ||
+    phase.startsWith('credit-')
+  )
+    return 'db';
+  return undefined;
+}
+
+// A retried attempt usually lands on the same worker; carry its sums so the final record covers every attempt.
+const chatReplyCarry = new Map<string, ChatReplySums & { at: number }>();
+const chatReplyCarryLimit = 1000;
+const chatReplyCarryMs = 60 * 60 * 1000;
+
+function carryChatReply(key: string, sums: ChatReplySums) {
+  const now = Date.now();
+  for (const [stored, value] of chatReplyCarry) {
+    if (now - value.at <= chatReplyCarryMs && chatReplyCarry.size < chatReplyCarryLimit) break;
+    chatReplyCarry.delete(stored);
+  }
+  chatReplyCarry.delete(key);
+  chatReplyCarry.set(key, { ...sums, at: now });
+}
+
+function finishChatReply(clock: ChatReplyClock) {
+  tickChatReply(clock);
+  const carried = clock.key === undefined ? undefined : chatReplyCarry.get(clock.key);
+  const sums: ChatReplySums = {
+    model: clock.sums.model + (carried?.model ?? 0),
+    tools: clock.sums.tools + (carried?.tools ?? 0),
+    db: clock.sums.db + (carried?.db ?? 0),
+    tools_used: clock.sums.tools_used || Boolean(carried?.tools_used),
+  };
+  if (!clock.final) {
+    if (clock.key !== undefined && (sums.model || sums.tools || sums.db || sums.tools_used))
+      carryChatReply(clock.key, sums);
+    return;
+  }
+  if (clock.key !== undefined) chatReplyCarry.delete(clock.key);
+  const { status, totalSeconds: total, queueSeconds: queue, firstTextSeconds, attempts } = clock.final;
+  const outcome = status === 'completed' ? 'success' : status === 'cancelled' ? 'cancelled' : 'failed';
+  const tools = sums.tools_used ? 'yes' : 'no';
+  const values: Partial<Record<(typeof chatReplySegments)[number], number>> = {
+    total,
+    ...(firstTextSeconds === null ? {} : { first_text: firstTextSeconds }),
+    queue,
+    model: sums.model,
+    tools: sums.tools,
+    db: sums.db,
+    overhead: Math.max(0, total - queue - sums.model - sums.tools),
+  };
+  const histogram = metrics.getMeter(scope).createHistogram('cloud_chat_reply_duration', {
+    unit: 's',
+    description: 'Chat reply time by segment, recorded once per reply at its final state',
+    advice: { explicitBucketBoundaries: [...chatReplyBuckets] },
+  });
+  const fields: Attributes = {};
+  for (const segment of chatReplySegments) {
+    const value = values[segment];
+    if (value === undefined) continue;
+    histogram.record(value, { ...dimensions, segment, outcome, tools });
+    fields[`chat.reply.${segment}_seconds`] = value;
+  }
+  log('info', 'activity', 'call_completed', {
+    operation: 'chat.reply.summary',
+    outcome,
+    'chat.reply.tools': tools,
+    'chat.reply.attempts': attempts,
+    ...fields,
+  });
+}
+
+/**
+ * Measures one reply attempt and records its database transaction count and time when it ends. `reply` is an in-process key, such as the turn ID, that joins retried attempts; it is
+ * never exported. The reply duration is recorded only after `noteChatReplyFinal`.
+ */
+export async function withChatMeasurements<T>(call: () => Promise<T>, reply?: string): Promise<T> {
   if (chatMeasurement.getStore()) return call();
-  return chatMeasurement.run({ counter: { value: 0 }, purpose: 'turn' }, call);
+  const clock: ChatReplyClock = {
+    key: reply,
+    since: performance.now(),
+    active: { model: 0, tools: 0, db: 0 },
+    sums: { model: 0, tools: 0, db: 0, tools_used: false },
+  };
+  const database: ChatDatabase = { transactions: 0, milliseconds: 0 };
+  return chatMeasurement.run({ counter: { value: 0 }, database, purpose: 'turn', reply: clock }, async () => {
+    try {
+      return await call();
+    } finally {
+      recordChatDatabase(database);
+      finishChatReply(clock);
+    }
+  });
+}
+
+export function chatReplyMeasured() {
+  return chatMeasurement.getStore() !== undefined;
+}
+
+/** Call inside the transaction that moved the turn to a final state; `guardChatReplyFinal` drops it on rollback. */
+export function noteChatReplyFinal(final: ChatReplyFinal) {
+  const state = chatMeasurement.getStore();
+  if (state) state.reply.final = final;
+}
+
+/** Timing columns of a finished tf_conversation_turns row, as written by its timing trigger. */
+export type ChatReplyTiming = {
+  status: ChatReplyFinal['status'];
+  startedAt: Date;
+  claimedAt: Date | null;
+  finishedAt: Date;
+  firstTextSeconds: number | null;
+  humanWaitSeconds: number;
+  externalWaitSeconds: number;
+  inactiveSeconds: number;
+  attempts: number;
+};
+
+/**
+ * Total runs from the saved user message to the final state, minus time waiting on a person (approvals, questions),
+ * on Slack or MCP, and while inactive, so `total` and `overhead` only hold time the reply could make progress.
+ */
+export function chatReplyFinal(timing: ChatReplyTiming): ChatReplyFinal {
+  const wall = (timing.finishedAt.getTime() - timing.startedAt.getTime()) / 1000;
+  const waits = timing.humanWaitSeconds + timing.externalWaitSeconds + timing.inactiveSeconds;
+  const totalSeconds = Math.max(0, wall - waits);
+  const queued = timing.claimedAt ? (timing.claimedAt.getTime() - timing.startedAt.getTime()) / 1000 : totalSeconds;
+  return {
+    status: timing.status,
+    totalSeconds,
+    queueSeconds: Math.min(totalSeconds, Math.max(0, queued)),
+    firstTextSeconds: timing.firstTextSeconds,
+    attempts: timing.attempts,
+  };
+}
+
+export async function guardChatReplyFinal<T>(call: () => Promise<T>): Promise<T> {
+  const state = chatMeasurement.getStore();
+  if (!state) return call();
+  const before = state.reply.final;
+  try {
+    return await call();
+  } catch (error) {
+    state.reply.final = before;
+    throw error;
+  }
+}
+
+/** Real tool execution in a reply. UI-only steps such as `present.choice` do not use it. */
+export function observeChatTool<T>(call: () => Promise<T>): Promise<T> {
+  const clock = chatMeasurement.getStore()?.reply;
+  if (clock) clock.sums.tools_used = true;
+  return inChatReplyCategory('tools', call);
+}
+
+function recordChatDatabase(database: ChatDatabase) {
+  if (!database.transactions) return;
+  const meter = metrics.getMeter(scope);
+  meter.createHistogram('cloud_chat_db_transactions').record(database.transactions, dimensions);
+  meter.createHistogram('cloud_chat_db_duration', { unit: 's' }).record(database.milliseconds / 1000, dimensions);
+  log('info', 'activity', 'call_completed', {
+    operation: 'chat.database',
+    'db.transactions': database.transactions,
+    duration_ms: database.milliseconds,
+  });
+}
+
+/** Counts one database transaction, including its wait for a connection, toward the current reply's totals. */
+export async function observeChatTransaction<T>(call: () => Promise<T>): Promise<T> {
+  const state = chatMeasurement.getStore();
+  if (!state) return call();
+  const start = performance.now();
+  try {
+    return await call();
+  } finally {
+    state.database.transactions++;
+    state.database.milliseconds += performance.now() - start;
+  }
 }
 
 function chatDetailAttributes(state: ChatMeasurement): Attributes {
@@ -1144,7 +1427,7 @@ export async function observeChatDetail<T>(phase: ChatDetailPhase, call: () => P
       const start = performance.now();
       let outcome = 'success';
       try {
-        return await call();
+        return await inChatReplyCategory(chatReplyCategory(phase), call);
       } catch (error) {
         outcome = 'error';
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -1168,6 +1451,11 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
     },
     span => {
       const start = performance.now();
+      const category = chatReplyCategory(phase);
+      if (category) {
+        tickChatReply(state.reply);
+        state.reply.active[category]++;
+      }
       let outcome = 'success';
       try {
         return call();
@@ -1176,6 +1464,10 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
         span.setStatus({ code: SpanStatusCode.ERROR });
         throw error;
       } finally {
+        if (category) {
+          tickChatReply(state.reply);
+          state.reply.active[category]--;
+        }
         span.setAttribute('outcome', outcome);
         finishChatDetail(phase, state, start, outcome);
         span.end();
@@ -1187,20 +1479,24 @@ export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T):
 export function withChatModelRequest<T>(purpose: ChatModelPurpose, call: () => Promise<T>): Promise<T> {
   const state = chatMeasurement.getStore();
   if (!state) return call();
-  return chatMeasurement.run({ counter: state.counter, purpose, sequence: ++state.counter.value }, async () => {
-    let outcome = 'success';
-    try {
-      return await observeChatDetail('request', call);
-    } catch (error) {
-      outcome = 'error';
-      throw error;
-    } finally {
-      metrics
-        .getMeter(scope)
-        .createCounter('cloud_chat_model_requests')
-        .add(1, { ...dimensions, purpose, outcome });
-    }
-  });
+  const sequence = ++state.counter.value;
+  return chatMeasurement.run(
+    { counter: state.counter, database: state.database, purpose, sequence, reply: state.reply },
+    async () => {
+      let outcome = 'success';
+      try {
+        return await observeChatDetail('request', call);
+      } catch (error) {
+        outcome = 'error';
+        throw error;
+      } finally {
+        metrics
+          .getMeter(scope)
+          .createCounter('cloud_chat_model_requests')
+          .add(1, { ...dimensions, purpose, outcome });
+      }
+    },
+  );
 }
 
 const chatRequestComponents = [
@@ -1228,6 +1524,16 @@ export function recordChatRequestSizes(sizes: Partial<Record<(typeof chatRequest
       .record(bytes, { ...dimensions, purpose: state.purpose, component });
   }
   log('info', 'inference', 'call_completed', { operation: 'chat.request-size', ...attributes });
+}
+
+export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error';
+/** One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran. */
+export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_completion_checks')
+    .add(1, { ...dimensions, outcome });
+  log('info', 'inference', 'call_completed', { operation: 'chat.completion-check', outcome });
 }
 
 export function recordChatDiscovery(counts: { offered: number; loaded: number; added: number; matched: number }) {
@@ -1571,6 +1877,34 @@ export async function featureFlagSnapshot(
   return Object.fromEntries(featureFlagNames.map((flag, index) => [flag, values[index]])) as FeatureFlagSnapshot;
 }
 
+/** Counts and logs what an optional fallback model did for one failed primary model call. */
+export function recordModelFallback(
+  outcome: ModelFallbackOutcome,
+  primary: { provider: string; model: string; errorClass: string },
+  fallback?: { provider: string; model: string },
+) {
+  const labels = {
+    ...dimensions,
+    'gen_ai.provider.name': primary.provider,
+    'gen_ai.request.model': primary.model,
+    ...(telemetryErrorCode(primary.errorClass) ? { 'error.type': primary.errorClass } : {}),
+    model_fallback: outcome,
+  };
+  try {
+    metrics
+      .getMeter(scope)
+      .createCounter('gen_ai_model_fallback', { description: 'Fallback decisions after a failed model call' })
+      .add(1, labels);
+  } catch {
+    /* Telemetry must not change the reply. */
+  }
+  log(outcome === 'used' ? 'warn' : outcome === 'failed' ? 'error' : 'info', 'inference', 'call_completed', {
+    operation: 'chat.model-fallback',
+    ...labels,
+    ...(fallback ? { 'fallback.provider': fallback.provider, 'fallback.model': fallback.model } : {}),
+  });
+}
+
 export function withTelemetryContext<T>(parent: Context, call: () => T): T {
   return context.with(parent, call);
 }
@@ -1580,7 +1914,8 @@ export async function observeInference<T>(
   call: (report: {
     firstToken: () => void;
     usage: (input: number, output: number) => void;
-    error: () => void;
+    /** Marks the call failed; pass the failure so its classification and provider details are logged. */
+    error: (error?: unknown) => void;
   }) => Promise<T>,
 ): Promise<T> {
   const attributes = {
@@ -1599,13 +1934,37 @@ export async function observeInference<T>(
         let firstToken = false;
         let usage: { input: number; output: number } | undefined;
         const meter = metrics.getMeter(scope);
+        // A stream can report an error before the call throws its classified failure, so the failure is logged once, at the end.
+        let failure: unknown;
         const fail = (error?: unknown) => {
-          if (outcome === 'error') return;
           outcome = 'error';
-          const details = error === undefined ? {} : errorAttributes(error);
-          span.setAttributes(details);
+          if (error !== undefined && failure === undefined) failure = error;
+        };
+        let errorType: string | undefined;
+        const finishFailure = () => {
+          if (outcome !== 'error') return;
+          const details = failure === undefined ? { 'error.type': 'unknown' } : errorAttributes(failure);
+          const diagnostics = modelCallDiagnostics(failure);
+          const spanDetails: Attributes = {
+            ...details,
+            ...(diagnostics
+              ? {
+                  'error.code': diagnostics.errorClass,
+                  'error.type': diagnostics.errorClass,
+                  output_started: diagnostics.outputStarted,
+                  ...(diagnostics.status === undefined ? {} : { 'http.response.status_code': diagnostics.status }),
+                }
+              : {}),
+          };
+          errorType = String(spanDetails['error.code'] ?? spanDetails['error.type']);
+          span.setAttributes(spanDetails);
           span.setStatus({ code: SpanStatusCode.ERROR });
-          log('error', 'inference', 'call_failed', { ...attributes, ...details });
+          log('error', 'inference', 'call_failed', {
+            ...attributes,
+            ...spanDetails,
+            ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
+            ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
+          });
         };
         try {
           return await call({
@@ -1627,7 +1986,13 @@ export async function observeInference<T>(
           throw error;
         } finally {
           const seconds = (performance.now() - start) / 1000;
-          const labels = { ...dimensions, ...attributes, outcome };
+          finishFailure();
+          const labels = {
+            ...dimensions,
+            ...attributes,
+            outcome,
+            ...(errorType && telemetryErrorCode(errorType) ? { 'error.type': errorType } : {}),
+          };
           callMetrics('inference', model.operation, outcome, seconds, attributes);
           meter.createHistogram('gen_ai_client_operation_duration', { unit: 's' }).record(seconds, labels);
           if (usage) {

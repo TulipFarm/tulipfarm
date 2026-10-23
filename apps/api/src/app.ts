@@ -96,7 +96,7 @@ export function buildApp(
       });
       registerUserVisits(v1, auth, authConfig().webOrigin);
       const models = createModelConfiguration({ pool: auth.pool });
-      if (options.agentModel === undefined && models.modelContinuity) v1.addHook('onReady', models.registerModelBundle);
+      if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
       registerAbuseProtection(v1, auth.auth);
       registerPublicGuide(v1, auth);
       v1.register(async business => {

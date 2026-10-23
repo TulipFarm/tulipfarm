@@ -5,6 +5,10 @@ import Fastify from 'fastify';
 import { registerConversations } from '../src/conversations.ts';
 import { registerAbuseHooks } from '../src/abuse.ts';
 import { AccessDenied } from '@tulipfarm/access';
+import { useModelCatalog } from '../../worker/test/model-catalog-fixture.mjs';
+
+// Messages without a model use the shipped catalog's default, served with this key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
 
 test('private chat mutation budgets apply to verified users before persistence', async t => {
   const app = Fastify();
@@ -44,6 +48,29 @@ test('private chat mutation budgets apply to verified users before persistence',
     ['conversation-control', 'verified-user'],
     ['conversation-control', 'verified-user'],
   ]);
+});
+
+test('a message without a model replies on the model catalog default', async t => {
+  t.after(useModelCatalog(['claude-sonnet', 'claude-haiku'], 'claude-haiku'));
+  const app = Fastify();
+  const sent = [];
+  const auth = { api: { getSession: async () => ({ user: { id: 'verified-user' } }) } };
+  const service = {
+    send: async (_workspaceId, _userId, _chatId, input) => {
+      sent.push(input.model);
+      return { messageId: input.messageId, turnId: randomUUID(), sequence: 1 };
+    },
+  };
+  registerConversations(app, { auth, service });
+  t.after(() => app.close());
+  const response = await app.inject({
+    method: 'PUT',
+    url: `/workspaces/${randomUUID()}/conversations/${randomUUID()}/messages/${randomUUID()}`,
+    payload: { commandId: randomUUID(), parts: [{ kind: 'text', text: 'Hello' }] },
+    headers: { origin: 'http://localhost:5173' },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(sent, ['claude-haiku']);
 });
 
 test('bounded history reads reauthorize every page before validating reuse, redaction, deletion and errors', async t => {

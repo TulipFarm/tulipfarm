@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { defaultChatModelFamilyId, type ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
+import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { Button } from '@tulipfarm/sprout/button';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { authClient } from '@/lib/auth';
@@ -44,9 +44,7 @@ export function useChatModels(
     const savedFamily = listed(saved);
     const first =
       (savedFamily?.unavailableReason === 'model-family-paused' ? undefined : savedFamily) ??
-      state.data.families.find(
-        family => family.id === (state.data.defaultChatFamilyId ?? defaultChatModelFamilyId) && family.available,
-      ) ??
+      state.data.families.find(family => family.id === state.data.defaultChatFamilyId && family.available) ??
       state.data.families.find(family => family.available);
     setSelected(current => (current && listed(current.id) ? current : first ? composerModel(first) : null));
   }, [state, user.lastModelFamilyId]);
@@ -54,6 +52,9 @@ export function useChatModels(
   const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;
   const ready = state.kind === 'ready';
   const choices = families.map(composerModel).sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled));
+  // The operator removed the person's saved model, so new messages use another one until they choose.
+  const savedRemoved =
+    ready && !!user.lastModelFamilyId && !families.some(family => family.id === user.lastModelFamilyId);
   async function savePreference(id: string) {
     if (saving.current) return;
     saving.current = true;
@@ -75,6 +76,7 @@ export function useChatModels(
       if (selected) void savePreference(selected.id);
     },
     choices: ready && preferenceSave !== 'saving' ? choices : [],
+    replacedModel: savedRemoved && model && !model.disabled ? model.label : null,
     usable: ready && !!current?.available,
     select: (id: string) => {
       const family = families.find(item => item.id === id && item.available);
@@ -118,8 +120,17 @@ export function ChatModelStatus({
             : state.kind === 'ready' && !state.data.families.some(item => item.available)
               ? 'No models are available. Ask a workspace admin.'
               : null;
+  const replaced =
+    !message && catalog.replacedModel
+      ? `Your last model is no longer available. New messages use ${catalog.replacedModel}.`
+      : null;
   return (
     <>
+      {replaced && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {replaced}
+        </p>
+      )}
       {message && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <p role={failed ? 'alert' : 'status'}>{message}</p>

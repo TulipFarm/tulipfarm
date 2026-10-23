@@ -5,11 +5,20 @@ import { registerModelCatalog } from '../src/model-catalog.ts';
 import { modelCatalogSchema } from '../../../packages/config/src/model-catalog.ts';
 import {
   initialModelMapping,
-  modelFamilies,
+  legacyModels,
   resolveModelFamily,
 } from '../../../packages/config/src/model-continuity.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import modelPricing from '../../../packages/config/src/model-pricing.json' with { type: 'json' };
+
+// Every provider key is set, so the shipped catalog serves all of its models.
+Object.assign(process.env, {
+  ANTHROPIC_API_KEY: 'k',
+  OPENAI_API_KEY: 'k',
+  XAI_API_KEY: 'k',
+  GEMINI_API_KEY: 'k',
+  AZURE_FOUNDRY_API_KEY: 'k',
+  AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
+});
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const otherWorkspaceId = '22222222-2222-4222-8222-222222222222';
@@ -17,8 +26,8 @@ const membershipId = '33333333-3333-4333-8333-333333333333';
 const userId = 'signed-in-user';
 
 function trustedResolution({ modelFamilyId }, modelId, mappingRevision = initialModelMapping.revision) {
-  const family = modelFamilies.find(candidate => candidate.id === modelFamilyId);
-  const model = modelPricing.models.find(candidate => candidate.id === (modelId ?? family.currentModelId));
+  const family = initialModelMapping.families.find(candidate => candidate.id === modelFamilyId);
+  const model = legacyModels.find(candidate => candidate.id === (modelId ?? family.modelId));
   return resolveModelFamily({
     familyId: modelFamilyId,
     mapping: {
@@ -38,8 +47,8 @@ function trustedResolution({ modelFamilyId }, modelId, mappingRevision = initial
         adapterVersion: 1,
         qualification: 'local-fixture',
         lifecycle: 'current',
-        maxInputTokens: model.metadata.max_input_tokens,
-        maxOutputTokens: model.metadata.max_output_tokens,
+        maxInputTokens: model.maxInputTokens,
+        maxOutputTokens: model.maxOutputTokens,
         boundedDecision: true,
       },
     ],
@@ -548,7 +557,7 @@ test('a single provider credential makes exactly that provider’s families avai
       provider,
     );
     for (const family of available) {
-      const model = modelPricing.models.find(candidate => candidate.id === family.currentVersion);
+      const model = legacyModels.find(candidate => candidate.id === family.currentVersion);
       assert.equal(family.provider, provider, family.id);
       assert.equal(model.provider, provider, family.id);
       const base = model.rates.find(rate => rate.promptTokensAbove === null);

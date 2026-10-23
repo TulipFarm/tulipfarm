@@ -16,7 +16,6 @@ export async function githubChatFixture(options) {
   const f = await githubFixture(options);
   const env = {
     ANTHROPIC_API_KEY: 'synthetic-model-key',
-    MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
     INTEGRATION_CREDENTIAL_KEY_ID: 'test',
     INTEGRATION_CREDENTIAL_KEY: f.keyring.keys.test,
     GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,

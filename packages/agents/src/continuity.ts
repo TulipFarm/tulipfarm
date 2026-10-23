@@ -42,7 +42,8 @@ export type ModelContinuity = {
   health: ModelRouteHealth;
   infer: (resolution: ResolvedModel, input: Input, timeoutMs: number, signal: AbortSignal) => Promise<InferenceResult>;
   budgetPicoUsd: (workspaceId: string) => string | Promise<string>;
-  legacyFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
+  /** The family of an agent that has none, or whose family the server no longer serves: the catalog default. */
+  defaultFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
   /** True for a family the operator paused: closed to new agents and chats, still served for existing ones. */
   paused?: (familyId: string) => boolean;
 };
@@ -112,14 +113,18 @@ export async function admitGeneration(
     if (error instanceof CreditsExhausted) throw new AgentError('credits-exhausted', 409);
     throw error;
   }
-  const requested = family ?? config.legacyFamily?.(workspaceId, agentId, revision);
+  const active = await config.activeBundle(workspaceId);
+  const bundle = modelBundleSchema.parse(active.bundle);
+  const activationRevision = z.number().int().nonnegative().parse(active.activationRevision);
+  // An agent on a family the server no longer serves moves to the default family.
+  const requested =
+    family !== undefined && bundle.mapping.families.some(item => item.id === family)
+      ? family
+      : (config.defaultFamily?.(workspaceId, agentId, revision) ?? family);
   if (!requested) throw new AgentError('legacy-model-binding-required', 503);
   const availability = await modelAvailability(tx);
   let primaryAvailability = availability.find(row => row.familyId === requested);
   if (!primaryAvailability?.enabled) throw new AgentError('workspace-disabled', 400);
-  const active = await config.activeBundle(workspaceId);
-  const bundle = modelBundleSchema.parse(active.bundle);
-  const activationRevision = z.number().int().nonnegative().parse(active.activationRevision);
   const restrictions = await config.restrictions(workspaceId);
   const resolve = (familyId: string) => resolveModelBundle({ bundle, familyId, ...restrictions });
   let primary = resolve(requested);

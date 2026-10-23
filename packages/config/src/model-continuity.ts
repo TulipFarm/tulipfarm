@@ -1,23 +1,7 @@
 import { z } from 'zod';
-import pricing from './model-pricing.json' with { type: 'json' };
-import families from './model-families.json' with { type: 'json' };
+import legacy from './legacy-models-2026-10-19.json' with { type: 'json' };
 import { modelFamilyIdSchema, modelIdentifierSchema as identifier } from './model-identifier.ts';
-import {
-  buildModelCatalog,
-  ModelCatalogError,
-  modelCatalogRevision,
-  readModelCatalogSource,
-} from './model-catalog-source.ts';
-import {
-  modelApiSupported,
-  modelCapabilitiesSchema,
-  modelProviderSchema,
-  resolveModelCapabilities,
-  type ModelCapabilityOverrides,
-  type ModelProvider,
-} from './model-capabilities.ts';
-import { modelRolesSchema } from './model-roles.ts';
-import { modelEndpointShapeProblem } from './model-endpoints.ts';
+import { modelProviderSchema } from './model-capabilities.ts';
 
 export { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
@@ -39,190 +23,7 @@ export const modelPriceSchema = z
     usdPerMillionTokens: ratesSchema,
   })
   .readonly();
-
-const tokenLimit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-export const modelFamilyEntrySchema = z
-  .strictObject({
-    id: modelFamilyIdSchema,
-    name: z.string().min(1),
-    vendor: identifier,
-    currentModelId: identifier,
-    modelIds: z.array(identifier).min(1).readonly(),
-    capabilities: modelCapabilitiesSchema
-      .optional()
-      .describe('Overrides of the provider default capabilities for every model in the family'),
-    pricing: z
-      .literal('unmetered')
-      .optional()
-      .describe('Unmetered families record tokens at zero cost; their models declare no rates'),
-    roles: modelRolesSchema.optional(),
-  })
-  .readonly();
-export const modelPricingEntrySchema = z
-  .strictObject({
-    id: identifier,
-    name: z.string().min(1),
-    provider: modelProviderSchema,
-    providerModelId: z.string().min(1).max(200),
-    metadataKey: z.string().min(1).optional(),
-    metadata: z.looseObject({ max_input_tokens: tokenLimit, max_output_tokens: tokenLimit }).readonly(),
-    pricingSource: z.string().min(1).optional(),
-    pricingScope: z.string().min(1).optional(),
-    notes: z.array(z.string()).readonly().optional(),
-    rates: z
-      .array(modelPriceSchema)
-      .min(1)
-      .readonly()
-      .optional()
-      .describe('Required unless the model belongs to a family with `pricing: "unmetered"`'),
-    endpoint: z
-      .string()
-      .min(1)
-      .max(2048)
-      .optional()
-      .describe(
-        'OpenAI-compatible API base URL, required for and only for provider `openai-compatible`; its host must be in MODEL_ENDPOINT_HOSTS',
-      ),
-    credentialEnv: z
-      .string()
-      .regex(/^[A-Z][A-Z0-9_]{0,90}_API_KEY$/)
-      .refine(name => !/^(VITE_|NEXT_PUBLIC_|PUBLIC_)/.test(name), 'must not be a public variable')
-      .optional()
-      .describe(
-        'Environment variable holding the API key, required for and only for provider `openai-compatible`; must end in _API_KEY',
-      ),
-  })
-  .superRefine((model, ctx) => {
-    const compatible = model.provider === 'openai-compatible';
-    for (const field of ['endpoint', 'credentialEnv'] as const)
-      if ((model[field] !== undefined) !== compatible)
-        ctx.addIssue({
-          code: 'custom',
-          path: [field],
-          message: compatible
-            ? `Required for provider openai-compatible`
-            : 'Only provider openai-compatible declares an endpoint and credentialEnv',
-        });
-    const problem = model.endpoint === undefined ? null : modelEndpointShapeProblem(model.endpoint);
-    if (problem) ctx.addIssue({ code: 'custom', path: ['endpoint'], message: `Endpoint ${problem}` });
-    if (model.rates && !model.rates.some(rate => rate.promptTokensAbove === null))
-      ctx.addIssue({ code: 'custom', path: ['rates'], message: 'Missing base price' });
-    for (const [index, rate] of (model.rates ?? []).entries()) {
-      if (rate.validFrom && rate.validUntilExclusive && rate.validFrom >= rate.validUntilExclusive)
-        ctx.addIssue({ code: 'custom', path: ['rates', index], message: 'Invalid price interval' });
-      for (const [category, amount] of Object.entries(rate.usdPerMillionTokens))
-        if (!/^\d+(\.\d{1,6})?$/.test(String(amount)))
-          ctx.addIssue({
-            code: 'custom',
-            path: ['rates', index, 'usdPerMillionTokens', category],
-            message: 'Unsupported price precision',
-          });
-    }
-  })
-  .readonly();
-type ModelPrice = z.infer<typeof modelPriceSchema>;
-/** A model of the effective catalog. Models of unmetered families carry zero rates. */
-export type ModelPricingEntry = Omit<z.infer<typeof modelPricingEntrySchema>, 'rates'> & {
-  readonly rates: readonly ModelPrice[];
-};
-
-// Every token category at zero, so metering records usage without ever failing on an unpriced category.
-const unmeteredRates: readonly ModelPrice[] = Object.freeze([
-  modelPriceSchema.parse({
-    validFrom: null,
-    validUntilExclusive: null,
-    promptTokensAbove: null,
-    usdPerMillionTokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
-  }),
-]);
-
-const shippedCatalog = {
-  families: z.array(modelFamilyEntrySchema).parse(families),
-  models: z.array(modelPricingEntrySchema).parse(pricing.models),
-};
-const catalogSource = readModelCatalogSource(process.env);
-const effectiveCatalog = buildModelCatalog({
-  shipped: shippedCatalog,
-  source: catalogSource,
-  schemas: { family: modelFamilyEntrySchema, model: modelPricingEntrySchema },
-});
-for (const family of effectiveCatalog.families)
-  for (const model of effectiveCatalog.models.filter(item => family.modelIds.includes(item.id))) {
-    const name = `family ${JSON.stringify(family.id)}: model ${JSON.stringify(model.id)}`;
-    if (family.pricing === 'unmetered' && model.rates)
-      throw new ModelCatalogError(
-        catalogSource?.label ?? 'shipped',
-        `${name} has rates but the family is unmetered; remove the rates or the family pricing`,
-      );
-    if (family.pricing !== 'unmetered' && !model.rates)
-      throw new ModelCatalogError(
-        catalogSource?.label ?? 'shipped',
-        `${name} has no rates; add rates or set "pricing": "unmetered" on the family`,
-      );
-  }
-/** Concrete models of the effective catalog: the shipped catalog merged with MODEL_CATALOG_FILE or MODEL_CATALOG. */
-export const modelCatalogModels: readonly ModelPricingEntry[] = Object.freeze(
-  effectiveCatalog.models.map(model =>
-    model.rates ? { ...model, rates: model.rates } : { ...model, rates: unmeteredRates },
-  ),
-);
-const priceSnapshot = modelCatalogModels;
-
-export const modelFamilyCatalogSchema = z
-  .array(modelFamilyEntrySchema)
-  .min(1)
-  .superRefine((catalog, ctx) => {
-    const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
-    if (new Set(catalog.map(family => family.id)).size !== catalog.length) fail('Duplicate model family');
-    const modelIds = catalog.flatMap(family => family.modelIds);
-    if (new Set(modelIds).size !== modelIds.length) fail('Duplicate concrete model membership');
-    if (
-      modelIds.length !== priceSnapshot.length ||
-      priceSnapshot.some(model => !modelIds.includes(model.id)) ||
-      modelIds.some(id => !priceSnapshot.some(model => model.id === id))
-    )
-      fail('Catalog membership must cover the price snapshot');
-    for (const family of catalog) {
-      if (!family.modelIds.includes(family.currentModelId)) fail('Current model must belong to its family');
-      if (
-        priceSnapshot.some(
-          model =>
-            family.modelIds.includes(model.id) &&
-            !modelApiSupported(modelProviderSchema.parse(model.provider), family.capabilities?.api),
-        )
-      )
-        fail(`Model API must be supported by its provider (family "${family.id}")`);
-    }
-  })
-  .readonly();
-export const modelFamilies = modelFamilyCatalogSchema.parse(effectiveCatalog.families);
-export const selectableModelFamilies = modelFamilies;
-
-/**
- * The model a family runs on each provider that serves it: `currentModelId` on its own provider, and on every other
- * provider the first of `modelIds` that provider serves. The first entry is the provider the catalog prefers.
- */
-export function familyProviderModels(familyId: string): readonly { provider: ModelProvider; modelId: string }[] {
-  const family = modelFamilies.find(item => item.id === familyId);
-  if (!family) return [];
-  const byProvider = new Map<ModelProvider, string>();
-  for (const modelId of [family.currentModelId, ...family.modelIds]) {
-    const model = priceSnapshot.find(item => item.id === modelId);
-    if (model && !byProvider.has(model.provider)) byProvider.set(model.provider, model.id);
-  }
-  return [...byProvider].map(([provider, modelId]) => ({ provider, modelId }));
-}
-
-/** Capabilities of a provider model ID (deployment): provider defaults, its catalog family, then `overrides`. */
-export function modelCapabilities(
-  provider: ModelProvider,
-  providerModelId: string,
-  ...overrides: readonly (ModelCapabilityOverrides | undefined)[]
-) {
-  const model = priceSnapshot.find(item => item.provider === provider && item.providerModelId === providerModelId);
-  const family = model && modelFamilies.find(item => item.modelIds.includes(model.id));
-  return resolveModelCapabilities(provider, family?.capabilities, ...overrides);
-}
+export type ModelPrice = z.infer<typeof modelPriceSchema>;
 
 export const modelMappingSchema = z
   .strictObject({
@@ -239,18 +40,29 @@ export const modelMappingSchema = z
       ctx.addIssue({ code: 'custom', message: 'Duplicate model family' });
   })
   .readonly();
-// The shipped catalog keeps its published revisions; operator catalogs get content-derived ones.
-export const initialModelMapping = modelMappingSchema.parse({
-  format: 1,
-  revision: modelCatalogRevision('families', 'families-2026-10-19.1', shippedCatalog.families, modelFamilies),
-  pricingRevision: modelCatalogRevision(
-    'prices',
-    'prices-2026-10-19.1',
-    shippedCatalog.models,
-    effectiveCatalog.models,
-  ),
-  families: modelFamilies.map(family => ({ id: family.id, modelId: family.currentModelId })),
-});
+
+const tokenLimit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const legacyModelSchema = z
+  .strictObject({
+    id: identifier,
+    familyId: modelFamilyIdSchema,
+    vendor: identifier,
+    provider: modelProviderSchema,
+    providerModelId: z.string().min(1).max(200),
+    maxInputTokens: tokenLimit,
+    maxOutputTokens: tokenLimit,
+    rates: z.array(modelPriceSchema).min(1).readonly(),
+  })
+  .readonly();
+
+/**
+ * Frozen record of the models and prices served before the model catalog file, for verifying the bundles, runs and
+ * receipts they produced. Never configuration: deployments serve the models of their catalog file.
+ */
+export const legacyModels = Object.freeze(z.array(legacyModelSchema).parse(legacy.models));
+
+/** The mapping (revision `families-2026-10-19.1`, prices `prices-2026-10-19.1`) of the frozen record above. */
+export const initialModelMapping = modelMappingSchema.parse(legacy.mapping);
 
 export const qualifiedModelRouteSchema = z
   .strictObject({
@@ -262,8 +74,8 @@ export const qualifiedModelRouteSchema = z
     adapterVersion: z.literal(1),
     qualification: z.string().min(1).max(500),
     lifecycle: z.enum(['candidate', 'current', 'deprecated', 'retired']),
-    maxInputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    maxOutputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    maxInputTokens: tokenLimit,
+    maxOutputTokens: tokenLimit,
     boundedDecision: z.literal(true),
   })
   .readonly();
@@ -277,20 +89,20 @@ export const resolvedModelShapeSchema = z
     rates: z.array(modelPriceSchema).min(1).readonly(),
   })
   .readonly();
+/** A resolution of the initial mapping, checked against the frozen record. */
 export const resolvedModelSchema = resolvedModelShapeSchema
   .superRefine((value, ctx) => {
-    const family = modelFamilies.find(candidate => candidate.id === value.familyId);
-    if (!family?.modelIds.includes(value.modelId))
+    const model = legacyModels.find(candidate => candidate.id === value.modelId);
+    if (model?.familyId !== value.familyId)
       ctx.addIssue({ code: 'custom', message: 'Resolved family identity mismatch' });
-    if (value.mappingRevision === initialModelMapping.revision && family?.currentModelId !== value.modelId)
+    if (
+      value.mappingRevision === initialModelMapping.revision &&
+      initialModelMapping.families.find(family => family.id === value.familyId)?.modelId !== value.modelId
+    )
       ctx.addIssue({ code: 'custom', message: 'Resolved mapping identity mismatch' });
-    const model = priceSnapshot.find(candidate => candidate.id === value.modelId);
-    const rates = model?.rates.map(({ validFrom, validUntilExclusive, promptTokensAbove, usdPerMillionTokens }) =>
-      modelPriceSchema.parse({ validFrom, validUntilExclusive, promptTokensAbove, usdPerMillionTokens }),
-    );
     if (
       value.pricingRevision !== initialModelMapping.pricingRevision ||
-      JSON.stringify(value.rates) !== JSON.stringify(rates) ||
+      JSON.stringify(value.rates) !== JSON.stringify(model?.rates) ||
       value.route.modelId !== value.modelId ||
       value.route.provider !== model?.provider
     )
@@ -307,6 +119,7 @@ export class ModelResolutionError extends Error {
   }
 }
 
+/** Resolves a family through a mapping of the frozen record, as receipts made before server bundles were. */
 export function resolveModelFamily(input: {
   familyId: string;
   mapping: unknown;
@@ -323,12 +136,10 @@ export function resolveModelFamily(input: {
   )
     throw new ModelResolutionError('unknown-model');
   const family = mapping.families.find(candidate => candidate.id === input.familyId);
-  if (!family || !modelFamilies.some(candidate => candidate.id === family.id))
+  if (!family || !legacyModels.some(candidate => candidate.familyId === family.id))
     throw new ModelResolutionError('unknown-family');
-  const model = priceSnapshot.find(candidate => candidate.id === family.modelId);
-  if (!model) throw new ModelResolutionError('unknown-model');
-  const curated = modelFamilies.find(candidate => candidate.id === family.id);
-  if (!curated?.modelIds.includes(model.id)) throw new ModelResolutionError('unknown-model');
+  const model = legacyModels.find(candidate => candidate.id === family.modelId);
+  if (!model || model.familyId !== family.id) throw new ModelResolutionError('unknown-model');
   const routes = z
     .array(qualifiedModelRouteSchema)
     .parse(input.routes)
@@ -343,10 +154,7 @@ export function resolveModelFamily(input: {
   if (routes.length > 1) throw new ModelResolutionError('ambiguous-route');
   const route = routes[0];
   if (!route) throw new ModelResolutionError('route-unavailable');
-  if (
-    route.maxInputTokens > model.metadata.max_input_tokens ||
-    route.maxOutputTokens > model.metadata.max_output_tokens
-  )
+  if (route.maxInputTokens > model.maxInputTokens || route.maxOutputTokens > model.maxOutputTokens)
     throw new ModelResolutionError('route-unavailable');
   return resolvedModelSchema.parse({
     familyId: family.id,
@@ -354,11 +162,6 @@ export function resolveModelFamily(input: {
     mappingRevision: mapping.revision,
     pricingRevision: mapping.pricingRevision,
     route,
-    rates: model.rates.map(({ validFrom, validUntilExclusive, promptTokensAbove, usdPerMillionTokens }) => ({
-      validFrom,
-      validUntilExclusive,
-      promptTokensAbove,
-      usdPerMillionTokens,
-    })),
+    rates: model.rates,
   });
 }

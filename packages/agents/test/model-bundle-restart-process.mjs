@@ -17,8 +17,7 @@ const registry = new Pool({ connectionString: input.registry, max: 1, options: '
 const health = new Pool({ connectionString: input.health, max: 1 });
 try {
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'acme-chat',
-    MODEL_DEFAULT_FAMILY: 'acme-chat',
+    MODEL_CATALOG_FILE: process.env.MODEL_CATALOG_FILE,
     AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
     AZURE_FOUNDRY_API_KEY: 'synthetic-private-credential',
   });

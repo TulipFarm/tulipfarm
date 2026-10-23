@@ -62,42 +62,28 @@ const endpoint = `http://127.0.0.1:${server.address().port}/v1`;
 const credential = 'local-llm-credential';
 
 process.env.MODEL_CATALOG = JSON.stringify({
-  families: [
+  version: 1,
+  providers: {
+    local: { type: 'openai-compatible', apiKeyEnv: 'LOCAL_LLM_API_KEY', endpointEnv: 'LOCAL_LLM_URL' },
+  },
+  models: [
     {
       id: 'local-llama',
       name: 'Local Llama',
       vendor: 'meta',
-      currentModelId: 'local-llama-1',
-      modelIds: ['local-llama-1'],
+      routes: [{ provider: 'local', model: 'meta-llama/Llama-3.3-70B-Instruct' }],
+      default: true,
       roles: ['title'],
-    },
-  ],
-  models: [
-    {
-      id: 'local-llama-1',
-      name: 'Local Llama 1',
-      provider: 'openai-compatible',
-      providerModelId: 'meta-llama/Llama-3.3-70B-Instruct',
-      endpoint,
-      credentialEnv: 'LOCAL_LLM_API_KEY',
-      metadata: { max_input_tokens: 128000, max_output_tokens: 8192 },
-      rates: [
-        {
-          validFrom: null,
-          validUntilExclusive: null,
-          promptTokensAbove: null,
-          usdPerMillionTokens: { input: 0.2, output: 0.6 },
-        },
-      ],
+      limits: { maxInputTokens: 128000, maxOutputTokens: 8192 },
+      pricing: [{ usdPerMillionTokens: { input: 0.2, output: 0.6 } }],
     },
   ],
 });
-process.env.MODEL_CATALOG_MODE = 'extend';
 delete process.env.MODEL_CATALOG_FILE;
 process.env.MODEL_ENDPOINT_HOSTS = '127.0.0.1';
 process.env.NODE_ENV = 'test';
 
-const { calculateUsageCost, selectableModelFamilies } = await import('@tulipfarm/config');
+const { calculateUsageCost } = await import('@tulipfarm/config');
 const { createMemoryRouteHealth } = await import('@tulipfarm/agents/chat');
 const { modelEnvironment } = await import('@tulipfarm/agents/model-environment');
 const { conversationModel } = await import('../src/conversation-model.ts');
@@ -105,9 +91,14 @@ const { chatTitleModel } = await import('../src/conversation-activities.ts');
 const { respondToConversation } = await import('../src/conversation-responder.ts');
 const { inferChatTitle } = await import('@tulipfarm/agents/inference');
 
-// Only the operator's credential is set, so only its family is enabled. Catalog roles apply to listed families.
-const credentialOnly = { LOCAL_LLM_API_KEY: credential, MODEL_ENDPOINT_HOSTS: '127.0.0.1', NODE_ENV: 'test' };
-const env = { ...credentialOnly, MODEL_FAMILIES: 'local-llama' };
+// The operator catalog replaces the shipped one; its provider reads the key and endpoint from its own variables.
+const env = {
+  MODEL_CATALOG: process.env.MODEL_CATALOG,
+  LOCAL_LLM_API_KEY: credential,
+  LOCAL_LLM_URL: endpoint,
+  MODEL_ENDPOINT_HOSTS: '127.0.0.1',
+  NODE_ENV: 'test',
+};
 // 1000 input and 500 output tokens at 0.2 and 0.6 USD per million.
 const expectedPicoUsd = BigInt(Math.round((1000 * 0.2 + 500 * 0.6) * 1e6));
 
@@ -133,10 +124,7 @@ function cost(price, result) {
 }
 
 test('an openai-compatible catalog model chats (streamed) and runs a task against its own endpoint', async () => {
-  assert.deepEqual(
-    selectableModelFamilies.map(family => family.id).filter(family => conversationModel(family, credentialOnly)),
-    ['local-llama'],
-  );
+  assert.equal(conversationModel('claude-sonnet', { ...env, ANTHROPIC_API_KEY: 'unused' }), null);
   const chat = conversationModel('local-llama', env);
   assert.equal(chat.route.provider, 'openai-compatible');
   assert.equal(chat.route.endpoint, `${endpoint}/`);
@@ -184,7 +172,7 @@ test('an openai-compatible catalog model chats (streamed) and runs a task agains
   const environment = modelEnvironment(env);
   const continuity = environment.continuity(createMemoryRouteHealth);
   const resolution = environment.resolve('local-llama');
-  assert.equal(resolution.modelId, 'local-llama-1');
+  assert.equal(resolution.modelId, 'meta-llama-llama-3.3-70b-instruct');
   assert.equal(continuity.allowed('11111111-1111-4111-8111-111111111111', resolution), true);
   const task = await continuity.infer(
     resolution,
@@ -227,7 +215,7 @@ test('the credential is never sent when the endpoint host is not allowlisted or 
     assert.throws(
       () => conversationModel('local-llama', unsafe),
       error =>
-        error.message.startsWith('Invalid server model configuration: model "local-llama-1" endpoint ') &&
+        error.message.startsWith('Invalid model catalog (MODEL_CATALOG): models.0.routes.0: LOCAL_LLM_URL ') &&
         !error.message.includes(credential),
     );
   assert.equal(received.length, 0);

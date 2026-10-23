@@ -7,7 +7,7 @@ import { conversationFixture } from '../../../packages/conversations/test/fixtur
 import { createConversationActivities } from '../dist/conversation-activities.js';
 import { workspaceMcpFactory } from '../dist/workspace-mcp-composition.js';
 import { completionReply, isCompletionRequest, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 const mcp = (enabled = false) =>
   workspaceMcpFactory({
@@ -31,7 +31,7 @@ function model(t) {
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);

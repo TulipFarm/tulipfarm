@@ -5,7 +5,7 @@ import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-m
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { completionReply, isCompletionRequest, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test('default worker composition includes current personal memory across private chats and omits deleted memory', async t => {
   const f = await conversationFixture();
@@ -15,7 +15,7 @@ test('default worker composition includes current personal memory across private
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const requests = [];
     t.mock.method(globalThis, 'fetch', async (_url, options) => {
@@ -47,13 +47,14 @@ test('default worker composition includes current personal memory across private
         }),
         'completed',
       );
-      const input = JSON.stringify(requests.at(-2).messages);
+      const input = JSON.stringify(requests.at(-1).messages);
       if (index < 2) assert.match(input, /Prefer concise bullet points/);
       else assert.doesNotMatch(input, /Prefer concise bullet points|personalMemory/);
       const history = await f.store.history(w.id, w.userId, chatId);
       assert.equal(history.messages[1].parts[0].text, 'Here is the answer.');
     }
-    assert.equal(requests.length, 6);
+    // Tool-free replies skip the completion check, so each reply makes one model request.
+    assert.equal(requests.length, 3);
   } finally {
     await f.close();
   }

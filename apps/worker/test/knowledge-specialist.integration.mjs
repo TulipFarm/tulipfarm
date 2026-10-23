@@ -97,8 +97,6 @@ async function setup(t, knowledgeOptions = {}) {
       knowledge,
       env: {
         ANTHROPIC_API_KEY: 'synthetic-only',
-        MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
-        PLAN_SPECIALIST_MODEL_FAMILY: 'claude-sonnet',
       },
     });
   const row = async () =>

@@ -18,7 +18,7 @@ import { conversationFixture } from '../../../packages/conversations/test/fixtur
 import { anthropicText } from './native-chat-fixture.mjs';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { modelCatalogOf, useModelCatalog } from './model-catalog-fixture.mjs';
 
 // These tests exhaust workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -100,7 +100,7 @@ test('the provider receives the procedure after the request and no agent skill s
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const requests = [];
     t.mock.method(globalThis, 'fetch', async (_url, options) => {
@@ -129,8 +129,8 @@ test('an Azure Foundry model prepares a package through chat, meters its review,
   const azure = {
     AZURE_FOUNDRY_API_KEY: 'synthetic-test-key',
     AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
-    SKILL_REVIEW_MODEL_FAMILY: 'gpt-sol',
-    MODEL_FAMILIES: 'gpt-sol',
+    // The only model is the default, so it also reviews skills.
+    MODEL_CATALOG: modelCatalogOf(['gpt-sol']),
   };
   const previous = Object.fromEntries(Object.keys(azure).map(key => [key, process.env[key]]));
   Object.assign(process.env, azure);

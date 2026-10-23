@@ -25,6 +25,16 @@ for (const format of formats) {
     );
     assert.equal(requests.length, 3);
     for (const request of requests) assert.doesNotMatch(JSON.stringify(request), /Write a title for a new chat/);
+
+    requests.length = 0;
+    replies.push(nativeReply(format, { text: 'Here are your resources.' }));
+    assert.deepEqual(
+      await inferWithTools(nativeRoutes[format], [{ role: 'user', text: 'List our resources' }], () =>
+        assert.fail('No tool expected'),
+      ),
+      { text: 'Here are your resources.' },
+    );
+    assert.equal(requests.length, 1, 'a tool-free answer skips the completion check and the title');
   });
 
   test(`${format} titles a chat from the requester's message in one metered plain-text call`, async t => {
@@ -77,6 +87,7 @@ test('a title route sends the title request with that model', async t => {
   assert.match(requests[0].url, /api\.anthropic\.com/);
   assert.equal(requests[0].body.model, 'claude-haiku-synthetic');
   assert.equal(requests[0].body.max_tokens, 256);
+  assert.ok(JSON.stringify(requests[0].body.system).includes(JSON.stringify(titleSystemPrompt).slice(1, -1)));
 });
 
 test('an unusable title is absent, a failed request throws, and long Unicode titles truncate at whole characters', async t => {

@@ -1,0 +1,344 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "Schema URL for editors: https://tulipfarm.ai/schemas/model-catalog.v1.json",
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "const": 1,
+      "description": "Catalog format version"
+    },
+    "missingKeys": {
+      "default": "fail",
+      "description": "When no route of a model has its API key set: \"fail\" stops startup; \"skip\" leaves the model out. With \"skip\", a skipped default passes to the first remaining selectable, unpaused model, and a skipped role falls back as if no model had it. Startup fails when no model remains.",
+      "type": "string",
+      "enum": [
+        "fail",
+        "skip"
+      ]
+    },
+    "providers": {
+      "default": {},
+      "description": "Provider accounts. Only needed to use other variables than a built-in provider's defaults.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,49}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "xai",
+              "google",
+              "azure",
+              "openai-compatible"
+            ],
+            "description": "API this provider speaks"
+          },
+          "apiKeyEnv": {
+            "description": "Environment variable holding the API key. Never the key itself. Defaults to the type's standard variable, such as AZURE_FOUNDRY_API_KEY; required for type \"openai-compatible\".",
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+          },
+          "endpointEnv": {
+            "description": "Environment variable holding the API base URL. Defaults to the type's standard variable, such as AZURE_FOUNDRY_ENDPOINT; required for type \"openai-compatible\".",
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false,
+        "description": "How to reach one provider account. Models name it by its key in `providers`."
+      }
+    },
+    "models": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,99}$",
+            "description": "Stable ID chats, agents and settings store. Keep it when the underlying model version changes."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Name people see in the model picker"
+          },
+          "vendor": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "description": "Who makes the model, for branding, such as anthropic or openai"
+          },
+          "routes": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,49}$",
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "Model or deployment name sent to the provider, such as an Azure Foundry deployment name"
+                }
+              },
+              "required": [
+                "provider",
+                "model"
+              ],
+              "additionalProperties": false,
+              "description": "One provider that serves the model"
+            },
+            "description": "Where the model runs, in order of preference. The first route whose provider has its API key set serves it; see `missingKeys` for when none has."
+          },
+          "default": {
+            "default": false,
+            "description": "New chats and agents use this model. Exactly one model is the default; it must be selectable.",
+            "type": "boolean"
+          },
+          "paused": {
+            "default": false,
+            "description": "Still serves existing chats and agents, but cannot be chosen for new ones",
+            "type": "boolean"
+          },
+          "selectable": {
+            "default": true,
+            "description": "Shown in the model picker. False keeps the model for its roles only, such as a cheap model that titles chats.",
+            "type": "boolean"
+          },
+          "roles": {
+            "default": [],
+            "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation, fallback. Each role on at most one model.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "title",
+                "compaction",
+                "review",
+                "plan",
+                "heartbeat",
+                "public-guide",
+                "table-search",
+                "recommendation",
+                "fallback"
+              ]
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxInputTokens": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "maxOutputTokens": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "maxInputTokens",
+              "maxOutputTokens"
+            ],
+            "additionalProperties": false
+          },
+          "capabilities": {
+            "description": "Overrides of the provider type's default behavior",
+            "readOnly": true,
+            "type": "object",
+            "properties": {
+              "api": {
+                "description": "Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini",
+                "type": "string",
+                "enum": [
+                  "chat-completions",
+                  "responses",
+                  "anthropic-messages",
+                  "gemini"
+                ]
+              },
+              "toolChoice": {
+                "description": "Structured decisions force the select_action tool, or let the model answer in text (auto)",
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "forced"
+                ]
+              },
+              "reasoningOffForTools": {
+                "description": "Disable reasoning on tool requests the deployment rejects with reasoning on",
+                "type": "boolean"
+              },
+              "reasoningTokensInOutput": {
+                "description": "Usage reports reasoning tokens separately from completion tokens; count them as output",
+                "type": "boolean"
+              },
+              "streaming": {
+                "description": "Chat steps stream the response",
+                "type": "boolean"
+              },
+              "responseModelAliases": {
+                "description": "Other model identities the provider may report for this model",
+                "readOnly": true,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9._-]{1,100}$"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "unmetered",
+                "description": "Tokens are recorded at zero cost"
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "validFrom": {
+                      "default": null,
+                      "description": "First day this rate applies (UTC); null for always",
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "validUntilExclusive": {
+                      "default": null,
+                      "description": "Day this rate stops applying (UTC); null for open-ended",
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "promptTokensAbove": {
+                      "default": null,
+                      "description": "Long-context tier: applies to whole requests whose prompt exceeds this many tokens; null for base rate",
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "usdPerMillionTokens": {
+                      "type": "object",
+                      "properties": {
+                        "input": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "output": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cacheRead": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cacheWrite": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cacheWrite5m": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cacheWrite1h": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "input",
+                        "output"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "usdPerMillionTokens"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A price in USD per million tokens"
+                },
+                "description": "Rates; one must have no tier and no dates limits overlap"
+              }
+            ],
+            "description": "\"unmetered\", or the rates this deployment is billed"
+          },
+          "notes": {
+            "description": "Free-form notes, such as where prices were checked",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "vendor",
+          "routes",
+          "limits",
+          "pricing"
+        ],
+        "additionalProperties": false,
+        "description": "One model people can choose"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "models"
+  ],
+  "additionalProperties": false,
+  "description": "TulipFarm model catalog: every model a deployment serves",
+  "$id": "https://tulipfarm.ai/schemas/model-catalog.v1.json",
+  "title": "TulipFarm model catalog"
+}

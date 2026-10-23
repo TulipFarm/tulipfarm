@@ -21,7 +21,6 @@ await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} }
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
 
 const model = conversationModel('claude-haiku', {
-  MODEL_FAMILIES: 'claude-haiku,claude-sonnet',
   ANTHROPIC_API_KEY: 'fixture-only',
 });
 assert.deepEqual(

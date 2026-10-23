@@ -12,6 +12,9 @@ import { registerConversations } from '../src/conversations.ts';
 import { registerWorkspaceSettings } from '../src/workspace-settings.ts';
 import { StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 test('disabled workspace errors are concealed across business routes without concealing transient failures', async t => {
   const id = '22222222-2222-4222-8222-222222222222';
   const auth = { api: { getSession: async () => ({ user: { id } }) } };
@@ -58,7 +61,7 @@ function fixture() {
 
 test('security headers cover successes, errors, missing routes, and Swagger remains usable', async t => {
   const app = fixture();
-  const real = buildApp();
+  const real = buildApp({ agentModel: null });
   t.after(() => Promise.all([app.close(), real.close()]));
   for (const [url, status] of [
     ['/ok', 200],

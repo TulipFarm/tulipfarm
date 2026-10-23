@@ -6,24 +6,30 @@ import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { inferDecision } from '@tulipfarm/agents/inference';
 import { modelBundleStore } from '@tulipfarm/agents/model-bundles';
 import { modelEnvironment } from '../src/model-environment.ts';
+import { readFileSync } from 'node:fs';
+import { shippedModelCatalogPath } from '@tulipfarm/config';
 
 const credential = 'synthetic-private-credential';
+const shipped = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+/** An inline catalog of shipped models `ids`, with `defaultId` as the default. */
+const catalogOf = (ids, defaultId = ids[0], change = model => model) =>
+  JSON.stringify({
+    ...shipped,
+    models: ids.map(id => change({ ...shipped.models.find(model => model.id === id), default: id === defaultId })),
+  });
 const azure = {
-  MODEL_FAMILIES: 'gpt-luna, gpt-sol',
-  MODEL_DEFAULT_FAMILY: 'gpt-luna',
+  MODEL_CATALOG: catalogOf(['gpt-luna', 'gpt-sol']),
   AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.services.ai.azure.com/',
   AZURE_FOUNDRY_API_KEY: credential,
 };
-const invalid = { message: 'Invalid server model configuration' };
 const input = {
   prompt: 'Local proof',
   definition: { name: 'Local agent', instructions: 'Return an answer.', tools: [] },
   scope: [],
 };
 
-test('empty configuration disables models', () => {
-  assert.equal(modelEnvironment({}), null);
-  assert.equal(modelEnvironment({ MODEL_FAMILIES: ' , ' }), null);
+test('no provider key fails at startup', () => {
+  assert.throws(() => modelEnvironment({}), { message: /no model has a route with its key set/ });
 });
 
 test('listed families resolve to their pricing deployment and nothing else', () => {
@@ -38,7 +44,10 @@ test('listed families resolve to their pricing deployment and nothing else', () 
   assert.equal(environment.route('gpt-astra'), null);
   assert.equal(environment.inference({ ...luna, route: { ...luna.route, deployment: 'other' } }), null);
   assert.equal(modelEnvironment(azure).bundle.id, environment.bundle.id);
-  assert.notEqual(modelEnvironment({ ...azure, MODEL_FAMILIES: 'gpt-luna' }).bundle.id, environment.bundle.id);
+  assert.notEqual(
+    modelEnvironment({ ...azure, MODEL_CATALOG: catalogOf(['gpt-luna']) }).bundle.id,
+    environment.bundle.id,
+  );
   assert.equal(JSON.stringify(environment.bundle).includes(credential), false);
   const binding = environment.inference(luna);
   assert.throws(() => {
@@ -49,26 +58,26 @@ test('listed families resolve to their pricing deployment and nothing else', () 
   }, TypeError);
 });
 
-test('continuity binds the configured default, budget and dated identities', () => {
+test('continuity binds the catalog default, budget and dated identities', () => {
   const environment = modelEnvironment(azure);
   const continuity = environment.continuity(createMemoryRouteHealth);
   const luna = environment.resolve('gpt-luna');
   assert.equal(continuity.activeBundle().bundle.id, environment.bundle.id);
   assert.equal(continuity.trustedBundle(environment.bundle.id), environment.bundle);
   assert.throws(() => continuity.trustedBundle('other'), { message: 'Model configuration changed' });
-  assert.equal(continuity.legacyFamily(), 'gpt-luna');
+  assert.equal(continuity.defaultFamily(), 'gpt-luna');
   assert.equal(continuity.allowed('any-workspace', luna), true);
   assert.deepEqual(continuity.actualModelIds(luna), ['gpt-6-luna']);
   assert.equal(
-    modelEnvironment({ ...azure, MODEL_DEFAULT_FAMILY: '' })
+    modelEnvironment({ ...azure, MODEL_CATALOG: catalogOf(['gpt-luna', 'gpt-sol'], 'gpt-sol') })
       .continuity(createMemoryRouteHealth)
-      .legacyFamily(),
-    undefined,
+      .defaultFamily(),
+    'gpt-sol',
   );
 });
 
 test('continuity finishes runs bound to an earlier configuration only through verified stored bundles', async () => {
-  const earlier = modelEnvironment({ ...azure, MODEL_FAMILIES: 'gpt-luna' });
+  const earlier = modelEnvironment({ ...azure, MODEL_CATALOG: catalogOf(['gpt-luna']) });
   const environment = modelEnvironment(azure);
   const rows = new Map();
   const queries = [];
@@ -107,7 +116,7 @@ test('continuity finishes runs bound to an earlier configuration only through ve
 });
 
 test('Haiku accepts the exact dated identity returned by Anthropic', () => {
-  const environment = modelEnvironment({ MODEL_FAMILIES: 'claude-haiku', ANTHROPIC_API_KEY: credential });
+  const environment = modelEnvironment({ ANTHROPIC_API_KEY: credential });
   assert.deepEqual(
     environment.continuity(createMemoryRouteHealth).actualModelIds(environment.resolve('claude-haiku')),
     ['claude-haiku-4-5', 'claude-haiku-4-5-20251001'],
@@ -115,25 +124,31 @@ test('Haiku accepts the exact dated identity returned by Anthropic', () => {
 });
 
 test('invalid configuration fails at startup without leaking values', () => {
-  for (const env of [
-    { ...azure, MODEL_FAMILIES: 'gpt-luna,unknown' },
-    { ...azure, MODEL_FAMILIES: 'gpt-luna,gpt-luna' },
-    { ...azure, AZURE_FOUNDRY_API_KEY: '' },
-    { ...azure, AZURE_FOUNDRY_API_KEY: 'bad\nvalue' },
-    { ...azure, AZURE_FOUNDRY_ENDPOINT: undefined },
-    { ...azure, AZURE_FOUNDRY_ENDPOINT: 'https://evil.example/' },
-    { ...azure, MODEL_DEFAULT_FAMILY: 'gpt-astra' },
-    { MODEL_FAMILIES: 'claude-opus' },
-    { MODEL_FAMILIES: 'gemini-flash' },
-    { MODEL_FAMILIES: 'gpt-luna', OPENAI_API_KEY: 'bad\nvalue' },
-    { MODEL_FAMILIES: 'grok', XAI_API_KEY: '' },
-    { PUBLIC_OPENAI_API_KEY: credential, OPENAI_API_KEY: credential },
-    { NEXT_PUBLIC_XAI_API_KEY: credential, XAI_API_KEY: credential },
-    { ...azure, VITE_AZURE_FOUNDRY_API_KEY: credential },
+  const failOnMissingKeys = JSON.stringify({ ...shipped, missingKeys: 'fail' });
+  for (const [env, message] of [
+    [{ ...azure, MODEL_CATALOG: catalogOf(['gpt-luna', 'unknown']) }, /Invalid model catalog \(MODEL_CATALOG\)/],
+    [{ ...azure, MODEL_CATALOG: catalogOf(['gpt-luna', 'gpt-luna']) }, /Invalid model catalog \(MODEL_CATALOG\)/],
+    [{ ...azure, AZURE_FOUNDRY_API_KEY: '' }, /no model has a route with its key set/],
+    [{ ...azure, AZURE_FOUNDRY_API_KEY: 'bad\nvalue' }, /^Invalid server model configuration: model gpt-luna/],
+    [{ ...azure, AZURE_FOUNDRY_ENDPOINT: undefined }, /no model has a route with its key set/],
+    [{ ...azure, AZURE_FOUNDRY_ENDPOINT: 'https://evil.example/' }, /AZURE_FOUNDRY_ENDPOINT/],
+    [{ ...azure, MODEL_DEFAULT_FAMILY: 'gpt-astra' }, /Remove MODEL_DEFAULT_FAMILY/],
+    [{ MODEL_CATALOG: failOnMissingKeys, ANTHROPIC_API_KEY: credential }, /"gpt-luna" has no route with its key set/],
+    [{ OPENAI_API_KEY: 'bad\nvalue' }, /^Invalid server model configuration: model gpt-luna/],
+    [
+      { PUBLIC_OPENAI_API_KEY: credential, OPENAI_API_KEY: credential },
+      /PUBLIC_OPENAI_API_KEY would reach the browser/,
+    ],
+    [
+      { NEXT_PUBLIC_XAI_API_KEY: credential, XAI_API_KEY: credential },
+      /NEXT_PUBLIC_XAI_API_KEY would reach the browser/,
+    ],
+    [{ ...azure, VITE_AZURE_FOUNDRY_API_KEY: credential }, /VITE_AZURE_FOUNDRY_API_KEY would reach the browser/],
   ]) {
     assert.throws(
       () => modelEnvironment(env),
-      error => error.message === invalid.message && !String(error.stack).includes(credential),
+      error => message.test(error.message) && !String(error.stack).includes(credential),
+      message,
     );
   }
 });
@@ -200,7 +215,6 @@ function endpointHosts(t, hosts, nodeEnv = process.env.NODE_ENV) {
 
 test('unset base URLs keep the built-in provider endpoints', () => {
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'claude-haiku,gpt-luna,grok,gemini-flash',
     ANTHROPIC_API_KEY: credential,
     OPENAI_API_KEY: credential,
     XAI_API_KEY: credential,
@@ -223,7 +237,6 @@ test('unset base URLs keep the built-in provider endpoints', () => {
 test('provider base URLs replace the built-in endpoints in requests', async t => {
   endpointHosts(t, 'gateway.example.com');
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'claude-haiku,gpt-luna,grok,gemini-flash',
     MODEL_ENDPOINT_HOSTS: 'gateway.example.com',
     ANTHROPIC_API_KEY: credential,
     OPENAI_API_KEY: credential,
@@ -263,7 +276,7 @@ test('provider base URLs replace the built-in endpoints in requests', async t =>
 
 test('unsafe base URLs fail at startup naming the variable, never the credential', t => {
   endpointHosts(t, 'gateway.example.com,localhost');
-  const haiku = { MODEL_FAMILIES: 'claude-haiku', ANTHROPIC_API_KEY: credential };
+  const haiku = { ANTHROPIC_API_KEY: credential };
   for (const [env, message] of [
     [
       { ANTHROPIC_BASE_URL: 'https://evil.example.com/' },
@@ -293,11 +306,18 @@ test('unsafe base URLs fail at startup naming the variable, never the credential
       'ANTHROPIC_BASE_URL must not end in /v1/; it is appended',
     ],
     [
-      { GEMINI_BASE_URL: 'https://gateway.example.com/v1beta/', MODEL_ENDPOINT_HOSTS: 'gateway.example.com' },
+      {
+        GEMINI_API_KEY: credential,
+        GEMINI_BASE_URL: 'https://gateway.example.com/v1beta/',
+        MODEL_ENDPOINT_HOSTS: 'gateway.example.com',
+      },
       'GEMINI_BASE_URL must not end in /v1beta/; it is appended',
     ],
-    [{ OPENAI_BASE_URL: 'https://gateway.example.com/?key=x' }, 'OPENAI_BASE_URL must not have a query or fragment'],
-    [{ XAI_BASE_URL: 'gateway.example.com' }, 'XAI_BASE_URL is not a URL'],
+    [
+      { OPENAI_API_KEY: credential, OPENAI_BASE_URL: 'https://gateway.example.com/?key=x' },
+      'OPENAI_BASE_URL must not have a query or fragment',
+    ],
+    [{ XAI_API_KEY: credential, XAI_BASE_URL: 'gateway.example.com' }, 'XAI_BASE_URL is not a URL'],
     [
       { MODEL_ENDPOINT_HOSTS: 'https://gateway.example.com' },
       'MODEL_ENDPOINT_HOSTS: "https://gateway.example.com" is not a host name (no scheme, port or path)',
@@ -306,7 +326,7 @@ test('unsafe base URLs fail at startup naming the variable, never the credential
     assert.throws(
       () => modelEnvironment({ ...haiku, ...env }),
       error => {
-        assert.equal(error.message, `${invalid.message}: ${message}`);
+        assert.ok(error.message.endsWith(`: ${message}`), error.message);
         assert.equal(String(error.stack).includes(credential), false);
         return true;
       },
@@ -329,7 +349,6 @@ test('an allowlisted localhost base URL works over http outside production', asy
   });
   endpointHosts(t, '127.0.0.1', 'development');
   const environment = modelEnvironment({
-    MODEL_FAMILIES: 'claude-haiku',
     MODEL_ENDPOINT_HOSTS: '127.0.0.1',
     NODE_ENV: 'development',
     ANTHROPIC_API_KEY: credential,
@@ -341,14 +360,20 @@ test('an allowlisted localhost base URL works over http outside production', asy
   assert.equal(requests[0].headers['x-api-key'], credential);
 });
 
-test('paused families must be enabled, cannot be the default, and are exposed to continuity', () => {
-  assert.throws(() => modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-astra' }), {
-    message: /MODEL_PAUSED_FAMILIES names gpt-astra, which is not enabled/,
+test('paused models still serve existing work and are exposed to continuity', () => {
+  const paused = model => (model.id === 'gpt-sol' ? { ...model, paused: true } : model);
+  assert.throws(
+    () =>
+      modelEnvironment({
+        ...azure,
+        MODEL_CATALOG: catalogOf(['gpt-luna', 'gpt-sol'], 'gpt-luna', model => ({ ...model, paused: true })),
+      }),
+    { message: /Invalid model catalog \(MODEL_CATALOG\)/ },
+  );
+  const environment = modelEnvironment({
+    ...azure,
+    MODEL_CATALOG: catalogOf(['gpt-luna', 'gpt-sol'], 'gpt-luna', paused),
   });
-  assert.throws(() => modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-luna' }), {
-    message: /must not include MODEL_DEFAULT_FAMILY/,
-  });
-  const environment = modelEnvironment({ ...azure, MODEL_PAUSED_FAMILIES: 'gpt-sol' });
   assert.equal(environment.paused('gpt-sol'), true);
   assert.equal(environment.paused('gpt-luna'), false);
   assert.ok(environment.resolve('gpt-sol'), 'a paused family still resolves for existing work');

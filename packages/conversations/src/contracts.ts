@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { defaultChatModelFamilyId } from '@tulipfarm/config/model-catalog';
 import { toolPresentationSchema, activityStatusSchema, workflowReferenceSchema } from './tool-activity.ts';
 export { workflowReferenceSchema } from './tool-activity.ts';
 import { publicWebReceiptSchema } from './public-web.ts';
@@ -83,7 +82,6 @@ export const moveChatSchema = z.strictObject({
   confirmFullHistoryIncludingAdmins: z.literal(true),
 });
 export const conversationModelSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,99}$/);
-export const defaultConversationModel = defaultChatModelFamilyId;
 export const chatToolCallLimit = 1000;
 export const timeZoneSchema = z
   .string()
@@ -100,7 +98,8 @@ export const timeZoneSchema = z
 export const sendMessageSchema = z.strictObject({
   commandId: uuidSchema,
   messageId: uuidSchema,
-  model: conversationModelSchema.default(defaultConversationModel),
+  /** Model family of the reply; the server's default model when absent. */
+  model: conversationModelSchema.optional(),
   mode: z.enum(['normal', 'plan']).optional(),
   timeZone: timeZoneSchema.optional(),
   parts: z
@@ -234,6 +233,11 @@ export const turnStatusSchema = z.enum([
   'cancelled',
   'blocked',
 ]);
+/**
+ * A completed turn's `errorCode` starts with this when a configured fallback model answered after the chat model failed;
+ * the rest is that model family's id. The turn itself succeeded.
+ */
+export const modelFallbackCodePrefix = 'model-fallback:';
 export const turnSummarySchema = z.object({
   id: uuidSchema,
   status: turnStatusSchema,

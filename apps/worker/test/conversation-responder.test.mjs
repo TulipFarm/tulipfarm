@@ -197,8 +197,9 @@ test('source authorization is measured before credit admission and dispatch, inc
       assert.equal(fetched, 0);
     } else {
       assert.deepEqual(await pending, { text: 'Ready.', sources: [] });
-      assert.equal(admitted, 2);
-      assert.equal(fetched, 2);
+      // A tool-free answer skips the completion check, so one request is admitted and sent.
+      assert.equal(admitted, 1);
+      assert.equal(fetched, 1);
     }
     const authorization = records.slice(start).find(record => record.operation === 'chat.detail.authorize');
     assert.equal(authorization.outcome, denied ? 'error' : 'success');

@@ -170,7 +170,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         actualModelIds: () => [route.modelId],
         health: { claim: async () => true, finish: async () => {} },
         budgetPicoUsd: () => '10000000000000',
-        legacyFamily: () => 'claude-opus',
+        defaultFamily: () => 'claude-opus',
         infer: async (_resolution, input) => {
           const context = JSON.parse(input.prompt);
           const decision = context.results.length

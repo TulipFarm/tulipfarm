@@ -16,7 +16,7 @@ import {
 } from './native-chat-fixture.mjs';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 // These tests assert workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -25,7 +25,7 @@ test('invalid ordinary model credentials never reserve credits across all retrie
   const f = await conversationFixture();
   const old = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'invalid credential with spaces';
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     calls++;
@@ -78,13 +78,14 @@ test(
       let body = '';
       for await (const chunk of req) body += chunk;
       const request = JSON.parse(body);
-      assert.equal(request.model, isTitleRequest(request) ? 'claude-haiku-4-5' : 'claude-sonnet-5');
       res.writeHead(200, { 'content-type': 'application/json' });
       if (isTitleRequest(request)) {
+        assert.equal(request.model, 'claude-haiku-4-5');
         titles++;
         res.end(JSON.stringify(anthropicText('Hello')));
         return;
       }
+      assert.equal(request.model, 'claude-sonnet-5');
       calls++;
       if (isCompletionRequest(request)) {
         const { usage, ...response } = completionReply('anthropic');
@@ -107,7 +108,7 @@ test(
     });
     const old = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'synthetic-only';
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace;
       const chatId = randomUUID();
@@ -154,13 +155,21 @@ test(
       assert.equal(titled.available, titled.granted - titled.used);
       assert.equal(titled.held, 0);
       assert.equal((await f.store.history(w.id, w.userId, chatId)).messages.at(-1).parts[0].text, 'A metered answer.');
+      // The fixture's default members table reaches the reply through the inventory and table tools.
+      const ownSources = rows =>
+        rows.map(({ sources, ...row }) => ({
+          ...row,
+          sources: sources.filter(source => !source.kind.startsWith('table-')),
+        }));
       assert.deepEqual(
-        (
-          await f.db.platform.query(
-            `SELECT sources, publication FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`,
-            [work.turnId],
-          )
-        ).rows,
+        ownSources(
+          (
+            await f.db.platform.query(
+              `SELECT sources, publication FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`,
+              [work.turnId],
+            )
+          ).rows,
+        ),
         [{ sources: [{ kind: 'private-conversation', conversationId: chatId }], publication: 'private' }],
       );
       unknown = true;
@@ -168,11 +177,13 @@ test(
       const toolWork = await send();
       assert.equal(await activity(toolWork), 'completed');
       assert.deepEqual(
-        (
-          await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`, [
-            toolWork.turnId,
-          ])
-        ).rows,
+        ownSources(
+          (
+            await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_results')} WHERE turn_id=$1`, [
+              toolWork.turnId,
+            ])
+          ).rows,
+        ),
         [{ sources: [{ kind: 'private-conversation', conversationId: chatId }] }],
       );
       assert.equal(
@@ -180,8 +191,11 @@ test(
           .status,
         'completed',
       );
-      assert.ok((await summary()).held > 0);
-      assert.equal((await summary()).used, titled.used);
+      // Unknown usage is charged at each call's whole reservation when the reply settles, so nothing stays held.
+      const afterUnknown = await summary();
+      assert.equal(afterUnknown.held, 0);
+      assert.ok(afterUnknown.used > titled.used);
+      assert.equal(afterUnknown.available + afterUnknown.used, 1000);
       const blocked = await send();
       await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=1`);
       assert.equal(await activity(blocked), 'failed');
@@ -219,7 +233,7 @@ test(
     });
     const old = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'synthetic-only';
-    t.after(useModelFamilies());
+    t.after(useModelCatalog());
     try {
       const w = f.workspace;
       const activities = createConversationActivities(f.runtime);

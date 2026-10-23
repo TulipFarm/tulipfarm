@@ -42,6 +42,12 @@ the API and worker env files. Authenticated services also take
 to the service env files. With these unset, local defaults are unchanged.
 See [`self-host/README.md`](self-host/README.md#public-web).
 
+The API and worker start only when the model catalog serves at least one
+model, so export a provider key such as `ANTHROPIC_API_KEY` before `pnpm dev`.
+The shipped catalog ([`packages/config/catalog/models.json`](packages/config/catalog/models.json))
+skips models whose key is unset; `MODEL_CATALOG_FILE` or `MODEL_CATALOG`
+replaces it. See [`packages/config/README.md`](packages/config/README.md#configuration).
+
 ## Commands
 
 | Command             | What it does                                                                         |

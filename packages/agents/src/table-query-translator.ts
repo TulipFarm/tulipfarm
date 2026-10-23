@@ -10,9 +10,10 @@ import {
 import {
   calculateUsageCost,
   initialModelMapping,
-  modelPricing,
+  loadModelCatalog,
   reserveModelCost,
   usageTokenCounts,
+  type ResolvedModel,
 } from '@tulipfarm/config';
 import { recordUsage } from '@tulipfarm/extensions';
 import {
@@ -626,16 +627,18 @@ export function fakeTranslationProvider(): TranslationProvider {
   };
 }
 
-export function modelTranslationProvider(route: InferenceRoute): TranslationProvider {
-  const price = modelPricing.models.find(
-    candidate => candidate.providerModelId === route.model && candidate.provider === route.provider,
-  );
-  if (!price) throw new Error('Table search model has no price');
-  const pricingRevision = initialModelMapping.pricingRevision;
+/** A translator on `route`, priced by the server bundle's `resolution` of its model. */
+export function modelTranslationProvider(
+  route: InferenceRoute,
+  resolution: Pick<ResolvedModel, 'modelId' | 'pricingRevision' | 'rates'> & {
+    route: Pick<ResolvedModel['route'], 'maxOutputTokens'>;
+  },
+): TranslationProvider {
+  const { pricingRevision } = resolution;
   const quote = (maxInputTokens: number, maxOutputTokens: number) => ({
-    modelId: price.id,
+    modelId: resolution.modelId,
     pricingRevision,
-    rates: price.rates,
+    rates: resolution.rates,
     maxInputTokens,
     maxOutputTokens,
     date: new Date().toISOString().slice(0, 10),
@@ -643,10 +646,10 @@ export function modelTranslationProvider(route: InferenceRoute): TranslationProv
   const limited = {
     ...route,
     timeoutMs: translatorLimits.providerTimeoutMs,
-    maxOutputTokens: Math.min(translatorLimits.outputTokens, price.metadata.max_output_tokens),
+    maxOutputTokens: Math.min(translatorLimits.outputTokens, resolution.route.maxOutputTokens),
   };
   return {
-    modelId: price.id,
+    modelId: resolution.modelId,
     pricingRevision,
     reserve: (maxInputTokens, maxOutputTokens) => reserveModelCost(quote(maxInputTokens, maxOutputTokens)),
     cost(usage) {
@@ -664,7 +667,7 @@ export function modelTranslationProvider(route: InferenceRoute): TranslationProv
 
 /**
  * Selects the translator from server configuration. `TABLE_SEARCH_TRANSLATOR=fake` is a local development switch and is
- * refused in production. Otherwise `TABLE_SEARCH_MODEL_FAMILY` names one configured family; there is no fallback.
+ * refused in production. Otherwise the model catalog's table-search model translates; without one, table search is off.
  */
 export function tableSearchTranslator(env: NodeJS.ProcessEnv = process.env): TranslationProvider | null {
   const mode = env.TABLE_SEARCH_TRANSLATOR?.trim() || 'model';
@@ -673,16 +676,18 @@ export function tableSearchTranslator(env: NodeJS.ProcessEnv = process.env): Tra
     return fakeTranslationProvider();
   }
   if (mode !== 'model') throw new Error('TABLE_SEARCH_TRANSLATOR must be "model" or "fake"');
-  const family = env.TABLE_SEARCH_MODEL_FAMILY?.trim();
+  const family = loadModelCatalog(env).role('table-search')?.id;
   if (!family) return null;
-  const route = modelEnvironment(env)?.route(family);
-  if (!route) throw new Error('TABLE_SEARCH_MODEL_FAMILY must name a configured model family');
-  const provider = modelTranslationProvider(route);
+  const environment = modelEnvironment(env);
+  const route = environment.route(family);
+  const resolution = environment.resolve(family);
+  if (!route || !resolution) throw new Error(`Table search model ${family} has no served route`);
+  const provider = modelTranslationProvider(route, resolution);
   if (
     BigInt(provider.reserve(translatorLimits.inputTokens, translatorLimits.outputTokens)) >
     translatorLimits.maxProviderPicoUsd
   )
-    throw new Error('TABLE_SEARCH_MODEL_FAMILY exceeds the table search cost cap');
+    throw new Error(`Table search model ${family} exceeds the table search cost cap`);
   return provider;
 }
 

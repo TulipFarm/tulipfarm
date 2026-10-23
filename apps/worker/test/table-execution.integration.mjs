@@ -36,7 +36,7 @@ import {
   isTitleRequest,
   toolResults,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 test(
   'Q29 model-selected deterministic replay through authenticated chat, real table execution and Soul',
@@ -268,7 +268,7 @@ test(
     );
     const previousKey = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'deterministic-replay-not-a-provider-credential';
-    cleanup.push(useModelFamilies());
+    cleanup.push(useModelCatalog());
     cleanup.push(async () => {
       if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = previousKey;

@@ -9,7 +9,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
-import { compactionDefaultFamily, compactionDefaults, compactionModelFamilies } from '@tulipfarm/config';
+import { compactionDefaults, loadModelCatalog } from '@tulipfarm/config';
 import { type EffectiveCompactionPolicy } from '@tulipfarm/conversations/compaction';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -43,6 +43,19 @@ async function stored(tx: AgentTransaction, lock = false) {
     FROM ${relation(tx, 'tf_compaction_policy')} ${lock ? 'FOR UPDATE' : ''}`)
   ).rows[0];
   return row ? storedSchema.parse(row) : null;
+}
+
+/** The model with the compaction role, else the default model. */
+function compactionDefaultFamily() {
+  const catalog = loadModelCatalog();
+  return (catalog.role('compaction') ?? catalog.defaultModel).id;
+}
+
+/** Families approved for summary work: the compaction model and the default model. */
+function compactionModelFamilies() {
+  const catalog = loadModelCatalog();
+  const models = [catalog.role('compaction'), catalog.defaultModel].filter(model => model !== null);
+  return [...new Map(models.map(model => [model.id, { id: model.id, name: model.name }])).values()];
 }
 
 function isCompactionBudgetFamily(id: string) {

@@ -7,6 +7,9 @@ import { registerAccountDetails } from '../src/account-details.ts';
 import { Pool } from 'pg';
 import { createHmac } from 'node:crypto';
 
+// The app serves the shipped model catalog, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 test('saved-agent and chat routes compile with the aggregate integration tool contracts', async () => {
   const app = Fastify();
   registerAgents(app, { auth: { api: { getSession: async () => null } }, runtime: {}, pool: {}, agentModel: null });
@@ -48,7 +51,7 @@ test('private account details reject guests before reading account data', async 
 });
 
 test('v1 documentation describes the routes and their response contracts', async () => {
-  const app = buildApp();
+  const app = buildApp({ agentModel: null });
   try {
     const response = await app.inject('/v1/docs/json');
     assert.equal(response.statusCode, 200);

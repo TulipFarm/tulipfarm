@@ -13,7 +13,7 @@ import {
   anthropicText,
   isTitleRequest,
 } from './native-chat-fixture.mjs';
-import { useModelFamilies } from './model-families-fixture.mjs';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 const respond = decision => Response.json(anthropicChat(decision));
 const ROOT = '1767225600.000100';
@@ -40,7 +40,7 @@ test('chat answers from an indexed Google Drive file and a Slack channel thread'
     if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previous;
   });
-  t.after(useModelFamilies());
+  t.after(useModelCatalog());
   try {
     const w = f.workspace;
     const table = name => f.table(name.startsWith('tf_') ? name : `tf_knowledge_${name}`);

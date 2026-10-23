@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { defaultChatModelFamilyId } from '../../../packages/config/src/model-catalog.ts';
 import { fileURLToPath } from 'node:url';
 import { conversationPages } from '../../api/src/conversation-pages.ts';
 
@@ -307,11 +306,12 @@ test('chat model selection uses the configured default, then the first available
   try {
     const page = await browser.newPage();
     await page.route('**/v1/**/model-catalog', async route => {
+      // The server names its default model; without one listed, the first available model is used.
       const withoutDefault = route.request().url().includes('/without-default/');
       const families = withoutDefault
-        ? chatCatalog.families.filter(family => family.id !== defaultChatModelFamilyId)
+        ? chatCatalog.families.filter(family => family.id !== 'claude-sonnet')
         : chatCatalog.families;
-      await route.fulfill({ json: { families } });
+      await route.fulfill({ json: { families, defaultChatFamilyId: 'claude-sonnet' } });
     });
     await page.goto(`${server.resolvedUrls.local[0]}chat-model-default-test`);
     await page.evaluate(async () => {
@@ -326,7 +326,8 @@ test('chat model selection uses the configured default, then the first available
       });
       function Model({ workspaceId, user }) {
         const models = f.useChatModels(workspaceId, user);
-        return React.createElement('output', null, models.model?.id);
+        const replaced = models.replacedModel ? ` (replaced: ${models.replacedModel})` : '';
+        return React.createElement('output', null, `${models.model?.id}${replaced}`);
       }
       const model = (workspaceId, user) =>
         React.createElement(
@@ -344,13 +345,14 @@ test('chat model selection uses the configured default, then the first available
             model('configured', { lastModelFamilyId: null }),
             model('without-default', { lastModelFamilyId: null }),
             model('saved', { lastModelFamilyId: 'claude-haiku' }),
+            model('removed', { lastModelFamilyId: 'retired-model' }),
           ),
         ),
       );
     });
     await page.waitForFunction(
       expected => [...document.querySelectorAll('output')].map(output => output.textContent).join(',') === expected,
-      `${defaultChatModelFamilyId},gpt-sol,claude-haiku`,
+      'claude-sonnet,gpt-sol,claude-haiku,claude-sonnet (replaced: Claude Sonnet)',
     );
   } finally {
     await browser.close();

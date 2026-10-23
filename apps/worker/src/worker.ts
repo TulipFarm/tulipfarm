@@ -6,7 +6,7 @@ import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { captureException, createBackgroundJob, errorAttributes, log, startTelemetry } from '@tulipfarm/observability';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { workerTelemetry } from './telemetry.ts';
-import { modelRoleWarnings } from '@tulipfarm/config';
+import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import * as activities from './activities.ts';
 import { isolatedStorageEnabled } from '@tulipfarm/workspaces/storage';
@@ -56,8 +56,8 @@ async function run() {
     if (!isolatedStorageEnabled()) throw new Error('GitHub requires isolated workspace storage');
     integrationCredentialKeyring();
   }
-  for (const warning of modelRoleWarnings(process.env, ['title', 'compaction', 'review', 'plan', 'heartbeat']))
-    console.warn(JSON.stringify({ level: 'warn', msg: warning }));
+  // Fails startup on an invalid model catalog or provider environment.
+  for (const warning of loadModelCatalog().warnings) console.warn(JSON.stringify({ level: 'warn', msg: warning }));
   const emailEnabled = emailDeliveryEnabled();
   for (const key of [
     'WORKSPACE_PROVISIONING_DATABASE_URL',

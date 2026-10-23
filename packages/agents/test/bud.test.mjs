@@ -73,7 +73,7 @@ for (const provider of formats)
     const result = await inferWithTools(route, [{ role: 'user', text: 'hey' }], () => assert.fail());
     assert.deepEqual(result, { text: 'Hi! How can I help?' });
     assert.equal(requests.length, 1);
-    assert.deepEqual(checks, [1], 'the completion check follows the single reply round');
+    assert.deepEqual(checks, [], 'a tool-free reply skips the completion check');
     for (const pattern of [/bud_state/, /avatar/i, /expression/i, /Waving/, /\bBud\b.*\bIdle\b/])
       assert.doesNotMatch(requests[0], pattern);
   });
@@ -135,7 +135,8 @@ test('Bud metadata does not bypass completion checks or idle before a rejected a
     undefined,
     false,
     null,
-    { avatar: { update: value => updates.push(value) } },
+    // Receipts from this turn's earlier attempt keep the check; Bud must not bypass it.
+    { priorCalls: 1, avatar: { update: value => updates.push(value) } },
   );
   assert.deepEqual(result, { text: '18 times 24 is 432.', avatar: { name: 'Bud', state: 'Solving' } });
   assert.deepEqual(

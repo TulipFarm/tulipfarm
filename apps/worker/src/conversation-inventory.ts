@@ -33,3 +33,31 @@ export function readConversationInventory(runtime: ConversationRuntime, fence: R
     return readWorkspaceInventory(local, fence.workspaceId, actor);
   });
 }
+
+export type ConversationInventory = Awaited<ReturnType<typeof readConversationInventory>>;
+
+/**
+ * Shares one attempt's inventory read between context measurement and the reply, so a reply reads it once. `take`
+ * hands the read to the reply and forgets it; a failed read is never reused.
+ */
+export function conversationInventoryReads(runtime: ConversationRuntime) {
+  const reads = new Map<string, Promise<ConversationInventory>>();
+  const key = (fence: ReplyFence) => `${fence.turnId}:${fence.generation}:${fence.epoch}`;
+  return {
+    read(fence: ReplyFence) {
+      let read = reads.get(key(fence));
+      if (!read) {
+        read = readConversationInventory(runtime, fence);
+        reads.set(key(fence), read);
+        read.catch(() => reads.delete(key(fence)));
+      }
+      return read;
+    },
+    take(fence: ReplyFence) {
+      const read = reads.get(key(fence));
+      reads.delete(key(fence));
+      return read;
+    },
+  };
+}
+export type ConversationInventoryReads = ReturnType<typeof conversationInventoryReads>;

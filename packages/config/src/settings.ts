@@ -48,7 +48,7 @@ export const selfHostSections = {
   release: ['Build identity: YYYY.M.D.N and the full source commit (git rev-parse HEAD).'],
   infrastructure: ['Infrastructure credentials you choose. Use URL-safe values: openssl rand -hex 32'],
   models: [
-    'Models. Set the API key of at least one provider; unless MODEL_FAMILIES lists them, every family it serves turns on.',
+    'Models. Set the API key of at least one provider; the shipped model catalog serves every model whose provider key is set.',
     'Providers, custom catalogs and endpoints: https://docs.tulipfarm.ai/self-hosting/models/',
   ],
   turnstile: [
@@ -885,49 +885,19 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', example: 'gateway.example.com', commented: true },
   },
   {
-    name: 'MODEL_FAMILIES',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Comma-separated model families to enable. Unset enables every family a configured provider key serves. See [model configuration](https://docs.tulipfarm.ai/self-hosting/models/).',
-    selfHost: { section: 'models', example: 'claude-haiku,claude-sonnet', commented: true },
-  },
-  {
-    name: 'MODEL_PAUSED_FAMILIES',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Comma-separated `MODEL_FAMILIES` families to pause. A paused family stays listed but cannot be chosen for new chats, new agents or a changed agent model. Existing agents and chats switch to the workspace fallback rule of the family when one is set, otherwise keep using it. Must not include `MODEL_DEFAULT_FAMILY`.',
-    selfHost: { section: 'models', example: 'claude-opus', commented: true },
-  },
-  {
-    name: 'MODEL_DEFAULT_FAMILY',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    description:
-      "Default model family for new agents and agent-instruction improvements. Falls back to the catalog's `default-chat` role.",
-    selfHost: { section: 'models', example: 'claude-sonnet', commented: true },
-  },
-  {
     name: 'MODEL_CATALOG_FILE',
     group: 'Models',
     services: apiWorker,
     requirement: 'optional',
     secret: false,
     description:
-      'Path to a JSON model catalog (`{ "families": [...], "models": [...] }`, the shape of the shipped `model-families.json` entries and `model-pricing.json` models). A model entry with a shipped ID sets your own prices; a family with `"pricing": "unmetered"` has models without rates that cost zero. A family\'s `roles` (`default-chat`, `title`, `compaction`, `review`, `plan`, `heartbeat`, `public-guide`) make it the default for those features. Startup fails naming any invalid entry. Set this or `MODEL_CATALOG`, not both.',
+      'Path to your model catalog, a JSON file in the [model catalog format](https://tulipfarm.ai/schemas/model-catalog.v1.json). It replaces the shipped catalog (`packages/config/catalog/models.json`) entirely: it lists every model, its provider routes, prices and limits, the default model for new chats and agents, paused and hidden models, and which model titles chats, compacts, reviews skills, plans, triages Gmail, answers the public guide, searches tables and recommends. Provider keys stay in environment variables; the catalog names them. Startup fails naming the file and every invalid field. Set this or `MODEL_CATALOG`, not both.',
     selfHost: {
       section: 'models',
       example: '/run/tulipfarm-config/model-catalog.json',
       commented: true,
       comment:
-        'Your own model catalog. The file path is inside the api and worker containers; mount it with a Compose override.',
+        'Your own model catalog, replacing the shipped one. The path is inside the api and worker containers; mount the file with a Compose override.',
     },
   },
   {
@@ -936,19 +906,9 @@ export const settings: readonly Setting[] = [
     services: apiWorker,
     requirement: 'optional',
     secret: false,
-    description: 'Inline JSON model catalog, the same shape as the `MODEL_CATALOG_FILE` contents.',
-    selfHost: { section: 'models', example: '\'{"families":[],"models":[]}\'', commented: true },
-  },
-  {
-    name: 'MODEL_CATALOG_MODE',
-    group: 'Models',
-    services: apiWorker,
-    requirement: 'optional',
-    secret: false,
-    default: 'extend',
     description:
-      '`extend` adds the operator catalog to the shipped one; an entry with a shipped ID replaces it. `replace` uses only the operator catalog. `MODEL_FAMILIES` still selects the enabled families.',
-    selfHost: { section: 'models', example: 'extend', commented: true },
+      'The full model catalog as inline JSON, in the same format as a `MODEL_CATALOG_FILE` file (`$schema` is optional), for container hosts that cannot mount files. It replaces the shipped catalog entirely. Not secret, as it holds only environment variable names, but it may be large. Set this or `MODEL_CATALOG_FILE`, not both.',
+    selfHost: { section: 'models', example: '\'{"version":1,"models":[...]}\'', commented: true },
   },
   {
     name: 'AZURE_FOUNDRY_ENDPOINT',
@@ -969,59 +929,6 @@ export const settings: readonly Setting[] = [
     requirementNote: 'One provider key',
     description: 'Azure Foundry API key for Azure model families, and for GPT and Grok families when it is set.',
     selfHost: { section: 'models', commented: true },
-  },
-  {
-    name: 'CHAT_TITLE_MODEL_FAMILY',
-    group: 'Models',
-    services: ['worker'],
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Model family that titles chats. Outside `MODEL_FAMILIES`, the chat model titles the chat. Defaults to the first `MODEL_FAMILIES` family with the catalog role `title`.',
-  },
-  {
-    name: 'SKILL_REVIEW_MODEL_FAMILY',
-    group: 'Models',
-    services: ['worker'],
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Model family that safety-reviews imported skills. Must be in `MODEL_FAMILIES`. Defaults to the first `MODEL_FAMILIES` family with the catalog role `review`.',
-  },
-  {
-    name: 'PLAN_SPECIALIST_MODEL_FAMILY',
-    group: 'Models',
-    services: ['worker'],
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Model family for the plan specialist. Must be in `MODEL_FAMILIES`. Defaults to the first `MODEL_FAMILIES` family with the catalog role `plan`.',
-  },
-  {
-    name: 'GMAIL_HEARTBEAT_MODEL_FAMILY',
-    group: 'Models',
-    services: ['worker'],
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Model family that triages Gmail heartbeats. Must be in `MODEL_FAMILIES`. Defaults to the first `MODEL_FAMILIES` family with the catalog role `heartbeat`.',
-  },
-  {
-    name: 'PUBLIC_GUIDE_MODEL_FAMILY',
-    group: 'Models',
-    services: ['api'],
-    requirement: 'optional',
-    secret: false,
-    description:
-      'Model family that answers the public guide; it needs an Azure chat-completions route. Defaults to the first `MODEL_FAMILIES` family with the catalog role `public-guide`.',
-  },
-  {
-    name: 'TABLE_SEARCH_MODEL_FAMILY',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    description: 'Model family that translates table searches. Unset disables model translation.',
   },
   {
     name: 'TABLE_SEARCH_TRANSLATOR',
@@ -1463,14 +1370,6 @@ export const settings: readonly Setting[] = [
     description: '`true` allows the `runc` runtime for local development.',
   },
 
-  {
-    name: 'RECOMMENDATION_MODEL_FAMILY',
-    group: 'Recommendations',
-    services: apiWorker,
-    requirement: 'conditional',
-    secret: false,
-    description: 'Model family for recommendations. Unset disables them.',
-  },
   {
     name: 'RECOMMENDATION_PERIOD_SECONDS',
     group: 'Recommendations',
