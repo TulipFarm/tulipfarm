@@ -171,7 +171,9 @@ const spanAttributes = new Set([
   'usage.unknown_reason',
 ]);
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
-const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message', 'usage.shape']);
+const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message', 'usage.shape', 'slack.event_id']);
+// A stored Slack event's own row id: it locates the event in the database and carries no Slack content.
+const rowIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const dependencyEndpoints = [
   'github-repository',
@@ -196,6 +198,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (logLine && logOnlyAttributes.has(key)) {
     if (key === 'provider.error_code') return safeProviderCode(value) === value;
     if (key === 'usage.shape') return safeUsageShape(value);
+    if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;

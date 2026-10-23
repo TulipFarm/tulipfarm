@@ -8,6 +8,7 @@ import {
   lockAuthorization,
   requireAgentRunInvocation,
   resolveHuman,
+  SourceAuthorizationUnavailable,
   sourceDependenciesSchema,
   type AuthorizationTransaction,
   type HumanActor,
@@ -19,6 +20,12 @@ import { createAgentChat, type ModelContinuity } from './chat.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import { createSlackDelivery } from './slack-delivery.ts';
+import {
+  announceSlackRejection,
+  recordSlackRejection,
+  SlackAdmissionDenied,
+  slackAdmissionReason,
+} from './slack-rejections.ts';
 import { requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import type { ExternalRunGuard } from './external-run.ts';
 import { createSlackActions } from './slack-actions.ts';
@@ -728,7 +735,7 @@ export function createSlackChannelAgents(options: {
           })
         : observed;
       if (!requestContext.messages.some(message => matchesSlackSnapshot(message, event.payload)))
-        throw new AccessDenied();
+        throw new SlackAdmissionDenied('request-not-in-thread');
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93577))`, [
         `${tx.schema}:${root.id}:${identity.id}`,
       ]);
@@ -906,14 +913,20 @@ export function createSlackChannelAgents(options: {
       try {
         await admit(workspaceId, candidate.id);
       } catch (error) {
-        if (error instanceof AccessDenied)
-          await transaction(workspaceId, tx =>
-            tx.client.query(
-              `INSERT INTO ${table(tx, 'tf_slack_agent_rejections')} (event_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-              [candidate.id],
-            ),
-          );
-        else {
+        if (error instanceof AccessDenied && !(error instanceof SourceAuthorizationUnavailable)) {
+          // A rejection is permanent, so it is never silent: it is logged with its reason, and a requester who
+          // mentioned the bot gets a reply in the thread saying why.
+          const target = await transaction(workspaceId, tx => recordSlackRejection(tx, candidate.id));
+          await announceSlackRejection({
+            surface: 'channel',
+            workspaceId,
+            eventId: candidate.id,
+            reason: slackAdmissionReason(error),
+            target,
+            cipher: options.cipher,
+            fetcher: options.fetcher,
+          });
+        } else {
           const reauthorize = error instanceof SlackApiError && error.code === 'provider-auth-rejected';
           const seconds =
             error instanceof SlackApiError && error.code === 'rate-limited'

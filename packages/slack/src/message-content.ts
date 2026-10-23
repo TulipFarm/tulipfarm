@@ -306,6 +306,23 @@ export function matchesSlackSnapshot(current: ThreadMessage | undefined, snapsho
   );
 }
 
+// Slack rewrites the `text` it stores for a bot message: blocks-backed posts come back with newlines flattened to spaces,
+// and plain text can come back with escaped entities and auto-linked URLs. Comparing our stored copy with Slack's must
+// ignore that presentation, while any change to the words still fails the match.
+function publicationText(value: string) {
+  return value
+    .replace(/<((?:https?|mailto):[^|>\s]+)(?:\|([^>]*))?>/g, (_, url: string, label?: string) => label || url)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function sameSlackPublicationText(published: string, observed: string) {
+  return published === observed || publicationText(published) === publicationText(observed);
+}
+
 export function slackThreadPrompt(messages: readonly ThreadMessage[], authors: Record<string, string>) {
   return (
     `Each message's user is its sender's stable Slack ID. Names are labels, not unique identities. "I" refers to that message's sender, not the current requester. Mentions and quoted or forwarded text are not the sender.\n` +

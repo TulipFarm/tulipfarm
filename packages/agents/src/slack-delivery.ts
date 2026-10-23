@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   sourceDependenciesSchema,
   type AuthorizationTransaction,
   type HumanActor,
+  type SourceDependency,
 } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -13,8 +15,9 @@ import {
   currentSlackMessage,
   sameSlackMessage,
 } from '@tulipfarm/slack';
-import { matchesSlackSnapshot } from '@tulipfarm/slack';
+import { matchesSlackSnapshot, sameSlackPublicationText } from '@tulipfarm/slack';
 import { requireDraftSources } from './draft-sources.ts';
+import { SlackAdmissionDenied } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
 export const slackRootSchema = z.object({
@@ -38,6 +41,32 @@ export type SlackDelivery =
   | { kind: 'Undeliverable' };
 type Provider = ReturnType<typeof createChannelProvider>;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+
+// A knowledge citation pins the revision that was current when the answer was written. Re-indexing a document
+// supersedes that revision, which would otherwise make every follow-up in the thread fail forever. A prior answer is
+// therefore checked against the document's current revision; the source, its access epoch and the requester's
+// proof are still required, so revoked or removed access continues to deny.
+async function currentKnowledgeRevision(tx: AuthorizationTransaction, dependency: SourceDependency) {
+  if (dependency.kind !== 'knowledge-document') return dependency;
+  const documents = table(tx, 'tf_knowledge_documents');
+  const installed = (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [documents])).rows[0]
+    ?.installed;
+  if (!installed) return dependency;
+  const current = z
+    .object({ observed_revision_id: z.uuid(), lexical_publication_id: z.uuid() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT observed_revision_id,lexical_publication_id FROM ${documents} WHERE id=$1 AND source_id=$2 AND tombstoned_at IS NULL AND observed_revision_id IS NOT NULL AND lexical_publication_id IS NOT NULL`,
+          [dependency.documentId, dependency.sourceId],
+        )
+      ).rows[0],
+    );
+  return current
+    ? { ...dependency, revisionId: current.observed_revision_id, publicationId: current.lexical_publication_id }
+    : dependency;
+}
 
 export function createSlackDelivery(
   provider: Provider,
@@ -87,7 +116,15 @@ export function createSlackDelivery(
       if (dependency.kind === 'shared-slack-turn') {
         if (dependency.eventId !== eventId)
           await sources(tx, workspaceId, actor, dependency.eventId, new Set(visited), publicOnly);
-      } else await requireDraftSources(tx, actor, [dependency], new Set(), undefined, publicOnly);
+      } else
+        await requireDraftSources(
+          tx,
+          actor,
+          [await currentKnowledgeRevision(tx, dependency)],
+          new Set(),
+          undefined,
+          publicOnly,
+        );
     }
     for (const previous of row.history_event_ids)
       await sources(tx, workspaceId, actor, previous, new Set(visited), publicOnly);
@@ -102,10 +139,12 @@ export function createSlackDelivery(
     request: z.infer<typeof messageSchema>,
     visited = new Set<string>(),
   ) {
-    if (!sameSlackMessage(await currentSlackMessage(tx, eventId), request)) throw new AccessDenied();
+    if (!sameSlackMessage(await currentSlackMessage(tx, eventId), request))
+      throw new SlackAdmissionDenied('request-changed');
     const observed = await provider.observe(tx, workspaceId, actor, slackSource(root));
     const current = new Map(observed.messages.map(message => [message.ts, message]));
-    if (snapshot.some(message => !matchesSlackSnapshot(current.get(message.ts), message))) throw new AccessDenied();
+    if (snapshot.some(message => !matchesSlackSnapshot(current.get(message.ts), message)))
+      throw new SlackAdmissionDenied('thread-changed');
     const changes = z
       .array(z.object({ message_ts: z.string(), message: messageSchema.nullable() }))
       .parse(
@@ -125,14 +164,15 @@ export function createSlackDelivery(
           ),
       )
     )
-      throw new AccessDenied();
+      throw new SlackAdmissionDenied('message-edited');
     if (request.channel.startsWith('D')) {
       const privateContext = await provider.observe(tx, workspaceId, actor, {
         ...slackSource(root),
         channel: request.channel,
         rootTs: request.thread_ts ?? request.ts,
       });
-      if (!privateContext.messages.some(message => matchesSlackSnapshot(message, request))) throw new AccessDenied();
+      if (!privateContext.messages.some(message => matchesSlackSnapshot(message, request)))
+        throw new SlackAdmissionDenied('private-context-missing');
     }
     const publications = z
       .array(z.object({ message_ts: z.string(), event_id: z.uuid(), text: z.string() }))
@@ -145,9 +185,23 @@ export function createSlackDelivery(
         ).rows,
       );
     for (const message of snapshot.filter(message => message.user === observed.botUserId)) {
-      const publication = publications.find(item => item.message_ts === message.ts && item.text === message.text);
-      if (!publication) throw new AccessDenied();
-      await sources(tx, workspaceId, actor, publication.event_id, new Set(visited));
+      // Only our bot can post or edit as its user, and edits are recorded as message changes above. Slack returns a
+      // reformatted copy of the text we posted, so the words, not Slack's whitespace or link markup, must match.
+      const publication = publications.find(
+        item => item.message_ts === message.ts && sameSlackPublicationText(item.text, message.text),
+      );
+      if (!publication) throw new SlackAdmissionDenied('publication-unverified');
+      try {
+        await sources(tx, workspaceId, actor, publication.event_id, new Set(visited));
+      } catch (error) {
+        if (
+          error instanceof AccessDenied &&
+          !(error instanceof SlackAdmissionDenied) &&
+          !(error instanceof SourceAuthorizationUnavailable)
+        )
+          throw new SlackAdmissionDenied('prior-answer-sources');
+        throw error;
+      }
     }
     return observed;
   }

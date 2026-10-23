@@ -10,7 +10,12 @@ export { createChannelProvider, threadSnapshotSchema } from './channel-provider.
 export { messageSchema, slackId } from './contracts.ts';
 export { postBotMessage, openBotDirectMessage, botChannelInfo, setBotThreadStatus } from './bot-message.ts';
 export { currentSlackMessage, sameSlackMessage } from './message-source.ts';
-export { slackMessageText, matchesSlackSnapshot, slackThreadPrompt } from './message-content.ts';
+export {
+  slackMessageText,
+  matchesSlackSnapshot,
+  sameSlackPublicationText,
+  slackThreadPrompt,
+} from './message-content.ts';
 export { SlackApiError, type SlackApiErrorCode } from './web-api.ts';
 export * from './action-contracts.ts';
 export {
