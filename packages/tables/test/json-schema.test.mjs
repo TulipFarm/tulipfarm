@@ -5,7 +5,8 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { definitionSchema } from '../src/definition.ts';
 import { z } from 'zod';
-import { tableDefinitionJsonSchema, tableDocumentJsonSchema, tableProposalJsonSchema } from '../src/json-schema.ts';
+import { tableDefinitionJsonSchema, tableDocumentJsonSchema } from '../src/json-schema.ts';
+import { tableProposalJsonSchema } from '../src/proposal-json-schema.ts';
 import { tableDocumentSchema } from '../src/names.ts';
 import { proposeTableSchema } from '../src/proposal-contracts.ts';
 

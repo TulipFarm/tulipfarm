@@ -10,7 +10,7 @@ import { AccessDenied } from '@tulipfarm/access';
 import { createChatTableProposals } from '../src/table-proposals.ts';
 import { tableDefinitionMessages } from '@tulipfarm/tables/definition';
 import { tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
-import { tableProposalJsonSchema } from '@tulipfarm/tables/json-schema';
+import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 
 test('chat distinguishes creation eligibility, validates proposal arguments, and enforces current authority', async t => {
   const db = await fixture();

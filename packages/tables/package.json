@@ -39,9 +39,9 @@
       "types": "./dist/definition.d.ts",
       "default": "./dist/definition.js"
     },
-    "./json-schema": {
-      "types": "./dist/json-schema.d.ts",
-      "default": "./dist/json-schema.js"
+    "./proposal-json-schema": {
+      "types": "./dist/proposal-json-schema.d.ts",
+      "default": "./dist/proposal-json-schema.js"
     },
     "./names": {
       "types": "./dist/names.d.ts",

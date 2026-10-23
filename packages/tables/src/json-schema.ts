@@ -1,13 +1,6 @@
 import { z } from 'zod';
 import { definitionSchema, fieldSchema, trimmedLabelSchema } from './definition.ts';
 import { tableDocumentSchema } from './names.ts';
-import {
-  archivePlanSchema,
-  importPlanSchema,
-  proposalPlansSchema,
-  restorePlanSchema,
-  schemaPlanSchema,
-} from './proposal-contracts.ts';
 
 const tableDefinitionSchemaId = 'https://tulipfarm.ai/schemas/table.v1.json';
 const soulTableSchemaId = 'https://tulipfarm.ai/schemas/soul-table.v1.json';
@@ -41,7 +34,8 @@ const numericPrecisionRules = Array.from({ length: 11 }, (_, scale) => {
   return rule;
 });
 
-function toJsonSchema(schema: z.ZodType) {
+/** Converts a table Zod schema with the shared label and numeric precision rules. */
+export function toJsonSchema(schema: z.ZodType) {
   return z.toJSONSchema(schema, {
     target: 'draft-2020-12',
     io: 'input',
@@ -73,18 +67,4 @@ export function tableDefinitionJsonSchema() {
 
 export function tableDocumentJsonSchema() {
   return toTableJsonSchema(tableDocumentSchema, soulTableSchemaId, 'TulipFarm Soul table document');
-}
-
-/**
- * The `tables.propose` input shown to models, with the same label and numeric rules as table.v1.json. Chat adds rows
- * with the row tools, so records plans are left out; `proposeTableSchema` still validates every plan kind.
- */
-export function tableProposalJsonSchema() {
-  return toJsonSchema(
-    z.strictObject({
-      plans: proposalPlansSchema(
-        z.discriminatedUnion('kind', [schemaPlanSchema, importPlanSchema, archivePlanSchema, restorePlanSchema]),
-      ).meta({ description: 'Plans reviewed and applied in order. Add rows with the row tools, not with a plan.' }),
-    }),
-  );
 }

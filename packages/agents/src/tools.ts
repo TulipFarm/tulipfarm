@@ -48,7 +48,7 @@ import { requireInvestigationToolBoundary } from './investigation-boundary.ts';
 import { GitHubBatchError } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
-import { tableProposalJsonSchema } from '@tulipfarm/tables/json-schema';
+import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals } from './table-proposals.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
