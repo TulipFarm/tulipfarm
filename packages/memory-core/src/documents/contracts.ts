@@ -57,6 +57,7 @@ export const parserProfileSchema = z.strictObject({
   version: boundedText,
   normalization: boundedText,
   ocr: z.literal('disabled'),
+  fallback: z.enum(['unsupported', 'malformed']).optional(),
 });
 export const embeddingProfileSchema = z.strictObject({
   id: boundedText,

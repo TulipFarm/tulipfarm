@@ -129,6 +129,29 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.deepEqual(absent.hits, []);
       assert.equal(w.calls(), before + 1);
     });
+    await t.test('parsed documents are keyword-searchable before embeddings and report freshness', async () => {
+      const w = await setup();
+      const early = await w.note('orchard irrigation schedule for quince rows', 'Irrigation plan');
+      const vector = (
+        await db.platform.query(
+          `SELECT lexical_publication_id,vector_publication_id FROM ${w.table('documents')} WHERE id=$1`,
+          [early.documentId],
+        )
+      ).rows[0];
+      assert.ok(vector.lexical_publication_id);
+      assert.equal(vector.vector_publication_id, null);
+      const before = await w.submit('quince irrigation');
+      const hit = before.hits.find(entry => entry.citation.documentId === early.documentId);
+      assert.ok(hit, 'lexical hit before vector publication');
+      assert.match(hit.freshness.indexedAt, /^\d{4}-/);
+      assert.ok(Date.parse(hit.freshness.indexedAt) >= Date.parse(hit.freshness.observedAt));
+      assert.equal(hit.freshness.sourceSyncedAt, null);
+      await w.index();
+      const after = await w.submit('quince irrigation');
+      assert.equal(after.mode, 'hybrid');
+      assert.equal(after.hits[0].citation.documentId, early.documentId);
+      assert.equal(after.hits[0].freshness.indexedAt, hit.freshness.indexedAt);
+    });
     await t.test('frozen identifier, phrase, path, table and private-content regression queries', async () => {
       const w = await setup();
       for (const example of relevanceCases) await w.note(example.text, example.title);

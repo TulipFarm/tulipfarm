@@ -18,6 +18,7 @@ import {
   type SlackSource,
 } from './slack-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand, useExpired } from './slack-knowledge-shared';
+import { KnowledgeSourceFailures } from './knowledge-source-failures';
 
 const statusLabels = {
   queued: 'Queued for import',
@@ -209,12 +210,14 @@ function SlackSourceDocuments({ api, sourceId }: { api: SlackKnowledgeApi; sourc
 }
 
 function SlackSourceRow({
+  workspaceId,
   api,
   source,
   disabled,
   changed,
   checkStatus,
 }: {
+  workspaceId: string;
   api: SlackKnowledgeApi;
   source: SlackSource;
   disabled: boolean;
@@ -385,6 +388,9 @@ function SlackSourceRow({
         <p className="text-sm text-muted-foreground">Only the source owner can pause, resume, retry, or remove it.</p>
       )}
       {showDocuments && source.state === 'active' && <SlackSourceDocuments api={api} sourceId={source.sourceId} />}
+      {showDocuments && source.state === 'active' && source.canManage && (
+        <KnowledgeSourceFailures workspaceId={workspaceId} sourceId={source.sourceId} />
+      )}
       {busy && <p role="status">Updating source…</p>}
       {refresh.kind === 'done' && (
         <p role="status" className="text-sm">
@@ -521,6 +527,7 @@ export function SlackKnowledgeSources({ workspaceId }: { workspaceId: string }) 
               {visibleSources.map(source => (
                 <SlackSourceRow
                   key={source.sourceId}
+                  workspaceId={workspaceId}
                   api={api}
                   source={source}
                   disabled={sources.state.kind !== 'ready' || !!sources.state.error || sources.state.refreshing}

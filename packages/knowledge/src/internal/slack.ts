@@ -35,7 +35,8 @@ import {
   type SlackKnowledgeWork,
   type SlackThreadObservation,
 } from '../slack-contracts.ts';
-import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
+import { KnowledgeParseError } from '../parser.ts';
+import { parseKnowledgeDocument } from './parse-document.ts';
 import { citationSchema, KnowledgeAccountChanged, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';

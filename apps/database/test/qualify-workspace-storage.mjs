@@ -276,6 +276,7 @@ try {
     'packages/workspace-storage/common/0005_knowledge_github_item_path.sql',
     'packages/workspace-storage/common/0006_github_knowledge_opt_out.sql',
     'packages/workspace-storage/common/0007_knowledge_github_commits.sql',
+    'packages/workspace-storage/common/0008_knowledge_freshness.sql',
     ...['table-migrations', 'table-registry', 'credentials', 'operators'].map(
       name => `packages/workspaces/src/${name}.ts`,
     ),
@@ -297,6 +298,7 @@ try {
       '0005_knowledge_github_item_path.sql',
       '0006_github_knowledge_opt_out.sql',
       '0007_knowledge_github_commits.sql',
+      '0008_knowledge_freshness.sql',
     ],
   );
   emit({

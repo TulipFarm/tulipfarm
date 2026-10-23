@@ -31,7 +31,8 @@ import {
   googleKnowledgeDocumentsSchema,
   type GoogleKnowledgeWork,
 } from '../google-contracts.ts';
-import { KnowledgeParseError, parseKnowledgeDocument } from '../parser.ts';
+import { KnowledgeParseError } from '../parser.ts';
+import { parseKnowledgeDocument } from './parse-document.ts';
 import {
   citationSchema,
   knowledgeLimits,

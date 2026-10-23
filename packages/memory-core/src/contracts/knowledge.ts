@@ -76,11 +76,20 @@ export const knowledgeDocumentSchema = z.discriminatedUnion('kind', [
   documentBase.extend({ kind: z.literal('note'), noteText: z.string().optional() }),
   documentBase.extend({ kind: z.literal('file'), fileId: uuid }),
 ]);
+// When the cited revision was indexed. sourceRevision is the provider's own version marker (absent for notes and Files);
+// sourceSyncedAt is the source's last completed sync (absent before the first one and for sources that never sync).
+export const knowledgeFreshnessSchema = z.object({
+  indexedAt: z.iso.datetime(),
+  observedAt: z.iso.datetime(),
+  sourceRevision: z.string().nullable(),
+  sourceSyncedAt: z.iso.datetime().nullable(),
+});
 export const knowledgeHitSchema = z.object({
   title: z.string(),
   text: z.string(),
   heading: z.string(),
   citation: knowledgeCitationSchema,
+  freshness: knowledgeFreshnessSchema.optional(),
 });
 export const knowledgeSearchReasonSchema = z.enum([
   'semantic-not-enabled',
@@ -102,6 +111,7 @@ export const knowledgeSearchResultSchema = z.object({
   coverage: z.enum(['complete', 'partial', 'keyword-only']).default('keyword-only'),
   bounded: z.boolean().default(true),
 });
+export type KnowledgeFreshness = z.infer<typeof knowledgeFreshnessSchema>;
 export type KnowledgeSearchFilters = z.infer<typeof knowledgeSearchFiltersSchema>;
 export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>;
 export const knowledgeEvidenceSchema = knowledgeHitSchema.extend({

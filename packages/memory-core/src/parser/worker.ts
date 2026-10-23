@@ -19,6 +19,7 @@ async function main(): Promise<void> {
       bytes: Buffer.concat(parts),
       filename: metadata.filename,
       mediaType: metadata.mediaType,
+      rawTextFallback: metadata.rawTextFallback === true,
     });
     const response = JSON.stringify({ kind: 'ready', result });
     if (Buffer.byteLength(response) > parserLimits.outputBytes) throw new KnowledgeParseError('resource-limited');

@@ -13,7 +13,7 @@ import { soulStorageConfig } from '../src/soul.ts';
 const setupFailed = /^Error: Workspace setup failed; retry the same setup$/;
 const probeSql = 'CREATE TABLE {{schema}}.tf_ready_probe (id integer PRIMARY KEY);\n';
 const probe = {
-  name: '0007_ready_probe.sql',
+  name: '9999_ready_probe.sql',
   sql: probeSql,
   checksum: createHash('sha256').update(probeSql).digest('hex'),
 };

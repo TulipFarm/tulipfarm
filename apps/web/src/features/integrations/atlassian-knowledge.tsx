@@ -19,6 +19,7 @@ import {
   type ManageAtlassian,
 } from './atlassian-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand, useExpired } from './slack-knowledge-shared';
+import { KnowledgeSourceFailures } from './knowledge-source-failures';
 
 const productNames = { confluence: 'Confluence', jira: 'Jira' } as const;
 const itemNames = { confluence: ['page', 'pages'], jira: ['issue', 'issues'] } as const;
@@ -242,12 +243,14 @@ function SourceDocuments({
 }
 
 function SourceRow({
+  workspaceId,
   api,
   source,
   disabled,
   changed,
   checkStatus,
 }: {
+  workspaceId: string;
   api: AtlassianKnowledgeApi;
   source: AtlassianSource;
   disabled: boolean;
@@ -418,6 +421,9 @@ function SourceRow({
       {showDocuments && source.state === 'active' && (
         <SourceDocuments api={api} sourceId={source.sourceId} product={source.product} />
       )}
+      {showDocuments && source.state === 'active' && source.canManage && (
+        <KnowledgeSourceFailures workspaceId={workspaceId} sourceId={source.sourceId} />
+      )}
       {busy && <p role="status">Updating source…</p>}
       {refresh.kind === 'done' && (
         <p role="status" className="text-sm">
@@ -569,6 +575,7 @@ export function AtlassianKnowledgeSources({
               {visibleSources.map(source => (
                 <SourceRow
                   key={source.sourceId}
+                  workspaceId={workspaceId}
                   api={api}
                   source={source}
                   disabled={sources.state.kind !== 'ready' || !!sources.state.error || sources.state.refreshing}

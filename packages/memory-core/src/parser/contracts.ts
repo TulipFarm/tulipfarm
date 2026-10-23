@@ -90,11 +90,14 @@ export interface KnowledgeParseInput {
   bytes: Uint8Array;
   filename: string;
   mediaType: string;
+  // Index plain UTF-8 text that the converter rejects as unsupported or malformed, instead of failing.
+  rawTextFallback?: boolean;
 }
 
 export const metadataSchema = z.strictObject({
   filename: z.string().max(2048),
   mediaType: z.string().max(256),
+  rawTextFallback: z.boolean().optional(),
 });
 
 export const resultSchema = z
@@ -112,6 +115,8 @@ export const resultSchema = z
       version: z.string(),
       normalization: z.string(),
       ocr: z.literal('disabled'),
+      // The converter failure that raw-text indexing replaced, when the original could not be converted.
+      fallback: z.enum(['unsupported', 'malformed']).optional(),
     }),
   })
   .refine(value => value.chunks.reduce((sum, chunk) => sum + chunk.tokens, 0) <= knowledgeLimits.tokens);

@@ -26,7 +26,7 @@ test(
       const stream = [
         ...db.baseline,
         migration(
-          '0007_rollout_probe.sql',
+          '9999_rollout_probe.sql',
           "CREATE TABLE {{schema}}.tf_atomic_probe (id integer); INSERT INTO {{schema}}.tf_atomic_probe VALUES (42); CREATE TABLE {{schema}}.tf_rollout_probe (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO {{schema}}.tf_rollout_probe VALUES (1, 'once');",
         ),
       ];

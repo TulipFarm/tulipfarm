@@ -383,6 +383,10 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
               heading: z.string(),
               expires_at: z.date().nullable(),
               file_id: uuidSchema.nullable(),
+              indexed_at: z.date(),
+              observed_at: z.date(),
+              source_revision: z.string().nullable(),
+              synced_at: z.date().nullable(),
             })
             .extend(candidateSchema.shape),
         )
@@ -452,6 +456,12 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
           accessEpoch: row.access_epoch,
           ordinal: row.ordinal,
         }),
+        freshness: {
+          indexedAt: row.indexed_at.toISOString(),
+          observedAt: row.observed_at.toISOString(),
+          sourceRevision: row.source_revision,
+          sourceSyncedAt: row.synced_at?.toISOString() ?? null,
+        },
       }));
       const next =
         rows.length === 20 ? (rows.at(-1)?.position ?? session.candidates.length) + 1 : session.candidates.length;

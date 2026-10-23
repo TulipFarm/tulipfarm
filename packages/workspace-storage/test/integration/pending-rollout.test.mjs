@@ -16,7 +16,7 @@ test('common upgrades refuse unfinished resource work without changing receipts 
     const sql = 'CREATE TABLE {{schema}}.tf_upgrade_probe (id integer PRIMARY KEY)';
     const stream = [
       ...baseline,
-      { name: '0007_upgrade_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+      { name: '9999_upgrade_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
     ];
     const teamId = randomUUID();
     const tableId = randomUUID();
@@ -101,7 +101,7 @@ test(
       const sql = 'CREATE TABLE {{schema}}.tf_upgrade_probe (id integer)';
       const stream = [
         ...db.baseline,
-        { name: '0007_upgrade_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+        { name: '9999_upgrade_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
       ];
       await author.query('BEGIN');
       await author.query(`SELECT count(*) FROM ${table('tf_common_migrations')}`);

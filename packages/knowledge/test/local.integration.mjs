@@ -7,7 +7,7 @@ import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/
 import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations.js';
 import { createFiles } from '@tulipfarm/files';
 import { AccessDenied } from '@tulipfarm/access';
-import { createLocalKnowledge, KnowledgeError } from '../dist/index.js';
+import { createKnowledgeSourceFailures, createLocalKnowledge, KnowledgeError } from '../dist/index.js';
 import { docx, pdf } from './fixtures/parser-documents.mjs';
 
 test('local knowledge originals, actual parsing, indexed search and durable work', async t => {
@@ -438,6 +438,94 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await restarted.get(one.id, owner.userId, capped.documentId)).canRetry, false);
       assert.equal((await restarted.get(one.id, owner.userId, capped.documentId)).parsing, 'failed');
     });
+    await t.test(
+      'unreadable text falls back to raw text, failures are listed and provider errors back off',
+      async () => {
+        const fileId = randomUUID();
+        await files.upload(
+          one.id,
+          owner.userId,
+          fileId,
+          { name: 'ledger.bin', parentId: null, mediaType: 'application/octet-stream' },
+          Buffer.from('Orchard ledger: plum shipments leave on Fridays.'),
+        );
+        const item = save('', { title: 'Orchard ledger', input: { kind: 'file', fileId } });
+        await api.save(one.id, owner.userId, item);
+        await run(item.commandId);
+        const hit = (await api.search(one.id, owner.userId, { query: 'plum shipments Fridays' })).hits.find(
+          entry => entry.citation.documentId === item.documentId,
+        );
+        assert.ok(hit);
+        const { source_id: sourceId } = (
+          await db.platform.query(`SELECT source_id FROM ${table('documents')} WHERE id=$1`, [item.documentId])
+        ).rows[0];
+        const failures = createKnowledgeSourceFailures({ runtime });
+        const listed = await failures.list(one.id, owner.userId, sourceId);
+        assert.equal(listed.sourceId, sourceId);
+        assert.equal(listed.truncated, false);
+        assert.deepEqual(
+          listed.items.find(entry => entry.documentId === item.documentId) && {
+            status: listed.items.find(entry => entry.documentId === item.documentId).status,
+            reason: listed.items.find(entry => entry.documentId === item.documentId).reason,
+          },
+          { status: 'raw-text', reason: 'unsupported' },
+        );
+        const scan = listed.items.find(entry => entry.title === 'Mixed scan');
+        assert.equal(scan?.status, 'ocr-unavailable');
+        assert.equal(scan?.reason, 'ocr-required');
+        assert.ok(
+          listed.items.findIndex(entry => entry.status !== 'raw-text') <
+            listed.items.indexOf(listed.items.find(entry => entry.status === 'raw-text')),
+        );
+        const stranger = randomUUID();
+        await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'admin')`, [
+          randomUUID(),
+          stranger,
+        ]);
+        await assert.rejects(failures.list(one.id, stranger, sourceId), AccessDenied);
+        await assert.rejects(failures.list(one.id, owner.userId, randomUUID()), AccessDenied);
+
+        const flakyId = randomUUID();
+        await files.upload(
+          one.id,
+          owner.userId,
+          flakyId,
+          { name: 'flaky.md', parentId: null, mediaType: 'text/markdown' },
+          Buffer.from('Flaky storage note.'),
+        );
+        const flaky = save('', { title: 'Flaky', input: { kind: 'file', fileId: flakyId } });
+        await api.save(one.id, owner.userId, flaky);
+        const delays = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await db.platform.query(
+            `UPDATE ${table('jobs')} SET dispatch_after=clock_timestamp()-interval '1 second' WHERE revision_id=$1`,
+            [flaky.commandId],
+          );
+          const work = (await api.due(one.id)).find(entry => entry.revisionId === flaky.commandId);
+          await api.acknowledge(work);
+          afterRead = () => {
+            throw new Error('storage unavailable');
+          };
+          assert.equal((await api.process(work)).disposition, 'retry');
+          delays.push(
+            (
+              await db.platform.query(
+                `SELECT extract(epoch FROM dispatch_after-clock_timestamp())::float8 AS s FROM ${table('jobs')} WHERE revision_id=$1`,
+                [flaky.commandId],
+              )
+            ).rows[0].s,
+          );
+        }
+        assert.ok(delays[0] > 20 && delays[0] <= 30, String(delays));
+        assert.ok(delays[1] > delays[0] * 1.5 && delays[1] <= 60, String(delays));
+        assert.equal((await api.get(one.id, owner.userId, flaky.documentId)).parsing, 'queued');
+        await db.platform.query(
+          `UPDATE ${table('jobs')} SET dispatch_after=clock_timestamp()-interval '1 second' WHERE revision_id=$1`,
+          [flaky.commandId],
+        );
+        await run(flaky.commandId);
+      },
+    );
     await t.test('shared local source count and membership incarnation remain exact', async () => {
       const documents = [save('First member note.'), save('Second member note.')];
       for (const item of documents) await api.save(one.id, owner.userId, item);

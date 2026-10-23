@@ -66,6 +66,41 @@ open another transaction or commit individual steps. Reconciliation calls
 the model outside the transaction, then checks revisions and watermarks in
 a new fenced transaction before applying anything.
 
+## Searchability, freshness and parse failures
+
+A document becomes keyword-searchable as soon as its lexical publication
+exists. Search eligibility requires only `lexical_publication_id`; vector
+results join the same ranking once the embedding publication is ready, so
+embeddings never delay keyword search.
+
+Search hits carry `freshness`: `indexedAt` (when the current publication was
+built), `observedAt` (when the indexed revision was observed),
+`sourceRevision` (provider revision for external sources, otherwise null) and
+`sourceSyncedAt` (the source's last completed sync, or null). Retrieval
+documents and `knowledge.read` expose `indexedAt`, `sourceRevision` and
+`sourceSyncedAt`, and the tool instructions ask the model to say "indexed as
+of" when recency matters. Common migration `0008` adds
+`tf_knowledge_sources.synced_at`, set by a trigger when a provider sync
+completes.
+
+`parseKnowledgeDocument` retries transient process failures (spawn, abnormal
+exit, invalid output, memory sampling) up to `parserRetry.attempts` times with
+exponential backoff from `parserRetry.initialDelayMs`. Timeouts and memory
+limits fail at once because the same bytes fail the same way. Hosts that queue
+parse work retry provider and transient failures with their own exponential
+backoff (local Knowledge: 30 seconds doubling, capped at one hour, 8 attempts).
+
+When the converter rejects a document as `unsupported` or `malformed` but the
+bytes are valid UTF-8 text without binary markers, the parser indexes the raw
+text instead. The result profile then has `fallback` set to the original
+failure, and the Knowledge source failures endpoint
+(`GET /v1/workspaces/:workspaceId/knowledge/sources/:sourceId/failures`, source
+owner only) lists it as `raw-text` next to items that stayed unsearchable.
+For GitHub sources it also lists provider items that failed before becoming a
+document (for example `too-large` or a fetch error), with a null `documentId`.
+GitHub `denied` coverage markers record missing permissions, not failures, so
+the list excludes them.
+
 ## Authority and host responsibilities
 
 The host resolves the current principal, locks authority, binds tenant/schema

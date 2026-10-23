@@ -9,9 +9,12 @@ export function createPostgresRetrievalRepository(
   return {
     anchors: values =>
       client.query(
-        `SELECT p.id AS publication_id,p.document_id,p.revision_id,d.source_id,s.access_epoch,a.ordinal
+        `SELECT p.id AS publication_id,p.document_id,p.revision_id,d.source_id,s.access_epoch,a.ordinal,
+           p.created_at AS indexed_at,r.created_at AS observed_at,s.synced_at,
+           CASE WHEN s.provider IN ('google','slack','github','confluence','jira') THEN left(r.source_revision,200) END AS source_revision
          FROM unnest($1::uuid[],$2::int[]) WITH ORDINALITY a(publication_id,ordinal,position)
          JOIN ${table('publications')} p ON p.id=a.publication_id
+         JOIN ${table('revisions')} r ON r.id=p.revision_id
          JOIN ${table('documents')} d ON d.id=p.document_id
          JOIN ${table('sources')} s ON s.id=d.source_id
          JOIN ${table('chunks')} k ON k.publication_id=p.id AND k.ordinal=a.ordinal

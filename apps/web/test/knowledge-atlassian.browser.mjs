@@ -80,7 +80,8 @@ test(
       const page = await context.newPage();
       page.setDefaultTimeout(15_000);
       const sources = new Map(),
-        documents = new Map();
+        documents = new Map(),
+        failures = new Map();
       const faults = {
         sites: 200,
         sitesError: null,
@@ -216,6 +217,9 @@ test(
           writes.push({ kind: 'refresh', path });
           status = faults.refresh;
           json = { refreshed: 3, unavailable: 1, bounded: true };
+        } else if (/\/knowledge\/sources\/[^/]+\/failures$/.test(path)) {
+          const sourceId = path.split('/sources/')[1].split('/')[0];
+          json = failures.get(sourceId) ?? { sourceId, syncedAt: null, items: [], truncated: false };
         } else if (path.startsWith(`${knowledge}/sources/`) && path.endsWith('/documents')) {
           const pages = documents.get(path.split('/sources/')[1].split('/')[0]) ?? [];
           const index = Number(url.searchParams.get('cursor') ?? 0);
@@ -279,7 +283,7 @@ test(
         await page.getByRole('region', { name: `Select ${product} content`, exact: true }).waitFor();
       };
       try {
-        await run({ page, context, faults, sources, documents, writes, reads, open, select });
+        await run({ page, context, faults, sources, documents, failures, writes, reads, open, select });
         assert.deepEqual(errors, []);
         assert.deepEqual(unknown, []);
       } finally {
