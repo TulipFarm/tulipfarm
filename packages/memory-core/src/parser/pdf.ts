@@ -4,7 +4,14 @@ import { KnowledgeParseError, parserLimits } from './contracts.js';
 
 type Token = { kind: 'name' | 'word'; value: string } | { kind: 'value' };
 
-export function checkPdf(document: PDFDocument): void {
+/**
+ * Validates page content and returns the 1-based numbers of pages that paint images: inline images, image XObjects
+ * (also inside Forms, tiling patterns and annotation appearances) and applied soft masks. Native text extraction
+ * misses what those pages show, so each becomes a rendered page image.
+ */
+export function checkPdf(document: PDFDocument): Set<number> {
+  const imagePages = new Set<number>();
+  let painted = false;
   const form = document.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
   if (form?.has(PDFName.of('XFA')) || (form?.lookupMaybe(PDFName.of('Fields'), PDFArray)?.size() ?? 0) > 0) {
     throw new KnowledgeParseError('unsupported');
@@ -12,8 +19,8 @@ export function checkPdf(document: PDFDocument): void {
   let hasAnnotations = false;
   let expandedBytes = 0;
   const active = new Set<PDFRawStream>();
-  function inspectForm(object: PDFRawStream, resources: PDFDict | undefined): void {
-    if (object.dict.lookup(PDFName.of('Subtype'), PDFName).decodeText() !== 'Form')
+  function inspectForm(object: PDFRawStream, resources: PDFDict | undefined, pattern = false): void {
+    if (!pattern && object.dict.lookup(PDFName.of('Subtype'), PDFName).decodeText() !== 'Form')
       throw new KnowledgeParseError('unsupported');
     if (active.has(object) || active.size >= 64) malformed();
     active.add(object);
@@ -32,15 +39,15 @@ export function checkPdf(document: PDFDocument): void {
     let previous: Token | undefined;
     for (const token of tokens(contents)) {
       if (token.kind === 'word') {
-        if (token.value === 'BI') throw new KnowledgeParseError('ocr-required');
+        if (token.value === 'BI') painted = true;
         if (token.value === 'Do') {
           if (previous?.kind !== 'name') malformed();
           const objects = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
           const object = objects?.lookup(PDFName.of(previous.value));
           if (!(object instanceof PDFRawStream)) malformed();
           const subtype = object.dict.lookup(PDFName.of('Subtype'), PDFName).decodeText();
-          if (subtype === 'Image') throw new KnowledgeParseError('ocr-required');
-          inspectForm(object, resources);
+          if (subtype === 'Image') painted = true;
+          else inspectForm(object, resources);
         }
         if (token.value === 'gs') {
           if (previous?.kind !== 'name') malformed();
@@ -49,17 +56,21 @@ export function checkPdf(document: PDFDocument): void {
           if (!(state instanceof PDFDict)) malformed();
           const mask = state.lookup(PDFName.of('SMask'));
           // Soft-mask rendering is not represented in native text extraction.
-          if (mask && !(mask instanceof PDFName && mask.decodeText() === 'None'))
-            throw new KnowledgeParseError('ocr-required');
+          if (mask && !(mask instanceof PDFName && mask.decodeText() === 'None')) painted = true;
         }
-        // Pattern paints can contain images in their own content streams.
-        if ((token.value === 'scn' || token.value === 'SCN') && previous?.kind === 'name')
-          throw new KnowledgeParseError('unsupported');
+        // Tiling patterns have their own content streams, which can paint images; shadings can't.
+        if ((token.value === 'scn' || token.value === 'SCN') && previous?.kind === 'name') {
+          const patterns = resources?.lookupMaybe(PDFName.of('Pattern'), PDFDict);
+          const object = patterns?.lookup(PDFName.of(previous.value));
+          if (object instanceof PDFRawStream) inspectForm(object, resources, true);
+          else if (!(object instanceof PDFDict)) malformed();
+        }
         previous = undefined;
       } else previous = token;
     }
   }
-  for (const page of document.getPages()) {
+  for (const [index, page] of document.getPages().entries()) {
+    painted = false;
     const contents = page.node.Contents();
     const streams =
       contents instanceof PDFArray
@@ -92,8 +103,10 @@ export function checkPdf(document: PDFDocument): void {
         }
       }
     }
+    if (painted) imagePages.add(index + 1);
   }
   if (hasAnnotations) throw new KnowledgeParseError('unsupported');
+  return imagePages;
 }
 
 function* tokens(text: string): Generator<Token> {
@@ -153,7 +166,15 @@ function* tokens(text: string): Generator<Token> {
       };
     } else if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) || ['true', 'false', 'null'].includes(value))
       yield { kind: 'value' };
-    else yield { kind: 'word', value };
+    else if (value === 'ID') {
+      // Inline image data is binary and runs to the first whitespace-delimited `EI`.
+      const end = /\sEI(?=[\s/[<(%]|$)/g;
+      end.lastIndex = position + 1;
+      const match = end.exec(text);
+      if (!match) malformed();
+      position = match.index + 3;
+      yield { kind: 'word', value: 'EI' };
+    } else yield { kind: 'word', value };
   }
   if (stack.length) malformed();
 }

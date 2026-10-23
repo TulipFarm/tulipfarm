@@ -3,6 +3,7 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 import { loadCollaborationDirectory } from '@/lib/governance';
+import { knowledgeGapsSchema } from '@/features/files/knowledge-api';
 
 const projectSchema = z.object({
   id: z.uuid(),
@@ -29,6 +30,7 @@ const fileSchema = z.object({
   bytes: z.number().int(),
   updatedAt: z.string(),
   source: sourceFileSchema.nullable().default(null),
+  gaps: knowledgeGapsSchema.nullable().default(null),
 });
 const fileAudienceSchema = z.object({
   readers: z.number().int(),

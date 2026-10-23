@@ -24,6 +24,10 @@ export const modelCapabilitiesSchema = z
       .optional()
       .describe('Usage reports reasoning tokens separately from completion tokens; count them as output'),
     streaming: z.boolean().optional().describe('Chat steps stream the response'),
+    imageInput: z
+      .boolean()
+      .optional()
+      .describe('Accepts images in user messages; required for the document-vision role'),
     responseModelAliases: z
       .array(z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/))
       .readonly()
@@ -40,6 +44,7 @@ const base = {
   toolChoice: 'forced',
   reasoningOffForTools: false,
   reasoningTokensInOutput: false,
+  imageInput: false,
   responseModelAliases: [],
 } as const;
 export const providerModelCapabilities: Readonly<Record<ModelProvider, ModelCapabilities>> = Object.freeze({

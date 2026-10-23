@@ -129,6 +129,25 @@ export function chunkMarkdown(markdown: string): { chunks: KnowledgeChunk[]; tok
   return { chunks, tokens };
 }
 
+/** Chunks each located segment separately so every passage keeps the page, slide or sheet it came from. */
+export function chunkSegments(segments: readonly { location: KnowledgeChunk['offset']; markdown: string }[]): {
+  chunks: KnowledgeChunk[];
+  tokens: number;
+} {
+  const chunks: KnowledgeChunk[] = [];
+  let tokens = 0;
+  for (const segment of segments) {
+    if (!segment.markdown.trim()) continue;
+    const result = chunkMarkdown(segment.markdown);
+    tokens += result.tokens;
+    if (tokens > knowledgeLimits.tokens || chunks.length + result.chunks.length > knowledgeLimits.chunksPerRevision)
+      throw new KnowledgeParseError('resource-limited');
+    for (const chunk of result.chunks) chunks.push({ ...chunk, offset: segment.location });
+  }
+  if (!chunks.length) throw new KnowledgeParseError('malformed');
+  return { chunks, tokens };
+}
+
 function joinPrefix(prefix: string, text: string): string {
   return prefix ? `${prefix}\n\n${text}` : text;
 }

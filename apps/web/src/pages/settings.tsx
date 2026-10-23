@@ -26,6 +26,7 @@ import { TeamConfirmation } from './team-administration';
 import { AvatarImagePicker } from '@/features/avatar/image-picker';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { useFlag } from '@/lib/feature-flags';
+import { KnowledgeSettings } from '@/features/files/knowledge-settings';
 
 export function SettingsPage() {
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
@@ -365,6 +366,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
                   </SettingsRow>
                 </SettingsGroup>
               )}
+              {admin && <KnowledgeSettings workspaceId={workspaceId} />}
               {admin && (
                 <SettingsGroup title="Close workspace" titleId="delete-heading">
                   <SettingsRow

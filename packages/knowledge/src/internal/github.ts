@@ -45,6 +45,7 @@ import { KnowledgeParseError, KnowledgeParserBusy } from '../parser.ts';
 import { parseKnowledgeDocument } from './parse-document.ts';
 import { citationSchema, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
+import { publicationSeed, recordParse } from './media.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -1505,7 +1506,7 @@ export function createGitHubKnowledge({
       });
       await ensureOwnerProof(work, token, item.repositoryId);
       await fenced(work, token, async (tx, _s, human) => {
-        const publicationId = identity(`github-publication:${revisionId}`);
+        const publicationId = identity(publicationSeed('github-', revisionId, parsed));
         await store.publish(
           tx,
           human,
@@ -1520,10 +1521,7 @@ export function createGitHubKnowledge({
           }),
           { filename: 'github-document.md' },
         );
-        await tx.client.query(`INSERT INTO ${table(tx, 'parse_profiles')} VALUES ($1,$2) ON CONFLICT DO NOTHING`, [
-          publicationId,
-          parsed.profile,
-        ]);
+        await recordParse(tx, publicationId, parsed);
         await tx.client.query(
           `UPDATE ${table(tx, 'github_items')} SET failure=NULL WHERE source_id=$1 AND native_id=$2`,
           [s.source_id, item.nativeId],

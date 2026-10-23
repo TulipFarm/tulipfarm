@@ -13,6 +13,8 @@ export function createWorkerGoogleKnowledge(dependencies: {
   gate?: KnowledgeSourceGate;
   googleService?: ReturnType<typeof createGoogleWorkspaceService>;
   providerFetch?: typeof fetch;
+  recognition?: Parameters<typeof createGoogleKnowledge>[0]['recognition'];
+  recognitionAvailable?: Parameters<typeof createGoogleKnowledge>[0]['recognitionAvailable'];
 }) {
   return createGoogleKnowledge({
     runtime: dependencies.runtime,
@@ -26,6 +28,8 @@ export function createWorkerGoogleKnowledge(dependencies: {
       ...(dependencies.providerFetch ? { providerFetch: dependencies.providerFetch } : {}),
     }),
     ...(dependencies.gate ? { gate: dependencies.gate } : {}),
+    ...(dependencies.recognition ? { recognition: dependencies.recognition } : {}),
+    ...(dependencies.recognitionAvailable ? { recognitionAvailable: dependencies.recognitionAvailable } : {}),
   });
 }
 

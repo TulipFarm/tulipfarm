@@ -1,3 +1,4 @@
+import { knowledgeGapLimit, knowledgeLocationOf, type KnowledgeGaps } from '@tulipfarm/memory-core/contracts';
 import { parseKnowledgeDocument } from '@tulipfarm/memory-core/parser';
 
 export class KnowledgeExtractionError extends Error {
@@ -50,7 +51,10 @@ export function readableKnowledgeText(content: string) {
   return content;
 }
 
-export async function extractKnowledge(filename: string, bytes: Uint8Array): Promise<string> {
+/** Readable text of a project file, and the parts of it that could not be read: the count and the first few. */
+export type ExtractedKnowledge = { content: string; gaps: KnowledgeGaps | null };
+
+export async function extractKnowledge(filename: string, bytes: Uint8Array): Promise<ExtractedKnowledge> {
   const extension = knowledgeFileExtension(filename);
   if (!knowledgeTextExtensions.has(extension) && extension !== 'pdf' && extension !== 'docx') {
     throw new KnowledgeExtractionError('unsupported-file');
@@ -58,7 +62,7 @@ export async function extractKnowledge(filename: string, bytes: Uint8Array): Pro
   if (bytes.byteLength > 10 * 1024 * 1024) throw new KnowledgeExtractionError('unreadable-file');
   if (knowledgeTextExtensions.has(extension)) {
     try {
-      return readableKnowledgeText(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      return { content: readableKnowledgeText(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), gaps: null };
     } catch {
       throw new KnowledgeExtractionError('unreadable-file');
     }
@@ -73,7 +77,19 @@ export async function extractKnowledge(filename: string, bytes: Uint8Array): Pro
           : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
     if (result.pages > 200) throw new KnowledgeExtractionError('unreadable-file');
-    return readableKnowledgeText(result.markdown);
+    // Project knowledge has no recognizer: it keeps the readable text and records what it could not read.
+    const content = readableKnowledgeText(result.markdown);
+    if (!result.gaps.length) return { content, gaps: null };
+    return {
+      content,
+      gaps: {
+        count: result.gaps.length,
+        items: result.gaps.slice(0, knowledgeGapLimit).map(({ kind, reason, location, label }) => {
+          const at = knowledgeLocationOf(location);
+          return { kind, reason, label, ...(at ? { location: at } : {}) };
+        }),
+      },
+    };
   } catch {
     throw new KnowledgeExtractionError('unreadable-file');
   }

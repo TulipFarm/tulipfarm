@@ -110,6 +110,7 @@ test(
           bytes: Buffer.byteLength(brief),
           updatedAt: 'set',
           source: { kind: 'file', fileId, readAt: 'set', available: true },
+          gaps: null,
         },
       );
       const digest = (

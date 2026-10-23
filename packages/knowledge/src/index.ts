@@ -17,7 +17,16 @@ export {
   type ConversationKnowledgeInput,
 } from './internal/conversation.ts';
 export type { LocalKnowledgeOptions } from './internal/local.ts';
+export {
+  KnowledgeAdminRequired,
+  createRecognitionCache,
+  mediaStorageVersion,
+  type KnowledgeRecognitionAvailability,
+  type KnowledgeRecognitionPort,
+  type KnowledgeRecognitionScope,
+} from './internal/media.ts';
 export * from './contracts.ts';
+export * from './settings-contracts.ts';
 export * from './retrieval-contracts.ts';
 export * from './embeddings.ts';
 export { createKnowledgeEmbeddings } from './internal/embeddings.ts';
@@ -43,6 +52,7 @@ export {
   knowledgeCitationIdSchema,
   knowledgeToolSearchSchema,
   knowledgeToolLimits,
+  knowledgeLocationText,
   type KnowledgeAgentTools,
   type KnowledgeToolContext,
 } from './internal/agent-tools.ts';

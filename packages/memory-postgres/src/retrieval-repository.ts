@@ -1,6 +1,7 @@
 import type { RetrievalRepository } from '@tulipfarm/memory-core/ports/retrieval-repository';
 import type { MemoryQueryClient } from './query-client.ts';
 import { memoryTable, type PostgresMemoryNames } from './names.ts';
+import { readCoverageGaps } from './coverage-gaps.ts';
 export function createPostgresRetrievalRepository(
   client: MemoryQueryClient,
   names: PostgresMemoryNames,
@@ -26,7 +27,7 @@ export function createPostgresRetrievalRepository(
     passages: values =>
       client.query(
         `WITH ranked AS (
-          SELECT k.publication_id,k.ordinal,k.heading,k.passage,
+          SELECT k.publication_id,k.ordinal,k.heading,k.passage,k.source_offset,
             count(*) OVER (PARTITION BY k.publication_id)::int AS chunk_count,
             row_number() OVER (PARTITION BY k.publication_id ORDER BY
               min(CASE WHEN k.ordinal=a.ordinal THEN 0 WHEN k.heading=anchor.heading THEN 1 ELSE 2 END),
@@ -34,7 +35,7 @@ export function createPostgresRetrievalRepository(
           FROM unnest($1::uuid[],$2::int[]) a(publication_id,ordinal)
           JOIN ${table('chunks')} anchor ON anchor.publication_id=a.publication_id AND anchor.ordinal=a.ordinal
           JOIN ${table('chunks')} k ON k.publication_id=a.publication_id
-          GROUP BY k.publication_id,k.ordinal,k.heading,k.passage
+          GROUP BY k.publication_id,k.ordinal,k.heading,k.passage,k.source_offset
         ), budgeted AS (
           SELECT *,row_number() OVER (PARTITION BY publication_id ORDER BY priority) AS selected_priority,
             COALESCE(sum(length(passage)) OVER
@@ -42,11 +43,12 @@ export function createPostgresRetrievalRepository(
           FROM ranked
           WHERE NOT (publication_id::text || ':' || ordinal::text = ANY($5::text[]))
         )
-        SELECT publication_id,ordinal,heading,left(passage,$3-preceding) AS text,
+        SELECT publication_id,ordinal,heading,source_offset,left(passage,$3-preceding) AS text,
           length(passage)>$3-preceding AS truncated,chunk_count
         FROM budgeted WHERE preceding<$3 AND selected_priority<=$4
         ORDER BY publication_id,priority`,
         values,
       ),
+    readGaps: values => readCoverageGaps(client, table('coverage_gaps'), values),
   };
 }

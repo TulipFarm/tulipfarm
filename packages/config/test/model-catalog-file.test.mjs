@@ -80,6 +80,20 @@ test('the optional completion-check role is provider-neutral and has a single ow
   );
 });
 
+test('the document-vision model accepts image input and has a single owner', () => {
+  const vision = overrides => catalog([model({ roles: ['document-vision'], ...overrides })]);
+  assert.deepEqual(problems(vision({ capabilities: { imageInput: true } })), []);
+  rejects(vision(), /^models\.0\.roles: The document-vision model needs "capabilities": \{ "imageInput": true \}/);
+  rejects(vision({ capabilities: { imageInput: false } }), /^models\.0\.roles: The document-vision model/);
+  rejects(
+    catalog([
+      model({ roles: ['document-vision'], capabilities: { imageInput: true } }),
+      model({ id: 'claude-haiku', default: false, roles: ['document-vision'], capabilities: { imageInput: true } }),
+    ]),
+    /^models\.1\.roles\.0: Role "document-vision" is already on models\[0\]/,
+  );
+});
+
 const routes = (...providers) => ({
   routes: providers.map(provider => ({ provider, model: 'm' })),
 });

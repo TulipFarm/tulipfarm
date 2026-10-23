@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { getEncoding } from 'js-tiktoken';
-import { parseKnowledgeDocument, KnowledgeParseError, parserRetry, transientParseFailure } from '../dist/parser.js';
+import {
+  parseKnowledgeDocument,
+  KnowledgeParseError,
+  parserRetry,
+  retryTransientParse,
+  transientParseFailure,
+} from '../dist/parser.js';
 import { chunkMarkdown } from '../dist/parser/chunks.js';
 import {
   docx,
@@ -26,7 +32,6 @@ const failure = code => error => error instanceof KnowledgeParseError && error.f
 test('DOCX rejects proven native semantic loss before returning any chunks', async () => {
   const fixtures = new Map(strictAdmissionFixtures());
   for (const name of [
-    'superscript exponent',
     'unknown WordML element with a fact',
     'text in paragraph properties',
     'text in section properties',
@@ -36,12 +41,17 @@ test('DOCX rejects proven native semantic loss before returning any chunks', asy
   ]) {
     await assert.rejects(parse(await fixtures.get(name), 'facts.docx'), failure('unsupported'), name);
   }
-  for (const alignment of ['subscript', 'baseline']) {
-    const bytes = await rewriteDocx(await fixtures.get('superscript exponent'), [
+  const aligned = async alignment =>
+    rewriteDocx(await fixtures.get('superscript exponent'), [
       ['word/document.xml', xml => xml.replace('superscript', alignment)],
     ]);
-    await assert.rejects(parse(bytes, 'facts.docx'), failure('unsupported'), alignment);
-  }
+  // Raised and lowered text keeps a mark, so an exponent cannot read as a larger number.
+  for (const [alignment, text] of [
+    ['superscript', 'Area 10^2 square metres\n'],
+    ['subscript', 'Area 10_2 square metres\n'],
+    ['baseline', 'Area 102 square metres\n'],
+  ])
+    assert.equal((await parse(await aligned(alignment), 'facts.docx')).markdown, text, alignment);
   for (const container of ['p', 'r']) {
     const bytes = await rewriteDocx(await fixtures.get('unknown WordML element with a fact'), [
       [
@@ -57,7 +67,8 @@ test('DOCX rejects proven native semantic loss before returning any chunks', asy
   const aliased = await rewriteDocx(await fixtures.get('superscript exponent'), [
     ['word/document.xml', xml => xml.replaceAll('w:', 'word:').replace('xmlns:w=', 'xmlns:word=')],
   ]);
-  await assert.rejects(parse(aliased, 'facts.docx'), failure('unsupported'));
+  // An aliased WordML prefix is the same namespace, so the raised digit is still marked.
+  assert.equal((await parse(aliased, 'facts.docx')).markdown, 'Area 10^2 square metres\n');
   const result = await parse(await fixtures.get('struck out amount'), 'facts.docx');
   assert.equal(result.markdown, 'Limit ~~450~~ 500\n');
   assert.equal(result.chunks[0].text, 'Limit ~~450~~ 500');
@@ -328,14 +339,14 @@ test('transient parser failures retry with exponential backoff and stop at the a
   const delays = [];
   const sleep = async ms => void delays.push(ms);
   let calls = 0;
-  const result = await parseKnowledgeDocument(input, {
-    sleep,
-    run: async value => {
+  const result = await retryTransientParse(
+    async () => {
       calls++;
       if (calls < 3) throw new KnowledgeParseError('resource-limited', { reason: 'abnormal-exit' });
-      return parseKnowledgeDocument(value, { attempts: 1 });
+      return parseKnowledgeDocument(input);
     },
-  });
+    { sleep },
+  );
   assert.equal(calls, 3);
   assert.deepEqual(delays, [500, 1000]);
   assert.ok(result.markdown.includes('Harvest apples.'));
@@ -344,13 +355,13 @@ test('transient parser failures retry with exponential backoff and stop at the a
   calls = 0;
   delays.length = 0;
   await assert.rejects(
-    parseKnowledgeDocument(input, {
-      sleep,
-      run: async () => {
+    retryTransientParse(
+      async () => {
         calls++;
         throw new KnowledgeParseError('malformed', { reason: 'spawn' });
       },
-    }),
+      { sleep },
+    ),
     error => error.reason === 'spawn',
   );
   assert.equal(calls, 3);
@@ -362,13 +373,13 @@ test('transient parser failures retry with exponential backoff and stop at the a
   ]) {
     calls = 0;
     await assert.rejects(
-      parseKnowledgeDocument(input, {
-        sleep,
-        run: async () => {
+      retryTransientParse(
+        async () => {
           calls++;
           throw error;
         },
-      }),
+        { sleep },
+      ),
     );
     assert.equal(calls, 1, error.reason);
     assert.equal(transientParseFailure(error), false);
@@ -390,21 +401,42 @@ for (const [extension, create, expected] of [
     assert.equal(result.profile.engine, 'anydoc');
     assert.equal(result.profile.version, '0.2.4');
     assert.equal(result.pages, 0);
-    assert.ok(result.chunks.every(chunk => chunk.offset.kind === 'passage'));
+    const location = { xlsx: 'sheet', pptx: 'slide' }[extension] ?? 'passage';
+    assert.ok(result.chunks.every(chunk => chunk.offset.kind === location));
+    assert.deepEqual(result.gaps, []);
   });
 }
 
-test('native text PDF reports real page count and does not invent page citations', async () => {
+test('native text PDF reports real page count and cites the page of each chunk', async () => {
   const result = await parse(await pdf(['text', 'text']), 'orchard.pdf', 'application/pdf');
   assert.equal(result.pages, 2);
   assert.ok(result.markdown.includes('Harvest apples on Tuesday.'));
-  assert.ok(result.chunks.every(chunk => chunk.offset.kind === 'passage'));
+  assert.deepEqual(
+    result.chunks.map(chunk => chunk.offset),
+    [
+      { kind: 'page', page: 1 },
+      { kind: 'page', page: 2 },
+    ],
+  );
+  assert.deepEqual(result.gaps, []);
 });
 
-test('scanned and mixed PDFs reject the entire document', async () => {
+test('scanned PDFs need recognition while mixed PDFs keep native text and report image pages', async () => {
   await assert.rejects(parse(await pdf(['scan']), 'scan.pdf', 'application/pdf'), failure('ocr-required'));
-  await assert.rejects(parse(await pdf(['text', 'scan']), 'mixed.pdf', 'application/pdf'), failure('ocr-required'));
-  await assert.rejects(parse(await pdf(['mixed']), 'mixed-page.pdf', 'application/pdf'), failure('ocr-required'));
+  const mixed = await parse(await pdf(['text', 'scan']), 'mixed.pdf', 'application/pdf');
+  assert.equal(mixed.pages, 2);
+  assert.ok(mixed.markdown.includes('Harvest apples on Tuesday.'));
+  assert.deepEqual(
+    mixed.gaps.map(gap => [gap.kind, gap.reason, gap.location]),
+    [['image', 'recognition-unavailable', { kind: 'page', page: 2 }]],
+  );
+  // A page that paints an image falls back to its native text when it can't be recognized.
+  const page = await parse(await pdf(['mixed']), 'mixed-page.pdf', 'application/pdf');
+  assert.ok(page.markdown.includes('Harvest apples on Tuesday.'));
+  assert.deepEqual(
+    page.gaps.map(gap => gap.location),
+    [{ kind: 'page', page: 1 }],
+  );
 });
 
 test('encrypted, malformed, and over-500-page PDFs are rejected', async () => {
@@ -447,9 +479,15 @@ for (const kind of ['header', 'footer', 'comments', 'footnotes', 'endnotes']) {
   }
 }
 
-for (const kind of ['header', 'footer', 'comments', 'checkbox', 'legacyCheckbox']) {
-  test(`DOCX ${kind} is unsupported rather than silently omitted`, async () => {
-    await assert.rejects(parse(docxFeature(kind), 'budget.docx'), failure('unsupported'));
+for (const [kind, expected] of [
+  ['header', 'Harvest apples on Tuesday.\n\n## Header\n\nMaximum is 450\n'],
+  ['footer', 'Harvest apples on Tuesday.\n\n## Footer\n\nMaximum is 450\n'],
+  ['comments', 'Harvest apples on Tuesday.\n\nBudget reviewed\n\n> Comment (Reviewer): Maximum is 450\n'],
+  ['checkbox', 'Harvest apples on Tuesday.\n\nApproved\n'],
+  ['legacyCheckbox', 'Harvest apples on Tuesday.\n\n\u2612Approved\n'],
+]) {
+  test(`DOCX ${kind} is read rather than silently omitted`, async () => {
+    assert.equal((await parse(docxFeature(kind), 'budget.docx')).markdown, expected);
   });
 }
 
@@ -509,16 +547,16 @@ test('declared Office lists and structural slide or sheet bodies cannot disappea
   }
 });
 
-test('native model cannot recover DOCX header, footer, comment or checkbox facts', async () => {
+test('native model drops DOCX header, footer, comment and checkbox facts that extraction restores', async () => {
   const { toDocument, toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
-  for (const kind of ['header', 'footer', 'comments', 'checkbox', 'legacyCheckbox']) {
+  for (const kind of ['header', 'footer', 'comments', 'legacyCheckbox']) {
     const bytes = docxFeature(kind);
     const native = JSON.stringify(await toDocument(bytes));
     assert.ok(native.includes('Harvest apples on Tuesday.'));
     assert.ok(!native.includes('Maximum is 450'));
-    assert.ok(!native.includes('"kind":"checkbox"'));
+    assert.ok(!native.includes('\u2612'));
     assert.ok((await toMarkdownBytes(bytes)).includes('Harvest apples on Tuesday.'));
-    await assert.rejects(parse(bytes, 'facts.docx'), failure('unsupported'));
+    assert.match((await parse(bytes, 'facts.docx')).markdown, kind === 'legacyCheckbox' ? /\u2612/ : /Maximum is 450/);
   }
 });
 

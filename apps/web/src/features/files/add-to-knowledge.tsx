@@ -17,6 +17,7 @@ import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { errorMessage, type FileSummary } from './api';
 import { knowledgeApi, type KnowledgeEntry } from './knowledge-api';
+import { knowledgeGapSummary } from './knowledge-labels';
 import { PromotionSummary } from './promotion-summary';
 import type { FinalFocus } from './sharing';
 
@@ -368,14 +369,25 @@ function RowStatus({
       paused ? null : <Spinner aria-hidden="true" />,
       entry.parsing === 'queued' ? 'Waiting to extract text…' : 'Extracting text…',
     );
-  if (entry.parsing === 'ready')
+  if (entry.parsing === 'ready') {
+    const gaps = knowledgeGapSummary(entry.gaps);
     return line(
       <Check size={14} aria-hidden="true" />,
-      row.existing ? 'Already in your Knowledge. Chats can use it.' : 'Ready. Chats can use it from your Knowledge.',
+      [
+        row.existing ? 'Already in your Knowledge. Chats can use it.' : 'Ready. Chats can use it from your Knowledge.',
+        gaps,
+      ]
+        .filter(Boolean)
+        .join(' '),
       'foreground',
     );
+  }
   if (entry.parsing === 'ocr-unavailable')
-    return line(null, 'This file has scanned pages. TulipFarm can’t read text from images yet.', 'destructive');
+    return line(
+      null,
+      'This file has only images, and image reading is off or unavailable. TulipFarm will try again when it’s on.',
+      'destructive',
+    );
   if (entry.canRetry)
     return (
       <div className="flex flex-wrap items-center gap-2">

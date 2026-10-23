@@ -329,7 +329,7 @@ function azureSchema(value: unknown): unknown {
 
 function openAiShapedRequest(
   config: OpenAiShapedRoute,
-  messages: { role: string; content: string }[],
+  messages: { role: string; content: string | readonly object[] }[],
   description: string,
   schema?: object,
 ) {
@@ -1021,6 +1021,48 @@ export async function inferDecision(
 }
 
 export type ChatTurn = { role: 'user' | 'assistant'; text: string };
+export const chatImageMediaTypes = Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const);
+export type ChatImageMediaType = (typeof chatImageMediaTypes)[number];
+/** One part of a user message. Image `data` is raw bytes or their base64 encoding. */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mediaType: ChatImageMediaType; data: Uint8Array | string };
+/** A user message with images, for models whose capabilities declare `imageInput`. */
+export type ChatContentTurn = { role: 'user'; content: readonly ChatContentPart[] };
+type ChatRequestTurn = ChatTurn | ChatContentTurn;
+
+const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+function imageBase64(part: Extract<ChatContentPart, { type: 'image' }>) {
+  if (!chatImageMediaTypes.includes(part.mediaType)) throw new Error(`Unsupported image media type ${part.mediaType}`);
+  if (typeof part.data !== 'string') return Buffer.from(part.data).toString('base64');
+  if (!part.data || !base64Pattern.test(part.data)) throw new Error('Image data must be base64');
+  return part.data;
+}
+/** The provider wire content of a turn. A text turn keeps its plain string. */
+function turnContent(api: ModelCapabilities['api'], turn: ChatRequestTurn): string | object[] {
+  if ('text' in turn) return turn.text;
+  return turn.content.map(part => {
+    if (part.type === 'text') {
+      if (api === 'gemini') return { text: part.text };
+      return api === 'responses' ? { type: 'input_text', text: part.text } : { type: 'text', text: part.text };
+    }
+    const data = imageBase64(part);
+    switch (api) {
+      case 'chat-completions':
+        return { type: 'image_url', image_url: { url: `data:${part.mediaType};base64,${data}` } };
+      case 'responses':
+        return { type: 'input_image', image_url: `data:${part.mediaType};base64,${data}` };
+      case 'anthropic-messages':
+        return { type: 'image', source: { type: 'base64', media_type: part.mediaType, data } };
+      case 'gemini':
+        return { inlineData: { mimeType: part.mediaType, data } };
+    }
+  });
+}
+function googleParts(turn: ChatRequestTurn) {
+  if ('text' in turn) return [{ text: turn.text }];
+  return turnContent('gemini', turn) as object[];
+}
 function routeStreamFormat(route: CapableRoute): StreamFormat | null {
   const capabilities = routeCapabilities(route);
   if (!capabilities.streaming) return null;
@@ -1028,7 +1070,7 @@ function routeStreamFormat(route: CapableRoute): StreamFormat | null {
 }
 function chatRequest(
   config: z.output<typeof inferenceRouteSchema>,
-  context: readonly ChatTurn[],
+  context: readonly ChatRequestTurn[],
   system: string,
   schema?: object,
 ) {
@@ -1043,7 +1085,10 @@ function chatRequest(
           model: config.model,
           max_tokens: config.maxOutputTokens,
           system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-          messages: context.map(message => ({ role: message.role, content: message.text })),
+          messages: context.map(message => ({
+            role: message.role,
+            content: turnContent('anthropic-messages', message),
+          })),
           ...(schema
             ? {
                 tools: [{ name: 'select_action', description, input_schema: schema }],
@@ -1060,7 +1105,10 @@ function chatRequest(
         config,
         [
           { role: 'system', content: system },
-          ...context.map(message => ({ role: message.role, content: message.text })),
+          ...context.map(message => ({
+            role: message.role,
+            content: turnContent(routeCapabilities(config).api, message),
+          })),
         ],
         description,
         schema,
@@ -1073,7 +1121,7 @@ function chatRequest(
           systemInstruction: { parts: [{ text: system }] },
           contents: context.map(message => ({
             role: message.role === 'user' ? 'user' : 'model',
-            parts: [{ text: message.text }],
+            parts: googleParts(message),
           })),
           generationConfig: {
             maxOutputTokens: config.maxOutputTokens,
@@ -1732,6 +1780,7 @@ async function sendChatRequest<T>(
   answerText?: ToolInferenceContext['answerText'],
   onOutput?: () => void,
   onSettled?: (inputBytes: number, usage: InferenceUsage) => void,
+  signal?: AbortSignal,
 ) {
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
@@ -1782,7 +1831,9 @@ async function sendChatRequest<T>(
           headers: wire.headers,
           body: serialized,
           redirect: 'manual',
-          signal: AbortSignal.timeout(target.timeoutMs),
+          signal: signal
+            ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
+            : AbortSignal.timeout(target.timeoutMs),
         }).catch((error: unknown) => {
           throw new ModelCallError(
             timedOut(error) ? 'timeout' : 'transport',
@@ -1851,6 +1902,120 @@ export async function inferChatTitle(
       },
     ),
   );
+}
+
+export type ContentInferenceResult =
+  | { kind: 'answer'; text: string }
+  /** The provider refused or filtered the request or the answer. */
+  | { kind: 'refused' }
+  /** The answer stopped at the output token limit. */
+  | { kind: 'truncated'; text: string };
+
+function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResult | undefined {
+  switch (route.provider) {
+    case 'anthropic': {
+      const parsed = anthropicResponseSchema.safeParse(body);
+      if (!parsed.success) return undefined;
+      const text = parsed.data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('');
+      if (parsed.data.stop_reason === 'refusal') return { kind: 'refused' };
+      if (parsed.data.stop_reason === 'max_tokens') return { kind: 'truncated', text };
+      return parsed.data.stop_reason === 'end_turn' ? { kind: 'answer', text } : undefined;
+    }
+    case 'openai':
+    case 'xai':
+    case 'openai-compatible':
+    case 'azure': {
+      if (routeCapabilities(route).api === 'responses') {
+        const parsed = responsesResponseSchema.safeParse(body);
+        if (!parsed.success) return undefined;
+        const { output, incomplete_details: incomplete, status } = parsed.data;
+        if (
+          incomplete?.reason === 'content_filter' ||
+          output.some(item => item.type === 'message' && item.content.some(part => part.type === 'refusal'))
+        )
+          return { kind: 'refused' };
+        const text = output
+          .flatMap(item =>
+            item.type === 'message'
+              ? item.content.flatMap(part => (part.type === 'output_text' ? [part.text] : []))
+              : [],
+          )
+          .join('');
+        if (incomplete?.reason === 'max_output_tokens') return { kind: 'truncated', text };
+        return status === 'completed' ? { kind: 'answer', text } : undefined;
+      }
+      const parsed = azureResponseSchema.safeParse(body);
+      const choice = parsed.success ? parsed.data.choices[0] : undefined;
+      if (!choice) return undefined;
+      if (choice.message.refusal || choice.finish_reason === 'content_filter') return { kind: 'refused' };
+      const text = choice.message.content ?? '';
+      if (choice.finish_reason === 'length') return { kind: 'truncated', text };
+      return choice.finish_reason === 'stop' ? { kind: 'answer', text } : undefined;
+    }
+    case 'google': {
+      const feedback = googlePromptFeedbackSchema.safeParse(body);
+      if (
+        feedback.success &&
+        feedback.data.promptFeedback.blockReason &&
+        feedback.data.promptFeedback.blockReason !== 'BLOCK_REASON_UNSPECIFIED'
+      )
+        return { kind: 'refused' };
+      const parsed = googleResponseSchema.safeParse(body);
+      const candidate = parsed.success ? parsed.data.candidates?.[0] : undefined;
+      if (!candidate) return undefined;
+      if (
+        ['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY'].includes(
+          candidate.finishReason,
+        )
+      )
+        return { kind: 'refused' };
+      const content = googleContentSchema.safeParse(candidate.content);
+      const text = content.success
+        ? content.data.parts.flatMap(part => (part.thought ? [] : [part.text])).join('')
+        : '';
+      if (candidate.finishReason === 'MAX_TOKENS') return { kind: 'truncated', text };
+      return candidate.finishReason === 'STOP' && content.success ? { kind: 'answer', text } : undefined;
+    }
+  }
+}
+
+/**
+ * Answers one user message that may include images, on a model whose capabilities declare `imageInput`. A refusal
+ * or content filter, whether reported in the answer or as a provider error, returns `refused`. Transport, timeout,
+ * credit and provider failures throw, as does a response with no readable answer.
+ */
+export async function inferWithContent(
+  route: InferenceRoute,
+  system: string,
+  content: readonly ChatContentPart[],
+  options: { meter?: ToolModelMeter | undefined; signal?: AbortSignal | undefined } = {},
+): Promise<ContentInferenceResult> {
+  const config = inferenceRouteSchema.parse(route);
+  if (content.some(part => part.type === 'image') && !routeCapabilities(config).imageInput)
+    throw new Error(`Model ${config.model} does not declare imageInput`);
+  const wire = chatRequest(config, [{ role: 'user', content }], system);
+  let result: ContentInferenceResult | undefined;
+  try {
+    result = await sendChatRequest(
+      config,
+      0,
+      options.meter,
+      wire,
+      body => {
+        const value = contentAnswer(config, body);
+        return { value, failed: value === undefined };
+      },
+      undefined,
+      undefined,
+      undefined,
+      options.signal,
+    );
+  } catch (error) {
+    if (error instanceof ModelCallError && error.reason === 'refusal') return { kind: 'refused' };
+    throw error;
+  }
+  if (!result) throw new ModelCallError('invalid-decision', { outputStarted: false });
+  return result;
 }
 
 export async function inferWithTools(

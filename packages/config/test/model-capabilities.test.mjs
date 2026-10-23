@@ -37,6 +37,7 @@ test('every shipped model resolves the capabilities that reproduce its previous 
     toolChoice: 'forced',
     reasoningOffForTools: false,
     reasoningTokensInOutput: false,
+    imageInput: false,
     streaming: true,
     responseModelAliases: [],
   });

@@ -11,6 +11,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { knowledgeGapsSchema, type KnowledgeGaps } from '@tulipfarm/memory-core/contracts';
 import type { createFiles } from '@tulipfarm/files';
 import {
   createProjectMembership,
@@ -26,13 +27,17 @@ import {
   usableProjectSources,
 } from './project-file-sources.ts';
 export { projectSourceFile };
-import { extractKnowledge, readableKnowledgeText } from './knowledge-extraction.ts';
+import { extractKnowledge, KnowledgeExtractionError, readableKnowledgeText } from './knowledge-extraction.ts';
 import { selectProjectContext, type ProjectContext } from './project-context.ts';
 import type { ConversationRuntime } from './runtime.ts';
 import type { createAttachments } from './attachments.ts';
 
+type ProjectTransaction = AuthorizationTransaction & { commonVersion: number };
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 export const projectCompatibility = commonCompatibility;
+/** The first common storage version that records unread parts of project knowledge revisions. */
+const projectGapsVersion = 4;
+const gapsColumn = (tx: ProjectTransaction) => (tx.commonVersion >= projectGapsVersion ? 'r.gaps' : 'NULL::jsonb');
 const knowledgeQuotaBytes = 20 * 1024 * 1024;
 export const projectContextBudgetBytes = 96 * 1024;
 const filename = z
@@ -82,6 +87,8 @@ export const knowledgeSchema = z.object({
   bytes: z.number().int(),
   updatedAt: z.string(),
   source: projectFileSourceSchema.nullable(),
+  /** Parts of the file that could not be read, such as images; chats read the rest. Null when all of it was read. */
+  gaps: knowledgeGapsSchema.nullable(),
 });
 export const projectSourceViewSchema = z.object({ title: z.string(), filename: z.string(), content: z.string() });
 
@@ -94,6 +101,7 @@ type Revision = {
   bytes: number;
   digest: string;
   content: string;
+  gaps: KnowledgeGaps | null;
   fromFile?: boolean;
 };
 
@@ -120,7 +128,7 @@ export function createProjects(
     workspaceId: string,
     userId: string,
     write: boolean,
-    operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
+    operation: (tx: ProjectTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), projectCompatibility, async tx => {
       await lockAuthorization(tx, write ? 'write' : 'read');
@@ -139,7 +147,7 @@ export function createProjects(
       const rows = z.array(knowledgeSchema.omit({ source: true }).extend({ digest: z.string() })).parse(
         (
           await tx.client.query(
-            `SELECT k.id,k.title,k.pinned,k.current_revision AS "revisionId",r.filename,r.bytes,r.digest,to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt"
+            `SELECT k.id,k.title,k.pinned,k.current_revision AS "revisionId",r.filename,r.bytes,r.digest,to_char(r.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "updatedAt",${gapsColumn(tx)} AS gaps
         FROM ${table(tx, 'tf_project_knowledge')} k JOIN ${table(tx, 'tf_project_knowledge_revisions')} r ON r.id=k.current_revision
         WHERE k.project_id=$1 AND k.removed_at IS NULL ORDER BY k.pinned DESC,lower(k.title),k.id`,
             [projectId],
@@ -215,13 +223,18 @@ export function createProjects(
         ).rows[0]?.bytes,
       );
       if (used + revision.bytes > knowledgeQuotaBytes) throw new ProjectConflict();
+      // Before gaps can be recorded and shown, a partial read stays unreadable rather than silently incomplete.
+      const recordsGaps = tx.commonVersion >= projectGapsVersion;
+      if (revision.gaps && !recordsGaps) throw new KnowledgeExtractionError('unreadable-file');
       if (!prior)
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_project_knowledge')} (id,project_id,title,current_revision) VALUES ($1,$2,$3,$4)`,
           [revision.id, projectId, revision.title, revision.revisionId],
         );
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_project_knowledge_revisions')} (id,knowledge_id,filename,digest,bytes,content,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        recordsGaps
+          ? `INSERT INTO ${table(tx, 'tf_project_knowledge_revisions')} (id,knowledge_id,filename,digest,bytes,content,created_by,gaps) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
+          : `INSERT INTO ${table(tx, 'tf_project_knowledge_revisions')} (id,knowledge_id,filename,digest,bytes,content,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
         [
           revision.revisionId,
           revision.id,
@@ -230,6 +243,7 @@ export function createProjects(
           revision.bytes,
           revision.content,
           actor.membershipId,
+          ...(recordsGaps ? [revision.gaps && JSON.stringify(revision.gaps)] : []),
         ],
       );
       if (prior)
@@ -260,7 +274,7 @@ export function createProjects(
     denyMcpEgress();
     projectId = uuidSchema.parse(projectId);
     const input = knowledgeUploadSchema.parse(value);
-    const content = await extractKnowledge(input.filename, bytes);
+    const { content, gaps } = await extractKnowledge(input.filename, bytes);
     return save(workspaceId, userId, projectId, {
       ...input,
       id: uuidSchema.parse(id),
@@ -268,6 +282,7 @@ export function createProjects(
       bytes: bytes.byteLength,
       digest: createHash('sha256').update(bytes).digest('hex'),
       content,
+      gaps,
     });
   }
   async function saveKnowledge(workspaceId: string, userId: string, projectId: string, id: string, value: unknown) {
@@ -285,6 +300,7 @@ export function createProjects(
       bytes: bytes.byteLength,
       digest: createHash('sha256').update(bytes).digest('hex'),
       content,
+      gaps: null,
     });
   }
   async function knowledgeState(workspaceId: string, userId: string, projectId: string, id: string, value: unknown) {
@@ -387,7 +403,7 @@ export function createProjects(
     });
     if (!files) throw new AccessDenied();
     const file = await files.download(workspaceId, userId, input.fileId);
-    const content = await extractKnowledge(file.name, file.bytes);
+    const { content, gaps } = await extractKnowledge(file.name, file.bytes);
     await save(workspaceId, userId, projectId, {
       id: knowledgeId,
       revisionId,
@@ -397,6 +413,7 @@ export function createProjects(
       bytes: file.bytes.byteLength,
       digest: createHash('sha256').update(file.bytes).digest('hex'),
       content,
+      gaps,
       fromFile: true,
     });
     return { id: knowledgeId, revisionId };

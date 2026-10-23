@@ -43,6 +43,7 @@
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",

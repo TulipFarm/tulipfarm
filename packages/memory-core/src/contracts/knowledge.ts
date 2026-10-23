@@ -63,6 +63,31 @@ export const knowledgeCitationSchema = z.strictObject({
   accessEpoch: z.number().int().positive(),
   ordinal: z.number().int().min(0).max(4095),
 });
+/** Where a passage or an unread part sits in its original. Absent for documents without pages, slides or sheets. */
+export const knowledgeLocationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('page'), page: z.number().int().min(1) }),
+  z.strictObject({ kind: z.literal('slide'), slide: z.number().int().min(1) }),
+  z.strictObject({ kind: z.literal('sheet'), sheet: z.number().int().min(1), name: z.string().max(256) }),
+]);
+export type KnowledgeLocation = z.infer<typeof knowledgeLocationSchema>;
+/** The page, slide or sheet of a stored chunk offset; a whole-passage offset has none. */
+export function knowledgeLocationOf(offset: unknown): KnowledgeLocation | undefined {
+  const parsed = knowledgeLocationSchema.safeParse(offset);
+  return parsed.success ? parsed.data : undefined;
+}
+export const knowledgeGapLimit = 20;
+export const knowledgeGapSchema = z.object({
+  kind: z.enum(['image', 'video', 'audio', 'object', 'other']),
+  reason: z.enum(['unsupported-media', 'recognition-unavailable', 'refused', 'empty', 'limit']),
+  location: knowledgeLocationSchema.optional(),
+  label: z.string(),
+});
+/** Parts of the latest publication Knowledge could not read: the full count and the first few. */
+export const knowledgeGapsSchema = z.object({
+  count: z.number().int().min(0),
+  items: z.array(knowledgeGapSchema).max(knowledgeGapLimit),
+});
+export type KnowledgeGaps = z.infer<typeof knowledgeGapsSchema>;
 const documentBase = z.object({
   documentId: uuid,
   revisionId: uuid,
@@ -71,6 +96,7 @@ const documentBase = z.object({
   failure: z.string().nullable(),
   publicationId: uuid.nullable(),
   canRetry: z.boolean(),
+  gaps: knowledgeGapsSchema.optional(),
 });
 export const knowledgeDocumentSchema = z.discriminatedUnion('kind', [
   documentBase.extend({ kind: z.literal('note'), noteText: z.string().optional() }),
@@ -90,6 +116,9 @@ export const knowledgeHitSchema = z.object({
   heading: z.string(),
   citation: knowledgeCitationSchema,
   freshness: knowledgeFreshnessSchema.optional(),
+  location: knowledgeLocationSchema.optional(),
+  /** True when the cited revision has parts Knowledge could not read. */
+  coverageGaps: z.boolean().optional(),
 });
 export const knowledgeSearchReasonSchema = z.enum([
   'semantic-not-enabled',

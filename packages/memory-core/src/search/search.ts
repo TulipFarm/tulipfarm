@@ -10,6 +10,7 @@ import type { SearchSessions } from '../ports/search-sessions.ts';
 import type { Clock } from '../ports/runtime.ts';
 import {
   knowledgeCitationSchema,
+  knowledgeLocationOf,
   knowledgeSearchFiltersSchema,
   knowledgeSearchRequestSchema,
   knowledgeSearchReasonSchema,
@@ -20,6 +21,11 @@ import type { createEmbeddingEngine } from '../embeddings/engine.ts';
 import { KnowledgeError } from '../documents/contracts.ts';
 import type { createDocumentStore } from '../documents/store.ts';
 import { normalizeIdentifier } from '../documents/identifiers.ts';
+
+const withLocation = (offset: unknown) => {
+  const location = knowledgeLocationOf(offset);
+  return location ? { location } : {};
+};
 
 const candidateSchema = z.object({
   document_id: uuidSchema,
@@ -387,6 +393,7 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
               observed_at: z.date(),
               source_revision: z.string().nullable(),
               synced_at: z.date().nullable(),
+              source_offset: z.unknown().optional(),
             })
             .extend(candidateSchema.shape),
         )
@@ -442,10 +449,22 @@ export function createSearchEngine<Context, Source extends { kind: string }>({
           (row.expires_at === null || row.expires_at.getTime() > clock.now()) &&
           (row.file_id === null || readable.get(row.file_id)),
       );
+      const port = sessions(tx);
+      const gapped =
+        port.readGaps && freshRows.length
+          ? new Set(
+              z
+                .array(z.object({ publication_id: uuidSchema }))
+                .parse((await port.readGaps([[...new Set(freshRows.map(row => row.publication_id))]])).rows)
+                .map(row => row.publication_id),
+            )
+          : undefined;
       const hits = freshRows.map(row => ({
         title: row.title,
         heading: row.heading,
         text: row.passage,
+        ...withLocation(row.source_offset),
+        ...(gapped ? { coverageGaps: gapped.has(row.publication_id) } : {}),
         citation: knowledgeCitationSchema.parse({
           kind: 'knowledge-document',
           workspaceId,

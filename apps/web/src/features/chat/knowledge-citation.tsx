@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
 import { CheckedCitation, type CitationState } from '@tulipfarm/sprout/chat-sources';
 import { apiOrigin } from '@/lib/auth';
+import { knowledgePlaceLabel } from '@/features/files/knowledge-labels';
 
 export const knowledgeCitationPrefix = '#knowledge-citation=';
 const citationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]{0,3})$/;
@@ -11,6 +12,7 @@ const evidenceSchema = z.object({
   heading: z.string(),
   text: z.string(),
   truncated: z.boolean(),
+  location: z.string().optional(),
   source: z.enum(['note', 'file', 'google', 'slack', 'github', 'confluence', 'jira', 'conversation']),
 });
 const sourceNames = {
@@ -76,7 +78,9 @@ export function KnowledgeCitation({
       setState({
         kind: 'ready',
         title: evidence.title,
-        location: [sourceNames[evidence.source], evidence.heading].filter(Boolean).join(' · '),
+        location: [sourceNames[evidence.source], knowledgePlaceLabel(evidence.location), evidence.heading]
+          .filter(Boolean)
+          .join(' · '),
         excerpt: evidence.truncated ? `${evidence.text}…` : evidence.text,
       });
     } catch {

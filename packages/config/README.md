@@ -144,6 +144,12 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   twice; the rejected call is not charged. Slack and external-context replies
   use the same workspace policy and summary models. The completion check's
   evidence is trimmed, oldest first, to fit its model's window.
+
+- **Document vision.** The optional `document-vision` role reads the images in
+  Knowledge documents: every visible word and a description of what each image
+  shows. Its model must declare `"imageInput": true` in `capabilities`, or the
+  catalog is invalid. Without it, images in Knowledge documents are left out
+  and reported as coverage gaps. Calls are billed to the document's workspace.
 - **Completion checks.** The optional `completion-check` role checks whether a
   tool-using chat reply is a sufficient stopping point. Without it, checks keep
   using the active chat model (including a chat fallback). Assign the role to
@@ -191,6 +197,7 @@ a model ID:
 | `reasoningOffForTools`    | sends reasoning effort `none` for deployments that reject tools while reasoning                             | `false`            |
 | `reasoningTokensInOutput` | adds reported reasoning tokens to completion tokens when the response omits `total_tokens`                  | `false`            |
 | `streaming`               | chat steps stream the response                                                                              | `true`             |
+| `imageInput`              | the model accepts images in user messages; the `document-vision` model needs it                             | `false`            |
 | `responseModelAliases`    | other model IDs the provider may report                                                                     | `[]`               |
 
 An `api` the provider does not serve is rejected. Capabilities do not change

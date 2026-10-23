@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { crc32 } from 'node:zlib';
-import { extractKnowledge } from '../src/knowledge-extraction.ts';
+import { extractKnowledge as extractWithGaps } from '../src/knowledge-extraction.ts';
+
+async function extractKnowledge(filename, bytes, api = { extractKnowledge: extractWithGaps }) {
+  const result = await api.extractKnowledge(filename, bytes);
+  assert.equal(result.gaps, null, filename);
+  return result.content;
+}
 
 function pdf(text) {
   const stream = text === null ? '' : `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
@@ -89,8 +95,8 @@ test('extracts a real text PDF and DOCX as normalized Markdown', async () => {
 
 test('compiled export uses the shared parser for real document bytes', async () => {
   const compiled = await import('../dist/knowledge-extraction.js');
-  assert.equal((await compiled.extractKnowledge('brief.pdf', pdf('Compiled PDF'))).trim(), '## Compiled PDF');
-  assert.equal((await compiled.extractKnowledge('brief.docx', docx('Compiled DOCX'))).trim(), 'Compiled DOCX');
+  assert.equal((await extractKnowledge('brief.pdf', pdf('Compiled PDF'), compiled)).trim(), '## Compiled PDF');
+  assert.equal((await extractKnowledge('brief.docx', docx('Compiled DOCX'), compiled)).trim(), 'Compiled DOCX');
 });
 
 test('rejects scans, corrupt documents, invalid text and unsupported formats', async () => {

@@ -409,3 +409,28 @@ test('retry commands requeue eligible provider failures once and preserve confli
     await f.close();
   }
 });
+
+test('workspace admins read and change whether Knowledge reads images in documents', async () => {
+  const f = await knowledgeFixture({ filesEnabled: false });
+  try {
+    const admin = { cookie: f.signed.admin.cookie };
+    assert.deepEqual((await f.call('/settings', admin)).json(), { mediaRecognition: true, canManage: true });
+    const off = await f.call('/settings', { ...admin, method: 'PUT', body: { mediaRecognition: false } });
+    assert.equal(off.status, 200, off.bytes.toString());
+    assert.deepEqual(off.json(), { mediaRecognition: false, canManage: true });
+    assert.equal(
+      (await f.call('/settings', { ...admin, method: 'PUT', body: { mediaRecognition: 'no' } })).status,
+      400,
+    );
+    const owner = await f.db.platform.query(`SELECT role FROM ${f.table('tf_memberships')} WHERE user_id=$1`, [
+      f.signed.owner.id,
+    ]);
+    const ownerIsAdmin = owner.rows[0]?.role === 'admin';
+    assert.deepEqual((await f.call('/settings')).json(), { mediaRecognition: false, canManage: ownerIsAdmin });
+    const change = await f.call('/settings', { method: 'PUT', body: { mediaRecognition: true } });
+    if (ownerIsAdmin) assert.equal(change.status, 200);
+    else assert.deepEqual([change.status, change.json()], [403, { error: 'knowledge-admin-required' }]);
+  } finally {
+    await f.close();
+  }
+});

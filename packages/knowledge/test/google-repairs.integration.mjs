@@ -82,7 +82,7 @@ test('Google review repairs with restricted PostgreSQL', async t => {
           const o = observation();
           return {
             ...o,
-            bytes: Buffer.from(malformed ? 'not a pdf' : 'private supplier terms'),
+            bytes: Buffer.from(malformed ? '%PDF-1.7\nbroken' : 'private supplier terms'),
             filename: malformed ? 'one.pdf' : 'one.txt',
             normalizedContent: null,
             metadataBefore: o,
@@ -396,7 +396,7 @@ test('Google review repairs with restricted PostgreSQL', async t => {
       assert.equal(item.canRetry, false);
       assert.equal(
         (await w.google.original(w.ws.id, w.ws.userId, item.documentId, item.revisionId)).bytes.toString(),
-        'not a pdf',
+        '%PDF-1.7\nbroken',
       );
       assert.deepEqual(await w.google.listDocuments(w.ws.id, w.reader.userId, w.source.sourceId), {
         items: [],
