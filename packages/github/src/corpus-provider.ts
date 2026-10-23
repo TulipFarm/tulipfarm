@@ -1914,7 +1914,6 @@ export function createGitHubCorpusProvider(options: {
       await withAccount(workspaceId, userId, expected.accountId, expected, async credential => {
         const token = credential.accessToken;
         const body = await byId(token, repositoryId);
-        scoped(credential, repository(body));
         for await (const part of fileReads(token, body, kind, file, id.part, new Date().toISOString()))
           if ((await accept(part)) === false) break;
       });
