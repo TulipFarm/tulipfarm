@@ -1,10 +1,19 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { HumanActor } from '@tulipfarm/access';
-import { FileError, type createFiles } from '@tulipfarm/files';
+import { AccessDenied, type HumanActor } from '@tulipfarm/access';
+import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
 import { bindFileSources, type FileSource } from './file-references.ts';
 import { requireFileSources } from './source-access.ts';
-import { OfficeSpecError, officeFormats, renderOfficeDocument, type OfficeFormat } from './office-documents.ts';
+import {
+  OfficeSpecError,
+  officeFormats,
+  officeImageIds,
+  officeImageInfo,
+  officeImageLimits,
+  renderOfficeDocument,
+  type OfficeFormat,
+  type OfficeImage,
+} from './office-documents.ts';
 
 const maximumBytes = 10 * 1024 * 1024;
 
@@ -29,7 +38,7 @@ export const fileOutputFormats: Record<CreateFileCall['format'], string> = {
   ...officeFormats,
 };
 const isOffice = (format: CreateFileCall['format']): format is OfficeFormat => format in officeFormats;
-export type FileOutputStore = Pick<ReturnType<typeof createFiles>, 'createDerived'>;
+export type FileOutputStore = Pick<ReturnType<typeof createFiles>, 'createDerived' | 'download'>;
 
 export type FileOutputContext = {
   workspaceId: string;
@@ -66,12 +75,48 @@ const publishFailures = {
 } as const;
 const isPublishFailure = (code: string): code is keyof typeof publishFailures => code in publishFailures;
 
+type ReadImage = OfficeImage & { fileId: string; sha256: string; readAt: string };
+
+/** Reads each image a spec places as the author, or says which one cannot be used. */
+async function readImages(
+  files: FileOutputStore,
+  context: FileOutputContext,
+  ids: readonly string[],
+): Promise<ReadImage[] | string> {
+  if (ids.length > officeImageLimits.images)
+    return `A document can place at most ${officeImageLimits.images} different images.`;
+  const images: ReadImage[] = [];
+  for (const fileId of ids) {
+    let bytes: Uint8Array;
+    try {
+      ({ bytes } = await files.download(context.workspaceId, context.actor.userId, fileId));
+    } catch (error) {
+      if (error instanceof AccessDenied || (error instanceof FileError && error.code === 'integrity'))
+        return `Image ${fileId} can't be read. Use a file the person can open in Files.`;
+      throw error;
+    }
+    if (bytes.byteLength > officeImageLimits.bytes)
+      return `Image ${fileId} is over ${officeImageLimits.bytes / 1024 / 1024} MiB. Use a smaller image.`;
+    const info = officeImageInfo(bytes);
+    if (!info) return `Image ${fileId} is not a PNG, JPEG, or GIF. Use an image in one of those formats.`;
+    images.push({
+      ...info,
+      bytes,
+      fileId,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      readAt: new Date().toISOString(),
+    });
+  }
+  return images;
+}
+
 const outputName = (call: CreateFileCall) =>
   call.name.trim().toLowerCase().endsWith(`.${call.format}`) ? call.name.trim() : `${call.name.trim()}.${call.format}`;
 
 /**
  * Writes an agent output into Files. Storage is written and verified before the ready row commits,
- * and the turn's referenced files are checked again in that transaction, so a revoked input blocks the output with AccessDenied.
+ * and the turn's referenced files and the images placed in an Office spec are checked again in that transaction,
+ * so a revoked or changed input blocks the output with AccessDenied.
  */
 export async function createFileOutput(
   files: FileOutputStore,
@@ -99,10 +144,14 @@ export async function createFileOutput(
       };
     }
   }
+  const images = isOffice(call.format)
+    ? await readImages(files, context, officeImageIds(call.format, call.content))
+    : [];
+  if (typeof images === 'string') return { error: 'invalid-content', instruction: `No file was created. ${images}` };
   let content: Uint8Array;
   try {
     content = isOffice(call.format)
-      ? await renderOfficeDocument(call.format, call.content)
+      ? await renderOfficeDocument(call.format, call.content, new Map(images.map(image => [image.fileId, image])))
       : new TextEncoder().encode(call.content);
   } catch (error) {
     if (error instanceof OfficeSpecError)
@@ -121,7 +170,12 @@ export async function createFileOutput(
       fileOutputId(context.origin.turnId, call),
       { name: outputName(call), parentId: call.folderId ?? null, mediaType: fileOutputFormats[call.format] },
       content,
-      tx => requireFileSources(bindFileSources(tx), context.actor, inputs),
+      async tx => {
+        await requireFileSources(bindFileSources(tx), context.actor, inputs);
+        for (const image of images)
+          if ((await requireReadableFile(tx, context.actor, image.fileId)).sha256 !== image.sha256)
+            throw new AccessDenied();
+      },
     );
     return {
       file: {
@@ -131,11 +185,12 @@ export async function createFileOutput(
         size: file.size ?? content.byteLength,
         parentId: file.parentId,
       },
-      derivedFrom: inputs.map(source => ({
-        fileId: source.fileId,
-        sha256: source.read.sha256,
-        readAt: source.read.readAt,
-      })),
+      derivedFrom: [
+        ...inputs.map(source => ({ fileId: source.fileId, sha256: source.read.sha256, readAt: source.read.readAt })),
+        ...images
+          .filter(image => !inputs.some(source => source.fileId === image.fileId))
+          .map(({ fileId, sha256, readAt }) => ({ fileId, sha256, readAt })),
+      ],
       instruction:
         'The file is saved in Files and shown as a card under your reply. Refer to it by name. Do not paste its full content again.',
     };

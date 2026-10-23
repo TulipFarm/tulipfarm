@@ -45,6 +45,7 @@ A run has `text` and any of `bold`, `italic`, `underline`, `strike`, `code` (mon
 | `divider`   | —                                                              | A horizontal rule.                                                                           |
 | `pageBreak` | —                                                              | Starts a new page.                                                                           |
 | `toc`       | optional `title` (default `Contents`)                          | A table of contents built from heading levels 1–3. Put it after the title.                   |
+| `image`     | `fileId`, optional `width` (10–100), optional `alt`            | A PNG, JPEG, or GIF from Files, centred. `width` is a percentage of the text width.          |
 
 ## Example
 
@@ -89,4 +90,7 @@ A run has `text` and any of `bold`, `italic`, `underline`, `strike`, `code` (mon
 - Headings are plain strings; put bold or links in the paragraph that follows.
 - Long tables split across pages automatically, and the header row repeats on each page.
 
-Images, charts, footnotes, comments, and tracked changes are not supported. Describe a chart's data in a table instead.
+- An `image` needs the Files id of a PNG, JPEG, or GIF the person can open, such as an attachment in the chat. Up to 20 images, each at most 8 MiB. Images are never enlarged past their own size. Write `alt` text that says what the image shows.
+- Images work in Files only. Google Drive proposals reject image blocks for now.
+
+Charts, footnotes, comments, and tracked changes are not supported. Describe a chart's data in a table instead.
