@@ -71,6 +71,7 @@ export async function grantApplicationAccess(
   const capability = installed.rowCount ? 'isolated-v1' : 'disabled';
   const applicationRoutines = [
     'app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)',
+    'app.prune_github_event_deliveries(integer,integer)',
     ...modelBundleRoutines,
   ];
   if ((await client.query("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tulipfarm'")).rowCount) {

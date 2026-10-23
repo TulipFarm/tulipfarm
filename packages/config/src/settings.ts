@@ -1261,6 +1261,16 @@ export const settings: readonly Setting[] = [
     description: 'Webhook secret of that GitHub App, 32 to 4096 characters. Required with `GITHUB_WEBHOOK_APP_ID`.',
   },
   {
+    name: 'GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS',
+    group: 'GitHub',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: '6',
+    description:
+      'Hours a processed GitHub webhook delivery is kept to recognize redeliveries of the same delivery ID, 1 to 720. Older processed deliveries are deleted every minute; a redelivery after that is handled as a new delivery.',
+  },
+  {
     name: 'GITHUB_MCP_READ_BINDINGS',
     group: 'GitHub',
     services: apps,

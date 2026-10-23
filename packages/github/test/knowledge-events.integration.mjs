@@ -8,6 +8,7 @@ import { grantApplicationAccess } from '../../../apps/database/src/postgres.ts';
 import { readMigrations } from '../../../apps/database/src/migrations.ts';
 import { createGitHubKnowledgeEvents, GitHubKnowledgeEventConflict } from '../src/knowledge-events.ts';
 import { githubWebhookSignature, GitHubWebhookError } from '../src/event-signature.ts';
+import { pruneGitHubEventDeliveries } from '../src/event-retention.ts';
 
 const secret = 'fixture-github-knowledge-signing-secret';
 const issue = (id = 7001, title = 'Confidential title') => ({
@@ -130,6 +131,76 @@ test(
         assert.equal(await count('github_event_deliveries', "status='expired'"), 2);
         assert.equal(await count('github_event_payloads'), 0);
         assert.equal((await send(events, request(issue(4)))).status, 'pending');
+      });
+
+      await t.test('processed deliveries past the retention are deleted by the application role', async () => {
+        const events = make();
+        await db.platform.query('TRUNCATE app.github_event_payloads, app.github_event_deliveries CASCADE');
+        await db.platform.query('UPDATE app.github_event_policy SET maximum_pending=10000');
+        const age = async (id, hours) =>
+          db.platform.query(
+            `UPDATE app.github_event_deliveries SET received_at=received_at-$2*interval '1 hour',expires_at=expires_at-$2*interval '1 hour' WHERE delivery_id=$1`,
+            [id, hours],
+          );
+        const routed = request(issue(11));
+        await send(events, routed);
+        await events.settle((await events.pending()).map(item => item.deliveryId));
+        const ignored = request({ zen: 'old' }, randomUUID(), 'ping');
+        await send(events, ignored);
+        const recent = request({ zen: 'recent' }, randomUUID(), 'ping');
+        await send(events, recent);
+        const middle = request({ zen: 'middle' }, randomUUID(), 'ping');
+        await send(events, middle);
+        const waiting = request(issue(12));
+        await send(events, waiting);
+        const referenced = request({ zen: 'referenced' }, randomUUID(), 'ping');
+        await send(events, referenced);
+        const id = value => value.headers['x-github-delivery'];
+        for (const old of [routed, ignored, waiting, referenced]) await age(id(old), 7);
+        await age(id(middle), 3);
+        // Pending deliveries are only closed by expiry, never deleted while pending.
+        await db.platform.query(
+          `UPDATE app.github_event_deliveries SET expires_at=clock_timestamp()+interval '1 hour' WHERE delivery_id=$1`,
+          [id(waiting)],
+        );
+        await db.platform.query(
+          'INSERT INTO app.github_event_payloads(app_id,delivery_id,envelope) VALUES ($1,$2,$3)',
+          ['100', id(referenced), { all: true, repositories: [] }],
+        );
+        const remaining = async () =>
+          (
+            await db.platform.query('SELECT delivery_id FROM app.github_event_deliveries ORDER BY delivery_id')
+          ).rows.map(row => row.delivery_id);
+
+        assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6 }), 2);
+        assert.deepEqual(await remaining(), [id(recent), id(middle), id(waiting), id(referenced)].sort());
+        assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6 }), 0);
+        assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 2 }), 1);
+        assert.deepEqual(await remaining(), [id(recent), id(waiting), id(referenced)].sort());
+
+        const client = await pool.connect();
+        try {
+          await assert.rejects(client.query('DELETE FROM app.github_event_deliveries'), { code: '42501' });
+          await assert.rejects(client.query('SELECT app.prune_github_event_deliveries(0, 10)'), { code: '22023' });
+          await assert.rejects(client.query('SELECT app.prune_github_event_deliveries(6, 1001)'), { code: '22023' });
+        } finally {
+          client.release();
+        }
+
+        const again = await send(events, request(issue(11), id(routed)));
+        assert.deepEqual([again.duplicate, again.status], [false, 'pending']);
+        assert.equal((await send(events, recent)).duplicate, true);
+      });
+
+      await t.test('cleanup deletes large backlogs in bounded batches', async () => {
+        await db.platform.query(
+          `INSERT INTO app.github_event_deliveries (app_id,delivery_id,body_digest,event_name,status,reason,received_at,expires_at)
+          SELECT '100',gen_random_uuid(),repeat('a',64),'ping','ignored','ping',now()-interval '8 hours',now()-interval '7 hours'
+          FROM generate_series(1,1200)`,
+        );
+        assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6, maxBatches: 2 }), 1000);
+        assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6 }), 200);
+        assert.equal(await count('github_event_deliveries', "received_at < now()-interval '6 hours'"), 2);
       });
     } finally {
       await pool?.end();

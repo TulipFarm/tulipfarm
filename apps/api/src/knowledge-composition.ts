@@ -35,6 +35,7 @@ import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { registerGitHubKnowledge, githubDocumentsResponseSchema } from './knowledge-github.ts';
 import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
 import { githubKnowledgeEventsFromEnvironment, registerGitHubKnowledgeEvents } from './knowledge-github-events.ts';
+import { registerGitHubDeliveryRetention } from './github-delivery-retention.ts';
 import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import { atlassianDocumentsResponseSchema, registerAtlassianKnowledge } from './knowledge-atlassian.ts';
@@ -349,6 +350,7 @@ export function registerKnowledgeComposition(
   });
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
   registerGitHubKnowledgeEvents(app, githubEvents);
+  if (dependencies.pool) registerGitHubDeliveryRetention(app, dependencies.pool, dependencies.env ?? process.env);
   registerDefaultKnowledge(app, {
     auth: dependencies.auth,
     service: defaults,

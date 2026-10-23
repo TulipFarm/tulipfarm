@@ -940,6 +940,7 @@ export const backgroundJobs = [
   'knowledge-google-dispatch',
   'knowledge-slack-dispatch',
   'knowledge-github-dispatch',
+  'github-delivery-retention',
   'knowledge-atlassian-dispatch',
   'knowledge-defaults-dispatch',
   'knowledge-embedding-dispatch',

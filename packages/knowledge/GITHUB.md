@@ -386,7 +386,22 @@ know the repository yet (a new repository). It then closes the deliveries. A sou
 already running is asked to start another pass as soon as it finishes. The pass
 re-reads GitHub with the source owner's own account. A delivery not dispatched
 within an hour expires; polling covers it. At most 10,000 deliveries are pending
-per App; beyond that, deliveries are recorded as rejected with `capacity-exceeded`.
+per App, a limit shared with the workflow event inbox; beyond that, deliveries are
+recorded as rejected with `capacity-exceeded`.
+
+Processed deliveries (routed, ignored, rejected or expired) are kept for
+`GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS`, 6 hours by default and 1 to 720 hours,
+so redeliveries of the same delivery ID are recognized. Every API replica deletes
+older ones once a minute, in batches of 500, through the
+`app.prune_github_event_deliveries` function (platform migration
+`0004_github_event_delivery_retention.sql`); the application role still cannot delete
+deliveries directly. Pending deliveries are never deleted, and neither are
+deliveries the workflow event inbox still references by a dispatch. Runs appear as
+the `github-delivery-retention` background job, and a run that deletes anything
+logs the count. GitHub redeliveries normally arrive within hours. One arriving
+after the retention is accepted as a new delivery: its repositories are made due
+again, costing one extra pass, and a reused delivery ID with a different body is no
+longer rejected with 409. Raise the retention if your redeliveries arrive later.
 
 ## Reader-first rollout
 
