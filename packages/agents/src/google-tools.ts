@@ -18,6 +18,8 @@ import {
 import { GoogleLifecycleError, type createGoogleOperations } from '@tulipfarm/google-workspace/operations';
 import { GoogleWorkspaceError, googleAppScopes, type GoogleApp } from '@tulipfarm/google-workspace/contracts';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
+import type { createFiles } from '@tulipfarm/files';
+import { readOfficeImages } from '@tulipfarm/conversations/file-outputs';
 
 import type { AgentStorage } from './store.ts';
 import {
@@ -169,11 +171,13 @@ export async function requireGoogleAgentOwner(
   return actor;
 }
 
+/** `files` reads the images a document spec places; without it, a spec with images is refused. */
 export async function invokeGoogleTool(
   runtime: Runtime,
   factory: GoogleOperationsFactory | undefined,
   context: { workspaceId: string; actor: HumanActor; callId: string },
   call: GoogleToolCall,
+  files?: Pick<ReturnType<typeof createFiles>, 'download'>,
 ) {
   if (!factory) throw new Error('google-operation-unavailable');
   const guarded: Runtime = {
@@ -197,13 +201,20 @@ export async function invokeGoogleTool(
         if (!call.operation === !call.document) return invalidProposal('Set exactly one of operation or document.');
         let operation = call.operation;
         if (call.document) {
-          if (officeImageIds(call.document.format, call.document.content).length)
+          const ids = officeImageIds(call.document.format, call.document.content);
+          if (ids.length && !files)
             return invalidProposal(
-              'No proposal was created. Images are not supported in Google Drive documents yet. Remove the image blocks, or save the file in Files instead.',
+              'No proposal was created. Images can only be placed from a chat. Remove the image blocks and try again.',
             );
+          const images = ids.length && files ? await readOfficeImages(files, context, ids) : [];
+          if (typeof images === 'string') return invalidProposal(`No proposal was created. ${images}`);
           let bytes: Uint8Array;
           try {
-            bytes = await renderOfficeDocument(call.document.format, call.document.content);
+            bytes = await renderOfficeDocument(
+              call.document.format,
+              call.document.content,
+              new Map(images.map(image => [image.fileId, image])),
+            );
           } catch (error) {
             if (error instanceof OfficeSpecError)
               return invalidProposal(`No proposal was created. The document spec is invalid: ${error.message}`);
@@ -211,7 +222,7 @@ export async function invokeGoogleTool(
           }
           if (bytes.byteLength > maximumUploadBytes)
             return invalidProposal(
-              'No proposal was created. The rendered file is over 1 MiB. Split it or save it in Files instead.',
+              `No proposal was created. The rendered file is over 1 MiB.${images.length ? ' Use fewer or smaller images,' : ''} Split it or save it in Files instead.`,
             );
           operation = documentUpload(call.document, Buffer.from(bytes).toString('base64'));
         }

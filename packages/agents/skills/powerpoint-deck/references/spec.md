@@ -112,6 +112,6 @@ Blocks on a slide share its height equally, so keep a slide to one or two blocks
 - Charts become native, editable charts in PowerPoint and Google Slides.
 
 - An `image` needs the Files id of a PNG, JPEG, or GIF the person can open, such as an attachment in the chat. Up to 20 images, each at most 8 MiB. Images keep their shape and are never enlarged past their own size.
-- Images work in Files only. Google Drive proposals reject image blocks for now.
+- In Google Drive, images are copied into the converted file. The whole file must stay under 1 MiB, so use few, small images there. Images can't be added to an existing Google file.
 
 Animations, transitions, and custom slide masters are not supported.

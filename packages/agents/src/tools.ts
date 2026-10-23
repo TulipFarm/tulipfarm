@@ -773,7 +773,7 @@ export function createChatTools(
       case 'google.propose':
       case 'google.status':
       case 'google.execute':
-        return invokeGoogleTool(runtime, google, context, call);
+        return invokeGoogleTool(runtime, google, context, call, outputs?.files);
       case 'tables.list':
         return resources.list(workspaceId, actor, { after: call.after, limit: call.limit });
       case 'schema.context':
