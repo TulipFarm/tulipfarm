@@ -2190,12 +2190,6 @@ for (const [provider, mutate] of [
   [
     'azure',
     b => {
-      b.usage.prompt_tokens_details = { cached_tokens: null };
-    },
-  ],
-  [
-    'azure',
-    b => {
       b.usage.completion_tokens = 1.5;
     },
   ],

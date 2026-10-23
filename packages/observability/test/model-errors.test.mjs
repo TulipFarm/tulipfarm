@@ -19,6 +19,7 @@ import {
   recordModelFallback,
   sanitizeProviderMessage,
   telemetryErrorCode,
+  usageShape,
 } from '../src/index.ts';
 
 test('every model-<reason> message maps to a bounded class instead of a generic Error', () => {
@@ -164,4 +165,25 @@ test('a failed model call sets the bounded class on its span, metric and log lin
   } finally {
     await sdk.shutdown();
   }
+});
+
+test('a usage shape keeps only lowercase field names and counts', () => {
+  assert.equal(
+    usageShape({
+      prompt_tokens: 40,
+      completion_tokens: 3,
+      total_tokens: null,
+      prompt_tokens_details: { cached_tokens: 0, audio: { nested: 1 } },
+      completion_tokens_details: null,
+      note: 'PRIVATE text',
+      'Sk-PRIVATE': 1,
+      list: [1],
+      negative: -1,
+    }),
+    'prompt_tokens=40,completion_tokens=3,total_tokens=null,prompt_tokens_details.cached_tokens=0,' +
+      'prompt_tokens_details.audio=object,completion_tokens_details=null,note=string,list=array,negative=nan',
+  );
+  assert.equal(usageShape(undefined), undefined);
+  assert.equal(usageShape('PRIVATE'), undefined);
+  assert.equal(usageShape({}), undefined);
 });

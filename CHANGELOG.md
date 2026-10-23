@@ -48,6 +48,12 @@ One version identifies all apps and images of a release.
   Retry action, and a reply waiting to retry says so instead of a silent
   spinner. A call the provider refused before generating anything is not
   charged.
+- Streamed model replies read token usage from any chunk, including a final
+  usage-only chunk, and accept null usage details, DeepSeek cache fields and a
+  missing `total_tokens`. Credits settle on that usage and
+  `gen_ai_client_tokens` is recorded instead of charging the full reservation.
+  Calls whose usage is still unknown are counted as `gen_ai_model_usage`
+  `model_usage="unknown"` and logged with the usage field shape.
 
 ### Added
 

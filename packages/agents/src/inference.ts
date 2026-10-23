@@ -150,12 +150,29 @@ export type InferenceUsage =
       cacheWrite1h: number;
     };
 
-function reportUsage(report: { usage(input: number, output: number): void }, value: InferenceUsage) {
-  if (value.kind === 'known')
+type UsageReport = {
+  usage(input: number, output: number): void;
+  usageUnknown(reason: 'missing' | 'invalid', providerUsage?: unknown): void;
+};
+
+/** The usage object a provider response carries, if any: `usage`, or Gemini's `usageMetadata`. */
+function providerUsage(body: unknown): unknown {
+  if (body === null || typeof body !== 'object') return undefined;
+  const value = body as { usage?: unknown; usageMetadata?: unknown };
+  return value.usage ?? value.usageMetadata ?? undefined;
+}
+
+/** Reports a parsed call's tokens, or why they are unknown, to the call's telemetry. */
+function reportUsage(report: UsageReport, value: InferenceUsage, body: unknown) {
+  if (value.kind === 'known') {
     report.usage(
       value.input + value.cacheRead + value.cacheWrite + value.cacheWrite5m + value.cacheWrite1h,
       value.output,
     );
+    return;
+  }
+  const sent = providerUsage(body);
+  report.usageUnknown(sent === undefined ? 'missing' : 'invalid', sent);
 }
 
 export type InferenceFailure =
@@ -356,23 +373,75 @@ const anthropicUsageSchema = z.object({
     cache_creation: z.object({ ephemeral_5m_input_tokens: count, ephemeral_1h_input_tokens: count }).nullish(),
   }),
 });
-const azureUsageSchema = z.object({
+/**
+ * Chat Completions usage as OpenAI, xAI, Azure AI Foundry, DeepSeek and Kimi send it, on the response or on a stream's
+ * usage chunk. Detail objects and their counts may be absent or null. DeepSeek also reports cache hits as
+ * `prompt_cache_hit_tokens`.
+ */
+const chatUsageSchema = z.object({
   usage: z.object({
     prompt_tokens: count,
     completion_tokens: count,
-    total_tokens: count,
-    prompt_tokens_details: z.object({ cached_tokens: count }).optional(),
-    completion_tokens_details: z.object({ reasoning_tokens: count }).optional(),
+    total_tokens: count.nullish(),
+    prompt_tokens_details: z.object({ cached_tokens: count.nullish() }).nullish(),
+    completion_tokens_details: z.object({ reasoning_tokens: count.nullish() }).nullish(),
+    prompt_cache_hit_tokens: count.nullish(),
   }),
 });
 const responsesUsageSchema = z.object({
   usage: z.object({
     input_tokens: count,
     output_tokens: count,
-    total_tokens: count,
-    input_tokens_details: z.object({ cached_tokens: count }),
+    total_tokens: count.nullish(),
+    input_tokens_details: z.object({ cached_tokens: count.nullish() }).nullish(),
   }),
 });
+
+/**
+ * Billable usage from an OpenAI-shaped Chat Completions or Responses body, or unknown when it is absent or does not
+ * add up. Providers disagree on whether `completion_tokens` already counts reasoning tokens: when the response has a
+ * total, the total decides; without one, `reasoningTokensInOutput` does.
+ */
+export function openAiUsage(
+  capabilities: Pick<ModelCapabilities, 'api' | 'reasoningTokensInOutput'>,
+  body: unknown,
+): InferenceUsage {
+  const unknown = { kind: 'unknown' } satisfies InferenceUsage;
+  const known = (input: number, output: number, cacheRead: number) =>
+    ({
+      kind: 'known',
+      input,
+      output,
+      cacheRead,
+      cacheWrite: 0,
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+    }) satisfies InferenceUsage;
+  if (capabilities.api === 'responses') {
+    const parsed = responsesUsageSchema.safeParse(body);
+    if (!parsed.success) return unknown;
+    const u = parsed.data.usage;
+    const cacheRead = u.input_tokens_details?.cached_tokens ?? 0;
+    if (cacheRead > u.input_tokens || (u.total_tokens != null && u.input_tokens + u.output_tokens !== u.total_tokens))
+      return unknown;
+    return known(u.input_tokens - cacheRead, u.output_tokens, cacheRead);
+  }
+  const parsed = chatUsageSchema.safeParse(body);
+  if (!parsed.success) return unknown;
+  const u = parsed.data.usage;
+  const cacheRead = u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? 0;
+  const reasoning = u.completion_tokens_details?.reasoning_tokens ?? 0;
+  const output =
+    u.total_tokens == null
+      ? u.completion_tokens + (capabilities.reasoningTokensInOutput ? reasoning : 0)
+      : u.prompt_tokens + u.completion_tokens === u.total_tokens
+        ? u.completion_tokens
+        : u.prompt_tokens + u.completion_tokens + reasoning === u.total_tokens
+          ? u.completion_tokens + reasoning
+          : null;
+  if (output === null || cacheRead > u.prompt_tokens) return unknown;
+  return known(u.prompt_tokens - cacheRead, output, cacheRead);
+}
 const googleUsageSchema = z.object({
   usageMetadata: z.object({
     promptTokenCount: count,
@@ -417,32 +486,7 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
     case 'xai':
     case 'openai-compatible':
     case 'azure': {
-      const capabilities = routeCapabilities(route);
-      if (capabilities.api === 'responses') {
-        const parsed = responsesUsageSchema.safeParse(body);
-        if (!parsed.success) return unknown;
-        const u = parsed.data.usage;
-        if (
-          u.input_tokens_details.cached_tokens > u.input_tokens ||
-          u.input_tokens + u.output_tokens !== u.total_tokens
-        )
-          return unknown;
-        return {
-          ...empty,
-          input: u.input_tokens - u.input_tokens_details.cached_tokens,
-          output: u.output_tokens,
-          cacheRead: u.input_tokens_details.cached_tokens,
-        };
-      }
-      const parsed = azureUsageSchema.safeParse(body);
-      if (!parsed.success) return unknown;
-      const u = parsed.data.usage;
-      const cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
-      const output =
-        u.completion_tokens +
-        (capabilities.reasoningTokensInOutput ? (u.completion_tokens_details?.reasoning_tokens ?? 0) : 0);
-      if (cacheRead > u.prompt_tokens || u.prompt_tokens + output !== u.total_tokens) return unknown;
-      return { ...empty, input: u.prompt_tokens - cacheRead, output, cacheRead };
+      return openAiUsage(routeCapabilities(route), body);
     }
     case 'google': {
       const parsed = googleUsageSchema.safeParse(body);
@@ -804,6 +848,7 @@ export async function inferDecision(
       async report => {
         let thrown: unknown;
         let errorBody: unknown;
+        let responseBody: unknown;
         let request: string | undefined;
         const result = await (async (): Promise<InferenceResult> => {
           const timeout = AbortSignal.timeout(config.data.timeoutMs);
@@ -893,6 +938,7 @@ export async function inferDecision(
                     : null),
                 usage: usage(config.data, body),
               };
+              responseBody = body;
             });
             if (!response.ok) {
               errorBody = body;
@@ -933,7 +979,7 @@ export async function inferDecision(
             callerSignal?.removeEventListener('abort', onCancel);
           }
         })();
-        reportUsage(report, result.usage);
+        reportUsage(report, result.usage, responseBody);
         if (result.kind === 'failure') {
           const detail = providerErrorDetail(errorBody);
           report.error(
@@ -1622,7 +1668,7 @@ async function sendChatRequest<T>(
       result => !result.response.ok || result.body === null || result.error !== null,
     );
     const value = observeChatDetailSync('response-parse', () => usage(target, json));
-    reportUsage(report, value);
+    reportUsage(report, value, json);
     await observeChatDetail('settle', async () =>
       onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
     );
@@ -2297,7 +2343,7 @@ export async function inferSpecialist(
           result => !result.response.ok || result.json === null,
         );
         const value = observeChatDetailSync('response-parse', () => usage(config, json));
-        reportUsage(report, value);
+        reportUsage(report, value, json);
         await observeChatDetail('settle', () => onUsage(value));
         if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
         const step = observeChatDetailSync('decision-parse', () => nativeStep(config, json));
@@ -2477,7 +2523,7 @@ export async function inferWithSystem(
         result => !result.response.ok || result.json === null,
       );
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
-      reportUsage(report, value);
+      reportUsage(report, value, json);
       await observeChatDetail('settle', async () => onUsage?.(value));
       if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {
@@ -2529,7 +2575,7 @@ export async function inferText(
         result => !result.response.ok || result.json === null,
       );
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
-      reportUsage(report, value);
+      reportUsage(report, value, json);
       await observeChatDetail('settle', async () => onUsage?.(value));
       if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {

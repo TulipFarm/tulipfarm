@@ -54,9 +54,14 @@ import {
 import {
   modelCallDiagnostics,
   modelFallbackOutcomes,
+  modelUsageOutcomes,
+  modelUsageUnknownReasons,
   providerMessageLimit,
   safeProviderCode,
+  safeUsageShape,
+  usageShape,
   type ModelFallbackOutcome,
+  type ModelUsageUnknownReason,
 } from './model-errors.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
@@ -70,10 +75,15 @@ export {
   modelErrorClasses,
   modelFailureClasses,
   modelFallbackOutcomes,
+  modelUsageOutcomes,
+  modelUsageUnknownReasons,
   sanitizeProviderMessage,
+  usageShape,
   type ModelCallDiagnostics,
   type ModelErrorClass,
   type ModelFallbackOutcome,
+  type ModelUsageOutcome,
+  type ModelUsageUnknownReason,
 } from './model-errors.ts';
 
 const scope = 'tulipfarm';
@@ -145,9 +155,11 @@ const spanAttributes = new Set([
   'model_fallback',
   'fallback.provider',
   'fallback.model',
+  'model_usage',
+  'usage.unknown_reason',
 ]);
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
-const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message']);
+const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message', 'usage.shape']);
 
 const dependencyEndpoints = [
   'github-repository',
@@ -170,11 +182,14 @@ const titleGenerationOutcomes = new Set<string>(titleGenerationOutcomeValues);
 function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (logLine && logOnlyAttributes.has(key)) {
     if (key === 'provider.error_code') return safeProviderCode(value) === value;
+    if (key === 'usage.shape') return safeUsageShape(value);
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
   if (key === 'output_started') return typeof value === 'boolean';
   if (key === 'model_fallback') return (modelFallbackOutcomes as readonly unknown[]).includes(value);
+  if (key === 'model_usage') return (modelUsageOutcomes as readonly unknown[]).includes(value);
+  if (key === 'usage.unknown_reason') return (modelUsageUnknownReasons as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
@@ -1914,6 +1929,11 @@ export async function observeInference<T>(
   call: (report: {
     firstToken: () => void;
     usage: (input: number, output: number) => void;
+    /**
+     * Records why a successful call's usage is unknown, with the usage object the provider sent, if any.
+     * A successful chat call that reports neither is counted as unknown with reason `missing`.
+     */
+    usageUnknown: (reason: ModelUsageUnknownReason, providerUsage?: unknown) => void;
     /** Marks the call failed; pass the failure so its classification and provider details are logged. */
     error: (error?: unknown) => void;
   }) => Promise<T>,
@@ -1933,6 +1953,7 @@ export async function observeInference<T>(
         let outcome = 'success';
         let firstToken = false;
         let usage: { input: number; output: number } | undefined;
+        let unknownUsage: { reason: ModelUsageUnknownReason; shape: string | undefined } | undefined;
         const meter = metrics.getMeter(scope);
         // A stream can report an error before the call throws its classified failure, so the failure is logged once, at the end.
         let failure: unknown;
@@ -1979,6 +2000,9 @@ export async function observeInference<T>(
               if (Number.isSafeInteger(input) && input >= 0 && Number.isSafeInteger(output) && output >= 0)
                 usage = { input, output };
             },
+            usageUnknown(reason, providerUsage) {
+              unknownUsage = { reason, shape: usageShape(providerUsage) };
+            },
             error: fail,
           });
         } catch (error) {
@@ -2003,6 +2027,27 @@ export async function observeInference<T>(
               'gen_ai.usage.input_tokens': usage.input,
               'gen_ai.usage.output_tokens': usage.output,
             });
+          }
+          if (model.operation === 'chat' && outcome === 'success') {
+            const reported = usage !== undefined;
+            try {
+              meter
+                .createCounter('gen_ai_model_usage', {
+                  description: 'Successful model calls by whether the provider reported readable token usage',
+                })
+                .add(1, { ...labels, model_usage: reported ? 'reported' : 'unknown' });
+            } catch {
+              /* Telemetry must not change the reply. */
+            }
+            if (!reported)
+              log('warn', 'inference', 'call_failed', {
+                ...attributes,
+                operation: 'chat.model-usage',
+                'error.type': 'usage-unknown',
+                model_usage: 'unknown',
+                'usage.unknown_reason': unknownUsage?.reason ?? 'missing',
+                ...(unknownUsage?.shape ? { 'usage.shape': unknownUsage.shape } : {}),
+              });
           }
           span.setAttribute('outcome', outcome);
           const { traceId, spanId } = span.spanContext();

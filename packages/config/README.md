@@ -143,6 +143,14 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   selected model. Each decision is counted as `gen_ai_model_fallback` with a
   bounded `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
   `failed`).
+- **Usage.** Chat-completions usage is read from any streamed chunk, including a
+  final usage-only chunk, and tolerates null or missing detail objects and
+  `total_tokens`. When `total_tokens` is reported, it decides whether reasoning
+  tokens are already in the completion count. Every successful chat call is
+  counted as `gen_ai_model_usage` with a bounded `model_usage` outcome
+  (`reported`, `unknown`). Unknown usage also logs a `chat.model-usage`
+  `usage-unknown` warning with `usage.unknown_reason` (`missing`, `invalid`) and
+  `usage.shape`, the provider's usage field names and numbers without text.
 - **Endpoints.** `model-endpoints.ts` checks every endpoint at startup and before
   each request: built-in provider and Azure Foundry hosts are implicit, every
   other host must be in `MODEL_ENDPOINT_HOSTS`, and http is allowed only on
@@ -161,7 +169,7 @@ a model ID:
 | `api`                     | `chat-completions` or `responses` (Azure, OpenAI, xAI), `anthropic-messages` (Anthropic), `gemini` (Google) | the provider's API |
 | `toolChoice`              | `forced` makes structured decisions select `select_action`; `auto` also accepts a text answer               | `forced`           |
 | `reasoningOffForTools`    | sends reasoning effort `none` for deployments that reject tools while reasoning                             | `false`            |
-| `reasoningTokensInOutput` | adds reported reasoning tokens to completion tokens                                                         | `false`            |
+| `reasoningTokensInOutput` | adds reported reasoning tokens to completion tokens when the response omits `total_tokens`                  | `false`            |
 | `streaming`               | chat steps stream the response                                                                              | `true`             |
 | `responseModelAliases`    | other model IDs the provider may report                                                                     | `[]`               |
 
