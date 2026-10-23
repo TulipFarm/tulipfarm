@@ -39,7 +39,18 @@ export function fakeGitHub() {
   const repos = new Map();
   const renamed = new Map();
   // `truncate` truncates the recursive tree; `truncateDirs` truncates the listing of those directory prefixes.
-  const state = { failure: null, repos, renamed, truncate: false, truncateDirs: new Set(), chunk: 64 * 1024 };
+  // Every file-only head served, so compare can diff two of them. `compare` overrides the comparison response.
+  const snapshots = new Map();
+  const state = {
+    failure: null,
+    repos,
+    renamed,
+    truncate: false,
+    truncateDirs: new Set(),
+    chunk: 64 * 1024,
+    snapshots,
+    compare: null,
+  };
   function addRepo({
     id,
     fullName,
@@ -116,7 +127,29 @@ export function fakeGitHub() {
     committer: { login: 'web-flow', id: 2 },
     parents: item.parents.map(parent => ({ sha: parent, url: 'x' })),
   });
-  const commit = repo => repo.history.at(-1)?.sha ?? buildTrees(repo.files).root;
+  const commit = repo => {
+    const head = repo.history.at(-1)?.sha;
+    if (head) return head;
+    const root = buildTrees(repo.files).root;
+    snapshots.set(root, new Map(repo.files));
+    return root;
+  };
+  // Like GitHub, a file whose content moved unchanged to a new path is reported as a rename.
+  function diff(base, head) {
+    const files = [];
+    const added = [...head.keys()].filter(file => !base.has(file));
+    for (const file of [...base.keys()].filter(file => !head.has(file))) {
+      const target = added.find(candidate => head.get(candidate) === base.get(file));
+      if (target) {
+        added.splice(added.indexOf(target), 1);
+        files.push({ filename: target, previous_filename: file, status: 'renamed', patch: '' });
+      } else files.push({ filename: file, status: 'removed', patch: '' });
+    }
+    for (const file of added) files.push({ filename: file, status: 'added', patch: '' });
+    for (const [file, content] of head)
+      if (base.has(file) && base.get(file) !== content) files.push({ filename: file, status: 'modified', patch: '' });
+    return files;
+  }
   const readable = (repo, user) => repo && (!repo.private || repo.readers.has(user.id));
   const body = repo => ({
     id: repo.id,
@@ -291,6 +324,14 @@ export function fakeGitHub() {
     match = /^\/compare\/([a-f0-9]{40})\.\.\.([a-f0-9]{40})$/.exec(rest);
     if (match) {
       const [base, head] = [match[1], match[2]];
+      if (state.compare) return state.compare(base, head);
+      if (snapshots.has(base) && snapshots.has(head))
+        return Response.json({
+          status: base === head ? 'identical' : 'ahead',
+          total_commits: 1,
+          commits: [],
+          files: diff(snapshots.get(base), snapshots.get(head)),
+        });
       if (!repo.objects.has(base) || !repo.objects.has(head))
         return Response.json({ message: 'Not Found' }, { status: 404 });
       const per = Number(url.searchParams.get('per_page') ?? 250);
