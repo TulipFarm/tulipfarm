@@ -29,7 +29,7 @@ test('sources and tests use the current common compatibility maximum unless they
   })) {
     if (path === definition) continue;
     const source = await readFile(new URL(path, root), 'utf8');
-    for (const match of source.matchAll(/minimum:\s*[\w.]+,\s*maximum:\s*(\d+)/g)) {
+    for (const match of source.matchAll(/minimum:\s*[\w.]+,\s*maximum:\s*(\d+)\s*[,}]/g)) {
       const maximum = Number(match[1]);
       if (maximum < current && !historicalPins[path]?.includes(maximum))
         stale.push(`${path}:${source.slice(0, match.index).split('\n').length} maximum ${maximum}`);
