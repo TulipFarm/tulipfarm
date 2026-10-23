@@ -242,7 +242,7 @@ test('the inbox keeps its own title while the next page is still loading', async
   await close();
 });
 
-test('choosing a file says whether the chat reads it, only stores it, or adds it to Knowledge', async () => {
+test('the add menu uploads, and @ lets the assistant read a saved file', async () => {
   const { page, errors, close } = await open('/acme');
   const renderErrors = [];
   page.on('console', message => {
@@ -251,14 +251,15 @@ test('choosing a file says whether the chat reads it, only stores it, or adds it
   });
   await evidence(page, 'a17-file-choices', async () => {
     await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
-    await page.getByRole('button', { name: 'Add a file', exact: true }).click();
+    await page.getByRole('button', { name: 'Add files and more', exact: true }).click();
     const menu = page.getByRole('menu');
-    await menu.getByText('What should happen to the file?', { exact: true }).waitFor();
-    await menu.getByRole('menuitem', { name: /^Let the assistant read a file.*reads it with your message/ }).waitFor();
-    await menu.getByRole('menuitem', { name: /^Store a private file.*doesn’t read it/ }).waitFor();
-    await menu.getByRole('menuitem', { name: /^Add a file to Knowledge.*other people can’t/ }).waitFor();
+    await menu.getByRole('menuitem', { name: 'Upload from computer', exact: true }).waitFor();
+    assert.equal(await menu.getByRole('menuitem').count(), 1);
   });
-  await page.getByRole('menuitem', { name: /^Let the assistant read a file/ }).click();
+  await page.keyboard.press('Escape');
+  const message = page.getByRole('textbox', { name: 'Message' });
+  await message.click();
+  await message.pressSequentially('@');
   await evidence(page, 'a17-read-file', async () => {
     await page.getByRole('option', { name: /Pricing notes\.txt/ }).click();
     await page
@@ -272,13 +273,6 @@ test('choosing a file says whether the chat reads it, only stores it, or adds it
       1,
     );
   });
-  await page.getByRole('button', { name: 'Add a file', exact: true }).click();
-  await page.getByRole('menuitem', { name: /^Add a file to Knowledge/ }).click();
-  await page
-    .getByRole('alertdialog', { name: 'Leave these edits?' })
-    .getByRole('button', { name: 'Leave editor', exact: true })
-    .click();
-  await page.waitForURL(url => url.pathname === '/acme/files');
   assert.deepEqual(errors, []);
   assert.deepEqual(renderErrors, []);
   await close();

@@ -387,7 +387,7 @@ test(
         .getByRole('form', { name: 'Message composer' })
         .locator('input[type=file]')
         .setInputFiles(file('launch-notes.txt'));
-      await page.getByText('launch-notes.txt: Ready to send', { exact: false }).waitFor();
+      await page.locator('[data-state="ready"]', { hasText: 'launch-notes.txt' }).waitFor();
       const html = await editor.innerHTML();
       api.state.sendStatus = 400;
       await sendMessage(page);
@@ -396,7 +396,7 @@ test(
       assert.equal(await editor.evaluate(node => document.activeElement === node), true);
       assert.equal(api.state.chatCreates.length, 1);
       assert.equal(api.state.sends.length, 1);
-      await page.getByText('launch-notes.txt: Ready to send', { exact: false }).waitFor();
+      await page.locator('[data-state="ready"]', { hasText: 'launch-notes.txt' }).waitFor();
       api.state.sendStatus = 200;
       await sendMessage(page);
       await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);

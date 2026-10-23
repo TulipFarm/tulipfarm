@@ -1248,10 +1248,6 @@ function ConversationDetail({
               validation={validation}
               onFiles={uploads.add}
               integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
-              fileChoices={{
-                read: mentions.typeTrigger,
-                knowledge: () => void navigate({ to: '/$workspaceSlug/files', params: { workspaceSlug } }),
-              }}
               attachments={
                 !pending && (staged || uploads.error || mentions.notice) ? (
                   <div className="space-y-2">
@@ -1287,7 +1283,6 @@ function ConversationDetail({
                   </div>
                 ) : undefined
               }
-              onSkill={privateChat || (draft && !sharedChat) ? skills.typeTrigger : undefined}
               extensions={composerExtensions}
               picker={picker}
               model={models.model}

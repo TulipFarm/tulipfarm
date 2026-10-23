@@ -100,6 +100,14 @@ export function useConversationAttachments(api: ConversationApi, chatId: string)
   };
 }
 
+function uploadSummary(files: ReturnType<typeof useConversationAttachments>['files']) {
+  const uploading = files.filter(file => file.kind === 'uploading').length;
+  const ready = files.filter(file => file.kind === 'ready').length;
+  if (uploading) return `Uploading ${uploading} ${uploading === 1 ? 'file' : 'files'}…`;
+  if (ready) return `${ready} ${ready === 1 ? 'file' : 'files'} ready to send`;
+  return '';
+}
+
 export function StagedAttachments({
   uploads,
   disabled,
@@ -156,28 +164,25 @@ export function StagedAttachments({
         </p>
       )}
       {blocked}
-      {uploads.files.map(item => (
-        <p
-          key={item.id}
-          role={item.kind === 'error' ? 'alert' : 'status'}
-          className="break-words text-xs text-muted-foreground"
-        >
-          {item.file.name}:{' '}
-          {item.kind === 'ready'
-            ? 'Ready to send · Storage only, not read by this chat'
-            : item.kind === 'uploading'
-              ? 'Uploading for private storage…'
-              : item.message}
-        </p>
-      ))}
+      {uploads.files.map(
+        item =>
+          item.kind === 'error' && (
+            <p key={item.id} role="alert" className="break-words text-sm text-destructive">
+              {item.file.name}: {item.message}
+            </p>
+          ),
+      )}
       {uploads.error && (
         <p role="alert" className="text-sm text-destructive">
           {uploads.error}
         </p>
       )}
+      <p role="status" className="sr-only">
+        {uploadSummary(uploads.files)}
+      </p>
       {!!uploads.files.length && (
         <p className="text-xs text-muted-foreground">
-          Files are saved privately for download. The assistant cannot read their contents.
+          Stored privately for download. The assistant can’t read uploaded files.
         </p>
       )}
     </div>
