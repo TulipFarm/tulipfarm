@@ -102,7 +102,11 @@ function execute(
           '--max-old-space-size=256',
           '--jitless',
           fileURLToPath(worker),
-          JSON.stringify({ filename: input.filename, mediaType: input.mediaType }),
+          JSON.stringify({
+            filename: input.filename,
+            mediaType: input.mediaType,
+            rawTextFallback: input.rawTextFallback === true,
+          }),
         ],
         {
           cwd: '/',

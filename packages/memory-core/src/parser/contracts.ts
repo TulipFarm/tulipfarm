@@ -90,11 +90,14 @@ export interface KnowledgeParseInput {
   bytes: Uint8Array;
   filename: string;
   mediaType: string;
+  // Index plain UTF-8 text that the converter rejects as unsupported or malformed, instead of failing.
+  rawTextFallback?: boolean;
 }
 
 export const metadataSchema = z.strictObject({
   filename: z.string().max(2048),
   mediaType: z.string().max(256),
+  rawTextFallback: z.boolean().optional(),
 });
 
 export const resultSchema = z

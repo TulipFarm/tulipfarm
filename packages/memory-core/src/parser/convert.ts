@@ -78,12 +78,13 @@ const nativeMediaTypes = new Set([
   'application/vnd.oasis.opendocument.presentation',
 ]);
 
-// A document the converter rejects as unsupported or malformed is still indexed from its raw text when the bytes are
-// plain UTF-8 text, so it stays searchable. The profile records the original failure.
+// With rawTextFallback, a document the converter rejects as unsupported or malformed is still indexed from its raw
+// text when the bytes are plain UTF-8 text, so it stays searchable. The profile records the original failure.
 export async function convertDocument(input: KnowledgeParseInput): Promise<KnowledgeParseResult> {
   try {
     return await convertNative(input);
   } catch (error) {
+    if (!input.rawTextFallback) throw error;
     const failure = parseFailure(error);
     if (failure !== 'unsupported' && failure !== 'malformed') throw error;
     const text = rawText(Buffer.from(input.bytes));

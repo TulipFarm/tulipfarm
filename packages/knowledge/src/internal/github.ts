@@ -38,7 +38,8 @@ import {
   type GitHubRepository,
   type GitHubRepositoryAccess,
 } from '../github-contracts.ts';
-import { KnowledgeParseError, KnowledgeParserBusy, parseKnowledgeDocument } from '../parser.ts';
+import { KnowledgeParseError, KnowledgeParserBusy } from '../parser.ts';
+import { parseKnowledgeDocument } from './parse-document.ts';
 import { citationSchema, KnowledgeError, lexicalInput, revisionInput } from './contracts.ts';
 import { importStatus } from './import-status.ts';
 import { createKnowledgeStore, type KnowledgeOptions, type ExternalSource } from './store.ts';

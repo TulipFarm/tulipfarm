@@ -12,7 +12,8 @@ import {
 } from '@tulipfarm/access';
 import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { KnowledgeParseError, parseKnowledgeDocument, transientParseFailure } from '../parser.ts';
+import { KnowledgeParseError, transientParseFailure } from '../parser.ts';
+import { parseKnowledgeDocument } from './parse-document.ts';
 import {
   knowledgeCommandSchema,
   knowledgeDocumentSchema,

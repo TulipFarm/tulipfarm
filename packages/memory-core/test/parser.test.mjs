@@ -287,15 +287,14 @@ test('rejects empty, malformed UTF-8, binary text, unsupported and oversized inp
   await assert.rejects(parse(''), failure('malformed'));
   await assert.rejects(parse(Buffer.from([0xff])), failure('malformed'));
   await assert.rejects(parse('apple\0tree'), failure('malformed'));
-  await assert.rejects(
-    parse(Buffer.from([0x00, 0x01, 0x02, 0x03]), 'file.bin', 'application/octet-stream'),
-    failure('unsupported'),
-  );
+  await assert.rejects(parse('arbitrary', 'file.bin', 'application/octet-stream'), failure('unsupported'));
   await assert.rejects(parse(Buffer.alloc(10 * 1024 * 1024 + 1)), failure('resource-limited'));
   await assert.rejects(parse('# ' + 'heading '.repeat(1000)), failure('resource-limited'));
 });
 
-test('unsupported or malformed text falls back to indexing its raw text', async () => {
+test('rawTextFallback indexes unsupported or malformed text from its raw text', async () => {
+  const parse = (bytes, filename, mediaType) =>
+    parseKnowledgeDocument({ bytes: Buffer.from(bytes), filename, mediaType, rawTextFallback: true });
   const unsupported = await parse(
     'Harvest apples on Tuesday.\nStore pears in the cellar.',
     'notes.bin',
@@ -317,6 +316,11 @@ test('unsupported or malformed text falls back to indexing its raw text', async 
     ),
     error => error instanceof KnowledgeParseError,
   );
+  await assert.rejects(
+    parse(Buffer.from([0x00, 0x01, 0x02, 0x03]), 'file.bin', 'application/octet-stream'),
+    failure('unsupported'),
+  );
+  await assert.rejects(parse('apple\0tree', 'notes.txt', 'text/plain'), failure('malformed'));
 });
 
 test('transient parser failures retry with exponential backoff and stop at the attempt limit', async () => {
