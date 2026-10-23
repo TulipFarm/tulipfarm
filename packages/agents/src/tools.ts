@@ -48,6 +48,7 @@ import { requireInvestigationToolBoundary } from './investigation-boundary.ts';
 import { GitHubBatchError } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
+import { tableProposalJsonSchema } from '@tulipfarm/tables/json-schema';
 import { createChatTableProposals } from './table-proposals.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
@@ -87,6 +88,7 @@ const tableAuthoringConstraints = [
   ...tableProposalRules.map(({ rule, message }) => `${rule} Otherwise tables.propose reports "${message}".`),
   'Call tables.propose with input set to the plans as one JSON-encoded string.',
 ].join('\n');
+const tableProposalInputSchema = tableProposalJsonSchema();
 const tableProposalInput = z
   .string()
   .max(1048576)
@@ -1020,7 +1022,7 @@ export function createChatTools(
         return call.skillId === 'table-authoring' && skill
           ? {
               ...skill,
-              proposalInputSchema: z.toJSONSchema(proposeTableSchema, { io: 'input' }),
+              proposalInputSchema: tableProposalInputSchema,
               constraints: tableAuthoringConstraints,
             }
           : skill;

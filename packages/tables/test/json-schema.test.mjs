@@ -4,8 +4,10 @@ import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { definitionSchema } from '../src/definition.ts';
-import { tableDefinitionJsonSchema, tableDocumentJsonSchema } from '../src/json-schema.ts';
+import { z } from 'zod';
+import { tableDefinitionJsonSchema, tableDocumentJsonSchema, tableProposalJsonSchema } from '../src/json-schema.ts';
 import { tableDocumentSchema } from '../src/names.ts';
+import { proposeTableSchema } from '../src/proposal-contracts.ts';
 
 const tableId = 'a1111111-1111-4111-8111-111111111111';
 const targetTableId = 'b2222222-2222-4222-8222-222222222222';
@@ -275,4 +277,99 @@ function assertEveryPropertyHasDescription(schema) {
 test('every property in both generated schemas has a description', () => {
   assertEveryPropertyHasDescription(tableDefinitionJsonSchema());
   assertEveryPropertyHasDescription(tableDocumentJsonSchema());
+});
+
+const labelPattern = String.raw`^(?!\s*$)(?![\s\S]*\u0000)[\s\S]*$`;
+const revision = 'a'.repeat(40);
+
+function proposal(target = definition()) {
+  return {
+    plans: [{ kind: 'schema', tableId, dependsOn: [], expectedRevision: null, target, transforms: { outputs: [] } }],
+  };
+}
+
+function collect(value, found = []) {
+  if (value && typeof value === 'object') {
+    found.push(value);
+    for (const child of Object.values(value)) collect(child, found);
+  }
+  return found;
+}
+
+test('the model-facing proposal schema carries the label pattern and numeric precision rules', () => {
+  const nodes = collect(tableProposalJsonSchema());
+  assert.ok(nodes.some(node => node.pattern === labelPattern));
+  const scales = nodes
+    .filter(node => node.if?.properties?.scale && node.then?.properties?.precision)
+    .map(node => [
+      node.if.properties.scale.const,
+      node.then.properties.precision.minimum,
+      node.then.properties.precision.maximum,
+    ]);
+  assert.deepEqual(
+    scales,
+    Array.from({ length: 11 }, (_, scale) => [scale, Math.max(1, scale), Math.min(30, scale + 20)]),
+  );
+});
+
+test('the model-facing proposal schema reuses definitions and stays small', () => {
+  const schema = tableProposalJsonSchema();
+  const text = JSON.stringify(schema);
+  assert.ok(Object.keys(schema.$defs ?? {}).length > 0);
+  assert.match(text, /"\$ref":"#\/\$defs\//);
+  const bytes = Buffer.byteLength(text);
+  assert.ok(bytes < 21000, `proposal schema is ${bytes} bytes`);
+  assert.ok(bytes < Buffer.byteLength(JSON.stringify(z.toJSONSchema(proposeTableSchema, { io: 'input' }))));
+});
+
+test('the model-facing proposal schema offers schema, import, archive and restore plans', () => {
+  const kinds = collect(tableProposalJsonSchema())
+    .map(node => node.properties?.kind?.const)
+    .filter(kind => ['schema', 'records', 'import', 'archive', 'restore'].includes(kind));
+  assert.deepEqual(new Set(kinds), new Set(['schema', 'import', 'archive', 'restore']));
+});
+
+test('the model-facing proposal schema agrees with Zod on numeric and label errors', () => {
+  const validate = ajvValidator(tableProposalJsonSchema());
+  assert.equal(validate(proposal()), true, JSON.stringify(validate.errors));
+  assert.equal(proposeTableSchema.safeParse(proposal()).success, true);
+  for (const [name, change] of [
+    ['scale exceeds precision', input => Object.assign(input.fields[1], { precision: 2, scale: 3 })],
+    ['precision minus scale exceeds 20 digits', input => Object.assign(input.fields[1], { precision: 30, scale: 0 })],
+    ['label contains only spaces', input => (input.label = '   ')],
+  ]) {
+    const target = definition();
+    change(target);
+    assert.equal(validate(proposal(target)), false, name);
+    assert.equal(proposeTableSchema.safeParse(proposal(target)).success, false, name);
+  }
+});
+
+test('generating the model-facing proposal schema does not change Zod parsing', () => {
+  const inputs = [
+    proposal(),
+    proposal({ ...definition(), label: '   ' }),
+    { plans: [{ kind: 'archive', tableId, dependsOn: [], expectedRevision: revision }] },
+    {
+      plans: [
+        {
+          kind: 'records',
+          tableId,
+          dependsOn: [],
+          expectedRevision: revision,
+          changes: [{ kind: 'delete', recordId: fieldIds[0] }],
+        },
+      ],
+    },
+    { plans: [] },
+  ];
+  const parse = () => inputs.map(input => proposeTableSchema.safeParse(structuredClone(input)));
+  const before = parse();
+  tableProposalJsonSchema();
+  tableProposalJsonSchema();
+  assert.deepEqual(parse(), before);
+  assert.deepEqual(
+    before.map(result => result.success),
+    [true, false, true, true, false],
+  );
 });

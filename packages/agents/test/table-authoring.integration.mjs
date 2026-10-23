@@ -10,6 +10,7 @@ import { AccessDenied } from '@tulipfarm/access';
 import { createChatTableProposals } from '../src/table-proposals.ts';
 import { tableDefinitionMessages } from '@tulipfarm/tables/definition';
 import { tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
+import { tableProposalJsonSchema } from '@tulipfarm/tables/json-schema';
 
 test('chat distinguishes creation eligibility, validates proposal arguments, and enforces current authority', async t => {
   const db = await fixture();
@@ -177,6 +178,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(skill.constraints.includes(message), message);
     }
     assert.match(skill.constraints, /Call tables\.propose with input set to the plans as one JSON-encoded string\./);
+    assert.deepEqual(skill.proposalInputSchema, tableProposalJsonSchema());
     assert.equal(await count('tf_table_proposals'), proposals);
   });
   await t.test('an admin sees creatable teams they do not belong to only as opaque ids', async () => {

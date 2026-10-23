@@ -38,36 +38,43 @@ export const tableProposalRules: readonly TableRule[] = [
   },
 ];
 const base = { tableId: z.uuid(), dependsOn: z.array(z.uuid()).max(20) };
+const revision = z.string().regex(/^[a-f0-9]{40}$/);
+export const schemaPlanSchema = z.strictObject({
+  ...base,
+  kind: z.literal('schema'),
+  expectedRevision: z.string().nullable(),
+  target: definitionSchema,
+  transforms: transformsSchema,
+});
+export const recordsPlanSchema = z.strictObject({
+  ...base,
+  kind: z.literal('records'),
+  expectedRevision: revision,
+  changes: z.array(recordChangeSchema).min(1).max(1000),
+});
+export const importPlanSchema = z.strictObject({
+  ...base,
+  kind: z.literal('import'),
+  expectedRevision: revision,
+  reference: importReferenceSchema,
+  matchFieldIds: z.array(z.uuid()).min(1).max(8),
+  mappings: z
+    .array(z.strictObject({ sourceColumn: z.string().min(1).max(120), fieldId: z.uuid() }))
+    .min(1)
+    .max(64),
+});
+export const archivePlanSchema = z.strictObject({ ...base, kind: z.literal('archive'), expectedRevision: revision });
+export const restorePlanSchema = z.strictObject({ ...base, kind: z.literal('restore'), expectedRevision: revision });
 export const proposalPlanSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    ...base,
-    kind: z.literal('schema'),
-    expectedRevision: z.string().nullable(),
-    target: definitionSchema,
-    transforms: transformsSchema,
-  }),
-  z.strictObject({
-    ...base,
-    kind: z.literal('records'),
-    expectedRevision: z.string().regex(/^[a-f0-9]{40}$/),
-    changes: z.array(recordChangeSchema).min(1).max(1000),
-  }),
-  z.strictObject({
-    ...base,
-    kind: z.literal('import'),
-    expectedRevision: z.string().regex(/^[a-f0-9]{40}$/),
-    reference: importReferenceSchema,
-    matchFieldIds: z.array(z.uuid()).min(1).max(8),
-    mappings: z
-      .array(z.strictObject({ sourceColumn: z.string().min(1).max(120), fieldId: z.uuid() }))
-      .min(1)
-      .max(64),
-  }),
-  z.strictObject({ ...base, kind: z.literal('archive'), expectedRevision: z.string().regex(/^[a-f0-9]{40}$/) }),
-  z.strictObject({ ...base, kind: z.literal('restore'), expectedRevision: z.string().regex(/^[a-f0-9]{40}$/) }),
+  schemaPlanSchema,
+  recordsPlanSchema,
+  importPlanSchema,
+  archivePlanSchema,
+  restorePlanSchema,
 ]);
+export const proposalPlansSchema = <T extends z.ZodType>(plan: T) => z.array(plan).min(1).max(20);
 export const proposeTableSchema = z
-  .strictObject({ plans: z.array(proposalPlanSchema).min(1).max(20) })
+  .strictObject({ plans: proposalPlansSchema(proposalPlanSchema) })
   .superRefine((input, ctx) => {
     const seen = new Set<string>();
     for (const plan of input.plans) {

@@ -39,6 +39,10 @@
       "types": "./dist/definition.d.ts",
       "default": "./dist/definition.js"
     },
+    "./json-schema": {
+      "types": "./dist/json-schema.d.ts",
+      "default": "./dist/json-schema.js"
+    },
     "./names": {
       "types": "./dist/names.d.ts",
       "default": "./dist/names.js"
