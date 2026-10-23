@@ -418,7 +418,17 @@ for (const failure of [
       assert.equal(await f.admit(event), false);
       assert.equal(await f.countRuns(event), 0);
       assert.equal(f.modelInputs.length, 0);
-      assert.equal(f.posts.length, 0);
+      // A denied mention is never silent: the requester gets one content-free notice in the thread, never an answer.
+      // An unlinked identity stays in the link-account flow, and a rejected user token is retried, not denied.
+      assert.deepEqual(
+        f.posts.map(post => [
+          post.thread_ts,
+          /^I can't answer this in this thread because [^.]+\. Mention me in a new thread and I'll start fresh\. \(reason: [a-z-]+\)$/.test(
+            post.text,
+          ),
+        ]),
+        ['identity', 'provider-token'].includes(failure) ? [] : [[event.ts, true]],
+      );
     } finally {
       await f.close();
     }

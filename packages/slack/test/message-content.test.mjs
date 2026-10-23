@@ -4,6 +4,7 @@ import {
   normalizeSlackContent,
   slackMessageText,
   matchesSlackSnapshot,
+  sameSlackPublicationText,
   slackThreadPrompt,
 } from '../src/message-content.ts';
 import { messageSchema, classifyEvent } from '../src/contracts.ts';
@@ -248,4 +249,29 @@ test('John Saturday and Jack Sunday stay tied to distinct sender IDs, not mentio
   assert.match(prompt, /"I" refers to that message's sender/);
   assert.equal(matchesSlackSnapshot(messages[0], messages[0]), true);
   assert.ok(slackThreadPrompt(messages, { UJOHN: 'John', UJACK: 'John' }).includes('"user":"UJACK"'));
+});
+
+test("a bot reply matches Slack's reformatted copy of it, but not changed words", () => {
+  // Production, 2026-10-23: the stored reply had paragraph breaks; Slack returned the same text with spaces instead.
+  const published =
+    "*Short answer:* we don't self-host yet.\n\nLive production:\n• Web app: https://app.tulipfarm.ai\n";
+  assert.equal(
+    sameSlackPublicationText(
+      published,
+      "*Short answer:* we don't self-host yet.  Live production: • Web app: https://app.tulipfarm.ai ",
+    ),
+    true,
+  );
+  assert.equal(
+    sameSlackPublicationText(
+      published,
+      "*Short answer:* we don't self-host yet. Live production: • Web app: <https://app.tulipfarm.ai>",
+    ),
+    true,
+  );
+  assert.equal(sameSlackPublicationText('A & B < C', 'A &amp; B &lt; C'), true);
+  assert.equal(sameSlackPublicationText('See https://a.example', 'See <https://a.example|https://a.example>'), true);
+  assert.equal(sameSlackPublicationText(published, published.replace('self-host', 'host')), false);
+  assert.equal(sameSlackPublicationText('Web app: https://app.tulipfarm.ai', 'Web app: <https://evil.example>'), false);
+  assert.equal(sameSlackPublicationText('Answer', 'Answer.'), false);
 });
