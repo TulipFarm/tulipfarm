@@ -201,15 +201,6 @@ test('discovery and selection use the caller own account and resolve stable repo
   assert.ok(github.calls.every(call => call.user === 'reader'));
 });
 
-test('private repositories need the repo scope', async () => {
-  const { provider, binding } = setup({ scopes: ['read:user'] });
-  assert.deepEqual((await provider.discover(workspaceId, 'reader', accountId)).items, []);
-  await assert.rejects(
-    provider.access(workspaceId, 'reader', binding, '7001'),
-    error => error.code === 'insufficient-scope',
-  );
-});
-
 test('discovery continues after a full provider page even when entries are unreadable or invalid', async () => {
   const repository = {
     id: 7002,
@@ -1182,17 +1173,6 @@ test('a commit history the connection cannot read becomes a commit denied marker
   await assert.rejects(
     readAs(provider, binding, 'commit:7001:/denied', commitsOnly),
     error => error.code === 'not-found',
-  );
-});
-
-test('access checks can include repositories the connection sees but cannot read', async () => {
-  const { provider } = setup({ scopes: ['read:user'] });
-  assert.deepEqual((await provider.discover(workspaceId, 'reader', accountId)).items, []);
-  assert.deepEqual(
-    (await provider.discover(workspaceId, 'reader', accountId, undefined, { includeUnreadable: true })).items.map(
-      item => item.repositoryId,
-    ),
-    ['7001'],
   );
 });
 

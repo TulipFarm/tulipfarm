@@ -9,7 +9,6 @@ const configured = {
   GITHUB_OAUTH_CLIENT_ID: 'github-id',
   GITHUB_OAUTH_CLIENT_SECRET: 'github-secret',
   GITHUB_OAUTH_REDIRECT_URI: 'https://app.example/github/callback',
-  GITHUB_OAUTH_SCOPES: 'repo',
   ATLASSIAN_MCP_CLIENT_ID: 'mcp-id',
   ATLASSIAN_MCP_CLIENT_SECRET: 'mcp-secret',
   ATLASSIAN_MCP_REDIRECT_URI: 'https://app.example/integrations/atlassian/callback',

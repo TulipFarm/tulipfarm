@@ -196,22 +196,13 @@ export async function checkDeletedProjectOwner(
   credential: GitHubCredential,
   read: Read,
 ) {
-  if (!credential.scopes.includes('project')) throw new GitHubBatchError('batch-conflict');
+  if (operation.ownerType === 'user') throw new GitHubBatchError('batch-conflict');
   const owner = graphqlData(await read(projectDocuments.owner, { id: operation.ownerNodeId })).node;
   ownerIdentity(operation, owner);
-  if (operation.ownerType === 'user')
-    parseProjectAccess(
-      z.object({
-        isViewer: z.literal(true),
-        databaseId: z.number().refine(id => String(id) === credential.identity.id),
-      }),
-      owner,
-    );
-  else parseProjectAccess(z.object({ viewerCanAdminister: z.literal(true) }), owner);
+  parseProjectAccess(z.object({ viewerCanAdminister: z.literal(true) }), owner);
 }
 export async function checkProjectContent(operation: ProjectWrite, credential: GitHubCredential, read: Read) {
   if ('content' in operation && operation.content.type !== 'DraftIssue') {
-    if (!credential.scopes.includes('repo')) throw new GitHubBatchError('batch-conflict');
     contentIdentity(
       operation.content,
       graphqlData(await read(projectDocuments.content, { id: operation.content.id })).node,
@@ -224,21 +215,13 @@ export async function checkProjectTarget(
   read: Read,
   dispatch: boolean,
 ) {
-  if (!credential.scopes.includes('project')) throw new GitHubBatchError('batch-conflict');
+  if (operation.ownerType === 'user') throw new GitHubBatchError('batch-conflict');
   const node = async (query: string, id: string) => graphqlData(await read(query, { id })).node;
   const owner = await node(projectDocuments.owner, operation.ownerNodeId);
   ownerIdentity(operation, owner);
   if (operation.kind === 'project.create') {
     if (dispatch) {
       parseProjectAccess(z.object({ viewerCanCreateProjects: z.literal(true) }), owner);
-      if (operation.ownerType === 'user')
-        parseProjectAccess(
-          z.object({
-            isViewer: z.literal(true),
-            databaseId: z.number().refine(id => String(id) === credential.identity.id),
-          }),
-          owner,
-        );
     }
     return;
   }
@@ -564,7 +547,7 @@ export async function recoverProject(
   marker: string,
   read: Read,
 ) {
-  if (!credential.scopes.includes('project')) throw new GitHubBatchError('batch-conflict');
+  if (operation.ownerType === 'user') throw new GitHubBatchError('batch-conflict');
   if (operation.kind !== 'project.draft-create' || !marker || !operation.body.includes(marker)) {
     graphqlData(
       await read(operation.kind === 'project.create' ? projectDocuments.owner : projectDocuments.project, {

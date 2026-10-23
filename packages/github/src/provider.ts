@@ -22,39 +22,27 @@ export const configurationSchema = z.strictObject({
       (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))
     );
   }),
-  scopes: scopesSchema.refine(value => value.length > 0),
 });
 export type Configuration = z.infer<typeof configurationSchema>;
-// Knowledge reads private repositories and their contents, so connecting always asks for `repo`.
-export const githubRequiredScopes = ['repo'];
-const withRequired = (scopes: string[]) =>
-  scopes.length ? [...scopes, ...githubRequiredScopes.filter(s => !scopes.includes(s))] : scopes;
 export function githubConfiguration(env: NodeJS.ProcessEnv = process.env): Configuration | null {
-  const values = [
-    env.GITHUB_OAUTH_CLIENT_ID,
-    env.GITHUB_OAUTH_CLIENT_SECRET,
-    env.GITHUB_OAUTH_REDIRECT_URI,
-    env.GITHUB_OAUTH_SCOPES,
-  ];
+  const values = [env.GITHUB_OAUTH_CLIENT_ID, env.GITHUB_OAUTH_CLIENT_SECRET, env.GITHUB_OAUTH_REDIRECT_URI];
   if (values.every(value => value === undefined)) return null;
   const parsed = configurationSchema.safeParse({
     clientId: values[0],
     clientSecret: values[1],
     redirectUri: values[2],
-    scopes: values[3] === undefined ? undefined : withRequired(values[3].split(/\s+/).filter(Boolean)),
   });
   if (!parsed.success) throw new Error('Invalid GitHub OAuth configuration');
   return parsed.data;
 }
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export const configurationHash = (config: Configuration) =>
-  hash(JSON.stringify([config.clientId, config.clientSecret, config.redirectUri, [...config.scopes].sort()]));
+  hash(JSON.stringify([config.clientId, config.clientSecret, config.redirectUri]));
 export function authorizationUrl(config: Configuration, state: string, verifier: string) {
   const url = new URL('https://github.com/login/oauth/authorize');
   url.search = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
-    scope: config.scopes.join(' '),
     state,
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     code_challenge_method: 'S256',
@@ -93,29 +81,12 @@ async function request(url: string, init: RequestInit, fetcher: typeof fetch): P
     clearTimeout(timer);
   }
 }
-export function hasScopes(granted: string[], required: string[]) {
-  const parents: Record<string, string[]> = {
-    'read:user': ['user'],
-    'user:email': ['user'],
-    'user:follow': ['user'],
-    public_repo: ['repo'],
-    'repo:status': ['repo'],
-    repo_deployment: ['repo'],
-    'repo:invite': ['repo'],
-    'read:org': ['write:org', 'admin:org'],
-    'read:discussion': ['write:discussion'],
-    'read:project': ['project'],
-  };
-  return required.every(
-    scope => granted.includes(scope) || (parents[scope] ?? []).some(parent => granted.includes(parent)),
-  );
-}
 export async function exchange(config: Configuration, code: string, verifier: string, fetcher: typeof fetch) {
   const token = z
     .object({
       access_token: secret,
       token_type: z.string().refine(value => value.toLowerCase() === 'bearer'),
-      scope: z.string().max(4096),
+      scope: z.string().max(4096).default(''),
       expires_in: z.number().int().positive().max(31536000).optional(),
       refresh_token: secret.optional(),
       refresh_token_expires_in: z.number().int().positive().max(31536000).optional(),
@@ -138,7 +109,6 @@ export async function exchange(config: Configuration, code: string, verifier: st
       ),
     );
   const scopes = scopesSchema.parse(token.scope.split(/[,\s]+/).filter(Boolean));
-  if (!hasScopes(scopes, config.scopes)) throw new GitHubAccountError('account-reconnect-required');
   return {
     accessToken: token.access_token,
     scopes,

@@ -75,3 +75,22 @@ test('the App endpoint body cap is independent of the smaller generic workflow c
     failure('payload-too-large'),
   );
 });
+
+test('App delivery must come from this App when the App ID is known', () => {
+  const raw = Buffer.from('{}'),
+    signed = {
+      ...headers(raw),
+      'x-github-hook-installation-target-type': 'integration',
+      'x-github-hook-installation-target-id': '5442409',
+    };
+  assert.equal(readGitHubAppDelivery(secret, raw, signed, '5442409').event, 'pull_request');
+  for (const patch of [
+    { 'x-github-hook-installation-target-id': '1' },
+    { 'x-github-hook-installation-target-type': 'repository' },
+    { 'x-github-hook-installation-target-id': undefined },
+  ])
+    assert.throws(
+      () => readGitHubAppDelivery(secret, raw, { ...signed, ...patch }, '5442409'),
+      failure('headers-invalid'),
+    );
+});

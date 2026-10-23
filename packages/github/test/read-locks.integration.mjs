@@ -273,7 +273,6 @@ test('prepared and served downloads fetch bytes outside authority locks and disc
       GITHUB_OAUTH_CLIENT_ID: f.configuration.clientId,
       GITHUB_OAUTH_CLIENT_SECRET: f.configuration.clientSecret,
       GITHUB_OAUTH_REDIRECT_URI: f.configuration.redirectUri,
-      GITHUB_OAUTH_SCOPES: f.configuration.scopes.join(' '),
     });
     let blocked = gate();
     const reads = createGitHubReads({

@@ -8,7 +8,7 @@ import { buildSchema, graphql } from 'graphql';
 export const projectSchema = buildSchema(
   gunzipSync(readFileSync(new URL('./project-schema.graphql.gz', import.meta.url))).toString(),
 );
-export const projectOwner = { owner: 'octocat', ownerType: 'user', ownerNodeId: 'U_123' };
+export const projectOwner = { owner: 'company', ownerType: 'organization', ownerNodeId: 'O_9' };
 export const projectTarget = { ...projectOwner, projectId: 'P_1', projectNumber: 1 };
 export const draftTarget = { ...projectTarget, itemId: 'PI_1', content: { type: 'DraftIssue', id: 'DI_1' } };
 export const issueContent = {
@@ -114,7 +114,7 @@ export async function projectProviderFixture(nativeFetch = fetch) {
     items = new Map(),
     fields = new Map(),
     contents = new Map();
-  const makeProject = (id, number, title, owner = user) => ({
+  const makeProject = (id, number, title, owner = organization) => ({
     __typename: 'ProjectV2',
     id,
     number,

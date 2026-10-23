@@ -84,13 +84,9 @@ test('dispatch refuses legacy 204, missing run identity, wrong URL and credentia
   assert.equal((await send(f, operation)).result.runId, 22);
 });
 for (const operation of actionsOperations)
-  test(`${operation.kind} ${operation.mode ?? ''} status and scope failures never become success`, async t => {
+  test(`${operation.kind} ${operation.mode ?? ''} status failures never become success`, async t => {
     const f = await actionsProviderFixture();
     t.after(f.close);
-    await assert.rejects(
-      requireWriteTarget(operation, { ...credential, scopes: ['workflow'] }, f.fetcher, true),
-      /batch-conflict/,
-    );
     for (const status of [403, 404, 405, 409, 410, 422]) {
       f.state.status = status;
       assert.deepEqual(await send(f, operation), { status: 'rejected', result: null });

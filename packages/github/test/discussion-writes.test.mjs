@@ -96,9 +96,6 @@ test('current owner repository category discussion comment and rights checks sto
       { commentId: 'DC_missing' },
     ])
       await assert.rejects(requireWriteTarget({ ...discussionOperations[4], ...patch }, credential, f.fetcher, true));
-    await assert.rejects(
-      requireWriteTarget(discussionOperations[0], { ...credential, scopes: ['read:project'] }, f.fetcher, true),
-    );
     f.comments.get('DC_1').viewerCanUpdate = false;
     await assert.rejects(requireWriteTarget(discussionOperations[4], credential, f.fetcher, true));
     assert.equal(f.effects.length, 0);

@@ -157,7 +157,7 @@ export function createGitHubKnowledgeEvents(options: {
     duplicate,
   });
   async function accept(raw: Buffer, headers: Parameters<typeof readGitHubAppDelivery>[2]) {
-    const delivery = readGitHubAppDelivery(options.signingSecret, raw, headers);
+    const delivery = readGitHubAppDelivery(options.signingSecret, raw, headers, appId);
     const trigger = githubKnowledgeTrigger(delivery.event, delivery.body);
     return transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`github-event-inbox:${appId}`]);

@@ -47,7 +47,6 @@ export async function checkActionsTarget(
     .parse(await read(repositoryPath(operation)));
   if (
     repository.full_name.toLowerCase() !== `${operation.owner}/${operation.repo}`.toLowerCase() ||
-    !credential.scopes.includes('repo') ||
     (dispatch && (repository.archived || !repository.permissions.push))
   )
     throw new GitHubBatchError('batch-conflict');

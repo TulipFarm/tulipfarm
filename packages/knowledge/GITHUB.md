@@ -22,11 +22,11 @@ dispatches source and proof checks to the adapter that owns each provider.
 account owned by the calling member. Without OAuth configuration or keys, every
 provider call fails with `not-configured`; API startup is unaffected.
 
-The connect flow always requests the `repo` scope, even when `GITHUB_OAUTH_SCOPES`
-omits it, so private repositories and their contents can be read. A blank
-`GITHUB_OAUTH_SCOPES` is still rejected. Production configuration already requires
-`repo` among the operation scopes. Adding `repo` to a deployment that lacked it
-changes the OAuth configuration hash, so existing accounts must reconnect once.
+`GITHUB_OAUTH_*` holds the client ID, secret and callback of the TulipFarm GitHub App.
+A GitHub App user token has no scopes: it reaches what the App's permissions and
+the member's own access allow, on repositories where the App is installed. A repository
+without the App is invisible to the member's token. Changing the client ID changes the
+OAuth configuration hash, so existing accounts must reconnect once.
 
 The service exports `discover`, `configure`, `list`, `listDocuments`, `manage`,
 `due`, `process`, `refresh`, `evidence`, `original`, and `status`, with the same
@@ -209,7 +209,7 @@ nothing implicitly. A changed OAuth configuration hash is not visible to SQL; th
 next credential use rejects the account and changes its generation.
 
 A repository the owner can no longer read is marked `unavailable` with reason
-`forbidden`, or `insufficient-scope` when the account lacks the `repo` scope. Its
+`forbidden`. Its
 content stays retained but hidden from search and is not tombstoned; other
 repositories continue to sync and the source is not revoked. The next sync or
 `retry` re-checks it and reactivates it if access returns. A claimed pass, like
@@ -376,8 +376,8 @@ net; webhooks make changes appear within seconds.
 ### Webhooks
 
 With `GITHUB_WEBHOOK_APP_ID` and `GITHUB_WEBHOOK_SECRET` set, the API accepts
-GitHub deliveries at `POST /v1/github/knowledge/events`. Configure the GitHub App
-(or an organization or repository webhook sharing the secret) with:
+GitHub deliveries at `POST /v1/github/knowledge/events`. The App is the same one
+members sign in with, and `GITHUB_WEBHOOK_APP_ID` is its numeric ID. Configure it with:
 
 - Webhook URL `https://<api host>/v1/github/knowledge/events`, content type
   `application/json`, and a secret of 32 to 4,096 characters.
@@ -391,7 +391,8 @@ Each delivery's `X-Hub-Signature-256` is verified before anything is stored, and
 deliveries are deduplicated by `X-GitHub-Delivery`: a redelivery is acknowledged
 again, and a reused delivery ID with a different body is rejected with 409.
 Responses are 202 for accepted, 401 for a bad signature, 400 for malformed headers
-or bodies, 413 above 25 MiB, and 503 while webhooks are disabled.
+or bodies (including a delivery whose `X-GitHub-Hook-Installation-Target-ID` is not
+`GITHUB_WEBHOOK_APP_ID`), 413 above 25 MiB, and 503 while webhooks are disabled.
 
 A delivery keeps only the numeric IDs of the repositories it changes, in the
 platform GitHub event inbox; its content is never indexed. Pushes count only on the

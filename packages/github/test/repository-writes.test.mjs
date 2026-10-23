@@ -163,10 +163,6 @@ test('repository identity, admin, deletion scope, owner and branch head fence di
       requireWriteTarget(deletion, credential, read({ ...repository, ...changed }), true),
       /batch-conflict/,
     );
-  await assert.rejects(
-    requireWriteTarget(deletion, { ...credential, scopes: ['repo'] }, read(repository), true),
-    /batch-conflict/,
-  );
   const branchRead = async url =>
     Response.json(
       String(url).includes('/git/ref/')

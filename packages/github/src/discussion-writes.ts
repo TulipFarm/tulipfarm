@@ -125,7 +125,6 @@ export async function checkDiscussionTarget(
   read: (query: string, variables: Record<string, string>) => Promise<unknown>,
   dispatch: boolean,
 ) {
-  if (!credential.scopes.includes('repo')) throw new GitHubBatchError('batch-conflict');
   const value = graphqlData(
     await read(discussionDocuments.repository, { owner: operation.owner, repo: operation.repo }),
   ).repository;
