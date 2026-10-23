@@ -1320,6 +1320,122 @@ test('without a cutoff or mark, issues are listed from the beginning', async () 
   assert.equal(github.calls.find(call => call.path === '/repositories/7001/issues').query.since, undefined);
 });
 
+// Serves a repository's issues from a list sorted once, the way GitHub's ascending update-time listing pages them.
+function manyIssues(issues) {
+  const sorted = issues.toSorted((a, b) => a.updated_at.localeCompare(b.updated_at) || a.number - b.number);
+  const requests = [];
+  const wrap = fetcher => async (input, init) => {
+    const url = new URL(input);
+    if (url.pathname !== '/repositories/7001/issues') return fetcher(input, init);
+    const since = url.searchParams.get('since');
+    const per = Number(url.searchParams.get('per_page'));
+    const page = Number(url.searchParams.get('page'));
+    requests.push({ since, page });
+    let start = 0;
+    if (since) {
+      let high = sorted.length;
+      while (start < high) {
+        const middle = (start + high) >> 1;
+        if (Date.parse(sorted[middle].updated_at) < Date.parse(since)) start = middle + 1;
+        else high = middle;
+      }
+    }
+    return Response.json(
+      sorted.slice(start + (page - 1) * per, start + page * per).map(issue => ({
+        number: issue.number,
+        title: `Issue ${issue.number}`,
+        body: null,
+        user: { login: 'octo' },
+        state: 'open',
+        created_at: issue.updated_at,
+        updated_at: issue.updated_at,
+        comments: 0,
+        html_url: `https://github.com/acme/handbook/issues/${issue.number}`,
+      })),
+    );
+  };
+  return { wrap, requests };
+}
+async function listIssuesToEnd(provider, binding, value, cursor = null) {
+  const numbers = [];
+  for (let page = 0; page < 5000; page++) {
+    const result = await provider.list(workspaceId, 'reader', binding, '7001', value, cursor);
+    numbers.push(...result.observations.map(item => Number(item.nativeId.split(':')[2])));
+    if (!result.nextCursor) return numbers;
+    assert.notEqual(result.nextCursor, cursor, 'every page moves the cursor');
+    cursor = result.nextCursor;
+  }
+  assert.fail('listing did not finish');
+}
+const second = ms => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+test('issue listings page by update time past 50,000 issues without large page numbers', async () => {
+  const base = Date.parse(`${after}T00:00:00Z`) + 86400000;
+  // Three issues share each update second, so ties straddle most page boundaries.
+  const issues = Array.from({ length: 60000 }, (_, i) => ({
+    number: i + 1,
+    updated_at: second(base + Math.floor(i / 3) * 1000),
+  }));
+  const served = manyIssues(issues);
+  const { provider, binding } = setup({ wrap: served.wrap });
+  const numbers = await listIssuesToEnd(provider, binding, { ...selection, kinds: ['issues'] });
+  assert.equal(numbers.length, 60000);
+  assert.equal(new Set(numbers).size, 60000, 'every issue is listed exactly once');
+  assert.ok(
+    served.requests.every(request => request.page === 1),
+    'page numbers never grow with the issue count',
+  );
+  assert.ok(served.requests.length < 700);
+});
+
+test('issues sharing one update second are paged through without skipping or repeating', async () => {
+  const base = Date.parse(`${after}T00:00:00Z`) + 86400000;
+  const issues = [
+    ...Array.from({ length: 98 }, (_, i) => ({ number: i + 1, updated_at: second(base + i * 1000) })),
+    // 250 issues share one second across three pages, and the group starts two issues before a page boundary.
+    ...Array.from({ length: 250 }, (_, i) => ({ number: 1000 + i, updated_at: second(base + 500000) })),
+    ...Array.from({ length: 5 }, (_, i) => ({ number: 2000 + i, updated_at: second(base + 600000 + i * 1000) })),
+  ];
+  const served = manyIssues(issues);
+  const { provider, binding } = setup({ wrap: served.wrap });
+  const numbers = await listIssuesToEnd(provider, binding, { ...selection, kinds: ['issues'] });
+  assert.deepEqual(
+    numbers.toSorted((a, b) => a - b),
+    issues.map(issue => issue.number),
+  );
+  assert.ok(
+    served.requests.some(request => request.page === 3),
+    'a tie group longer than a page steps by page',
+  );
+  assert.ok(served.requests.every(request => request.page <= 3));
+});
+
+test('issue cursors are validated, and a page-number cursor from an older listing restarts it', async () => {
+  const { provider, binding } = setup();
+  const value = { ...selection, kinds: ['issues'] };
+  const restarted = await provider.list(workspaceId, 'reader', binding, '7001', value, 'issues:7');
+  assert.deepEqual(
+    restarted.observations.map(item => item.nativeId),
+    ['issue:7001:1'],
+  );
+  assert.ok(restarted.mark?.issues, 'a restarted listing records its own start');
+  for (const cursor of [
+    'issues:2024-01-01',
+    'issues:2024-02-30T00:00:00Z',
+    'issues:2024-01-01T00:00:00Z/1',
+    'issues:2024-01-01T00:00:00.000Z',
+    'issues:x',
+  ])
+    await assert.rejects(
+      provider.list(workspaceId, 'reader', binding, '7001', value, cursor),
+      error => error.code === 'invalid-cursor',
+      cursor,
+    );
+  const resumed = await provider.list(workspaceId, 'reader', binding, '7001', value, 'issues:2000-01-01T00:00:00Z/2');
+  assert.deepEqual(resumed.observations, []);
+  assert.equal(resumed.mark, undefined);
+});
+
 test('the commit listing pins to the head the file listing read', async () => {
   const { provider, binding, github } = setup();
   github.push(github.state.repos.get(7001), { message: 'First', files: [{ filename: 'README.md' }] });

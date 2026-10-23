@@ -339,6 +339,15 @@ function afterFiles(selection: GitHubCorpusSelection) {
   return next ? `${next}:` : null;
 }
 // The later of the selection's cutoff and the previous listing's start less a small overlap; undefined lists everything.
+const issueTime = (second: number) => new Date(second * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+function issueCursor(state: string) {
+  if (!state || /^\d{1,9}$/.test(state)) return null;
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)(?:\/([2-9]|[1-9]\d{1,6}))?$/.exec(state);
+  const time = match ? Date.parse(match[1] ?? '') : NaN;
+  if (!match || !Number.isFinite(time) || issueTime(time / 1000) !== match[1])
+    throw new GitHubCorpusError('invalid-cursor');
+  return { time: time / 1000, page: Number(match[2] ?? 1) };
+}
 function since(selection: GitHubCorpusSelection, mark: string | undefined) {
   const time = Math.max(
     ...[
@@ -1097,9 +1106,13 @@ export function createGitHubCorpusProvider(options: {
     selection: GitHubCorpusSelection,
     mark: GitHubRepositoryMark | undefined,
   ): Promise<GitHubCorpusPage> {
-    const page = state ? Number(state) : 1;
-    const from = since(selection, mark?.issues);
-    if (!Number.isInteger(page) || page < 1 || page > 500) throw new GitHubCorpusError('invalid-cursor');
+    // The cursor is `<time>` or `<time>/<page>`: list issues updated at or after `<time>`, a whole second, from that
+    // page of GitHub's ascending listing. Moving the time forward keeps page numbers small, so any number of issues
+    // can be listed; the page number only steps through a full page of issues that share one update second. A bare
+    // page number is a cursor from before this format and restarts the listing.
+    const parsed = issueCursor(state);
+    const from = parsed ? issueTime(parsed.time - 1) : since(selection, mark?.issues);
+    const page = parsed?.page ?? 1;
     const response = await call(
       token,
       'github-issues',
@@ -1110,7 +1123,25 @@ export function createGitHubCorpusProvider(options: {
     if (response.status !== 200)
       throw new GitHubCorpusError([403, 404].includes(response.status) ? 'forbidden' : 'invalid-response');
     const issues = parse(z.array(issueSchema).max(100), response.json());
-    const observations = issues
+    const second = (issue: Issue) => {
+      const time = Date.parse(issue.updated_at);
+      if (!Number.isFinite(time)) throw new GitHubCorpusError('invalid-response');
+      return Math.floor(time / 1000);
+    };
+    // GitHub's `since` is asked one second early, so issues from that earlier second are dropped here.
+    let kept = parsed ? issues.filter(issue => second(issue) >= parsed.time) : issues;
+    let nextCursor = nextPhase(selection, 'issues');
+    const last = issues.at(-1);
+    if (last && issues.length === limits.issuePageSize) {
+      const time = second(last);
+      const start = parsed?.time ?? -Infinity;
+      if (time > start) {
+        // The issues of the page's last second may continue on the next page, so they are all listed from there.
+        kept = kept.filter(issue => second(issue) < time);
+        nextCursor = `issues:${issueTime(time)}`;
+      } else nextCursor = `issues:${issueTime(time)}/${page + 1}`;
+    }
+    const observations = kept
       .filter(
         issue =>
           selection.kinds.includes(issue.pull_request ? 'pulls' : 'issues') && inWindow(selection, issue.updated_at),
@@ -1132,8 +1163,8 @@ export function createGitHubCorpusProvider(options: {
     return {
       observations,
       // The listing's start is the next incremental listing's mark; later pages keep the first page's mark.
-      ...(page === 1 ? { mark: { issues: accessedAt } } : {}),
-      nextCursor: issues.length === limits.issuePageSize ? `issues:${page + 1}` : nextPhase(selection, 'issues'),
+      ...(parsed ? {} : { mark: { issues: accessedAt } }),
+      nextCursor,
     };
   }
   async function listDiscussions(
