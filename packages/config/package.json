@@ -37,6 +37,10 @@
       "types": "./dist/feature-flags.d.ts",
       "default": "./dist/feature-flags.js"
     },
+    "./analytics-events": {
+      "types": "./dist/analytics-events.d.ts",
+      "default": "./dist/analytics-events.js"
+    },
     "./settings": {
       "types": "./dist/settings.d.ts",
       "default": "./dist/settings.js"

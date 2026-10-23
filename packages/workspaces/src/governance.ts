@@ -18,6 +18,7 @@ import {
 } from '@tulipfarm/access';
 import { afterCommit, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { emitHook } from '@tulipfarm/extensions';
+import { trackEvent } from '@tulipfarm/observability';
 import {
   activeRecommendationMembers,
   recordRecommendationChange,
@@ -1070,16 +1071,15 @@ export function createGovernanceService(dependencies: {
     await recordInvitationOperation(transaction, requestId, email, predecessorId, 'created', id, workspaceMemberId);
     await recommendationChange(transaction, id, await activeRecommendationMembers(transaction));
     await scheduleRecommendationExpiry(transaction, id, row.expires_at);
-    afterCommit(
-      transaction.client,
-      () =>
-        void emitHook('member.invited', {
-          workspaceId,
-          invitationId: id,
-          invitedByUserId: actor.userId,
-          replacesInvitationId: predecessorId,
-        }),
-    );
+    afterCommit(transaction.client, () => {
+      void emitHook('member.invited', {
+        workspaceId,
+        invitationId: id,
+        invitedByUserId: actor.userId,
+        replacesInvitationId: predecessorId,
+      });
+      trackEvent('member_invited', { userId: actor.userId, workspaceId }, { resend: predecessorId !== null });
+    });
     return invitationResult(transaction, row, 'created');
   }
 
@@ -1317,6 +1317,7 @@ export function createGovernanceService(dependencies: {
       );
       await audit(transaction, { kind: 'human', userId, membershipId }, 'invitation.redeem', row.id);
       await recommendationChange(transaction, row.id, await activeRecommendationMembers(transaction));
+      afterCommit(transaction.client, () => trackEvent('member_joined', { userId, workspaceId }));
       return { workspaceId, membershipId };
     });
   }

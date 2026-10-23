@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AccessDenied, humanActorSchema, requireNoMcpDerived, uuidSchema, type HumanActor } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { trackEvent } from '@tulipfarm/observability';
+import { afterCommit } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError, agentProjectionSchema, saveAgentSchema, soulRevisionSchema } from './saved-contracts.ts';
 import { requireAgentCreation, requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
@@ -136,6 +138,13 @@ export function createAgentAuthoring(runtime: AgentStorage, eligible: ModelFamil
             [randomUUID(), agentId, actor.membershipId, actor.userId, input.requestId, input],
           )
         ).rows[0],
+      );
+      afterCommit(transaction.client, () =>
+        trackEvent(
+          'agent_save_requested',
+          { userId: actor.userId, workspaceId },
+          { agent_id: agentId, created: input.expectedSavedRevision === null },
+        ),
       );
       return result(command);
     });

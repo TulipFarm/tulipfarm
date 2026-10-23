@@ -69,6 +69,7 @@ async function verifyRegistryPrivileges(
         AND p.proowner <> $1::regrole)
       AND NOT ($4 = 'authoring' AND p.oid=ANY(ARRAY[
         coalesce(to_regprocedure('app.workspace_member_profiles(uuid,uuid[])'),0::oid),
+        coalesce(to_regprocedure('app.workspace_flag_context(uuid)'),0::oid),
         coalesce(to_regprocedure('app.pending_member_profile_events()'),0::oid),
         coalesce(to_regprocedure('app.advance_member_profile_event(uuid,bigint,uuid,uuid)'),0::oid),
         coalesce(to_regprocedure('app.register_model_bundle(text,jsonb)'),0::oid),
@@ -115,6 +116,7 @@ export async function grantTableRegistryAccess(
     }
     for (const signature of [
       'app.workspace_member_profiles(uuid,uuid[])',
+      'app.workspace_flag_context(uuid)',
       'app.pending_member_profile_events()',
       'app.advance_member_profile_event(uuid,bigint,uuid,uuid)',
       ...modelBundleRoutines,

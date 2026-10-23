@@ -1,5 +1,7 @@
 import type {
   AnalyticsEvent,
+  AnalyticsGroup,
+  AnalyticsPerson,
   CreditGate,
   CreditPricing,
   ErrorReporter,
@@ -237,6 +239,14 @@ export function reportError(error: unknown, distinctId?: string) {
 
 export function captureAnalytics(event: AnalyticsEvent) {
   each(state().analytics, analytics => analytics.capture(event));
+}
+
+export function identifyAnalyticsGroup(group: AnalyticsGroup) {
+  each(state().analytics, analytics => analytics.group?.(group));
+}
+
+export function identifyAnalyticsPerson(person: AnalyticsPerson) {
+  each(state().analytics, analytics => analytics.person?.(person));
 }
 
 /** Delivers usage to every sink. Sink failures go to the error reporters, never to the caller. */

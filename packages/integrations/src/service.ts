@@ -11,7 +11,16 @@ import {
   type Actor,
   type AuthorizationTransaction,
 } from '@tulipfarm/access';
-import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import {
+  afterCommit,
+  qualified,
+  type createWorkspaceRuntime,
+  commonCompatibility,
+} from '@tulipfarm/workspace-storage/runtime';
+import { trackEvent } from '@tulipfarm/observability';
+
+const analyticsActor = (actor: Actor, workspaceId: string) =>
+  actor.kind === 'human' ? { userId: actor.userId, workspaceId } : { workspaceId };
 import { actorSchema, uuidSchema } from '@tulipfarm/access/contracts';
 import {
   IntegrationError,
@@ -397,6 +406,9 @@ export function createIntegrationService(options: Options) {
           );
         await audit(tx, actor, value.id, 'create');
         await recommendations();
+        afterCommit(tx.client, () =>
+          trackEvent('integration_connected', analyticsActor(actor, workspaceId), { provider: 'github' }),
+        );
         return metadata(tx, actor, await load(tx, value.id));
       });
     },
@@ -584,6 +596,9 @@ export function createIntegrationService(options: Options) {
         );
         await audit(tx, actor, id, 'remove');
         await recommendations();
+        afterCommit(tx.client, () =>
+          trackEvent('integration_disconnected', analyticsActor(actor, workspaceId), { provider: 'github' }),
+        );
         return { removed: true };
       });
     },

@@ -34,6 +34,8 @@ import { registerViewer } from './viewer.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { registerPublicGuide } from './public-guide.ts';
 import { getLastWorkspace, getWorkspace } from '@tulipfarm/workspaces/store';
+import { registerFlagSubjectResolver } from '@tulipfarm/observability';
+import { apiFlagSubjects } from './flag-subjects.ts';
 import { registerFeatureFlags } from './feature-flags.ts';
 
 export function buildApp(
@@ -91,6 +93,7 @@ export function buildApp(
     async v1 => {
       registerHealth(v1, temporal);
       const auth = registerAuth(v1);
+      registerFlagSubjectResolver(apiFlagSubjects(auth.pool));
       let workspaceStorage: ReturnType<typeof registerWorkspaces>;
       registerViewer(v1, auth.auth, userId => {
         if (!workspaceStorage) throw new Error('Workspace storage is unavailable');

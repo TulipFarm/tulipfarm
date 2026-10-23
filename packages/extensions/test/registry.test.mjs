@@ -10,6 +10,8 @@ import {
   extensionMigrations,
   flagProvider,
   flushExtensions,
+  identifyAnalyticsGroup,
+  identifyAnalyticsPerson,
   loadedExtensions,
   recordUsage,
   registerExtension,
@@ -427,5 +429,34 @@ test('every lifecycle hook reaches its subscriber, and a failing subscriber is l
   assert.deepEqual(seen, Object.entries(events));
   assert.deepEqual(logged, [
     { level: 'error', event: 'extension_hook_failed', hook: 'task.completed', extension: 'recorder' },
+  ]);
+});
+
+test('group and person profiles reach analytics that support them, and a failure never reaches the caller', async () => {
+  const seen = [];
+  await registerExtension(
+    defineExtension({
+      name: 'profiles',
+      register(slots) {
+        slots.analytics({ capture: () => undefined });
+        slots.analytics({
+          capture: () => undefined,
+          group: group => seen.push(['group', group]),
+          person: person => {
+            seen.push(['person', person]);
+            throw new Error('person down');
+          },
+        });
+      },
+    }),
+    context,
+  );
+  const group = { type: 'workspace', key: 'w1', properties: { slug: 'acme' } };
+  const person = { distinctId: 'u1', properties: { email_domain: 'example.com' } };
+  identifyAnalyticsGroup(group);
+  identifyAnalyticsPerson(person);
+  assert.deepEqual(seen, [
+    ['group', group],
+    ['person', person],
   ]);
 });

@@ -5,12 +5,21 @@
 // 1. The registered flag provider, when it returns a boolean.
 // 2. The flag's `env` variable (`true` or `false`), then FEATURE_FLAGS_OFF.
 // 3. The declared `default`. `development` means on unless NODE_ENV=production.
+//
+// `scope` decides who a flag is evaluated for, so every caller gets the same answer:
+// - `user`: the signed-in person, in the workspace when there is one. Needs a real user.
+// - `workspace`: the workspace alone. The user is ignored, so API requests and background
+//   work in that workspace agree.
+// - `global`: one answer for everyone.
+// Flags restrict an already-authorized action; they never grant membership, roles or data access.
 
 export type FeatureFlagDefault = boolean | 'development';
+export type FeatureFlagScope = 'user' | 'workspace' | 'global';
 
 export type FeatureFlagDefinition = {
   readonly description: string;
   readonly default: FeatureFlagDefault;
+  readonly scope: FeatureFlagScope;
   /** Overrides the flag for this process when set to `true` or `false`. */
   readonly env: `FEATURE_FLAG_${string}`;
 };
@@ -19,38 +28,45 @@ export const featureFlags = {
   'soul-repository-explorer': {
     description: 'Admin-only, permission-filtered read-only Soul repository explorer in workspace settings.',
     default: 'development',
+    scope: 'user',
     env: 'FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER',
   },
   'public-tulipfarm-guide': {
     description: 'Public website guide, bounded model answers and inline signup.',
     default: 'development',
+    scope: 'global',
     env: 'FEATURE_FLAG_PUBLIC_TULIPFARM_GUIDE',
   },
   'google-calendar-canvas': {
     description: 'Calendar read and action canvas cards and approved Google Meet creation.',
     default: 'development',
+    scope: 'user',
     env: 'FEATURE_FLAG_GOOGLE_CALENDAR_CANVAS',
   },
   'slack-app-sender': {
     description: 'Workflow and agent Slack sends can post as the TulipFarm app instead of the requester.',
     default: 'development',
+    scope: 'workspace',
     env: 'FEATURE_FLAG_SLACK_APP_SENDER',
   },
   'default-connection-knowledge': {
     description:
       'New eligible integration enablements automatically get owner-only Knowledge with ongoing discovery. GitHub always does, whatever this flag says.',
     default: 'development',
+    scope: 'workspace',
     env: 'FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE',
   },
   'bud-avatar': {
     description:
       'Animated Bud expressions in personal chats. The model sets them with the bud_state tool, which costs extra model rounds.',
     default: false,
+    scope: 'user',
     env: 'FEATURE_FLAG_BUD_AVATAR',
   },
   'social-publishing': {
     description: 'Social account connections, approved social posts, scheduling, engagement and analytics.',
     default: 'development',
+    scope: 'workspace',
     env: 'FEATURE_FLAG_SOCIAL_PUBLISHING',
   },
 } as const satisfies Record<string, FeatureFlagDefinition>;

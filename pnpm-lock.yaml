@@ -974,6 +974,9 @@ importers:
       '@tulipfarm/keyring':
         specifier: workspace:*
         version: link:../keyring
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@tulipfarm/workspace-storage':
         specifier: workspace:*
         version: link:../workspace-storage
@@ -1418,6 +1421,9 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../tables
@@ -1551,6 +1557,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../slack

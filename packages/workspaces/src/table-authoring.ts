@@ -16,6 +16,8 @@ const seedRow = z.object({
   soul_key: z.string(),
 });
 
+const flagWorkspaceRow = z.object({ slug: z.string(), name: z.string(), created_at: z.date() });
+
 export function createWorkspaceTableAuthoring() {
   const pool = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_AUTHORING_DATABASE_URL),
@@ -69,6 +71,28 @@ export function createWorkspaceTableAuthoring() {
         }),
     }),
     memberProfiles: memberProfileSource(pool),
+    /**
+     * Feature flag targeting attributes: the workspace's slug, name and creation time, and the user's
+     * email only while they are a current member. A workspace that is not ready yields no email.
+     */
+    async flagContext({ userId, workspaceId }: { userId?: string; workspaceId?: string }) {
+      if (!workspaceId) return {};
+      const id = z.uuid().parse(workspaceId);
+      const [workspace, member] = await Promise.all([
+        pool.query('SELECT slug, name, created_at FROM app.workspace_flag_context($1)', [id]),
+        userId
+          ? memberProfileSource(pool)
+              .read(id, [userId])
+              .catch(() => [])
+          : [],
+      ]);
+      const row = flagWorkspaceRow.optional().parse(workspace.rows[0]);
+      const email = member[0]?.email ?? undefined;
+      return {
+        ...(email && { user: { email } }),
+        ...(row && { workspace: { slug: row.slug, name: row.name, createdAt: row.created_at.toISOString() } }),
+      };
+    },
     async readyTaskWorkspaces(after: string | null) {
       return z
         .array(z.object({ workspace_id: z.uuid() }))

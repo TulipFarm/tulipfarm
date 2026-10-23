@@ -23,11 +23,13 @@ import {
 } from './authorization.ts';
 import { changeGrant, listGrants, sharingCandidates } from './sharing.ts';
 import {
+  afterCommit,
   qualified,
   type createWorkspaceRuntime,
   commonCompatibility,
   StorageUnavailableError,
 } from '@tulipfarm/workspace-storage/runtime';
+import { trackEvent } from '@tulipfarm/observability';
 import {
   isSecretHeader,
   activationSchema,
@@ -742,6 +744,9 @@ export function createWorkflows(
           [id, input.revision],
         );
       await auditWorkflow(tx, actor.membershipId, 'workflow.save', id);
+      afterCommit(tx.client, () =>
+        trackEvent('workflow_saved', { userId: user, workspaceId }, { workflow_id: id, created: !previous }),
+      );
       return read(tx, id, actor.membershipId);
     });
   }
