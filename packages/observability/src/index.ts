@@ -1120,11 +1120,21 @@ export async function observeChatStage<T>(phase: ChatStage, call: () => Promise<
 
 /** `send` starts a reply from the send request; `sweep` is the background recovery path. */
 export type ChatDispatchSource = 'send' | 'sweep';
-export function recordChatDispatch(source: ChatDispatchSource, outcome: 'success' | 'error') {
+/**
+ * Why a turn was due: `undispatched` never started; `unclaimed` started but no worker claimed it within the grace;
+ * `retry` waits out a failed attempt; `expired` lost its worker lease; `waiting` polls an external action.
+ */
+export const chatDispatchReasons = ['undispatched', 'unclaimed', 'retry', 'expired', 'waiting'] as const;
+export type ChatDispatchReason = (typeof chatDispatchReasons)[number];
+export function recordChatDispatch(
+  source: ChatDispatchSource,
+  outcome: 'success' | 'error',
+  reason: ChatDispatchReason = 'undispatched',
+) {
   metrics
     .getMeter(scope)
     .createCounter('cloud_chat_dispatches', { description: 'Reply workflow starts by dispatch path' })
-    .add(1, { ...dimensions, dispatch_source: source, outcome });
+    .add(1, { ...dimensions, dispatch_source: source, dispatch_reason: reason, outcome });
 }
 
 export type ChatModelPurpose = 'reply' | 'completion' | 'title' | 'calendar' | 'compaction';

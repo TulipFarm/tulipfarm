@@ -351,6 +351,16 @@ export const settings: readonly Setting[] = [
     description: 'Listen port.',
   },
   {
+    name: 'CHAT_DISPATCH_GRACE_MS',
+    group: 'Runtime',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: '5000',
+    description:
+      'How long a chat reply started on send may stay unclaimed before the background sweep starts it again.',
+  },
+  {
     name: 'API_PROXY_MODE',
     group: 'Runtime',
     services: ['api'],
