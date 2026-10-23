@@ -167,7 +167,7 @@ function oauthClient(
   product: string,
   group: SettingGroup,
   services: readonly SettingService[],
-  scopes: boolean,
+  scopes: boolean | string,
 ): Setting[] {
   const shared = { group, services, requirement: 'conditional' } as const;
   return [
@@ -190,7 +190,7 @@ function oauthClient(
             ...shared,
             name: `${prefix}_SCOPES`,
             secret: false,
-            description: `Space-separated ${product} OAuth scopes.`,
+            description: `Space-separated ${product} OAuth scopes.${typeof scopes === 'string' ? ` ${scopes}` : ''}`,
           },
         ]
       : []),
@@ -1236,7 +1236,13 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'sign-in', example: 'noreply@example.com', commented: true },
   },
 
-  ...oauthClient('GITHUB_OAUTH', 'GitHub', 'GitHub', apps, true),
+  ...oauthClient(
+    'GITHUB_OAUTH',
+    'GitHub',
+    'GitHub',
+    apps,
+    '`repo` is always requested so Knowledge can read private repositories and their contents.',
+  ),
   {
     name: 'GITHUB_MCP_READ_BINDINGS',
     group: 'GitHub',

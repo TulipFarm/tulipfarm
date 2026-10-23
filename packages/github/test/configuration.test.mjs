@@ -25,7 +25,12 @@ test('production GitHub is disabled or complete with all accepted operation scop
     assert.throws(() => githubRuntimeConfiguration(partial));
     assert.throws(() => githubRuntimeConfiguration({ ...configured, [key]: '' }));
   }
-  for (const scope of configured.GITHUB_OAUTH_SCOPES.split(' ')) {
+  const withoutRepo = configured.GITHUB_OAUTH_SCOPES.replace(' repo', '');
+  assert.deepEqual(githubRuntimeConfiguration({ ...configured, GITHUB_OAUTH_SCOPES: withoutRepo }).oauth.scopes, [
+    ...withoutRepo.split(' '),
+    'repo',
+  ]);
+  for (const scope of configured.GITHUB_OAUTH_SCOPES.split(' ').filter(scope => scope !== 'repo')) {
     assert.throws(() =>
       githubRuntimeConfiguration({
         ...configured,

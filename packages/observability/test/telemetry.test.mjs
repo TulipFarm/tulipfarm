@@ -644,10 +644,18 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     const sent = { id: 'PRIVATE_EMAIL_ID' };
     assert.equal(await observeDependency('email', 'send', async () => sent), sent);
     epoch += 20000;
-    knowledgeMetrics.publish({ failedItems: 3, failedSources: 1, stalledSources: 1 });
-    knowledgeMetrics.publish({ failedItems: 2, failedSources: 0, stalledSources: 0 });
+    const access = { reconnectSources: 0, permissionRepositories: 0, lostRepositories: 0 };
+    knowledgeMetrics.publish({ failedItems: 3, failedSources: 1, stalledSources: 1, ...access });
+    knowledgeMetrics.publish({
+      failedItems: 2,
+      failedSources: 0,
+      stalledSources: 0,
+      reconnectSources: 1,
+      permissionRepositories: 2,
+      lostRepositories: 3,
+    });
     assert.throws(
-      () => knowledgeMetrics.publish({ failedItems: -1, failedSources: 0, stalledSources: 0 }),
+      () => knowledgeMetrics.publish({ failedItems: -1, failedSources: 0, stalledSources: 0, ...access }),
       /invalid-knowledge-sync-snapshot/,
     );
     await withTelemetryContext(request.context, async () => {
@@ -690,6 +698,15 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
       data.find(metric => metric.descriptor.name === 'cloud_knowledge_stalled_sources').dataPoints[0].value,
       0,
     );
+    for (const [name, value] of [
+      ['cloud_knowledge_reconnect_sources', 1],
+      ['cloud_knowledge_permission_repositories', 2],
+      ['cloud_knowledge_lost_repositories', 3],
+    ]) {
+      const metric = data.find(entry => entry.descriptor.name === name);
+      assert.equal(metric.dataPoints[0].value, value);
+      assert.deepEqual(Object.keys(metric.dataPoints[0].attributes).includes('provider'), true);
+    }
     assert.equal(
       data.find(metric => metric.descriptor.name === 'cloud_knowledge_scan_completed').dataPoints[0].value,
       epoch / 1000,

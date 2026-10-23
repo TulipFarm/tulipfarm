@@ -797,6 +797,10 @@ export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;
   stalledSources: number;
+  // Sources whose owner must reconnect the account, and repositories that need permission or lost access.
+  reconnectSources: number;
+  permissionRepositories: number;
+  lostRepositories: number;
 }
 
 export function createKnowledgeSyncMetrics() {
@@ -807,14 +811,28 @@ export function createKnowledgeSyncMetrics() {
   const failedItems = meter.createObservableGauge('cloud_knowledge_failed_items');
   const failedSources = meter.createObservableGauge('cloud_knowledge_failed_sources');
   const stalledSources = meter.createObservableGauge('cloud_knowledge_stalled_sources');
+  const reconnectSources = meter.createObservableGauge('cloud_knowledge_reconnect_sources');
+  const permissionRepositories = meter.createObservableGauge('cloud_knowledge_permission_repositories');
+  const lostRepositories = meter.createObservableGauge('cloud_knowledge_lost_repositories');
   const scan = meter.createObservableGauge('cloud_knowledge_scan_completed', { unit: 's' });
-  const instruments = [failedItems, failedSources, stalledSources, scan];
+  const instruments = [
+    failedItems,
+    failedSources,
+    stalledSources,
+    reconnectSources,
+    permissionRepositories,
+    lostRepositories,
+    scan,
+  ];
   const callback: Parameters<typeof meter.addBatchObservableCallback>[0] = result => {
     result.observe(scan, completedAt, labels);
     if (!snapshot) return;
     result.observe(failedItems, snapshot.failedItems, labels);
     result.observe(failedSources, snapshot.failedSources, labels);
     result.observe(stalledSources, snapshot.stalledSources, labels);
+    result.observe(reconnectSources, snapshot.reconnectSources, labels);
+    result.observe(permissionRepositories, snapshot.permissionRepositories, labels);
+    result.observe(lostRepositories, snapshot.lostRepositories, labels);
   };
   meter.addBatchObservableCallback(callback, instruments);
   return {

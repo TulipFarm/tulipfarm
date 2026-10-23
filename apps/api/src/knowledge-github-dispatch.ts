@@ -38,7 +38,15 @@ export function registerGitHubKnowledgeDispatch(
 ) {
   let after: string | null = null;
   const monitoring = createKnowledgeSyncMetrics();
-  let snapshot = { failedItems: 0, failedSources: 0, stalledSources: 0 };
+  const empty = () => ({
+    failedItems: 0,
+    failedSources: 0,
+    stalledSources: 0,
+    reconnectSources: 0,
+    permissionRepositories: 0,
+    lostRepositories: 0,
+  });
+  let snapshot = empty();
   let scanFailed = false;
   app.addHook('onClose', async () => monitoring.close());
   backgroundSweep(
@@ -49,9 +57,7 @@ export function registerGitHubKnowledgeDispatch(
         if (stopped()) return;
         try {
           const health = await dependencies.service.health(row.workspace_id);
-          snapshot.failedItems += health.failedItems;
-          snapshot.failedSources += health.failedSources;
-          snapshot.stalledSources += health.stalledSources;
+          for (const key of Object.keys(snapshot) as (keyof typeof snapshot)[]) snapshot[key] += health[key];
           for (const work of await dependencies.service.due(row.workspace_id)) {
             if (stopped()) return;
             await startGitHubKnowledgeWorkflow(dependencies.temporal, work);
@@ -66,7 +72,7 @@ export function registerGitHubKnowledgeDispatch(
       if (rows.length < 100) {
         if (!scanFailed) monitoring.publish(snapshot);
         after = null;
-        snapshot = { failedItems: 0, failedSources: 0, stalledSources: 0 };
+        snapshot = empty();
         scanFailed = false;
       }
     },

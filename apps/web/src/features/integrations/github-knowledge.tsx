@@ -8,7 +8,7 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { useGitHubAccounts } from './queries';
 import { GitHubSelectionForm } from './github-knowledge-selection';
-import { describeGitHubContent } from './github-knowledge-content';
+import { describeGitHubContent, githubKindLabels } from './github-knowledge-content';
 import { GitHubSourceSettings } from './github-knowledge-source-settings';
 import {
   GitHubKnowledgeError,
@@ -18,6 +18,7 @@ import {
   githubSourceKeys,
   type ManageGitHub,
   type GitHubDocument,
+  type GitHubKind,
   type GitHubKnowledgeApi,
   type GitHubSource,
 } from './github-knowledge-api';
@@ -34,8 +35,11 @@ const statusLabels = {
 const syncLabels = { queued: 'Queued', syncing: 'Syncing', ready: 'Sync complete', failed: 'Sync failed' };
 const repositoryFailures: Record<string, string> = {
   forbidden:
-    'The source owner can no longer read this repository in GitHub. It may have been made private, transferred or deleted. Its content stays hidden; other repositories keep syncing.',
+    'The source owner can no longer read this repository in GitHub. It may have been made private, transferred or deleted. Its content stays hidden until access returns; other repositories keep syncing.',
+  'insufficient-scope':
+    'The connected GitHub account cannot read this repository. Reconnect it with repository access, then retry.',
 };
+const missingContent = (kinds: GitHubKind[]) => kinds.map(kind => githubKindLabels[kind].short).join(', ');
 const sourceFailures: Record<string, string> = {
   ...Object.fromEntries(
     Object.entries(githubKnowledgeErrorMessages).map(([code, message]) => [code.replace(/^github-/, ''), message]),
@@ -217,12 +221,16 @@ function GitHubSourceRow({
   disabled,
   changed,
   checkStatus,
+  onReconnect,
+  accountBusy,
 }: {
   api: GitHubKnowledgeApi;
   source: GitHubSource;
   disabled: boolean;
   changed: () => Promise<void>;
   checkStatus: () => Promise<void>;
+  onReconnect?: ((id: string) => void) | undefined;
+  accountBusy: boolean;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
@@ -245,7 +253,11 @@ function GitHubSourceRow({
   const busy = command.state.kind === 'sending';
   const locked = disabled || command.locked || refresh.kind === 'loading';
   const blocked =
-    source.repositories?.filter(repository => repository.state === 'unavailable' && !repository.excluded) ?? [];
+    source.repositories?.filter(
+      repository => repository.status === 'needs-permission' || repository.status === 'access-lost',
+    ) ?? [];
+  const reconnect = source.connection === 'reconnect-required' && source.state !== 'removed';
+  const repositoryCounts = source.repositoryCounts;
   const excludedCount = source.repositories?.filter(repository => repository.excluded).length ?? 0;
   const listed = showAll ? source.repositories : source.repositories?.slice(0, 20);
   async function refreshAccess() {
@@ -295,7 +307,7 @@ function GitHubSourceRow({
         </div>
         <Badge
           variant={
-            source.syncState === 'failed' || blocked.length > 0 || (source.counts?.failed ?? 0) > 0
+            reconnect || source.syncState === 'failed' || blocked.length > 0 || (source.counts?.failed ?? 0) > 0
               ? 'warning'
               : 'secondary'
           }
@@ -308,6 +320,35 @@ function GitHubSourceRow({
           </Badge>
         )}
       </div>
+      {reconnect && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <span className="block">
+              GitHub access for this source needs to be reconnected. Knowledge from it may be out of date until{' '}
+              {source.canManage ? 'you reconnect' : 'the source owner reconnects'} the GitHub account.
+            </span>
+            {source.canManage && source.accountId && onReconnect && (
+              <span className="mt-2 block">
+                <Button
+                  variant="outline"
+                  disabled={accountBusy}
+                  onClick={() => source.accountId && onReconnect(source.accountId)}
+                >
+                  Reconnect GitHub
+                </Button>
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+      {repositoryCounts && (repositoryCounts.needsPermission > 0 || repositoryCounts.accessLost > 0) && (
+        <p className="text-sm tabular-nums" aria-label="Repository access summary">
+          {repositoryCounts.active} active
+          {repositoryCounts.needsPermission > 0 && ` · ${repositoryCounts.needsPermission} need permission`}
+          {repositoryCounts.accessLost > 0 && ` · ${repositoryCounts.accessLost} access lost`}
+          {repositoryCounts.excluded > 0 && ` · ${repositoryCounts.excluded} excluded`}
+        </p>
+      )}
       {source.counts && (
         <p className="text-sm tabular-nums">
           {source.counts.ready} ready · {source.counts.failed} failed · {source.counts.total} items discovered
@@ -321,17 +362,27 @@ function GitHubSourceRow({
               {repository.visibility !== 'public' && (
                 <Badge variant="outline">{repository.visibility === 'private' ? 'Private' : 'Internal'}</Badge>
               )}
-              {repository.excluded ? (
+              {repository.status === 'excluded' ? (
                 <Badge variant="outline">Excluded</Badge>
-              ) : repository.state === 'unavailable' ? (
-                <Badge variant="warning">Blocked</Badge>
+              ) : repository.status === 'needs-permission' ? (
+                <Badge variant="warning">Needs permission</Badge>
+              ) : repository.status === 'access-lost' ? (
+                <Badge variant="warning">Access lost</Badge>
               ) : (
                 <Badge variant="secondary">Active</Badge>
               )}
-              {repository.failure && !repository.excluded && (
+              {repository.status === 'needs-permission' && (
                 <span className="w-full text-muted-foreground">
-                  {repositoryFailures[repository.failure] ??
-                    'Permissions for this repository cannot be verified. Its content stays hidden.'}
+                  {repository.failure
+                    ? (repositoryFailures[repository.failure] ??
+                      'The connected GitHub account cannot read this repository. Grant access in GitHub, then retry.')
+                    : `The connected GitHub account cannot read ${missingContent(repository.missingKinds)} in this repository. Grant access in GitHub, then retry. Other content keeps syncing.`}
+                </span>
+              )}
+              {repository.status === 'access-lost' && (
+                <span className="w-full text-muted-foreground">
+                  {(repository.failure && repositoryFailures[repository.failure]) ??
+                    'Permissions for this repository cannot be verified. Its content stays hidden until access returns.'}
                 </span>
               )}
             </li>
@@ -613,6 +664,8 @@ export function GitHubKnowledgeSources({
                           disabled={sources.state.kind !== 'ready' || !!sources.state.error || sources.state.refreshing}
                           changed={changed}
                           checkStatus={sources.refresh}
+                          onReconnect={onReconnect}
+                          accountBusy={accountBusy}
                         />
                       ))}
                     </ul>

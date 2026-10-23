@@ -138,6 +138,12 @@ try {
     await link.focus();
     assert.equal(await link.evaluate(element => element === document.activeElement), true);
   }
+  f.decide([], 'GitHub knowledge may be out of date. [Reconnect GitHub](#github-reconnect)');
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('What changed in the roadmap?');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  const reconnect = page.getByRole('link', { name: 'Reconnect GitHub', exact: true });
+  await reconnect.waitFor();
+  assert.equal(await reconnect.getAttribute('href'), `/${workspace.slug}/integrations#github-accounts`);
   await page.reload();
   const link = page.getByRole('button', { name: 'Download private archive', exact: true }).last();
   await link.waitFor();

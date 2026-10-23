@@ -191,7 +191,8 @@ export type GitHubItemObservation = {
   canonicalURL: string;
   sourceRevision: string;
   accessedAt: string;
-  coverage: 'supported' | 'too-large' | 'unsupported' | 'excluded';
+  // `denied` marks a kind the connection cannot read in a repository it can still see.
+  coverage: 'supported' | 'too-large' | 'unsupported' | 'excluded' | 'denied';
   // The full repository path of a file; `nativeId` carries only its hash when the path is longer than 1,024 bytes.
   path?: string;
 };
@@ -212,6 +213,8 @@ export type GitHubCorpusProvider = {
     userId: string,
     accountId: string,
     cursor?: string,
+    // Also lists private repositories the credential's scopes cannot read, so they can be reported as needing permission.
+    options?: { includeUnreadable?: boolean },
   ): Promise<{ binding: GitHubCorpusBinding; items: GitHubRepository[]; nextCursor: string | null }>;
   inspectSelection(
     workspaceId: string,
@@ -283,10 +286,21 @@ export const githubKnowledgeDiscoverySchema = z.strictObject({
   items: z.array(repositorySchema).max(100),
   nextCursor: githubCorpusCursorTokenSchema.nullable(),
 });
+// `needs-permission`: the repository is visible but some selected kinds cannot be read (`missingKinds`).
+// `access-lost`: the repository can no longer be read at all; its content stays hidden until access returns.
+export const githubKnowledgeRepositoryStatusSchema = z.enum(['active', 'excluded', 'needs-permission', 'access-lost']);
 export const githubKnowledgeRepositorySchema = repositorySchema.extend({
   state: z.enum(['active', 'unavailable']),
   failure: z.string().max(128).nullable(),
   excluded: z.boolean(),
+  status: githubKnowledgeRepositoryStatusSchema,
+  missingKinds: z.array(githubCorpusKindSchema).max(githubCorpusKinds.length),
+});
+export const githubKnowledgeRepositoryCountsSchema = z.strictObject({
+  active: z.number().int().nonnegative(),
+  excluded: z.number().int().nonnegative(),
+  needsPermission: z.number().int().nonnegative(),
+  accessLost: z.number().int().nonnegative(),
 });
 export const githubKnowledgeSourceSchema = z.strictObject({
   sourceId: z.uuid(),
@@ -298,6 +312,11 @@ export const githubKnowledgeSourceSchema = z.strictObject({
   syncState: z.enum(['queued', 'syncing', 'ready', 'failed']),
   failure: z.string().max(128).nullable(),
   nextAttemptAt: z.iso.datetime(),
+  // `reconnect-required` when the owner's GitHub account was revoked, expired or disconnected; sync resumes on reconnect.
+  connection: z.enum(['connected', 'reconnect-required']),
+  // The owner's GitHub account to reconnect; null for members who do not manage the source.
+  accountId: z.uuid().nullable(),
+  repositoryCounts: githubKnowledgeRepositoryCountsSchema.nullable(),
   repositories: z.array(githubKnowledgeRepositorySchema).max(githubCorpusLimits.repositories).nullable(),
   counts: z
     .strictObject({

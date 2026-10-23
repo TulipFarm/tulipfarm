@@ -151,9 +151,37 @@ if (githubMockEnabled) {
             ? workRepositories
             : repositories
           : [...repositories, ...workRepositories].filter(item => body.selection.repositories.includes(item.fullName))
-        ).map(item => ({ ...item, state: 'active', failure: null, excluded: false })),
+        ).map(item => ({
+          ...item,
+          state: 'active',
+          failure: null,
+          excluded: false,
+          status: 'active',
+          missingKinds: [],
+        })),
         counts: { total: 12, ready: 12, failed: 0 },
+        connection: 'connected',
+        accountId: account?.id ?? null,
+        repositoryCounts: null,
       };
+      if (source.repositories) {
+        if (scenario === 'access' && source.repositories[0] && source.repositories[1]) {
+          source.connection = 'reconnect-required';
+          source.repositories[0] = { ...source.repositories[0], status: 'needs-permission', missingKinds: ['issues'] };
+          source.repositories[1] = {
+            ...source.repositories[1],
+            state: 'unavailable',
+            failure: 'forbidden',
+            status: 'access-lost',
+          };
+        }
+        source.repositoryCounts = {
+          active: source.repositories.filter(item => item.status === 'active').length,
+          excluded: 0,
+          needsPermission: source.repositories.filter(item => item.status === 'needs-permission').length,
+          accessLost: source.repositories.filter(item => item.status === 'access-lost').length,
+        };
+      }
       sources.push(source);
       return Response.json(source);
     }
@@ -179,6 +207,11 @@ if (githubMockEnabled) {
         source.repositories?.map(item => ({
           ...item,
           excluded: body.excludedRepositories.includes(item.repositoryId),
+          status: body.excludedRepositories.includes(item.repositoryId)
+            ? 'excluded'
+            : item.status === 'excluded'
+              ? 'active'
+              : item.status,
         })) ?? null;
       return Response.json(source);
     }

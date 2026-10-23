@@ -32,6 +32,8 @@ const sourceSchema = z.object({
         state: z.enum(['active', 'unavailable']),
         failure: z.string().nullable(),
         excluded: z.boolean().default(false),
+        status: z.enum(['active', 'excluded', 'needs-permission', 'access-lost']).default('active'),
+        missingKinds: z.array(githubCorpusKindSchema).default([]),
       }),
     )
     .nullable(),
@@ -43,6 +45,17 @@ const sourceSchema = z.object({
     })
     .nullable(),
   canManage: z.boolean(),
+  connection: z.enum(['connected', 'reconnect-required']).default('connected'),
+  accountId: z.uuid().nullable().default(null),
+  repositoryCounts: z
+    .object({
+      active: z.number().int().nonnegative(),
+      excluded: z.number().int().nonnegative(),
+      needsPermission: z.number().int().nonnegative(),
+      accessLost: z.number().int().nonnegative(),
+    })
+    .nullable()
+    .default(null),
 });
 const discoverySchema = z.object({
   binding: githubCorpusBindingSchema,

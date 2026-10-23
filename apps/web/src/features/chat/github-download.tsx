@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, useParams } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { apiOrigin } from '@/lib/auth';
 import { KnowledgeCitation, knowledgeCitationId } from './knowledge-citation';
+
+// Matches the knowledge search tool's reconnect link for stale GitHub access.
+export const githubReconnectHref = '#github-reconnect';
 
 function DownloadLink({ path, children }: { path: string; children: ReactNode }) {
   const [state, setState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -77,9 +81,16 @@ export function GitHubChatResponse({
   task?: boolean;
 }) {
   const prefix = `/v1/workspaces/${workspaceId}/github/${task ? 'tasks' : 'chats'}/${chatId}/downloads/`;
+  const workspaceSlug = useParams({ strict: false }).workspaceSlug;
   return (
     <MessageResponse
       renderLink={(href, label) => {
+        if (href === githubReconnectHref && workspaceSlug)
+          return (
+            <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug }} hash="github-accounts">
+              {label}
+            </Link>
+          );
         const citation = knowledgeCitationId(href);
         if (citation)
           return (
