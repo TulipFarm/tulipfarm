@@ -75,6 +75,24 @@ This path does not use Azure CLI credentials. Database CLI operations also defau
 to `DATABASE_PROVIDER=postgres`; only explicit `DATABASE_PROVIDER=azure` enables
 Azure server management. See [database operations](../apps/database/README.md).
 
+## Upgrades
+
+Setup applies application migrations on every start. Workspace storage has a
+second stream, the common workspace migrations, that runs only after every
+service is on the new release: older services refuse a workspace upgraded past
+what they know. Until it runs, creating a workspace fails and existing
+workspaces keep their old tables. After `docker compose up -d --build --wait`
+finishes, run:
+
+```sh
+cd self-host && docker compose run --rm --entrypoint node setup \
+  --env-file=/setup/storage-worker.env apps/database/src/cli.ts workspace-rollout --env local
+```
+
+It applies the stream to every ready workspace and is safe to rerun. Outside
+Compose, run `pnpm db workspace-rollout --env local` with
+`WORKSPACE_PROVISIONING_DATABASE_URL` set.
+
 ## Email transport
 
 No email provider is required to start the API or worker. Leave `EMAIL_PROVIDER`,
@@ -149,9 +167,9 @@ Grafana Cloud, Honeycomb, New Relic, SigNoz, Jaeger, or a Datadog Agent. Export 
 off unless `CLOUD_TELEMETRY_ENABLED=true`, and it runs only in the production
 images. Nothing is sent to TulipFarm.
 
-Only reviewed data leaves the process: spans keep allowlisted attributes and drop
-events and links, logs carry allowlisted fields, and errors carry reviewed codes
-instead of messages. The same rules apply whatever the backend.
+Only reviewed data leaves the process: spans keep allowlisted attributes, drop
+events, and keep links without their attributes; logs carry allowlisted fields, and
+errors carry reviewed codes instead of messages. The same rules apply whatever the backend.
 
 | Setting                                               | Purpose                                                                                                    |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -161,6 +179,8 @@ instead of messages. The same rules apply whatever the backend.
 | `CLOUD_TELEMETRY_OTLP_HEADERS`                        | Optional headers as `name=value,name2=value2`, values percent-encoded, as in `OTEL_EXPORTER_OTLP_HEADERS`. |
 | `CLOUD_TELEMETRY_{TRACES,METRICS,LOGS}_ENABLED`       | `false` stops one signal. All three are on by default.                                                     |
 | `CLOUD_TELEMETRY_SAMPLE_RATIO`                        | Share of new traces to keep, `0` to `1`. Default `0.1`.                                                    |
+| `CLOUD_TELEMETRY_JOB_SAMPLE_RATIO`                    | Share of new background `job.*` traces to keep, `0` to `1`. Default `0.01`.                                |
+| `CLOUD_TELEMETRY_ENVIRONMENT`                         | `deployment.environment` and the `environment` metric label, such as `staging`. Default `production`.      |
 | `CLOUD_TELEMETRY_OTLP_ALLOW_HTTP`                     | `true` allows plain `http` to a public host.                                                               |
 
 Endpoints must use `https`. Plain `http` works without `CLOUD_TELEMETRY_OTLP_ALLOW_HTTP`
@@ -179,6 +199,38 @@ headers), `OTEL_EXPORTER_OTLP_COMPRESSION`, and the `OTEL_EXPORTER_OTLP_CERTIFIC
 `_CLIENT_CERTIFICATE` and `_CLIENT_KEY` files for a private CA or mutual TLS.
 
 Restart the services after changing these settings: `docker compose up -d api worker storage-worker`.
+
+### Sampling
+
+Sampling is decided once, when a trace starts, without a collector. Child spans
+and the worker spans of a Temporal workflow follow their parent's decision.
+
+- Chat replies are always kept. The send request that starts a reply is always
+  sampled, and the reply continues its trace through the worker and model calls.
+  A reply started by the background sweep gets its own `chat.turn` root, linked
+  to the sweep span.
+- Background `job.*` sweeps use `CLOUD_TELEMETRY_JOB_SAMPLE_RATIO`. Every run,
+  sampled or not, still logs failures and counts runs and durations in metrics.
+- Every other new trace uses `CLOUD_TELEMETRY_SAMPLE_RATIO`.
+
+Each log line with a `trace_id` also has `trace_sampled` (`true` or `false`). Only
+sampled trace ids exist in the trace backend.
+
+### Find a chat reply's trace
+
+Telemetry never carries chat or conversation ids. Each reply instead stores the
+trace id of its latest attempt, and whether it was sampled, on its turn record.
+An operator with the workspace provisioning credential looks it up from the chat URL:
+
+```sh
+WORKSPACE_PROVISIONING_DATABASE_URL=... \
+  pnpm db chat-traces --env local --chat 'https://app.example.com/<workspace>/chat/<chat-id>'
+```
+
+It prints each turn's id, sequence, status, attempts, times, `traceId` and
+`traceSampled`, never message content. Add `--workspace <id>` to skip searching
+every ready workspace. Open `traceId` in your trace backend. A turn from before
+this change, or one that has not started, has no trace id.
 
 ### OpenTelemetry Collector in this stack
 

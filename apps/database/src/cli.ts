@@ -9,6 +9,7 @@ import { loadDatabaseExtensions, migrate } from './migrations.ts';
 import { installExtensions } from './extensions.ts';
 import { workspaceStoragePreflight } from './workspace-preflight.ts';
 import { workspaceStorageInventory } from './workspace-inventory.ts';
+import { chatIdFromInput, chatTraces } from './chat-traces.ts';
 import { MigrationDriftError, rolloutCommonMigrations } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 
@@ -23,6 +24,8 @@ const help = `Usage: pnpm db <command> --env local|production
   workspace-preflight --env local|production  Refuse fresh cutover when workspace data exists
   workspace-inventory --env local|production Read aggregate preservation inventory without row contents
   workspace-rollout --env local|production    Apply the common migration stream to every ready workspace
+  chat-traces --env local|production --chat URL|ID [--workspace ID]
+                                              Print a chat's turns with each reply's trace id (operators only)
 
 Postgres is the default provider, including managed Postgres. Azure management
 (provision, allow-ip, extension allowlisting) requires DATABASE_PROVIDER=azure and az login.
@@ -30,7 +33,7 @@ Production secrets come from environment
 variables (database-admin-url → DATABASE_ADMIN_URL) or the module named by
 TULIPFARM_DATABASE_SECRET_STORE; provision and bootstrap need a writable store. Local commands require DATABASE_MIGRATION_URL
 for migrate and DATABASE_ADMIN_URL for extensions. status uses DATABASE_URL.
-workspace-rollout uses WORKSPACE_PROVISIONING_DATABASE_URL.
+workspace-rollout and chat-traces use WORKSPACE_PROVISIONING_DATABASE_URL.
 Run provision, bootstrap, extensions, then migrate for a new Azure server.
 `;
 
@@ -48,7 +51,12 @@ async function main() {
   try {
     parsed = parseArgs({
       allowPositionals: true,
-      options: { env: { type: 'string' }, 'allow-ip': { type: 'string' } },
+      options: {
+        env: { type: 'string' },
+        'allow-ip': { type: 'string' },
+        chat: { type: 'string' },
+        workspace: { type: 'string' },
+      },
     });
   } catch {
     throw new DatabaseError('Invalid arguments. Run pnpm db --help.');
@@ -67,6 +75,7 @@ async function main() {
       'workspace-preflight',
       'workspace-inventory',
       'workspace-rollout',
+      'chat-traces',
     ].includes(command ?? '')
   )
     throw new DatabaseError('Unknown command. Run pnpm db --help.');
@@ -88,6 +97,35 @@ async function main() {
     return;
   }
   if (values['allow-ip']) throw new DatabaseError('--allow-ip is only for provision and allow-ip.');
+  if (command !== 'chat-traces' && (values.chat || values.workspace))
+    throw new DatabaseError('--chat and --workspace are only for chat-traces.');
+  if (command === 'chat-traces') {
+    if (!values.chat) throw new DatabaseError('--chat is required: a chat URL or chat id.');
+    const chatId = chatIdFromInput(values.chat);
+    const connectionString = remote
+      ? await readSecret('workspace-provisioning-database-url')
+      : process.env.WORKSPACE_PROVISIONING_DATABASE_URL;
+    if (!connectionString)
+      throw new DatabaseError('Set WORKSPACE_PROVISIONING_DATABASE_URL for local database access.');
+    const client = await connect(connectionString);
+    try {
+      // Chat URLs name the workspace by slug, which the provisioning login cannot read; chat ids are unique, so
+      // without --workspace every ready workspace is searched.
+      const workspaceIds = values.workspace
+        ? [values.workspace]
+        : (
+            await client.query(
+              "SELECT workspace_id FROM app.workspace_storage WHERE stage = 'ready' ORDER BY workspace_id",
+            )
+          ).rows.map(row => String(row.workspace_id));
+      const found = await chatTraces(client, chatId, workspaceIds);
+      if (!found) throw new DatabaseError('No ready workspace has this chat.');
+      process.stdout.write(`${JSON.stringify(found, null, 2)}\n`);
+    } finally {
+      await client.end();
+    }
+    return;
+  }
   if (command === 'bootstrap') {
     const url = await readSecret('database-admin-url');
     const passwords = await rolePasswords();

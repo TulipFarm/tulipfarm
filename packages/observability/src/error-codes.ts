@@ -202,6 +202,22 @@ const reasons: Record<string, string> = {
   '23514': 'Database check constraint violated',
   'table-title-immutable': 'Table titles cannot change after creation',
   'table-name-unavailable': 'A referenced table has no permanent name',
+  // Model failures that happen before or around a provider call, so they have no model error class.
+  'model-unpriced': 'The selected model has no price',
+  'model-family-unavailable': 'The requested model family is not configured',
+  'model-context-unavailable': 'Model context could not be assembled',
+  'model-budget-exceeded': 'The model call would exceed its budget',
+  'model-lease-expired': 'The model call lease expired',
+  'model-retry-conflict': 'A model retry conflicted with another attempt',
+  'model-policy-revision-conflict': 'The model policy changed during the request',
+  'model-provider-response-failed': 'The model provider response could not be read',
+  'skill-review-model-unavailable': 'No model is configured for skill review',
+  'guide-model-unavailable': 'No model is configured for the public guide',
+  'compaction-model-unavailable': 'No model is configured for chat compaction',
+  'compaction-model-failed': 'The compaction model call failed',
+  'compaction-invalid-summary': 'The compaction model returned an invalid summary',
+  'compaction-ineffective': 'Compaction would not reduce the chat context',
+  'compaction-unmeasured': 'Chat context size could not be measured for compaction',
 };
 for (const code of Object.keys(reasons)) codes.add(code);
 for (const code of modelErrorClasses) codes.add(code);

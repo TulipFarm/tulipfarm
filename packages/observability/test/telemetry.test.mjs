@@ -79,6 +79,7 @@ const enabled = { NODE_ENV: 'production', CLOUD_TELEMETRY_ENABLED: 'true' };
 test('existing Grafana Cloud configuration exports to the same URLs with the same header', () => {
   assert.deepEqual(telemetryConfig(grafana), {
     ratio: 0.1,
+    jobRatio: 0.01,
     headers: { Authorization: 'Basic dGVzdDp0ZXN0' },
     traces: 'https://otlp-gateway-prod-us-west-0.grafana.net/otlp/v1/traces',
     metrics: 'https://otlp-gateway-prod-us-west-0.grafana.net/otlp/v1/metrics',
@@ -96,6 +97,7 @@ test('any HTTPS OTLP endpoint works with or without authorization and generic he
     }),
     {
       ratio: 0.1,
+      jobRatio: 0.01,
       headers: { 'x-honeycomb-team': 'hc key', 'x-honeycomb-dataset': 'tulipfarm' },
       traces: 'https://api.honeycomb.io/v1/traces',
       metrics: 'https://api.honeycomb.io/v1/metrics',
@@ -111,6 +113,7 @@ test('any HTTPS OTLP endpoint works with or without authorization and generic he
     }),
     {
       ratio: 1,
+      jobRatio: 0.01,
       headers: { 'DD-API-KEY': 'abc123' },
       traces: 'https://otlp.us5.datadoghq.com/v1/traces',
       metrics: 'https://otlp.us5.datadoghq.com/v1/metrics',
@@ -185,6 +188,7 @@ test('per-signal endpoints are used as-is and signals can be turned off', () => 
     }),
     {
       ratio: 0.1,
+      jobRatio: 0.01,
       headers: {},
       traces: 'https://traces.example.com/custom/path',
       logs: 'https://otlp.example.com/v1/logs',
@@ -197,7 +201,7 @@ test('per-signal endpoints are used as-is and signals can be turned off', () => 
       CLOUD_TELEMETRY_METRICS_ENABLED: 'false',
       CLOUD_TELEMETRY_LOGS_ENABLED: 'false',
     }),
-    { ratio: 0.1, headers: {}, traces: 'http://jaeger:4318/v1/traces' },
+    { ratio: 0.1, jobRatio: 0.01, headers: {}, traces: 'http://jaeger:4318/v1/traces' },
   );
   assert.throws(
     () => telemetryConfig({ ...enabled, CLOUD_TELEMETRY_OTLP_TRACES_ENDPOINT: 'https://traces.example.com/v1/traces' }),

@@ -56,7 +56,7 @@ test(
             `SELECT count(*)::integer AS count FROM ${qualified(failure.names.schema, 'tf_common_migrations')}`,
           )
         ).rows[0].count,
-        1,
+        db.baseline.length,
       );
       assert.equal(
         (
@@ -95,7 +95,7 @@ test(
               `SELECT count(*)::integer AS count FROM ${qualified(workspace.names.schema, 'tf_common_migrations')}`,
             )
           ).rows[0].count,
-          2,
+          db.baseline.length + 1,
         );
       }
       const altered = [migration(db.baseline[0].name, `${db.baseline[0].sql}\nSELECT 1;`), ...stream.slice(1)];

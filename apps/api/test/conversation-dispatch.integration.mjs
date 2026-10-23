@@ -16,7 +16,9 @@ import { createRequire } from 'node:module';
 const telemetryRequire = createRequire(import.meta.resolve('@tulipfarm/observability'));
 const { context, metrics, trace } = telemetryRequire('@opentelemetry/api');
 const { MeterProvider, MetricReader } = telemetryRequire('@opentelemetry/sdk-metrics');
-const { BasicTracerProvider } = telemetryRequire('@opentelemetry/sdk-trace-base');
+const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = telemetryRequire(
+  '@opentelemetry/sdk-trace-base',
+);
 const { AsyncLocalStorageContextManager } = createRequire(telemetryRequire.resolve('@opentelemetry/sdk-node'))(
   '@opentelemetry/context-async-hooks',
 );
@@ -27,7 +29,8 @@ class TestReader extends MetricReader {
 }
 const metricReader = new TestReader();
 metrics.setGlobalMeterProvider(new MeterProvider({ readers: [metricReader] }));
-trace.setGlobalTracerProvider(new BasicTracerProvider());
+const spanExporter = new InMemorySpanExporter();
+trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spanExporter)] }));
 context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 
 const registerWithReplies = (app, dependencies) =>
@@ -587,32 +590,63 @@ test('a send dispatches only its own chat and leaves other due chats to the swee
   }
 });
 
-test('a send starts its reply inside the request trace; the sweep does not', { timeout: 60000 }, async () => {
-  const f = await conversationFixture();
-  const active = [];
-  const replies = createReplyDispatch({
-    runtime: f.runtime,
-    temporal: fakeTemporal(async () => {
-      active.push(trace.getActiveSpan()?.spanContext().spanId);
-    }),
-  });
-  const quiet = await sendRoute(f, undefined);
-  const route = await sendRoute(f, replies);
-  try {
-    const chatId = await newChat(f);
-    const request = trace.getTracer('test').startSpan('PUT message');
-    await context.with(trace.setSpan(context.active(), request), () => route.send(chatId, 'traced'));
-    request.end();
-    await replies.settle();
-    await quiet.send(await newChat(f), 'untraced');
-    await replies.dispatch(f.workspace.id);
-    assert.deepEqual(active, [request.spanContext().spanId, undefined]);
-  } finally {
-    await quiet.app.close();
-    await route.app.close();
-    await f.close();
-  }
-});
+test(
+  'a send continues the request trace; a sweep reply gets its own root linked to the sweep; both store it on the turn',
+  { timeout: 60000 },
+  async () => {
+    const f = await conversationFixture();
+    const executor = createConversationExecutor(f.runtime, reverseReply);
+    const active = [];
+    const replies = createReplyDispatch({
+      runtime: f.runtime,
+      temporal: fakeTemporal(async options => {
+        active.push(trace.getActiveSpan()?.spanContext());
+        await executor.process(options.args[0]);
+      }),
+    });
+    const quiet = await sendRoute(f, undefined);
+    const route = await sendRoute(f, replies);
+    const traces = async turnId =>
+      (
+        await f.db.platform.query(
+          `SELECT trace_id, trace_sampled FROM ${f.table('tf_conversation_turns')} WHERE id=$1`,
+          [turnId],
+        )
+      ).rows[0];
+    try {
+      const chatId = await newChat(f);
+      const request = trace.getTracer('test').startSpan('PUT message');
+      const sent = await context.with(trace.setSpan(context.active(), request), () => route.send(chatId, 'traced'));
+      request.end();
+      await replies.settle();
+      const missed = await quiet.send(await newChat(f), 'untraced');
+      spanExporter.reset();
+      const sweep = trace.getTracer('test').startSpan('job.conversation-discovery');
+      await context.with(trace.setSpan(context.active(), sweep), () => replies.dispatch(f.workspace.id));
+      sweep.end();
+
+      assert.equal(active.length, 2);
+      assert.equal(active[0].spanId, request.spanContext().spanId, 'a send dispatch continues the request span');
+      const turn = spanExporter.getFinishedSpans().find(span => span.name === 'chat.turn');
+      assert.ok(turn, 'a sweep dispatch starts a chat.turn span');
+      assert.equal(turn.parentSpanContext, undefined, 'chat.turn is a new root');
+      assert.equal(turn.attributes.dispatch_source, 'sweep');
+      assert.deepEqual(
+        turn.links.map(link => link.context.spanId),
+        [sweep.spanContext().spanId],
+      );
+      assert.equal(active[1].spanId, turn.spanContext().spanId);
+      assert.notEqual(active[1].traceId, sweep.spanContext().traceId);
+
+      assert.deepEqual(await traces(sent.turnId), { trace_id: request.spanContext().traceId, trace_sampled: true });
+      assert.deepEqual(await traces(missed.turnId), { trace_id: turn.spanContext().traceId, trace_sampled: true });
+    } finally {
+      await quiet.app.close();
+      await route.app.close();
+      await f.close();
+    }
+  },
+);
 
 test('a start that outlives its bound fails the send dispatch with a timeout code', { timeout: 60000 }, async t => {
   const f = await conversationFixture();

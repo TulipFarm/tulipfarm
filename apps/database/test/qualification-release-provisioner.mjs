@@ -152,7 +152,7 @@ try {
   const migrations = await workspaceTableMigrations();
   assert.deepEqual(
     migrations.map(row => row.name),
-    ['0001_baseline.sql'],
+    ['0001_baseline.sql', '0002_turn_trace.sql'],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));
   emit({ event: 'objects', database, owner, logins, workspaceId, names });

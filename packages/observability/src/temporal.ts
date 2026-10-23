@@ -7,6 +7,7 @@ import {
   propagation,
   SpanStatusCode,
   trace,
+  TraceFlags,
   type Context,
   type Span,
   type Tracer,
@@ -127,6 +128,7 @@ export function traceLogAttributes<T extends Record<string, unknown>>(input: T):
     trace_id: spanContext.traceId,
     span_id: spanContext.spanId,
     trace_flags: `0${spanContext.traceFlags.toString(16)}`,
+    trace_sampled: (spanContext.traceFlags & TraceFlags.SAMPLED) === TraceFlags.SAMPLED,
     ...input,
   };
 }

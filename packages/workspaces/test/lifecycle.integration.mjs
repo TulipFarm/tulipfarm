@@ -13,7 +13,7 @@ import { soulStorageConfig } from '../src/soul.ts';
 const setupFailed = /^Error: Workspace setup failed; retry the same setup$/;
 const probeSql = 'CREATE TABLE {{schema}}.tf_ready_probe (id integer PRIMARY KEY);\n';
 const probe = {
-  name: '0002_ready_probe.sql',
+  name: '0007_ready_probe.sql',
   sql: probeSql,
   checksum: createHash('sha256').update(probeSql).digest('hex'),
 };
@@ -199,7 +199,7 @@ test(
     const installed = await setup.receipts(workspace);
     assert.deepEqual(
       installed.map(receipt => receipt.name),
-      ['0001_baseline.sql'],
+      setup.baseline.map(({ name }) => name),
     );
     assert.deepEqual((await setup.rollout(setup.published)).results, []);
     assert.deepEqual(
@@ -241,13 +241,13 @@ test(
     assert.deepEqual(await setup.state(workspace), { stage: 'database', errorCode: 'setup_failed', ready: false });
     assert.deepEqual(
       (await setup.receipts(workspace)).map(receipt => receipt.name),
-      ['0001_baseline.sql'],
+      setup.baseline.map(({ name }) => name),
     );
     await setup.initialize(workspace.id, setup.published);
     assert.deepEqual(await setup.state(workspace), { stage: 'ready', errorCode: null, ready: true });
     assert.deepEqual(
       (await setup.receipts(workspace)).map(receipt => receipt.name),
-      ['0001_baseline.sql', '0002_ready_probe.sql'],
+      setup.published.map(({ name }) => name),
     );
     assert.equal(await setup.probeExists(workspace), true);
   },
@@ -273,7 +273,7 @@ test(
     assert.deepEqual(await setup.state(workspace), { stage: 'ready', errorCode: null, ready: true });
     assert.deepEqual(
       (await setup.receipts(workspace)).map(receipt => receipt.name),
-      ['0001_baseline.sql', '0002_ready_probe.sql'],
+      setup.published.map(({ name }) => name),
     );
     assert.equal(await setup.probeExists(workspace), true);
   },

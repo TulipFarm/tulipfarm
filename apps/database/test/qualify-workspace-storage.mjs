@@ -284,7 +284,7 @@ try {
   const migrations = await workspaceTableMigrations();
   assert.deepEqual(
     migrations.map(({ name }) => name),
-    ['0001_baseline.sql'],
+    ['0001_baseline.sql', '0002_turn_trace.sql'],
   );
   emit({
     event: 'common-stream',

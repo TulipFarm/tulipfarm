@@ -91,3 +91,13 @@ A second test runs the real migration files. It checks that the API role can sav
 claim, and expire onboarding drafts after an upgrade, a rerun, a bootstrap rerun,
 and a fresh install. It also checks that updates to `details`, `token_hash`, and
 `expires_at` stay denied.
+
+## Chat reply traces
+
+`pnpm db chat-traces --env local|production --chat <chat URL or id> [--workspace <id>]`
+prints a chat's turns with the trace id of each reply's latest attempt and whether
+it was sampled. It reads ids, states and times only, never message content. It
+connects with the workspace provisioning login (`WORKSPACE_PROVISIONING_DATABASE_URL`
+locally, `workspace-provisioning-database-url` in production), which owns every
+workspace schema; application and workspace runtime logins cannot read it. See
+`self-host/README.md#find-a-chat-replys-trace`.
