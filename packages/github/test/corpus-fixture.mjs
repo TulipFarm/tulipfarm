@@ -49,6 +49,7 @@ export function fakeGitHub() {
     files = {},
     issues = [],
     discussions = [],
+    commits = [],
   }) {
     const repo = {
       id,
@@ -79,11 +80,43 @@ export function fakeGitHub() {
           { comments: [], createdAt: iso(-10), updatedAt: iso(-1), author: 'octo', ...item },
         ]),
       ),
+      // The default branch's commits, oldest first, and every commit object GitHub still serves by SHA.
+      history: [],
+      objects: new Map(),
     };
     repos.set(id, repo);
+    for (const item of commits) push(repo, item);
     return repo;
   }
-  const commit = repo => buildTrees(repo.files).root;
+  // Appends a commit to the default branch, or to `parents` when given (a force push rewrites `repo.history`).
+  function push(repo, { message = 'Change', author = 'octo', name = 'Octo Cat', files = [], date = iso(0) } = {}) {
+    const parent = repo.history.at(-1);
+    const value = {
+      sha: sha(`commit:${repo.id}:${repo.objects.size}:${message}`),
+      message,
+      author,
+      name,
+      date,
+      parents: parent ? [parent.sha] : [],
+      files: files.map(file => ({ status: 'modified', additions: 1, deletions: 0, ...file })),
+    };
+    repo.history.push(value);
+    repo.objects.set(value.sha, value);
+    return value;
+  }
+  const commitBody = item => ({
+    sha: item.sha,
+    node_id: `C_${item.sha}`,
+    commit: {
+      message: item.message,
+      author: { name: item.name, email: `${item.author}@example.test`, date: item.date },
+      committer: { name: 'GitHub', email: 'noreply@github.com', date: item.date },
+    },
+    author: item.author ? { login: item.author, id: 1 } : null,
+    committer: { login: 'web-flow', id: 2 },
+    parents: item.parents.map(parent => ({ sha: parent, url: 'x' })),
+  });
+  const commit = repo => repo.history.at(-1)?.sha ?? buildTrees(repo.files).root;
   const readable = (repo, user) => repo && (!repo.private || repo.readers.has(user.id));
   const body = repo => ({
     id: repo.id,
@@ -242,9 +275,64 @@ export function fakeGitHub() {
     const rest = match[2] ?? '';
     if (!rest) return Response.json(body(repo));
     if (rest === `/commits/${repo.default_branch}`)
-      return repo.files.size
+      return repo.files.size || repo.history.length
         ? new Response(commit(repo), { headers: { 'content-type': 'application/vnd.github.sha' } })
         : Response.json({ message: 'Git Repository is empty.' }, { status: 409 });
+    if (rest === '/commits') {
+      const head = url.searchParams.get('sha');
+      const per = Number(url.searchParams.get('per_page') ?? 30);
+      const number = Number(url.searchParams.get('page') ?? 1);
+      if (!repo.history.length) return Response.json({ message: 'Git Repository is empty.' }, { status: 409 });
+      const index = repo.history.findIndex(item => item.sha === head);
+      if (index < 0) return Response.json({ message: 'No commit found for SHA' }, { status: 422 });
+      const listed = repo.history.slice(0, index + 1).reverse();
+      return Response.json(listed.slice((number - 1) * per, number * per).map(commitBody));
+    }
+    match = /^\/compare\/([a-f0-9]{40})\.\.\.([a-f0-9]{40})$/.exec(rest);
+    if (match) {
+      const [base, head] = [match[1], match[2]];
+      if (!repo.objects.has(base) || !repo.objects.has(head))
+        return Response.json({ message: 'Not Found' }, { status: 404 });
+      const per = Number(url.searchParams.get('per_page') ?? 250);
+      const number = Number(url.searchParams.get('page') ?? 1);
+      const from = repo.history.findIndex(item => item.sha === base);
+      const to = repo.history.findIndex(item => item.sha === head);
+      const ahead = from >= 0 && to >= from ? repo.history.slice(from + 1, to + 1) : [];
+      return Response.json({
+        status: from < 0 || to < 0 ? 'diverged' : to === from ? 'identical' : to > from ? 'ahead' : 'behind',
+        ahead_by: ahead.length,
+        total_commits: ahead.length,
+        commits: ahead.slice((number - 1) * per, number * per).map(commitBody),
+        files: number === 1 ? ahead.flatMap(item => item.files).map(file => ({ ...file, patch: '@@' })) : undefined,
+      });
+    }
+    match = /^\/(git\/)?commits\/([a-f0-9]{40})$/.exec(rest);
+    if (match) {
+      const found = repo.objects.get(match[2]);
+      if (!found) return Response.json({ message: 'No commit found for SHA' }, { status: 422 });
+      if (match[1]) {
+        const value = commitBody(found);
+        return Response.json({ sha: found.sha, ...value.commit, parents: value.parents });
+      }
+      const per = Math.min(300, Number(url.searchParams.get('per_page') ?? 300));
+      const number = Number(url.searchParams.get('page') ?? 1);
+      const files = found.files.slice(0, 3000);
+      const more = number * per < files.length;
+      return Response.json(
+        {
+          ...commitBody(found),
+          stats: { total: 0, additions: 0, deletions: 0 },
+          files: files.slice((number - 1) * per, number * per).map(file => ({ ...file, patch: '@@ -1 +1 @@' })),
+        },
+        more
+          ? {
+              headers: {
+                link: `<https://api.github.com/repositories/${repo.id}/commits/${found.sha}?page=${number + 1}>; rel="next"`,
+              },
+            }
+          : {},
+      );
+    }
     if (rest.startsWith('/git/trees/')) {
       const { root, trees } = buildTrees(repo.files);
       const id = rest.slice('/git/trees/'.length);
@@ -348,5 +436,5 @@ export function fakeGitHub() {
     const issue = repo.issues.get(number);
     Object.assign(issue, change, { updated_at: new Date().toISOString() });
   };
-  return { calls, tokens, state, fetcher, addRepo, token, touch, iso };
+  return { calls, tokens, state, fetcher, addRepo, token, touch, iso, push };
 }

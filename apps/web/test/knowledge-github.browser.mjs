@@ -474,7 +474,7 @@ test(
             assert.equal(await f.page.getByLabel('Use GitHub account', { exact: true }).isDisabled(), true);
             const original = f.writes.find(write => write.kind === 'save').body;
             assert.deepEqual(original.selection.repositories, ['acme/archive', 'acme/handbook', 'acme/leadership']);
-            assert.deepEqual(original.selection.kinds, ['code', 'docs', 'issues', 'pulls']);
+            assert.deepEqual(original.selection.kinds, ['code', 'commits', 'docs', 'issues', 'pulls']);
             assert.equal(original.selection.after, undefined);
             assert.equal(original.accountId, personal.id);
             assert.deepEqual(original.memberIds, []);
@@ -502,7 +502,7 @@ test(
           assert.deepEqual(saved.selection, {
             scope: 'all',
             repositories: [],
-            kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
+            kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'],
           });
           const row = f.page.getByRole('listitem', { name: 'All repositories', exact: true });
           await row.getByText('All repositories, including new ones · All content · full history').waitFor();
@@ -591,6 +591,7 @@ test(
               'Issues and comments',
               'Pull request descriptions and comments',
               'Discussions',
+              'Commit messages and changed files',
             ])
               await f.page.getByRole('checkbox', { name }).click();
             await f.page.getByLabel('Only index activity after').fill('2999-01-01');
@@ -604,6 +605,7 @@ test(
               'Documentation and text files',
               'Issues and comments',
               'Pull request descriptions and comments',
+              'Commit messages and changed files',
             ])
               await f.page.getByRole('checkbox', { name }).click();
             await f.page.getByLabel('Only index activity after').fill(after);
@@ -642,7 +644,7 @@ test(
             assert.equal(saved.accountId, work.id);
             assert.deepEqual(saved.selection, {
               repositories: ['work/public-docs'],
-              kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'],
+              kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'],
             });
           }),
       );

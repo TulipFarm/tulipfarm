@@ -160,7 +160,7 @@ test(
           assert.deepEqual(configured.memberIds, [], 'automatic sources are owner-only');
           assert.deepEqual(
             configured.selection,
-            { scope: 'all', repositories: [], kinds: ['code', 'discussions', 'docs', 'issues', 'pulls'] },
+            { scope: 'all', repositories: [], kinds: ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls'] },
             'every repository and content kind, no cutoff date and no rolling window',
           );
           const [intent] = (await defaults.list(ws.id, owner.userId)).items;

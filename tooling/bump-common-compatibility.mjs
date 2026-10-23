@@ -16,7 +16,8 @@ if (!previous?.endsWith('.sql') || !added?.endsWith('.sql') || !Number.isInteger
 const next = count + 1;
 const escape = value => value.replaceAll('.', '\\.');
 const rules = [
-  [new RegExp(`(minimum:\\s*[\\w.]+,\\s*maximum:\\s*)${count}\\b`, 'g'), `$1${next}`],
+  // Only a literal maximum is a pin; `maximum: 6 * 60 * 60` is an unrelated expression.
+  [new RegExp(`(minimum:\\s*[\\w.]+,\\s*maximum:\\s*)${count}\\b(?!\\s*[-+*/.])`, 'g'), `$1${next}`],
   [new RegExp(`("minimum":\\s*\\d+,\\s*"maximum":\\s*)${count}\\b`, 'g'), `$1${next}`],
   [new RegExp(`(\\b(?:migrations|stream|baseline|tf_common_migrations)\\.length,\\s*)${count}\\)`, 'g'), `$1${next})`],
   [new RegExp(`(\\.at\\(-1\\)\\.name,\\s*)(['"])${escape(previous)}\\2`, 'g'), `$1$2${added}$2`],

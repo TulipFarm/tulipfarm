@@ -34,7 +34,7 @@ test('a GitHub selection names up to 1,000 repositories and indexes full history
 });
 
 test('an all-repositories selection names no repositories and every content kind is available', () => {
-  assert.deepEqual([...githubCorpusKinds].sort(), ['code', 'discussions', 'docs', 'issues', 'pulls']);
+  assert.deepEqual([...githubCorpusKinds].sort(), ['code', 'commits', 'discussions', 'docs', 'issues', 'pulls']);
   assert.equal(
     githubCorpusSelectionSchema.safeParse({ scope: 'all', repositories: [], kinds: [...githubCorpusKinds].sort() })
       .success,

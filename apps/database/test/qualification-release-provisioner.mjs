@@ -130,6 +130,7 @@ try {
     'packages/workspace-storage/common/0004_social.sql',
     'packages/workspace-storage/common/0005_knowledge_github_item_path.sql',
     'packages/workspace-storage/common/0006_github_knowledge_opt_out.sql',
+    'packages/workspace-storage/common/0007_knowledge_github_commits.sql',
   ];
   emit({
     event: 'sources',
@@ -163,6 +164,7 @@ try {
       '0004_social.sql',
       '0005_knowledge_github_item_path.sql',
       '0006_github_knowledge_opt_out.sql',
+      '0007_knowledge_github_commits.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

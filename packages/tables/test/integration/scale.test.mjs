@@ -65,7 +65,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       provisionedStream: migrations.length,
       publication: 'deterministic receipt',
     });
-    assert.equal(migrations.length, 6);
+    assert.equal(migrations.length, 7);
     assert.deepEqual(executionCompatibility, commonCompatibility);
     const ws = await timed('provision', () => db.create(migrations));
     const s = `"${ws.names.schema}"`;

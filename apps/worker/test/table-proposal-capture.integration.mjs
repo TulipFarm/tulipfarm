@@ -26,7 +26,7 @@ test(
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 6);
+    assert.equal(migrations.length, 7);
     const ws = await db.create(migrations);
     t.diagnostic(`Workspace common stream: ${migrations.length}`);
     const s = `"${ws.names.schema}"`;
