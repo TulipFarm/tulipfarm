@@ -82,8 +82,10 @@ import {
   observeChatDetail,
   observeChatDetailSync,
   withChatMeasurements,
+  chatDispatchReasons,
   chatReplyFinal,
   chatReplyMeasured,
+  type ChatDispatchReason,
   guardChatReplyFinal,
   noteChatReplyFinal,
   observeChatTool,
@@ -2489,44 +2491,112 @@ export function createConversationExecutor(
     );
   }
 
-  /** A conversation narrows the same due query; every gate still applies. */
-  async function due(workspaceId: string, conversationId?: string): Promise<ReplyWork[]> {
-    const scope = conversationId === undefined ? null : uuidSchema.parse(conversationId);
-    try {
-      return await runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        const rows = z
-          .array(
-            z.object({ conversationId: uuidSchema, turnId: uuidSchema, generation: z.number().int().nonnegative() }),
-          )
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT t.conversation_id AS "conversationId", t.id AS "turnId", t.generation
-          FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
+  function dueTurns(tx: RuntimeTransaction) {
+    return `FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
           WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting')))
           AND o.next_attempt_at <= clock_timestamp()
           AND ($1::uuid IS NULL OR t.conversation_id = $1)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.turn_id=t.id)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} p WHERE p.conversation_id = t.conversation_id AND p.accepted_sequence < t.accepted_sequence AND p.status NOT IN ('completed', 'cancelled', 'blocked'))
-          ORDER BY o.next_attempt_at, t.id LIMIT 50`,
-                [scope],
-              )
-            ).rows,
-          );
-        return rows.map(row => ({ workspaceId, ...row }));
-      });
+          ORDER BY o.next_attempt_at, t.id LIMIT 50`;
+  }
+  const dueRowSchema = z.object({
+    conversationId: uuidSchema,
+    turnId: uuidSchema,
+    generation: z.number().int().nonnegative(),
+  });
+
+  async function dueQuery<T>(workspaceId: string, read: (tx: RuntimeTransaction) => Promise<T[]>): Promise<T[]> {
+    try {
+      return await runtime.transaction(workspaceId, commonCompatibility, read);
     } catch (error) {
       if (error instanceof StorageUnavailableError && error.code === 'incompatible_version') return [];
       throw error;
     }
   }
 
-  async function acknowledge(value: unknown) {
+  /** A conversation narrows the same due query; every gate still applies. Reads only; dispatchers use `lease`. */
+  async function due(workspaceId: string, conversationId?: string): Promise<ReplyWork[]> {
+    const scope = conversationId === undefined ? null : uuidSchema.parse(conversationId);
+    return dueQuery(workspaceId, async tx =>
+      z
+        .array(dueRowSchema)
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT t.conversation_id AS "conversationId", t.id AS "turnId", t.generation ${dueTurns(tx)}`,
+              [scope],
+            )
+          ).rows,
+        )
+        .map(row => ({ workspaceId, ...row })),
+    );
+  }
+
+  /**
+   * Takes due turns for one dispatcher: the same gates as `due`, and in the same statement pushes each turn's next
+   * attempt `leaseMs` ahead. A concurrent send or sweep skips a turn another dispatcher holds, so a turn is started by
+   * one dispatcher until its lease lapses; `acknowledge` then holds it for the claim grace, and `release` hands a failed
+   * start straight back to the sweep.
+   */
+  async function lease(
+    workspaceId: string,
+    conversationId: string | undefined,
+    leaseMs: number,
+  ): Promise<{ work: ReplyWork; reason: ChatDispatchReason }[]> {
+    const scope = conversationId === undefined ? null : uuidSchema.parse(conversationId);
+    const milliseconds = z.number().int().positive().parse(leaseMs);
+    return dueQuery(workspaceId, async tx =>
+      z
+        .array(dueRowSchema.extend({ reason: z.enum(chatDispatchReasons) }))
+        .parse(
+          (
+            await tx.client.query(
+              `WITH due AS (
+                SELECT t.conversation_id, t.id, t.generation, CASE
+                  WHEN t.status = 'waiting' THEN 'waiting'
+                  WHEN t.status = 'processing' THEN 'expired'
+                  WHEN t.attempts > 0 THEN 'retry'
+                  WHEN o.dispatched_at IS NULL THEN 'undispatched'
+                  ELSE 'unclaimed' END AS reason
+                ${dueTurns(tx)}
+                FOR UPDATE OF o SKIP LOCKED)
+              UPDATE ${table(tx, 'tf_conversation_outbox')} o SET next_attempt_at = clock_timestamp() + $2 * interval '1 millisecond'
+              FROM due WHERE o.turn_id = due.id AND o.generation = due.generation
+              RETURNING due.conversation_id AS "conversationId", due.id AS "turnId", due.generation, due.reason`,
+              [scope, milliseconds],
+            )
+          ).rows,
+        )
+        .map(({ reason, ...row }) => ({ work: { workspaceId, ...row }, reason })),
+    );
+  }
+
+  /** Returns a leased turn whose start failed to the sweep at once, instead of after its lease. */
+  async function release(value: unknown) {
     const work = replyWorkSchema.parse(value);
+    await transaction(work.workspaceId, async tx => {
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_conversation_outbox')} SET next_attempt_at = clock_timestamp() WHERE turn_id = $1 AND conversation_id = $2 AND generation = $3 AND next_attempt_at > clock_timestamp()`,
+        [work.turnId, work.conversationId, work.generation],
+      );
+    });
+  }
+
+  /**
+   * Records a started workflow. A queued turn the worker has not claimed within `graceMs` is due again; turns waiting
+   * on an external action keep their 30-second poll.
+   */
+  async function acknowledge(value: unknown, graceMs = 30_000) {
+    const work = replyWorkSchema.parse(value);
+    const grace = z.number().int().positive().parse(graceMs);
     return transaction(work.workspaceId, async tx => {
       await tx.client.query(
-        `UPDATE ${table(tx, 'tf_conversation_outbox')} SET dispatched_at = clock_timestamp(), next_attempt_at = clock_timestamp() + interval '30 seconds' WHERE turn_id = $1 AND conversation_id = $2 AND generation = $3`,
-        [work.turnId, work.conversationId, work.generation],
+        `UPDATE ${table(tx, 'tf_conversation_outbox')} o SET dispatched_at = clock_timestamp(), next_attempt_at = clock_timestamp() + CASE
+          WHEN EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.id = o.turn_id AND t.status = 'waiting') THEN interval '30 seconds'
+          ELSE $4 * interval '1 millisecond' END
+        WHERE turn_id = $1 AND conversation_id = $2 AND generation = $3`,
+        [work.turnId, work.conversationId, work.generation, grace],
       );
       if (tx.commonVersion >= 1)
         await tx.client.query(
@@ -2545,5 +2615,5 @@ export function createConversationExecutor(
     return outcome === 'completed' && titleRevision !== undefined ? { outcome, title: { titleRevision } } : { outcome };
   }
 
-  return { claim, complete, fail, process, processReply, due, acknowledge };
+  return { claim, complete, fail, process, processReply, due, lease, release, acknowledge };
 }

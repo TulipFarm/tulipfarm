@@ -335,23 +335,18 @@ test(
   },
 );
 
-test('a racing send and sweep start one workflow id and write one reply', { timeout: 60000 }, async () => {
+test('a racing send and sweep start one workflow and write one reply', { timeout: 60000 }, async () => {
   const f = await conversationFixture();
   const executor = createConversationExecutor(f.runtime, reverseReply);
   const starts = [];
-  let release;
-  const both = new Promise(resolve => {
-    release = resolve;
-  });
   const runs = [];
+  let sweeping;
   const replies = createReplyDispatch({
     runtime: f.runtime,
-    // Holding each start until both paths have one proves both saw the turn; every start then runs the
-    // workflow, which is stricter than Temporal's USE_EXISTING and leaves only the database fence.
+    // The sweep runs while the send's start is still in flight, the window the prod race hit.
     temporal: fakeTemporal(async options => {
       starts.push(options.workflowId);
-      if (starts.length === 2) release();
-      await Promise.race([both, delay(2000)]);
+      if (starts.length === 1) await (sweeping = replies.dispatch(f.workspace.id));
       runs.push(await executor.process(options.args[0]));
     }),
   });
@@ -359,13 +354,117 @@ test('a racing send and sweep start one workflow id and write one reply', { time
   try {
     const chatId = await newChat(f);
     const sent = await route.send(chatId, 'race');
-    await Promise.all([replies.dispatch(f.workspace.id), replies.settle()]);
-    assert.equal(starts.length, 2);
-    assert.deepEqual(new Set(starts), new Set([`conversation-reply-v1-${f.workspace.id}-${sent.turnId}-0`]));
-    assert.equal(runs.filter(result => result === 'completed').length, 1);
+    await replies.settle();
+    await sweeping;
+    assert.deepEqual(starts, [`conversation-reply-v1-${f.workspace.id}-${sent.turnId}-0`]);
+    assert.deepEqual(runs, ['completed']);
     assert.deepEqual(await replyTexts(f, chatId), ['ecar']);
   } finally {
     await route.app.close();
+    await f.close();
+  }
+});
+
+test('concurrent sends and sweeps lease each turn to one start', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.workflowId);
+      await delay(50);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  try {
+    const chats = await Promise.all([newChat(f), newChat(f), newChat(f)]);
+    for (const chatId of chats) await quiet.send(chatId, 'many');
+    await Promise.all([
+      replies.dispatch(f.workspace.id),
+      replies.dispatch(f.workspace.id),
+      ...chats.map(conversationId => replies.dispatch(f.workspace.id, { conversationId, source: 'send' })),
+    ]);
+    assert.equal(starts.length, 3);
+    assert.equal(new Set(starts).size, 3);
+  } finally {
+    await quiet.app.close();
+    await f.close();
+  }
+});
+
+test('the sweep restarts a started reply only once its claim grace lapses', { timeout: 60000 }, async () => {
+  const before = await dispatchCounts();
+  const f = await conversationFixture();
+  const executor = createConversationExecutor(f.runtime, reverseReply);
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    graceMs: 400,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.workflowId);
+    }),
+  });
+  const route = await sendRoute(f, replies);
+  try {
+    const chatId = await newChat(f);
+    const sent = await route.send(chatId, 'lost');
+    await replies.settle();
+    await replies.dispatch(f.workspace.id);
+    assert.equal(starts.length, 1, 'a sweep inside the grace leaves the send alone');
+    await delay(500);
+    await replies.dispatch(f.workspace.id);
+    assert.equal(starts.length, 2, 'an unclaimed reply is started again after the grace');
+    assert.equal(new Set(starts).size, 1, 'with the same workflow id');
+    await delay(500);
+    assert.equal(
+      await executor.process({
+        workspaceId: f.workspace.id,
+        conversationId: chatId,
+        turnId: sent.turnId,
+        generation: 0,
+      }),
+      'completed',
+    );
+    await replies.dispatch(f.workspace.id);
+    assert.equal(starts.length, 2, 'a claimed reply is never due again');
+    const after = await dispatchCounts();
+    const delta = key => (after[key] ?? 0) - (before[key] ?? 0);
+    assert.equal(delta('send/undispatched/success'), 1);
+    assert.equal(delta('sweep/unclaimed/success'), 1);
+    assert.equal(delta('sweep/undispatched/success'), 0);
+  } finally {
+    await route.app.close();
+    await f.close();
+  }
+});
+
+test('a lease left by a crashed dispatcher lapses to the sweep', { timeout: 60000 }, async () => {
+  const f = await conversationFixture();
+  const executor = createConversationExecutor(f.runtime, reverseReply);
+  const starts = [];
+  const replies = createReplyDispatch({
+    runtime: f.runtime,
+    graceMs: 400,
+    temporal: fakeTemporal(async options => {
+      starts.push(options.args[0]);
+    }),
+  });
+  const quiet = await sendRoute(f, undefined);
+  try {
+    const chatId = await newChat(f);
+    const sent = await quiet.send(chatId, 'crash');
+    // A dispatcher that leased the turn and then died before starting or releasing it.
+    assert.equal((await executor.lease(f.workspace.id, chatId, 400)).length, 1);
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(starts, []);
+    await delay(500);
+    await replies.dispatch(f.workspace.id);
+    assert.deepEqual(
+      starts.map(work => work.turnId),
+      [sent.turnId],
+    );
+  } finally {
+    await quiet.app.close();
     await f.close();
   }
 });
@@ -559,8 +658,8 @@ test('dispatch metrics label each start with the path that made it', { timeout: 
     await replies.dispatch(f.workspace.id);
     const after = await dispatchCounts();
     const delta = key => (after[key] ?? 0) - (before[key] ?? 0);
-    assert.equal(delta('send/success'), 1);
-    assert.equal(delta('sweep/success'), 1);
+    assert.equal(delta('send/undispatched/success'), 1);
+    assert.equal(delta('sweep/undispatched/success'), 1);
   } finally {
     await quiet.app.close();
     await route.app.close();
@@ -575,6 +674,8 @@ async function dispatchCounts() {
     for (const metric of scope.metrics)
       if (metric.descriptor.name === 'cloud_chat_dispatches')
         for (const point of metric.dataPoints)
-          counts[`${point.attributes.dispatch_source}/${point.attributes.outcome}`] = point.value;
+          counts[
+            `${point.attributes.dispatch_source}/${point.attributes.dispatch_reason}/${point.attributes.outcome}`
+          ] = point.value;
   return counts;
 }

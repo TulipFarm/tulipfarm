@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
-import { createConversationDispatch } from '@tulipfarm/conversations/dispatch';
+import { createConversationDispatch, defaultDispatchGraceMs } from '@tulipfarm/conversations/dispatch';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { createTemporalClient } from './temporal.ts';
 import type { createAttachments } from '@tulipfarm/conversations/attachments';
@@ -15,15 +15,25 @@ import { errorAttributes, log } from '@tulipfarm/observability';
 const sendStartDeadlineMs = 2000;
 const sweepStartDeadlineMs = 10000;
 
+export function dispatchGraceMs(value = process.env.CHAT_DISPATCH_GRACE_MS) {
+  if (value === undefined || value === '') return defaultDispatchGraceMs;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 300_000)
+    throw new Error('CHAT_DISPATCH_GRACE_MS must be an integer from 1 to 300000');
+  return parsed;
+}
+
 export type ReplyDispatch = ReturnType<typeof createReplyDispatch>;
 
 export function createReplyDispatch(dependencies: {
   runtime: ConversationRuntime;
   temporal: Pick<ReturnType<typeof createTemporalClient>, 'connection' | 'client'>;
+  graceMs?: number;
 }) {
   const { temporal } = dependencies;
   const dispatch = createConversationDispatch({
     runtime: dependencies.runtime,
+    graceMs: dependencies.graceMs ?? dispatchGraceMs(),
     start: async (work, source) => {
       const deadline = source === 'send' ? sendStartDeadlineMs : sweepStartDeadlineMs;
       await bounded(deadline, () =>
