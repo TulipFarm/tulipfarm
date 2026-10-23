@@ -614,7 +614,7 @@ test('a truncated recursive tree is walked one directory at a time so every file
   assert.deepEqual(walked.toSorted(), expected.toSorted(), 'the walk lists the same files as the complete tree');
   assert.ok(pages.some(page => /^code:[a-f0-9]{40}:w\d+(?:\.\d+)*(?:\+\d+)?$/.test(page.nextCursor ?? '')));
   assert.ok(
-    pages.every(page => page.observations.length <= 50),
+    pages.every(page => page.observations.length <= 100),
     'each page stays within the list page size',
   );
   const huge = walked.filter(id => id.endsWith('docs/huge.md'));
@@ -640,15 +640,15 @@ test('a truncated recursive tree is walked one directory at a time so every file
 
 test('a resumed listing continues inside a file with many parts', async () => {
   const { provider, binding, repo } = setup();
-  repo.files.set('data/huge.csv', 'r,1\n'.repeat(1700 * 1024));
+  repo.files.set('data/huge.csv', 'r,1\n'.repeat(3400 * 1024));
   const first = await provider.list(workspaceId, 'reader', binding, '7001', code, null);
-  assert.equal(first.observations.length, 50);
-  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+51$/);
+  assert.equal(first.observations.length, 100);
+  assert.match(first.nextCursor, /^code:[a-f0-9]{40}:0\+101$/);
   const items = await listAll(provider, binding, '7001', code);
   const parts = items.filter(item => item.path === 'data/huge.csv');
-  assert.equal(parts.length, 54);
-  assert.equal(new Set(parts.map(item => item.nativeId)).size, 54);
-  assert.equal(parts.at(-1).nativeId, 'code:7001:/p/54/data/huge.csv');
+  assert.equal(parts.length, 107);
+  assert.equal(new Set(parts.map(item => item.nativeId)).size, 107);
+  assert.equal(parts.at(-1).nativeId, 'code:7001:/p/107/data/huge.csv');
 });
 
 test('large files are streamed from the blob API in line-aligned parts that cover every byte once', async () => {
@@ -1095,6 +1095,17 @@ test('transient failures retry with exponential backoff before surfacing', async
   const denied = await provider.access(workspaceId, 'reader', binding, '7001').catch(error => error);
   assert.ok(denied.readable === false || denied.code === 'forbidden');
   assert.deepEqual(sleeps, [], 'a denial is not retried');
+  github.state.failure = () => Response.json({ message: 'Forbidden' }, { status: 403 });
+  await provider.access(workspaceId, 'reader', binding, '7001').catch(error => error);
+  assert.deepEqual(sleeps, [], 'a 403 without a rate limit is not retried');
+  const rejectedBefore = github.calls.length;
+  github.state.failure = () => Response.json({ message: 'Bad credentials' }, { status: 401 });
+  await assert.rejects(
+    provider.access(workspaceId, 'reader', binding, '7001'),
+    error => error.code === 'reconnect-required',
+  );
+  assert.equal(github.calls.length - rejectedBefore, 1, 'a rejected credential asks for reconnection at once');
+  assert.deepEqual(sleeps, []);
 });
 
 test('requests slow down as the rate budget drains and pause before it runs out', async () => {
