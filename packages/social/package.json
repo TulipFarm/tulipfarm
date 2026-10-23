@@ -50,6 +50,14 @@
     "./channels": {
       "types": "./dist/channels.d.ts",
       "default": "./dist/channels.js"
+    },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "default": "./dist/media.js"
+    },
+    "./posts": {
+      "types": "./dist/posts.d.ts",
+      "default": "./dist/posts.js"
     }
   },
   "scripts": {
@@ -62,6 +70,7 @@
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",

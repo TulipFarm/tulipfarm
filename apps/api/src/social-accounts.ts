@@ -5,18 +5,24 @@ import { AccessDenied } from '@tulipfarm/access';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { SocialAccounts } from '@tulipfarm/social/accounts';
 import type { SocialChannels } from '@tulipfarm/social/channels';
+import type { SocialPosts } from '@tulipfarm/social/posts';
 import {
   addChannelSchema,
   beginConnectionResultSchema,
   beginConnectionSchema,
   channelGrantsSchema,
   channelSchema,
+  decisionSubmitSchema,
   discoveredChannelSchema,
   disconnectResultSchema,
   platformAppCreateSchema,
   platformAppMetadataSchema,
   platformAvailabilitySchema,
   platformSchema,
+  postSchema,
+  preparedPostSchema,
+  prepareBodySchema,
+  reviseBodySchema,
   socialAccountGrantsSchema,
   socialAccountMetadataSchema,
 } from '@tulipfarm/social/contracts';
@@ -34,6 +40,7 @@ const workspaceParams = z.strictObject({ workspaceId: z.uuid() });
 const accountParams = workspaceParams.extend({ accountId: z.uuid() });
 const appParams = workspaceParams.extend({ platformAppId: z.uuid() });
 const channelParams = workspaceParams.extend({ channelId: z.uuid() });
+const postParams = workspaceParams.extend({ postId: z.uuid() });
 const channelFilter = z.strictObject({ accountId: z.uuid().optional(), platform: platformSchema.optional() });
 const callbackState = z.string().regex(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
 const callbackSchema = z.union([
@@ -86,6 +93,16 @@ const statuses = {
   'channel-conflict': 409,
   'channel-unreachable': 409,
   'channel-unavailable': 409,
+  'post-conflict': 409,
+  'revision-conflict': 409,
+  'revision-expired': 409,
+  'variant-invalid': 409,
+  'variant-not-editable': 409,
+  'review-choices-invalid': 400,
+  'source-blocked': 409,
+  'source-unreadable': 403,
+  'media-unreadable': 403,
+  'media-changed': 409,
 } as const satisfies Record<SocialError['code'], number>;
 
 /** The workspace a request concerns: from the path, or from the OAuth state on the callback. */
@@ -104,6 +121,7 @@ export function registerSocialAccounts(
   enabled: (userId: string, workspaceId: string) => Promise<boolean> = (userId, workspaceId) =>
     isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId }),
   channels: SocialChannels | null = null,
+  posts: SocialPosts | null = null,
 ) {
   app.register(async routes => {
     validation.install(routes, true);
@@ -151,7 +169,11 @@ export function registerSocialAccounts(
     routes.setErrorHandler<FastifyError>((error, request, reply) => {
       if (error instanceof AccessDenied)
         return reply.code(404).send({
-          error: request.routeOptions.url?.includes('/social/channels') ? 'channel-not-found' : 'account-not-found',
+          error: request.routeOptions.url?.includes('/social/channels')
+            ? 'channel-not-found'
+            : request.routeOptions.url?.includes('/social/posts')
+              ? 'post-not-found'
+              : 'account-not-found',
         });
       if (error.statusCode === 400 || error.validation || error instanceof z.ZodError)
         return reply.code(400).send({ error: 'invalid-request' });
@@ -169,6 +191,11 @@ export function registerSocialAccounts(
       const session = sessions.get(request);
       if (!session || !channels) throw new SocialError('account-unavailable');
       return { ...session, channels };
+    };
+    const postContext = (request: FastifyRequest) => {
+      const session = sessions.get(request);
+      if (!session || !posts) throw new SocialError('account-unavailable');
+      return { ...session, posts };
     };
     const social = '/workspaces/:workspaceId/social';
     routes.get(
@@ -447,6 +474,88 @@ export function registerSocialAccounts(
         const { channels, userId } = channelContext(request);
         const { workspaceId, channelId } = channelParams.parse(request.params);
         return channels.setGrants(workspaceId, userId, channelId, request.body);
+      },
+    );
+    const postBase = `${social}/posts`;
+    routes.post(
+      postBase,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'prepareSocialPostV1',
+            'Prepare a post from a chat, one variant per channel, checked against each channel’s rules',
+            preparedPostSchema,
+          ),
+          params: json(workspaceParams),
+          body: json(prepareBodySchema),
+        },
+      },
+      async (request, reply) => {
+        const { posts, userId } = postContext(request);
+        const body = prepareBodySchema.parse(request.body);
+        // Only a chat origin reaches this route; its conversation is the post's source.
+        if (body.origin.kind !== 'conversation') return reply.code(400).send({ error: 'invalid-request' });
+        return posts.prepare(workspaceParams.parse(request.params).workspaceId, userId, body, {
+          dependencies: [{ kind: 'private-conversation', conversationId: body.origin.conversationId }],
+        });
+      },
+    );
+    routes.get(
+      `${postBase}/:postId`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('getSocialPostV1', 'Read a post with its revisions, decisions and variants', postSchema),
+          params: json(postParams),
+        },
+      },
+      async request => {
+        const { posts, userId } = postContext(request);
+        const { workspaceId, postId } = postParams.parse(request.params);
+        return posts.get(workspaceId, userId, postId);
+      },
+    );
+    routes.post(
+      `${postBase}/:postId/revisions`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'reviseSocialPostV1',
+            'Edit the unattempted variants as a new revision that needs its own approval',
+            preparedPostSchema,
+          ),
+          params: json(postParams),
+          body: json(reviseBodySchema),
+        },
+      },
+      async request => {
+        const { posts, userId } = postContext(request);
+        const { workspaceId, postId } = postParams.parse(request.params);
+        return posts.revise(workspaceId, userId, postId, request.body);
+      },
+    );
+    routes.post(
+      `${postBase}/:postId/decision`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema(
+            'decideSocialPostV1',
+            'Approve or reject the current revision, bound to its content digest and review choices',
+            postSchema,
+          ),
+          params: json(postParams),
+          body: json(decisionSubmitSchema),
+        },
+      },
+      async (request, reply) => {
+        const { posts, userId } = postContext(request);
+        const { workspaceId, postId } = postParams.parse(request.params);
+        const body = decisionSubmitSchema.parse(request.body);
+        if (body.postId !== postId) return reply.code(400).send({ error: 'invalid-request' });
+        return posts.decide(workspaceId, userId, body);
       },
     );
     routes.get(

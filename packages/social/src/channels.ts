@@ -327,20 +327,28 @@ export function createSocialChannels(options: {
     permission: ChannelPermission,
     expected: ChannelExpectations = {},
   ): Promise<AuthorizedChannel> {
-    return transaction(workspaceId, 'read', async tx => {
-      const result = await authorizeIn(tx, principal, channelId, permission, expected);
-      return {
-        channel: await toChannel(tx, result.channel),
-        account: {
-          id: result.account.id,
-          platform: result.account.platform,
-          generation: result.account.generation,
-          grantsVersion: result.account.grants_version,
-        },
-        sponsorMembershipId: result.sponsor.membershipId,
-        agentId: result.agentId,
-      };
-    });
+    return transaction(workspaceId, 'read', tx => authorizeWithin(tx, principal, channelId, permission, expected));
+  }
+  /** `authorize` inside a caller's transaction, which already holds the authorization lock. */
+  async function authorizeWithin(
+    tx: AuthorizationTransaction,
+    principal: ChannelPrincipal,
+    channelId: string,
+    permission: ChannelPermission,
+    expected: ChannelExpectations = {},
+  ): Promise<AuthorizedChannel> {
+    const result = await authorizeIn(tx, principal, channelId, permission, expected);
+    return {
+      channel: await toChannel(tx, result.channel),
+      account: {
+        id: result.account.id,
+        platform: result.account.platform,
+        generation: result.account.generation,
+        grantsVersion: result.account.grants_version,
+      },
+      sponsorMembershipId: result.sponsor.membershipId,
+      agentId: result.agentId,
+    };
   }
 
   return {
@@ -510,6 +518,9 @@ export function createSocialChannels(options: {
       });
     },
     authorize,
+    authorizeWithin,
+    /** The member acting, and the agent acting for them, after the agent permission limits (PRODUCT 11). */
+    principal: resolvePrincipal,
     /**
      * A post target is chosen per post, never stored on the channel. It must suit the platform and pass the
      * target's live posting rules; preparing and publishing a variant each call this (PRODUCT 12).

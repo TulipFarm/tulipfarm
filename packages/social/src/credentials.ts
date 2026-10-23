@@ -17,7 +17,17 @@ export class SocialError extends Error {
       | 'grants-invalid'
       | 'channel-conflict'
       | 'channel-unreachable'
-      | 'channel-unavailable',
+      | 'channel-unavailable'
+      | 'post-conflict'
+      | 'revision-conflict'
+      | 'revision-expired'
+      | 'variant-invalid'
+      | 'variant-not-editable'
+      | 'review-choices-invalid'
+      | 'source-blocked'
+      | 'source-unreadable'
+      | 'media-unreadable'
+      | 'media-changed',
   ) {
     super(code);
     this.name = 'SocialError';

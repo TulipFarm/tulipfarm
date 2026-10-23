@@ -577,16 +577,31 @@ const variantsSchema = z
   });
 
 const prepareFields = { commandId: z.uuid(), origin: originSchema, variants: variantsSchema };
-/** Prepare input with `publishAt` checked against `now`. */
-export function prepareInputSchema(now: Date) {
-  return z.strictObject(prepareFields).superRefine((value, ctx) => {
+function checkPublishAt(now: Date) {
+  return (value: { variants: VariantInput[] }, ctx: z.RefinementCtx) => {
     value.variants.forEach((variant, index) => {
       const problem = publishAtIssue(variant.publishAt, now);
       if (problem) issue(ctx, ['variants', index, 'publishAt'], problem);
     });
-  });
+  };
+}
+/** Prepare input with `publishAt` checked against `now`. */
+export function prepareInputSchema(now: Date) {
+  return z.strictObject(prepareFields).superRefine(checkPublishAt(now));
 }
 export type PrepareInput = z.infer<ReturnType<typeof prepareInputSchema>>;
+/** The prepare request's shape; the service checks `publishAt` against the time it runs. */
+export const prepareBodySchema = z.strictObject(prepareFields);
+
+const reviseFields = { expectedRevision: version, variants: variantsSchema };
+/**
+ * Editing a post: replacement content for some of the current revision's unattempted variants. Variants left
+ * out are copied unchanged into the new revision (PRODUCT 16).
+ */
+export function reviseInputSchema(now: Date) {
+  return z.strictObject(reviseFields).superRefine(checkPublishAt(now));
+}
+export const reviseBodySchema = z.strictObject(reviseFields);
 
 export const sourcesSchema = z.strictObject({
   dependencies: z.array(sourceDependencySchema).max(256),
@@ -1017,6 +1032,14 @@ export const validationErrorSchema = z.strictObject({
   code: z.string().min(1).max(200),
 });
 export type ValidationError = z.infer<typeof validationErrorSchema>;
+
+/** Each variant's checks when a revision is written; any error keeps every variant in `draft` (PRODUCT 13). */
+export const variantChecksSchema = z
+  .array(z.strictObject({ channelId: z.uuid(), valid: z.boolean(), errors: z.array(validationErrorSchema).max(64) }))
+  .min(1)
+  .max(10);
+export const preparedPostSchema = z.strictObject({ post: postSchema, variants: variantChecksSchema });
+export type PreparedPost = z.infer<typeof preparedPostSchema>;
 
 export const agentToolInputSchemas = {
   social_list_channels: z.strictObject({ platform: platformSchema.optional() }),

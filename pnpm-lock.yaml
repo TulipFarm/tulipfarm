@@ -1299,6 +1299,9 @@ importers:
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
+      '@tulipfarm/files':
+        specifier: workspace:*
+        version: link:../files
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../integrations
