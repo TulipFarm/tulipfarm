@@ -217,6 +217,59 @@ test('missingKeys "skip" leaves models out, moves the default and drops skipped 
   );
 });
 
+const imageModel = (id, extra = {}) => ({
+  id,
+  name: id,
+  vendor: 'acme',
+  routes: [{ provider: 'openai', model: `${id}-1`, api: 'openai-images' }],
+  aspects: { square: '1024x1024', portrait: '1024x1536', landscape: '1536x1024' },
+  pricing: 'unmetered',
+  ...extra,
+});
+
+test('image models are served from their first keyed route, and the default is never replaced', () => {
+  const env = {
+    ...anthropic,
+    MODEL_CATALOG_FILE: file(
+      catalog([model('chat', { default: true })], {
+        missingKeys: 'skip',
+        imageModels: [
+          imageModel('main-image', { default: true }),
+          imageModel('azure-image', {
+            routes: [
+              { provider: 'openai', model: 'a', api: 'openai-images' },
+              { provider: 'azure', model: 'b', api: 'openai-images' },
+            ],
+          }),
+        ],
+      }),
+    ),
+  };
+  const served = loadModelCatalog({ ...env, ...azure });
+  assert.deepEqual(
+    served.imageModels.map(image => [image.id, image.route.provider, image.route.model, image.route.api]),
+    [['azure-image', 'azure', 'b', 'openai-images']],
+  );
+  assert.deepEqual(served.skipped, ['main-image']);
+  assert.equal(served.defaultImageModel, null, 'another image model never replaces a skipped default');
+  assert.equal(served.imageModel('azure-image').id, 'azure-image');
+  assert.equal(served.imageModel('main-image'), undefined);
+  const all = loadModelCatalog({ ...env, ...azure, OPENAI_API_KEY: 'test-key' });
+  assert.equal(all.defaultImageModel.id, 'main-image');
+  assert.equal(all.imageModel('azure-image').route.provider, 'openai');
+  assert.throws(
+    () =>
+      loadModelCatalog({
+        ...anthropic,
+        MODEL_CATALOG_FILE: file(
+          catalog([model('chat', { default: true })], { imageModels: [imageModel('main-image')] }),
+        ),
+      }),
+    /imageModels\.0 "main-image" has no route with its key set; set OPENAI_API_KEY/,
+  );
+  assert.deepEqual(loadModelCatalog(anthropic).imageModels, []);
+});
+
 test('removed model settings fail startup and name what replaces them', () => {
   for (const name of Object.keys(removedModelSettings)) {
     assert.throws(() => readModelCatalog({ [name]: 'claude-sonnet' }), new RegExp(`Remove ${name} \\(`));

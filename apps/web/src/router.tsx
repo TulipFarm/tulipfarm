@@ -908,7 +908,7 @@ export const workspaceModelsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/models',
   validateSearch: search =>
-    z.object({ tab: z.enum(['access', 'compaction']).optional().catch(undefined) }).parse(search),
+    z.object({ tab: z.enum(['access', 'compaction', 'images']).optional().catch(undefined) }).parse(search),
   component: ModelsPage,
 });
 const workspaceAccountRoute = createRoute({

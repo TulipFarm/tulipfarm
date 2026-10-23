@@ -90,6 +90,9 @@ const rateSchema = z
 
 const tokenLimit = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
+/** Image input limits for an `imageInput` model that does not state its own. */
+export const defaultImageInputLimits = Object.freeze({ imageInputTokens: 1600, maxImageBytes: 5 * 1024 * 1024 });
+
 const routeSchema = z
   .strictObject({
     provider: z
@@ -142,8 +145,28 @@ const modelSchema = z
     limits: z.strictObject({
       maxInputTokens: tokenLimit,
       maxOutputTokens: tokenLimit,
+      imageInputTokens: tokenLimit
+        .optional()
+        .describe(
+          `Most input tokens one image may cost, used to reserve credits. Only with "imageInput"; defaults to ${defaultImageInputLimits.imageInputTokens}.`,
+        ),
+      maxImageBytes: z
+        .number()
+        .int()
+        .min(64 * 1024)
+        .max(64 * 1024 * 1024)
+        .optional()
+        .describe(
+          `Largest image the model accepts; bigger images are downscaled before sending. Only with "imageInput"; defaults to ${defaultImageInputLimits.maxImageBytes}.`,
+        ),
     }),
     capabilities: modelCapabilitiesSchema.optional().describe("Overrides of the provider type's default behavior"),
+    imageModel: modelFamilyIdSchema
+      .nullable()
+      .default(null)
+      .describe(
+        'Id of the entry in `imageModels` that generates images for work on this model; null uses the workspace default image model',
+      ),
     pricing: z
       .union([
         z.literal('unmetered').describe('Tokens are recorded at zero cost'),
@@ -153,6 +176,62 @@ const modelSchema = z
     notes: z.array(z.string()).optional().describe('Free-form notes, such as where prices were checked'),
   })
   .describe('One model people can choose');
+
+export const imageModelApis = Object.freeze(['openai-images', 'xai-images', 'gemini-images'] as const);
+export type ImageModelApi = (typeof imageModelApis)[number];
+/** Provider types that speak each image API. */
+export const imageModelApiProviders: Readonly<Record<ImageModelApi, readonly string[]>> = Object.freeze({
+  'openai-images': ['openai', 'azure', 'openai-compatible'],
+  'xai-images': ['xai'],
+  'gemini-images': ['google'],
+});
+export const imageAspects = Object.freeze(['square', 'portrait', 'landscape'] as const);
+export const imageQualities = Object.freeze(['standard', 'high'] as const);
+
+const aspectPrices = z.strictObject({ square: usd, portrait: usd, landscape: usd });
+const imageModelSchema = z
+  .strictObject({
+    id: modelFamilyIdSchema.describe('Stable ID settings and generated-image receipts store'),
+    name: z.string().min(1).max(100).describe('Name people see in the catalog'),
+    vendor: modelIdentifierSchema.describe('Who makes the model, for branding'),
+    routes: z
+      .array(
+        routeSchema.extend({
+          api: z
+            .enum(imageModelApis)
+            .describe(
+              'Image API: openai-images (OpenAI, Azure, OpenAI-compatible), xai-images (xAI) or gemini-images (Google)',
+            ),
+        }),
+      )
+      .min(1)
+      .describe('Where the model runs, in order of preference, chosen the same way as a model route'),
+    default: z
+      .boolean()
+      .default(false)
+      .describe('Generates images for models without an imageModel, unless a workspace chose another. At most one.'),
+    paused: z.boolean().default(false).describe('Listed, but no new image is generated with it'),
+    edits: z.boolean().default(false).describe('Can edit or combine source images'),
+    maxSources: z.number().int().min(1).max(16).default(1).describe('Most source images one edit may use'),
+    aspects: z
+      .strictObject({
+        square: z.string().min(1).max(20),
+        portrait: z.string().min(1).max(20),
+        landscape: z.string().min(1).max(20),
+      })
+      .describe('The size or aspect ratio sent to the provider for each shape, such as 1024x1536 or 3:4'),
+    pricing: z
+      .union([
+        z.literal('unmetered').describe('Images are recorded at zero cost'),
+        z
+          .strictObject({ usdPerImage: z.strictObject({ standard: aspectPrices, high: aspectPrices }) })
+          .describe('A price per generated image, by quality and shape'),
+        z.array(rateSchema).min(1).describe('Token rates, for providers that report image tokens'),
+      ])
+      .describe('"unmetered", a price per image, or token rates'),
+    notes: z.array(z.string()).optional().describe('Free-form notes, such as where prices were checked'),
+  })
+  .describe('One model that generates images');
 
 const catalogShape = z
   .strictObject({
@@ -169,6 +248,10 @@ const catalogShape = z
       .default({})
       .describe("Provider accounts. Only needed to use other variables than a built-in provider's defaults."),
     models: z.array(modelSchema).min(1),
+    imageModels: z
+      .array(imageModelSchema)
+      .default([])
+      .describe('Models that generate images. Without one, image generation is unavailable.'),
   })
   .describe('TulipFarm model catalog: every model a deployment serves');
 
@@ -264,7 +347,54 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
     if (model.pricing !== 'unmetered')
       for (const issue of rateProblems(model.pricing))
         issues.push({ path: at('pricing', ...issue.path), message: issue.message });
+    if (model.capabilities?.imageInput !== true)
+      for (const field of ['imageInputTokens', 'maxImageBytes'] as const)
+        if (model.limits[field] !== undefined)
+          issues.push({ path: at('limits', field), message: 'Only for a model with "imageInput": true' });
+    if (model.imageModel !== null && !catalog.imageModels.some(image => image.id === model.imageModel))
+      issues.push({ path: at('imageModel'), message: `No entry in imageModels has id "${model.imageModel}"` });
   }
+  for (const [index, image] of catalog.imageModels.entries()) {
+    const at = (...path: (string | number)[]) => ['imageModels', index, ...path];
+    if (seen.has(image.id)) issues.push({ path: at('id'), message: `Duplicate model id "${image.id}"` });
+    seen.add(image.id);
+    for (const [routeIndex, route] of image.routes.entries()) {
+      const type = providerType(catalog, route.provider);
+      if (!type)
+        issues.push({
+          path: at('routes', routeIndex, 'provider'),
+          message: `Unknown provider "${route.provider}"; declare it in providers`,
+        });
+      else if (!imageModelApiProviders[route.api].includes(type))
+        issues.push({
+          path: at('routes', routeIndex, 'api'),
+          message: `Provider type ${type} does not serve ${route.api}`,
+        });
+      if (image.routes.findIndex(other => other.provider === route.provider) !== routeIndex)
+        issues.push({
+          path: at('routes', routeIndex, 'provider'),
+          message: `Duplicate route provider "${route.provider}"`,
+        });
+    }
+    if (image.default && image.paused)
+      issues.push({ path: at('paused'), message: 'The default image model cannot be paused' });
+    if (!image.edits && image.maxSources !== 1)
+      issues.push({ path: at('maxSources'), message: 'Only a model with "edits": true takes source images' });
+    if (Array.isArray(image.pricing))
+      for (const issue of rateProblems(image.pricing))
+        issues.push({ path: at('pricing', ...issue.path), message: issue.message });
+    else if (image.pricing !== 'unmetered')
+      for (const quality of imageQualities)
+        for (const aspect of imageAspects)
+          if (!/^\d+(\.\d{1,6})?$/.test(String(image.pricing.usdPerImage[quality][aspect])))
+            issues.push({ path: at('pricing', 'usdPerImage', quality, aspect), message: 'At most 6 decimal places' });
+  }
+  const imageDefaults = catalog.imageModels.filter(image => image.default).length;
+  if (imageDefaults > 1)
+    issues.push({
+      path: ['imageModels'],
+      message: `At most one image model can be the default; found ${imageDefaults}`,
+    });
   const defaults = catalog.models.filter(model => model.default).length;
   if (defaults !== 1)
     issues.push({ path: ['models'], message: `Exactly one model must have "default": true; found ${defaults}` });
@@ -276,6 +406,7 @@ export const modelCatalogFileSchema = catalogShape.superRefine((catalog, ctx) =>
 });
 export type ModelCatalogFile = z.infer<typeof modelCatalogFileSchema>;
 export type ModelCatalogFileModel = ModelCatalogFile['models'][number];
+export type ModelCatalogFileImageModel = ModelCatalogFile['imageModels'][number];
 
 /** The published JSON Schema. Cross-entry rules, such as one default and unique roles, are enforced only by the validator. */
 export function modelCatalogJsonSchema() {

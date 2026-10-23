@@ -57,6 +57,8 @@ export function catalogFamily(id: string, overrides: Partial<ModelCatalogFamily>
     mappingRevision: 'fixture-mapping',
     pricingRevision: 'fixture-pricing',
     fallbackFor: [],
+    imageInput: false,
+    imageModelId: null,
     ...overrides,
   } as ModelCatalogFamily;
 }
@@ -64,6 +66,7 @@ export function catalogFamily(id: string, overrides: Partial<ModelCatalogFamily>
 export function catalogFixture(ids: readonly string[] = shippedCatalogFamilyIds): ModelCatalog {
   return {
     families: ids.map(id => catalogFamily(id)),
+    imageModels: [],
     defaultChatFamilyId: ids.includes('claude-sonnet') ? 'claude-sonnet' : (ids[0] ?? null),
   };
 }

@@ -29,7 +29,7 @@ export function AgentModelPicker({
       description="The model this agent asks for first."
     >
       <ModelRead state={catalog.state} refresh={catalog.refresh} label="model catalog">
-        {({ families }) => {
+        {({ families, imageModels }) => {
           const selected = families.find(family => family.id === value);
           return (
             <div className="grid gap-3">
@@ -88,7 +88,7 @@ export function AgentModelPicker({
                   </SelectContent>
                 </Select>
               </Field>
-              {selected && <FamilyDetails family={selected} />}
+              {selected && <FamilyDetails family={selected} imageModels={imageModels} />}
             </div>
           );
         }}

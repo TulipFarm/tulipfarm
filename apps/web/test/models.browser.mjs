@@ -108,6 +108,18 @@ function fixtureState() {
         { id: 'deepseek-flash', name: 'DeepSeek Flash', enabled: true },
       ],
     },
+    images: {
+      recognitionFamilyId: null,
+      defaultImageModelId: null,
+      generationEnabled: true,
+      revision: 0,
+      editorMembershipId: null,
+      updatedAt: null,
+      effective: { recognitionFamilyId: 'claude-haiku', defaultImageModelId: null },
+      recognitionFamilies: [{ id: 'claude-haiku', name: 'Claude Haiku', enabled: true }],
+      imageModels: [],
+    },
+    imageReceipts: new Map(),
     compactionStatus: 200,
     compactionGate: null,
     nextCompactionSave: 'commit',
@@ -161,6 +173,8 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
   const { modelCatalogSchema } = await import('@tulipfarm/config/model-catalog');
   const { compactionPolicySchema, compactionPolicyCommandSchema, compactionPolicyReceiptSchema } =
     await import('@tulipfarm/agents/compaction-policy-contracts');
+  const { imageSettingsSchema, imageSettingsCommandSchema, imageSettingsReceiptSchema } =
+    await import('@tulipfarm/agents/image-settings-contracts');
   const { saveAgentSchema, agentCommandStatusSchema } = await import('@tulipfarm/agents/saved-contracts');
   const { chromium } = await import(
     process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
@@ -263,6 +277,16 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
             ? send(policy)
             : send({ error: 'compaction-unavailable' }, current.compactionStatus);
         }
+        if (path === `${base}/model-policy/images`) {
+          if (current.role !== 'admin') return send({ error: 'agent-not-found' }, 404);
+          return send(imageSettingsSchema.parse(current.images));
+        }
+        if (path.startsWith(`${base}/model-policy/images/commands/`)) {
+          const receipt = current.imageReceipts.get(path.split('/').at(-1));
+          return receipt
+            ? send(imageSettingsReceiptSchema.parse(receipt))
+            : send({ error: 'image-settings-command-not-found' }, 404);
+        }
         if (path === `${base}/model-policy/availability`)
           return send({
             items: current.catalog.families.map(family => ({ familyId: family.id, enabled: true, revision: 0 })),
@@ -297,6 +321,25 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           const command = current.agentCommands.get(path.split('/').at(-1));
           if (command) return send(agentCommandStatusSchema.parse(command));
         }
+      }
+      if (request.method === 'PUT' && path === `${base}/model-policy/images`) {
+        if (current.role !== 'admin') return send({ error: 'agent-not-found' }, 404);
+        const input = imageSettingsCommandSchema.parse(body);
+        const previous = current.imageReceipts.get(input.requestId);
+        if (previous) return send(previous);
+        if (input.expectedRevision !== current.images.revision)
+          return send({ error: 'image-settings-revision-conflict' }, 409);
+        const { requestId, expectedRevision, ...settings } = input;
+        current.images = imageSettingsSchema.parse({
+          ...current.images,
+          ...settings,
+          revision: expectedRevision + 1,
+          editorMembershipId: membershipId,
+          updatedAt: timestamp,
+        });
+        const receipt = imageSettingsReceiptSchema.parse({ ...current.images, requestId });
+        current.imageReceipts.set(requestId, receipt);
+        return send(receipt);
       }
       if (request.method === 'PUT' && path === `${base}/compaction-policy`) {
         const input = compactionPolicyCommandSchema.parse(body);
@@ -547,6 +590,22 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       await eventually(() => policyReads(fixture) > before, true, 'Catalog refresh rechecks compaction policy');
       await eventually(() => trigger(page).isEnabled(), true);
     }
+    await scenario('an admin turns image creation off and the saved settings stay', async (page, fixture) => {
+      await models(page, 'images');
+      const create = page.getByRole('checkbox', { name: 'Create images', exact: true });
+      await eventually(() => create.isEnabled(), true);
+      assert.equal(await create.isChecked(), true);
+      await create.uncheck();
+      await page.getByRole('button', { name: 'Save image settings', exact: true }).click();
+      await eventually(() => fixture.images.revision, 1, 'Image settings save once');
+      assert.equal(fixture.images.generationEnabled, false);
+      assert.equal(
+        writes(fixture).filter(request => request.path === `${base}/model-policy/images`).length,
+        1,
+        'One image settings write',
+      );
+      assert.equal(await create.isChecked(), false);
+    });
     await scenario('compaction draft and focused input survive an identical catalog refresh', async (page, fixture) => {
       await compaction(page);
       await trigger(page).fill('85');

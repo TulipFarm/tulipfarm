@@ -120,7 +120,7 @@ test('public route contracts do not initialize editors, query engines, model pri
   assert.deepEqual(JSON.parse(child.stdout), {
     cleanup: 'function',
     query: { q: '5' },
-    models: { families: [] },
+    models: { families: [], imageModels: [] },
     callback: { outcome: 'consent-denied' },
     files: { section: 'google' },
     workflow: { provider: 'slack' },

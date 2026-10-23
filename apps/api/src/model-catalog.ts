@@ -8,11 +8,13 @@ import {
   modelIdentifierSchema,
   modelPriceSchema,
   modelProviderSchema,
+  resolveModelCapabilities,
   type ResolvedModel,
   type ServedModelCatalog,
 } from '@tulipfarm/config';
 import {
   modelCatalogFamilySchema,
+  modelCatalogImageModelSchema,
   modelCatalogSchema,
   type ModelCatalog,
   type ModelCatalogFamily,
@@ -115,6 +117,8 @@ function projectCatalog(
         provider: resolution?.route.provider ?? family.route.type,
         inputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.input * creditsPerUsd : null,
         outputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.output * creditsPerUsd : null,
+        imageInput: resolveModelCapabilities(family.route.type, family.capabilities).imageInput,
+        imageModelId: family.imageModel,
       };
       return modelCatalogFamilySchema.parse(
         resolution
@@ -149,8 +153,47 @@ function projectCatalog(
             },
       );
     }),
+    imageModels: catalog.catalog.imageModels.map(image => {
+      const served = catalog.imageModel(image.id);
+      const creditsPerUsd = Number(creditPricing().unitsPerPicoUsd);
+      const perImage =
+        typeof image.pricing === 'object' && !Array.isArray(image.pricing) ? image.pricing.usdPerImage : null;
+      const tokenRate = Array.isArray(image.pricing)
+        ? image.pricing.filter(
+            rate =>
+              rate.promptTokensAbove === null &&
+              (rate.validFrom === null || date >= rate.validFrom) &&
+              (rate.validUntilExclusive === null || date < rate.validUntilExclusive),
+          )
+        : [];
+      const credits = (prices: Record<string, number>) =>
+        Object.fromEntries(Object.entries(prices).map(([aspect, usd]) => [aspect, usd * creditsPerUsd]));
+      return modelCatalogImageModelSchema.parse({
+        id: image.id,
+        displayName: image.name,
+        vendor: image.vendor,
+        provider: served?.route.type ?? providerOfRoute(catalog, image.routes[0]!.provider),
+        edits: image.edits,
+        available: Boolean(served) && !image.paused && !disabled.has(image.id),
+        unavailableReason: !served
+          ? 'image-model-unavailable'
+          : image.paused
+            ? 'image-model-paused'
+            : disabled.has(image.id)
+              ? 'workspace-disabled'
+              : null,
+        creditsPerImage: perImage ? { standard: credits(perImage.standard), high: credits(perImage.high) } : null,
+        outputCreditsPerMillionTokens:
+          tokenRate.length === 1 ? tokenRate[0]!.usdPerMillionTokens.output * creditsPerUsd : null,
+      });
+    }),
     defaultChatFamilyId: catalog.defaultModel.id,
   };
+}
+
+/** The provider type of a catalog route, for an image model this deployment does not serve. */
+function providerOfRoute(catalog: ServedModelCatalog, key: string) {
+  return modelProviderSchema.parse(catalog.catalog.providers[key]?.type ?? key);
 }
 
 export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCatalogDependencies) {

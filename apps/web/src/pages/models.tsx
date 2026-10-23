@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
+import type { ModelCatalogFamily, ModelCatalogImageModel } from '@tulipfarm/config/model-catalog';
 import { workspaceModelsRoute, workspaceRoute } from '@/router';
 import { useNavigate } from '@tanstack/react-router';
 import { Cpu } from 'reicon-react/icons/Cpu';
@@ -16,6 +16,8 @@ import { FallbackRule } from '@/features/models/fallback-rule';
 import { CompactionPolicySection } from '@/features/models/compaction-policy';
 import { ModelAvailability } from '@/features/models/availability';
 import { ModelSetupLink } from '@/features/models/model-setup';
+import { ImageSettingsSection } from '@/features/models/image-settings';
+import { useFlag } from '@/lib/feature-flags';
 
 export function ModelsPage() {
   const { workspace, user } = workspaceRoute.useRouteContext();
@@ -26,6 +28,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const api = useMemo(() => modelApi(workspaceId), [workspaceId]);
   const [snapshot, setSnapshot] = useState<{
     families: ModelCatalogFamily[];
+    imageModels: ModelCatalogImageModel[];
     membership: Awaited<ReturnType<typeof api.membership>>;
   } | null>(null);
   const [accessVersion, setAccessVersion] = useState(0);
@@ -38,7 +41,11 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
       (catalog.state.error || membership.state.error || catalog.state.refreshing || membership.state.refreshing)
     )
       return;
-    setSnapshot({ families: catalog.state.data.families, membership: membership.state.data });
+    setSnapshot({
+      families: catalog.state.data.families,
+      imageModels: catalog.state.data.imageModels,
+      membership: membership.state.data,
+    });
     setAccessVersion(previous => previous + 1);
   }, [
     catalog.state.kind,
@@ -70,7 +77,9 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const concealed = read.state.kind !== 'ready';
   const writable = read.state.kind === 'ready' && !read.state.refreshing && !read.state.error;
   const admin = snapshot?.membership.role === 'admin';
-  const tab = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
+  const images = useFlag('images');
+  const selected = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
+  const tab = selected === 'images' && !images ? 'access' : selected;
   const navigate = useNavigate({ from: workspaceModelsRoute.fullPath });
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -116,6 +125,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
             <TabsList variant="line" aria-label="Model settings">
               <TabsTrigger value="access">Access</TabsTrigger>
               <TabsTrigger value="compaction">Compaction</TabsTrigger>
+              {images && <TabsTrigger value="images">Images</TabsTrigger>}
             </TabsList>
           </div>
           <TabsContent value="access" keepMounted>
@@ -124,6 +134,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
                 userId={userId}
                 workspaceId={workspaceId}
                 families={snapshot?.families ?? []}
+                imageModels={images ? (snapshot?.imageModels ?? []) : []}
                 admin={admin}
                 concealed={concealed}
                 writable={writable}
@@ -162,6 +173,21 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
               </div>
             )}
           </TabsContent>
+          {images && (
+            <TabsContent value="images" keepMounted>
+              {snapshot && !concealed && (
+                <div className="pt-2">
+                  <ImageSettingsSection
+                    key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
+                    workspaceId={workspaceId}
+                    admin={admin}
+                    writable={writable}
+                    accessVersion={accessVersion}
+                  />
+                </div>
+              )}
+            </TabsContent>
+          )}
         </Tabs>
       </PageContent>
     </div>

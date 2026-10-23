@@ -43,6 +43,13 @@ export const featureFlags = {
     scope: 'user',
     env: 'FEATURE_FLAG_GOOGLE_CALENDAR_CANVAS',
   },
+  images: {
+    description:
+      'Workspace image settings: the model that reads images, the default image model and image generation, plus image models in the catalog.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_IMAGES',
+  },
   'slack-app-sender': {
     description: 'Workflow and agent Slack sends can post as the TulipFarm app instead of the requester.',
     default: 'development',

@@ -84,6 +84,8 @@ test('MODEL_CATALOG_FILE replaces the shipped catalog in the workspace model cat
       unavailableReason: null,
       inputCreditsPerMillionTokens: 50,
       outputCreditsPerMillionTokens: 150,
+      imageInput: false,
+      imageModelId: null,
       fallbackFor: ['claude-haiku'],
       mappingRevision: undefined,
       pricingRevision: undefined,
@@ -195,4 +197,93 @@ test('models without a key are left out, and the catalog never offers non-select
   assert.equal(snapshot.modelFamilyEligibility(haiku), false, 'not choosable for new chats or agents');
   assert.equal(snapshot.modelFamilyEligibility({ ...haiku, existing: true }), true, 'existing chats keep it');
   assert.equal(modelEnvironment(inline).catalog.role('title').id, 'claude-haiku');
+});
+
+test('the catalog lists image models with availability and credits, and pairs models that read images', async t => {
+  const file = JSON.parse(readFileSync(env.MODEL_CATALOG_FILE, 'utf8'));
+  const aspects = { square: '1024x1024', portrait: '1024x1536', landscape: '1536x1024' };
+  file.models[0] = {
+    ...file.models[0],
+    capabilities: { ...file.models[0].capabilities, imageInput: true },
+    imageModel: 'acme-image',
+  };
+  file.imageModels = [
+    {
+      id: 'acme-image',
+      name: 'Acme Image',
+      vendor: 'acme',
+      default: true,
+      edits: true,
+      maxSources: 4,
+      routes: [{ provider: 'azure', model: 'acme-image-1', api: 'openai-images' }],
+      aspects,
+      pricing: {
+        usdPerImage: {
+          standard: { square: 0.04, portrait: 0.06, landscape: 0.06 },
+          high: { square: 0.17, portrait: 0.25, landscape: 0.25 },
+        },
+      },
+    },
+    {
+      id: 'acme-sketch',
+      name: 'Acme Sketch',
+      vendor: 'acme',
+      paused: true,
+      routes: [{ provider: 'azure', model: 'acme-sketch-1', api: 'openai-images' }],
+      aspects,
+      pricing: [{ usdPerMillionTokens: { input: 5, output: 40 } }],
+    },
+    {
+      id: 'grok-image',
+      name: 'Grok Image',
+      vendor: 'xai',
+      routes: [{ provider: 'xai', model: 'grok-2-image', api: 'xai-images' }],
+      aspects,
+      pricing: 'unmetered',
+    },
+  ];
+  const inline = { ...env, MODEL_CATALOG_FILE: undefined, MODEL_CATALOG: JSON.stringify(file) };
+  const { families, imageModels } = await catalog(t, createModelConfiguration({ pool, env: inline }));
+  const acme = families.find(family => family.id === 'acme-chat');
+  assert.deepEqual([acme.imageInput, acme.imageModelId], [true, 'acme-image']);
+  const haiku = families.find(family => family.id === 'claude-haiku');
+  assert.deepEqual([haiku.imageInput, haiku.imageModelId], [false, null], 'only a declared capability reads images');
+  assert.deepEqual(imageModels, [
+    {
+      id: 'acme-image',
+      displayName: 'Acme Image',
+      vendor: 'acme',
+      provider: 'azure',
+      edits: true,
+      available: true,
+      unavailableReason: null,
+      creditsPerImage: {
+        standard: { square: 4, portrait: 6, landscape: 6 },
+        high: { square: 17, portrait: 25, landscape: 25 },
+      },
+      outputCreditsPerMillionTokens: null,
+    },
+    {
+      id: 'acme-sketch',
+      displayName: 'Acme Sketch',
+      vendor: 'acme',
+      provider: 'azure',
+      edits: false,
+      available: false,
+      unavailableReason: 'image-model-paused',
+      creditsPerImage: null,
+      outputCreditsPerMillionTokens: 4000,
+    },
+    {
+      id: 'grok-image',
+      displayName: 'Grok Image',
+      vendor: 'xai',
+      provider: 'xai',
+      edits: false,
+      available: false,
+      unavailableReason: 'image-model-unavailable',
+      creditsPerImage: null,
+      outputCreditsPerMillionTokens: null,
+    },
+  ]);
 });

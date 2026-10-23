@@ -187,6 +187,14 @@
       "types": "./dist/model-policy.d.ts",
       "default": "./dist/model-policy.js"
     },
+    "./image-settings": {
+      "types": "./dist/image-settings.d.ts",
+      "default": "./dist/image-settings.js"
+    },
+    "./image-settings-contracts": {
+      "types": "./dist/image-settings-contracts.d.ts",
+      "default": "./dist/image-settings-contracts.js"
+    },
     "./compaction-policy": {
       "types": "./dist/compaction-policy.d.ts",
       "default": "./dist/compaction-policy.js"
