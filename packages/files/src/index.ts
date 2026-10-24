@@ -27,6 +27,7 @@ import {
   roleLevel,
   type DeletionOutcome,
   type FileCopySource,
+  type FileGeneration,
   type FileItem,
   type FileRole,
   type FileSummary,
@@ -63,6 +64,7 @@ export type {
   LibrarySection,
   LibrarySort,
   FileCopySource,
+  FileGeneration,
   FileStorageUsage,
   DeletionPreview,
   DeletionOutcome,
@@ -420,7 +422,21 @@ const consoleLog: FilesLog = {
   warn: (fields, message) => console.warn(JSON.stringify({ level: 'warn', msg: message, ...fields })),
 };
 
-export function createFiles(runtime: Runtime, bytes: FileBytes, options: { quotaBytes?: number; log?: FilesLog } = {}) {
+export function createFiles(
+  runtime: Runtime,
+  bytes: FileBytes,
+  options: {
+    quotaBytes?: number;
+    log?: FilesLog;
+    /** Reads a file's generation details in the details transaction. Undefined leaves `generation` out of details. */
+    generation?: (
+      tx: AuthorizationTransaction,
+      actor: HumanActor,
+      workspaceId: string,
+      fileId: string,
+    ) => Promise<FileGeneration | null | undefined>;
+  } = {},
+) {
   const quota = z
     .number()
     .int()
@@ -1104,11 +1120,14 @@ export function createFiles(runtime: Runtime, bytes: FileBytes, options: { quota
       const { item, role } = await access(tx, actor, id);
       const path = await readablePath(tx, actor, item.parent_id);
       const [owner] = await activeMembers(tx, [item.creator_membership_id]);
+      const generation =
+        item.kind === 'file' && options.generation ? await options.generation(tx, actor, workspaceId, id) : undefined;
       return {
         item: metadata(item, role),
         owner: owner ?? null,
         path,
         pathRestricted: (path.length ? path[0]?.parentId : item.parent_id) !== null,
+        ...(generation === undefined ? {} : { generation }),
       };
     });
   }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { imageGenerationOffered } from './image-generation.ts';
 import type { FileReadReceipt, GoogleFileReadReceipt } from '@tulipfarm/access/source-dependencies';
 import {
   AccessDenied,
@@ -768,6 +769,7 @@ export function createTaskRuntime(
         personalMemory,
         ...(catalog ? { mcp: catalog.model } : {}),
         ...(materializing?.content ? { files: materializing.content } : {}),
+        ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
       });
       const timeoutMs = Math.min(47000, task.limits.activeMilliseconds - Number(task.activeMilliseconds));
       const claim = await claimAttempt(tx, model, workspaceId, generation, input, {

@@ -75,6 +75,7 @@ import { useConversationStream } from './use-conversation-stream';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
+import { ImageCards } from './image-cards';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
 import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
@@ -434,19 +435,6 @@ function ConversationDetail({
   const composerInput = useRef<RichTextEditorHandle>(null);
   const canvas = useCanvas();
   const appliedComposer = useRef<string | null>(null);
-  useEffect(() => {
-    const request = canvas.composerRequest;
-    if (!request || appliedComposer.current === request.id) return;
-    appliedComposer.current = request.id;
-    const prompt = textDocument(request.prompt);
-    setContent(current => ({
-      ...current,
-      doc: { ...current.doc, content: [...prompt.doc.content, ...(current.doc.content ?? [])] },
-    }));
-    if (window.matchMedia('(max-width: 767px)').matches) canvas.setOpen(false);
-    composerInput.current?.focus();
-    canvas.consumeComposer(request.id);
-  }, [canvas.composerRequest, canvas.consumeComposer]);
   const appliedPrefill = useRef<NewChatPrefill['source'] | null>(null);
   const [skillHandoffError, setSkillHandoffError] = useState('');
   useEffect(() => {
@@ -473,6 +461,32 @@ function ConversationDetail({
   }, [prefill, text, onPrefillApplied]);
   const uploads = useConversationAttachments(api, chatId);
   const mentions = useRichFileMentions(draft ? 'new' : chatId, validContent, composerInput);
+  useEffect(() => {
+    const request = canvas.composerRequest;
+    if (!request || appliedComposer.current === request.id) return;
+    appliedComposer.current = request.id;
+    const files = request.files.length ? mentions.attach(request.files) : [];
+    const chips = (files ?? []).flatMap(file => [
+      { type: 'fileReference' as const, attrs: { source: file.source, id: file.id } },
+      { type: 'text' as const, text: ' ' },
+    ]);
+    const paragraphs =
+      chips.length || request.prompt
+        ? [
+            {
+              type: 'paragraph' as const,
+              content: [...chips, ...(request.prompt ? [{ type: 'text' as const, text: request.prompt }] : [])],
+            },
+          ]
+        : [];
+    setContent(current => ({
+      ...current,
+      doc: { ...current.doc, content: [...paragraphs, ...(current.doc.content ?? [])] },
+    }));
+    if (window.matchMedia('(max-width: 767px)').matches) canvas.setOpen(false);
+    composerInput.current?.focus();
+    canvas.consumeComposer(request.id);
+  }, [canvas.composerRequest, canvas.consumeComposer]);
   const skills = useRichSkillPicker(workspace.id, composerInput, privateChat || (draft && !sharedChat));
   useEffect(() => {
     if (!prefill?.skill || sharedChat) return;
@@ -1806,6 +1820,11 @@ function ConversationTools({
             disabled={githubLocked}
             picked={pickGitHub}
           />
+        ))}
+      {message.tools
+        .filter(tool => tool.images?.length)
+        .map(tool => (
+          <ImageCards key={`images:${tool.id}`} workspaceId={workspace.id} slug={slug} images={tool.images!} />
         ))}
       {message.tools.some(tool => tool.status === 'completed' && (tool.fileId || tool.fileIds?.length)) && (
         <section aria-label="Files created in this reply" className="flex flex-col gap-2">

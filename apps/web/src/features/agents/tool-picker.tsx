@@ -7,6 +7,7 @@ import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { useFlag } from '@/lib/feature-flags';
 import { toolLabels } from './labels';
 
 export type ToolName = ReturnType<typeof toolNameSchema.parse>;
@@ -24,6 +25,7 @@ export const changingTools = new Set<ToolName>([
   'mcp.call',
   'skills.execute',
   'agents.task.start',
+  'images.generate',
 ]);
 export const suggestedTools: readonly ToolName[] = [
   'tables.list',
@@ -118,7 +120,9 @@ export function AgentToolPicker({
       ...value.filter(tool => !tools.includes(tool) || next.includes(tool)),
       ...next.filter(tool => !value.includes(tool)),
     ]);
+  const images = useFlag('images');
   const matches = (tool: ToolName, app: string) =>
+    (images || tool !== 'images.generate' || value.includes(tool)) &&
     `${app} ${toolLabels[tool]} ${agentToolRuntimeDescription(tool)}`
       .toLowerCase()
       .includes(search.trim().toLowerCase());

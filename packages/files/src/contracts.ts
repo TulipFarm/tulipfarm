@@ -178,11 +178,26 @@ export const fileSuggestionsPageSchema = z.object({
   next: uuidSchema.nullable(),
 });
 export type FileSuggestionsPage = z.infer<typeof fileSuggestionsPageSchema>;
+/** How a generated image was made, as one reader may see it: sources the reader can't read now are only counted. */
+export const fileGenerationSchema = z.object({
+  prompt: z.string(),
+  imageModelId: z.string(),
+  catalogRevision: z.string().nullable(),
+  origin: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('turn'), conversationId: uuidSchema, turnId: uuidSchema }),
+    z.object({ kind: z.literal('run'), runId: uuidSchema }),
+  ]),
+  sources: z.array(z.object({ kind: z.literal('file'), id: uuidSchema })),
+  hiddenSources: z.number().int().nonnegative(),
+});
+export type FileGeneration = z.infer<typeof fileGenerationSchema>;
 export const fileDetailsSchema = z.object({
   item: fileSummarySchema,
   owner: filePersonSchema,
   path: z.array(fileSummarySchema),
   pathRestricted: z.boolean(),
+  /** Present only when image generation is on for the workspace; null for a file that was not generated. */
+  generation: fileGenerationSchema.nullable().optional(),
 });
 export type FileDetails = z.infer<typeof fileDetailsSchema>;
 export const fileDirectorySchema = z.object({

@@ -7,7 +7,7 @@ import { renameLegacyToolCall } from '@tulipfarm/conversations/tool-activity';
 import type { ConversationPlanning } from '@tulipfarm/conversations/runtime';
 import { z } from 'zod';
 import { observeTool, type ToolObservation, type ToolOutcome, type ToolRuntime } from '@tulipfarm/observability';
-import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
+import { AccessDenied, type AuthorizationTransaction, type HumanActor, type SourceDependency } from '@tulipfarm/access';
 import { createAgentRecordTools } from './record-tools.ts';
 import { createRecordBatchSchema, rowsListModelSchema, toolCallSchema } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
@@ -63,13 +63,13 @@ import {
   type AttachmentReader,
   type TurnFiles,
 } from '@tulipfarm/conversations/turn-files';
+import { generateImagesCallSchema } from '@tulipfarm/conversations/image-contracts';
 import {
   generateImageOutputs,
-  generateImagesCallSchema,
+  type ImageGenerator,
+  type ImageModelChoice,
   type ImageOutputStore,
 } from '@tulipfarm/conversations/image-outputs';
-import { pinnedImageModels } from '@tulipfarm/conversations/turn-image-models';
-import { pinnedImageChoice } from './image-generation.ts';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
@@ -578,10 +578,12 @@ export type ChatToolsOptions = {
 export type ChatImages = {
   files: ImageOutputStore;
   attachments: AttachmentReader;
-  turnFiles: Pick<TurnFiles, 'pin'>;
-  /** The family answering the turn, used to pin a turn admitted without a pin. */
-  familyId: string;
   autonomous: boolean;
+  /** The turn's pinned image model and its provider call. */
+  choose(
+    tx: AuthorizationTransaction,
+    turnId: string,
+  ): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
 };
 /** What `files.read` reads with: Files, Google Drive and the images reader of the workspace. */
 export type ChatFiles = {
@@ -1135,12 +1137,7 @@ export function createChatTools(
         const origin = context.origin;
         const transaction = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
           withHuman(runtime, workspaceId, actor, 'write', operation);
-        const { model, generate } = await transaction(async tx =>
-          pinnedImageChoice(
-            tx,
-            await pinnedImageModels(tx, origin.turnId, images.familyId, images.turnFiles),
-          ),
-        );
+        const { model, generate } = await transaction(tx => images.choose(tx, origin.turnId));
         return generateImageOutputs(
           { files: images.files, attachments: images.attachments, transaction },
           {

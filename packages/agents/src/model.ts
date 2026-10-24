@@ -60,6 +60,8 @@ export const agentModelInputSchema = z
     procedures: resolvedProceduresSchema.optional(),
     task: z.literal(true).optional(),
     runtime: z.literal('slackChannel').optional(),
+    /** Offers `images.generate` when the agent lists it; set only while the images flag is on. */
+    images: z.literal(true).optional(),
     personalMemory: z
       .strictObject({
         content: z.string().refine(value => Array.from(value).length <= 16000),
@@ -128,6 +130,7 @@ export function modelNativeTools(input: ModelInput) {
     : runtimeTools
       ? input.definition.tools.filter(tool => runtimeTools.has(tool))
       : [...input.definition.tools];
+  if (!input.images) allowed.splice(0, allowed.length, ...allowed.filter(tool => tool !== 'images.generate'));
   if (
     (input.definition.skills?.length ?? 0) > 0 &&
     !allowed.includes('skills.read') &&

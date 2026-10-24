@@ -82,6 +82,13 @@ import { createAgentTasks } from './tasks.ts';
 import { withTaskTelemetry } from './task-telemetry.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { skillExecutionResultSchema } from './skill-execution-contracts.ts';
+import { imageGenerationOffered } from './image-generation.ts';
+import {
+  generateImageOutputs,
+  type ImageGenerator,
+  type ImageModelChoice,
+  type ImageOutputStore,
+} from '@tulipfarm/conversations/image-outputs';
 
 export { createAgentStore } from './store.ts';
 export { toolCallSchema, executionIdsSchema } from './contracts.ts';
@@ -100,6 +107,13 @@ type Options = {
   externalGuard?: ExternalRunGuard | undefined;
   internalActivity?: (transaction: Transaction, ids: ExecutionIds) => Promise<void>;
   knowledge?: KnowledgeToolsFactory | undefined;
+  /** Generates images for `images.generate` in runs; without it, the call is refused. */
+  images?: RunImages | undefined;
+};
+/** What runs generate images with. The model is the one pinned on the run at admission. */
+export type RunImages = {
+  files: ImageOutputStore;
+  choose(tx: Transaction, runId: string): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
 };
 const callRowSchema = z.object({
   id: z.uuid(),
@@ -476,6 +490,56 @@ export function createAgentExecutor(options: Options) {
                     [ids.runId],
                   );
                   return 'completed';
+                }
+                if (row.call.tool === 'images.generate') {
+                  if (!options.images || !(await imageGenerationOffered(ids.workspaceId, definition.tools)))
+                    throw new AccessDenied();
+                  if (row.status === 'completed' || row.status === 'failed' || row.status === 'blocked')
+                    return row.status;
+                  if (
+                    (
+                      await transaction.client.query(
+                        `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id=$1 AND sequence<$2 AND status NOT IN ('completed','failed','blocked')`,
+                        [ids.runId, row.sequence],
+                      )
+                    ).rowCount
+                  )
+                    return 'waiting';
+                  const owner = z.object({ user_id: z.string(), membership_id: z.uuid() }).parse(
+                    (
+                      await transaction.client.query(
+                        `SELECT m.user_id,m.id AS membership_id FROM ${relation(transaction, 'tf_agent_runs')} r
+            LEFT JOIN ${relation(transaction, 'tf_agent_schedules')} s ON s.id=r.schedule_id JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,s.sponsor_membership_id,r.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
+                        [ids.runId],
+                      )
+                    ).rows[0],
+                  );
+                  // A task's images count against its credit allowance, in its flow; other runs bill in their own.
+                  const task = binding
+                    ? z
+                        .object({ flow_id: z.uuid(), limits: z.object({ credits: z.number().int().nonnegative() }) })
+                        .parse(
+                          (
+                            await transaction.client.query(
+                              `SELECT flow_id,limits FROM ${relation(transaction, 'tf_agent_tasks')} WHERE id=$1`,
+                              [binding.task_id],
+                            )
+                          ).rows[0],
+                        )
+                    : null;
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status='waiting' WHERE id=$1`,
+                    [ids.callId],
+                  );
+                  return {
+                    call: row.call,
+                    actor: { kind: 'human' as const, userId: owner.user_id, membershipId: owner.membership_id },
+                    images: {
+                      agentId: run.agent_id,
+                      flowId: task?.flow_id ?? ids.runId,
+                      allowanceCredits: task ? String(task.limits.credits) : undefined,
+                    },
+                  };
                 }
                 if (row.call.tool === 'skills.execute' || row.call.tool === 'skills.files.read') {
                   const call = row.call;
@@ -994,6 +1058,56 @@ export function createAgentExecutor(options: Options) {
                 );
             });
             return status;
+          }
+          if (outcome.call.tool === 'images.generate') {
+            const call = outcome.call,
+              actor = outcome.actor;
+            const billing = 'images' in outcome ? outcome.images : undefined;
+            if (!options.images || actor.kind !== 'human' || !billing) throw new AccessDenied();
+            const images = options.images;
+            // Every generation write re-checks that the run and this call are still live.
+            const transaction = <T>(operation: (tx: Transaction) => Promise<T>) =>
+              runtime.transaction(ids.workspaceId, agentCompatibility, async tx => {
+                await lockAuthorization(tx);
+                await requireExternalRun(tx, ids.workspaceId, ids.runId, options.externalGuard);
+                if (!(await work.live(tx))) throw new AccessDenied();
+                return operation(tx);
+              });
+            const chosen = await transaction(async tx => images.choose(tx, ids.runId));
+            const result = await generateImageOutputs(
+              { files: images.files, transaction },
+              {
+                workspaceId: ids.workspaceId,
+                actor,
+                // No person asked for this in a private chat, so images go only to a folder the call names.
+                autonomous: true,
+                origin: { kind: 'run', runId: ids.runId },
+                model: chosen.model,
+                generate: chosen.generate,
+                credits: {
+                  flowId: billing.flowId,
+                  activity: 'agent',
+                  agentId: billing.agentId,
+                  allowanceCredits: billing.allowanceCredits,
+                },
+              },
+              call,
+            );
+            return transaction(async tx => {
+              await tx.client.query(
+                `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status='completed',result=$2 WHERE id=$1 AND status='waiting'`,
+                [ids.callId, JSON.stringify(toolResultSchema.parse(result))],
+              );
+              await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_runs')} SET status='running' WHERE id=$1`, [
+                ids.runId,
+              ]);
+              if (work.reserved)
+                await tx.client.query(
+                  `INSERT INTO ${relation(tx, 'tf_agent_task_action_receipts')} (call_id,status) VALUES ($1,'completed') ON CONFLICT DO NOTHING`,
+                  [ids.callId],
+                );
+              return 'completed' as const;
+            });
           }
           if (outcome.call.tool === 'skills.execute' || outcome.call.tool === 'skills.files.read') {
             const call = outcome.call,
@@ -1546,6 +1660,7 @@ export function createAgentExecutor(options: Options) {
         if (owner.userId !== human.userId || owner.membershipId !== human.membershipId) throw new AccessDenied();
         return { status: row.status, result: row.result };
       }
+      if (row.call.tool === 'images.generate') return { status: row.status, result: row.result };
       if (row.call.tool === 'skills.execute' || row.call.tool === 'skills.files.read') {
         const output = skillExecutionResultSchema.safeParse(row.result);
         if (output.success) await requireDraftSources(transaction, human, output.data.sources);

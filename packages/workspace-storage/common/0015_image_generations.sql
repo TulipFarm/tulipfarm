@@ -26,3 +26,8 @@ CREATE INDEX tf_image_generations_origin ON {{schema}}.tf_image_generations (ori
 REVOKE ALL ON {{schema}}.tf_image_generations FROM PUBLIC;
 GRANT SELECT, INSERT ON {{schema}}.tf_image_generations TO {{runtime}};
 GRANT UPDATE (state, failure, image_model_id, catalog_revision, updated_at) ON {{schema}}.tf_image_generations TO {{runtime}};
+
+-- Agent, task and workflow runs pin their image models at admission, as chat turns do (0013).
+ALTER TABLE {{schema}}.tf_agent_runs
+  ADD COLUMN image_models jsonb CHECK (image_models IS NULL OR jsonb_typeof(image_models) = 'object');
+GRANT UPDATE (image_models) ON {{schema}}.tf_agent_runs TO {{runtime}};

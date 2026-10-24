@@ -1,4 +1,5 @@
 import { loadModelCatalog } from '@tulipfarm/config';
+import { imageReceipt } from './image-outputs.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
@@ -739,6 +740,16 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   sources: row.sources,
                 }),
                 ...(hidden.size ? {} : { ...createdFile(row), ...skillImportOutput(row) }),
+                ...(!hidden.size && row.tool === 'images.generate'
+                  ? {
+                      images: await imageReceipt(
+                        tx,
+                        { kind: 'turn', conversationId: chatId, turnId: message.turn.id },
+                        row.call,
+                        row.status === 'running',
+                      ),
+                    }
+                  : {}),
                 ...(!hidden.size && row.google_proposal_id ? { googleProposalId: row.google_proposal_id } : {}),
                 ...(!hidden.size && row.row_draft_id ? { rowDraftId: row.row_draft_id } : {}),
               }),

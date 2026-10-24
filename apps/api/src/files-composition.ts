@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { createFiles, type FileBytes } from '@tulipfarm/files';
 import type { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { attachmentLimit } from '@tulipfarm/conversations/attachments';
+import { imageGenerationDetails } from '@tulipfarm/conversations/image-outputs';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerFiles } from './files.ts';
 
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
@@ -44,6 +46,10 @@ export function registerFilesComposition(
 ) {
   const service = createFiles(dependencies.runtime, filesObjectAdapter(dependencies.objects), {
     log: app.log,
+    generation: async (tx, actor, workspaceId, fileId) =>
+      (await isFeatureEnabled('images', null, { id: workspaceId }))
+        ? imageGenerationDetails(tx, actor, fileId)
+        : undefined,
     ...(dependencies.quotaBytes === undefined ? {} : { quotaBytes: dependencies.quotaBytes }),
   });
   registerFiles(app, { auth: dependencies.auth, service, identity: dependencies.identity });

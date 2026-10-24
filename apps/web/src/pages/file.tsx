@@ -25,6 +25,8 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { fileKeys, useFilesApi, useFilesChanges, type FileSummary, type ViewerSearch } from '@/features/files/api';
 import { DetailsDialog } from '@/features/files/details';
+import { GenerationDetails } from '@/features/files/generation';
+import { useFlag } from '@/lib/feature-flags';
 import { copyLink, SharingDialog } from '@/features/files/sharing';
 import { UseInChatDialog } from '@/features/files/use-in-chat';
 import { AddToKnowledgeDialog } from '@/features/files/add-to-knowledge';
@@ -77,6 +79,7 @@ function Viewer({
   const [dialog, setDialog] = useState<'details' | 'share' | 'chat' | 'knowledge' | 'project' | null>(null);
   const [copied, setCopied] = useState<Awaited<ReturnType<typeof copyLink>>>(null);
   const narrow = useIsMobile();
+  const images = useFlag('images');
   const file = read.state.kind === 'ready' && !denied ? read.state.data : null;
   const deny = () => {
     saving.current?.abort();
@@ -372,6 +375,7 @@ function Viewer({
           />
         )}
       </section>
+      {images && <GenerationDetails api={api} fileId={item.id} workspaceSlug={workspaceSlug} />}
     </Page>
   );
 }

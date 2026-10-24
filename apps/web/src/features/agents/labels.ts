@@ -42,6 +42,7 @@ export const toolLabels: Record<ReturnType<typeof toolNameSchema.parse>, string>
   'knowledge.search': 'Search knowledge',
   'knowledge.read': 'Read knowledge sources',
   'knowledge.retrieve': 'Search and read grouped knowledge',
+  'images.generate': 'Generate images',
 };
 
 const permissionWords: Record<string, string> = {

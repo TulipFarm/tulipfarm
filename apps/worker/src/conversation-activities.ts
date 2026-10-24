@@ -65,6 +65,8 @@ import { compactionDefaults } from '@tulipfarm/config/compaction';
 import { withFileSources, type FileContent, type GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
+import { pinnedImageModels } from '@tulipfarm/conversations/turn-image-models';
+import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -288,9 +290,9 @@ export function meteredReply(
           ? {
               files: { ...outputs, read: outputs.read },
               attachments: chatFiles.turnFiles.attachments,
-              turnFiles: chatFiles.turnFiles,
-              familyId: model,
               autonomous: !requester,
+              choose: async (tx, turnId) =>
+                pinnedImageChoice(tx, await pinnedImageModels(tx, turnId, model, chatFiles.turnFiles)),
             }
           : undefined,
     });

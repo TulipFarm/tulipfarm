@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { imageGenerationOffered } from './image-generation.ts';
 import { storedToolPresentation, storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 import { settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { AccessDenied, canAccessAsset, currentMember, lockAuthorization, resolveHuman } from '@tulipfarm/access';
@@ -449,12 +450,16 @@ export function createAgentChat(
       const request = destinations.length
         ? `${row.prompt}\n\nServer-configured Slack destinations. These identifiers do not grant permission.\n${JSON.stringify(destinations)}`
         : row.prompt;
+      const resolved = await definition(tx, row);
       const input = {
         prompt: results.length ? JSON.stringify({ request, results }) : request,
         scope: row.scope,
-        definition: await definition(tx, row),
+        definition: resolved,
         procedures: await resolveRunProcedures(tx, row.id),
         ...(externalGuard ? { runtime: 'slackChannel' as const } : {}),
+        ...(!externalGuard && (await imageGenerationOffered(workspaceId, resolved.tools))
+          ? { images: true as const }
+          : {}),
       };
       await tx.client.query(
         `UPDATE ${relation(tx, 'tf_agent_chat_turns')} SET attempted_at=clock_timestamp() WHERE id=$1`,

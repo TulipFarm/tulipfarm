@@ -22,6 +22,7 @@ import { AgentError } from './saved-contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import type { ModelRouteHealth } from './model-health.ts';
 import { modelAvailability } from './model-availability.ts';
+import { pinRunImageModels } from './image-generation.ts';
 import { CreditsExhausted, requireCredits, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 
@@ -183,6 +184,7 @@ export async function admitGeneration(
       amount.parse(await config.budgetPicoUsd(workspaceId)),
     ],
   );
+  await pinRunImageModels(tx, runId, primary.familyId);
 }
 
 export async function latestGeneration(tx: AgentTransaction, runId: string) {

@@ -271,6 +271,16 @@ export const displayPartSchema = z.discriminatedUnion('kind', [
   compactCommandPartSchema,
   compactionPartSchema,
 ]);
+export const imageReceiptSchema = z.array(
+  z.object({
+    index: z.number().int().min(0).max(3),
+    /** Also the saved file's id. */
+    id: uuidSchema,
+    state: z.enum(['pending', 'saved', 'refused', 'failed', 'cancelled']),
+  }),
+);
+/** One card per image of an `images.generate` call in a chat. */
+export type ImageReceipt = z.infer<typeof imageReceiptSchema>;
 export const toolReceiptSchema = z.object({
   id: uuidSchema,
   tool: z.string(),
@@ -290,6 +300,8 @@ export const toolReceiptSchema = z.object({
   workflows: z.array(workflowReferenceSchema).optional(),
   /** The final sub-agent cards and reports of an `agents.delegate` call. */
   subagents: subagentResultSchema.optional(),
+  /** One entry per image of an `images.generate` call, pending until it is saved, refused, failed or cancelled. */
+  images: imageReceiptSchema.optional(),
 });
 /** Stops one sub-agent of a running `agents.delegate` call. `id` is the call's receipt ID. */
 export const stopSubagentSchema = z.strictObject({ id: uuidSchema, key: subagentCardSchema.shape.key });

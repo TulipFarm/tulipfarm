@@ -195,7 +195,11 @@ async function run() {
       : undefined;
     const skillClient = configuredSkillClient();
     const agents = guarded
-      ? createAgentComposition(guarded, chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined)
+      ? createAgentComposition(
+          guarded,
+          chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined,
+          chatObjects ? createFiles(guarded, chatObjects) : undefined,
+        )
       : undefined;
     const skillImports =
       guarded && chatObjects

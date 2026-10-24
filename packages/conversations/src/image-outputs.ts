@@ -10,7 +10,7 @@ import {
   type ServedImageModel,
 } from '@tulipfarm/config';
 import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
-import { imagePresetNames, imagePresets, sniffMediaType } from '@tulipfarm/media';
+import { imagePresets, sniffMediaType } from '@tulipfarm/media';
 import {
   CreditsExhausted,
   creditUnitsForProviderCost,
@@ -19,29 +19,15 @@ import {
 } from '@tulipfarm/workspace-storage/credits';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
+import type { ImageReceipt } from './contracts.ts';
+import { generateImagesCallSchema, imagesPerOrigin } from './image-contracts.ts';
+
+export { generateImagesCallSchema, imagesPerOrigin };
 import type { FileOutputStore } from './file-outputs.ts';
 import type { AttachmentReader } from './turn-files.ts';
 
-/** Most images one turn or run may generate, across all of its calls. */
-export const imagesPerOrigin = 8;
-const maximumSources = 4;
 const staleClaimMs = 10 * 60 * 1000;
 
-export const generateImagesCallSchema = z.strictObject({
-  tool: z.literal('images.generate'),
-  prompt: z.string().min(1).max(4000).describe('What to draw, or for an edit, what to change in the sources'),
-  count: z.number().int().min(1).max(4).default(1).describe('How many images, 1 to 4'),
-  aspect: z.enum(imageAspects).optional().describe('square, portrait or landscape; square when neither is given'),
-  preset: z.enum(imagePresetNames).optional().describe('A named destination such as instagram-feed, instead of aspect'),
-  quality: z.enum(imageQualities).default('standard'),
-  name: z.string().min(1).max(120).optional().describe('File name without extension'),
-  folderId: z.uuid().optional().describe('Files folder to save into'),
-  sources: z
-    .array(z.uuid())
-    .max(maximumSources)
-    .optional()
-    .describe('attachment-id or file-id of images to edit or combine; makes this call an edit'),
-});
 export type GenerateImagesCall = z.input<typeof generateImagesCallSchema>;
 
 /** The turn or run an image belongs to. A turn's images may use the chat's attachments as sources. */
@@ -665,4 +651,40 @@ export async function imageGenerationDetails(
     sources,
     hiddenSources: row.sources.length - sources.length,
   };
+}
+
+/**
+ * The current state of each image of one `images.generate` call of a turn, read from its generation rows. While the
+ * call runs, images without a row yet are pending, so every image shows before generation starts.
+ */
+export async function imageReceipt(
+  tx: AuthorizationTransaction,
+  origin: Extract<ImageOrigin, { kind: 'turn' }>,
+  storedCall: unknown,
+  running: boolean,
+): Promise<ImageReceipt | undefined> {
+  const parsed = generateImagesCallSchema.safeParse(storedCall);
+  if (!parsed.success) return undefined;
+  if ((await tx.client.query(`SELECT to_regclass($1) AS present`, [generationsTable(tx)])).rows[0]?.present === null)
+    return undefined;
+  const hash = imageCallHash(parsed.data);
+  const ids = Array.from({ length: parsed.data.count }, (_, index) => imageOutputId(origin, hash, index));
+  const stored = new Map(
+    z
+      .array(z.object({ id: z.uuid(), state: z.enum(['pending', 'saved', 'refused', 'failed', 'cancelled']) }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT id,state FROM ${generationsTable(tx)} WHERE id=ANY($1::uuid[]) AND origin_kind='turn' AND origin_id=$2`,
+            [ids, origin.turnId],
+          )
+        ).rows,
+      )
+      .map(row => [row.id, row.state]),
+  );
+  const images = ids.flatMap((id, index) => {
+    const state = stored.get(id) ?? (running ? 'pending' : undefined);
+    return state ? [{ index, id, state }] : [];
+  });
+  return images.length ? images : undefined;
 }

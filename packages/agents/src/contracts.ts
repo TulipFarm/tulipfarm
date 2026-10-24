@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { skillIdSchema, skillResourceSchema } from './skill-ids.ts';
 import { publicWebResultSchema } from '@tulipfarm/conversations/public-web';
+import { generateImagesCallSchema } from '@tulipfarm/conversations/image-contracts';
 import { assetPermissionSchema, uuidSchema } from '@tulipfarm/access/contracts';
 import { issueResultSchema } from '@tulipfarm/integrations/contracts';
 import { recordQuerySchema, revisionSchema } from '@tulipfarm/tables/definition';
@@ -156,6 +157,7 @@ export const publicWebCallSchema = z.discriminatedUnion('tool', [
   }),
 ]);
 export const toolCallSchema = z.discriminatedUnion('tool', [
+  generateImagesCallSchema,
   skillExecutionCallSchema,
   skillFileCallSchema,
   ...githubTaskCallSchema.options,
