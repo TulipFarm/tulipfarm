@@ -74,7 +74,11 @@ function memoryBytes() {
     objects,
     /** While set, every write fails as an unavailable object store does. */
     failing: false,
+    puts: 0,
+    /** Runs before every write with its 1-based call number, to hold or fail particular writes. */
+    beforePut: async () => {},
     putIfAbsent: async (key, body) => {
+      await store.beforePut(++store.puts);
       if (store.failing) throw new Error('chat-object-write-unavailable');
       if (!objects.has(key)) objects.set(key, Buffer.from(body));
     },
@@ -361,6 +365,51 @@ test('a Slack download that never finishes does not delay admission for the work
   assert.ok(Date.now() - started < 3000);
   assert.equal(f.downloads.length, 0, 'admission itself downloads nothing');
   assert.equal(await f.admitted(textEvent), true);
+});
+
+test('an overlapping run for the same file DM never leaves an attachment whose bytes are gone', async t => {
+  const f = await setup(t);
+  const notes = { ...whiteboard, id: 'F2', name: 'notes.png', url_private: `${fileUrl}-2` };
+  f.served.set(whiteboard.url_private, await png(32, 24));
+  f.served.set(notes.url_private, await png(24, 32));
+  const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard, notes]));
+  const admission = await f.dm.admitPending(f.workspace.id);
+  assert.deepEqual(admission.files, [{ workspaceId: f.workspace.id, eventId }]);
+  const [work] = admission.files;
+  let failFirst, firstStuck;
+  const firstAtSecondFile = new Promise(resolve => (firstStuck = resolve));
+  let first;
+  f.bytes.beforePut = async call => {
+    if (call === 2) {
+      firstStuck();
+      await new Promise(resolve => (failFirst = resolve));
+      throw new Error('chat-object-write-unavailable');
+    }
+    if (call === 4) {
+      failFirst();
+      await first.catch(() => {});
+    }
+  };
+  first = f.dm.admitFiles(work);
+  await firstAtSecondFile;
+  const later = await f.dm.admitFiles(work);
+  await assert.rejects(first, /chat-object-write-unavailable/);
+  assert.equal(later, true, 'the later run admits the message');
+  const attachments = (
+    await f.db.platform.query(
+      `SELECT a.filename,a.object_key FROM ${f.table('tf_conversation_parts')} p JOIN ${f.table('tf_conversation_attachments')} a ON a.id=p.attachment_id WHERE p.message_id=$1 ORDER BY p.ordinal`,
+      [eventId],
+    )
+  ).rows;
+  assert.deepEqual(
+    attachments.map(row => [row.filename, f.bytes.objects.has(`${f.workspace.id}/${row.object_key}`)]),
+    [
+      ['whiteboard.png', true],
+      ['notes.png', true],
+    ],
+    'every attachment of the message has its bytes',
+  );
+  assert.equal(f.bytes.objects.size, 2, 'the failed run left no bytes behind');
 });
 
 test('a file the workspace has no room for leaves no stored bytes behind', async t => {
