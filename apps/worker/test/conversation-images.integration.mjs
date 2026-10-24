@@ -293,14 +293,17 @@ test('a refused credit reservation leaves a gap for that page and the rest of th
   const file = { name: 'notes.pdf', mediaType: 'application/pdf', bytes: await mediaPdf(['text', 'scan', 'text']) };
   const refused = await (await taskFileExtraction(f.runtime)(scope))(file);
   assert.equal(f.recognitions.length, 0, 'no provider call is made without a reservation');
-  assert.match(refused.text, /^1 image or page in this file could not be recognised \(recognition-unavailable\)/);
+  assert.match(
+    refused.text,
+    /^1 image or page in this file was not read \(no credits or recognition was unavailable\)\./,
+  );
   assert.match(refused.text, /\[page 1\]\n## Page 1 notes on the orchard/);
   assert.match(refused.text, /\[page 3\]\n## Page 3 notes on the orchard/);
 
   await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=$1`, [funded]);
   const read = await (await taskFileExtraction(f.runtime)(scope))(file);
   assert.equal(f.recognitions.length, 1, 'with credits the same page is recognised');
-  assert.doesNotMatch(read.text, /could not be recognised/);
+  assert.doesNotMatch(read.text, /in this file was not read/);
   assert.match(read.text, new RegExp(recognisedText));
 });
 

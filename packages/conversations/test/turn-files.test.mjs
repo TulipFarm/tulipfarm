@@ -108,9 +108,7 @@ test('a failed image recognition keeps the document text and names the failed im
       ['page 2', '## Page 2 notes on the orchard.'],
     ],
   );
-  assert.deepEqual(read.notes, [
-    '1 image or page in this file could not be recognised because the image reader failed; their content was not read.',
-  ]);
+  assert.deepEqual(read.notes, ['1 image or page in this file was not read (recognition failed).']);
 });
 
 test('the type comes from the bytes: audio is a reason, ZIP is a listing, Word is text', async () => {
@@ -289,6 +287,6 @@ test('a page whose credit reservation fails is a gap and the rest of the file is
   assert.equal(calls, 3);
   assert.equal(read.segments.filter(segment => segment.text.includes('[Recognised image]')).length, 2);
   assert.deepEqual(read.notes, [
-    '1 image or page in this file could not be recognised (recognition-unavailable); their content was not read.',
+    '1 image or page in this file was not read (no credits or recognition was unavailable).',
   ]);
 });
