@@ -3,12 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { shippedModelCatalogPath } from '@tulipfarm/config';
+import { registerExtension } from '@tulipfarm/extensions';
+import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
 import { png } from '../../../packages/memory-core/test/fixtures/parser-media.mjs';
 import { promptFixture } from '../../../packages/slack/test/link-prompts.integration.mjs';
 import { createSlackDirectMessages } from '../../../packages/slack/src/direct-messages.ts';
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { localWeb, send } from './local-web-fixture.mjs';
 import { anthropicText, completionReply, isCompletionRequest, isTitleRequest } from './native-chat-fixture.mjs';
+
+// The held-for-credits test exhausts the workspace balance, so work is funded from the credit account.
+await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
 
 const shipped = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
 const model = id => shipped.models.find(entry => entry.id === id);
@@ -65,14 +70,18 @@ async function authorizeDm(f) {
 
 function memoryBytes() {
   const objects = new Map();
-  return {
+  const store = {
     objects,
+    /** While set, every write fails as an unavailable object store does. */
+    failing: false,
     putIfAbsent: async (key, body) => {
+      if (store.failing) throw new Error('chat-object-write-unavailable');
       if (!objects.has(key)) objects.set(key, Buffer.from(body));
     },
     read: async key => Buffer.from(objects.get(key)),
     remove: async key => void objects.delete(key),
   };
+  return store;
 }
 
 /**
@@ -101,9 +110,12 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
   await authorizeDm(f);
   const served = new Map();
   const downloads = [];
+  const slack = { stalled: false };
   const fetcher = async (url, init) => {
     if (new URL(url).hostname !== 'files.slack.com') return f.options.fetcher(url, init);
     downloads.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+    if (slack.stalled)
+      return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
     const body = served.get(url);
     if (!body || new Headers(init?.headers).get('authorization') !== 'Bearer synthetic-bot-token')
       return new Response('<html>sign in</html>', { headers: { 'content-type': 'text/html' } });
@@ -138,10 +150,27 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
     { attachments: bytes, snapshots: bytes },
     undefined,
   );
+  const failures = [];
+  /**
+   * One dispatch pass as the worker runs it: held messages are admitted, and each message with files is admitted by its
+   * own activity, whose failure is the activity's alone.
+   */
+  async function admit() {
+    let staging = [];
+    try {
+      staging = (await dm.admitPending(f.workspace.id)) ?? [];
+    } catch (error) {
+      failures.push(error);
+    }
+    for (const work of staging) await dm.admitFiles(work).catch(error => failures.push(error));
+  }
+  const admitted = async eventId =>
+    (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_slack_dm_events')} WHERE event_id=$1`, [eventId]))
+      .rowCount === 1;
   /** Receives one DM, admits it and runs its reply as the worker does, returning the chat requests and the turn. */
   async function receive(extra) {
     const eventId = await f.event('UPERSON', 'DONE', extra);
-    await dm.admitPending(f.workspace.id);
+    await admit();
     const admitted = (
       await f.db.platform.query(
         `SELECT conversation_id,turn_id FROM ${f.table('tf_slack_dm_events')} WHERE event_id=$1`,
@@ -166,7 +195,7 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
     ).rows;
     return { requests: requests.slice(from), parts };
   }
-  return { ...f, served, downloads, recognitions, bytes, receive };
+  return { ...f, dm, served, downloads, slack, recognitions, bytes, failures, admit, admitted, receive };
 }
 
 const fileShare = (files, text = '') => ({ text, subtype: 'file_share', files });
@@ -288,4 +317,64 @@ test('with images off a file share is unchanged: named by its metadata, nothing 
     1,
     'a metadata line is text, so the legacy path admits it as before',
   );
+});
+
+test('a file DM held because credits ran out is not downloaded again on later passes', async t => {
+  const f = await setup(t);
+  f.served.set(fileUrl, await png(32, 24));
+  await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=0`);
+  const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
+  for (let pass = 0; pass < 3; pass++) await f.admit();
+  assert.equal(await f.admitted(eventId), false, 'the message waits for credits');
+  assert.equal(f.downloads.length, 0, 'a held message is not downloaded while it waits');
+  assert.equal(f.bytes.objects.size, 0);
+  await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=granted`);
+  await f.admit();
+  assert.equal(await f.admitted(eventId), true);
+  assert.equal(f.downloads.length, 1);
+});
+
+test('a file DM whose bytes cannot be stored does not hold up a later text DM', async t => {
+  const f = await setup(t);
+  f.served.set(fileUrl, await png(32, 24));
+  f.bytes.failing = true;
+  const fileEvent = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
+  const textEvent = await f.event('UPERSON', 'DONE', { text: 'Anything new?' });
+  await f.admit();
+  assert.equal(await f.admitted(textEvent), true, 'the text DM is admitted');
+  assert.equal(await f.admitted(fileEvent), false);
+  assert.ok(f.failures.length > 0, 'the staging failure is reported');
+  f.bytes.failing = false;
+  await f.admit();
+  assert.equal(await f.admitted(fileEvent), true, 'the file DM is admitted once storage is back');
+});
+
+test('a Slack download that never finishes does not delay admission for the workspace', async t => {
+  const f = await setup(t);
+  f.slack.stalled = true;
+  await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
+  const textEvent = await f.event('UPERSON', 'DONE', { text: 'Anything new?' });
+  const started = Date.now();
+  const pass = f.dm.admitPending(f.workspace.id);
+  const timer = new Promise(resolve => setTimeout(resolve, 3000, 'stalled'));
+  assert.notEqual(await Promise.race([pass, timer]), 'stalled', 'admission finishes without waiting on Slack');
+  assert.ok(Date.now() - started < 3000);
+  assert.equal(f.downloads.length, 0, 'admission itself downloads nothing');
+  assert.equal(await f.admitted(textEvent), true);
+});
+
+test('a file the workspace has no room for leaves no stored bytes behind', async t => {
+  const f = await setup(t);
+  f.served.set(fileUrl, await png(32, 24));
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_skill_package_objects')} (digest,size) SELECT encode(sha256(i::text::bytea),'hex'),10485760 FROM generate_series(1,103) i`,
+  );
+  const { parts } = await f.receive(fileShare([whiteboard]));
+  assert.deepEqual(
+    parts.map(part => part.kind),
+    ['text'],
+  );
+  assert.match(parts[0].text, /File not read: whiteboard.png; the workspace's attachment storage is full/);
+  assert.equal(f.downloads.length, 1);
+  assert.equal(f.bytes.objects.size, 0, 'the staged bytes were removed');
 });
