@@ -677,6 +677,9 @@ importers:
       pg:
         specifier: 8.23.0
         version: 8.23.0
+      undici:
+        specifier: 8.7.0
+        version: 8.7.0
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -7286,6 +7289,10 @@ packages:
     resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
     engines: {node: '>=20.18.1'}
 
+  undici@8.7.0:
+    resolution: {integrity: sha512-N7iQtfyLhIMOFgQubvmLV26svHpO0bqKnAiWotTQCVKCmWrcGbBotPuW1x+xwYZ2VHdSTVUfPQQnlEt1/LouTQ==}
+    engines: {node: '>=22.19.0'}
+
   unicorn-magic@0.3.0:
     resolution: {integrity: sha512-+QBBXBCvifc56fsbuxZQ6Sic3wqqc3WWaqxs58gvJrcOuN83HGTCwz3oS5phzU9LthRNE9VrJCFCLUgHeeFnfA==}
     engines: {node: '>=18'}
@@ -13480,6 +13487,8 @@ snapshots:
   undici-types@8.9.0: {}
 
   undici@7.30.0: {}
+
+  undici@8.7.0: {}
 
   unicorn-magic@0.3.0: {}
 

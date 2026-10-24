@@ -34,6 +34,7 @@ import {
   type AgentModel,
 } from './model.ts';
 import { readOnlyTools, type FrameworkCall } from './tools.ts';
+import { providerFetch } from './provider-fetch.ts';
 import {
   agentInstructionsPrompt,
   agentToolSystemPrompt,
@@ -891,7 +892,7 @@ export async function inferDecision(
             request = serialized;
             const received = await observeProviderResponse(
               async () => {
-                const response = await fetch(wire.url, {
+                const response = await providerFetch(wire.url, {
                   method: 'POST',
                   headers: wire.headers,
                   body: serialized,
@@ -1897,7 +1898,7 @@ async function sendChatRequest<T>(
       error,
     } = await observeProviderResponse(
       async () => {
-        const response = await fetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
+        const response = await providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
           method: 'POST',
           headers: wire.headers,
           body: serialized,
@@ -2972,7 +2973,7 @@ export async function inferSpecialist(
       return observeInference({ provider: config.provider, model: config.model, operation: 'chat' }, async report => {
         const { response, json } = await observeProviderResponse(
           async () => {
-            const response = await fetch(wire.url, {
+            const response = await providerFetch(wire.url, {
               method: 'POST',
               headers: wire.headers,
               body: serialized,
@@ -3172,7 +3173,7 @@ export async function inferWithSystem(
     return observeInference({ provider: config.provider, model: config.model, operation: 'chat' }, async report => {
       const { response, json } = await observeProviderResponse(
         async () => {
-          const response = await fetch(url, {
+          const response = await providerFetch(url, {
             method: 'POST',
             headers,
             body: serialized,
@@ -3224,7 +3225,7 @@ export async function inferText(
       const serialized = serializeChatRequest(body);
       const { response, json } = await observeProviderResponse(
         async () => {
-          const response = await fetch(url, {
+          const response = await providerFetch(url, {
             method: 'POST',
             headers,
             body: serialized,
