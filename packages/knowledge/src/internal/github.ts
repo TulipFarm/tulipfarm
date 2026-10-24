@@ -86,8 +86,6 @@ const cursorSchema = z.strictObject({
 type Cursor = z.infer<typeof cursorSchema>;
 const initialCursor = (carry: Pick<Cursor, 'marks' | 'reconciledAt' | 'reconcile'> = {}) =>
   cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0, ...carry });
-// Even when webhooks deliver every change, a full pass this often catches missed events and silent deletions.
-const fullReconciliationMs = 24 * 60 * 60_000;
 const later = (a: string | undefined, b: string | undefined) =>
   a === undefined ? b : b === undefined ? a : Date.parse(a) >= Date.parse(b) ? a : b;
 function mergeMark(base: GitHubRepositoryMark | undefined, next: GitHubRepositoryMark | undefined) {
@@ -183,7 +181,8 @@ export type GitHubSyncOptions = {
   concurrency: number;
   // How often a progressing run extends its 15-minute lease.
   leaseRenewMs: number;
-  // How long a source that finished cleanly waits before its next pass; webhooks start it sooner.
+  // How long a source that finished cleanly waits before its next pass; webhooks start it sooner. A full pass is also
+  // due once the last one is this old, so missed events and silent deletions are caught at this pace.
   idleRecheckMs: number;
   sleep: (ms: number) => Promise<void>;
   random: () => number;
@@ -1693,7 +1692,7 @@ export function createGitHubKnowledge({
         cursor.pages === 0 &&
         !cursor.reconcile &&
         cursor.reconciledAt !== undefined &&
-        clock.now() - Date.parse(cursor.reconciledAt) < fullReconciliationMs
+        clock.now() - Date.parse(cursor.reconciledAt) < tuning.idleRecheckMs
           ? 'incremental'
           : 'full';
     const incremental = cursor.mode === 'incremental';

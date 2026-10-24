@@ -1262,7 +1262,7 @@ export const settings: readonly Setting[] = [
     secret: false,
     default: '10',
     description:
-      'Minutes a GitHub Knowledge source waits after a clean sync before it checks GitHub again, 1 to 1440. Webhooks start a sync sooner; this timer only catches events they missed.',
+      'Minutes a GitHub Knowledge source waits after a clean sync before it checks GitHub again, 1 to 1440. Webhooks start a sync sooner. It is also how old the last full pass may get before the next pass is full again, which catches missed events and deletions; at the default every pass is full.',
   },
   {
     name: 'GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS',
