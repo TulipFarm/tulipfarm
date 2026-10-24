@@ -4,14 +4,17 @@ import {
   taskFilesReader,
   taskGoogleFilesReader,
 } from '@tulipfarm/agents/task-runtime';
+import { fetchPublicFile } from '@tulipfarm/agents/web-fetch';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { googleOperations } from './google-composition.ts';
-import { taskFileExtraction } from './turn-files-composition.ts';
+import { taskFileRecognition } from './turn-files-composition.ts';
 import { createTaskProgress, type TaskProgress } from '@tulipfarm/agents/task-progress';
 import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { ModelBundleStore } from '@tulipfarm/agents/model-bundles';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
 import { createFiles } from '@tulipfarm/files';
+import type { GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { workspaceMcpFromEnvironment } from './workspace-mcp-composition.ts';
@@ -28,15 +31,18 @@ export function createTaskComposition(
   mcp: McpExecutionFactory | undefined = workspaceMcpFromEnvironment(),
   knowledge: KnowledgeToolsFactory = createKnowledgeTools({ runtime: storage }),
   bundles?: ModelBundleStore,
+  objects: ReturnType<typeof chatObjectStore> = chatObjectStore(),
 ) {
   const runtime = withKnowledgeSourceAuthorization(storage);
   const environment = modelEnvironment();
   const model = environment?.continuity(createMemoryRouteHealth, bundles) ?? null;
-  const objects = chatObjectStore();
   const attachments = objects ? createAttachments(runtime, objects) : null;
   const files = objects ? createFiles(runtime, objects) : null;
   let google: ReturnType<typeof googleOperations> | undefined;
-  const extraction = taskFileExtraction(runtime);
+  const drive: GoogleFileReader = {
+    fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
+    fileDocument: (...args) => (google ??= googleOperations(runtime)).fileDocument(...args),
+  };
   const tasks = createTaskRuntime(
     runtime,
     model,
@@ -64,12 +70,17 @@ export function createTaskComposition(
     mcp,
     githubTaskTools,
     knowledge,
-    files ? taskFilesReader(files, extraction) : undefined,
-    taskGoogleFilesReader(
-      { fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args) },
-      extraction,
-    ),
+    files ? taskFilesReader(files) : undefined,
+    taskGoogleFilesReader(drive),
     objects ? createSkillExecutionFactory(objects, configuredSkillClient()) : undefined,
+    {
+      enabled: workspaceId => isFeatureEnabled('images', null, { id: workspaceId }),
+      attachments: attachments ?? undefined,
+      files: files ?? undefined,
+      google: drive,
+      recognition: taskFileRecognition(runtime),
+      links: fetchPublicFile,
+    },
   );
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {

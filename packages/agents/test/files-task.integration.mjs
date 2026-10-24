@@ -13,7 +13,6 @@ import { createTaskRuntime, taskFilesReader } from '../src/task-runtime.ts';
 import { createModelRouteHealth } from '../src/model-health.ts';
 import { savedTaskAgent } from './task-fixture.mjs';
 import { createAgentExecutor } from '../src/executor.ts';
-import { recognisingExtract } from '@tulipfarm/conversations/turn-files';
 import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 
 const terms = 'Suppliers are paid within 30 days of delivery.';
@@ -104,7 +103,7 @@ test(
       budgetPicoUsd: () => '10000000000000',
       health: createModelRouteHealth(db.platform, () => 'files-task'),
       infer: async (_resolution, input) => {
-        prompts.push(JSON.parse(input.prompt));
+        prompts.push({ ...JSON.parse(input.prompt), content: input.files });
         return {
           kind: 'success',
           decision: { kind: 'answer', text: 'Within 30 days.' },
@@ -331,22 +330,29 @@ test(
       undefined,
       undefined,
       undefined,
-      taskFilesReader(files, async scope => {
-        scopes.push(scope);
-        return recognisingExtract(
-          {
-            recognizer: {
-              modelId: 'vision',
-              promptVersion: 'media-v1',
-              recognize: async request => {
-                recognitions.push(request);
-                return { kind: 'recognized', text: 'Delivery note: 418 crates', description: 'A scanned slip' };
+      taskFilesReader(files),
+      undefined,
+      undefined,
+      {
+        enabled: async () => true,
+        files,
+        recognition: async scope => {
+          scopes.push(scope);
+          return {
+            recognition: {
+              recognizer: {
+                modelId: 'vision',
+                promptVersion: 'media-v1',
+                recognize: async request => {
+                  recognitions.push(request);
+                  return { kind: 'recognized', text: 'Delivery note: 418 crates', description: 'A scanned slip' };
+                },
               },
             },
-          },
-          5 * 1024 * 1024,
-        );
-      }),
+            maxImageBytes: 5 * 1024 * 1024,
+          };
+        },
+      },
     );
     const scanId = await upload(user, 'Delivery.png', 'image/png', await png(8, 6));
     const scan = await start([{ kind: 'file', fileId: scanId }], 'How many crates were delivered?');
@@ -355,9 +361,12 @@ test(
     assert.equal((await tasks.read(w.id, user, scan.id)).status, 'completed');
     assert.deepEqual(scopes, [{ workspaceId: w.id, userId: user, membershipId: member, taskId: scan.id }]);
     assert.equal(recognitions.length, 1);
-    const [input] = prompts.at(-1).files;
-    assert.equal(input.filename, 'Delivery.png');
-    assert.match(input.text, /^\[Recognised image\]\n/, 'recognised text is labelled as it is in chat');
+    const { files: legacy, content } = prompts.at(-1);
+    assert.deepEqual(legacy, [], 'the images path leaves the legacy prompt files empty');
+    const [input] = content;
+    assert.equal(content.length, 1, 'a text-only family gets no image parts');
+    assert.match(input.text, /name="Delivery.png"/);
+    assert.match(input.text, /\[Recognised image\]\n/, 'recognised text is labelled as it is in chat');
     assert.match(input.text, /Delivery note: 418 crates/);
     const scanReceipt = (await tasks.history(w.id, user, scan.id)).messages
       .at(-1)

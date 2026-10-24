@@ -11,7 +11,8 @@ import { createFiles } from '../../../packages/files/src/index.ts';
 import { mediaPdf, png } from '../../../packages/memory-core/test/fixtures/parser-media.mjs';
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { knowledgeMediaRecognition } from '../src/media-recognition.ts';
-import { taskFileExtraction } from '../src/turn-files-composition.ts';
+import { readFile, taskFileContent } from '../../../packages/conversations/src/turn-files.ts';
+import { taskFileRecognition } from '../src/turn-files-composition.ts';
 import {
   anthropicText,
   anthropicTools,
@@ -22,6 +23,24 @@ import {
 } from './native-chat-fixture.mjs';
 
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
+
+/** Reads one file as a task on a text-only family does, returning the text the model would see. */
+const taskReader = runtime => async scope => {
+  const { recognition, maxImageBytes } = await taskFileRecognition(runtime)(scope);
+  return async file => {
+    const reading = await readFile(file, { imageInput: false, maxImageBytes, recognition });
+    const read = {
+      origin: 'tulipfarm',
+      id: file.name,
+      name: file.name,
+      mediaType: file.mediaType,
+      size: null,
+      reading,
+    };
+    const { content } = taskFileContent([read], { maxInputTokens: 200_000, imageInputTokens: 1_600 }, '');
+    return content.map(part => part.text).join('');
+  };
+};
 
 const shipped = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
 const model = id => shipped.models.find(entry => entry.id === id);
@@ -269,17 +288,14 @@ test('the workspace recognition model reads images for chat, Knowledge and tasks
   );
 
   const scope = { workspaceId: f.w.id, userId: f.w.userId, membershipId: membership, taskId: randomUUID() };
-  const extract = await taskFileExtraction(f.runtime)(scope);
+  const extract = await taskReader(f.runtime)(scope);
   const read = await extract({ name: 'slip.png', mediaType: 'image/png', bytes: await png(24, 18, '#456') });
-  assert.equal(read.representation, 'extracted');
-  assert.match(read.text, /^\[Recognised image\]\n/);
+  assert.match(read, /\[Recognised image\]\n/);
   assert.deepEqual(
     f.recognitions.map(body => body.model),
     ['claude-opus-5-5', 'claude-opus-5-5', 'claude-opus-5-5'],
     'task recognition runs on the configured model too',
   );
-  process.env.FEATURE_FLAG_IMAGES = 'false';
-  assert.equal(await taskFileExtraction(f.runtime)(scope), undefined, 'without the flag tasks keep the legacy reader');
 });
 
 test('a refused credit reservation leaves a gap for that page and the rest of the file is read', async t => {
@@ -291,20 +307,17 @@ test('a refused credit reservation leaves a gap for that page and the rest of th
   await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=0`);
   const scope = { workspaceId: f.w.id, userId: f.w.userId, membershipId: membership, taskId: randomUUID() };
   const file = { name: 'notes.pdf', mediaType: 'application/pdf', bytes: await mediaPdf(['text', 'scan', 'text']) };
-  const refused = await (await taskFileExtraction(f.runtime)(scope))(file);
+  const refused = await (await taskReader(f.runtime)(scope))(file);
   assert.equal(f.recognitions.length, 0, 'no provider call is made without a reservation');
-  assert.match(
-    refused.text,
-    /^1 image or page in this file was not read \(no credits or recognition was unavailable\)\./,
-  );
-  assert.match(refused.text, /\[page 1\]\n## Page 1 notes on the orchard/);
-  assert.match(refused.text, /\[page 3\]\n## Page 3 notes on the orchard/);
+  assert.match(refused, /1 image or page in this file was not read \(no credits or recognition was unavailable\)\./);
+  assert.match(refused, /\[page 1\]\n## Page 1 notes on the orchard/);
+  assert.match(refused, /\[page 3\]\n## Page 3 notes on the orchard/);
 
   await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=$1`, [funded]);
-  const read = await (await taskFileExtraction(f.runtime)(scope))(file);
+  const read = await (await taskReader(f.runtime)(scope))(file);
   assert.equal(f.recognitions.length, 1, 'with credits the same page is recognised');
-  assert.doesNotMatch(read.text, /in this file was not read/);
-  assert.match(read.text, new RegExp(recognisedText));
+  assert.doesNotMatch(read, /in this file was not read/);
+  assert.match(read, new RegExp(recognisedText));
 });
 
 test('one task recognises at most four units at once across all of its files', async t => {
@@ -321,7 +334,7 @@ test('one task recognises at most four units at once across all of its files', a
     await f.db.platform.query(`SELECT id FROM ${f.table('tf_memberships')} WHERE user_id=$1`, [f.w.userId])
   ).rows[0].id;
   const scope = { workspaceId: f.w.id, userId: f.w.userId, membershipId: membership, taskId: randomUUID() };
-  const extract = await taskFileExtraction(f.runtime)(scope);
+  const extract = await taskReader(f.runtime)(scope);
   // Eight different images read at once by one task still share four recognitions in flight.
   await Promise.all(
     Array.from({ length: 8 }, async (_, index) =>

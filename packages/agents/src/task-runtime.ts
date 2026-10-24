@@ -54,7 +54,6 @@ import { sourceDependenciesSchema } from '@tulipfarm/conversations/results';
 import {
   readFileText,
   readGoogleFileText,
-  type FileExtract,
   type FileContent,
   type GoogleFileReader,
 } from '@tulipfarm/conversations/file-references';
@@ -65,6 +64,10 @@ import type { KnowledgeToolsFactory } from './tools.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { taskTelemetryCheckpoint, taskTransition, withTaskTelemetry } from './task-telemetry.ts';
 import { readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import { messageLinks } from '@tulipfarm/conversations/links';
+import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
+import { readTaskFiles, taskFileStopMessage, type TaskFileReading, type TaskReadingFamily } from './task-files.ts';
+import type { TaskFileContent } from './model.ts';
 
 const compatibility = commonCompatibility;
 type Transaction = Parameters<Parameters<AgentStorage['transaction']>[2]>[0];
@@ -91,20 +94,15 @@ export type TaskFileScope = { workspaceId: string; userId: string; membershipId:
 export type TaskFilesReader = (
   input: TaskFileScope & { fileId: string },
 ) => Promise<{ filename: string; text: string; read: FileReadReceipt }>;
-/**
- * The reader a task's file input uses, undefined for the legacy text extraction. Under the `images` flag it is the chat
- * reader with recognition, so images and scanned pages read as labelled recognised text.
- */
-export type TaskFileExtraction = (scope: TaskFileScope) => Promise<FileExtract | undefined>;
 export class TaskFileUnsupported extends Error {
   constructor() {
     super('task-file-unsupported');
   }
 }
-/** Task input reads Files through the chat reader; text beyond the task's per-file budget is unsupported rather than cut. */
-export function taskFilesReader(files: FileContent, extraction?: TaskFileExtraction): TaskFilesReader {
+/** Task input reads Files as text; text beyond the task's per-file budget is unsupported rather than cut. */
+export function taskFilesReader(files: FileContent): TaskFilesReader {
   return async ({ fileId, ...scope }) => {
-    const file = await readFileText(files, scope.workspaceId, scope.userId, fileId, await extraction?.(scope));
+    const file = await readFileText(files, scope.workspaceId, scope.userId, fileId);
     if (file.kind === 'unreadable' || file.text.length > 16000) throw new TaskFileUnsupported();
     return { filename: file.name, text: file.text, read: file.read };
   };
@@ -125,18 +123,9 @@ export class TaskGoogleFileUnavailable extends Error {
   }
 }
 /** Task input reads Drive through the chat reader. A changed integration is `access`, never a read through another account. */
-export function taskGoogleFilesReader(
-  google: GoogleFileReader,
-  extraction?: TaskFileExtraction,
-): TaskGoogleFilesReader {
+export function taskGoogleFilesReader(google: GoogleFileReader): TaskGoogleFilesReader {
   return async ({ binding: { fileId, ...expectedIntegration }, ...scope }) => {
-    const file = await readGoogleFileText(
-      google,
-      scope.workspaceId,
-      scope.userId,
-      { fileId, expectedIntegration },
-      await extraction?.(scope),
-    );
+    const file = await readGoogleFileText(google, scope.workspaceId, scope.userId, { fileId, expectedIntegration });
     if (file.kind === 'unavailable') {
       if (file.cause === 'busy') throw new Error('task-google-file-busy');
       throw new TaskGoogleFileUnavailable(file.cause);
@@ -163,6 +152,9 @@ type Materialized = {
   files: { source: FileSource; filename: string; text: string }[];
   reads: TaskSource[];
   stop: keyof typeof fileStops | null;
+  /** Under the `images` flag: the step's files and links as the model reads them, and the stop naming a file. */
+  content?: TaskFileContent | null;
+  stopMessage?: string;
 };
 // A Drive file keys by its id alone, so a newer binding from a later message replaces one whose integration changed.
 const fileKey = (source: FileSource) =>
@@ -173,6 +165,26 @@ const fileKey = (source: FileSource) =>
       : `attachment:${source.attachmentId}`;
 const withoutRead = (source: FileSource): FileSource =>
   source.kind === 'attachment' ? source : (({ read: _read, ...requested }) => requested)(source);
+
+/**
+ * What a step's files are read for: images only when every route the step may use reads them, since a fallback that
+ * does not cannot be sent them; and the smallest window and image bound among those routes.
+ */
+function readingFamily(
+  model: ModelContinuity,
+  binding: { primary: ResolvedModel; fallback: ResolvedModel | null },
+): TaskReadingFamily {
+  const routes = [binding.primary, ...(binding.fallback ? [binding.fallback] : [])];
+  const images = routes.map(route => model.imageInput?.(route) ?? null);
+  return {
+    imageInput: images.every(image => image !== null),
+    maxInputTokens: Math.min(...routes.map(route => route.route.maxInputTokens)),
+    imageInputTokens: Math.max(
+      ...images.map(image => image?.imageInputTokens ?? defaultImageInputLimits.imageInputTokens),
+    ),
+    maxImageBytes: Math.min(...images.map(image => image?.maxImageBytes ?? defaultImageInputLimits.maxImageBytes)),
+  };
+}
 
 export function createTaskRuntime(
   runtime: AgentStorage,
@@ -185,6 +197,7 @@ export function createTaskRuntime(
   files?: TaskFilesReader,
   google?: TaskGoogleFilesReader,
   skills?: SkillExecutionFactory,
+  reading?: TaskFileReading,
 ) {
   runtime = withTaskTelemetry(runtime);
   async function locked<T>(workspaceId: string, taskId: string, operation: (tx: Transaction) => Promise<T>) {
@@ -665,7 +678,13 @@ export function createTaskRuntime(
             .map(source => [fileKey(source), withoutRead(source)]),
         ).values(),
       ];
-      if (!materializing && sources.length) {
+      const ownerTexts = c.history.filter(message => message.role === 'owner').map(message => message.text);
+      const images =
+        !materializing &&
+        reading !== undefined &&
+        (sources.length > 0 || ownerTexts.some(text => messageLinks(text).read.length > 0)) &&
+        (await reading.enabled(workspaceId));
+      if (!materializing && (sources.length || images)) {
         const activity = await reserveTaskWork(tx, taskId, 'files');
         return activity
           ? {
@@ -675,6 +694,7 @@ export function createTaskRuntime(
               userId: owner.userId,
               membershipId: owner.membershipId,
               history: JSON.stringify(c.history),
+              images: images ? { family: readingFamily(model, generation.binding), ownerTexts } : null,
             }
           : null;
       }
@@ -684,7 +704,7 @@ export function createTaskRuntime(
           generation,
           materializing.stop === 'unsupported' ? 'file-unsupported' : 'file-unavailable',
         );
-        await pause(tx, taskId, task.generation, 'file', fileStops[materializing.stop]);
+        await pause(tx, taskId, task.generation, 'file', materializing.stopMessage ?? fileStops[materializing.stop]);
         return null;
       }
       const destinations = slack
@@ -745,6 +765,7 @@ export function createTaskRuntime(
         task: true,
         personalMemory,
         ...(catalog ? { mcp: catalog.model } : {}),
+        ...(materializing?.content ? { files: materializing.content } : {}),
       });
       const timeoutMs = Math.min(47000, task.limits.activeMilliseconds - Number(task.activeMilliseconds));
       const claim = await claimAttempt(tx, model, workspaceId, generation, input, {
@@ -833,6 +854,30 @@ export function createTaskRuntime(
               reads: [],
               stop: null,
             };
+            if (preparation.images && reading) {
+              const read = await readTaskFiles({
+                reading,
+                scope: {
+                  workspaceId,
+                  userId: preparation.userId,
+                  membershipId: preparation.membershipId,
+                  taskId,
+                },
+                family: preparation.images.family,
+                sources: preparation.sources,
+                instructions: preparation.images.ownerTexts,
+                withinAllowance: () => work.withinAllowance(),
+              });
+              if ('stop' in read) {
+                const { stop } = read;
+                materializing.stop = 'name' in stop ? 'unsupported' : stop.kind;
+                if ('name' in stop) materializing.stopMessage = taskFileStopMessage(stop);
+              } else {
+                materializing.content = read.content;
+                materializing.reads.push(...read.receipts);
+              }
+              return prepare(workspaceId, taskId, materializing);
+            }
             const text = z.strictObject({ filename: z.string().max(255), text: z.string().max(16000) });
             for (const source of preparation.sources) {
               if (!(source.kind === 'attachment' ? attachments : source.kind === 'file' ? files : google)) {

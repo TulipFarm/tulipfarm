@@ -46,6 +46,12 @@ export type LinkRead =
   | { url: string; outcome: 'page' }
   | { url: string; outcome: 'failed'; reason: PublicFileFailure };
 
+/** What the link notice needs of a read: a task's links are read for one step and not kept. */
+export type NoticedLink =
+  | { url: string; outcome: 'file'; filename: string }
+  | { url: string; outcome: 'page' }
+  | { url: string; outcome: 'failed'; reason: PublicFileFailure };
+
 /** Keeps one link's outcome for its message, a file as a bound attachment, and returns what is kept. */
 export type KeepLink = (
   workspaceId: string,
@@ -178,7 +184,12 @@ const escapeLinks = (text: string) => text.replace(/<\/chat-links/gi, '<\\/chat-
  * content is in the attachment blocks with that source URL), which are web pages left for `web.fetch`, which failed
  * and why, and which were not read because the message has more than five.
  */
-export function linkNotice(reads: readonly LinkRead[], extra: readonly string[], webOff: boolean): string {
+export function linkNotice(
+  reads: readonly NoticedLink[],
+  extra: readonly string[],
+  webOff: boolean,
+  fileBlock = 'the attachment block with this source-url',
+): string {
   if (!reads.length && !extra.length) return '';
   const line = (url: string, text: string) => `- ${escapeLinks(attribute(url))}: ${text}`;
   const lines = webOff
@@ -192,7 +203,7 @@ export function linkNotice(reads: readonly LinkRead[], extra: readonly string[],
           line(
             read.url,
             read.outcome === 'file'
-              ? `read as the file ${escapeLinks(attribute(read.filename))}; its content is in the attachment block with this source-url`
+              ? `read as the file ${escapeLinks(attribute(read.filename))}; its content is in ${fileBlock}`
               : read.outcome === 'page'
                 ? 'a web page, not read; call web.fetch with it if its text is needed'
                 : `${failureWording[read.reason]}. Say so plainly and do not describe or guess its contents`,
