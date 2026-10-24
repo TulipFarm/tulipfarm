@@ -198,6 +198,8 @@ const modelVisible = (schema: (typeof frameworkCallSchema.options)[number]) =>
   schema.shape.tool.value === 'rows.list' ? rowsListModelSchema : schema;
 export const chatCallSchema = z.discriminatedUnion('tool', [firstCall, ...otherCalls.map(modelVisible)]);
 export type ToolName = FrameworkCall['tool'];
+// A tool result over 96,000 characters of JSON is dropped whole; a fetched file's result is cut below that instead.
+const fetchedFileChars = 90_000;
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'github.investigation.account',
   'github.investigation.repositories',
@@ -1217,6 +1219,22 @@ export function createChatTools(
     if (!(await chatFiles.turnFiles.enabled(context.workspaceId))) return null;
     const probe = await links.fetch(call.url, context.signal ?? new AbortController().signal);
     if (probe.kind !== 'file') return null;
+    // A public-web result keeps the chat's web receipt; the file block rides beside it.
+    const wrap = (outcome: 'read' | 'partial' | 'unreadable', file: string) => ({
+      kind: 'public-web' as const,
+      status: outcome === 'read' ? 'success' : outcome === 'partial' ? 'partial' : 'failed',
+      sources: [{ url: call.url, title: probe.filename.slice(0, 500), description: '', publishedAt: null }],
+      pages: [],
+      window: 'any' as const,
+      widened: false,
+      retrievedAt: new Date().toISOString(),
+      untrusted: true as const,
+      instruction:
+        outcome === 'partial'
+          ? 'This link served a file, read in the file block. Only part of it is included; say so and do not guess the rest.'
+          : 'This link served a file, read in the file block.',
+      file,
+    });
     const read = await readFetchedFile({
       workspaceId: context.workspaceId,
       conversationId: origin.conversationId,
@@ -1226,24 +1244,10 @@ export function createChatTools(
       transaction: operation => withHuman(runtime, context.workspaceId, context.actor, 'read', operation),
       turnFiles: chatFiles.turnFiles,
       imageInput: chatFiles.imageInput,
+      maxChars: fetchedFileChars - JSON.stringify(wrap('partial', '')).length,
       signal: context.signal,
     });
-    // A public-web result keeps the chat's web receipt; the file block rides beside it.
-    const result = {
-      kind: 'public-web' as const,
-      status: read.outcome === 'read' ? 'success' : read.outcome === 'partial' ? 'partial' : 'failed',
-      sources: [{ url: call.url, title: probe.filename.slice(0, 500), description: '', publishedAt: null }],
-      pages: [],
-      window: 'any' as const,
-      widened: false,
-      retrievedAt: new Date().toISOString(),
-      untrusted: true as const,
-      instruction:
-        read.outcome === 'partial'
-          ? 'This link served a file, read in the file block. Only part of it is included; say so and do not guess the rest.'
-          : 'This link served a file, read in the file block.',
-      file: read.file,
-    };
+    const result = wrap(read.outcome, read.file);
     return {
       result,
       sources: [{ kind: 'public-web' as const, url: call.url }],

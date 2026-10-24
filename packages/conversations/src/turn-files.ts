@@ -1193,7 +1193,8 @@ export async function readChatFile(input: {
 
 /**
  * `web.fetch` on a file: reads bytes fetched from a public link with the turn's pinned models under the tool output
- * budget, in a labelled untrusted block. Nothing is stored; images reach image-reading families as images.
+ * budget, in a labelled untrusted block. Nothing is stored; images reach image-reading families as images. The block is
+ * cut until it serialises as JSON within `maxChars`, so escaping cannot push the tool result past its limit.
  */
 export async function readFetchedFile(input: {
   workspaceId: string;
@@ -1205,6 +1206,7 @@ export async function readFetchedFile(input: {
   turnFiles: TurnFiles;
   /** Whether the route answering this turn reads images. */
   imageInput: boolean;
+  maxChars: number;
   signal?: AbortSignal | undefined;
 }): Promise<{ file: string; outcome: 'read' | 'partial' | 'unreadable'; images?: ChatFileImages }> {
   const pinned = await input.transaction(async tx => {
@@ -1233,7 +1235,6 @@ export async function readFetchedFile(input: {
     }),
     signal: input.signal,
   });
-  const context = new TurnFileContext();
   const entry: Entry = {
     messageId: input.turnId,
     origin: 'web',
@@ -1243,18 +1244,29 @@ export async function readFetchedFile(input: {
     size: input.file.bytes.byteLength,
     result: { kind: 'reading', reading },
   };
-  let outcome: 'read' | 'partial' | 'unreadable' = 'unreadable';
-  if (reading.kind === 'read') {
-    const fitted = fit(reading.segments, Math.min(Math.floor(family.maxInputTokens / 2), toolReadTokens), family);
-    const complete = fitted.complete && reading.complete;
-    outcome = complete ? 'read' : 'partial';
-    context.add(entry, { segments: fitted.kept, complete, notes: reading.notes });
-  } else context.add(entry);
-  let text = context.context(input.turnId);
-  const images = [...context.images].map(([marker, image], index) => {
-    text = text.replace(marker, `[image ${index + 1}, shown after the tool results]`);
-    return image;
-  });
+  const show = (budget: number) => {
+    const context = new TurnFileContext();
+    let outcome: 'read' | 'partial' | 'unreadable' = 'unreadable';
+    if (reading.kind === 'read') {
+      const fitted = fit(reading.segments, budget, family);
+      const complete = fitted.complete && reading.complete;
+      outcome = complete ? 'read' : 'partial';
+      context.add(entry, { segments: fitted.kept, complete, notes: reading.notes });
+    } else context.add(entry);
+    let text = context.context(input.turnId);
+    const images = [...context.images].map(([marker, image], index) => {
+      text = text.replace(marker, `[image ${index + 1}, shown after the tool results]`);
+      return image;
+    });
+    return { text, outcome, images, size: JSON.stringify(text).length };
+  };
+  let budget = Math.min(Math.floor(family.maxInputTokens / 2), toolReadTokens);
+  let shown = show(budget);
+  while (shown.size > input.maxChars && budget > 0) {
+    budget = Math.min(budget - 1, Math.floor((budget * input.maxChars) / shown.size));
+    shown = show(budget);
+  }
+  const { text, outcome, images } = shown;
   return {
     file: text,
     outcome,
