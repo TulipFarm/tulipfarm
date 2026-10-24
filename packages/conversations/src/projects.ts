@@ -35,8 +35,8 @@ import type { createAttachments } from './attachments.ts';
 type ProjectTransaction = AuthorizationTransaction & { commonVersion: number };
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 export const projectCompatibility = commonCompatibility;
-/** The first common storage version that records unread parts of project knowledge revisions. */
-const projectGapsVersion = 4;
+/** The first common storage version that records unread parts of project knowledge revisions (migration 0011). */
+const projectGapsVersion = 11;
 const gapsColumn = (tx: ProjectTransaction) => (tx.commonVersion >= projectGapsVersion ? 'r.gaps' : 'NULL::jsonb');
 const knowledgeQuotaBytes = 20 * 1024 * 1024;
 export const projectContextBudgetBytes = 96 * 1024;

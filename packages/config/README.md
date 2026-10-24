@@ -150,6 +150,9 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   shows. Its model must declare `"imageInput": true` in `capabilities`, or the
   catalog is invalid. Without it, images in Knowledge documents are left out
   and reported as coverage gaps. Calls are billed to the document's workspace.
+  With the workspace `images` flag on, Knowledge, chat and tasks all read
+  images with the workspace's chosen image reader instead (falling back to
+  this role), and share its cached recognitions.
 - **Image input.** A model with `"imageInput": true` may set
   `limits.imageInputTokens` (the most input tokens one image may cost, used to
   reserve credits; default 1600) and `limits.maxImageBytes` (larger images are

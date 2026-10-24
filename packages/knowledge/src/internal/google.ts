@@ -49,6 +49,7 @@ import {
   publicationSeed,
   recognitionFailed,
   recognitionOptions,
+  recognitionRefused,
   recordParse,
   type KnowledgeRecognitionAvailability,
   type KnowledgeRecognitionPort,
@@ -677,7 +678,7 @@ export function createGoogleKnowledge({
       await fenced(work, token, async tx => {
         await markRecognitionRetry(tx, previous.id);
         await tx.client.query(
-          `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND parsing='ocr-unavailable'`,
+          `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND (parsing='ocr-unavailable' OR (parsing='failed' AND failure='credits'))`,
           [previous.id],
         );
       });
@@ -877,13 +878,15 @@ export function createGoogleKnowledge({
       }
       const failure = recognitionFailed(error)
         ? 'provider'
-        : error instanceof KnowledgeParseError
-          ? error.failure
-          : error instanceof KnowledgeError && error.code === 'quota'
-            ? 'resource-limited'
-            : error instanceof GoogleCorpusError
-              ? error.code
-              : 'provider';
+        : recognitionRefused(error)
+          ? 'credits'
+          : error instanceof KnowledgeParseError
+            ? error.failure
+            : error instanceof KnowledgeError && error.code === 'quota'
+              ? 'resource-limited'
+              : error instanceof GoogleCorpusError
+                ? error.code
+                : 'provider';
       await tx.client.query(`UPDATE ${table(tx, 'google_items')} SET failure=$3 WHERE source_id=$1 AND native_id=$2`, [
         s.source_id,
         nativeId,
@@ -894,11 +897,13 @@ export function createGoogleKnowledge({
         [
           documentId,
           failure === 'ocr-required' ? 'ocr-unavailable' : 'failed',
-          error instanceof KnowledgeParseError && !recognitionFailed(error)
-            ? error.failure
-            : failure === 'resource-limited'
-              ? 'resource-limited'
-              : 'provider',
+          failure === 'credits'
+            ? 'credits'
+            : error instanceof KnowledgeParseError && !recognitionFailed(error)
+              ? error.failure
+              : failure === 'resource-limited'
+                ? 'resource-limited'
+                : 'provider',
         ],
       );
     });
@@ -933,7 +938,7 @@ export function createGoogleKnowledge({
     await fenced(work, token, async tx => {
       await markRecognitionRetry(tx, waiting.revisionId);
       await tx.client.query(
-        `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND parsing='ocr-unavailable'`,
+        `UPDATE ${table(tx, 'work')} SET parsing='queued',failure=NULL WHERE revision_id=$1 AND (parsing='ocr-unavailable' OR (parsing='failed' AND failure='credits'))`,
         [waiting.revisionId],
       );
     });

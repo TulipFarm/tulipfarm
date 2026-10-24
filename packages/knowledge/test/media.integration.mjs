@@ -8,6 +8,8 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import { createFiles } from '@tulipfarm/files';
 import { createLocalKnowledge, KnowledgeAdminRequired } from '../dist/index.js';
 import { pdf } from './fixtures/parser-documents.mjs';
+import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
+import { MediaRecognitionUnavailable } from '../../memory-core/dist/parser.js';
 
 test('local knowledge reads images through the injected recognizer, caches them and honors the switch', async t => {
   const db = await fixture();
@@ -50,6 +52,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const scopes = [];
     const calls = [];
     let available = false;
+    let images = false;
     let answer = () => ({ kind: 'recognized', text: 'Plant tulips in October.', description: 'A planting calendar' });
     const recognizer = {
       modelId: 'vision-test',
@@ -64,19 +67,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       files,
       recognition: async scope => {
         scopes.push(scope);
-        return available ? { recognizer } : undefined;
+        return { ...(available ? { recognizer } : {}), ...(images ? { images } : {}) };
       },
       recognitionAvailable: async () => available,
     });
-    const upload = async (title, bytes) => {
+    const upload = async (title, bytes, name = `${title}.pdf`, mediaType = 'application/pdf') => {
       const fileId = randomUUID();
-      await files.upload(
-        one.id,
-        member.userId,
-        fileId,
-        { name: `${title}.pdf`, parentId: null, mediaType: 'application/pdf' },
-        bytes,
-      );
+      await files.upload(one.id, member.userId, fileId, { name, parentId: null, mediaType }, bytes);
       const command = {
         commandId: randomUUID(),
         documentId: randomUUID(),
@@ -178,6 +175,78 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.notEqual(complete.publicationId, gapped.publicationId);
       assert.ok(!(await api.due(one.id)).some(item => item.revisionId === failing.commandId));
     });
+
+    await t.test('under the images flag a Files image is searchable by text only the image holds', async () => {
+      images = true;
+      answer = () => ({ kind: 'recognized', text: 'Greenhouse vents open at 28 degrees.', description: '' });
+      const photo = await upload('Greenhouse sign', await png(120, 80, '#4a6'), 'sign.png', 'image/png');
+      assert.equal(await process(photo.commandId), 'ready');
+      const hit = (await api.search(one.id, member.userId, { query: 'greenhouse vents degrees' })).hits.find(
+        item => item.citation.documentId === photo.documentId,
+      );
+      assert.ok(hit, 'the recognised text is indexed for Files search');
+      const profile = (
+        await db.platform.query(`SELECT profile FROM ${table('parse_profiles')} WHERE publication_id=$1`, [
+          (await api.get(one.id, member.userId, photo.documentId)).publicationId,
+        ])
+      ).rows[0].profile;
+      assert.equal(profile.engine, 'image');
+      assert.equal(profile.ocrModel, 'vision-test');
+      const outsider = (await api.search(one.id, admin.userId, { query: 'greenhouse vents degrees' })).hits;
+      assert.ok(
+        !outsider.some(item => item.citation.documentId === photo.documentId),
+        'recognised text never reaches someone who cannot open the file',
+      );
+    });
+
+    await t.test('the sweep keeps every recognition and a new write prunes those past 180 days', async () => {
+      const stored = (await db.platform.query(`SELECT recognition FROM ${table('recognitions')}`)).rows;
+      assert.ok(stored.length >= 2);
+      assert.ok(
+        stored.every(row => !('source' in row.recognition)),
+        'a cached recognition holds only what readers see',
+      );
+      const old = `${'f'.repeat(64)}:vision-test:media-v1`;
+      const unheld = `${'e'.repeat(64)}:vision-test:media-v1`;
+      await db.platform.query(
+        `INSERT INTO ${table('recognitions')} (key,recognition,created_at) VALUES
+          ($1,$2,clock_timestamp()-interval '181 days'),($3,$2,clock_timestamp()-interval '2 days')`,
+        [old, { kind: 'empty' }, unheld],
+      );
+      const before = await count('recognitions');
+      await api.due(one.id);
+      assert.equal(await count('recognitions'), before, 'scheduling work deletes no recognition');
+
+      answer = () => ({ kind: 'recognized', text: 'Seed trays go under the bench.', description: '' });
+      const tray = await upload('Seed tray', await png(90, 60, '#a64'), 'tray.png', 'image/png');
+      assert.equal(await process(tray.commandId), 'ready');
+      const kept = (await db.platform.query(`SELECT key FROM ${table('recognitions')}`)).rows.map(row => row.key);
+      assert.equal(kept.length, before);
+      assert.ok(!kept.includes(old), 'a recognition past 180 days is pruned when a new one is written');
+      assert.ok(kept.includes(unheld), 'a younger recognition is kept whether or not a file holds it');
+    });
+
+    await t.test(
+      'under the images flag a scan refused for credits is retried, not marked ocr-unavailable',
+      async () => {
+        answer = () => {
+          throw new MediaRecognitionUnavailable('Credits are exhausted');
+        };
+        await db.platform.query(`DELETE FROM ${table('recognitions')}`);
+        const unpaid = await upload('Unpaid scan', await pdf(['scan', 'scan']));
+        assert.equal(await process(unpaid.commandId), 'failed');
+        const waiting = await api.get(one.id, member.userId, unpaid.documentId);
+        assert.equal(waiting.parsing, 'failed');
+        assert.equal(waiting.failure, 'credits');
+        const requeued = (await api.due(one.id)).find(item => item.revisionId === unpaid.commandId);
+        assert.ok(requeued, 'the sweep queues it again while a model reads images');
+
+        answer = () => ({ kind: 'recognized', text: 'Water the bulbs weekly.', description: '' });
+        await api.acknowledge(requeued);
+        assert.equal((await api.process(requeued)).disposition, 'ready');
+        assert.equal((await api.get(one.id, member.userId, unpaid.documentId)).parsing, 'ready');
+      },
+    );
   } finally {
     await runtime?.close();
     await db.close();

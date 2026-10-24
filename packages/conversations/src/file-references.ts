@@ -211,9 +211,12 @@ export type FileReading =
 export type GoogleUnavailable = 'busy' | 'access' | 'source' | 'provider';
 export type UnreadableReason = 'unsupported' | 'failed' | 'too-large' | 'download-restricted' | 'not-exportable';
 
-type Extraction = { representation: 'text' | 'extracted'; text: string } | { failure: 'unsupported' | 'failed' };
+/** A file's text for a reader outside chat, or why there is none. */
+export type Extraction = { representation: 'text' | 'extracted'; text: string } | { failure: 'unsupported' | 'failed' };
+/** Turns a downloaded file into text; tasks under the `images` flag supply one that recognises images. */
+export type FileExtract = (file: { name: string; mediaType: string; bytes: Uint8Array }) => Promise<Extraction>;
 
-async function extract(file: { name: string; mediaType: string; bytes: Uint8Array }): Promise<Extraction> {
+const extract: FileExtract = async file => {
   if (file.mediaType.startsWith('text/') || textMediaTypes.has(file.mediaType)) {
     try {
       return { representation: 'text', text: new TextDecoder('utf-8', { fatal: true }).decode(file.bytes) };
@@ -232,7 +235,7 @@ async function extract(file: { name: string; mediaType: string; bytes: Uint8Arra
       return { failure: error.code === 'unsupported' ? 'unsupported' : 'failed' };
     throw error;
   }
-}
+};
 
 export type Authorize = (check: (tx: AuthorizationTransaction) => Promise<void>) => Promise<void>;
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -291,12 +294,18 @@ async function readFileReference(input: {
  * Reads one file's current text under `userId`'s Files access, for a reader outside chat such as an agent task.
  * Content that fails verification is withheld as lost access. The caller rechecks access after it uses the text.
  */
-export async function readFileText(files: FileContent, workspaceId: string, userId: string, fileId: string) {
+export async function readFileText(
+  files: FileContent,
+  workspaceId: string,
+  userId: string,
+  fileId: string,
+  read: FileExtract = extract,
+) {
   const file = await files.download(workspaceId, userId, fileId).catch((error: unknown) => {
     throw error instanceof FileError && error.code === 'integrity' ? new AccessDenied() : error;
   });
-  const read = { readAt: new Date().toISOString(), sha256: sha256(file.bytes) };
-  const extraction = await extract({
+  const receipt = { readAt: new Date().toISOString(), sha256: sha256(file.bytes) };
+  const extraction = await read({
     name: file.name,
     mediaType: file.mediaType ?? 'application/octet-stream',
     bytes: file.bytes,
@@ -306,7 +315,7 @@ export async function readFileText(files: FileContent, workspaceId: string, user
     kind: 'read' as const,
     name: file.name,
     text: extraction.text,
-    read: { ...read, representation: extraction.representation },
+    read: { ...receipt, representation: extraction.representation },
   };
 }
 
@@ -365,16 +374,17 @@ export async function readGoogleFileText(
   workspaceId: string,
   userId: string,
   input: GoogleFileRead,
+  read: FileExtract = extract,
 ) {
   try {
     const file = await google.fileText(workspaceId, userId, input);
-    const read = {
+    const receipt = {
       readAt: new Date().toISOString(),
       sha256: sha256(file.bytes),
       ...(file.metadata.version ? { version: file.metadata.version } : {}),
       ...(file.metadata.modifiedTime ? { modifiedTime: file.metadata.modifiedTime } : {}),
     };
-    const extraction = await extract({ name: file.metadata.name, mediaType: file.contentType, bytes: file.bytes });
+    const extraction = await read({ name: file.metadata.name, mediaType: file.contentType, bytes: file.bytes });
     if ('failure' in extraction)
       return { kind: 'unreadable' as const, name: file.metadata.name, reason: extraction.failure };
     return {
@@ -382,7 +392,7 @@ export async function readGoogleFileText(
       name: file.metadata.name,
       text: extraction.text,
       read: {
-        ...read,
+        ...receipt,
         representation: file.representation === 'export' ? ('export' as const) : extraction.representation,
       },
     };

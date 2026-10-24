@@ -27,13 +27,13 @@ export type KnowledgeRecognitionScope = {
   signal?: AbortSignal;
 };
 /**
- * Host port that supplies the workspace's document-vision recognizer, charged to the scope's workspace.
- * Returns no recognizer when no model holds the role or the workspace has no credits. Knowledge checks the
- * workspace switch first and supplies the cache.
+ * Host port that supplies the workspace's recognizer, charged to the scope's workspace, and whether the workspace
+ * `images` flag's parse rules apply. Returns no recognizer when no model reads images for the workspace. Knowledge
+ * applies the workspace switch and supplies the cache.
  */
 export type KnowledgeRecognitionPort = (
   scope: KnowledgeRecognitionScope,
-) => Promise<{ recognizer?: MediaRecognizer } | undefined>;
+) => Promise<{ recognizer?: MediaRecognizer; images?: boolean } | undefined>;
 /** Host port: whether recognition could run for this workspace now, used to re-parse revisions with gaps. */
 export type KnowledgeRecognitionAvailability = (workspaceId: string) => Promise<boolean>;
 
@@ -44,8 +44,8 @@ export class KnowledgeAdminRequired extends Error {
   }
 }
 
-/** The first common storage version with the media tables. Older workspaces keep the switch on and store no gaps. */
-export const mediaStorageVersion = 4;
+/** The first common storage version with the media tables (0011). Older workspaces keep the switch on and store no gaps. */
+export const mediaStorageVersion = 11;
 export const mediaLimitsForStorage = Object.freeze({
   /** Recognitions older than this are pruned when new ones are written. */
   cacheDays: 180,
@@ -117,8 +117,7 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
       return parsed.success ? parsed.data : undefined;
     },
     async set(key, value) {
-      const recognition = mediaRecognitionSchema.parse(value);
-      const json = JSON.stringify(recognition);
+      const json = JSON.stringify(mediaRecognitionSchema.parse(value));
       if (Buffer.byteLength(key) > 1024 || Buffer.byteLength(json) > mediaLimitsForStorage.cacheBytes) return;
       await run(async tx => {
         await tx.client.query(
@@ -135,7 +134,11 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
   };
 }
 
-/** Recognition options for one revision's parse: none while the workspace switch is off or no recognizer is available. */
+/**
+ * Recognition options for one revision's parse: no recognizer while the workspace switch is off or none is available.
+ * The `images` rules follow the host either way, so a standalone image without a recognizer still reads as unread
+ * media rather than an unsupported file.
+ */
 export async function recognitionOptions(
   runtime: Runtime,
   port: KnowledgeRecognitionPort | undefined,
@@ -144,10 +147,10 @@ export async function recognitionOptions(
   const signal = scope.signal ? { signal: scope.signal } : {};
   if (!port) return signal;
   const enabled = await runtime.transaction(scope.workspaceId, commonCompatibility, tx => mediaRecognitionEnabled(tx));
-  if (!enabled) return signal;
-  const recognizer = (await port(scope))?.recognizer;
-  if (!recognizer) return signal;
-  return { recognizer, cache: createRecognitionCache(runtime, scope.workspaceId), ...signal };
+  const offered = await port(scope);
+  const base = { ...signal, ...(offered?.images ? { images: true } : {}) };
+  if (!enabled || !offered?.recognizer) return base;
+  return { ...base, recognizer: offered.recognizer, cache: createRecognitionCache(runtime, scope.workspaceId) };
 }
 
 /**
@@ -192,6 +195,13 @@ export async function recordParse(
 export const recognitionFailed = (error: unknown) =>
   error instanceof KnowledgeParseError && error.reason === 'recognition-failed';
 
+/**
+ * A recognizer refused every unit of a document left with no text, as for credits. It is recorded as a `credits`
+ * failure the recognition sweep retries, not `ocr-unavailable`, which stays for the switch off or no model.
+ */
+export const recognitionRefused = (error: unknown) =>
+  error instanceof KnowledgeParseError && error.reason === 'recognition-unavailable';
+
 const gapRow = z.object({
   kind: z.enum(['image', 'video', 'audio', 'object', 'other']),
   reason: z.enum(['unsupported-media', 'recognition-unavailable', 'refused', 'empty', 'limit']),
@@ -224,7 +234,8 @@ export async function publicationGaps(tx: Tx, publicationId: string | null): Pro
 
 // A revision waits for recognition when its current publication has images that could not be recognized, or when
 // nothing was left but images. The retry marker keeps a sweep from re-parsing it again before the backoff ends.
-const waiting = (tx: Tx) => `(w.parsing='ocr-unavailable' OR (w.parsing='ready' AND EXISTS (
+const waiting = (tx: Tx) => `(w.parsing='ocr-unavailable' OR (w.parsing='failed' AND w.failure='credits')
+  OR (w.parsing='ready' AND EXISTS (
   SELECT 1 FROM ${table(tx, 'coverage_gaps')} g WHERE g.publication_id=d.lexical_publication_id AND g.reason='recognition-unavailable')))
   AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'recognition_retries')} x WHERE x.revision_id=r.id AND x.retry_after>clock_timestamp())`;
 

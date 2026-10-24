@@ -54,6 +54,7 @@ import { sourceDependenciesSchema } from '@tulipfarm/conversations/results';
 import {
   readFileText,
   readGoogleFileText,
+  type FileExtract,
   type FileContent,
   type GoogleFileReader,
 } from '@tulipfarm/conversations/file-references';
@@ -84,21 +85,26 @@ export type TaskAttachmentReader = (input: {
   conversationId: string;
   attachmentId: string;
 }) => Promise<{ filename: string; text: string }>;
+/** The task and owner a file read is made for; recognition is charged to the owner's membership. */
+export type TaskFileScope = { workspaceId: string; userId: string; membershipId: string; taskId: string };
 /** Reads a TulipFarm file's current text under the owner's access and returns the receipt of what was read. */
-export type TaskFilesReader = (input: {
-  workspaceId: string;
-  userId: string;
-  fileId: string;
-}) => Promise<{ filename: string; text: string; read: FileReadReceipt }>;
+export type TaskFilesReader = (
+  input: TaskFileScope & { fileId: string },
+) => Promise<{ filename: string; text: string; read: FileReadReceipt }>;
+/**
+ * The reader a task's file input uses, undefined for the legacy text extraction. Under the `images` flag it is the chat
+ * reader with recognition, so images and scanned pages read as labelled recognised text.
+ */
+export type TaskFileExtraction = (scope: TaskFileScope) => Promise<FileExtract | undefined>;
 export class TaskFileUnsupported extends Error {
   constructor() {
     super('task-file-unsupported');
   }
 }
 /** Task input reads Files through the chat reader; text beyond the task's per-file budget is unsupported rather than cut. */
-export function taskFilesReader(files: FileContent): TaskFilesReader {
-  return async input => {
-    const file = await readFileText(files, input.workspaceId, input.userId, input.fileId);
+export function taskFilesReader(files: FileContent, extraction?: TaskFileExtraction): TaskFilesReader {
+  return async ({ fileId, ...scope }) => {
+    const file = await readFileText(files, scope.workspaceId, scope.userId, fileId, await extraction?.(scope));
     if (file.kind === 'unreadable' || file.text.length > 16000) throw new TaskFileUnsupported();
     return { filename: file.name, text: file.text, read: file.read };
   };
@@ -107,11 +113,9 @@ type TaskSource = z.infer<typeof taskSourcesSchema>[number];
 type GoogleSource = Extract<TaskSource, { kind: 'google-drive-file' }>;
 type GoogleBinding = Omit<GoogleSource, 'kind' | 'read'>;
 /** Reads a Drive file's current text through the owner's bound Google integration and returns the receipt of what was read. */
-export type TaskGoogleFilesReader = (input: {
-  workspaceId: string;
-  userId: string;
-  binding: GoogleBinding;
-}) => Promise<{ filename: string; text: string; read: GoogleFileReadReceipt }>;
+export type TaskGoogleFilesReader = (
+  input: TaskFileScope & { binding: GoogleBinding },
+) => Promise<{ filename: string; text: string; read: GoogleFileReadReceipt }>;
 /** Why a Google Drive input withheld its content. A busy or slow Google is not one of them: that step retries. */
 export class TaskGoogleFileUnavailable extends Error {
   readonly reason: 'access' | 'source' | 'provider';
@@ -121,9 +125,18 @@ export class TaskGoogleFileUnavailable extends Error {
   }
 }
 /** Task input reads Drive through the chat reader. A changed integration is `access`, never a read through another account. */
-export function taskGoogleFilesReader(google: GoogleFileReader): TaskGoogleFilesReader {
-  return async ({ workspaceId, userId, binding: { fileId, ...expectedIntegration } }) => {
-    const file = await readGoogleFileText(google, workspaceId, userId, { fileId, expectedIntegration });
+export function taskGoogleFilesReader(
+  google: GoogleFileReader,
+  extraction?: TaskFileExtraction,
+): TaskGoogleFilesReader {
+  return async ({ binding: { fileId, ...expectedIntegration }, ...scope }) => {
+    const file = await readGoogleFileText(
+      google,
+      scope.workspaceId,
+      scope.userId,
+      { fileId, expectedIntegration },
+      await extraction?.(scope),
+    );
     if (file.kind === 'unavailable') {
       if (file.cause === 'busy') throw new Error('task-google-file-busy');
       throw new TaskGoogleFileUnavailable(file.cause);
@@ -655,7 +668,14 @@ export function createTaskRuntime(
       if (!materializing && sources.length) {
         const activity = await reserveTaskWork(tx, taskId, 'files');
         return activity
-          ? { kind: 'files' as const, activity, sources, userId: owner.userId, history: JSON.stringify(c.history) }
+          ? {
+              kind: 'files' as const,
+              activity,
+              sources,
+              userId: owner.userId,
+              membershipId: owner.membershipId,
+              history: JSON.stringify(c.history),
+            }
           : null;
       }
       if (materializing?.stop) {
@@ -825,6 +845,8 @@ export function createTaskRuntime(
                   const { read, ...file } = await files({
                     workspaceId,
                     userId: preparation.userId,
+                    membershipId: preparation.membershipId,
+                    taskId,
                     fileId: source.fileId,
                   });
                   materializing.files.push({ source, ...text.parse(file) });
@@ -834,6 +856,8 @@ export function createTaskRuntime(
                   const { read, ...file } = await google({
                     workspaceId,
                     userId: preparation.userId,
+                    membershipId: preparation.membershipId,
+                    taskId,
                     binding: { fileId, integrationId, accountId, generation },
                   });
                   materializing.files.push({ source, ...text.parse(file) });

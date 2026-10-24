@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MediaRecognitionFailed } from '@tulipfarm/memory-core/parser/media-contracts';
+import { MediaRecognitionFailed, MediaRecognitionUnavailable } from '@tulipfarm/memory-core/parser/media-contracts';
 import { AttachmentError } from '../src/attachments.ts';
 import { readFile, readTurnFiles, withImages } from '../src/turn-files.ts';
 import { docx, officeParts, xlsx, zip } from '../../memory-core/test/fixtures/parser-documents.mjs';
@@ -23,14 +23,17 @@ async function attachmentBlock(download, family = { ...textFamily, maxInputToken
     google: undefined,
     attachments: { download },
     family,
-    recognise: undefined,
-    recognitionModel: undefined,
+    recognition: undefined,
     authorize: check => check({}),
   });
   return read.context(messageId);
 }
 
 const recognised = async () => ({ kind: 'recognized', text: 'INVOICE 42', description: 'A blue square' });
+/** Recognition through `recognize`, the shape the worker supplies. */
+const reading = (recognize, cache) => ({
+  recognition: { recognizer: { modelId: 'vision', promptVersion: 'media-v1', recognize }, ...(cache ? { cache } : {}) },
+});
 
 test('an image is an image for a family that reads images and recognised text otherwise', async () => {
   const bytes = await png(8, 6);
@@ -42,7 +45,7 @@ test('an image is an image for a family that reads images and recognised text ot
 
   const described = await readFile(
     { name: 'shot.png', mediaType: 'image/png', bytes },
-    { ...textFamily, recognise: recognised },
+    { ...textFamily, ...reading(recognised) },
   );
   assert.equal(described.segments[0].kind, 'recognised');
   assert.match(described.segments[0].text, /INVOICE 42/);
@@ -59,7 +62,7 @@ test('an image the family cannot see and nothing can recognise is a named reason
     throw new MediaRecognitionFailed('down');
   };
   assert.deepEqual(
-    await readFile({ name: 'a.png', mediaType: 'image/png', bytes }, { ...textFamily, recognise: failing }),
+    await readFile({ name: 'a.png', mediaType: 'image/png', bytes }, { ...textFamily, ...reading(failing) }),
     { kind: 'unreadable', reason: 'recognition-failed' },
   );
 });
@@ -94,7 +97,7 @@ test('a failed image recognition keeps the document text and names the failed im
   };
   const read = await readFile(
     { name: 'scan.pdf', mediaType: 'application/pdf', bytes },
-    { ...textFamily, recognise: failing },
+    { ...textFamily, ...reading(failing) },
   );
   assert.equal(calls, 1);
   assert.equal(read.kind, 'read');
@@ -105,9 +108,7 @@ test('a failed image recognition keeps the document text and names the failed im
       ['page 2', '## Page 2 notes on the orchard.'],
     ],
   );
-  assert.deepEqual(read.notes, [
-    '1 image or page in this file could not be recognised because the image reader failed; their content was not read.',
-  ]);
+  assert.deepEqual(read.notes, ['1 image or page in this file was not read (recognition failed).']);
 });
 
 test('the type comes from the bytes: audio is a reason, ZIP is a listing, Word is text', async () => {
@@ -219,12 +220,11 @@ test('files the turn deadline cuts off are named with a files.read pointer, not 
           : { filename: 'notes.txt', mediaType: 'text/plain', size: 5, bytes: Buffer.from('notes') },
     },
     family: { ...textFamily, maxInputTokens: 100_000, imageInputTokens: 1000 },
-    recognise: async ({ signal }) => {
+    ...reading(async ({ signal }) => {
       deadline.abort(new DOMException('The files deadline passed', 'TimeoutError'));
       signal?.throwIfAborted();
       return recognised();
-    },
-    recognitionModel: 'vision',
+    }),
     authorize: check => check({}),
     deadline: deadline.signal,
   });
@@ -234,4 +234,59 @@ test('files the turn deadline cuts off are named with a files.read pointer, not 
   assert.ok(block.includes(`attachment-id="${attachmentId}" name="scan.pdf" ${pointer(attachmentId)}`), block);
   assert.ok(block.includes(`attachment-id="${second}" name="notes.txt" ${pointer(second)}`), block);
   assert.equal(read.sources.length, 0);
+});
+
+test('recognised images are labelled and a second read of the same image comes from the cache', async () => {
+  const bytes = await png(30, 20);
+  const stored = new Map();
+  const cache = { get: async key => stored.get(key), set: async (key, value) => void stored.set(key, value) };
+  let calls = 0;
+  const counting = async () => {
+    calls += 1;
+    return recognised();
+  };
+  const first = await readTurnFiles({
+    workspaceId: 'workspace-1',
+    conversationId: 'conversation-1',
+    actor,
+    parts: [{ kind: 'attachment', messageId, attachmentId, filename: 'shot.png' }],
+    files: undefined,
+    google: undefined,
+    attachments: {
+      download: async () => ({ filename: 'shot.png', mediaType: 'image/png', size: bytes.byteLength, bytes }),
+    },
+    family: { ...textFamily, maxInputTokens: 100_000, imageInputTokens: 1000 },
+    ...reading(counting, cache),
+    authorize: check => check({}),
+  });
+  assert.match(first.context(messageId), /\[Recognised image\]\n\*\*Image:\*\* /);
+  assert.match(first.context(messageId), /INVOICE 42/);
+  const again = await readFile(
+    { name: 'shot.png', mediaType: 'image/png', bytes },
+    { ...textFamily, ...reading(counting, cache) },
+  );
+  assert.match(again.segments[0].text, /INVOICE 42/);
+  assert.equal(calls, 1, 'the same image with the same model and prompt is recognised once');
+});
+
+test('a page whose credit reservation fails is a gap and the rest of the file is still recognised', async () => {
+  const bytes = await mediaPdf(['mixed', 'mixed', 'mixed']);
+  let calls = 0;
+  const read = await readFile(
+    { name: 'scan.pdf', mediaType: 'application/pdf', bytes },
+    {
+      ...textFamily,
+      ...reading(async () => {
+        calls += 1;
+        if (calls === 1) throw new MediaRecognitionUnavailable('Credits are exhausted');
+        return recognised();
+      }),
+    },
+  );
+  assert.equal(read.kind, 'read');
+  assert.equal(calls, 3);
+  assert.equal(read.segments.filter(segment => segment.text.includes('[Recognised image]')).length, 2);
+  assert.deepEqual(read.notes, [
+    '1 image or page in this file was not read (no credits or recognition was unavailable).',
+  ]);
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { workspaceRecognitionFamily } from '@tulipfarm/agents/image-settings';
 import {
   inferenceRouteSchema,
   inferWithContent,
@@ -9,6 +10,7 @@ import { calculateUsageCost, loadModelCatalog, reserveModelCost, usageTokenCount
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { KnowledgeRecognitionAvailability, KnowledgeRecognitionPort } from '@tulipfarm/knowledge';
 import { recordUsage } from '@tulipfarm/extensions';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import {
   MediaRecognitionFailed,
   MediaRecognitionUnavailable,
@@ -272,20 +274,44 @@ function recognitionMeter(
   };
 }
 
-/** Knowledge recognition ports: usage is recorded under the document and charged to its workspace. */
+/** The model that reads a workspace's files; undefined when none can. */
+export type WorkspaceRecognitionModel = (workspaceId: string) => Promise<DocumentVisionModel | undefined>;
+
+/**
+ * Under the workspace `images` flag, the workspace recognition model from image settings; without it, the catalog
+ * `document-vision` model.
+ */
+export function workspaceRecognitionModel(
+  runtime: ConversationRuntime,
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceRecognitionModel {
+  return async workspaceId => {
+    const familyId = await workspaceRecognitionFamily(runtime, workspaceId, loadModelCatalog(env));
+    return familyId ? recognitionModel(familyId, env) : undefined;
+  };
+}
+
+/**
+ * Knowledge recognition ports: usage is recorded under the document and charged to its workspace. The workspace
+ * `images` flag also turns on the shared parse rules (per-file cap, per-unit credit gaps, labels, standalone images).
+ */
 export function knowledgeMediaRecognition(
   runtime: ConversationRuntime,
-  model: () => DocumentVisionModel | undefined = documentVisionModel,
+  model: WorkspaceRecognitionModel = workspaceRecognitionModel(runtime),
 ): { recognition: KnowledgeRecognitionPort; recognitionAvailable: KnowledgeRecognitionAvailability } {
   return {
     recognition: async scope => {
+      const [images, resolved] = await Promise.all([
+        isFeatureEnabled('images', null, { id: scope.workspaceId }),
+        model(scope.workspaceId),
+      ]);
       const recognizer = createMediaRecognizer(
         runtime,
         { workspaceId: scope.workspaceId, sourceId: scope.sourceId, flowId: scope.documentId },
-        model,
+        () => resolved,
       );
-      return recognizer ? { recognizer } : undefined;
+      return { ...(recognizer ? { recognizer } : {}), ...(images ? { images } : {}) };
     },
-    recognitionAvailable: async () => model() !== undefined,
+    recognitionAvailable: async workspaceId => (await model(workspaceId)) !== undefined,
   };
 }

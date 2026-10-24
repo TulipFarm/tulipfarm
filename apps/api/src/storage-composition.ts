@@ -1,4 +1,3 @@
-import { loadModelCatalog } from '@tulipfarm/config';
 import type { FastifyInstance } from 'fastify';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { createWorkspaceTableConfirmation } from '@tulipfarm/workspaces/table-confirmation';
@@ -21,7 +20,7 @@ import type { createTemporalClient } from './temporal.ts';
 import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { createConversations } from '@tulipfarm/conversations';
-import { pinTurnImageModels } from '@tulipfarm/agents/image-settings';
+import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/image-settings';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerConversations } from './conversations.ts';
 import { createConversationEventHub } from './conversation-events.ts';
@@ -149,7 +148,7 @@ export function registerStorageComposition(
     temporal,
     googleService,
     // Recognition runs in the worker; the API only needs to know a model can read images to queue re-parses.
-    recognitionAvailable: async () => loadModelCatalog().role('document-vision') !== undefined,
+    recognitionAvailable: recognitionAvailability(runtime),
     ...(files ? { files } : {}),
     ...(defaultKnowledge ? { defaultKnowledge } : {}),
   });

@@ -32,6 +32,7 @@ export const parseReasonSchema = z.enum([
   'invalid-output',
   'unsupported-platform',
   'recognition-failed',
+  'recognition-unavailable',
 ]);
 export type KnowledgeParseReason = z.infer<typeof parseReasonSchema>;
 
@@ -121,7 +122,7 @@ export const resultSchema = z
     profile: z.union([
       z.strictObject({
         id: z.string(),
-        engine: z.enum(['text', 'anydoc']),
+        engine: z.enum(['text', 'anydoc', 'image']),
         version: z.string(),
         normalization: z.string(),
         ocr: z.literal('disabled'),
@@ -130,7 +131,7 @@ export const resultSchema = z
       }),
       z.strictObject({
         id: z.string(),
-        engine: z.enum(['text', 'anydoc']),
+        engine: z.enum(['text', 'anydoc', 'image']),
         version: z.string(),
         normalization: z.string(),
         ocr: z.literal('vision'),

@@ -4,6 +4,9 @@ import { KnowledgeParseError, parserLimits } from './contracts.js';
 import type { KnowledgeChunk } from './contracts.js';
 
 const tokenizer = getEncoding('cl100k_base');
+/** Names the text normalization and chunking below; part of every parser profile. */
+export const normalization = 'nfc-lf-v1-cl100k_base-800-100';
+
 export function countTokens(text: string): number {
   return tokenizer.encode(text, [], []).length;
 }

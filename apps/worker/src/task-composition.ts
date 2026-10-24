@@ -5,6 +5,7 @@ import {
   taskGoogleFilesReader,
 } from '@tulipfarm/agents/task-runtime';
 import { googleOperations } from './google-composition.ts';
+import { taskFileExtraction } from './turn-files-composition.ts';
 import { createTaskProgress, type TaskProgress } from '@tulipfarm/agents/task-progress';
 import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
@@ -35,6 +36,7 @@ export function createTaskComposition(
   const attachments = objects ? createAttachments(runtime, objects) : null;
   const files = objects ? createFiles(runtime, objects) : null;
   let google: ReturnType<typeof googleOperations> | undefined;
+  const extraction = taskFileExtraction(runtime);
   const tasks = createTaskRuntime(
     runtime,
     model,
@@ -62,8 +64,11 @@ export function createTaskComposition(
     mcp,
     githubTaskTools,
     knowledge,
-    files ? taskFilesReader(files) : undefined,
-    taskGoogleFilesReader({ fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args) }),
+    files ? taskFilesReader(files, extraction) : undefined,
+    taskGoogleFilesReader(
+      { fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args) },
+      extraction,
+    ),
     objects ? createSkillExecutionFactory(objects, configuredSkillClient()) : undefined,
   );
   const progress = createTaskProgress(runtime);

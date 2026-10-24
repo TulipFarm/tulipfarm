@@ -10,6 +10,7 @@ import {
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { loadModelCatalog, resolveModelCapabilities, type ServedModelCatalog } from '@tulipfarm/config';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -125,22 +126,61 @@ export async function resolveImageModels(
       model =>
         model.id !== familyId && model.selectable && !model.paused && families.has(model.id) && imageFor(model.id),
     )?.id ?? null;
-  const switchedOn = z
-    .object({ media_recognition: z.boolean() })
-    .optional()
-    .parse((await tx.client.query(`SELECT media_recognition FROM ${relation(tx, 'tf_knowledge_settings')}`)).rows[0]);
   return {
     familyId,
     image: imageModelId
       ? { status: 'available', imageModelId }
       : { status: 'unavailable', code: 'image-model-unavailable', alternativeFamilyId: alternative() },
-    recognition:
-      switchedOn?.media_recognition === false
-        ? { status: 'unavailable', reason: 'recognition-off' }
-        : settings.effective.recognitionFamilyId
-          ? { status: 'available', familyId: settings.effective.recognitionFamilyId }
-          : { status: 'unavailable', reason: 'recognition-model-unavailable' },
+    recognition: await resolveRecognition(tx, settings),
   };
+}
+
+/** The Knowledge recognition switch, stored from common version 11. */
+async function recognitionSwitchedOn(tx: AgentTransaction) {
+  const row = z
+    .object({ media_recognition: z.boolean() })
+    .optional()
+    .parse((await tx.client.query(`SELECT media_recognition FROM ${relation(tx, 'tf_knowledge_settings')}`)).rows[0]);
+  return row?.media_recognition !== false;
+}
+
+/** The workspace recognition model, unless the Knowledge recognition switch is off or the chosen model is unusable. */
+async function resolveRecognition(tx: AgentTransaction, settings: ImageSettings): Promise<RecognitionModelResolution> {
+  if (!(await recognitionSwitchedOn(tx))) return { status: 'unavailable', reason: 'recognition-off' };
+  return settings.effective.recognitionFamilyId
+    ? { status: 'available', familyId: settings.effective.recognitionFamilyId }
+    : { status: 'unavailable', reason: 'recognition-model-unavailable' };
+}
+
+/** The recognition switch is stored from common version 11, image settings and the model choice from 12. */
+const recognitionSwitchVersion = 11;
+const imageSettingsVersion = 12;
+
+/**
+ * The family that reads images for a workspace's Files, Knowledge and tasks, or null when none can. Under the
+ * workspace `images` flag it is resolved as `resolveImageModels` resolves recognition for a chat turn: the saved
+ * choice, else the catalog `document-vision` model, while usable here and while the recognition switch is on. Before
+ * image settings are stored it is the catalog `document-vision` model while the switch is on. Without the flag it is
+ * the catalog `document-vision` model.
+ */
+export async function workspaceRecognitionFamily(
+  storage: AgentStorage,
+  workspaceId: string,
+  catalog: ServedModelCatalog = loadModelCatalog(),
+): Promise<string | null> {
+  const role = catalog.role('document-vision')?.id ?? null;
+  if (!(await isFeatureEnabled('images', null, { id: workspaceId }))) return role;
+  return storage.transaction(workspaceId, commonCompatibility, async tx => {
+    if (tx.commonVersion < recognitionSwitchVersion) return role;
+    if (tx.commonVersion < imageSettingsVersion) return (await recognitionSwitchedOn(tx)) ? role : null;
+    const recognition = await resolveRecognition(tx, await current(tx, catalog));
+    return recognition.status === 'available' ? recognition.familyId : null;
+  });
+}
+
+/** Whether any model reads images for the workspace; the API uses it to decide whether to queue re-reads. */
+export function recognitionAvailability(storage: AgentStorage, catalog?: ServedModelCatalog) {
+  return async (workspaceId: string) => (await workspaceRecognitionFamily(storage, workspaceId, catalog)) !== null;
 }
 
 /** A content hash of the served catalog, stored with pinned models so a later catalog change is visible. */

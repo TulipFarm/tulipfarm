@@ -123,6 +123,7 @@ import {
 import { pinnedImageModels } from './turn-image-models.ts';
 import {
   readTurnFiles,
+  turnRecognition,
   readableFileParts,
   unloadedFileBlocks,
   withImages,
@@ -1659,7 +1660,12 @@ export function createConversationExecutor(
         });
       if (images && source.imageModels) {
         const pinned = source.imageModels;
-        const recognitionModel = pinned.recognitionFamilyId;
+        const recognition = turnRecognition(images, pinned.recognitionFamilyId, {
+          workspaceId: fence.workspaceId,
+          conversationId: fence.conversationId,
+          turnId: fence.turnId,
+          requester: source.requester,
+        });
         const read = await staged('files', () =>
           whileLeased(fence, signal =>
             readTurnFiles({
@@ -1673,17 +1679,7 @@ export function createConversationExecutor(
               google,
               attachments: images.attachments,
               family: images.family(pinned.familyId),
-              recognise: recognitionModel
-                ? request =>
-                    images.recognise(request, {
-                      workspaceId: fence.workspaceId,
-                      conversationId: fence.conversationId,
-                      turnId: fence.turnId,
-                      requester: source.requester,
-                      model: recognitionModel,
-                    })
-                : undefined,
-              recognitionModel: recognitionModel ?? undefined,
+              recognition,
               authorize,
             }),
           ),

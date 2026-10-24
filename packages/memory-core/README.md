@@ -35,6 +35,25 @@ a replacement for host permission checks.
 one segment per page, slide or sheet, with recognised media in place, for
 callers such as chat that read a document without indexing it.
 
+`recognise` is the one recognition entry point for Knowledge, chat and
+tasks. Each file gets one session, which:
+
+- dedupes units by sha256;
+- reads the host's cache first, and writes each new result with the SHA-256 of
+  the file it came from (`source`), so the host can drop results no file holds;
+- runs at most 4 units at once;
+- returns one outcome per unit.
+
+With `images: true` (the host's workspace `images` flag) the shared rules also
+apply:
+
+- at most `mediaLimits.recognitionsPerFile` (100) units, with `limit` gaps after that;
+- a `MediaRecognitionUnavailable` thrown for one unit, such as a failed credit
+  reservation, is a `recognition-unavailable` gap for that unit only;
+- recognised text is labelled `[Recognised image]`;
+- a standalone PNG, JPEG, GIF, WebP or BMP is parsed as one recognised passage
+  (engine `image`), so Knowledge search finds its text.
+
 ## Port contracts
 
 | Port                                                                            | Caller-visible responsibility                                                                                            |
