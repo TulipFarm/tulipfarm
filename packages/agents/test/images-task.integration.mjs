@@ -157,6 +157,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     undefined,
     undefined,
     undefined,
+    undefined,
     { files, choose },
   );
   const start = (text, limits = {}) =>
