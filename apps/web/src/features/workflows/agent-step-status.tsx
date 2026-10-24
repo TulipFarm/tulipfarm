@@ -15,7 +15,7 @@ export function AgentStepStatus({ output }: { output: unknown }) {
   return (
     <div className="space-y-1">
       <p role="status" className="flex items-center gap-2">
-        <Status state={taskStatusStates[state.data.status]} aria-hidden="true" />
+        <Status state={taskStatusStates[state.data.status]} tooltip={false} aria-hidden="true" />
         {taskStatusLabel(state.data)}
       </p>
       <p className="text-sm text-muted-foreground">
