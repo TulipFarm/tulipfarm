@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { withChatMeasurements } from '@tulipfarm/observability';
 import { completionCheckEvidence, inferWithTools, ToolResultImages } from '../src/inference.ts';
 import {
   completionReply,
@@ -325,4 +326,38 @@ test('after a provider overflow with many images, only the text is rescaled, so 
     'older results keep their summaries',
   );
   assert.match(retried.at(-1), /"page-6 lorem/, 'the latest round stays verbatim');
+});
+
+test('request-size telemetry counts Buffer image data as a short size, not its bytes as numbers', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('anthropic', { text: 'A grey square.' })));
+  const logs = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (typeof chunk === 'string' && chunk.startsWith('{"level":')) logs.push(JSON.parse(chunk));
+    else write(chunk, ...args);
+    return true;
+  });
+  const content = [
+    { type: 'text', text: 'What is this?' },
+    { type: 'image', mediaType: 'image/png', data: Buffer.alloc(300000, 7) },
+  ];
+  await withChatMeasurements(() => inferWithTools(vision('anthropic'), [{ role: 'user', content }], fetched));
+  const history = logs.find(record => record['chat.request.history_bytes'] !== undefined);
+  assert.equal(
+    history['chat.request.history_bytes'],
+    Buffer.byteLength(
+      JSON.stringify([
+        {
+          kind: 'turn',
+          turn: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is this?' },
+              { type: 'image', mediaType: 'image/png', data: '[300000 bytes]' },
+            ],
+          },
+        },
+      ]),
+    ),
+  );
 });
