@@ -20,7 +20,15 @@ import {
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
 import type { ImageReceipt } from './contracts.ts';
-import { generateImagesCallSchema, imagesPerOrigin } from './image-contracts.ts';
+import {
+  generateImagesCallSchema,
+  imagesPerOrigin,
+  type generatedImageSchema,
+  type imageCallErrors,
+  type imageFailures,
+  type imageOutputResultSchema,
+  type imageStates,
+} from './image-contracts.ts';
 
 export { generateImagesCallSchema, imagesPerOrigin };
 import type { FileOutputStore } from './file-outputs.ts';
@@ -80,26 +88,9 @@ export type ImageOutputDeps = {
   transaction: <T>(operation: (tx: AuthorizationTransaction) => Promise<T>) => Promise<T>;
 };
 
-/** Each image moves from `pending` to exactly one final state. Only `failed` and `cancelled` images are tried again. */
-export type ImageState = 'pending' | 'saved' | 'refused' | 'failed' | 'cancelled';
-export type ImageFailure =
-  | 'content-refused'
-  | 'credits-exhausted'
-  | 'task-credits'
-  | 'generation-failed'
-  | 'in-progress'
-  | 'size'
-  | 'quota'
-  | 'busy'
-  | 'conflict';
-export type GeneratedImage = {
-  index: number;
-  /** Also the id of the saved file. */
-  id: string;
-  state: ImageState;
-  file?: { id: string; name: string; mediaType: string; size: number; parentId: string | null };
-  failure?: ImageFailure;
-};
+export type ImageState = (typeof imageStates)[number];
+export type ImageFailure = (typeof imageFailures)[number];
+export type GeneratedImage = z.infer<typeof generatedImageSchema>;
 /** What a generated file records, shown in the file viewer (item 29). */
 export type ImageGenerationRecord = {
   prompt: string;
@@ -109,21 +100,8 @@ export type ImageGenerationRecord = {
   origin: ImageOrigin;
 };
 
-export type ImageCallError =
-  | 'invalid-request'
-  | 'image-model-unavailable'
-  | 'image-limit-exceeded'
-  | 'image-edit-unsupported'
-  | 'source-unreadable'
-  | 'destination-required';
-export type ImageOutputResult =
-  | { images: GeneratedImage[]; instruction: string; error?: 'content-refused' }
-  | {
-      error: ImageCallError;
-      instruction: string;
-      alternativeFamilyId?: string | null;
-      remaining?: number;
-    };
+export type ImageCallError = (typeof imageCallErrors)[number];
+export type ImageOutputResult = z.infer<typeof imageOutputResultSchema>;
 
 const fail = (error: ImageCallError, instruction: string, extra: object = {}): ImageOutputResult => ({
   error,
