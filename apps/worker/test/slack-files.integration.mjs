@@ -156,13 +156,9 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
    * own activity, whose failure is the activity's alone.
    */
   async function admit() {
-    let staging = [];
-    try {
-      staging = (await dm.admitPending(f.workspace.id)) ?? [];
-    } catch (error) {
-      failures.push(error);
-    }
-    for (const work of staging) await dm.admitFiles(work).catch(error => failures.push(error));
+    const admission = await dm.admitPending(f.workspace.id);
+    failures.push(...admission.failures);
+    for (const work of admission.files) await dm.admitFiles(work).catch(error => failures.push(error));
   }
   const admitted = async eventId =>
     (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_slack_dm_events')} WHERE event_id=$1`, [eventId]))

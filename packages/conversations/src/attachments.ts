@@ -424,25 +424,33 @@ export function createAttachments(
   };
   /**
    * Stores bytes received from outside chat, such as a file shared in a Slack direct message, before any transaction.
-   * The type is taken from the bytes, falling back to the type the source declared. `adoptShared` then makes them a
-   * ready attachment, and `discardShared` removes bytes that were never adopted.
+   * The caller names the object, so a repeated run for the same source stores to the same key. The type is taken from
+   * the bytes, falling back to the type the source declared. `adoptShared` then makes them a ready attachment, and
+   * `discardShared` removes bytes that were never adopted.
    */
   async function stageShared(
     workspaceId: string,
-    file: { filename: string; declaredType: string | null; bytes: Uint8Array },
+    file: { objectKey: string; filename: string; declaredType: string | null; bytes: Uint8Array },
   ): Promise<SharedAttachment> {
-    const sha256 = digest(file.bytes);
     const staged = {
-      objectKey: randomUUID(),
+      objectKey: uuidSchema.parse(file.objectKey),
       ...reserveAttachmentSchema.parse({
         filename: file.filename,
         mediaType: sniffMediaType(file.bytes)?.mediaType ?? file.declaredType ?? 'application/octet-stream',
         size: file.bytes.byteLength,
-        sha256,
+        sha256: digest(file.bytes),
       }),
     };
     await bytes.putIfAbsent(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`, file.bytes);
     return staged;
+  }
+  /** The bytes an earlier run already staged under `objectKey`, so a repeated run does not download them again. */
+  async function stagedBytes(workspaceId: string, objectKey: string, size: number) {
+    try {
+      return await bytes.read(`${uuidSchema.parse(workspaceId)}/${uuidSchema.parse(objectKey)}`, size);
+    } catch {
+      return null;
+    }
   }
   /**
    * Makes staged bytes a ready attachment of `userId` in a chat they may send to, charged like an upload, so their next
@@ -476,10 +484,32 @@ export function createAttachments(
       return true;
     });
   }
+  /** Removes staged bytes unless a run for the same source made them an attachment. */
   async function discardShared(workspaceId: string, staged: SharedAttachment) {
-    await bytes.remove(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`).catch(() => {});
+    const adopted = await transaction(workspaceId, async tx =>
+      Boolean(
+        (
+          await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_conversation_attachments')} WHERE object_key=$1`, [
+            staged.objectKey,
+          ])
+        ).rowCount,
+      ),
+    );
+    if (!adopted) await bytes.remove(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`).catch(() => {});
   }
-  return { reserve, status, upload, download, cleanup, publishSent, keepLink, stageShared, adoptShared, discardShared };
+  return {
+    reserve,
+    status,
+    upload,
+    download,
+    cleanup,
+    publishSent,
+    keepLink,
+    stageShared,
+    stagedBytes,
+    adoptShared,
+    discardShared,
+  };
 }
 
 /** Bytes stored for a file received from outside chat, waiting to become an attachment. */

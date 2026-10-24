@@ -5,6 +5,7 @@ import { AccessDenied, currentMember, lockAuthorization, type HumanActor } from 
 import { requireSlackInstallationUse } from './installation-access.ts';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createConversations, ConversationConflict } from '@tulipfarm/conversations';
+import { CreditsExhausted, requireCredits } from '@tulipfarm/workspace-storage/credits';
 import { textPartSchema } from '@tulipfarm/conversations/contracts';
 import { requireResultSources, requireSlackTurn } from '@tulipfarm/conversations/source-access';
 import { messageSchema, slackId } from './contracts.ts';
@@ -25,6 +26,11 @@ import {
 
 type Transaction = Parameters<Parameters<SlackRuntime['transaction']>[2]>[0];
 const compatibility = commonCompatibility;
+/** A message that cannot be admitted yet: its sender is not allowed now, or the workspace is out of credits. */
+const held = (error: unknown) =>
+  error instanceof AccessDenied ||
+  error instanceof CreditsExhausted ||
+  (error instanceof ConversationConflict && error.code === 'credits-exhausted');
 const bindingSchema = z.object({
   conversation_id: z.uuid(),
   turn_id: z.uuid(),
@@ -62,8 +68,19 @@ export function createSlackDirectMessages(options: {
       return operation(tx);
     });
   }
-  async function admit(workspaceId: string, eventId: string, share: SlackFileShare | null = null) {
-    return transaction(workspaceId, async (tx): Promise<boolean> => {
+  /**
+   * Admits one held message as a chat turn. With `files` set to 'defer', a message that shares files is checked but
+   * not admitted, returning 'files' so its files are downloaded outside the dispatch pass. `adopted` collects the
+   * object keys of staged files that became attachments.
+   */
+  async function admit(
+    workspaceId: string,
+    eventId: string,
+    files: SlackFileShare | 'defer' | null,
+    adopted = new Set<string>(),
+  ) {
+    const share = files === 'defer' ? null : files;
+    return transaction(workspaceId, async (tx): Promise<boolean | 'files'> => {
       const table = (name: string) => qualified(tx.schema, name);
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93572))`, [`${tx.schema}:${eventId}`]);
       const event = z
@@ -166,6 +183,10 @@ export function createSlackDirectMessages(options: {
         await reject('root-owner-mismatch');
         return false;
       }
+      if (files === 'defer' && message.shared_files?.length) {
+        await requireCredits(tx);
+        return 'files';
+      }
       const bound: SlackRuntime = {
         transaction: async (workspace, range, action) => {
           if (workspace !== workspaceId || tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
@@ -188,9 +209,10 @@ export function createSlackDirectMessages(options: {
         const full: string[] = [];
         for (const { file, staged } of share.staged) {
           const id = randomUUID();
-          if (await attachments.adoptShared(workspaceId, identity.user_id, conversationId, id, staged))
+          if (await attachments.adoptShared(workspaceId, identity.user_id, conversationId, id, staged)) {
             attachmentIds.push(id);
-          else full.push(unreadSlackFileLine(file, 'storage-full'));
+            adopted.add(staged.objectKey);
+          } else full.push(unreadSlackFileLine(file, 'storage-full'));
         }
         text = [text, ...full].filter(Boolean).join('\n');
       }
@@ -214,12 +236,17 @@ export function createSlackDirectMessages(options: {
       return true;
     });
   }
+  /**
+   * Admits held messages without downloading anything. A message that shares files while reading them is on is
+   * returned instead, for `admitFiles` to download and admit in its own activity; later messages in its thread wait
+   * for it. One message's failure is reported without holding up messages in other threads.
+   */
   async function admitPending(workspaceId: string) {
     const candidates = await transaction(workspaceId, async tx =>
-      z.array(z.object({ id: z.uuid() })).parse(
+      z.array(z.object({ id: z.uuid(), root: z.string().nullable() })).parse(
         (
           await tx.client.query(
-            `SELECT e.id FROM ${qualified(tx.schema, 'tf_slack_events')} e
+            `SELECT e.id,(e.payload->>'channel')||':'||COALESCE(e.payload->>'thread_ts',e.payload->>'ts') AS root FROM ${qualified(tx.schema, 'tf_slack_events')} e
       JOIN ${qualified(tx.schema, 'tf_slack_identities')} i ON i.installation_id=e.installation_id AND i.generation=e.generation AND i.slack_user_id=e.payload->>'user'
       JOIN ${qualified(tx.schema, 'tf_slack_installations')} s ON s.id=e.installation_id AND s.generation=e.generation
       JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=i.membership_id AND m.user_id=i.user_id AND m.removed_at IS NULL
@@ -234,30 +261,48 @@ export function createSlackDirectMessages(options: {
         ).rows,
       ),
     );
+    const reads = Boolean(reading && (await reading.enabled(workspaceId)));
+    const files: SlackPromptWork[] = [];
+    const failures: unknown[] = [];
+    const waiting = new Set<string>();
     for (const candidate of candidates) {
-      const share =
-        reading && shared && (await reading.enabled(workspaceId))
-          ? await stageSlackFiles({
-              runtime,
-              cipher,
-              attachments: shared,
-              fetcher: options.fetcher ?? fetch,
-              workspaceId,
-              eventId: candidate.id,
-            })
-          : null;
-      let kept = false;
+      if (candidate.root && waiting.has(candidate.root)) continue;
       try {
-        kept = await admit(workspaceId, candidate.id, share);
+        if ((await admit(workspaceId, candidate.id, reads ? 'defer' : null)) !== 'files') continue;
+        files.push({ workspaceId, eventId: candidate.id });
       } catch (error) {
-        if (
-          !(error instanceof AccessDenied) &&
-          !(error instanceof ConversationConflict && error.code === 'credits-exhausted')
-        )
-          throw error;
-      } finally {
-        if (shared && share && !kept) await discardSlackFiles(shared, workspaceId, share);
+        if (held(error)) continue;
+        failures.push(error);
       }
+      if (candidate.root) waiting.add(candidate.root);
+    }
+    return { files, failures };
+  }
+  /**
+   * Downloads the files shared in one held message, stores them, and admits the message with them as attachments.
+   * Bytes that did not become an attachment are removed, whatever the outcome.
+   */
+  async function admitFiles(value: unknown) {
+    const work = slackPromptWorkSchema.parse(value);
+    const share =
+      reading && shared && (await reading.enabled(work.workspaceId))
+        ? await stageSlackFiles({
+            runtime,
+            cipher,
+            attachments: shared,
+            fetcher: options.fetcher ?? fetch,
+            workspaceId: work.workspaceId,
+            eventId: work.eventId,
+          })
+        : null;
+    const adopted = new Set<string>();
+    try {
+      return (await admit(work.workspaceId, work.eventId, share, adopted)) === true;
+    } catch (error) {
+      if (held(error)) return false;
+      throw error;
+    } finally {
+      if (shared && share) await discardSlackFiles(shared, work.workspaceId, share, adopted);
     }
   }
   async function due(workspaceId: string): Promise<SlackPromptWork[]> {
@@ -275,7 +320,8 @@ export function createSlackDirectMessages(options: {
     });
   }
   async function discover(workspaceId: string): Promise<SlackPromptWork[]> {
-    await admitPending(workspaceId);
+    const { failures } = await admitPending(workspaceId);
+    if (failures.length) throw new AggregateError(failures, 'slack-dm-admission-incomplete');
     return due(workspaceId);
   }
   async function load(tx: Transaction, eventId: string) {
@@ -363,5 +409,5 @@ export function createSlackDirectMessages(options: {
       return outcome.kind;
     });
   }
-  return { discover, admitPending, due, process };
+  return { discover, admitPending, admitFiles, due, process };
 }
