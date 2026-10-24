@@ -2031,7 +2031,7 @@ export function createGitHubKnowledge({
             // A change GitHub reported during the pass moved next_attempt_at past the claim's, so the next pass starts now.
             await tx.client.query(
               `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,
-              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+interval '1 minute' END WHERE source_id=$1`,
+              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+interval '10 minutes' END WHERE source_id=$1`,
               [
                 claim.source_id,
                 initialCursor({

@@ -403,8 +403,8 @@ whose storage version the API cannot use is skipped and counted in
 `cloud_dispatch_skipped_workspaces` (labels `dispatcher` and
 `reason=incompatible_version`; no workspace label).
 
-A ready source is due again one minute after its pass. Polling remains the safety
-net; webhooks make changes appear within seconds.
+A ready source is due again ten minutes after its pass. Polling is the safety net
+for missed events; webhooks make changes appear within seconds.
 
 ### Webhooks
 
