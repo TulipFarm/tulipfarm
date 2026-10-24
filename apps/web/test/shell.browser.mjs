@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.SHELL_BROWSER_PORT ?? 5295);
 const origin = `http://127.0.0.1:${port}`;
@@ -174,7 +175,7 @@ try {
     await page.goto(`${origin}/acme/chat/${chatId}`);
     await shellHeader.getByRole('heading', { name: 'Supplier follow-up' }).waitFor();
     await shellHeader.getByRole('button', { name: 'Chat actions' }).waitFor();
-    await shellHeader.getByRole('button', { name: 'Back to chats' }).click();
+    await openChatList(page);
     await page.getByRole('heading', { name: 'Chats', level: 1, exact: true }).waitFor();
     await page.getByText('No chats yet', { exact: true }).waitFor();
     chatStatus = 503;

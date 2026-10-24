@@ -5,6 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
+import { openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.INTERACTION_BROWSER_PORT ?? 5297);
 const origin = `http://127.0.0.1:${port}`;
@@ -345,7 +346,7 @@ try {
     0,
     'Chat history sidebar is removed',
   );
-  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await openChatList(page);
   await page.getByRole('region', { name: 'Chat list', exact: true }).waitFor();
   assert.equal(
     await page

@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chat, draftText, id, isAuthority, messageText, startFixture, workspace } from './query-loading.fixture.mjs';
+import { openChatList } from './browser-controls.mjs';
 
 const mode = process.argv[2] ?? 'baseline';
 assert.ok(
@@ -189,7 +190,7 @@ try {
     }
     async function toList() {
       await clearDraft();
-      await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+      await openChatList(page);
       await page.getByRole('button', { name: chat.title, exact: true }).waitFor();
     }
     async function navigateLink(path) {

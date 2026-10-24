@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { conversationPages } from '../../api/src/conversation-pages.ts';
-import { modelOption } from './browser-controls.mjs';
+import { modelOption, openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.CONVERSATION_BROWSER_PORT ?? 5293);
 const origin = `http://127.0.0.1:${port}`;
@@ -446,13 +446,13 @@ try {
   assert.equal(await page.locator('main header').count(), 1, 'The chat title and navigation share a single top bar');
   await chatAction('Archive chat');
   await page.getByText('This chat is archived.', { exact: false }).waitFor();
-  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await openChatList(page);
   await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
   await page.getByRole('button', { name: 'Saved conversation', exact: true }).click();
   await chatAction('Restore chat');
   await page.getByText('This chat is archived.', { exact: false }).waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await openChatList(page);
   await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
   await page.getByRole('heading', { name: 'No archived chats', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Active chats', exact: true }).click();
@@ -561,7 +561,7 @@ try {
   const sendBox = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox();
   assert.ok(sendBox && sendBox.y >= 0 && sendBox.y + sendBox.height <= 844, JSON.stringify(sendBox));
   assert.equal(await page.getByRole('complementary', { name: 'Chat history' }).count(), 0);
-  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await openChatList(page);
   await page.getByRole('region', { name: 'Chat list', exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'Conversation', exact: true }).count(), 0);
   assert.equal(

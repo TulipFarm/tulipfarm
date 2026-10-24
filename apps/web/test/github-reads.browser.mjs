@@ -9,6 +9,7 @@ import { githubChatFixture } from '../../worker/test/github-read-fixture.mjs';
 import { registerGitHubAccounts } from '../../api/src/github-accounts.ts';
 import { registerConversations } from '../../api/src/conversations.ts';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
+import { openChatList } from './browser-controls.mjs';
 
 const port = 5229,
   origin = `http://127.0.0.1:${port}`;
@@ -252,7 +253,7 @@ try {
     assert.ok(attempt < 100, 'Selection write reaches server');
     await setTimeout(20);
   }
-  await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+  await openChatList(page);
   await cards.last().waitFor({ state: 'detached' });
   const afterUnmount = requests.length;
   releaseSelection.resolve();
