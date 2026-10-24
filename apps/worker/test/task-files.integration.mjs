@@ -101,14 +101,14 @@ async function setup(t, { reader = 'claude-sonnet', images = true } = {}) {
   const upload = async (name, mediaType, content) =>
     (await files.upload(w.id, w.userId, randomUUID(), { name, parentId: null, mediaType }, Buffer.from(content))).id;
   /** Starts a task and steps it until it stops waiting on the worker. */
-  const run = async (text, sources = []) => {
+  const run = async (text, sources = [], credits = 100) => {
     const task = await tasks.start(w.id, w.userId, {
       requestId: randomUUID(),
       agentId: agent.agentId,
       scope: [],
       text,
       sources,
-      limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
+      limits: { toolCalls: 10, credits, activeMilliseconds: 600000 },
     });
     for (let n = 0; n < 8 && (await tasks.read(w.id, w.userId, task.id)).status === 'pending'; n++) {
       const composition = createTaskComposition(f.runtime, undefined, undefined, undefined, objects);
@@ -228,4 +228,29 @@ test('with the images flag off a task keeps the legacy text reader', async t => 
     'An attached file exceeds the supported text format or size, or file storage is not configured.',
   );
   assert.equal(f.requests.length, 1);
+});
+
+test('a linked file that gets no room in the reading budget is named as not included', async t => {
+  // Haiku's input window is small enough for one ledger to fill half of it.
+  const f = await setup(t, { reader: 'claude-haiku' });
+  const web = await localWeb(t, {
+    'charts.example/notes.txt': send(200, 'Quarterly notes.', { 'content-type': 'text/plain' }),
+  });
+  const ledger = await f.upload('ledger.txt', 'text/plain', 'ledger entry paid in full\n'.repeat(60_000));
+  // A full reading budget costs more than the other tests' tasks are allowed.
+  const task = await f.run(
+    'Compare the ledger with https://charts.example/notes.txt',
+    [{ kind: 'file', fileId: ledger }],
+    10_000,
+  );
+  assert.equal(task.status, 'completed');
+  assert.deepEqual(web.requests, ['charts.example/notes.txt']);
+  const read = text(filesTurn(f.requests[0]));
+  assert.match(read, /name="ledger.txt"[^>]*complete="false"/, 'the ledger fills the budget');
+  assert.match(
+    read,
+    /<[^>]*url="https:\/\/charts.example\/notes.txt"[^>]*status="not-included"/,
+    'the block the link notice points to says the file was not read',
+  );
+  assert.doesNotMatch(read, /Quarterly notes/);
 });
