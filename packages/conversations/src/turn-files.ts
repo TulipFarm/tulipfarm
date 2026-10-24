@@ -462,7 +462,8 @@ type Entry = {
   result:
     | { kind: 'reading'; reading: FileReading }
     | { kind: 'unavailable'; cause: 'busy' | 'access' | GoogleUnavailable }
-    | { kind: 'not-included' };
+    | { kind: 'not-included' }
+    | { kind: 'unloaded' };
 };
 
 const readPointer = (id: string) =>
@@ -507,6 +508,8 @@ class TurnFileContext {
             ? attachmentNotices[local]
             : unavailableNotices.tulipfarm[local];
       body = `<${tag} ${head(entry)} status="${cause === 'busy' ? 'temporarily-unavailable' : 'unavailable'}">${notice}</${tag}>`;
+    } else if (entry.result.kind === 'unloaded') {
+      body = `<${tag} ${head(entry)} status="unloaded">This file was unloaded from context to save space and was not read in this turn. ${readPointer(entry.id)}</${tag}>`;
     } else if (entry.result.kind === 'not-included') {
       body = `<${tag} ${head(entry)} status="not-included">This file did not fit in this turn's reading budget and was not read. ${readPointer(entry.id)}</${tag}>`;
     } else if (entry.result.reading.kind === 'unreadable') {
@@ -744,6 +747,24 @@ const partId = (part: TurnFilePart) =>
   part.kind === 'attachment' ? part.attachmentId : part.kind === 'file' ? part.fileId : part.google.fileId;
 const partOrigin = (part: TurnFilePart): Origin =>
   part.kind === 'attachment' ? 'attachment' : part.kind === 'file' ? 'tulipfarm' : 'google';
+/** What a part says about its file before it is read: an attachment's stored metadata or a Google reference's. */
+const partEntry = (part: TurnFilePart): Omit<Entry, 'result'> => ({
+  messageId: part.messageId,
+  origin: partOrigin(part),
+  id: partId(part),
+  name: part.kind === 'google-file' ? part.google.name : part.kind === 'attachment' ? (part.filename ?? null) : null,
+  mediaType:
+    part.kind === 'google-file' ? part.google.mimeType : part.kind === 'attachment' ? (part.mediaType ?? null) : null,
+  size: part.kind === 'attachment' ? (part.size ?? null) : null,
+});
+
+/** Name-only blocks for the files of a message compaction unloaded, each with its `files.read` pointer. */
+export function unloadedFileBlocks(messageId: string, parts: readonly TurnFilePart[]) {
+  const context = new TurnFileContext();
+  for (const part of parts)
+    if (part.messageId === messageId) context.add({ ...partEntry(part), result: { kind: 'unloaded' } });
+  return context.context(messageId);
+}
 
 /**
  * The notice for a file past the budget, named by type and size. A Files reference is named only while the requester
@@ -811,20 +832,7 @@ export async function readTurnFiles(input: {
     const key = `${part.kind}:${id}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const base = {
-      messageId: part.messageId,
-      origin: partOrigin(part),
-      id,
-      name:
-        part.kind === 'google-file' ? part.google.name : part.kind === 'attachment' ? (part.filename ?? null) : null,
-      mediaType:
-        part.kind === 'google-file'
-          ? part.google.mimeType
-          : part.kind === 'attachment'
-            ? (part.mediaType ?? null)
-            : null,
-      size: part.kind === 'attachment' ? (part.size ?? null) : null,
-    };
+    const base = partEntry(part);
     if (remaining <= 0) {
       context.add(await notIncluded(base, part, input));
       continue;

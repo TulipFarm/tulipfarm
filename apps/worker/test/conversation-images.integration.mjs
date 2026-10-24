@@ -423,3 +423,44 @@ test('with the images flag off a turn with an attachment sends exactly what a te
   ).rows[0].image_models;
   assert.equal(pinned, null);
 });
+
+test('an attachment of a message compaction cleaned is named with a files.read pointer, not dropped', async t => {
+  const f = await setup(t);
+  const chatId = await f.chat();
+  const id = await f.attach(chatId, 'ledger.txt', 'text/plain', 'LEDGER BODY');
+  await f.turn(
+    chatId,
+    [
+      { kind: 'attachment', attachmentId: id },
+      { kind: 'text', text: 'Keep this' },
+    ],
+    'claude-haiku',
+  );
+  const { message_id: messageId, turn_id: turnId } = (
+    await f.db.platform.query(
+      `SELECT p.message_id, t.id AS turn_id FROM ${f.table('tf_conversation_parts')} p
+      JOIN ${f.table('tf_conversation_turns')} t ON t.source_message_id=p.message_id WHERE p.attachment_id=$1`,
+      [id],
+    )
+  ).rows[0];
+  const compactionId = randomUUID();
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_conversation_compactions')} (id,conversation_id,turn_id,trigger,state,policy_revision,trigger_percent,target_percent)
+    VALUES ($1,$2,$3,'automatic','cleaned',0,80,50)`,
+    [compactionId, chatId, turnId],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_conversation_context_cleanups')} (message_id,conversation_id,compaction_id) VALUES ($1,$2,$3)`,
+    [messageId, chatId, compactionId],
+  );
+  const [request] = await f.turn(chatId, [{ kind: 'text', text: 'What was in the ledger?' }], 'claude-haiku');
+  const text = requestText(request);
+  assert.ok(!text.includes('LEDGER BODY'));
+  assert.ok(!text.includes('ask the requester to reference it again'));
+  assert.match(
+    text,
+    new RegExp(
+      `attachment-id=\\\\"${id}\\\\" name=\\\\"ledger.txt\\\\" media-type=\\\\"text/plain\\\\" size-bytes=\\\\"11\\\\" status=\\\\"unloaded\\\\">This file was unloaded from context to save space and was not read in this turn\\. Call files\\.read with source \\\\"${id}\\\\"`,
+    ),
+  );
+});

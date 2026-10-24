@@ -124,6 +124,7 @@ import { pinnedImageModels } from './turn-image-models.ts';
 import {
   readTurnFiles,
   readableFileParts,
+  unloadedFileBlocks,
   withImages,
   type ChatImage,
   type ReplyContent,
@@ -1303,22 +1304,18 @@ export function createConversationExecutor(
             ),
           );
           const cleaned = new Set(compaction?.cleaned ?? []);
-          const unloadedFiles = [
-            ...new Set(
-              fileReferences
-                .filter(reference => cleaned.has(reference.messageId))
-                .map(reference => reference.messageId),
-            ),
-          ];
           const loadedReferences = fileReferences.filter(reference => !cleaned.has(reference.messageId));
-          const turnFileParts = images
+          const fileParts = images
             ? await readableFileParts(
                 tx,
                 fence.conversationId,
-                messages.filter(message => !cleaned.has(message.id)).map(message => message.id),
+                messages.map(message => message.id),
                 chat.requester.membershipId,
               )
-            : [];
+            : fileReferences;
+          // Files of messages compaction cleaned are named, not read; attachments are parts only with the images reader.
+          const unloadedFiles = fileParts.filter(part => cleaned.has(part.messageId));
+          const turnFileParts = images ? fileParts.filter(part => !cleaned.has(part.messageId)) : [];
           const turnModel = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
           const imageModels = images ? await pinnedImageModels(tx, fence.turnId, turnModel, images) : null;
           const timeZone = timeZoneSchema
@@ -2143,7 +2140,16 @@ export function createConversationExecutor(
         const sourceMessages = source.messages
           .filter(message => message.text)
           .map(({ role, text }) => ({ role, text }));
-        const unloaded = new Set(source.unloadedFiles);
+        const cleanedNote = (id: string, cleanedNow: boolean) => {
+          const parts = [...source.unloadedFiles, ...(cleanedNow ? source.turnFileParts : [])];
+          if (images) {
+            const blocks = unloadedFileBlocks(id, parts);
+            return blocks ? [cleanedFileNote(id, blocks)] : [];
+          }
+          return parts.some(part => part.messageId === id) || (cleanedNow && fileContext(id))
+            ? [cleanedFileNote(id)]
+            : [];
+        };
         const render = (messages: readonly ContextMessage[], cleanedFiles: ReadonlySet<string>) =>
           observeChatDetailSync('render', () =>
             messages.flatMap(({ id, role, text }) => {
@@ -2153,7 +2159,7 @@ export function createConversationExecutor(
                 ...(files
                   ? [{ role: 'user' as const, text: `Untrusted file source referenced by the requester:\n${files}` }]
                   : []),
-                ...(unloaded.has(id) || (cleanedFiles.has(id) && fileContext(id)) ? [cleanedFileNote(id)] : []),
+                ...cleanedNote(id, cleanedFiles.has(id)),
               ];
             }),
           );

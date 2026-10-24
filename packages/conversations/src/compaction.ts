@@ -187,10 +187,13 @@ export function omittedBlock(messageIds: readonly string[]): ChatMessage {
 export const refersToEarlierMessages = (messages: readonly ChatMessage[]) =>
   messages.some(message => message.text.startsWith(summaryHeading) || message.text.startsWith(omittedHeading));
 
-export function cleanedFileNote(messageId: string): ChatMessage {
+/** `files` names each unloaded file with its `files.read` pointer; without it, `files.read` is not offered. */
+export function cleanedFileNote(messageId: string, files?: string): ChatMessage {
   return {
     role: 'user',
-    text: `A file referenced in earlier message ${messageId} was unloaded from context to save space. Its original remains attached to that message; ask the requester to reference it again if its contents are needed.`,
+    text: files
+      ? `Files of earlier message ${messageId} were unloaded from context to save space. Their originals remain with that message, and files.read reads them again:\n${files}`
+      : `A file referenced in earlier message ${messageId} was unloaded from context to save space. Its original remains attached to that message; ask the requester to reference it again if its contents are needed.`,
   };
 }
 
