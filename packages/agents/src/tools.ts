@@ -63,7 +63,6 @@ import {
   type AttachmentReader,
   type TurnFiles,
 } from '@tulipfarm/conversations/turn-files';
-import { generateImagesCallSchema } from '@tulipfarm/conversations/image-contracts';
 import {
   generateImageOutputs,
   type ImageGenerator,
@@ -187,7 +186,6 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('plans.start'), planId: z.uuid(), expectedVersion: z.number().int().nonnegative() }),
   delegateCallSchema,
   createFileCallSchema,
-  generateImagesCallSchema,
   z.strictObject({
     tool: z.literal('files.read'),
     source: z.string().trim().min(1).max(256),
@@ -580,10 +578,7 @@ export type ChatImages = {
   attachments: AttachmentReader;
   autonomous: boolean;
   /** The turn's pinned image model and its provider call. */
-  choose(
-    tx: AuthorizationTransaction,
-    turnId: string,
-  ): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
+  choose(tx: AuthorizationTransaction, turnId: string): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
 };
 /** What `files.read` reads with: Files, Google Drive and the images reader of the workspace. */
 export type ChatFiles = {
@@ -1136,7 +1131,7 @@ export function createChatTools(
         if (!images || !context.origin) throw new AccessDenied();
         const origin = context.origin;
         const transaction = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
-          withHuman(runtime, workspaceId, actor, 'write', operation);
+          withHuman(runtime, workspaceId, actor, 'read', operation);
         const { model, generate } = await transaction(tx => images.choose(tx, origin.turnId));
         return generateImageOutputs(
           { files: images.files, attachments: images.attachments, transaction },
