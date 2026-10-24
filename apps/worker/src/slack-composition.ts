@@ -10,7 +10,8 @@ import {
   slackCredentialCipher,
   type SlackRuntime,
 } from '@tulipfarm/slack';
-import { createBackgroundJob, errorAttributes, log } from '@tulipfarm/observability';
+import { createBackgroundJob, errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
+import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { createSlackDirectMessages } from '@tulipfarm/slack';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
@@ -58,6 +59,7 @@ export async function createSlackPromptComposition(
   runtime: SlackRuntime,
   model: ModelContinuity | null = null,
   modelFamilyId?: string,
+  attachments?: AttachmentBytes,
 ) {
   const outboundSettings = slackActionSettings();
   const settings = slackPromptSettings();
@@ -70,6 +72,15 @@ export async function createSlackPromptComposition(
         ...settings,
         appId: settings.config.appId,
         ...(modelFamilyId ? { modelFamilyId } : {}),
+        // Files shared in a direct message become its attachments while the `images` flag is on.
+        ...(attachments
+          ? {
+              files: {
+                enabled: (workspaceId: string) => isFeatureEnabled('images', null, { id: workspaceId }),
+                bytes: attachments,
+              },
+            }
+          : {}),
       })
     : undefined;
   const channelOptions = {

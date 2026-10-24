@@ -10,7 +10,8 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { slackConfigurationSchema, slackId, type SlackConfiguration } from './contracts.ts';
+import { requiredBotScopes, slackConfigurationSchema, slackId, type SlackConfiguration } from './contracts.ts';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { slackCredentialCipher, encryptSlackToken, storedCredentialSchema } from './credentials.ts';
 import { exchangeCode } from './provider.ts';
 import { canAccessSlackInstallation } from './installation-access.ts';
@@ -108,8 +109,12 @@ export function createSlackInstallations(options: {
       return actor;
     });
   }
+  // Reading shared files needs `files:read` while the `images` flag is on; without it an installation asks to update.
+  const botScopes = async (workspaceId: string) =>
+    requiredBotScopes(config, await isFeatureEnabled('images', null, { id: workspaceId }));
   async function status(workspaceId: string, userId: string) {
     const evidence = await installer(workspaceId);
+    const required = await botScopes(workspaceId);
     const access = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
       await lockAuthorization(tx);
       const actor = await resolveHuman(tx, userId);
@@ -143,7 +148,7 @@ export function createSlackInstallations(options: {
           (credential.data.rotation.state === 'ready' && credential.data.rotation.expiresAt <= Date.now()))
       )
         local.state = 'reconnect-required';
-      const missingScopes = local ? config.scopeApproval.botScopes.filter(scope => !local.scopes.includes(scope)) : [];
+      const missingScopes = local ? required.filter(scope => !local.scopes.includes(scope)) : [];
       if (local?.state === 'active' && missingScopes.length) local.state = 'permissions-required';
       const recovery = z
         .object({ event_id: z.uuid(), credential: z.unknown() })
@@ -221,6 +226,7 @@ export function createSlackInstallations(options: {
   }
   async function begin(workspaceId: string, userId: string, sessionId: string) {
     const actor = await manager(workspaceId, userId);
+    const required = await botScopes(workspaceId);
     const recovery = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
       await lockAuthorization(tx, 'write');
       await requireManager(tx, actor, true);
@@ -247,7 +253,7 @@ export function createSlackInstallations(options: {
         );
         return false;
       }
-      const missingScopes = local && config.scopeApproval.botScopes.some(scope => !local.scopes.includes(scope));
+      const missingScopes = local && required.some(scope => !local.scopes.includes(scope));
       if (
         !local ||
         !['active', 'scope-missing'].includes(local.state) ||
@@ -281,7 +287,7 @@ export function createSlackInstallations(options: {
     const url = new URL('https://slack.com/oauth/v2/authorize');
     url.search = new URLSearchParams({
       client_id: config.clientId,
-      scope: config.scopeApproval.botScopes.join(','),
+      scope: required.join(','),
       redirect_uri: config.redirectUri,
       state,
     }).toString();
@@ -310,7 +316,9 @@ export function createSlackInstallations(options: {
     try {
       const oauth = await exchangeCode(config, code, options.fetcher ?? fetch);
       const scopes = [...new Set(oauth.scope.split(',').filter(Boolean))];
+      // Only the configured scopes decide whether Slack works; a missing `files:read` leaves shared files unread.
       const missing = config.scopeApproval.botScopes.some(scope => !scopes.includes(scope));
+      const required = await botScopes(link.workspace_id);
       const reserved = await pool.query(
         `UPDATE app.slack_workspace_links SET team_id=$2 WHERE workspace_id=$1 AND installation_id=$3 AND generation=$4 AND state='authorizing' AND (team_id IS NULL OR team_id=$2) RETURNING workspace_id`,
         [link.workspace_id, oauth.team.id, link.installation_id, link.generation],
@@ -350,7 +358,7 @@ export function createSlackInstallations(options: {
             link.generation,
             scopes,
             credential,
-            config.scopeApproval.botScopes,
+            required,
           ],
         );
         if (!saved.rowCount) throw new Error('slack-installation-conflict');

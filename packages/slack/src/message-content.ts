@@ -54,12 +54,34 @@ const controls = new Set([
   'feedback_buttons',
 ]);
 
+/**
+ * A file shared in a Slack message, kept from the event so it can be downloaded with the bot token. `line` is how the
+ * message content names it, so a file that is read can drop its metadata line. Only Slack's own file host is kept.
+ */
+export const slackSharedFileSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().max(255),
+  mimetype: z.string().max(127).optional(),
+  size: z.number().int().nonnegative().optional(),
+  url: z
+    .url()
+    .max(2048)
+    .refine(value => {
+      const url = new URL(value);
+      return url.protocol === 'https:' && url.hostname === 'files.slack.com' && !url.username && !url.password;
+    })
+    .optional(),
+  line: z.string().max(limit),
+});
+export type SlackSharedFile = z.infer<typeof slackSharedFileSchema>;
+
 export const slackContentFields = {
   text: z.string().max(limit).default(''),
   content: z.string().max(limit).optional(),
   blocks: z.array(z.unknown()).max(100).optional(),
   attachments: z.array(z.unknown()).max(100).optional(),
   files: z.array(z.unknown()).max(100).optional(),
+  shared_files: z.array(slackSharedFileSchema).max(100).optional(),
 };
 
 type ContentInput = {
@@ -68,6 +90,7 @@ type ContentInput = {
   blocks?: unknown[] | undefined;
   attachments?: unknown[] | undefined;
   files?: unknown[] | undefined;
+  shared_files?: SlackSharedFile[] | undefined;
 };
 
 // Keep only visible content. Action values, metadata, private download URLs and arbitrary JSON are not model input.
@@ -273,21 +296,55 @@ export function normalizeSlackContent<T extends ContentInput>(input: T) {
     const fallback = render(attachment.fallback);
     if (fallback && !details.includes(fallback)) add(fallback);
   }
+  const shared: SlackSharedFile[] = [];
   for (const value of input.files ?? []) {
     const file = object.parse(value);
-    add(
-      join([
-        '[File: metadata only; contents not read]',
-        text(file.title) || text(file.name),
-        text(file.mimetype),
-        link('', file.permalink),
-      ]),
-    );
+    const line = join([
+      '[File: metadata only; contents not read]',
+      text(file.title) || text(file.name),
+      text(file.mimetype),
+      link('', file.permalink),
+    ]);
+    add(line);
+    const candidate = slackSharedFileSchema.safeParse({
+      id: file.id,
+      name: typeof file.name === 'string' && file.name ? file.name : typeof file.title === 'string' ? file.title : '',
+      mimetype: file.mimetype,
+      size: file.size,
+      url: file.url_private,
+      line,
+    });
+    if (candidate.success && sections.includes(line)) shared.push(candidate.data);
   }
-  const { blocks, attachments, files, content, ...message } = input;
+  const { blocks, attachments, files, content, shared_files, ...message } = input;
   const rendered = sections.join('\n');
   const normalized = string.parse(blocks || attachments || files ? rendered : (content ?? rendered));
-  return { ...message, ...(blocks || attachments || files || content !== undefined ? { content: normalized } : {}) };
+  const kept = files ? shared : (shared_files ?? []);
+  return {
+    ...message,
+    ...(blocks || attachments || files || content !== undefined ? { content: normalized } : {}),
+    ...(kept.length ? { shared_files: kept } : {}),
+  };
+}
+
+/**
+ * The message text with each shared file's metadata line replaced: by nothing when the file is read as an attachment,
+ * or by a line naming why it could not be read.
+ */
+export function slackMessageTextWithFiles(
+  message: { text: string; content?: string | undefined },
+  files: readonly { line: string; replacement: string }[],
+) {
+  let result = slackMessageText(message);
+  for (const file of files) {
+    const index = result.lastIndexOf(file.line);
+    if (index < 0) continue;
+    // Sections are joined by newlines, so a removed line takes the newline before it, or after it when it comes first.
+    const start = !file.replacement && index > 0 ? index - 1 : index;
+    const end = !file.replacement && index === 0 ? index + file.line.length + 1 : index + file.line.length;
+    result = result.slice(0, start) + file.replacement + result.slice(end);
+  }
+  return result;
 }
 
 export function slackMessageText(message: { text: string; content?: string | undefined }) {

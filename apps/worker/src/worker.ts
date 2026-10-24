@@ -190,7 +190,9 @@ async function run() {
             knowledge: createKnowledgeTools({ runtime: resources.runtime }),
           })
         : undefined;
-    slack = guarded ? await createSlackPromptComposition(guarded, tasks?.model ?? null) : undefined;
+    slack = guarded
+      ? await createSlackPromptComposition(guarded, tasks?.model ?? null, undefined, chatObjects ?? undefined)
+      : undefined;
     const skillClient = configuredSkillClient();
     const agents = guarded
       ? createAgentComposition(guarded, chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined)

@@ -12,6 +12,7 @@ import { chatAccess, type ChatAccessRule } from './chat-access.ts';
 import type { ConversationRuntime } from './runtime.ts';
 import { requireConversationMcpSources } from './source-access.ts';
 import { chargedBytes, type createFiles } from '@tulipfarm/files';
+import { sniffMediaType } from '@tulipfarm/media';
 import { linkReadsInstalled, messageLinkReads, type KeepLink, type LinkRead } from './links.ts';
 
 export const attachmentLimit = 10 * 1024 * 1024;
@@ -421,5 +422,65 @@ export function createAttachments(
       if (!stored) await bytes.remove(key).catch(() => {});
     }
   };
-  return { reserve, status, upload, download, cleanup, publishSent, keepLink };
+  /**
+   * Stores bytes received from outside chat, such as a file shared in a Slack direct message, before any transaction.
+   * The type is taken from the bytes, falling back to the type the source declared. `adoptShared` then makes them a
+   * ready attachment, and `discardShared` removes bytes that were never adopted.
+   */
+  async function stageShared(
+    workspaceId: string,
+    file: { filename: string; declaredType: string | null; bytes: Uint8Array },
+  ): Promise<SharedAttachment> {
+    const sha256 = digest(file.bytes);
+    const staged = {
+      objectKey: randomUUID(),
+      ...reserveAttachmentSchema.parse({
+        filename: file.filename,
+        mediaType: sniffMediaType(file.bytes)?.mediaType ?? file.declaredType ?? 'application/octet-stream',
+        size: file.bytes.byteLength,
+        sha256,
+      }),
+    };
+    await bytes.putIfAbsent(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`, file.bytes);
+    return staged;
+  }
+  /**
+   * Makes staged bytes a ready attachment of `userId` in a chat they may send to, charged like an upload, so their next
+   * message can carry it. Returns false when the workspace's attachment storage is full.
+   */
+  async function adoptShared(
+    workspaceId: string,
+    userId: string,
+    conversationId: string,
+    id: string,
+    staged: SharedAttachment,
+  ) {
+    const target = ids(workspaceId, conversationId, id);
+    return transaction(target.workspaceId, async tx => {
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 209871))', [tx.schema]);
+      const actor = await owned(tx, userId, target.conversationId, 'turn');
+      if ((await chargedBytes(tx)) + staged.size > quota) return false;
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_conversation_attachments')} (id,conversation_id,membership_id,object_key,filename,media_type,size,sha256,state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ready')`,
+        [
+          target.id,
+          target.conversationId,
+          actor.membershipId,
+          staged.objectKey,
+          staged.filename,
+          staged.mediaType,
+          staged.size,
+          staged.sha256,
+        ],
+      );
+      return true;
+    });
+  }
+  async function discardShared(workspaceId: string, staged: SharedAttachment) {
+    await bytes.remove(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`).catch(() => {});
+  }
+  return { reserve, status, upload, download, cleanup, publishSent, keepLink, stageShared, adoptShared, discardShared };
 }
+
+/** Bytes stored for a file received from outside chat, waiting to become an attachment. */
+export type SharedAttachment = z.infer<typeof reserveAttachmentSchema> & { objectKey: string };
