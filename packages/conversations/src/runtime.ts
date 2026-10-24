@@ -120,6 +120,16 @@ import {
   type EffectiveCompactionPolicy,
   type WorkingSummary,
 } from './compaction.ts';
+import { pinnedImageModels } from './turn-image-models.ts';
+import {
+  readTurnFiles,
+  readableFileParts,
+  unloadedFileBlocks,
+  withImages,
+  type ChatImage,
+  type ReplyContent,
+  type TurnFiles,
+} from './turn-files.ts';
 
 export type ConversationRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type RuntimeTransaction = Parameters<Parameters<ConversationRuntime['transaction']>[2]>[0];
@@ -193,7 +203,8 @@ export type ReplySettlement = (tx: ReplyTransaction) => Promise<void>;
 export type ReplyTransaction = RuntimeTransaction;
 export type ConversationReply = (input: {
   model: string;
-  messages: { role: 'user' | 'assistant'; text: string }[];
+  /** User messages carry images as content only when the `images` flag is on and the turn's family reads images. */
+  messages: ({ role: 'user' | 'assistant'; text: string } | { role: 'user'; content: ReplyContent })[];
   sourceMessages?: { role: 'user' | 'assistant'; text: string }[];
   fence: ReplyFence;
   /** Fresh, runtime-authorized preference context, excluded from snapshots and history. */
@@ -210,6 +221,8 @@ export type ConversationReply = (input: {
   priorToolCalls?: readonly unknown[];
   /** The working context holds a compaction summary, so earlier messages may be reread by id. */
   earlierMessages?: boolean;
+  /** The images reader read this turn's files, so the model may call `files.read`. */
+  chatFiles?: boolean;
   retainedSources?: SourceDependency[];
   describedHandles?: string[];
   project?: ProjectContext;
@@ -324,6 +337,11 @@ export const modelFailureEndsTurn = (failure: string) => {
   const parsed = modelFailureSchema.safeParse(failure);
   return parsed.success && terminalModelFailures.has(parsed.data);
 };
+
+// Renewed well inside the 60 second lease, so one slow renewal does not let it lapse.
+const filesLeaseRenewMs = 20_000;
+// Reading a turn's files stops here; files not yet read are named for files.read instead of holding the reply.
+const turnFilesDeadlineMs = 120_000;
 
 export async function renewConversationReplyLease(
   tx: AuthorizationTransaction,
@@ -452,6 +470,7 @@ export function createConversationExecutor(
   skills?: ChatSkills,
   compactor?: ConversationCompactor,
   planning?: ConversationPlanning,
+  turnFiles?: TurnFiles,
 ) {
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
@@ -460,6 +479,37 @@ export function createConversationExecutor(
         return operation(bindFileSources(tx));
       }),
     );
+  }
+
+  /**
+   * Keeps the turn's lease while `work` runs, since reading files can outlast one lease. Losing the lease aborts `work`
+   * through its signal, so a stale attempt stops recognising, and billing, the rest of its files.
+   */
+  async function whileLeased<T>(fence: ReplyFence, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const lost = new AbortController();
+    let renewing = false;
+    const timer = setInterval(() => {
+      if (renewing || lost.signal.aborted) return;
+      renewing = true;
+      transaction(fence.workspaceId, tx => renewConversationReplyLease(tx, fence))
+        .catch(error => {
+          // Any other failure is retried on the next tick; the lease outlasts two of them.
+          if (error instanceof AccessDenied) lost.abort(new Error('conversation-turn-stale'));
+        })
+        .finally(() => {
+          renewing = false;
+        });
+    }, filesLeaseRenewMs);
+    try {
+      const result = await work(lost.signal);
+      lost.signal.throwIfAborted();
+      return result;
+    } catch (error) {
+      if (lost.signal.aborted) throw lost.signal.reason;
+      throw error;
+    } finally {
+      clearInterval(timer);
+    }
   }
 
   const settlements = new Map<string, ReplySettlement>();
@@ -1169,6 +1219,8 @@ export function createConversationExecutor(
     const fence = fenceSchema.parse(value);
     const previousFailure = previousFailures.get(attempt(fence));
     previousFailures.delete(attempt(fence));
+    // With the images flag off, files are read as text exactly as before the images reader.
+    const images = turnFiles && (await turnFiles.enabled(fence.workspaceId)) ? turnFiles : undefined;
     const source = await staged('context', () =>
       observeChatDetail('history', () =>
         transaction(fence.workspaceId, async tx => {
@@ -1288,14 +1340,20 @@ export function createConversationExecutor(
             ),
           );
           const cleaned = new Set(compaction?.cleaned ?? []);
-          const unloadedFiles = [
-            ...new Set(
-              fileReferences
-                .filter(reference => cleaned.has(reference.messageId))
-                .map(reference => reference.messageId),
-            ),
-          ];
           const loadedReferences = fileReferences.filter(reference => !cleaned.has(reference.messageId));
+          const fileParts = images
+            ? await readableFileParts(
+                tx,
+                fence.conversationId,
+                messages.map(message => message.id),
+                chat.requester.membershipId,
+              )
+            : fileReferences;
+          // Files of messages compaction cleaned are named, not read; attachments are parts only with the images reader.
+          const unloadedFiles = fileParts.filter(part => cleaned.has(part.messageId));
+          const turnFileParts = images ? fileParts.filter(part => !cleaned.has(part.messageId)) : [];
+          const turnModel = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
+          const imageModels = images ? await pinnedImageModels(tx, fence.turnId, turnModel, images) : null;
           const timeZone = timeZoneSchema
             .nullable()
             .parse(
@@ -1525,7 +1583,9 @@ export function createConversationExecutor(
                 );
           return {
             personalMemory,
-            model: turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder,
+            model: turnModel,
+            imageModels,
+            turnFileParts,
             currentMessage,
             messages,
             fileReferences: loadedReferences,
@@ -1569,13 +1629,69 @@ export function createConversationExecutor(
     let replied = false;
     const fileSources: FileSource[] = [];
     let fileContext = (_messageId: string) => '';
+    let fileImages: ReadonlyMap<string, ChatImage> = new Map();
     if (
       source.currentMessage.text ||
       source.fileReferences.some(reference => reference.messageId === source.currentMessage.id) ||
+      source.turnFileParts.some(part => part.messageId === source.currentMessage.id) ||
       source.invoked
     ) {
       if (!reply) throw new Error('conversation-model-unavailable');
-      if (source.fileReferences.length) {
+      const authorize = (check: (tx: AuthorizationTransaction) => Promise<void>) =>
+        transaction(fence.workspaceId, async tx => {
+          const chat = await root(tx, fence);
+          const turn = await head(tx, fence.conversationId);
+          if (
+            !chat ||
+            !turn ||
+            turn.id !== fence.turnId ||
+            turn.generation !== fence.generation ||
+            turn.attempt_epoch !== fence.epoch ||
+            turn.status !== 'processing' ||
+            !turn.lease_live
+          )
+            throw new Error('conversation-turn-stale');
+          await check(tx);
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_conversation_turns')} SET lease_until = clock_timestamp() + interval '60 seconds' WHERE id = $1 AND status='processing'`,
+            [fence.turnId],
+          );
+        });
+      if (images && source.imageModels) {
+        const pinned = source.imageModels;
+        const recognitionModel = pinned.recognitionFamilyId;
+        const read = await staged('files', () =>
+          whileLeased(fence, signal =>
+            readTurnFiles({
+              signal,
+              deadline: AbortSignal.timeout(turnFilesDeadlineMs),
+              workspaceId: fence.workspaceId,
+              conversationId: fence.conversationId,
+              actor: source.requester,
+              parts: source.turnFileParts,
+              files,
+              google,
+              attachments: images.attachments,
+              family: images.family(pinned.familyId),
+              recognise: recognitionModel
+                ? request =>
+                    images.recognise(request, {
+                      workspaceId: fence.workspaceId,
+                      conversationId: fence.conversationId,
+                      turnId: fence.turnId,
+                      requester: source.requester,
+                      model: recognitionModel,
+                    })
+                : undefined,
+              recognitionModel: recognitionModel ?? undefined,
+              authorize,
+            }),
+          ),
+        );
+        fileSources.push(...read.sources);
+        fileContext = read.context;
+        fileImages = read.images;
+      } else if (source.fileReferences.length) {
         const read = await staged('files', () =>
           readReferencedFiles({
             workspaceId: fence.workspaceId,
@@ -1584,26 +1700,7 @@ export function createConversationExecutor(
             references: source.fileReferences,
             files,
             google,
-            authorize: check =>
-              transaction(fence.workspaceId, async tx => {
-                const chat = await root(tx, fence);
-                const turn = await head(tx, fence.conversationId);
-                if (
-                  !chat ||
-                  !turn ||
-                  turn.id !== fence.turnId ||
-                  turn.generation !== fence.generation ||
-                  turn.attempt_epoch !== fence.epoch ||
-                  turn.status !== 'processing' ||
-                  !turn.lease_live
-                )
-                  throw new Error('conversation-turn-stale');
-                await check(tx);
-                await tx.client.query(
-                  `UPDATE ${table(tx, 'tf_conversation_turns')} SET lease_until = clock_timestamp() + interval '60 seconds' WHERE id = $1 AND status='processing'`,
-                  [fence.turnId],
-                );
-              }),
+            authorize,
           }),
         );
         fileSources.push(...read.sources);
@@ -2083,7 +2180,16 @@ export function createConversationExecutor(
         const sourceMessages = source.messages
           .filter(message => message.text)
           .map(({ role, text }) => ({ role, text }));
-        const unloaded = new Set(source.unloadedFiles);
+        const cleanedNote = (id: string, cleanedNow: boolean) => {
+          const parts = [...source.unloadedFiles, ...(cleanedNow ? source.turnFileParts : [])];
+          if (images) {
+            const blocks = unloadedFileBlocks(id, parts);
+            return blocks ? [cleanedFileNote(id, blocks)] : [];
+          }
+          return parts.some(part => part.messageId === id) || (cleanedNow && fileContext(id))
+            ? [cleanedFileNote(id)]
+            : [];
+        };
         const render = (messages: readonly ContextMessage[], cleanedFiles: ReadonlySet<string>) =>
           observeChatDetailSync('render', () =>
             messages.flatMap(({ id, role, text }) => {
@@ -2093,7 +2199,7 @@ export function createConversationExecutor(
                 ...(files
                   ? [{ role: 'user' as const, text: `Untrusted file source referenced by the requester:\n${files}` }]
                   : []),
-                ...(unloaded.has(id) || (cleanedFiles.has(id) && fileContext(id)) ? [cleanedFileNote(id)] : []),
+                ...cleanedNote(id, cleanedFiles.has(id)),
               ];
             }),
           );
@@ -2163,7 +2269,7 @@ export function createConversationExecutor(
         await staged('model', () =>
           reply({
             model: source.model,
-            messages: prepared,
+            messages: withImages(prepared, fileImages),
             sourceMessages,
             executeTool,
             readPersonalMemory: currentPersonalMemory,
@@ -2174,6 +2280,7 @@ export function createConversationExecutor(
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
             earlierMessages: refersToEarlierMessages(prepared),
+            ...(images ? { chatFiles: true } : {}),
             retainedSources: mergeSources(inheritedSources),
             describedHandles,
             ...(source.project ? { project: source.project } : {}),

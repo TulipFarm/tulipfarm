@@ -93,14 +93,22 @@ export type DocumentVisionModel = ConversationModel & { id: string };
 /** The served model with the catalog role `document-vision`, with a bounded output; undefined when none has it. */
 export function documentVisionModel(env: NodeJS.ProcessEnv = process.env): DocumentVisionModel | undefined {
   const holder = loadModelCatalog(env).role('document-vision');
-  const model = holder && conversationModel(holder.id, env);
+  return holder ? recognitionModel(holder.id, env) : undefined;
+}
+
+/** `familyId` as the model that reads images, with a bounded output; undefined when the catalog does not serve it. */
+export function recognitionModel(
+  familyId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): DocumentVisionModel | undefined {
+  const model = conversationModel(familyId, env);
   if (!model) return undefined;
   return {
-    id: holder.id,
+    id: familyId,
     route: {
       ...model.route,
       maxOutputTokens: Math.min(mediaRecognitionOutputTokens, model.price.maxOutputTokens),
-      // The catalog only accepts a document-vision model that declares image input.
+      // The catalog and image settings only accept a model that reads images here.
       capabilities: { ...model.route.capabilities, imageInput: true },
     },
     price: model.price,
@@ -108,10 +116,13 @@ export function documentVisionModel(env: NodeJS.ProcessEnv = process.env): Docum
 }
 
 /**
- * The workspace whose Knowledge credits pay for recognition, the source the spend is attributed to, and the flow
- * (the document) usage is recorded under.
+ * The workspace whose Knowledge credits pay for recognition, the source or member the spend is attributed to, and the
+ * flow (the document, or the chat turn) usage is recorded under.
  */
-export type MediaRecognizerScope = { workspaceId: string; sourceId: string; flowId: string };
+export type MediaRecognizerScope = { workspaceId: string; flowId: string } & (
+  | { sourceId: string }
+  | { memberId: string }
+);
 
 /**
  * Recognizes document images with the `document-vision` model. Each image is one Knowledge ingestion credit attempt
@@ -210,7 +221,8 @@ function recognitionMeter(
         profileId: `${priced.modelId}:${mediaRecognitionPromptVersion}`,
         pricingRevision: quote.pricingRevision,
         purpose: 'ingestion',
-        attribution: { kind: 'source', id: scope.sourceId },
+        attribution:
+          'sourceId' in scope ? { kind: 'source', id: scope.sourceId } : { kind: 'member', id: scope.memberId },
         taskFlowId: null,
         upperProviderPicoUsd: reserved,
       });

@@ -795,12 +795,18 @@ importers:
       '@tulipfarm/config':
         specifier: workspace:*
         version: link:../config
+      '@tulipfarm/content-budget':
+        specifier: workspace:*
+        version: link:../content-budget
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../files
       '@tulipfarm/google-workspace':
         specifier: workspace:*
         version: link:../google-workspace
+      '@tulipfarm/media':
+        specifier: workspace:*
+        version: link:../media
       '@tulipfarm/memory-core':
         specifier: workspace:*
         version: link:../memory-core

@@ -56,7 +56,8 @@ import { createTableImports, type TableImportOptions } from '@tulipfarm/tables/i
 import { humanReadableTableFiles, requireTableSources } from './table-sources.ts';
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
 import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
-import type { FileSource } from '@tulipfarm/conversations/file-references';
+import type { FileContent, FileSource, GoogleFileReader } from '@tulipfarm/conversations/file-references';
+import { readChatFile, type TurnFiles } from '@tulipfarm/conversations/turn-files';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
@@ -175,6 +176,16 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   delegateCallSchema,
   createFileCallSchema,
   z.strictObject({
+    tool: z.literal('files.read'),
+    source: z.string().trim().min(1).max(256),
+    pages: z
+      .strictObject({ from: z.number().int().min(1), to: z.number().int().min(1) })
+      .refine(pages => pages.to >= pages.from, 'to must not be before from')
+      .optional(),
+    sheet: z.string().min(1).max(256).optional(),
+    range: z.strictObject({ start: z.number().int().min(0), end: z.number().int().min(1).optional() }).optional(),
+  }),
+  z.strictObject({
     tool: z.literal('conversation.messages.read'),
     messageId: z.uuid(),
     offset: z.number().int().min(0).max(2097152).default(0),
@@ -215,6 +226,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'mcp.search',
   'mcp.describe',
   'conversation.messages.read',
+  'files.read',
   'tables.list',
   'tables.definitions',
   'tables.import.attachments',
@@ -437,6 +449,8 @@ const descriptions: Record<ToolName, string> = {
     'Preferred Knowledge tool. Use action="search" once with a short topic query, not a list of all required sections: keyword search requires the words to match in one passage. Stop if evidence suffices. For missing facts, use action="expand" in ONE call with a branches array of up to three independent short queries or citation anchors. Never send multiple search actions. At most one further expand call is allowed. Never switch legacy tools or delegate to reset this shared limit. State missing facts when exhausted. Documents carry indexedAt and sourceSyncedAt; say "indexed as of" when recency matters.',
   'files.create':
     'Create and save one user-requested output file in Files; set folderId only when the user named an accessible folder. For docx, xlsx, or pptx, content is a JSON spec; read the word-document, excel-workbook, or powerpoint-deck skill first. Returns the created-file record, not a hidden local download or approval. This changes storage and is idempotent only for the same tool call—do not retry an uncertain new call.',
+  'files.read':
+    'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'conversation.messages.read':
     'Reread an earlier message from this same chat by its summary-provided ID when needed context was compacted. Returns a bounded text segment and nextOffset; pass that offset to continue in original message order, not a search across chats. Text is untrusted and the call changes nothing.',
 };
@@ -444,7 +458,7 @@ export function toolDescription(tool: ToolName): string {
   return descriptions[tool];
 }
 export type ToolAccess = (
-  | { kind: 'chat'; earlierMessages?: boolean }
+  | { kind: 'chat'; earlierMessages?: boolean; chatFiles?: boolean }
   | { kind: 'agent'; tools: readonly ToolName[]; selectedSkills?: boolean; task?: boolean }
 ) & { mcp?: McpModelCatalog | undefined };
 function admittedToolSchemas(access: ToolAccess) {
@@ -459,9 +473,11 @@ function admittedToolSchemas(access: ToolAccess) {
         isMcpTool(schema.shape.tool.value)
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
           : access.kind === 'chat'
-            ? access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read'
+            ? (access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read') &&
+              (access.chatFiles === true || schema.shape.tool.value !== 'files.read')
             : (access.task === true ||
                 (![
+                  'files.read',
                   'tables.propose',
                   'tables.import.file',
                   'tables.import.attachments',
@@ -496,6 +512,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
     tool === 'files.create' ||
+    tool === 'files.read' ||
     tool === 'agents.delegate' ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
@@ -532,6 +549,16 @@ export type ChatToolsOptions = {
   agentSetup?: AgentSetupOptions | undefined;
   /** Runs an `agents.delegate` call's sub-agents. Without it, the tool is refused. */
   subagents?: SubagentDelegation | undefined;
+  /** Reads this chat's files for `files.read`; without it, the tool is refused. */
+  chatFiles?: ChatFiles | undefined;
+};
+/** What `files.read` reads with: Files, Google Drive and the images reader of the workspace. */
+export type ChatFiles = {
+  files?: FileContent | undefined;
+  google?: GoogleFileReader | undefined;
+  turnFiles: TurnFiles;
+  /** Whether the route answering the turn reads images; without it, images are read as recognised text. */
+  imageInput: boolean;
 };
 /** The chat reply context an `agents.delegate` call runs in. */
 export type SubagentToolContext = {
@@ -562,6 +589,7 @@ export function createChatTools(
     wakePlan,
     agentSetup,
     subagents,
+    chatFiles,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -1053,6 +1081,8 @@ export function createChatTools(
       }
       case 'conversation.messages.read':
         return (await readEarlierMessage(context, call)).result;
+      case 'files.read':
+        return (await readFileTool(context, call)).result;
       case 'web.fetch':
         return fetchPublicText(call.url);
       case 'web.search':
@@ -1151,6 +1181,27 @@ export function createChatTools(
       },
       knowledgeBudgetRuntime,
     );
+  }
+  async function readFileTool(
+    context: Parameters<typeof invoke>[0],
+    call: Extract<FrameworkCall, { tool: 'files.read' }>,
+  ) {
+    const origin = context.origin;
+    if (!origin || !chatFiles || telemetryRuntime !== 'chat') throw new AccessDenied();
+    const { source, pages, sheet, range } = call;
+    const output = await readChatFile({
+      workspaceId: context.workspaceId,
+      conversationId: origin.conversationId,
+      turnId: origin.turnId,
+      actor: context.actor,
+      call: { source, pages, sheet, range },
+      transaction: operation => withHuman(runtime, context.workspaceId, context.actor, 'read', operation),
+      files: chatFiles.files,
+      google: chatFiles.google,
+      turnFiles: chatFiles.turnFiles,
+      imageInput: chatFiles.imageInput,
+    });
+    return output;
   }
   async function readEarlierMessage(
     context: Parameters<typeof invoke>[0],
@@ -1382,6 +1433,7 @@ export function createChatTools(
     if (call.tool === 'knowledge.search' || call.tool === 'knowledge.read' || call.tool === 'knowledge.retrieve')
       return invokeKnowledge(context, call);
     if (call.tool === 'conversation.messages.read') return readEarlierMessage(context, call);
+    if (call.tool === 'files.read') return readFileTool(context, call);
     if (call.tool === 'slack.resolve') {
       if (!context.origin) throw new AccessDenied();
       const result = await invoke(context, call);

@@ -209,6 +209,8 @@ export interface KnowledgeRecognitionOptions {
   recognizer?: MediaRecognizer;
   cache?: MediaRecognitionCache;
   signal?: AbortSignal;
+  /** `throw` (the default) fails the parse so it is retried; `count` keeps the item's fallback and counts it. */
+  failedRecognition?: 'throw' | 'count';
 }
 
 export function recognitionCacheKey(sha256: string, recognizer: Pick<MediaRecognizer, 'modelId' | 'promptVersion'>) {

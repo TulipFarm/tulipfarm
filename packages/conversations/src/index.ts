@@ -53,6 +53,7 @@ import { readCompaction } from './compaction.ts';
 import { recordConversationActivity } from './activity.ts';
 import { readMaintenance, resumeMaintenance } from './maintenance.ts';
 import { insertSkillPart, type ChatSkills, type InvokedSkill } from './skill-invocations.ts';
+import { turnImageModelsVersion, type TurnImageModels } from './turn-image-models.ts';
 import {
   archiveChatSchema,
   chatDestinationSchema,
@@ -143,7 +144,12 @@ const compactionParts = (
     LEFT JOIN ${qualified(tx.schema, 'tf_conversation_handoffs')} h ON h.compaction_id=c.id WHERE c.id=(to_jsonb(p)->>'compaction_id')::uuid)`;
 const skillReference = `jsonb_build_object('kind', p.kind, 'skillId', to_jsonb(p)->>'skill_id', 'revision', to_jsonb(p)->>'skill_revision', 'name', to_jsonb(p)->>'skill_name')`;
 
-export function createConversations(runtime: Runtime, skills?: ChatSkills) {
+export type ConversationAdmission = {
+  /** Pins the turn's image models when the workspace reads images; null leaves the turn unpinned. */
+  pinTurn?: (tx: AuthorizationTransaction, workspaceId: string, familyId: string) => Promise<TurnImageModels | null>;
+};
+
+export function createConversations(runtime: Runtime, skills?: ChatSkills, admission: ConversationAdmission = {}) {
   async function allowance(tx: AuthorizationTransaction) {
     try {
       await requireCredits(tx);
@@ -437,6 +443,18 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills) {
           ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
         ],
       );
+      if (admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
+        const pinned = await admission.pinTurn(
+          tx,
+          workspaceId,
+          responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : responder,
+        );
+        if (pinned)
+          await tx.client.query(`UPDATE ${table(tx, 'tf_conversation_turns')} SET image_models=$2 WHERE id=$1`, [
+            turnId,
+            JSON.stringify(pinned),
+          ]);
+      }
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
         [turnId, chatId],

@@ -81,6 +81,7 @@ import { emptyChatDocument } from './editor-extensions';
 import { RichMessage } from './rich-message';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModels } from './chat-models';
+import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
 import { InteractionCard } from './interaction-card';
@@ -401,6 +402,7 @@ function ConversationDetail({
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
   const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
+  const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const data = useMemo(
@@ -1280,6 +1282,14 @@ function ConversationDetail({
                     <StagedAttachments
                       uploads={uploads}
                       disabled={write.locked}
+                      reading={
+                        imagesReader
+                          ? {
+                              imageInput:
+                                modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
+                            }
+                          : undefined
+                      }
                       references={{ items: mentions.references, notice: mentions.notice }}
                       blocked={
                         googleBlocked && (

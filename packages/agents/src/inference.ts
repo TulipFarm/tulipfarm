@@ -1221,6 +1221,8 @@ export type ToolInferenceContext = {
   priorToolCalls?: readonly unknown[];
   /** The working context holds a compaction summary, so the model may reread earlier messages. */
   earlierMessages?: boolean;
+  /** The workspace reads chat files with the images reader, so the model may call `files.read`. */
+  chatFiles?: boolean;
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
   /**
@@ -2368,7 +2370,7 @@ export async function inferWithTools(
     if (older.length) rereadOffered = true;
     for (const name of idle) loaded.delete(name);
     if (idle.length) {
-      catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded);
+      catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false);
       previousCatalog = catalogKey(mcp);
     }
     baseline = undefined;
@@ -2425,7 +2427,7 @@ export async function inferWithTools(
         if (!catalog || previousCatalog !== currentCatalogKey) {
           catalogChanged = true;
           catalog = observeChatDetailSync('tool-schemas', () =>
-            nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded),
+            nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false),
           );
           previousCatalog = currentCatalogKey;
         }
@@ -2436,7 +2438,14 @@ export async function inferWithTools(
             role: 'user',
             text: observeChatDetailSync('render', () =>
               runtimeReminder(
-                { kind: 'tools', mcp, earlierMessages: tools?.earlierMessages ?? false, personalMemory, inventory },
+                {
+                  kind: 'tools',
+                  mcp,
+                  earlierMessages: tools?.earlierMessages ?? false,
+                  chatFiles: tools?.chatFiles ?? false,
+                  personalMemory,
+                  inventory,
+                },
                 timeZone,
               ),
             ),

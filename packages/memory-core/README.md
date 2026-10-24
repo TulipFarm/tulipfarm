@@ -31,6 +31,10 @@ or ambient environment configuration. The repository lint fence enforces
 this rule. Parser subprocess isolation remains part of the parser, not
 a replacement for host permission checks.
 
+`parser` also exports `readKnowledgeSegments`. It returns a document's text as
+one segment per page, slide or sheet, with recognised media in place, for
+callers such as chat that read a document without indexing it.
+
 ## Port contracts
 
 | Port                                                                            | Caller-visible responsibility                                                                                            |

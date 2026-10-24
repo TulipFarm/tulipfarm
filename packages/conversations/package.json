@@ -123,6 +123,10 @@
       "types": "./dist/file-outputs.d.ts",
       "default": "./dist/file-outputs.js"
     },
+    "./turn-files": {
+      "types": "./dist/turn-files.d.ts",
+      "default": "./dist/turn-files.js"
+    },
     "./file-references": {
       "types": "./dist/file-references.d.ts",
       "default": "./dist/file-references.js"
@@ -174,6 +178,10 @@
     "./dispatch": {
       "types": "./dist/dispatch.d.ts",
       "default": "./dist/dispatch.js"
+    },
+    "./turn-image-models": {
+      "types": "./dist/turn-image-models.d.ts",
+      "default": "./dist/turn-image-models.js"
     }
   },
   "scripts": {
@@ -185,8 +193,10 @@
   "dependencies": {
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/content-budget": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
+    "@tulipfarm/media": "workspace:*",
     "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",

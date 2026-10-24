@@ -45,7 +45,7 @@ export const featureFlags = {
   },
   images: {
     description:
-      'Workspace image settings: the model that reads images, the default image model and image generation, plus image models in the catalog.',
+      'Workspace image settings: the model that reads images, the default image model and image generation, plus image models in the catalog. Chat reads every attached and referenced file, with images, page labels and a per-file budget.',
     default: 'development',
     scope: 'workspace',
     env: 'FEATURE_FLAG_IMAGES',

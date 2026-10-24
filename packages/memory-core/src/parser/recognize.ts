@@ -13,6 +13,7 @@ import {
 import type {
   CoverageGap,
   KnowledgeExtraction,
+  KnowledgeLocation,
   KnowledgeRecognitionOptions,
   MediaBytes,
   MediaItem,
@@ -33,15 +34,24 @@ const defaultSandbox: KnowledgeParserSandbox = {
   readMedia: (...args) => retryTransientParse(() => readKnowledgeMedia(...args)),
 };
 
+/** The document's text in reading order, one segment per page, slide or sheet, with recognized media in place. */
+export type KnowledgeSegments = {
+  segments: { location: KnowledgeLocation; markdown: string }[];
+  gaps: CoverageGap[];
+  /** Media whose recognition failed, read past under `failedRecognition: 'count'`. */
+  failedRecognitions: number;
+  pages: number;
+};
+
 /**
- * Parses a document in the sandbox, recognizes its media on the host and chunks the merged result.
- * Media that isn't recognized becomes a coverage gap; a revision left with no text is `ocr-required`.
+ * Extracts a document in the sandbox and recognizes its media on the host, keeping each page, slide or sheet as its
+ * own segment. Media that isn't recognized becomes a coverage gap; a document left with no text is `ocr-required`.
  */
-export async function parseKnowledgeDocument(
+export async function readKnowledgeSegments(
   input: KnowledgeParseInput,
   recognition: KnowledgeRecognitionOptions = {},
   sandbox: KnowledgeParserSandbox = defaultSandbox,
-): Promise<KnowledgeParseResult> {
+): Promise<KnowledgeSegments & { extraction: KnowledgeExtraction; used?: MediaRecognizer }> {
   const signal = recognition.signal;
   const extraction = await sandbox.extract(input, signal ? { signal } : {});
   const outcome = await recognizeMedia(input, extraction, recognition, sandbox);
@@ -59,7 +69,27 @@ export async function parseKnowledgeDocument(
   }));
   const gaps = [...extraction.gaps, ...outcome.gaps];
   if (!segments.some(segment => segment.markdown.trim()))
-    throw new KnowledgeParseError(gaps.length ? 'ocr-required' : 'malformed');
+    throw new KnowledgeParseError(gaps.length || outcome.failed ? 'ocr-required' : 'malformed');
+  return {
+    segments,
+    gaps,
+    failedRecognitions: outcome.failed,
+    pages: extraction.pages,
+    extraction,
+    ...(outcome.used ? { used: outcome.used } : {}),
+  };
+}
+
+/**
+ * Parses a document in the sandbox, recognizes its media on the host and chunks the merged result.
+ * Media that isn't recognized becomes a coverage gap; a revision left with no text is `ocr-required`.
+ */
+export async function parseKnowledgeDocument(
+  input: KnowledgeParseInput,
+  recognition: KnowledgeRecognitionOptions = {},
+  sandbox: KnowledgeParserSandbox = defaultSandbox,
+): Promise<KnowledgeParseResult> {
+  const { segments, gaps, extraction, used } = await readKnowledgeSegments(input, recognition, sandbox);
   const markdown = normalizeMarkdown(
     segments
       .map(segment => segment.markdown.replace(/^\n+/, '').trimEnd())
@@ -68,7 +98,7 @@ export async function parseKnowledgeDocument(
   );
   const { chunks, tokens } = chunkSegments(segments);
   const base = `${extraction.engine}-${extraction.version}-${extraction.normalization}`;
-  const recognizer = outcome.used;
+  const recognizer = used;
   return {
     markdown,
     pages: extraction.pages,
@@ -99,6 +129,7 @@ export async function parseKnowledgeDocument(
 interface RecognitionOutcome {
   recognized: Map<string, Extract<MediaRecognition, { kind: 'recognized' }>>;
   gaps: CoverageGap[];
+  failed: number;
   /** Set when at least one media item went through the recognizer or its cache. */
   used?: MediaRecognizer;
 }
@@ -106,25 +137,27 @@ interface RecognitionOutcome {
 async function recognizeMedia(
   input: KnowledgeParseInput,
   extraction: KnowledgeExtraction,
-  { recognizer, cache, signal }: KnowledgeRecognitionOptions,
+  { recognizer, cache, signal, failedRecognition = 'throw' }: KnowledgeRecognitionOptions,
   sandbox: KnowledgeParserSandbox,
 ): Promise<RecognitionOutcome> {
   const recognized: RecognitionOutcome['recognized'] = new Map();
   const gaps: CoverageGap[] = [];
   const gap = (item: MediaItem, reason: CoverageGap['reason']) =>
     gaps.push({ kind: 'image', reason, location: item.location, label: label(item) });
-  if (!extraction.media.length) return { recognized, gaps };
+  let failed = 0;
+  if (!extraction.media.length) return { recognized, gaps, failed };
   if (!recognizer) {
     for (const item of extraction.media) gap(item, 'recognition-unavailable');
-    return { recognized, gaps };
+    return { recognized, gaps, failed };
   }
 
   let used = false;
   let available = true;
   let calls = 0;
-  const results = new Map<string, Promise<MediaRecognition | undefined>>();
-  const settle = (item: MediaItem, result: MediaRecognition | undefined) => {
-    if (!result) gap(item, available ? 'limit' : 'recognition-unavailable');
+  const results = new Map<string, Promise<MediaRecognition | 'failed' | undefined>>();
+  const settle = (item: MediaItem, result: MediaRecognition | 'failed' | undefined) => {
+    if (result === 'failed') failed += 1;
+    else if (!result) gap(item, available ? 'limit' : 'recognition-unavailable');
     else if (result.kind === 'recognized') recognized.set(item.id, result);
     else gap(item, result.kind);
   };
@@ -157,6 +190,7 @@ async function recognizeMedia(
         available = false;
         return undefined;
       }
+      if (failedRecognition === 'count' && !signal?.aborted) return 'failed' as const;
       throw new KnowledgeParseError('resource-limited', { reason: 'recognition-failed' });
     }
   };
@@ -213,7 +247,7 @@ async function recognizeMedia(
   }
   await Promise.all(pending);
   if (failure !== undefined) throw failure;
-  return used ? { recognized, gaps, used: recognizer } : { recognized, gaps };
+  return used ? { recognized, gaps, failed, used: recognizer } : { recognized, gaps, failed };
 }
 
 function createLimit(concurrency: number) {

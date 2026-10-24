@@ -62,6 +62,22 @@ call and again before publication. If either check fails, the turn fails with
 one `<system-reminder>` turn after the request. The reply starts with a `skill-use`
 part only when the model ran with that procedure.
 
+### Reading attached and referenced files
+
+With the workspace's `images` flag on, the executor reads a turn's files through [`turn-files.ts`](src/turn-files.ts) instead of `file-references.ts`. It reads the current message's attachments, Files references and Google Drive references in attached order, then earlier messages' files newest first. Messages removed by compaction are skipped. Files and Google references are read only for the member who sent them, under that member's current access. A reference they can no longer open is `unavailable`, and its content is withheld.
+
+`readFile` decides what a file is from its bytes, not from its declared type:
+
+- Text is read as text.
+- PDF and Office documents are read per page, slide or sheet with `@tulipfarm/memory-core`'s parser, and embedded images are recognised. Google Docs and Slides are exported as DOCX and PPTX so their images survive, and Sheets as XLSX.
+- An image is an image part for a family whose route declares `imageInput`, prepared with `@tulipfarm/media` to the family's `maxImageBytes`. For other families it is the text the workspace's image reader recognised.
+- A ZIP archive is a listing of entry names and sizes.
+- Audio, video, encrypted and unknown files are a named notice with the reason.
+
+Every file yields content, recognised text or a named notice. Files share a budget of half the family's `maxInputTokens`, with text at 4 characters per token and each image at the family's `imageInputTokens`. A file cut by the budget is labelled partial. Files after the budget runs out are named with their type and size. Both point the model at `files.read`, a chat-only read tool that takes `{ source, pages?, sheet?, range? }` and reads one file of this chat under the same access checks, with at most 20,000 tokens per call.
+
+The turn pins its family, the image reader and the image model with the catalog revision in `tf_conversation_turns.image_models` (common migration `0013_turn_image_models.sql`). The API pins them when it admits the turn. A turn admitted another way, such as from Slack, pins them the first time its files are read. With the flag off, the executor reads only referenced files as text, exactly as before.
+
 The executor persists at most five attempts, including abandoned leases. A transient failure releases the lease, advances generation, and schedules exponential delays of 2, 4, 8, and 16 seconds. The fifth failure becomes failed-blocking. Explicit retry/cancel commands require the expected generation and stable command identity. Generic controls refuse waiting and reconciling turns. The deterministic responder has no external effects to reconcile. This retry policy must not be reused for unknown tool effects without domain reconciliation.
 
 An automatic retry never reruns the model after tools have run, because the lost answer may already have acted on their results. Unless the turn can resume from durable execution steps, it ends `failed` with the error code of the failed attempt, such as `database-conflict`, `model-timeout` or `transient-failure`. A crashed attempt with no stored code ends with `reply-interrupted`. History keeps the completed tool receipts. The web chat maps each code to a plain-language cause and offers **Continue**. That explicit retry resumes the model with each recorded receipt marked as already done. Calls with stored steps are replayed with their results and guarded against repeated writes. Calls without stored steps are listed by receipt only.
