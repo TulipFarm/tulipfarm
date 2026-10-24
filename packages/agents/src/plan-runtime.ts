@@ -120,6 +120,8 @@ export type SpecialistAssignment = {
   name: string;
   role: string;
   instructions: string;
+  /** The family the step runs on. Without it, the plan role's model. */
+  modelFamilyId?: string | undefined;
   tools: readonly string[];
   title: string;
   brief: string;
@@ -1304,6 +1306,7 @@ export function createPlanRuntime(
           name: definition.name,
           role: definition.role,
           instructions: definition.instructions,
+          ...(definition.modelFamilyId ? { modelFamilyId: definition.modelFamilyId } : {}),
           tools: definition.tools,
           title: task.title,
           brief: task.brief,

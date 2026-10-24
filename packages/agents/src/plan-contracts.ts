@@ -182,6 +182,11 @@ export const specialistInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(planLimits.specialistName),
   role: z.string().trim().min(1).max(planLimits.specialistRole),
   instructions: z.string().trim().min(1).max(planLimits.specialistInstructions),
+  /** The family this step runs on, and so the image model its work resolves to. Without it, the plan role's model. */
+  modelFamilyId: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,99}$/)
+    .optional(),
   tools: z
     .array(specialistToolSchema)
     .min(1)

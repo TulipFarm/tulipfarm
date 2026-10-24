@@ -16,7 +16,7 @@ import { errorAttributes, log, retryError } from '@tulipfarm/observability';
 import { CreditsExhausted, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
-import { roleModel } from './conversation-model.ts';
+import { conversationFamilyPaused, conversationModel, roleModel } from './conversation-model.ts';
 
 /** Failure codes a specialist may record. Anything else is reported as `specialist-failed`, so no provider text reaches the plan. */
 const failureCodes = new Set([
@@ -74,7 +74,12 @@ export function createPlanComposition(options: {
   const env = options.env ?? process.env;
 
   async function runSpecialist(assignment: SpecialistAssignment & { workspaceId: string }, usage: { calls: number }) {
-    const resolved = roleModel('plan', env);
+    // A step that names a family runs on it and never falls back to another; others use the plan role's model.
+    const resolved = assignment.modelFamilyId
+      ? conversationFamilyPaused(assignment.modelFamilyId, env)
+        ? null
+        : conversationModel(assignment.modelFamilyId, env)
+      : roleModel('plan', env);
     if (!resolved) throw new Error('model-unavailable');
     const validated = inferenceRouteSchema.parse(resolved.route);
     const price = resolved.price;
