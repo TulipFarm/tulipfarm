@@ -454,3 +454,48 @@ test('concurrent images of one call never spend past the task allowance', { time
   assert.equal(f.providerCalls.length, 1, 'only the image within the allowance reaches the provider');
   assert.equal((await f.imageCredits()).length, 1);
 });
+
+test('knowledge spend in the task flow counts against the image allowance', { timeout: 120000 }, async t => {
+  const hold = creditUnitsForProviderCost(40000000000n);
+  const f = await setup(t, {
+    // Earlier knowledge retrieval in the task's flow leaves room for one and a half images when the call runs.
+    choose: async (tx, runId) => {
+      const flow = (
+        await f.db.platform.query(
+          `SELECT t.flow_id FROM ${f.table('tf_agent_task_runs')} r JOIN ${f.table('tf_agent_tasks')} t ON t.id=r.task_id WHERE r.run_id=$1`,
+          [runId],
+        )
+      ).rows[0].flow_id;
+      const spent = BigInt(
+        (
+          await f.db.platform.query(
+            `SELECT COALESCE(sum(COALESCE(charged,reserved)),0)::text AS spent FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`,
+            [flow],
+          )
+        ).rows[0].spent,
+      );
+      const perPico = hold / 40000000000n;
+      const retrieval = (100n * 1_000_000_000_000n - spent - (hold * 3n) / 2n) / perPico;
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_knowledge_credit_attempts')} (id,group_version,operation_id,model_id,profile_id,pricing_revision,purpose,attribution_kind,attribution_id,task_flow_id,upper_provider_pico_usd,state) VALUES ($1,1,$1,'acme-embed','default','test','query','member',$2,$3,$4,'reserved')`,
+        [randomUUID(), f.member, flow, retrieval.toString()],
+      );
+      return runImageChoice(tx, runId);
+    },
+  });
+  f.decisions.push({
+    kind: 'tool',
+    text: 'Draw two posters',
+    call: { tool: 'images.generate', prompt: 'Two tulip posters', count: 2, folderId: f.folder.id },
+  });
+  const task = await f.start('Make two posters.');
+  await f.run(task.id);
+  const result = (
+    await f.db.platform.query(`SELECT result FROM ${f.table('tf_agent_tool_calls')} ORDER BY sequence LIMIT 1`)
+  ).rows[0].result;
+  assert.deepEqual(result.images.map(image => [image.state, image.failure]).sort(), [
+    ['failed', 'task-credits'],
+    ['saved', undefined],
+  ]);
+  assert.equal(f.providerCalls.length, 1, 'only the image within the allowance left by retrieval reaches the provider');
+});
