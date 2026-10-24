@@ -62,6 +62,31 @@ test('a PDF reads per page with page labels and a page selection keeps only thos
   );
 });
 
+test('a failed image recognition keeps the document text and names the failed image', async () => {
+  const bytes = await mediaPdf(['mixed', 'text']);
+  let calls = 0;
+  const failing = async () => {
+    calls += 1;
+    throw new Error('provider down');
+  };
+  const read = await readFile(
+    { name: 'scan.pdf', mediaType: 'application/pdf', bytes },
+    { ...textFamily, recognise: failing },
+  );
+  assert.equal(calls, 1);
+  assert.equal(read.kind, 'read');
+  assert.deepEqual(
+    read.segments.map(segment => [segment.label, segment.text.trim()]),
+    [
+      ['page 1', '## Page 1 notes on the orchard.'],
+      ['page 2', '## Page 2 notes on the orchard.'],
+    ],
+  );
+  assert.deepEqual(read.notes, [
+    '1 image or page in this file could not be recognised because the image reader failed; their content was not read.',
+  ]);
+});
+
 test('the type comes from the bytes: audio is a reason, ZIP is a listing, Word is text', async () => {
   const wav = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WAVEfmt '), Buffer.alloc(32)]);
   assert.deepEqual(await readFile({ name: 'memo.txt', mediaType: 'text/plain', bytes: wav }, textFamily), {

@@ -273,19 +273,13 @@ async function readDocument(
     : undefined;
   const input = { bytes: file.bytes, filename: file.name, mediaType: file.mediaType };
   let parsed;
-  const notes: string[] = [];
   try {
-    try {
-      parsed = await readKnowledgeSegments(input, {
-        ...(recognizer ? { recognizer } : {}),
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-    } catch (error) {
-      // Recognition failing must not lose the document's own text (item 13).
-      if (!(error instanceof MediaRecognitionFailed)) throw error;
-      notes.push('The image reader failed, so images in this file were not recognised.');
-      parsed = await readKnowledgeSegments(input, options.signal ? { signal: options.signal } : {});
-    }
+    // A failed recognition keeps the document's own text (item 13).
+    parsed = await readKnowledgeSegments(input, {
+      failedRecognition: 'count',
+      ...(recognizer ? { recognizer } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   } catch (error) {
     if (!(error instanceof KnowledgeParseError)) throw error;
     switch (error.code) {
@@ -311,7 +305,14 @@ async function readDocument(
     kind: 'read',
     segments: options.selection?.range ? sliceRange(segments, options.selection.range) : segments,
     complete: kept.length === parsed.segments.length && !options.selection?.range,
-    notes: [...notes, ...gapNotes(parsed.gaps)],
+    notes: [
+      ...gapNotes(parsed.gaps),
+      ...(parsed.failedRecognitions
+        ? [
+            `${parsed.failedRecognitions} ${parsed.failedRecognitions === 1 ? 'image or page' : 'images or pages'} in this file could not be recognised because the image reader failed; their content was not read.`,
+          ]
+        : []),
+    ],
   };
 }
 
