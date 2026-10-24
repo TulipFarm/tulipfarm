@@ -55,6 +55,10 @@
       "types": "./dist/github-tasks.d.ts",
       "default": "./dist/github-tasks.js"
     },
+    "./web-fetch": {
+      "types": "./dist/web-fetch.d.ts",
+      "default": "./dist/web-fetch.js"
+    },
     "./mcp-authority": {
       "types": "./dist/mcp-authority.d.ts",
       "default": "./dist/mcp-authority.js"
@@ -274,6 +278,7 @@
     "@tulipfarm/github": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
