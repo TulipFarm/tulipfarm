@@ -744,7 +744,7 @@ function ConversationDetail({
     <div
       className={
         !compact && empty
-          ? 'flex min-h-0 flex-1 flex-col overflow-y-auto py-8 sm:pt-16 sm:pb-12'
+          ? 'flex min-h-0 flex-1 flex-col overflow-y-auto pt-8 pb-24 sm:pt-16 sm:pb-12'
           : 'flex min-h-0 flex-1 flex-col'
       }
     >
@@ -938,7 +938,7 @@ function ConversationDetail({
                         <h2 className="text-2xl font-medium tracking-tight">
                           <Greeting />
                         </h2>
-                        <p className="text-base text-muted-foreground">{emptyChatIntro(draft, sharedChat)}</p>
+                        <p className="text-base text-pretty text-muted-foreground">{emptyChatIntro(draft)}</p>
                       </div>
                     </div>
                   )

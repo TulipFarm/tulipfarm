@@ -18,7 +18,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import type { Brand } from '@tulipfarm/sprout/brand-icon';
 import { workspaceRoute } from '@/router';
-import { prioritizeTasks } from './starting-task-priority';
+import { fillTasks, prioritizeTasks } from './starting-task-priority';
 import { fallbackRecommendations, useRecommendations, sourcePickerHash, type Recommendation } from './recommendations';
 
 const icons: Record<string, ReactNode> = {
@@ -68,7 +68,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
   const { items, message, error, retry, refreshing } = useRecommendations(workspace.id);
   const setup = items.filter(item => item.kind === 'onboarding');
   const suggested = items.filter(item => item.kind === 'prompt');
-  const tasks = suggested.length ? suggested : fallbackRecommendations.slice(0, 3);
+  const tasks = fillTasks(suggested, fallbackRecommendations);
   const { primary, more } = prioritizeTasks(tasks);
   const choose = (id: string) => {
     const action = [...tasks, ...setup].find(item => item.id === id)?.action;
@@ -131,7 +131,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
       {setup.length > 0 && (
         <div className="space-y-2 border-t border-muted-foreground/30 pt-4">
           <PromptList
-            title="Set up your workspace"
+            title="Set up your workspace (optional)"
             disabled={disabled}
             onSelect={choose}
             items={rows(setup.slice(0, 1))}
@@ -161,7 +161,6 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
               </CollapsibleContent>
             </Collapsible>
           )}
-          <p className="px-3 text-xs text-muted-foreground">Optional. You can start a task now.</p>
         </div>
       )}
       {message &&

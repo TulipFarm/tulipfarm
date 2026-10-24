@@ -103,7 +103,9 @@ export function ProjectScopeSelect({
             variant={privateBadge ? 'ghost' : badge ? 'scope' : 'outline'}
             size={badge ? 'sm' : 'md'}
             aria-label={`${label}: ${name}`}
-            title={privateBadge ? 'Personal chat. Choose a project to share it.' : name}
+            title={
+              privateBadge ? 'Personal chat, separate from your earlier chats. Choose a project to share it.' : name
+            }
             disabled={disabled}
           />
         }

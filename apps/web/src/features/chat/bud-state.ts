@@ -24,9 +24,6 @@ export function budState(
   return turn.status === 'queued' || turn.status === 'processing' ? 'Thinking' : 'Idle';
 }
 
-export function emptyChatIntro(draft: boolean, sharedChat: boolean) {
-  if (!draft) return 'Turn a business task into a clear next step.';
-  return sharedChat
-    ? 'New shared chat. Your first message starts it; earlier chats stay separate.'
-    : 'New personal chat. Your first message starts it; earlier chats stay separate.';
+export function emptyChatIntro(draft: boolean) {
+  return draft ? 'Ask anything, or start from a task below.' : 'Turn a business task into a clear next step.';
 }

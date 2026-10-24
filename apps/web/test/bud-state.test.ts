@@ -48,8 +48,7 @@ test('Bud uses only the current turn and generation, with explicit idle, waiting
   assert.equal(budState([{ ...message, turn: { ...turn, id: 'other' } }], false, stream), 'Thinking');
 });
 
-test('Empty chat intro states the fresh draft context (#1116)', () => {
-  assert.match(emptyChatIntro(true, false), /^New personal chat\. Your first message starts it/);
-  assert.match(emptyChatIntro(true, true), /^New shared chat\./);
-  assert.equal(emptyChatIntro(false, false), 'Turn a business task into a clear next step.');
+test('Empty chat intro invites a first message; the sharing scope lives on the composer control', () => {
+  assert.equal(emptyChatIntro(true), 'Ask anything, or start from a task below.');
+  assert.equal(emptyChatIntro(false), 'Turn a business task into a clear next step.');
 });
