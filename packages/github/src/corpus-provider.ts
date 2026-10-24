@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
-import { observeFetch, type DependencyEndpoint } from '@tulipfarm/observability';
+import { log, observeFetch, type DependencyEndpoint } from '@tulipfarm/observability';
 import { AccessDenied } from '@tulipfarm/access';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
@@ -723,6 +723,16 @@ export function createGitHubCorpusProvider(options: {
             ? new GitHubCorpusError('transient', retryAfterMs)
             : null;
     if (failure) {
+      if (failure instanceof GitHubCorpusError && failure.code === 'rate-limited') {
+        const remaining = response.headers.get('x-ratelimit-remaining');
+        log('warn', 'dependency', 'call_failed', {
+          'dependency.endpoint': endpoint,
+          'http.response.status_code': response.status,
+          ...(remaining !== null && Number.isSafeInteger(Number(remaining)) ? { 'github.ratelimit_remaining': Number(remaining) } : {}),
+          ...(response.headers.has('retry-after') && Number.isFinite(retry) ? { 'github.retry_after_s': Math.ceil(retry) } : {}),
+          'github.ratelimit_resource': response.headers.get('x-ratelimit-resource') ?? 'none',
+        });
+      }
       await response.body?.cancel().catch(() => undefined);
       throw failure;
     }
