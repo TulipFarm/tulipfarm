@@ -135,26 +135,33 @@ export async function resolveImageModels(
   };
 }
 
-/** The workspace recognition model, unless the Knowledge recognition switch is off or the chosen model is unusable. */
-async function resolveRecognition(tx: AgentTransaction, settings: ImageSettings): Promise<RecognitionModelResolution> {
-  const switchedOn = z
+/** The Knowledge recognition switch, stored from common version 11. */
+async function recognitionSwitchedOn(tx: AgentTransaction) {
+  const row = z
     .object({ media_recognition: z.boolean() })
     .optional()
     .parse((await tx.client.query(`SELECT media_recognition FROM ${relation(tx, 'tf_knowledge_settings')}`)).rows[0]);
-  if (switchedOn?.media_recognition === false) return { status: 'unavailable', reason: 'recognition-off' };
+  return row?.media_recognition !== false;
+}
+
+/** The workspace recognition model, unless the Knowledge recognition switch is off or the chosen model is unusable. */
+async function resolveRecognition(tx: AgentTransaction, settings: ImageSettings): Promise<RecognitionModelResolution> {
+  if (!(await recognitionSwitchedOn(tx))) return { status: 'unavailable', reason: 'recognition-off' };
   return settings.effective.recognitionFamilyId
     ? { status: 'available', familyId: settings.effective.recognitionFamilyId }
     : { status: 'unavailable', reason: 'recognition-model-unavailable' };
 }
 
-/** Image settings and the recognition model choice live in storage from common version 12. */
+/** The recognition switch is stored from common version 11, image settings and the model choice from 12. */
+const recognitionSwitchVersion = 11;
 const imageSettingsVersion = 12;
 
 /**
  * The family that reads images for a workspace's Files, Knowledge and tasks, or null when none can. Under the
  * workspace `images` flag it is resolved as `resolveImageModels` resolves recognition for a chat turn: the saved
- * choice, else the catalog `document-vision` model, while usable here and while the recognition switch is on. Without
- * the flag, or before image settings are stored, it is the catalog `document-vision` model.
+ * choice, else the catalog `document-vision` model, while usable here and while the recognition switch is on. Before
+ * image settings are stored it is the catalog `document-vision` model while the switch is on. Without the flag it is
+ * the catalog `document-vision` model.
  */
 export async function workspaceRecognitionFamily(
   storage: AgentStorage,
@@ -164,7 +171,8 @@ export async function workspaceRecognitionFamily(
   const role = catalog.role('document-vision')?.id ?? null;
   if (!(await isFeatureEnabled('images', null, { id: workspaceId }))) return role;
   return storage.transaction(workspaceId, commonCompatibility, async tx => {
-    if (tx.commonVersion < imageSettingsVersion) return role;
+    if (tx.commonVersion < recognitionSwitchVersion) return role;
+    if (tx.commonVersion < imageSettingsVersion) return (await recognitionSwitchedOn(tx)) ? role : null;
     const recognition = await resolveRecognition(tx, await current(tx, catalog));
     return recognition.status === 'available' ? recognition.familyId : null;
   });
