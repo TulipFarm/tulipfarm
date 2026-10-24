@@ -263,3 +263,66 @@ test('completion evidence names images by a placeholder, never their data', () =
     }),
   );
 });
+
+test('after a provider overflow with many images, only the text is rescaled, so summaries fit the goal', async t => {
+  const format = 'anthropic';
+  const route = { ...nativeRoutes.anthropic, model: 'claude-synthetic-vision', capabilities: { imageInput: true } };
+  const images = Array.from({ length: 30 }, () => ({ type: 'image', mediaType: 'image/png', data: png }));
+  const page = round => `page-${round} ${'lorem ipsum dolor '.repeat(660)}`;
+  let rounds = 0;
+  let rejected = 0;
+  let retried;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply(format));
+    rounds++;
+    if (rounds <= 6)
+      return Response.json(
+        nativeReply(format, { calls: [use('web.fetch', { url: `https://example.com/${rounds}` })] }),
+      );
+    if (!rejected) {
+      rejected++;
+      return Response.json(
+        {
+          type: 'error',
+          error: { type: 'invalid_request_error', message: 'prompt is too long: 105000 tokens > 100000' },
+        },
+        { status: 400 },
+      );
+    }
+    retried = conversation(format, body).flatMap(message =>
+      Array.isArray(message.content)
+        ? message.content.filter(block => block.type === 'tool_result').map(block => block.content)
+        : [],
+    );
+    return Response.json(nativeReply(format, { text: 'Answered.' }));
+  });
+  const summarised = [];
+  let executed = 0;
+  const result = await inferWithTools(
+    route,
+    [{ role: 'user', content: [{ type: 'text', text: 'Read these pages next to the screenshots.' }, ...images] }],
+    async () => ({ text: page(++executed) }),
+    undefined,
+    false,
+    null,
+    {
+      context: { window: 100000, triggerPercent: 90, targetPercent: 80 },
+      compactToolResults: async ({ round, text }) => {
+        summarised.push(round);
+        return JSON.stringify({
+          notes: JSON.parse(text).results.map(({ callId, tool }) => ({ callId, note: `${tool} read one page.` })),
+        });
+      },
+    },
+  );
+  assert.equal(result.text, 'Answered.');
+  assert.equal(rejected, 1);
+  assert.deepEqual(summarised, [7]);
+  assert.equal(retried.length, 6);
+  assert.ok(
+    retried.slice(0, -1).every(output => output.includes('summarised to save context')),
+    'older results keep their summaries',
+  );
+  assert.match(retried.at(-1), /"page-6 lorem/, 'the latest round stays verbatim');
+});
