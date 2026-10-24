@@ -104,7 +104,7 @@ export type MeteredReplyOptions = {
   /** Summarises a long reply's older tool results. Without it, they are cut to stubs that can be reread. */
   compactor?: ConversationCompactor | undefined;
   /** Reads this chat's files for `files.read` when the turn used the images reader. */
-  chatFiles?: ChatFiles | undefined;
+  chatFiles?: Omit<ChatFiles, 'imageInput'> | undefined;
 };
 /** A paused family's replacement may not read images that the pinned family would have. */
 function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
@@ -279,7 +279,7 @@ export function meteredReply(
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
-      chatFiles,
+      chatFiles: chatFiles && { ...chatFiles, imageInput: routeCapabilities(validatedRoute).imageInput },
     });
     try {
       return await respondToConversation(

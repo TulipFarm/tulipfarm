@@ -137,7 +137,7 @@ async function setup(t, { answer } = {}) {
     assert.equal(status, 'completed');
     return requests.slice(from);
   };
-  return { ...f, w, files, chat, attach, turn, requests, recognitions };
+  return { ...f, w, files, chat, attach, turn, activities, requests, recognitions };
 }
 
 /** Every content block the requester's side of the request carries, in order. */
@@ -463,4 +463,45 @@ test('an attachment of a message compaction cleaned is named with a files.read p
       `attachment-id=\\\\"${id}\\\\" name=\\\\"ledger.txt\\\\" media-type=\\\\"text/plain\\\\" size-bytes=\\\\"11\\\\" status=\\\\"unloaded\\\\">This file was unloaded from context to save space and was not read in this turn\\. Call files\\.read with source \\\\"${id}\\\\"`,
     ),
   );
+});
+
+test('files.read gives a paused image family’s text-only replacement the image as recognised text', async t => {
+  let id;
+  const f = await setup(t, {
+    answer: (_body, requests) =>
+      requests.length === 1 ? anthropicTools([{ tool: 'files.read', source: id }]) : anthropicText('It is a receipt.'),
+  });
+  const chatId = await f.chat();
+  id = await f.attach(chatId, 'shot.png', 'image/png', await png(20, 10, '#d22'));
+  const sent = await f.store.send(f.w.id, f.w.userId, chatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    model: 'claude-sonnet',
+    parts: [
+      { kind: 'attachment', attachmentId: id },
+      { kind: 'text', text: 'Look again' },
+    ],
+  });
+  // The turn pinned Sonnet, which reads images; Sonnet is paused before the reply and Haiku answers instead.
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_model_fallback_rules')} (source_family_id,target_family_id,revision,editor_membership_id) VALUES ('claude-sonnet','claude-haiku',1,$1)`,
+    [f.w.membershipId],
+  );
+  const served = JSON.parse(process.env.MODEL_CATALOG);
+  process.env.MODEL_CATALOG = JSON.stringify({
+    ...served,
+    models: served.models.map(entry =>
+      entry.id === 'claude-sonnet'
+        ? { ...entry, default: false, paused: true }
+        : { ...entry, default: entry.id === 'claude-haiku' },
+    ),
+  });
+  const status = await f
+    .activities()
+    .processConversationReply({ workspaceId: f.w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
+  assert.equal(status, 'completed');
+  assert.equal(f.requests.length, 2);
+  assert.ok(f.requests.every(body => body.model.includes('haiku')));
+  assert.equal(f.requests.flatMap(imageBlocks).length, 0);
+  assert.match(JSON.stringify(toolResults(f.requests[1])), new RegExp(recognisedText));
 });

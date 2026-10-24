@@ -945,6 +945,8 @@ export async function readChatFile(input: {
   files: FileContent | undefined;
   google: GoogleFileReader | undefined;
   turnFiles: TurnFiles;
+  /** Whether the route answering this turn reads images; a paused family's replacement may not, though the pinned family does. */
+  imageInput: boolean;
 }): Promise<{ result: unknown; sources: FileSource[]; images?: ChatFileImages }> {
   const found = await input.transaction(async tx => {
     const part = (
@@ -1004,7 +1006,7 @@ export async function readChatFile(input: {
     attachments: input.turnFiles.attachments,
     authorize: check => input.transaction(check),
     options: {
-      imageInput: family.imageInput,
+      imageInput: family.imageInput && input.imageInput,
       maxImageBytes: family.maxImageBytes,
       recognise: recognitionModel
         ? request =>

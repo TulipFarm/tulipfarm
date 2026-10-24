@@ -557,6 +557,8 @@ export type ChatFiles = {
   files?: FileContent | undefined;
   google?: GoogleFileReader | undefined;
   turnFiles: TurnFiles;
+  /** Whether the route answering the turn reads images; without it, images are read as recognised text. */
+  imageInput: boolean;
 };
 /** The chat reply context an `agents.delegate` call runs in. */
 export type SubagentToolContext = {
@@ -1197,6 +1199,7 @@ export function createChatTools(
       files: chatFiles.files,
       google: chatFiles.google,
       turnFiles: chatFiles.turnFiles,
+      imageInput: chatFiles.imageInput,
     });
     return output;
   }
