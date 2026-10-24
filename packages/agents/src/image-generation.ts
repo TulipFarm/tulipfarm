@@ -56,7 +56,7 @@ export async function pinRunImageModels(
   tx: AgentTransaction & { commonVersion?: number },
   runId: string,
   familyId: string,
-  catalog: ServedModelCatalog = loadModelCatalog(),
+  catalog: ServedModelCatalog,
 ) {
   if ((tx.commonVersion ?? 0) < runImageModelsVersion) return;
   const runs = relation(tx, 'tf_agent_runs');

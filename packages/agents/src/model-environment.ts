@@ -104,6 +104,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
           const route = inference(resolution);
           return route && routeCapabilities(route).imageInput ? modelImageLimits(route.provider, route.model) : null;
         },
+        imageCatalog: catalog,
         health: health(deploymentKey),
         infer: (resolution, input, timeoutMs, signal) => {
           const route = inference(resolution);
