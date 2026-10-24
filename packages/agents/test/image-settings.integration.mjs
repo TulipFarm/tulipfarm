@@ -267,6 +267,25 @@ test(
           'a disabled chosen model leaves nothing to read images',
         );
         await enable('reader');
+
+        const atVersion11 = {
+          transaction: (id, compatibility, operation) =>
+            runtime.transaction(id, compatibility, tx => operation({ ...tx, commonVersion: 11 })),
+        };
+        assert.equal(
+          await workspaceRecognitionFamily(atVersion11, workspaceId),
+          'paired',
+          'before image settings are stored the catalog document-vision model reads images',
+        );
+        await owner.query(`UPDATE "${names.schema}".tf_knowledge_settings SET media_recognition = false`);
+        assert.equal(
+          await workspaceRecognitionFamily(atVersion11, workspaceId),
+          null,
+          'before image settings are stored the recognition switch still stops tasks reading images',
+        );
+        assert.equal(await recognitionAvailability(atVersion11)(workspaceId), false);
+        await owner.query(`UPDATE "${names.schema}".tf_knowledge_settings SET media_recognition = true`);
+        assert.equal(await recognitionAvailability(atVersion11)(workspaceId), true);
       });
       await withFlag('false', async () => {
         assert.equal(
