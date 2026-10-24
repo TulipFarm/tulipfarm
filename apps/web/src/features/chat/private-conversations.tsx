@@ -415,6 +415,7 @@ function ConversationDetail({
   const integrations = useIntegrationKeywords(workspace.id, workspaceSlug, draft ? undefined : chatId);
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
+  const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const data = useMemo(
@@ -999,6 +1000,7 @@ function ConversationDetail({
                                 key={`subagents:${tool.id}`}
                                 tool={tool}
                                 live={stream.subagents?.get(tool.id)}
+                                families={modelFamilies}
                                 stop={
                                   replyTurn?.status === 'processing'
                                     ? key =>
@@ -1087,6 +1089,7 @@ function ConversationDetail({
                                 key={`subagents:${tool.id}`}
                                 tool={tool}
                                 live={stream.subagents?.get(tool.id)}
+                                families={modelFamilies}
                                 stop={key =>
                                   api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
                                 }

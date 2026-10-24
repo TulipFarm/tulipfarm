@@ -297,6 +297,7 @@ export function meteredReply(
                       ? createSubagentDelegation({
                           runtime: context.runtime,
                           route: { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
+                          family: chat.price.familyId,
                           meter: session.creditMeter,
                           tools: createChatTools(context.runtime, chatToolOptions(context.runtime)),
                           offered: new Set(discoverToolNames({ kind: 'chat', earlierMessages })),

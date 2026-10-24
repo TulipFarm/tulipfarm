@@ -43,6 +43,30 @@ test('live cards map onto AgentFanout under the chat, with timed out shown as st
   );
 });
 
+test("helpers show their model and logo, saved agents their avatar, and the chat its helpers' model", () => {
+  const agentId = '22222222-2222-4222-8222-222222222222';
+  const view = delegationView(
+    { id: callId, tool: 'agents.delegate', status: 'running' },
+    live([
+      card('a0', 'running', { family: 'claude-sonnet' }),
+      card('a1', 'running', { kind: 'saved', agentId }),
+      card('a2', 'running', { family: 'removed-family' }),
+    ]),
+  )!;
+  const families = [{ id: 'claude-sonnet', displayName: 'Sonnet 5.5', vendor: 'anthropic' }];
+  const root = fanoutRoot(view, 10_000, { families, avatar: (id, name) => `${id}:${name}` });
+  assert.deepEqual([root.model, root.brand], ['Sonnet 5.5', 'claude']);
+  assert.deepEqual(
+    root.agents!.map(agent => [agent.model, agent.brand, agent.icon]),
+    [
+      ['Sonnet 5.5', 'claude', undefined],
+      [undefined, undefined, `${agentId}:Agent a1`],
+      [undefined, undefined, undefined],
+    ],
+  );
+  assert.equal(fanoutRoot(view, 10_000).agents![0]!.brand, undefined);
+});
+
 test('the saved result replaces live cards, and other tools have no fan-out', () => {
   const saved = {
     agents: [{ ...card('a0', 'done'), report: 'Findings' }],

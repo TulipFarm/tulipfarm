@@ -249,6 +249,23 @@ test('helper tools are the intersection of the request, the read-only helper too
   );
 });
 
+test('helper cards name the chat model family, and saved agent cards name the agent', async () => {
+  const agentId = '22222222-2222-4222-8222-222222222222';
+  const saved = { kind: 'saved', agentId, role: 'Analyst', task: 'Review the plan' };
+  const { value, published } = input({ call: call([helper('Alpha'), saved]), family: 'claude-sonnet' });
+  const result = await runSubagents(value);
+  for (const cards of [published[0], result.agents])
+    assert.deepEqual(
+      cards.map(card => [card.family, card.agentId]),
+      [
+        ['claude-sonnet', undefined],
+        [undefined, agentId],
+      ],
+    );
+  const unnamed = await runSubagents(input().value);
+  assert.ok(!('family' in unnamed.agents[0]));
+});
+
 test('a saved agent child never gets more credits than the chat has left', () => {
   assert.equal(childCreditBudget(undefined, null), subagentLimits.savedAgentCredits);
   assert.equal(childCreditBudget(40, null), 40);

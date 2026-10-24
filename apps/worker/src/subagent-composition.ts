@@ -31,6 +31,8 @@ export type SubagentDelegationOptions = {
   runtime: Runtime;
   /** Helpers use the chat's own model, so their calls are charged to the reply. */
   route: InferenceRoute;
+  /** The catalog family of `route`, shown on helper cards. */
+  family: string;
   /** The reply's meter that also reports each call's credits. */
   meter: (spent: (credits: number) => void) => ToolModelMeter;
   /** Chat tools for a helper's reads, without delegation. */
@@ -103,6 +105,7 @@ export function createSubagentDelegation(options: SubagentDelegationOptions): Su
         pool: options.pool,
         signal: reply.signal,
         run,
+        family: options.family,
         publish: cards => options.publish?.(context.callId, cards),
         resultBytes: options.resultBytes,
         stops: options.stops

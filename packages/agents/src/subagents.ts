@@ -106,6 +106,8 @@ export type DelegationInput = {
   /** Aborts when the reply stops; every sub-agent then stops. */
   signal: AbortSignal;
   run: SubagentRunner;
+  /** The model family helpers run on, shown on their cards. */
+  family?: string | undefined;
   /** Receives every card change. Publication is a preview; failures must not throw. */
   publish: (cards: SubagentCard[]) => void;
   /** Most bytes the JSON result may take, from the reply's tool-result cap. */
@@ -157,6 +159,7 @@ export async function runSubagents(input: DelegationInput): Promise<SubagentResu
       kind: spec.kind,
       name: clip(spec.kind === 'helper' ? spec.name : spec.role, 60),
       role: clip(spec.role, 80),
+      ...(spec.kind === 'saved' ? { agentId: spec.agentId } : input.family ? { family: input.family } : {}),
       status: 'queued',
       credits: 0,
       elapsedMs: 0,

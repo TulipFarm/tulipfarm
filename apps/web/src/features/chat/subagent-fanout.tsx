@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { AgentFanout } from '@tulipfarm/sprout/agent-fanout';
 import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
@@ -11,7 +12,10 @@ import {
   isActiveSubagent,
   subagentStatusLabel,
   type DelegationTool,
+  type FanoutMarks,
 } from './subagent-fanout-state';
+
+const avatar: FanoutMarks['avatar'] = (agentId, name) => <AgentAvatar agentId={agentId} name={name} size="sm" />;
 
 /**
  * The sub-agents of one `agents.delegate` call, live while they run. AgentFanout draws the agents; the list under it
@@ -20,10 +24,13 @@ import {
 export function SubagentFanout({
   tool,
   live,
+  families,
   stop,
 }: {
   tool: DelegationTool;
   live?: LiveSubagents | undefined;
+  /** The workspace's model catalog, to show which model each helper runs on. */
+  families: FanoutMarks['families'];
   /** Stops one running sub-agent. Absent once the reply no longer runs. */
   stop?: ((key: string) => Promise<unknown>) | undefined;
 }) {
@@ -39,7 +46,7 @@ export function SubagentFanout({
   if (!view) return null;
   return (
     <section aria-label="Sub-agents" className="space-y-2">
-      <AgentFanout agent={fanoutRoot(view, now)} title="Sub-agents" layout="auto" />
+      <AgentFanout agent={fanoutRoot(view, now, { families, avatar })} title="Sub-agents" layout="auto" />
       <ul className="space-y-1 text-sm">
         {view.entries.map(entry => (
           <li key={entry.key} className="space-y-1">

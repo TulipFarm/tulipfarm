@@ -75,12 +75,20 @@ export function applyStreamTool(state: StreamTool | undefined, update: StreamToo
 /** A sub-agent's state. `timed-out` and `stopped` sub-agents ended early and returned partial output. */
 export const subagentStatusSchema = z.enum(['queued', 'running', 'done', 'failed', 'timed-out', 'stopped']);
 export type SubagentStatus = z.infer<typeof subagentStatusSchema>;
-/** One sub-agent card. `key` is stable within its `agents.delegate` call; `step` is what it is doing now. */
+/**
+ * One sub-agent card. `key` is stable within its `agents.delegate` call; `step` is what it is doing now. A helper
+ * names the model family it runs on; a saved agent names its `agentId`, which picks its avatar.
+ */
 export const subagentCardSchema = z.strictObject({
   key: z.string().regex(/^a[0-9]$/),
   kind: z.enum(['saved', 'helper']),
   name: z.string().min(1).max(60),
   role: z.string().min(1).max(80),
+  family: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._-]{0,99}$/)
+    .optional(),
+  agentId: z.uuid().optional(),
   status: subagentStatusSchema,
   step: z.string().max(80).optional(),
   credits: z.number().nonnegative(),
