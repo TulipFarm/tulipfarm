@@ -9,6 +9,7 @@ import { createFiles } from '@tulipfarm/files';
 import { createLocalKnowledge, KnowledgeAdminRequired } from '../dist/index.js';
 import { pdf } from './fixtures/parser-documents.mjs';
 import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
+import { MediaRecognitionUnavailable } from '../../memory-core/dist/parser.js';
 
 test('local knowledge reads images through the injected recognizer, caches them and honors the switch', async t => {
   const db = await fixture();
@@ -224,6 +225,28 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok(!kept.includes(old), 'a recognition past 180 days is pruned when a new one is written');
       assert.ok(kept.includes(unheld), 'a younger recognition is kept whether or not a file holds it');
     });
+
+    await t.test(
+      'under the images flag a scan refused for credits is retried, not marked ocr-unavailable',
+      async () => {
+        answer = () => {
+          throw new MediaRecognitionUnavailable('Credits are exhausted');
+        };
+        await db.platform.query(`DELETE FROM ${table('recognitions')}`);
+        const unpaid = await upload('Unpaid scan', await pdf(['scan', 'scan']));
+        assert.equal(await process(unpaid.commandId), 'failed');
+        const waiting = await api.get(one.id, member.userId, unpaid.documentId);
+        assert.equal(waiting.parsing, 'failed');
+        assert.equal(waiting.failure, 'credits');
+        const requeued = (await api.due(one.id)).find(item => item.revisionId === unpaid.commandId);
+        assert.ok(requeued, 'the sweep queues it again while a model reads images');
+
+        answer = () => ({ kind: 'recognized', text: 'Water the bulbs weekly.', description: '' });
+        await api.acknowledge(requeued);
+        assert.equal((await api.process(requeued)).disposition, 'ready');
+        assert.equal((await api.get(one.id, member.userId, unpaid.documentId)).parsing, 'ready');
+      },
+    );
   } finally {
     await runtime?.close();
     await db.close();
