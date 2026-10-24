@@ -181,8 +181,8 @@ test('each image reserves the image token bound instead of its base64 bytes', as
   assert.deepEqual(
     small.map(({ step, imageInputTokens }) => ({ step, imageInputTokens })),
     [
-      { step: 0, imageInputTokens: 1600 },
-      { step: 1, imageInputTokens: 3200 },
+      { step: 0, imageInputTokens: 4800 },
+      { step: 1, imageInputTokens: 9600 },
       { step: 2, imageInputTokens: 0 },
     ],
   );
@@ -191,7 +191,7 @@ test('each image reserves the image token bound instead of its base64 bytes', as
 });
 
 test('a route without imageInput rejects image parts before any request, in history or from a tool', async t => {
-  const textRoute = nativeRoutes.anthropic;
+  const textRoute = { ...nativeRoutes.anthropic, capabilities: { imageInput: false } };
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     requests++;
@@ -215,7 +215,8 @@ test('a fallback without imageInput is not tried for a turn with images', async 
     providers.push(String(url).includes('anthropic') ? 'anthropic' : 'azure');
     return new Response(JSON.stringify({ error: { code: 'DeploymentNotFound', message: 'missing' } }), { status: 404 });
   });
-  const fallback = { fallback: { route: nativeRoutes.anthropic, label: 'claude-fallback' } };
+  const textRoute = { ...nativeRoutes.anthropic, capabilities: { imageInput: false } };
+  const fallback = { fallback: { route: textRoute, label: 'claude-fallback' } };
   const primaryFailure = { name: 'ModelCallError', message: 'model-configuration', code: 'not_found' };
   await assert.rejects(
     inferWithTools(vision('azure'), history, fetched, undefined, false, null, fallback),

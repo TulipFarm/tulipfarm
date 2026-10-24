@@ -65,6 +65,7 @@ test('unknown models use provider defaults and later layers override earlier one
     ...providerModelCapabilities.azure,
     api: 'responses',
     toolChoice: 'auto',
+    imageInput: true,
   });
   assert.equal(modelCapabilities('azure', 'gpt-6-astra', { api: 'chat-completions' }).api, 'chat-completions');
   assert.equal(resolveModelCapabilities('azure', { streaming: false }, { streaming: undefined }).streaming, false);
@@ -75,6 +76,7 @@ test('unknown models use provider defaults and later layers override earlier one
 test('capabilities are optional, strict and checked against the provider', () => {
   const models = structuredClone(shippedCatalog.models).map(model => {
     delete model.capabilities;
+    delete model.limits.imageInputTokens;
     return model;
   });
   const parse = rows => modelCatalogFileSchema.safeParse({ ...shippedCatalog, models: rows });
