@@ -33,7 +33,9 @@ export async function pinnedImageChoice(
       generate: refuse,
     };
   };
-  if (!pinned.imageModelId || !(await imageGenerationEnabled(tx))) return unavailable();
+  if (!(await imageGenerationEnabled(tx)))
+    return { model: { status: 'unavailable', alternativeFamilyId: null, turnedOff: true }, generate: refuse };
+  if (!pinned.imageModelId) return unavailable();
   const served = catalog.imageModel(pinned.imageModelId);
   const route = served && !served.paused ? imageProviderRoute(served, env) : null;
   if (!served || !route) return unavailable();
@@ -72,8 +74,9 @@ export async function runImageModels(
   runId: string,
 ): Promise<TurnImageModels | null> {
   if ((tx.commonVersion ?? 0) < runImageModelsVersion) return null;
-  const stored = (await tx.client.query(`SELECT image_models FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1`, [runId]))
-    .rows[0]?.image_models;
+  const stored = (
+    await tx.client.query(`SELECT image_models FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1`, [runId])
+  ).rows[0]?.image_models;
   return stored ? turnImageModelsSchema.parse(stored) : null;
 }
 

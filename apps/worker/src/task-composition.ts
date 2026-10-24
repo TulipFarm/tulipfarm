@@ -1,3 +1,4 @@
+import { runImageChoice } from '@tulipfarm/agents/image-generation';
 import {
   createTaskRuntime,
   TaskFileUnsupported,
@@ -81,6 +82,7 @@ export function createTaskComposition(
       recognition: taskFileRecognition(runtime),
       links: objects ? { fetch: fetchPublicFile, objects } : undefined,
     },
+    files ? { files, choose: runImageChoice } : undefined,
   );
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {

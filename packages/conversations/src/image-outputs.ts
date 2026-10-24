@@ -40,7 +40,7 @@ export type ImageModelChoice =
       model: Pick<ServedImageModel, 'id' | 'name' | 'edits' | 'maxSources' | 'aspects' | 'pricing' | 'maxTokens'>;
       catalogRevision: string | null;
     }
-  | { status: 'unavailable'; alternativeFamilyId: string | null };
+  | { status: 'unavailable'; alternativeFamilyId: string | null; turnedOff?: boolean };
 
 export type ImageGenerator = (
   request: { prompt: string; size: string; quality: 'standard' | 'high'; sources: readonly ImageSourceBytes[] },
@@ -266,9 +266,11 @@ export async function generateImageOutputs(
   if (context.model.status === 'unavailable')
     return fail(
       'image-model-unavailable',
-      context.model.alternativeFamilyId
-        ? `Image generation is not available for the selected model. Say so, and that the ${context.model.alternativeFamilyId} model can generate images.`
-        : 'Image generation is not available for the selected model, and no available model can generate images. Say so.',
+      context.model.turnedOff
+        ? 'Image generation is turned off for this workspace. Say so; an admin can turn it on.'
+        : context.model.alternativeFamilyId
+          ? `Image generation is not available for the selected model. Say so, and that the ${context.model.alternativeFamilyId} model can generate images.`
+          : 'Image generation is not available for the selected model, and no available model can generate images. Say so.',
       { alternativeFamilyId: context.model.alternativeFamilyId },
     );
   const { model, catalogRevision } = context.model;

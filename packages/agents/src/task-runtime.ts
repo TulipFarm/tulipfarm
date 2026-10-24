@@ -16,7 +16,7 @@ import { agentDefinitionSchema, recordConflict, toolCallSchema, toolResultSchema
 import { agentModelInputSchema, modelDecisionSchema, parseModelDecision, taskReadTools } from './model.ts';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 import type { InferenceResult } from './inference.ts';
-import { createAgentExecutor } from './executor.ts';
+import { createAgentExecutor, type RunImages } from './executor.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createTaskApprovals } from './task-approvals.ts';
@@ -199,6 +199,7 @@ export function createTaskRuntime(
   google?: TaskGoogleFilesReader,
   skills?: SkillExecutionFactory,
   reading?: TaskFileReading,
+  images?: RunImages,
 ) {
   runtime = withTaskTelemetry(runtime);
   async function locked<T>(workspaceId: string, taskId: string, operation: (tx: Transaction) => Promise<T>) {
@@ -814,6 +815,7 @@ export function createTaskRuntime(
           github,
           knowledge,
           skills,
+          images,
           telemetryRuntime: 'task',
         }).execute({ workspaceId, runId: tool.runId, callId: tool.callId });
         if (tool.step !== null)
@@ -832,7 +834,7 @@ export function createTaskRuntime(
       }
       if (claim?.kind === 'tools') {
         const tools = claim;
-        const executor = createAgentExecutor({ runtime, slack, mcp, github, knowledge });
+        const executor = createAgentExecutor({ runtime, slack, mcp, github, knowledge, images });
         const executions = tools.callIds.map(callId => ({ workspaceId, runId: tools.runId, callId }));
         const statuses =
           executions.length === 1 ? [await executor.execute(executions[0]!)] : await executor.executeBatch(executions);
