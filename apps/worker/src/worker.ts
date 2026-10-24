@@ -188,6 +188,7 @@ async function run() {
             wakePlan: planDispatch.wake,
             wakeTask: (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
             knowledge: createKnowledgeTools({ runtime: resources.runtime }),
+            files: chatObjects ? createFiles(guarded, chatObjects) : undefined,
           })
         : undefined;
     slack = guarded
@@ -195,7 +196,11 @@ async function run() {
       : undefined;
     const skillClient = configuredSkillClient();
     const agents = guarded
-      ? createAgentComposition(guarded, chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined)
+      ? createAgentComposition(
+          guarded,
+          chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined,
+          chatObjects ? createFiles(guarded, chatObjects) : undefined,
+        )
       : undefined;
     const skillImports =
       guarded && chatObjects

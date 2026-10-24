@@ -2930,8 +2930,9 @@ export async function inferWithTools(
   }
 }
 /**
- * A bounded tool loop for a plan specialist. It offers only the named read-only tools, so calls of one response run
- * together. The loop stops with the model's report, or fails once it exceeds `maxCalls` or keeps sending invalid calls.
+ * A bounded tool loop for a plan specialist. It offers only the named read-only tools and `images.generate`, whose
+ * calls each add their own images, so calls of one response run together. The loop stops with the model's report, or
+ * fails once it exceeds `maxCalls` or keeps sending invalid calls.
  */
 export async function inferSpecialist(
   route: InferenceRoute,
@@ -2947,10 +2948,11 @@ export async function inferSpecialist(
 ): Promise<{ text: string; calls: number }> {
   allowed = withKnowledgeRetrieveGrant(allowed);
   const config = inferenceRouteSchema.parse(route);
-  if (!allowed.length || allowed.some(tool => !readOnlyTools.has(tool)))
+  if (!allowed.length || allowed.some(tool => !readOnlyTools.has(tool) && tool !== 'images.generate'))
     throw new Error('specialist-tools-not-read-only');
   const names = new Set(allowed.map(nativeToolName));
-  const full = observeChatDetailSync('tool-schemas', () => nativeChatTools(undefined, false));
+  const images = allowed.includes('images.generate');
+  const full = observeChatDetailSync('tool-schemas', () => nativeChatTools(undefined, false, undefined, images));
   const catalog = {
     tools: full.tools.filter(tool => names.has(tool.name)),
     resolve: (call: NativeCall): ResolvedCall =>

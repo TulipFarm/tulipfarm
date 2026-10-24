@@ -21,6 +21,7 @@ import type { RecordChanges } from './record-changes';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
 import type { GoogleMutation } from '@/features/google/action-state';
 import type { ResultActivity } from './result-activity';
+import type { FileReference } from './draft-files';
 import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
 
 export type CanvasContent =
@@ -56,8 +57,9 @@ type Canvas = {
   setActionMutation: (id: string, state: 'pending' | 'uncertain' | undefined) => void;
   googleMutations: Readonly<Record<string, GoogleMutation>>;
   setGoogleMutation: (proposalId: string, mutation: GoogleMutation) => void;
-  composerRequest: { id: string; prompt: string } | null;
-  requestComposer: (prompt: string) => void;
+  /** Text, and files to reference, for the chat composer to add to its draft. */
+  composerRequest: { id: string; prompt: string; files: readonly FileReference[] } | null;
+  requestComposer: (prompt: string, files?: readonly FileReference[]) => void;
   consumeComposer: (id: string) => void;
   attention: string | null;
   registerAttention: (id: string, label: string | null) => void;
@@ -99,7 +101,11 @@ export function CanvasProvider({
     setGoogleMutations(current => ({ ...current, [proposalId]: mutation }));
   }, []);
   const [composerRequest, setComposerRequest] = useState<Canvas['composerRequest']>(null);
-  const requestComposer = useCallback((prompt: string) => setComposerRequest({ id: crypto.randomUUID(), prompt }), []);
+  const requestComposer = useCallback(
+    (prompt: string, files: readonly FileReference[] = []) =>
+      setComposerRequest({ id: crypto.randomUUID(), prompt, files }),
+    [],
+  );
   const consumeComposer = useCallback(
     (id: string) => setComposerRequest(current => (current?.id === id ? null : current)),
     [],

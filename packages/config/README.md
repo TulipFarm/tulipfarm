@@ -164,8 +164,9 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   `xai-images` or `gemini-images` that the route's provider type must serve),
   the provider size for each of `aspects.square`, `portrait` and `landscape`,
   `edits` and `maxSources` for source images, and `pricing`: `"unmetered"`,
-  `usdPerImage` by quality (`standard`, `high`) and shape, or token rates. At
-  most one is `"default": true`, and the default cannot be paused. A model's
+  `usdPerImage` by quality (`standard`, `high`) and shape, or token rates. With
+  token rates, `maxTokens.input` and `maxTokens.output` (default 32768 and 16384) bound what one image request is held for before the provider answers;
+  a request reporting more is charged its hold. At most one is `"default": true`, and the default cannot be paused. A model's
   `imageModel` pairs it with one image model; without a pair, work on it uses
   the workspace's chosen image model, then the catalog default. A pair that is
   unavailable falls back the same way. Without any served image model, image

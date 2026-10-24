@@ -64,6 +64,9 @@ import type { ConversationCompactor } from '@tulipfarm/conversations/compaction'
 import { compactionDefaults } from '@tulipfarm/config/compaction';
 import { withFileSources, type FileContent, type GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
+import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
+import { pinnedImageModels } from '@tulipfarm/conversations/turn-image-models';
+import { pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -94,7 +97,8 @@ export type MeteredReplyOptions = {
   objects?: Pick<TableImportOptions, 'attachments' | 'snapshots'> | undefined;
   mcp?: McpExecutionFactory | null | undefined;
   knowledge?: KnowledgeToolsFactory | undefined;
-  outputs?: FileOutputStore | undefined;
+  /** Files publication; with `read`, chat may also generate images into it. */
+  outputs?: (FileOutputStore & Partial<Pick<ImageOutputStore, 'read'>>) | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
@@ -281,6 +285,17 @@ export function meteredReply(
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
       chatFiles: chatFiles && { ...chatFiles, imageInput: routeCapabilities(validatedRoute).imageInput },
+      images:
+        outputs?.read && chatFiles
+          ? {
+              files: { ...outputs, read: outputs.read },
+              attachments: chatFiles.turnFiles.attachments,
+              autonomous: !requester,
+              ledger: runtime,
+              choose: async (tx, turnId) =>
+                pinnedImageChoice(tx, await pinnedImageModels(tx, turnId, model, chatFiles.turnFiles)),
+            }
+          : undefined,
     });
     try {
       return await respondToConversation(
@@ -428,7 +443,7 @@ export function createConversationActivities(
   conversationReply?: ConversationReply,
   objects?: Pick<TableImportOptions, 'snapshots'> & { attachments: AttachmentBytes },
   mcp: McpExecutionFactory | undefined = workspaceMcpFromEnvironment(),
-  files?: FileContent & FileOutputStore,
+  files?: FileContent & ImageOutputStore,
   knowledge?: KnowledgeToolsFactory,
   compactor?: ConversationCompactor,
   skillExecution?: SkillExecutionFactory,

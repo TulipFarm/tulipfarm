@@ -589,6 +589,21 @@ export function useRichFileMentions(
     extensions,
     suggestion,
     panel: suggestion ? <EditorSuggestionPanel state={suggestion} empty="No files you can open match." /> : null,
+    /**
+     * Records references whose chips the caller adds to the document itself. Returns the ones that were new, or null,
+     * changing nothing, when the message would exceed the reference limit.
+     */
+    attach: (added: readonly FileReference[]) => {
+      const current = referencesRef.current;
+      const fresh = added.filter(file => !current.some(entry => referenceKey(entry) === referenceKey(file)));
+      if (current.length + fresh.length > referenceLimit) {
+        setNotice(`Add up to ${referenceLimit} files per message. Remove one to add another.`);
+        return null;
+      }
+      referencesRef.current = [...current, ...fresh];
+      setReferences(referencesRef.current);
+      return fresh;
+    },
     remove: (reference: FileReference) => {
       deleteReference(reference);
       setReferences(current => current.filter(item => referenceKey(item) !== referenceKey(reference)));

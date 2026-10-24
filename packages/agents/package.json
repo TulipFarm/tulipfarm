@@ -195,6 +195,18 @@
       "types": "./dist/model-policy.d.ts",
       "default": "./dist/model-policy.js"
     },
+    "./model-availability": {
+      "types": "./dist/model-availability.d.ts",
+      "default": "./dist/model-availability.js"
+    },
+    "./image-generation": {
+      "types": "./dist/image-generation.d.ts",
+      "default": "./dist/image-generation.js"
+    },
+    "./image-providers": {
+      "types": "./dist/image-providers.d.ts",
+      "default": "./dist/image-providers.js"
+    },
     "./image-settings": {
       "types": "./dist/image-settings.d.ts",
       "default": "./dist/image-settings.js"

@@ -102,6 +102,11 @@ const computedReads = {
     ],
   },
   'apps/worker/src/worker.ts': { sites: 1, names: [] },
+  // Reads the API key that an image model's catalog route names.
+  'packages/agents/src/image-providers.ts': {
+    sites: 1,
+    names: ['ANTHROPIC_API_KEY', 'AZURE_FOUNDRY_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY'],
+  },
   // Reads the API key that the model catalog names for each served route; the built-in providers' keys by default.
   'packages/agents/src/model-environment.ts': {
     sites: 1,

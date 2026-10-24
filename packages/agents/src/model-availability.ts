@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { readModelCatalog } from '@tulipfarm/config';
+import { loadModelCatalog, readModelCatalog, type ServedModelCatalog } from '@tulipfarm/config';
 import { relation, type AgentTransaction } from './store.ts';
 import { modelAvailabilitySchema } from './model-policy-contracts.ts';
 
@@ -28,6 +28,19 @@ export async function modelAvailability(tx: AgentTransaction) {
 
 export async function modelFamilyEnabled(tx: AgentTransaction, familyId: string) {
   return (await modelAvailability(tx)).some(row => row.familyId === familyId && row.enabled);
+}
+
+/**
+ * Whether a plan step can run on `familyId`: the catalog serves it unpaused and the workspace has not turned it off.
+ * A step that names a family never falls back to another.
+ */
+export async function stepFamilyAvailable(
+  tx: AgentTransaction,
+  familyId: string,
+  catalog: Pick<ServedModelCatalog, 'model'> = loadModelCatalog(),
+) {
+  const served = catalog.model(familyId);
+  return Boolean(served && !served.paused) && (await modelFamilyEnabled(tx, familyId));
 }
 
 /**

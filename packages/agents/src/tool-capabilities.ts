@@ -36,6 +36,7 @@ const taskOnlyTools = [
   'knowledge.search',
   'knowledge.read',
   'knowledge.retrieve',
+  'images.generate',
 ] as const;
 
 const taskProposalTools = ['rows.create', 'rows.update', 'rows.delete'] as const;

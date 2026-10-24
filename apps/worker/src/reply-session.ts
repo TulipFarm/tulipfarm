@@ -14,6 +14,7 @@ import {
   type ReplySettlement,
   type ReplyTransaction,
 } from '@tulipfarm/conversations/runtime';
+import { recoverImageHolds } from '@tulipfarm/conversations/image-outputs';
 import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
 import {
   requireCurrentConversationSources,
@@ -332,6 +333,8 @@ export async function beginReplySession(input: {
     const recorded = await recordModelSources(tx, 0, mergeSources([...input.retainedSources, ...sources]));
     // Only one attempt holds a conversation's lease, so another attempt's open hold belongs to a crashed worker.
     await recoverReplyHolds(tx, fence.conversationId, chatId(0).slice(0, -1));
+    // Image holds of any turn or run whose worker died settle here too, past their stale window.
+    await recoverImageHolds(tx);
     const bytes =
       input.contextBytes +
       Buffer.byteLength(JSON.stringify([destinations, read?.inventory ?? null, mcp?.model ?? null]));

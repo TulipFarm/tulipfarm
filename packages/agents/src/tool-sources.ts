@@ -397,6 +397,7 @@ export async function resultSources(
     case 'tables.import.attachments':
     case 'tables.import.file':
     case 'files.create':
+    case 'images.generate':
     case 'agents.status':
     case 'agents.draft':
     case 'skills.draft':

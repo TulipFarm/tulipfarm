@@ -63,6 +63,7 @@ export const agentDefinitionSchema = z.strictObject({
         'knowledge.search',
         'knowledge.read',
         'knowledge.retrieve',
+        'images.generate',
       ]),
     )
     .max(20)

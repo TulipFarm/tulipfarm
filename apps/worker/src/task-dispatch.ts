@@ -2,6 +2,8 @@ import { Client, Connection } from '@temporalio/client';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { createTaskRuntime } from '@tulipfarm/agents/task-runtime';
 import { createTaskProgress } from '@tulipfarm/agents/task-progress';
+import { recoverImageHolds } from '@tulipfarm/conversations/image-outputs';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { retryError } from '@tulipfarm/observability';
 
@@ -23,6 +25,8 @@ export function createTaskRecovery(options: {
     },
     async recoverAgentTaskPage(workspaceId: string, after?: string) {
       try {
+        // Image holds of a run whose worker died settle here, without waiting for a chat reply.
+        if (!after) await options.runtime.transaction(workspaceId, commonCompatibility, tx => recoverImageHolds(tx));
         const page = await tasks.pending(workspaceId, after);
         for (const taskId of page) {
           try {

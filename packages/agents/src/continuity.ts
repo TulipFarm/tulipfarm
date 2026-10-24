@@ -22,6 +22,9 @@ import { AgentError } from './saved-contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import type { ModelRouteHealth } from './model-health.ts';
 import { modelAvailability } from './model-availability.ts';
+import { pinRunImageModels } from './image-generation.ts';
+import { isFeatureEnabled } from '@tulipfarm/observability';
+import type { ServedModelCatalog } from '@tulipfarm/config';
 import { CreditsExhausted, requireCredits, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 
@@ -49,6 +52,8 @@ export type ModelContinuity = {
   paused?: (familyId: string) => boolean;
   /** What an image costs a resolution that reads images, or null when it does not; absent, no route reads images. */
   imageInput?: (resolution: ResolvedModel) => { imageInputTokens: number; maxImageBytes: number } | null;
+  /** The served catalog that admission pins a run's image models from; without it, runs are admitted unpinned. */
+  imageCatalog?: ServedModelCatalog;
 };
 const amount = z.string().regex(/^(0|[1-9]\d{0,29})$/);
 const bindingSchema = z.object({
@@ -183,6 +188,8 @@ export async function admitGeneration(
       amount.parse(await config.budgetPicoUsd(workspaceId)),
     ],
   );
+  if (config.imageCatalog && (await isFeatureEnabled('images', null, { id: workspaceId })))
+    await pinRunImageModels(tx, runId, primary.familyId, config.imageCatalog);
 }
 
 export async function latestGeneration(tx: AgentTransaction, runId: string) {

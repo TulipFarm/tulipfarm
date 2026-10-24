@@ -120,6 +120,8 @@ export type SpecialistAssignment = {
   name: string;
   role: string;
   instructions: string;
+  /** The family the step runs on. Without it, the plan role's model. */
+  modelFamilyId?: string | undefined;
   tools: readonly string[];
   title: string;
   brief: string;
@@ -1304,6 +1306,7 @@ export function createPlanRuntime(
           name: definition.name,
           role: definition.role,
           instructions: definition.instructions,
+          ...(definition.modelFamilyId ? { modelFamilyId: definition.modelFamilyId } : {}),
           tools: definition.tools,
           title: task.title,
           brief: task.brief,
@@ -1386,6 +1389,15 @@ export function createPlanRuntime(
       ).rowCount;
       if (!live) throw new AccessDenied();
       return actor;
+    },
+    /** Extends a live specialist attempt's lease while a long tool call runs between model steps. Run after `guardSpecialist`. */
+    async renewSpecialistLease(tx: AgentTransaction, attemptId: string) {
+      const renewed = await tx.client.query(
+        `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET lease_until=clock_timestamp()+make_interval(secs => $2)
+          WHERE id=$1 AND status='running' AND settled_at IS NULL AND lease_until>clock_timestamp()`,
+        [uuidSchema.parse(attemptId), specialistLeaseMilliseconds / 1000],
+      );
+      if (!renewed.rowCount) throw new AccessDenied();
     },
     /** Records a specialist's result once. A stale or settled attempt changes nothing and returns false. */
     async settleSpecialist(

@@ -74,6 +74,15 @@ const partSchema = z.discriminatedUnion('kind', [
   compactCommandPartSchema,
   compactionPartSchema,
 ]);
+/** One card per image of an `images.generate` call. A saved image's id is its file's id. */
+const imageReceiptSchema = z.array(
+  z.object({
+    index: z.number().int().min(0).max(3),
+    id: z.uuid(),
+    state: z.enum(['pending', 'saved', 'refused', 'failed', 'cancelled']),
+  }),
+);
+export type ImageReceipt = z.infer<typeof imageReceiptSchema>[number];
 const messageSchema = z.object({
   id: z.uuid(),
   sequence: z.number().int().positive(),
@@ -101,6 +110,7 @@ const messageSchema = z.object({
         rowChange: rowChangeSchema.optional(),
         workflows: z.array(workflowReferenceSchema).optional(),
         subagents: subagentResultSchema.optional(),
+        images: imageReceiptSchema.optional(),
       }),
     )
     .default([]),

@@ -7,13 +7,13 @@ import { renameLegacyToolCall } from '@tulipfarm/conversations/tool-activity';
 import type { ConversationPlanning } from '@tulipfarm/conversations/runtime';
 import { z } from 'zod';
 import { observeTool, type ToolObservation, type ToolOutcome, type ToolRuntime } from '@tulipfarm/observability';
-import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
+import { AccessDenied, type AuthorizationTransaction, type HumanActor, type SourceDependency } from '@tulipfarm/access';
 import { createAgentRecordTools } from './record-tools.ts';
 import { createRecordBatchSchema, rowsListModelSchema, toolCallSchema } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
-import { requireAgentPermission, withHuman } from './saved-policy.ts';
+import { requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
@@ -57,7 +57,19 @@ import { humanReadableTableFiles, requireTableSources } from './table-sources.ts
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
 import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { FileContent, FileSource, GoogleFileReader } from '@tulipfarm/conversations/file-references';
-import { readChatFile, readFetchedFile, type TurnFiles } from '@tulipfarm/conversations/turn-files';
+import {
+  readChatFile,
+  readFetchedFile,
+  type AttachmentReader,
+  type TurnFiles,
+} from '@tulipfarm/conversations/turn-files';
+import {
+  generateImageOutputs,
+  type ImageGenerator,
+  type ImageModelChoice,
+  type ImageOrigin,
+  type ImageOutputStore,
+} from '@tulipfarm/conversations/image-outputs';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
@@ -451,6 +463,8 @@ const descriptions: Record<ToolName, string> = {
     'Preferred Knowledge tool. Use action="search" once with a short topic query, not a list of all required sections: keyword search requires the words to match in one passage. Stop if evidence suffices. For missing facts, use action="expand" in ONE call with a branches array of up to three independent short queries or citation anchors. Never send multiple search actions. At most one further expand call is allowed. Never switch legacy tools or delegate to reset this shared limit. State missing facts when exhausted. Documents carry indexedAt and sourceSyncedAt; say "indexed as of" when recency matters.',
   'files.create':
     'Create and save one user-requested output file in Files; set folderId only when the user named an accessible folder. For docx, xlsx, or pptx, content is a JSON spec; read the word-document, excel-workbook, or powerpoint-deck skill first. Returns the created-file record, not a hidden local download or approval. This changes storage and is idempotent only for the same tool call—do not retry an uncertain new call.',
+  'images.generate':
+    'Generate up to four images from a description, or edit and combine up to four source images by their attachment-id or file-id, and save them in Files. Pick aspect, or a preset for a named destination such as instagram-feed; set folderId only when the user named an accessible folder. Returns one entry per image (saved, refused, failed or cancelled); saved images show as cards under the reply. Costs credits per image and changes storage; a repeat of the same call in this turn returns the same images.',
   'files.read':
     'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'conversation.messages.read':
@@ -476,7 +490,9 @@ function admittedToolSchemas(access: ToolAccess) {
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
           : access.kind === 'chat'
             ? (access.earlierMessages === true || schema.shape.tool.value !== 'conversation.messages.read') &&
-              (access.chatFiles === true || schema.shape.tool.value !== 'files.read')
+              // Both need the images flag; chatFiles is offered only under it.
+              (access.chatFiles === true ||
+                (schema.shape.tool.value !== 'files.read' && schema.shape.tool.value !== 'images.generate'))
             : (access.task === true ||
                 (![
                   'files.read',
@@ -515,6 +531,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'mcp.call' ||
     tool === 'files.create' ||
     tool === 'files.read' ||
+    tool === 'images.generate' ||
     tool === 'agents.delegate' ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
@@ -553,6 +570,26 @@ export type ChatToolsOptions = {
   subagents?: SubagentDelegation | undefined;
   /** Reads this chat's files for `files.read`; without it, the tool is refused. */
   chatFiles?: ChatFiles | undefined;
+  /** Generates and saves images for `images.generate`; without it, the tool is refused. */
+  images?: ChatImages | undefined;
+};
+/** What a chat turn or plan specialist generates images with. The model is the one pinned when the work was admitted. */
+export type ChatImages = {
+  files: ImageOutputStore;
+  attachments?: AttachmentReader | undefined;
+  autonomous: boolean;
+  /** The unguarded workspace runtime: image holds settle through it even after the reply is stopped. */
+  ledger: Runtime;
+  /** The pinned image model of the turn or run, and its provider call. */
+  choose(
+    tx: AuthorizationTransaction,
+    originId: string,
+  ): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
+  /**
+   * A plan specialist's attempt: its images count against the attempt rather than a chat turn, and are billed to the
+   * attempt's flow within its credit allowance.
+   */
+  run?: { runId: string; allowanceCredits: string } | undefined;
 };
 /** What `files.read` reads with: Files, Google Drive and the images reader of the workspace. */
 export type ChatFiles = {
@@ -592,6 +629,7 @@ export function createChatTools(
     agentSetup,
     subagents,
     chatFiles,
+    images,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -1100,6 +1138,38 @@ export function createChatTools(
       case 'plans.report':
       case 'plans.start':
         return (await invokePlan(context, call)).result;
+      case 'images.generate': {
+        const turn = context.origin,
+          run = images?.run;
+        if (!images || (!run && !turn)) throw new AccessDenied();
+        const origin: ImageOrigin = run
+          ? { kind: 'run', runId: run.runId }
+          : { kind: 'turn', conversationId: turn!.conversationId, turnId: turn!.turnId };
+        const transaction = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
+          withHuman(runtime, workspaceId, actor, 'read', operation);
+        const ledger = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
+          images.ledger.transaction(workspaceId, savedAgentCompatibility, operation);
+        const { model, generate } = await transaction(tx =>
+          images.choose(tx, origin.kind === 'run' ? origin.runId : origin.turnId),
+        );
+        return generateImageOutputs(
+          { files: images.files, attachments: images.attachments, transaction, ledger },
+          {
+            workspaceId,
+            actor,
+            autonomous: images.autonomous,
+            origin,
+            model,
+            generate,
+            credits:
+              origin.kind === 'run'
+                ? { flowId: origin.runId, activity: 'agent', agentId: null, allowanceCredits: run!.allowanceCredits }
+                : { flowId: origin.conversationId, activity: 'chat', agentId: null },
+            signal: context.signal,
+          },
+          call,
+        );
+      }
       case 'files.create':
         if (!outputs || !context.origin) throw new AccessDenied();
         return createFileOutput(
