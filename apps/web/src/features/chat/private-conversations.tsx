@@ -21,7 +21,6 @@ import { newChatSearch, workspaceChatRoute, workspaceRoute } from '@/router';
 import { ArrowDown } from 'reicon-react/icons/ArrowDown';
 import { Danger } from 'reicon-react/icons/Danger';
 import { Folder } from 'reicon-react/icons/Folder';
-import { ArrowLeft } from 'reicon-react/icons/ArrowLeft';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
 import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
@@ -333,20 +332,6 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
         </Suspense>
       )}
       {chatId && <PendingGoogleActions key={chatId} workspaceId={workspace.id} slug={workspaceSlug} chatId={chatId} />}
-      {headerElement &&
-        chatId &&
-        createPortal(
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Back to chats"
-            title="Back to chats"
-            onClick={() => void navigate({ to: '/$workspaceSlug/chat', params: { workspaceSlug } })}
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-          </Button>,
-          headerElement,
-        )}
       <CanvasProvider key={activeChatId}>
         <ApprovalDockProvider>
           <ChoiceDockProvider>

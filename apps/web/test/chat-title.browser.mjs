@@ -5,6 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
+import { openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.CHAT_TITLE_BROWSER_PORT ?? 5297);
 const origin = `http://127.0.0.1:${port}`;
@@ -179,7 +180,7 @@ try {
     await header.getByRole('heading', { name: 'My chosen title', exact: true }).waitFor();
     assert.equal(await visible.textContent(), 'My chosen title', 'Manual titles render without typing');
     assert.equal(await page.title(), 'My chosen title · TulipFarm');
-    await page.getByRole('button', { name: 'Back to chats', exact: true }).click();
+    await openChatList(page);
     await page.getByRole('button', { name: 'My chosen title', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     await page.close();

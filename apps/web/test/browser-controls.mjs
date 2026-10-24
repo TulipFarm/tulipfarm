@@ -54,3 +54,14 @@ export function modelOption(page, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed|$)`) });
 }
+
+/** Open the chat list through the sidebar's Chats link, expanding the collapsed mobile sidebar first. */
+export async function openChatList(page) {
+  const link = page.getByRole('link', { name: 'Chats', exact: true }).first();
+  if (!(await link.isVisible()))
+    await page
+      .getByRole('button', { name: /^toggle sidebar$/i })
+      .first()
+      .click();
+  await link.click();
+}

@@ -66,7 +66,7 @@ export function knowledgeToolActivityItem(tool: Tool, visual: ReactNode): ToolAc
 function KnowledgeActivityDetails({ knowledge }: { knowledge: KnowledgeActivity }) {
   if (!knowledge.branches.length) return null;
   return (
-    <div className="ml-12">
+    <div>
       <Collapsible>
         <CollapsibleTrigger render={<Button variant="link" size="sm" />}>Details</CollapsibleTrigger>
         <CollapsibleContent>
