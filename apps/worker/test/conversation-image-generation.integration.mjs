@@ -15,6 +15,8 @@ import { pinnedImageChoice } from '../../../packages/agents/src/image-generation
 import { createFiles } from '../../../packages/files/src/index.ts';
 import { png } from '../../../packages/memory-core/test/fixtures/parser-media.mjs';
 import { createConversationActivities } from '../src/conversation-activities.ts';
+import { createPlanComposition } from '../src/plan-composition.ts';
+import { createTaskRecovery } from '../src/task-dispatch.ts';
 import {
   anthropicText,
   anthropicTools,
@@ -682,6 +684,60 @@ test('a reply start settles image holds a dead worker left open', { timeout: 120
     ],
   );
 });
+
+for (const [pass, recover] of [
+  [
+    'task',
+    f =>
+      createTaskRecovery({
+        runtime: f.runtime,
+        discover: async () => [],
+        wake: async () => {},
+        failure: () => {},
+      }).recoverAgentTaskPage(f.w.id),
+  ],
+  [
+    'plan',
+    f =>
+      createPlanComposition({
+        runtime: f.runtime,
+        discover: async () => [],
+        wakePlan: async () => {},
+        wakeTask: async () => {},
+      }).activities.recoverAgentPlanPage(f.w.id),
+  ],
+])
+  test(
+    `the ${pass} recovery pass settles image holds a dead run left open, without a chat`,
+    { timeout: 120000 },
+    async t => {
+      const f = await setup(t);
+      const { deps, context } = await f.direct();
+      await crashed(f, deps, { ...context, origin: { kind: 'run', runId: randomUUID() } }, 'Saved tulip', true);
+      await crashed(f, deps, { ...context, origin: { kind: 'run', runId: randomUUID() } }, 'Lost tulip', false);
+      await recover(f);
+      const rows = await f.rows(
+        `SELECT g.prompt,g.state,u.reserved::text,u.charged::text FROM ${f.table('tf_image_generations')} g JOIN ${f.table('tf_credit_usage')} u ON u.id=g.usage_id ORDER BY g.prompt`,
+      );
+      assert.deepEqual(
+        rows.map(row => [
+          row.prompt,
+          row.state,
+          row.charged === null
+            ? 'open'
+            : row.charged === '0'
+              ? 'released'
+              : row.charged === row.reserved
+                ? 'held'
+                : row.charged,
+        ]),
+        [
+          ['Lost tulip', 'failed', 'released'],
+          ['Saved tulip', 'saved', 'held'],
+        ],
+      );
+    },
+  );
 
 test('a repeat of a call a dead worker left settles its old hold before trying again', { timeout: 120000 }, async t => {
   const f = await setup(t);
