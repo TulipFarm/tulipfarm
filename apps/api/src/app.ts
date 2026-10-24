@@ -123,7 +123,7 @@ export function buildApp(
         const posts = socialPosts(social, channels, runtime);
         if (posts) business.addHook('onClose', posts.close);
         registerSocialAccounts(business, auth.auth, social, undefined, channels, posts?.posts ?? null);
-        const github = githubAccounts(runtime, process.env, defaultKnowledge.hook);
+        const github = githubAccounts(runtime, process.env);
         registerGitHubAccounts(
           business,
           auth.auth,

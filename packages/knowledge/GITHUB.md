@@ -479,18 +479,20 @@ next pass indexes the full commit history. Planned automatic sources with the
 earlier set are updated too. Running it again changes nothing. Workspaces below
 version 10 keep their kinds, and below version 7 commits are never indexed.
 
-## Automatic Knowledge
+## Choosing repositories
 
-Every authorization of a personal account creates one owner-only all-repositories
-source with every content kind and full history, unless the owner already has one
-for that account. Indexing starts at once. Unlike other providers, GitHub ignores
-the `default-connection-knowledge` flag and the automatic Knowledge gate never
-holds its sources. Automatic sources include `code`: every file at the default-branch
-head, with no count cap, and `commits`: the full default-branch history.
-Issues, pull requests and discussions keep their full history. Migration
-`common/0006_github_knowledge_opt_out.sql` removes the earlier rolling 90-day window
-and its date from existing GitHub sources. It also records a default intent for every
-active account, so existing accounts get their all-repositories source.
+Connecting a personal account no longer creates a source. The web app opens the
+repository picker first, with "Only repositories I choose" selected. Nothing is
+indexed until the owner saves a selection. Choosing "All repositories" makes an
+`all` source, whose later passes add new repositories. A chosen-repositories
+source follows only the repositories it names.
+
+Accounts connected before this change keep the automatic all-repositories source
+that migration `common/0006_github_knowledge_opt_out.sql` and the default-intent
+retry path created. The default-intent code stays for them. New authorizations
+record no intent, because `createGitHubAccounts` is built without a
+`defaultKnowledge` hook. Automatic sources include `code`: every file at the
+default-branch head, and `commits`: the full default-branch history.
 
 ## Verification
 
