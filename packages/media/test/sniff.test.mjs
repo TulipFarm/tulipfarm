@@ -35,6 +35,7 @@ test('identifies raster images from their bytes', async () => {
     [bigEndianTiff(2, 2, [51, 102, 153]), 'image/tiff'],
     [bmp24(2, 2, [51, 102, 153]), 'image/bmp'],
     [await fixture('tiny.heic'), 'image/heic'],
+    [await solid.clone().avif().toBuffer(), 'image/avif'],
     [await fixture('animated.gif'), 'image/gif'],
   ];
   for (const [input, mediaType] of cases) {
@@ -56,6 +57,12 @@ test('identifies HEIF brands', () => {
   assert.deepEqual(sniffMediaType(ftyp('msf1')), { mediaType: 'image/heif', family: 'image' });
   assert.deepEqual(sniffMediaType(ftyp('heim')), { mediaType: 'image/heif', family: 'image' });
   assert.deepEqual(sniffMediaType(ftyp('xxxx')), { mediaType: 'image/heif', family: 'image' });
+});
+
+test('identifies AVIF by its major brand before its HEIF compatible brand', () => {
+  const ftyp = brand => bytes([0, 0, 0, 24], 'ftyp', brand, [0, 0, 0, 0], 'mif1');
+  assert.deepEqual(sniffMediaType(ftyp('avif')), { mediaType: 'image/avif', family: 'image' });
+  assert.deepEqual(sniffMediaType(ftyp('avis')), { mediaType: 'image/avif', family: 'image' });
 });
 
 test('identifies SVG text after a BOM, XML declaration, comments and doctype', async () => {
