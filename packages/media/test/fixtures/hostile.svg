@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rendering must neither run the script nor fetch the image. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="80" viewBox="0 0 120 80">
+  <script>fetch('http://127.0.0.1:PORT/script')</script>
+  <rect width="120" height="80" fill="#00ff00"/>
+  <image href="http://127.0.0.1:PORT/x.png" width="120" height="80"/>
+  <image xlink:href="http://127.0.0.1:PORT/y.png" width="120" height="80"/>
+</svg>

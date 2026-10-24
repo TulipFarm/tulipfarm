@@ -5,6 +5,7 @@ import {
   modelEndpointProblem,
   modelCapabilities,
   modelCapabilitiesSchema,
+  modelImageLimits,
   type ModelCapabilities,
 } from '@tulipfarm/config';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
@@ -1020,27 +1021,78 @@ export async function inferDecision(
   });
 }
 
-export type ChatTurn = { role: 'user' | 'assistant'; text: string };
+export type ChatTextTurn = { role: 'user' | 'assistant'; text: string };
 export const chatImageMediaTypes = Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const);
 export type ChatImageMediaType = (typeof chatImageMediaTypes)[number];
-/** One part of a user message. Image `data` is raw bytes or their base64 encoding. */
-export type ChatContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image'; mediaType: ChatImageMediaType; data: Uint8Array | string };
+/** Image `data` is raw bytes or their base64 encoding. */
+export type ChatImagePart = { type: 'image'; mediaType: ChatImageMediaType; data: Uint8Array | string };
+export type ChatContentPart = { type: 'text'; text: string } | ChatImagePart;
 /** A user message with images, for models whose capabilities declare `imageInput`. */
 export type ChatContentTurn = { role: 'user'; content: readonly ChatContentPart[] };
-type ChatRequestTurn = ChatTurn | ChatContentTurn;
+export type ChatTurn = ChatTextTurn | ChatContentTurn;
+
+/**
+ * A tool's result together with images for the model to see. The result carries `value`; the images follow in a user
+ * message introduced by `label`, because the tool results of most provider APIs cannot hold images.
+ */
+export class ToolResultImages {
+  readonly value: unknown;
+  readonly label: string;
+  readonly images: readonly ChatImagePart[];
+  constructor(value: unknown, label: string, images: readonly ChatImagePart[]) {
+    this.value = value;
+    this.label = label;
+    this.images = images;
+  }
+}
 
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-function imageBase64(part: Extract<ChatContentPart, { type: 'image' }>) {
+function imageBase64(part: ChatImagePart) {
   if (!chatImageMediaTypes.includes(part.mediaType)) throw new Error(`Unsupported image media type ${part.mediaType}`);
   if (typeof part.data !== 'string') return Buffer.from(part.data).toString('base64');
   if (!part.data || !base64Pattern.test(part.data)) throw new Error('Image data must be base64');
   return part.data;
 }
+const base64Length = (part: ChatImagePart) =>
+  typeof part.data === 'string' ? part.data.length : Math.ceil(part.data.byteLength / 3) * 4;
+const imageByteLength = (part: ChatImagePart) =>
+  typeof part.data === 'string'
+    ? Math.floor((part.data.length * 3) / 4) - (part.data.match(/=+$/)?.[0].length ?? 0)
+    : part.data.byteLength;
+/** The turn as text, with each image named by a short placeholder instead of its data. */
+function textTurn(turn: ChatTurn): ChatTextTurn {
+  if ('text' in turn) return turn;
+  return {
+    role: turn.role,
+    text: turn.content
+      .map(part => (part.type === 'text' ? part.text : `[image ${part.mediaType} ${imageByteLength(part)} bytes]`))
+      .join('\n'),
+  };
+}
+/** A JSON replacer that sizes image bytes instead of spelling them out index by index. */
+const imageDataSize = (_key: string, value: unknown) =>
+  value instanceof Uint8Array ? `[${value.byteLength} bytes]` : value;
+const turnImages = (turns: Iterable<ChatTurn>) =>
+  [...turns].flatMap(turn => ('content' in turn ? turn.content.filter(part => part.type === 'image') : []));
+const loopTurns = (items: readonly LoopItem[]) => items.flatMap(item => (item.kind === 'turn' ? [item.turn] : []));
+/**
+ * A request's input size for credit holds and context estimates. `inputBytes` leaves out image data, whose base64 is
+ * far larger than the tokens it costs; `imageInputTokens` adds the model's catalog bound for each image instead.
+ */
+type RequestMeasure = { inputBytes: number; imageInputTokens: number };
+function measureRequest(route: CapableRoute, serialized: string, turns: Iterable<ChatTurn>): RequestMeasure {
+  const images = turnImages(turns);
+  return {
+    inputBytes: Buffer.byteLength(serialized) - images.reduce((sum, part) => sum + base64Length(part), 0),
+    imageInputTokens: images.length && images.length * modelImageLimits(route.provider, route.model).imageInputTokens,
+  };
+}
 /** The provider wire content of a turn. A text turn keeps its plain string. */
-function turnContent(api: ModelCapabilities['api'], turn: ChatRequestTurn): string | object[] {
+function turnContent(route: CapableRoute, turn: ChatTurn): string | object[] {
   if ('text' in turn) return turn.text;
+  const { api, imageInput } = routeCapabilities(route);
+  if (!imageInput && turn.content.some(part => part.type === 'image'))
+    throw new Error(`Model ${route.model} does not declare imageInput`);
   return turn.content.map(part => {
     if (part.type === 'text') {
       if (api === 'gemini') return { text: part.text };
@@ -1059,9 +1111,9 @@ function turnContent(api: ModelCapabilities['api'], turn: ChatRequestTurn): stri
     }
   });
 }
-function googleParts(turn: ChatRequestTurn) {
+function googleParts(route: CapableRoute, turn: ChatTurn) {
   if ('text' in turn) return [{ text: turn.text }];
-  return turnContent('gemini', turn) as object[];
+  return turnContent(route, turn) as object[];
 }
 function routeStreamFormat(route: CapableRoute): StreamFormat | null {
   const capabilities = routeCapabilities(route);
@@ -1070,7 +1122,15 @@ function routeStreamFormat(route: CapableRoute): StreamFormat | null {
 }
 function chatRequest(
   config: z.output<typeof inferenceRouteSchema>,
-  context: readonly ChatRequestTurn[],
+  context: readonly ChatTurn[],
+  system: string,
+  schema?: object,
+) {
+  return { ...chatWire(config, context, system, schema), turns: context };
+}
+function chatWire(
+  config: z.output<typeof inferenceRouteSchema>,
+  context: readonly ChatTurn[],
   system: string,
   schema?: object,
 ) {
@@ -1087,7 +1147,7 @@ function chatRequest(
           system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
           messages: context.map(message => ({
             role: message.role,
-            content: turnContent('anthropic-messages', message),
+            content: turnContent(config, message),
           })),
           ...(schema
             ? {
@@ -1107,7 +1167,7 @@ function chatRequest(
           { role: 'system', content: system },
           ...context.map(message => ({
             role: message.role,
-            content: turnContent(routeCapabilities(config).api, message),
+            content: turnContent(config, message),
           })),
         ],
         description,
@@ -1121,7 +1181,7 @@ function chatRequest(
           systemInstruction: { parts: [{ text: system }] },
           contents: context.map(message => ({
             role: message.role === 'user' ? 'user' : 'model',
-            parts: googleParts(message),
+            parts: googleParts(config, message),
           })),
           generationConfig: {
             maxOutputTokens: config.maxOutputTokens,
@@ -1139,6 +1199,8 @@ function chatRequest(
 export type ToolModelMeter = (attempt: {
   step: number;
   inputBytes: number;
+  /** The catalog bound on the tokens of the request's images, which `inputBytes` leaves out. */
+  imageInputTokens: number;
   maxOutputTokens: number;
   provider: string;
   model: string;
@@ -1417,12 +1479,20 @@ function nativeRequest(
   items: readonly LoopItem[],
   tools: readonly NativeTool[],
 ) {
+  return { ...nativeWire(config, blocks, items, tools), turns: loopTurns(items) };
+}
+function nativeWire(
+  config: z.output<typeof inferenceRouteSchema>,
+  blocks: readonly string[],
+  items: readonly LoopItem[],
+  tools: readonly NativeTool[],
+) {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   const system = blocks.join('\n\n');
   switch (config.provider) {
     case 'anthropic': {
       const messages = items.map(item => {
-        if (item.kind === 'turn') return { role: item.turn.role, content: item.turn.text };
+        if (item.kind === 'turn') return { role: item.turn.role, content: turnContent(config, item.turn) };
         if (item.kind === 'model')
           return {
             role: 'assistant',
@@ -1474,7 +1544,7 @@ function nativeRequest(
         const input = [
           { role: 'system', content: system },
           ...items.flatMap((item): object[] => {
-            if (item.kind === 'turn') return [{ role: item.turn.role, content: item.turn.text }];
+            if (item.kind === 'turn') return [{ role: item.turn.role, content: turnContent(config, item.turn) }];
             if (item.kind === 'model')
               return [
                 ...(item.text ? [{ role: 'assistant', content: item.text }] : []),
@@ -1520,7 +1590,7 @@ function nativeRequest(
       const messages = [
         { role: 'system', content: system },
         ...items.flatMap((item): object[] => {
-          if (item.kind === 'turn') return [{ role: item.turn.role, content: item.turn.text }];
+          if (item.kind === 'turn') return [{ role: item.turn.role, content: turnContent(config, item.turn) }];
           if (item.kind === 'model')
             return [
               {
@@ -1564,7 +1634,7 @@ function nativeRequest(
     case 'google': {
       const contents = items.map(item => {
         if (item.kind === 'turn')
-          return { role: item.turn.role === 'user' ? 'user' : 'model', parts: [{ text: item.turn.text }] };
+          return { role: item.turn.role === 'user' ? 'user' : 'model', parts: googleParts(config, item.turn) };
         if (item.kind === 'model') return { role: 'model', parts: item.raw };
         return {
           role: 'user',
@@ -1632,7 +1702,7 @@ Use continue when the reply merely promises, narrates, or plans work that remain
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
 
 type EvidenceEntry =
-  | { kind: 'turn'; turn: ChatTurn }
+  | { kind: 'turn'; turn: ChatTextTurn }
   | { kind: 'model'; text: string; calls: { id: string; name: string; input: unknown }[] }
   | { kind: 'results'; results: { id: string; name: string; output: string; error: boolean }[] }
   | { kind: 'omitted'; entries: number };
@@ -1649,7 +1719,7 @@ export function completionCheckEvidence(
   maxBytes?: number,
 ): string {
   let history: EvidenceEntry[] = items.map(item => {
-    if (item.kind === 'turn') return item;
+    if (item.kind === 'turn') return { kind: item.kind, turn: textTurn(item.turn) };
     if (item.kind === 'model')
       return {
         kind: item.kind,
@@ -1775,21 +1845,22 @@ async function sendChatRequest<T>(
   target: z.output<typeof inferenceRouteSchema>,
   step: number,
   meter: ToolModelMeter | undefined,
-  wire: { url: string; headers: Record<string, string>; body: object },
+  wire: { url: string; headers: Record<string, string>; body: object; turns: readonly ChatTurn[] },
   select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
   answerText?: ToolInferenceContext['answerText'],
   onOutput?: () => void,
-  onSettled?: (inputBytes: number, usage: InferenceUsage) => void,
+  onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   signal?: AbortSignal,
 ) {
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
     streamFormat ? { ...wire.body, ...streamRequestFields(streamFormat) } : wire.body,
   );
+  const measure = measureRequest(target, serialized, wire.turns);
   const onUsage = await observeChatDetail('reserve', async () =>
     meter?.({
       step,
-      inputBytes: Buffer.byteLength(serialized),
+      ...measure,
       maxOutputTokens: target.maxOutputTokens,
       provider: target.provider,
       model: target.model,
@@ -1863,7 +1934,7 @@ async function sendChatRequest<T>(
     await observeChatDetail('settle', async () =>
       onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
     );
-    onSettled?.(Buffer.byteLength(serialized), response.ok ? value : { kind: 'unknown' });
+    onSettled?.(measure, response.ok ? value : { kind: 'unknown' });
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
@@ -1991,8 +2062,6 @@ export async function inferWithContent(
   options: { meter?: ToolModelMeter | undefined; signal?: AbortSignal | undefined } = {},
 ): Promise<ContentInferenceResult> {
   const config = inferenceRouteSchema.parse(route);
-  if (content.some(part => part.type === 'image') && !routeCapabilities(config).imageInput)
-    throw new Error(`Model ${config.model} does not declare imageInput`);
   const wire = chatRequest(config, [{ role: 'user', content }], system);
   let result: ContentInferenceResult | undefined;
   try {
@@ -2077,11 +2146,11 @@ export async function inferWithTools(
   };
   const calendarBindings = new Map<string, CalendarTextBinding>();
   const send = <T>(
-    wire: { url: string; headers: Record<string, string>; body: object },
+    wire: { url: string; headers: Record<string, string>; body: object; turns: readonly ChatTurn[] },
     select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
     answerText?: ToolInferenceContext['answerText'],
     target = config,
-    settled?: (inputBytes: number, usage: InferenceUsage) => void,
+    settled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   ) =>
     sendChatRequest(
       target,
@@ -2118,7 +2187,8 @@ export async function inferWithTools(
         outputProduced ||
         diagnostics.outputStarted ||
         !fallbackEligibleClasses.has(diagnostics.errorClass) ||
-        (fallback.provider === config.provider && fallback.model === config.model)
+        (fallback.provider === config.provider && fallback.model === config.model) ||
+        (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
       ) {
         recordModelFallback('not_eligible', primary, target);
         throw error;
@@ -2147,16 +2217,16 @@ export async function inferWithTools(
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
   const loaded = new Set<string>();
   const catalogKey = (mcp: McpModelCatalog | undefined) => JSON.stringify([mcp ?? null, [...loaded].sort()]);
-  let reminder: ChatTurn | undefined;
+  let reminder: ChatTextTurn | undefined;
   const limits = tools?.context;
   const capBytes = limits ? resultCapBytes(limits.window) : 0;
   /** Full outputs of this reply's shortened results, by the reference `tool_result_read` takes. Never persisted. */
   const stored = new Map<string, string>();
   const chunksRead = new Set<string>();
   let rereadOffered = false;
-  /** The provider's prompt tokens for the last reply round, and that request's bytes. */
-  let baseline: { bytes: number; tokens: number } | undefined;
-  /** Bytes of the last reply-round request, so a rejected one can recalibrate the estimate. */
+  /** The provider's prompt tokens for the last reply round, and that request's measure. */
+  let baseline: (RequestMeasure & { tokens: number }) | undefined;
+  /** Text bytes of the last reply-round request, so a rejected one can recalibrate the estimate. */
   let lastRequestBytes = 0;
   /**
    * How many real tokens one estimated token turned out to be. It starts at 1 and only grows when the provider rejects
@@ -2197,20 +2267,22 @@ export async function inferWithTools(
     ...chatSystemBlocks(tools?.projectInstructions),
     ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
-  /** Estimated input tokens: the last round's reported prompt plus a quarter of the bytes added since, else bytes / 4. */
+  /**
+   * Estimated input tokens: the last round's reported prompt plus a quarter of the text bytes and the image bounds
+   * added since, else text bytes / 4 plus the image bounds.
+   */
   const estimateRound = (finalizing: boolean) =>
     observeChatDetailSync('context-measure', () => {
-      const bytes = Buffer.byteLength(
-        JSON.stringify(
-          nativeRequest(
-            config,
-            roundBlocks(),
-            [{ kind: 'turn', turn: reminder! }, ...items],
-            roundTools(catalog!, finalizing),
-          ).body,
-        ),
+      const wire = nativeRequest(
+        config,
+        roundBlocks(),
+        [{ kind: 'turn', turn: reminder! }, ...items],
+        roundTools(catalog!, finalizing),
       );
-      return baseline ? baseline.tokens + scaled(bytes - baseline.bytes) : scaled(bytes);
+      const { inputBytes, imageInputTokens } = measureRequest(config, JSON.stringify(wire.body), wire.turns);
+      return baseline
+        ? baseline.tokens + scaled(inputBytes - baseline.inputBytes) + imageInputTokens - baseline.imageInputTokens
+        : scaled(inputBytes) + imageInputTokens;
     });
   /**
    * Shrinks this reply's older tool results so the next request fits, keeping the latest round verbatim: summaries
@@ -2391,7 +2463,7 @@ export async function inferWithTools(
         observeChatDetailSync('serialize', () =>
           recordChatRequestSizes({
             reminder: Buffer.byteLength(currentReminder.text),
-            history: Buffer.byteLength(JSON.stringify(items)),
+            history: Buffer.byteLength(JSON.stringify(items, imageDataSize)),
           }),
         );
         return withFallback(target => {
@@ -2413,12 +2485,12 @@ export async function inferWithTools(
             },
             tools?.answerText,
             target,
-            (bytes, usage) => {
-              lastRequestBytes = bytes;
+            (measure, usage) => {
+              lastRequestBytes = measure.inputBytes;
               baseline =
                 usage.kind === 'known'
                   ? {
-                      bytes,
+                      ...measure,
                       tokens:
                         usage.input + usage.cacheRead + usage.cacheWrite + usage.cacheWrite5m + usage.cacheWrite1h,
                     }
@@ -2752,6 +2824,7 @@ export async function inferWithTools(
     }
     const calendar = only && valid.length === 1 ? calendarTextTarget(only.call) : null;
     if (only && calendar) {
+      const calendarMessages = sourceMessages.map(textTurn);
       const key = JSON.stringify(calendar.target);
       let binding = calendarBindings.get(key);
       if (!binding) {
@@ -2765,7 +2838,7 @@ export async function inferWithTools(
                     role: 'user',
                     text: JSON.stringify({
                       target: calendar.target,
-                      messages: sourceMessages.map((message, index) => ({ index, ...message })),
+                      messages: calendarMessages.map((message, index) => ({ index, ...message })),
                     }),
                   },
                 ],
@@ -2776,7 +2849,7 @@ export async function inferWithTools(
             body => {
               const checked = decision(config, body);
               const bound =
-                checked.kind === 'decision' ? bindCalendarText(unwrapDecision(checked.value), sourceMessages) : null;
+                checked.kind === 'decision' ? bindCalendarText(unwrapDecision(checked.value), calendarMessages) : null;
               return { value: bound, failed: !bound };
             },
           ),
@@ -2805,11 +2878,13 @@ export async function inferWithTools(
     const work = valid.filter(({ native }) => isWorkTool(native.name));
     if (work[0]) report('tool', toolDisplayName(work[0].call.tool));
     const outputs: ToolResult[] = [];
+    const images: ToolResultImages[] = [];
     if (valid.length === 1 && only) {
-      const value = await execute(only.call, only.activity);
+      const { value, shown } = toolResultImages(await execute(only.call, only.activity));
       const waiting = mcpExecutionResultSchema.safeParse(value);
       if (waiting.success && waiting.data.kind === 'waiting') throw new Error('mcp-wait-not-persisted');
       outputs.push(result(only.native, toolOutput(only.call, value), false));
+      if (shown) images.push(shown);
     } else {
       const pending = valid.entries();
       let stopped = false;
@@ -2817,11 +2892,9 @@ export async function inferWithTools(
         for (const [index, entry] of pending) {
           if (stopped) return;
           try {
-            outputs[index] = result(
-              entry.native,
-              toolOutput(entry.call, await execute(entry.call, entry.activity)),
-              false,
-            );
+            const { value, shown } = toolResultImages(await execute(entry.call, entry.activity));
+            outputs[index] = result(entry.native, toolOutput(entry.call, value), false);
+            if (shown) images[index] = shown;
           } catch (error) {
             stopped = true;
             throw error;
@@ -2832,7 +2905,7 @@ export async function inferWithTools(
       for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
     }
     for (const [index, entry] of valid.entries()) guard.record(entry.call, outputs[index]!.output);
-    items.push({ kind: 'results', results: cap(outputs, step) });
+    items.push({ kind: 'results', results: cap(outputs, step) }, ...imagesTurn(images));
     if (work.length) toolRounds++;
   }
 }
@@ -2890,7 +2963,7 @@ export async function inferSpecialist(
       const onUsage = await observeChatDetail('reserve', () =>
         meter({
           step,
-          inputBytes: Buffer.byteLength(serialized),
+          ...measureRequest(config, serialized, wire.turns),
           maxOutputTokens: config.maxOutputTokens,
           provider: config.provider,
           model: config.model,
@@ -2974,15 +3047,31 @@ export async function inferSpecialist(
       resolved.ok ? [{ native, call: resolved.call, activity: resolved.activity }] : [],
     );
     calls += valid.length;
-    const outputs = await Promise.all(
+    const executed = await Promise.all(
       valid.map(async ({ native, call, activity }) => {
         live?.onActivity?.(activity);
-        return result(native, toolOutput(call, await execute(call, activity)), false);
+        const { value, shown } = toolResultImages(await execute(call, activity));
+        return { output: result(native, toolOutput(call, value), false), shown };
       }),
     );
-    items.push({ kind: 'results', results: outputs });
+    items.push(
+      { kind: 'results', results: executed.map(entry => entry.output) },
+      ...imagesTurn(executed.map(entry => entry.shown)),
+    );
   }
   throw new Error('tool-limit');
+}
+function toolResultImages(value: unknown) {
+  return value instanceof ToolResultImages
+    ? { value: value.value, shown: value.images.length ? value : undefined }
+    : { value, shown: undefined };
+}
+/** The user message that shows a round's tool images after its results, labelled per tool in call order. */
+function imagesTurn(shown: readonly (ToolResultImages | undefined)[]): LoopItem[] {
+  const content = shown.flatMap(entry =>
+    entry ? [{ type: 'text' as const, text: entry.label }, ...entry.images] : [],
+  );
+  return content.length ? [{ kind: 'turn', turn: { role: 'user', content } }] : [];
 }
 function toolOutput(call: FrameworkCall, value: unknown) {
   const output = JSON.stringify(value);
