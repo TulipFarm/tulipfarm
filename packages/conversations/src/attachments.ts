@@ -476,6 +476,10 @@ export function createAttachments(
       return true;
     });
   }
+  /** Whether the workspace's attachment storage has room for `size` more bytes. */
+  async function hasRoom(workspaceId: string, size: number) {
+    return transaction(uuidSchema.parse(workspaceId), async tx => (await chargedBytes(tx)) + size <= quota);
+  }
   /** Removes staged bytes unless they became an attachment. */
   async function discardShared(workspaceId: string, staged: SharedAttachment) {
     const adopted = await transaction(workspaceId, async tx =>
@@ -500,6 +504,7 @@ export function createAttachments(
     stageShared,
     adoptShared,
     discardShared,
+    hasRoom,
   };
 }
 

@@ -41,9 +41,16 @@ export type TaskFileReading = {
   recognition(scope: Scope): Promise<{ recognition: FileRecognition | undefined; maxImageBytes: number }>;
   /**
    * Fetches public links and keeps what each returned in the chat object store, so every later step of the task reads
-   * the same bytes; absent, instruction links are left to `web.fetch`.
+   * the same bytes; absent, instruction links are left to `web.fetch`. A file is kept only while the workspace's
+   * attachment storage `hasRoom` for it, as a chat link copy is.
    */
-  links?: { fetch: FetchPublicFile; objects: AttachmentBytes } | undefined;
+  links?:
+    | {
+        fetch: FetchPublicFile;
+        objects: AttachmentBytes;
+        hasRoom: (workspaceId: string, size: number) => Promise<boolean>;
+      }
+    | undefined;
 };
 
 /** An owner message of the task, whose links are read. */
@@ -260,11 +267,13 @@ async function readLinks(
       let kept = await keptLink(links.objects, key);
       let bytes: Uint8Array | null = null;
       if (!kept) {
-        const result = await links.fetch(url, signal).catch(() => ({
+        let result: PublicFile = await links.fetch(url, signal).catch(() => ({
           kind: 'failed' as const,
           url,
           reason: 'unavailable' as const,
         }));
+        if (result.kind === 'file' && !(await links.hasRoom(scope.workspaceId, result.bytes.byteLength)))
+          result = { kind: 'failed', url, reason: 'storage-full' };
         if (result.kind === 'failed' && result.reason === 'web-off') {
           webOff = true;
           notices[index] = { url, outcome: 'failed', reason: result.reason };
