@@ -13,6 +13,8 @@ import { createTaskRuntime, taskFilesReader } from '../src/task-runtime.ts';
 import { createModelRouteHealth } from '../src/model-health.ts';
 import { savedTaskAgent } from './task-fixture.mjs';
 import { createAgentExecutor } from '../src/executor.ts';
+import { recognisingExtract } from '@tulipfarm/conversations/turn-files';
+import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 
 const terms = 'Suppliers are paid within 30 days of delivery.';
 
@@ -318,5 +320,48 @@ test(
       'An attached file exceeds the supported text format or size, or file storage is not configured.',
     );
     assert.equal(prompts.length, before, 'an unreadable file never reaches the model');
+
+    const scopes = [],
+      recognitions = [];
+    const recognising = createTaskRuntime(
+      runtime,
+      model,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      taskFilesReader(files, async scope => {
+        scopes.push(scope);
+        return recognisingExtract(
+          {
+            recognizer: {
+              modelId: 'vision',
+              promptVersion: 'media-v1',
+              recognize: async request => {
+                recognitions.push(request);
+                return { kind: 'recognized', text: 'Delivery note: 418 crates', description: 'A scanned slip' };
+              },
+            },
+          },
+          5 * 1024 * 1024,
+        );
+      }),
+    );
+    const scanId = await upload(user, 'Delivery.png', 'image/png', await png(8, 6));
+    const scan = await start([{ kind: 'file', fileId: scanId }], 'How many crates were delivered?');
+    for (let n = 0; n < 8 && (await tasks.read(w.id, user, scan.id)).status === 'pending'; n++)
+      await recognising.process(w.id, scan.id);
+    assert.equal((await tasks.read(w.id, user, scan.id)).status, 'completed');
+    assert.deepEqual(scopes, [{ workspaceId: w.id, userId: user, membershipId: member, taskId: scan.id }]);
+    assert.equal(recognitions.length, 1);
+    const [input] = prompts.at(-1).files;
+    assert.equal(input.filename, 'Delivery.png');
+    assert.match(input.text, /^\[Recognised image\]\n/, 'recognised text is labelled as it is in chat');
+    assert.match(input.text, /Delivery note: 418 crates/);
+    const scanReceipt = (await tasks.history(w.id, user, scan.id)).messages
+      .at(-1)
+      .sources.find(source => source.kind === 'file' && source.read);
+    assert.equal(scanReceipt.read.representation, 'extracted');
   },
 );

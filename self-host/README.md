@@ -159,6 +159,25 @@ restart the api. The login and sign-up pages then ask for a password.
   with a reset link. An email link sign-in proves the address, so it removes a
   password set by someone whose address was never confirmed.
 
+## Image recognition
+
+TulipFarm reads the text in images with a model whose catalog entry declares
+`"imageInput": true`. It does this for images in Knowledge documents, in files
+attached to chat, and in task inputs. Without the workspace `images` flag, the
+model is the catalog's `document-vision` role. With the flag, it is the image
+reader a workspace admin picks in image settings, which defaults to that role.
+Turning the flag on or off needs no migration.
+
+Recognitions are stored per workspace in `tf_knowledge_recognitions`, keyed by
+image hash, model and prompt version. Changing the model or prompt reads images
+again. Each row records the file it was read from. The Knowledge sweep deletes,
+oldest first, rows older than a day whose file is no longer held by Files, a
+live chat attachment or a Knowledge revision. Each image costs
+Knowledge ingestion credits of the workspace. When credits run out, that image
+is reported as not read and the rest of the file continues. If no model reads
+images, or the admin turns recognition off, images are reported as unread
+(`ocr-unavailable`).
+
 ## Telemetry
 
 The api, worker, and storage-worker can export OpenTelemetry traces, metrics, and

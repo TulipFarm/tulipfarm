@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
-import { chunkSegments, normalizeMarkdown } from './chunks.js';
+import { chunkSegments, normalization, normalizeMarkdown } from './chunks.js';
 import { KnowledgeParseError } from './contracts.js';
 import type { KnowledgeParseInput, KnowledgeParseResult } from './contracts.js';
+import { sniffImage } from './image-sniff.js';
 import {
   MediaRecognitionUnavailable,
   mediaLimits,
+  mediaPlaceholder,
   mediaRecognitionSchema,
   placeholderPattern,
+  recognisedLabel,
   recognitionCacheKey,
   stripPlaceholderMarkers,
 } from './media-contracts.js';
@@ -15,10 +18,11 @@ import type {
   KnowledgeExtraction,
   KnowledgeLocation,
   KnowledgeRecognitionOptions,
-  MediaBytes,
   MediaItem,
   MediaRecognition,
   MediaRecognizer,
+  RecognitionOutcome,
+  RecognitionUnit,
 } from './media-contracts.js';
 import { extractKnowledgeDocument, readKnowledgeMedia, retryTransientParse } from './process.js';
 
@@ -53,7 +57,10 @@ export async function readKnowledgeSegments(
   sandbox: KnowledgeParserSandbox = defaultSandbox,
 ): Promise<KnowledgeSegments & { extraction: KnowledgeExtraction; used?: MediaRecognizer }> {
   const signal = recognition.signal;
-  const extraction = await sandbox.extract(input, signal ? { signal } : {});
+  const extraction =
+    recognition.images && standaloneImage(input)
+      ? imageExtraction(input)
+      : await sandbox.extract(input, signal ? { signal } : {});
   const outcome = await recognizeMedia(input, extraction, recognition, sandbox);
   const byId = new Map(extraction.media.map(item => [item.id, item]));
   const segments = extraction.segments.map(segment => ({
@@ -63,7 +70,7 @@ export async function readKnowledgeSegments(
         const item = byId.get(id);
         if (!item) return '';
         const result = outcome.recognized.get(id);
-        return result ? renderRecognition(item, result) : item.fallback;
+        return result ? renderRecognition(item, result, { labelled: recognition.images === true }) : item.fallback;
       }),
     ),
   }));
@@ -126,7 +133,7 @@ export async function parseKnowledgeDocument(
   };
 }
 
-interface RecognitionOutcome {
+interface MediaOutcome {
   recognized: Map<string, Extract<MediaRecognition, { kind: 'recognized' }>>;
   gaps: CoverageGap[];
   failed: number;
@@ -134,13 +141,139 @@ interface RecognitionOutcome {
   used?: MediaRecognizer;
 }
 
+const imageTypes = new Set(['png', 'jpeg', 'gif', 'webp', 'bmp']);
+
+/** Whether the input is itself a raster image, judged from its header alone. */
+function standaloneImage(input: KnowledgeParseInput) {
+  return imageTypes.has(sniffImage(Buffer.from(input.bytes)).type);
+}
+
+/** A file that is itself an image: one passage holding one image unit, read whole by the sandbox. */
+function imageExtraction(input: KnowledgeParseInput): KnowledgeExtraction {
+  const location = { kind: 'passage' } as const;
+  return {
+    engine: 'image',
+    version: '1',
+    normalization,
+    pages: 1,
+    segments: [{ location, markdown: mediaPlaceholder('m1') }],
+    media: [
+      {
+        id: 'm1',
+        kind: 'image',
+        ref: { kind: 'file' },
+        location,
+        alt: '',
+        fallback: '',
+        sha256: createHash('sha256').update(input.bytes).digest('hex'),
+      },
+    ],
+    gaps: [],
+  };
+}
+
+/**
+ * Recognition for one file: identical bytes are recognised once, the cache answers before the model and at most
+ * `recognitionConcurrency` calls run at once. Under the `images` rules the first `recognitionsPerFile` distinct units
+ * are recognised, cached or not, and the rest are `limit`; an unavailable recognition, such as a refused credit
+ * reservation, affects only its unit. Without them, model calls past `recognitionsPerRevision` are `limit` and the
+ * first unavailable recognition makes every later unit unavailable.
+ */
+function fileRecognition(
+  recognizer: MediaRecognizer,
+  { cache, signal, failedRecognition = 'throw', images }: KnowledgeRecognitionOptions,
+  source: string | undefined,
+) {
+  const limit = createLimit(recognitionConcurrency);
+  const results = new Map<string, Promise<RecognitionOutcome>>();
+  let calls = 0;
+  let available = true;
+  let used = false;
+  const full = () => images === true && results.size >= mediaLimits.recognitionsPerFile;
+  const run = async (unit: RecognitionUnit, sha256: string): Promise<RecognitionOutcome> => {
+    const key = recognitionCacheKey(sha256, recognizer);
+    const cached = await cache?.get(key);
+    if (cached) {
+      used = true;
+      return mediaRecognitionSchema.parse(cached);
+    }
+    if (!available) return { kind: 'recognition-unavailable' };
+    if (!images && calls >= mediaLimits.recognitionsPerRevision) return { kind: 'limit' };
+    calls += 1;
+    try {
+      const result = mediaRecognitionSchema.parse(
+        await recognizer.recognize({
+          kind: unit.kind,
+          mediaType: unit.mediaType,
+          bytes: unit.bytes,
+          width: unit.width,
+          height: unit.height,
+          alt: unit.alt,
+          ...(signal ? { signal } : {}),
+        }),
+      );
+      used = true;
+      await cache?.set(key, result, source ?? sha256);
+      return result;
+    } catch (error) {
+      if (error instanceof MediaRecognitionUnavailable) {
+        if (!images) available = false;
+        return { kind: 'recognition-unavailable' };
+      }
+      if (failedRecognition === 'count' && !signal?.aborted) return { kind: 'failed' };
+      throw new KnowledgeParseError('resource-limited', { reason: 'recognition-failed' });
+    }
+  };
+  return {
+    recognise(unit: RecognitionUnit): Promise<RecognitionOutcome> {
+      const sha256 = unit.sha256 ?? createHash('sha256').update(unit.bytes).digest('hex');
+      let result = results.get(sha256);
+      if (!result) {
+        result = full() ? Promise.resolve({ kind: 'limit' }) : limit(() => run(unit, sha256));
+        results.set(sha256, result);
+      }
+      return result;
+    },
+    /** The outcome for bytes this file already recognised, without reading them again. */
+    seen(sha256: string | undefined) {
+      return sha256 === undefined ? undefined : results.get(sha256);
+    },
+    /** Under the `images` rules, whether the file has reached its cap and every new unit is `limit`. */
+    get full() {
+      return full();
+    },
+    get available() {
+      return available;
+    },
+    get used() {
+      return used;
+    },
+  };
+}
+
+/**
+ * The one entry point for recognising the units of a file, used by chat, tasks and, through
+ * `readKnowledgeSegments`, Knowledge: the cache, deduplication, concurrency, the per-file cap and per-unit credit
+ * failures. The recognizer is bound by the host to the requester who pays and the model that reads. `source` is the
+ * SHA-256 of the file the units came from, so the cache keeps a recognition only while some file holds it; it
+ * defaults to each unit's own bytes. Outcomes are in unit order.
+ */
+export async function recognise(
+  units: readonly RecognitionUnit[],
+  options: KnowledgeRecognitionOptions & { recognizer: MediaRecognizer; source?: string },
+): Promise<RecognitionOutcome[]> {
+  const recognition = fileRecognition(options.recognizer, options, options.source);
+  return Promise.all(units.map(unit => recognition.recognise(unit)));
+}
+
 async function recognizeMedia(
   input: KnowledgeParseInput,
   extraction: KnowledgeExtraction,
-  { recognizer, cache, signal, failedRecognition = 'throw' }: KnowledgeRecognitionOptions,
+  options: KnowledgeRecognitionOptions,
   sandbox: KnowledgeParserSandbox,
-): Promise<RecognitionOutcome> {
-  const recognized: RecognitionOutcome['recognized'] = new Map();
+): Promise<MediaOutcome> {
+  const { recognizer, signal } = options;
+  const recognized: MediaOutcome['recognized'] = new Map();
   const gaps: CoverageGap[] = [];
   const gap = (item: MediaItem, reason: CoverageGap['reason']) =>
     gaps.push({ kind: 'image', reason, location: item.location, label: label(item) });
@@ -151,58 +284,35 @@ async function recognizeMedia(
     return { recognized, gaps, failed };
   }
 
-  let used = false;
-  let available = true;
-  let calls = 0;
-  const results = new Map<string, Promise<MediaRecognition | 'failed' | undefined>>();
-  const settle = (item: MediaItem, result: MediaRecognition | 'failed' | undefined) => {
-    if (result === 'failed') failed += 1;
-    else if (!result) gap(item, available ? 'limit' : 'recognition-unavailable');
+  const recognition = fileRecognition(recognizer, options, createHash('sha256').update(input.bytes).digest('hex'));
+  const settle = (item: MediaItem, result: RecognitionOutcome) => {
+    if (result.kind === 'failed') failed += 1;
     else if (result.kind === 'recognized') recognized.set(item.id, result);
     else gap(item, result.kind);
-  };
-  const recognize = async (item: MediaItem, media: MediaBytes, sha256: string) => {
-    const key = recognitionCacheKey(sha256, recognizer);
-    const cached = await cache?.get(key);
-    if (cached) {
-      used = true;
-      return mediaRecognitionSchema.parse(cached);
-    }
-    if (!available || calls >= mediaLimits.recognitionsPerRevision) return undefined;
-    calls += 1;
-    try {
-      const result = mediaRecognitionSchema.parse(
-        await recognizer.recognize({
-          kind: item.kind,
-          mediaType: media.mediaType,
-          bytes: media.bytes,
-          width: media.width,
-          height: media.height,
-          alt: item.alt,
-          ...(signal ? { signal } : {}),
-        }),
-      );
-      used = true;
-      await cache?.set(key, result);
-      return result;
-    } catch (error) {
-      if (error instanceof MediaRecognitionUnavailable) {
-        available = false;
-        return undefined;
-      }
-      if (failedRecognition === 'count' && !signal?.aborted) return 'failed' as const;
-      throw new KnowledgeParseError('resource-limited', { reason: 'recognition-failed' });
-    }
   };
 
   // Identical stored media is recognized once; rendered pages are deduplicated after rendering.
   const queue = [...extraction.media];
   const pending: Promise<void>[] = [];
   let failure: unknown;
-  const limit = createLimit(recognitionConcurrency);
   while (queue.length && failure === undefined) {
-    if (!available) {
+    if (!recognition.available) {
       for (const item of queue.splice(0)) gap(item, 'recognition-unavailable');
+      break;
+    }
+    if (recognition.full) {
+      // Media past the cap is never read; a repeat of media already recognised keeps its outcome.
+      for (const item of queue.splice(0)) {
+        const seen = recognition.seen(item.sha256);
+        if (seen)
+          pending.push(
+            seen.then(
+              value => settle(item, value),
+              () => undefined,
+            ),
+          );
+        else gap(item, 'limit');
+      }
       break;
     }
     const batch = queue.splice(0, mediaLimits.batchItems);
@@ -225,19 +335,23 @@ async function recognizeMedia(
       else {
         const bytes = bytesById.get(item.id);
         if (!bytes) throw new KnowledgeParseError('malformed', { reason: 'invalid-output' });
-        const sha256 = item.sha256 ?? createHash('sha256').update(bytes.bytes).digest('hex');
-        let result = results.get(sha256);
-        if (!result) {
-          result = limit(() => recognize(item, bytes, sha256));
-          results.set(sha256, result);
-        }
         pending.push(
-          result.then(
-            value => settle(item, value),
-            error => {
-              failure ??= error;
-            },
-          ),
+          recognition
+            .recognise({
+              kind: item.kind,
+              mediaType: bytes.mediaType,
+              bytes: bytes.bytes,
+              width: bytes.width,
+              height: bytes.height,
+              alt: item.alt,
+              ...(item.sha256 ? { sha256: item.sha256 } : {}),
+            })
+            .then(
+              value => settle(item, value),
+              error => {
+                failure ??= error;
+              },
+            ),
         );
       }
     }
@@ -247,7 +361,7 @@ async function recognizeMedia(
   }
   await Promise.all(pending);
   if (failure !== undefined) throw failure;
-  return used ? { recognized, gaps, failed, used: recognizer } : { recognized, gaps, failed };
+  return recognition.used ? { recognized, gaps, failed, used: recognizer } : { recognized, gaps, failed };
 }
 
 function createLimit(concurrency: number) {
@@ -283,7 +397,17 @@ function clean(text: string): string {
   return value;
 }
 
+/** Recognised text as Markdown; `labelled` starts it with `[Recognised image]` so readers can tell it from file text. */
 export function renderRecognition(
+  item: Pick<MediaItem, 'kind' | 'alt'>,
+  result: Extract<MediaRecognition, { kind: 'recognized' }>,
+  { labelled = false }: { labelled?: boolean } = {},
+): string {
+  const body = recognitionMarkdown(item, result);
+  return labelled ? `${recognisedLabel}\n${body}` : body;
+}
+
+function recognitionMarkdown(
   item: Pick<MediaItem, 'kind' | 'alt'>,
   result: Extract<MediaRecognition, { kind: 'recognized' }>,
 ): string {

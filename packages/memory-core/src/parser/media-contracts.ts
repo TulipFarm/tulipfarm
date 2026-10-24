@@ -6,6 +6,8 @@ export const mediaLimits = Object.freeze({
   minimumSide: 32,
   /** Distinct recognitions per revision; the rest become coverage gaps. */
   recognitionsPerRevision: 300,
+  /** Distinct recognitions per file under the `images` rules; the rest become `limit` gaps. */
+  recognitionsPerFile: 100,
   /** Largest image or rendered page sent to the model, after normalization. */
   imageBytes: 8 * 1024 * 1024,
   /** Raw media bytes returned by one sandbox media call. */
@@ -51,6 +53,8 @@ export const mediaRefSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('part'), path: z.string().min(1).max(1024) }),
   z.strictObject({ kind: z.literal('pdf-page'), page: z.number().int().min(1).max(knowledgeLimits.pages) }),
   z.strictObject({ kind: z.literal('rtf-picture'), index: z.number().int().min(0).max(100_000) }),
+  /** The whole input is one image. */
+  z.strictObject({ kind: z.literal('file') }),
 ]);
 export type MediaRef = z.infer<typeof mediaRefSchema>;
 
@@ -100,7 +104,7 @@ export type ExtractionSegment = z.infer<typeof segmentSchema>;
 
 /** First sandbox call: text with placeholders, media to recognize and gaps found during extraction. */
 export const extractionSchema = z.strictObject({
-  engine: z.enum(['text', 'anydoc']),
+  engine: z.enum(['text', 'anydoc', 'image']),
   version: z.string(),
   normalization: z.string(),
   pages: z.number().int().min(0).max(knowledgeLimits.pages),
@@ -201,17 +205,37 @@ export interface MediaRecognizer {
 /** Workspace-scoped reuse of recognitions. Keys already include the model id and prompt version. */
 export interface MediaRecognitionCache {
   get(key: string): Promise<MediaRecognition | undefined>;
-  set(key: string, value: MediaRecognition): Promise<void>;
+  /** `source` is the SHA-256 of the file the media came from; the recognition is kept while a file holds it. */
+  set(key: string, value: MediaRecognition, source: string): Promise<void>;
 }
 
 export interface KnowledgeRecognitionOptions {
-  /** Absent when recognition is off for the workspace or no model holds the document-vision role. */
+  /** Absent when recognition is off for the workspace or no model reads images for it. */
   recognizer?: MediaRecognizer;
   cache?: MediaRecognitionCache;
   signal?: AbortSignal;
   /** `throw` (the default) fails the parse so it is retried; `count` keeps the item's fallback and counts it. */
   failedRecognition?: 'throw' | 'count';
+  /**
+   * The workspace `images` flag's rules: a file recognises at most `recognitionsPerFile` units, an unavailable
+   * recognition (such as a refused credit reservation) gaps only its own unit, recognised media is labelled
+   * `[Recognised image]`, and a standalone image file is read as one unit.
+   */
+  images?: boolean;
 }
+
+/** One image or page ready for the recognizer, from a document or a file that is itself an image. */
+export type RecognitionUnit = Omit<MediaRecognitionRequest, 'signal'> & { sha256?: string };
+
+/** What recognising one unit produced: its recognition, or why it has none. */
+export type RecognitionOutcome =
+  | MediaRecognition
+  | { kind: 'limit' }
+  | { kind: 'recognition-unavailable' }
+  | { kind: 'failed' };
+
+/** Marks recognised text so a reader can tell it apart from the file's own text. */
+export const recognisedLabel = '[Recognised image]';
 
 export function recognitionCacheKey(sha256: string, recognizer: Pick<MediaRecognizer, 'modelId' | 'promptVersion'>) {
   return `${sha256}:${recognizer.modelId}:${recognizer.promptVersion}`;

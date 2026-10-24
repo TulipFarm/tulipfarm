@@ -17,14 +17,18 @@ import {
   sniffMediaType,
   type ModelImageMediaType,
 } from '@tulipfarm/media';
-import { KnowledgeParseError, readKnowledgeSegments, renderRecognition } from '@tulipfarm/memory-core/parser';
 import {
-  MediaRecognitionFailed,
-  MediaRecognitionUnavailable,
+  KnowledgeParseError,
+  readKnowledgeSegments,
+  recognise,
+  renderRecognition,
+} from '@tulipfarm/memory-core/parser';
+import {
+  mediaLimits,
+  recognisedLabel,
   type CoverageGap,
   type KnowledgeLocation,
-  type MediaRecognition,
-  type MediaRecognitionRequest,
+  type MediaRecognitionCache,
   type MediaRecognizer,
 } from '@tulipfarm/memory-core/parser/media-contracts';
 import {
@@ -37,6 +41,7 @@ import {
   type FileSource,
   type GoogleFileReader,
   type GoogleUnavailable,
+  type FileExtract,
   storedReferenceSchema,
 } from './file-references.ts';
 import { AttachmentError } from './attachments.ts';
@@ -76,8 +81,11 @@ export type RecognitionContext = {
   requester: HumanActor;
   model: string;
 };
-/** Reads one image's text and description. Throws `MediaRecognitionUnavailable` or `MediaRecognitionFailed`. */
-export type Recognise = (request: MediaRecognitionRequest, context: RecognitionContext) => Promise<MediaRecognition>;
+/**
+ * The recognizer a read uses and the workspace cache that answers before it. The recognizer throws
+ * `MediaRecognitionUnavailable` when a unit cannot be paid for, and `MediaRecognitionFailed` when the call fails.
+ */
+export type FileRecognition = { recognizer: MediaRecognizer; cache?: MediaRecognitionCache };
 
 export type AttachmentReader = {
   download(
@@ -92,7 +100,11 @@ export type AttachmentReader = {
 export type TurnFiles = {
   enabled(workspaceId: string): Promise<boolean>;
   family(familyId: string): ReadingFamily;
-  recognise: Recognise;
+  /**
+   * The turn's recognizer on its pinned recognition model, undefined when it is not served. Every recognizer of one
+   * turn shares one concurrency bound, so a turn's reads and its `files.read` calls together stay within it.
+   */
+  recognition(context: RecognitionContext): FileRecognition | undefined;
   attachments: AttachmentReader;
   /** Resolves the turn's recognition and image models; runs inside the admitting or first claiming transaction. */
   pin(tx: AuthorizationTransaction, familyId: string): Promise<TurnImageModels>;
@@ -133,8 +145,7 @@ export type ReadOptions = {
   imageInput: boolean;
   maxImageBytes: number;
   /** Absent when the workspace has no recognition model or recognition is off. */
-  recognise?: ((request: MediaRecognitionRequest) => Promise<MediaRecognition>) | undefined;
-  recognitionModel?: string | undefined;
+  recognition?: FileRecognition | undefined;
   selection?: ReadSelection | undefined;
   signal?: AbortSignal | undefined;
 };
@@ -192,11 +203,30 @@ function sliceRange(segments: FileSegment[], range: NonNullable<ReadSelection['r
 }
 
 function gapNotes(gaps: readonly CoverageGap[]): string[] {
-  if (!gaps.length) return [];
-  const reasons = [...new Set(gaps.map(gap => gap.reason))].join(', ');
+  const limited = gaps.filter(gap => gap.reason === 'limit').length;
+  const other = gaps.filter(gap => gap.reason !== 'limit');
+  const reasons = [...new Set(other.map(gap => gap.reason))].join(', ');
   return [
-    `${gaps.length} ${gaps.length === 1 ? 'image or page' : 'images or pages'} in this file could not be recognised (${reasons}); their content was not read.`,
+    ...(limited
+      ? [
+          `Only the first ${mediaLimits.recognitionsPerFile} images or pages in this file were recognised; ${limited} more ${limited === 1 ? 'was' : 'were'} not read.`,
+        ]
+      : []),
+    ...(other.length
+      ? [
+          `${other.length} ${other.length === 1 ? 'image or page' : 'images or pages'} in this file could not be recognised (${reasons}); their content was not read.`,
+        ]
+      : []),
   ];
+}
+
+/** The turn's recognition on its pinned recognition model; undefined when the turn has none. */
+export function turnRecognition(
+  turnFiles: Pick<TurnFiles, 'recognition'>,
+  model: string | null,
+  context: Omit<RecognitionContext, 'model'>,
+): FileRecognition | undefined {
+  return model ? turnFiles.recognition({ ...context, model }) : undefined;
 }
 
 /** Lists a ZIP archive's entries from its central directory without opening them. Null when the archive is malformed. */
@@ -237,23 +267,32 @@ async function readImage(
       label: null,
       image: { type: 'image', mediaType: prepared.mediaType, data: Buffer.from(prepared.data).toString('base64') },
     };
-  if (!options.recognise) return { failure: 'recognition-unavailable' };
-  let result: MediaRecognition;
-  try {
-    result = await options.recognise({
-      kind: 'image',
-      mediaType: prepared.mediaType,
-      bytes: prepared.data,
-      width: prepared.width,
-      height: prepared.height,
-      alt: '',
+  if (!options.recognition) return { failure: 'recognition-unavailable' };
+  // Keyed by the file's own bytes, so Knowledge and chat share one recognition of the same image.
+  const source = sha256(bytes);
+  const [result] = await recognise(
+    [
+      {
+        kind: 'image',
+        mediaType: prepared.mediaType,
+        bytes: prepared.data,
+        width: prepared.width,
+        height: prepared.height,
+        alt: '',
+        sha256: source,
+      },
+    ],
+    {
+      ...options.recognition,
+      source,
+      images: true,
+      failedRecognition: 'count',
       ...(options.signal ? { signal: options.signal } : {}),
-    });
-  } catch (error) {
-    if (error instanceof MediaRecognitionUnavailable) return { failure: 'recognition-unavailable' };
-    if (error instanceof MediaRecognitionFailed) return { failure: 'recognition-failed' };
-    throw error;
-  }
+    },
+  );
+  if (!result || result.kind === 'failed') return { failure: 'recognition-failed' };
+  if (result.kind === 'recognition-unavailable' || result.kind === 'limit')
+    return { failure: 'recognition-unavailable' };
   if (result.kind === 'refused') return { failure: 'recognition-refused' };
   return {
     kind: 'recognised',
@@ -269,16 +308,15 @@ async function readDocument(
   file: { name: string; mediaType: string; bytes: Uint8Array },
   options: ReadOptions,
 ): Promise<FileReading> {
-  const recognizer: MediaRecognizer | undefined = options.recognise
-    ? { modelId: options.recognitionModel ?? 'chat', promptVersion: 'media-v1', recognize: options.recognise }
-    : undefined;
+  const recognizer = options.recognition?.recognizer;
   const input = { bytes: file.bytes, filename: file.name, mediaType: file.mediaType };
   let parsed;
   try {
     // A failed recognition keeps the document's own text (item 13).
     parsed = await readKnowledgeSegments(input, {
       failedRecognition: 'count',
-      ...(recognizer ? { recognizer } : {}),
+      images: true,
+      ...options.recognition,
       ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch (error) {
@@ -395,6 +433,36 @@ export async function readFile(
       return { kind: 'unreadable', reason: 'unsupported' };
     }
   }
+}
+
+/**
+ * A task's file reader under the `images` flag: the chat reader without image input, so images and scanned pages
+ * are recognised, labelled and cached exactly as in chat. Without `recognition` they read as unsupported.
+ */
+export function recognisingExtract(recognition: FileRecognition | undefined, maxImageBytes: number): FileExtract {
+  return async file => {
+    const reading = await readFile(file, { imageInput: false, maxImageBytes, recognition });
+    if (reading.kind === 'unreadable')
+      return {
+        failure: reading.reason === 'failed' || reading.reason === 'recognition-failed' ? 'failed' : 'unsupported',
+      };
+    const content = reading.segments.map(segment => {
+      const label =
+        segment.kind === 'recognised'
+          ? segment.label
+            ? `[${segment.label}]\n${recognisedLabel}`
+            : recognisedLabel
+          : segment.label
+            ? `[${segment.label}]`
+            : '';
+      const value = segment.kind === 'image' ? '' : segment.text;
+      return label ? `${label}\n${value}` : value;
+    });
+    return {
+      representation: file.mediaType.startsWith('text/') || textMediaTypes.has(file.mediaType) ? 'text' : 'extracted',
+      text: [...reading.notes, ...content].join('\n\n'),
+    };
+  };
 }
 
 /** Tokens a reading's segments cost the family, and the segments that fit in `budget`. */
@@ -531,7 +599,9 @@ class TurnFileContext {
           const name = segment.label && escapeContent(segment.label);
           const label =
             segment.kind === 'recognised'
-              ? `[${name ? `${name}, ` : ''}recognised text of an image]`
+              ? name
+                ? `[${name}]\n${recognisedLabel}`
+                : recognisedLabel
               : name
                 ? `[${name}]`
                 : '';
@@ -822,8 +892,7 @@ export async function readTurnFiles(input: {
   google: GoogleFileReader | undefined;
   attachments: AttachmentReader;
   family: ReadingFamily;
-  recognise: ((request: MediaRecognitionRequest) => Promise<MediaRecognition>) | undefined;
-  recognitionModel: string | undefined;
+  recognition: FileRecognition | undefined;
   authorize: Authorize;
   /** Aborts the reading; it ends with the signal's reason. */
   signal?: AbortSignal;
@@ -866,8 +935,7 @@ export async function readTurnFiles(input: {
         options: {
           imageInput: input.family.imageInput,
           maxImageBytes: input.family.maxImageBytes,
-          recognise: input.recognise,
-          recognitionModel: input.recognitionModel,
+          recognition: input.recognition,
           ...(signal ? { signal } : {}),
         },
       });
@@ -1036,17 +1104,12 @@ export async function readChatFile(input: {
     options: {
       imageInput: family.imageInput && input.imageInput,
       maxImageBytes: family.maxImageBytes,
-      recognise: recognitionModel
-        ? request =>
-            input.turnFiles.recognise(request, {
-              workspaceId: input.workspaceId,
-              conversationId: input.conversationId,
-              turnId: input.turnId,
-              requester: input.actor,
-              model: recognitionModel,
-            })
-        : undefined,
-      recognitionModel: recognitionModel ?? undefined,
+      recognition: turnRecognition(input.turnFiles, recognitionModel, {
+        workspaceId: input.workspaceId,
+        conversationId: input.conversationId,
+        turnId: input.turnId,
+        requester: input.actor,
+      }),
       selection: input.call,
     },
   });

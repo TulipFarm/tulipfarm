@@ -8,6 +8,7 @@ import { workspaceTableMigrations } from '../../workspaces/dist/table-migrations
 import { createFiles } from '@tulipfarm/files';
 import { createLocalKnowledge, KnowledgeAdminRequired } from '../dist/index.js';
 import { pdf } from './fixtures/parser-documents.mjs';
+import { png } from '../../memory-core/test/fixtures/parser-media.mjs';
 
 test('local knowledge reads images through the injected recognizer, caches them and honors the switch', async t => {
   const db = await fixture();
@@ -50,6 +51,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const scopes = [];
     const calls = [];
     let available = false;
+    let images = false;
     let answer = () => ({ kind: 'recognized', text: 'Plant tulips in October.', description: 'A planting calendar' });
     const recognizer = {
       modelId: 'vision-test',
@@ -64,19 +66,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       files,
       recognition: async scope => {
         scopes.push(scope);
-        return available ? { recognizer } : undefined;
+        return { ...(available ? { recognizer } : {}), ...(images ? { images } : {}) };
       },
       recognitionAvailable: async () => available,
     });
-    const upload = async (title, bytes) => {
+    const upload = async (title, bytes, name = `${title}.pdf`, mediaType = 'application/pdf') => {
       const fileId = randomUUID();
-      await files.upload(
-        one.id,
-        member.userId,
-        fileId,
-        { name: `${title}.pdf`, parentId: null, mediaType: 'application/pdf' },
-        bytes,
-      );
+      await files.upload(one.id, member.userId, fileId, { name, parentId: null, mediaType }, bytes);
       const command = {
         commandId: randomUUID(),
         documentId: randomUUID(),
@@ -177,6 +173,66 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(complete.gaps, undefined);
       assert.notEqual(complete.publicationId, gapped.publicationId);
       assert.ok(!(await api.due(one.id)).some(item => item.revisionId === failing.commandId));
+    });
+
+    await t.test('under the images flag a Files image is searchable by text only the image holds', async () => {
+      images = true;
+      answer = () => ({ kind: 'recognized', text: 'Greenhouse vents open at 28 degrees.', description: '' });
+      const photo = await upload('Greenhouse sign', await png(120, 80, '#4a6'), 'sign.png', 'image/png');
+      assert.equal(await process(photo.commandId), 'ready');
+      const hit = (await api.search(one.id, member.userId, { query: 'greenhouse vents degrees' })).hits.find(
+        item => item.citation.documentId === photo.documentId,
+      );
+      assert.ok(hit, 'the recognised text is indexed for Files search');
+      const profile = (
+        await db.platform.query(`SELECT profile FROM ${table('parse_profiles')} WHERE publication_id=$1`, [
+          (await api.get(one.id, member.userId, photo.documentId)).publicationId,
+        ])
+      ).rows[0].profile;
+      assert.equal(profile.engine, 'image');
+      assert.equal(profile.ocrModel, 'vision-test');
+      const outsider = (await api.search(one.id, admin.userId, { query: 'greenhouse vents degrees' })).hits;
+      assert.ok(
+        !outsider.some(item => item.citation.documentId === photo.documentId),
+        'recognised text never reaches someone who cannot open the file',
+      );
+    });
+
+    await t.test('the sweep deletes recognitions no file holds and keeps those a file still holds', async () => {
+      const held = await count('recognitions');
+      assert.ok(held >= 2);
+      const sources = (
+        await db.platform.query(`SELECT DISTINCT recognition->>'source' AS source FROM ${table('recognitions')}`)
+      ).rows.map(row => row.source);
+      const files = (await db.platform.query(`SELECT sha256 FROM ${table('tf_files')} WHERE kind='file'`)).rows.map(
+        row => row.sha256,
+      );
+      assert.ok(
+        sources.every(source => files.includes(source)),
+        'each recognition records the file it came from',
+      );
+      const orphan = 'f'.repeat(64);
+      const recent = 'e'.repeat(64);
+      await db.platform.query(
+        `INSERT INTO ${table('recognitions')} (key,recognition,created_at) VALUES
+          ($1,$2,clock_timestamp()-interval '2 days'),($3,$4,clock_timestamp())`,
+        [
+          `${orphan}:vision-test:media-v1`,
+          { kind: 'empty', source: orphan },
+          `${recent}:vision-test:media-v1`,
+          { kind: 'empty', source: recent },
+        ],
+      );
+      await db.platform.query(
+        `UPDATE ${table('recognitions')} SET created_at=clock_timestamp()-interval '2 days'
+        WHERE key NOT LIKE $1`,
+        [`${recent}:%`],
+      );
+      await api.due(one.id);
+      const kept = (await db.platform.query(`SELECT key FROM ${table('recognitions')}`)).rows.map(row => row.key);
+      assert.equal(kept.length, held + 1);
+      assert.ok(!kept.includes(`${orphan}:vision-test:media-v1`), 'an orphan past the grace period is deleted');
+      assert.ok(kept.includes(`${recent}:vision-test:media-v1`), 'a fresh orphan is kept for a read in progress');
     });
   } finally {
     await runtime?.close();

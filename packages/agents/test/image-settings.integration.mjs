@@ -44,7 +44,9 @@ process.env.MODEL_CATALOG = JSON.stringify({
 const { createWorkspaceRuntime, commonCompatibility } = await import('@tulipfarm/workspace-storage/runtime');
 const { provisionWorkspace } = await import('@tulipfarm/workspace-storage/provisioning');
 const { workspaceTableMigrations } = await import('@tulipfarm/workspaces/table-migrations');
-const { createImageSettingsService, resolveImageModels } = await import('../src/image-settings.ts');
+const { createImageSettingsService, recognitionAvailability, resolveImageModels, workspaceRecognitionFamily } =
+  await import('../src/image-settings.ts');
+const { loadModelCatalog } = await import('@tulipfarm/config');
 const { provisionTestPgvector } = await import('../../workspace-storage/test/integration/pgvector.fixture.mjs');
 const { loadPlatformBaseline, registerPlatformWorkspace } =
   await import('../../workspace-storage/test/integration/fixture.mjs');
@@ -227,6 +229,58 @@ test(
       await owner.query(`UPDATE "${names.schema}".tf_knowledge_settings SET media_recognition = false`);
       await enable('reader');
       assert.deepEqual((await resolve('plain')).recognition, { status: 'unavailable', reason: 'recognition-off' });
+
+      const noVisionRole = loadModelCatalog({
+        ...process.env,
+        MODEL_CATALOG: JSON.stringify({
+          version: 1,
+          models: [chat('plain', { default: true }), chat('reader', { capabilities: { imageInput: true } })],
+          imageModels: [image('main-image', { default: true })],
+        }),
+      });
+      const withFlag = async (value, operation) => {
+        const previous = process.env.FEATURE_FLAG_IMAGES;
+        process.env.FEATURE_FLAG_IMAGES = value;
+        try {
+          return await operation();
+        } finally {
+          if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
+          else process.env.FEATURE_FLAG_IMAGES = previous;
+        }
+      };
+      await withFlag('true', async () => {
+        assert.equal(
+          await workspaceRecognitionFamily(runtime, workspaceId),
+          null,
+          'with the recognition switch off tasks and Files read no images either',
+        );
+        await owner.query(`UPDATE "${names.schema}".tf_knowledge_settings SET media_recognition = true`);
+        assert.equal(
+          await workspaceRecognitionFamily(runtime, workspaceId),
+          'reader',
+          'under the images flag files are read by the workspace recognition model',
+        );
+        await disable('reader');
+        assert.equal(
+          await workspaceRecognitionFamily(runtime, workspaceId),
+          null,
+          'a disabled chosen model leaves nothing to read images',
+        );
+        await enable('reader');
+      });
+      await withFlag('false', async () => {
+        assert.equal(
+          await workspaceRecognitionFamily(runtime, workspaceId),
+          'paired',
+          'without the flag files keep the catalog document-vision model',
+        );
+        assert.equal(await recognitionAvailability(runtime)(workspaceId), true);
+        assert.equal(
+          await recognitionAvailability(runtime, noVisionRole)(workspaceId),
+          false,
+          'a catalog with no document-vision model reports recognition unavailable',
+        );
+      });
     } finally {
       await runtime?.close();
       await owner.end();

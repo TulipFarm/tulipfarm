@@ -1,4 +1,4 @@
-export { parseKnowledgeDocument, readKnowledgeSegments, renderRecognition } from './parser/recognize.js';
+export { parseKnowledgeDocument, readKnowledgeSegments, recognise, renderRecognition } from './parser/recognize.js';
 export type { KnowledgeParserSandbox, KnowledgeSegments } from './parser/recognize.js';
 export { parserRetry, retryTransientParse, transient as transientParseFailure } from './parser/process.js';
 export { KnowledgeParseError, KnowledgeParserBusy } from './parser/contracts.js';

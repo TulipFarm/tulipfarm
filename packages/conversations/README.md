@@ -71,12 +71,15 @@ With the workspace's `images` flag on, the executor reads a turn's files through
 - Text is read as text.
 - PDF and Office documents are read per page, slide or sheet with `@tulipfarm/memory-core`'s parser, and embedded images are recognised. Google Docs and Slides are exported as DOCX and PPTX so their images survive, and Sheets as XLSX.
 - An image is an image part for a family whose route declares `imageInput`, prepared with `@tulipfarm/media` to the family's `maxImageBytes`. For other families it is the text the workspace's image reader recognised.
+- Recognised text is labelled `[Recognised image]`. Recognition goes through memory-core's `recognise`, the same path Knowledge parsing uses: results are cached per workspace by image sha256, model and prompt version, so a later turn or a Knowledge parse of the same image does not pay again. A file gets at most 100 recognitions; the rest are named in a note. Each recognition reserves Knowledge credits first, and one that cannot is a gap for that image while the rest of the file is read. A turn runs at most 4 recognitions at once across all its reads.
 - A ZIP archive is a listing of entry names and sizes.
 - Audio, video, encrypted and unknown files are a named notice with the reason.
 
 Every file yields content, recognised text or a named notice. Files share a budget of half the family's `maxInputTokens`, with text at 4 characters per token and each image at the family's `imageInputTokens`. A file cut by the budget is labelled partial. Files after the budget runs out are named with their type and size. Both point the model at `files.read`, a chat-only read tool that takes `{ source, pages?, sheet?, range? }` and reads one file of this chat under the same access checks, with at most 20,000 tokens per call.
 
 The turn pins its family, the image reader and the image model with the catalog revision in `tf_conversation_turns.image_models` (common migration `0013_turn_image_models.sql`). The API pins them when it admits the turn. A turn admitted another way, such as from Slack, pins them the first time its files are read. With the flag off, the executor reads only referenced files as text, exactly as before.
+
+Tasks read their Files and Google Drive inputs with `readFileText` and `readGoogleFileText`. Under the flag, the worker passes `recognisingExtract`, which is `readFile` without image input. Task inputs are then recognised, labelled and cached as in chat, charged to the task owner and limited to 4 recognitions at once per task. The rendered text must still fit the task's 16,000-character input.
 
 The executor persists at most five attempts, including abandoned leases. A transient failure releases the lease, advances generation, and schedules exponential delays of 2, 4, 8, and 16 seconds. The fifth failure becomes failed-blocking. Explicit retry/cancel commands require the expected generation and stable command identity. Generic controls refuse waiting and reconciling turns. The deterministic responder has no external effects to reconcile. This retry policy must not be reused for unknown tool effects without domain reconciliation.
 

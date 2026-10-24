@@ -27,13 +27,13 @@ export type KnowledgeRecognitionScope = {
   signal?: AbortSignal;
 };
 /**
- * Host port that supplies the workspace's document-vision recognizer, charged to the scope's workspace.
- * Returns no recognizer when no model holds the role or the workspace has no credits. Knowledge checks the
- * workspace switch first and supplies the cache.
+ * Host port that supplies the workspace's recognizer, charged to the scope's workspace, and whether the workspace
+ * `images` flag's parse rules apply. Returns no recognizer when no model reads images for the workspace. Knowledge
+ * applies the workspace switch and supplies the cache.
  */
 export type KnowledgeRecognitionPort = (
   scope: KnowledgeRecognitionScope,
-) => Promise<{ recognizer?: MediaRecognizer } | undefined>;
+) => Promise<{ recognizer?: MediaRecognizer; images?: boolean } | undefined>;
 /** Host port: whether recognition could run for this workspace now, used to re-parse revisions with gaps. */
 export type KnowledgeRecognitionAvailability = (workspaceId: string) => Promise<boolean>;
 
@@ -47,8 +47,8 @@ export class KnowledgeAdminRequired extends Error {
 /** The first common storage version with the media tables (0011). Older workspaces keep the switch on and store no gaps. */
 export const mediaStorageVersion = 11;
 export const mediaLimitsForStorage = Object.freeze({
-  /** Recognitions older than this are pruned when new ones are written. */
-  cacheDays: 180,
+  /** Orphaned recognitions younger than this are kept, so a read in progress can still use them. */
+  orphanHours: 24,
   cacheBytes: 256 * 1024,
   pruneBatch: 100,
   /** Revisions re-queued per sweep once recognition becomes available. */
@@ -113,19 +113,15 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
           (await tx.client.query(`SELECT recognition FROM ${table(tx, 'recognitions')} WHERE key=$1`, [key])).rows[0],
         undefined,
       );
-      const parsed = mediaRecognitionSchema.safeParse(row?.recognition);
+      // The stored row also names the file it was read from, for the orphan sweep; readers never see it.
+      const { source: _, ...stored } = z.record(z.string(), z.unknown()).catch({}).parse(row?.recognition);
+      const parsed = mediaRecognitionSchema.safeParse(stored);
       return parsed.success ? parsed.data : undefined;
     },
-    async set(key, value) {
-      const recognition = mediaRecognitionSchema.parse(value);
-      const json = JSON.stringify(recognition);
+    async set(key, value, source) {
+      const json = JSON.stringify({ ...mediaRecognitionSchema.parse(value), source });
       if (Buffer.byteLength(key) > 1024 || Buffer.byteLength(json) > mediaLimitsForStorage.cacheBytes) return;
       await run(async tx => {
-        await tx.client.query(
-          `DELETE FROM ${table(tx, 'recognitions')} WHERE key IN (SELECT key FROM ${table(tx, 'recognitions')}
-            WHERE created_at<clock_timestamp()-make_interval(days=>$1) ORDER BY created_at LIMIT $2)`,
-          [mediaLimitsForStorage.cacheDays, mediaLimitsForStorage.pruneBatch],
-        );
         await tx.client.query(
           `INSERT INTO ${table(tx, 'recognitions')} (key,recognition) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`,
           [key, json],
@@ -135,7 +131,33 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
   };
 }
 
-/** Recognition options for one revision's parse: none while the workspace switch is off or no recognizer is available. */
+/**
+ * Deletes one batch of orphaned recognitions, oldest first along the created_at index: those whose source file (the
+ * file the media was read from, recorded when it was written) is no longer held by any file, live chat attachment or
+ * Knowledge revision here. A recognition younger than `orphanHours` is kept so a read in progress can still use it.
+ */
+export async function pruneRecognitions(tx: Tx) {
+  if (!(await mediaInstalled(tx))) return 0;
+  const held = (sha: string) => `EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_files')} f WHERE f.sha256=${sha})
+    OR EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_conversation_attachments')} a
+      JOIN ${qualified(tx.schema, 'tf_conversations')} c ON c.id=a.conversation_id
+      WHERE a.sha256=${sha} AND a.state<>'abandoned' AND c.deleted_at IS NULL)
+    OR EXISTS (SELECT 1 FROM ${table(tx, 'revisions')} r WHERE r.original->>'sha256'=${sha})`;
+  const result = await tx.client.query(
+    `DELETE FROM ${table(tx, 'recognitions')} WHERE key IN (SELECT key FROM ${table(tx, 'recognitions')} k
+      WHERE k.created_at<clock_timestamp()-make_interval(hours=>$1)
+        AND NOT (${held(`COALESCE(k.recognition->>'source',split_part(k.key,':',1))`)})
+      ORDER BY k.created_at LIMIT $2)`,
+    [mediaLimitsForStorage.orphanHours, mediaLimitsForStorage.pruneBatch],
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Recognition options for one revision's parse: no recognizer while the workspace switch is off or none is available.
+ * The `images` rules follow the host either way, so a standalone image without a recognizer still reads as unread
+ * media rather than an unsupported file.
+ */
 export async function recognitionOptions(
   runtime: Runtime,
   port: KnowledgeRecognitionPort | undefined,
@@ -144,10 +166,10 @@ export async function recognitionOptions(
   const signal = scope.signal ? { signal: scope.signal } : {};
   if (!port) return signal;
   const enabled = await runtime.transaction(scope.workspaceId, commonCompatibility, tx => mediaRecognitionEnabled(tx));
-  if (!enabled) return signal;
-  const recognizer = (await port(scope))?.recognizer;
-  if (!recognizer) return signal;
-  return { recognizer, cache: createRecognitionCache(runtime, scope.workspaceId), ...signal };
+  const offered = await port(scope);
+  const base = { ...signal, ...(offered?.images ? { images: true } : {}) };
+  if (!enabled || !offered?.recognizer) return base;
+  return { ...base, recognizer: offered.recognizer, cache: createRecognitionCache(runtime, scope.workspaceId) };
 }
 
 /**

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import type { Format } from '@firecrawl/anydoc/index.js';
 import { knowledgeLimits } from '../document-contracts.js';
 import { checkArchive } from './archive.js';
-import { normalizeMarkdown } from './chunks.js';
+import { normalization, normalizeMarkdown } from './chunks.js';
 import { MediaCollector, gapLabels } from './collector.js';
 import { KnowledgeParseError, parseFailure } from './contracts.js';
 import type { KnowledgeParseInput } from './contracts.js';
@@ -87,7 +87,6 @@ const nativeMediaTypes = new Set([
   'application/vnd.oasis.opendocument.presentation',
 ]);
 
-const normalization = 'nfc-lf-v1-cl100k_base-800-100';
 const anydocVersion = '0.2.4';
 
 type Anydoc = typeof import('@firecrawl/anydoc/index.js');
