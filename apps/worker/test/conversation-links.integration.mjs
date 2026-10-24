@@ -156,7 +156,8 @@ async function setup(t, { answer, images = true } = {}) {
     }
     if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
     requests.push(body);
-    return Response.json(answer?.(body, requests) ?? anthropicText('Read it.'));
+    const reply = answer?.(body, requests) ?? anthropicText('Read it.');
+    return reply instanceof Response ? reply : Response.json(reply);
   });
   const attachmentBytes = memoryBytes();
   const files = createFiles(f.runtime, memoryBytes());
@@ -173,8 +174,11 @@ async function setup(t, { answer, images = true } = {}) {
     undefined,
     files,
   );
-  /** Sends one text message and runs its reply exactly as the worker does, returning the chat model requests. */
-  const say = async (chatId, text, familyId = 'claude-sonnet') => {
+  /**
+   * Sends one text message and runs its reply exactly as the worker does, returning the chat model requests. Each
+   * entry of `attempts` is the status one attempt must end with, at generations 0, 1 and so on.
+   */
+  const say = async (chatId, text, familyId = 'claude-sonnet', attempts = ['completed']) => {
     const sent = await f.store.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
@@ -182,13 +186,19 @@ async function setup(t, { answer, images = true } = {}) {
       parts: [{ kind: 'text', text }],
     });
     const from = requests.length;
-    const status = await activities.processConversationReply({
-      workspaceId: w.id,
-      conversationId: chatId,
-      turnId: sent.turnId,
-      generation: 0,
-    });
-    assert.equal(status, 'completed');
+    for (const [generation, expected] of attempts.entries()) {
+      // A retry is due at once here instead of after its backoff.
+      await f.db.platform.query(`UPDATE ${f.table('tf_conversation_turns')} SET retry_at=NULL WHERE id=$1`, [
+        sent.turnId,
+      ]);
+      const status = await activities.processConversationReply({
+        workspaceId: w.id,
+        conversationId: chatId,
+        turnId: sent.turnId,
+        generation,
+      });
+      assert.equal(status, expected);
+    }
     return requests.slice(from);
   };
   const linkReads = async chatId =>
@@ -427,4 +437,23 @@ test('with the images flag off links are not fetched and web.fetch only uses Fir
   }
   assert.match(JSON.stringify(toolResults(requests[1])), /Markdown of https:\/\/files.example.com\/chart.png/);
   assert.deepEqual(await f.linkReads(chatId), []);
+});
+
+test('a retried turn reads each kept link once and fetches nothing again', async t => {
+  const chart = await png(8, 8, '#2a7');
+  const web = await localWeb(t, { 'files.example.com/chart.png': send(200, chart, { 'content-type': 'image/png' }) });
+  const f = await setup(t, {
+    answer: (_body, requests) =>
+      requests.length === 1 ? new Response('overloaded', { status: 529 }) : anthropicText('Read it.'),
+  });
+  const chatId = await f.chat();
+  const requests = await f.say(chatId, 'See https://files.example.com/chart.png', 'claude-sonnet', [
+    'retry',
+    'completed',
+  ]);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(web.requests, ['files.example.com/chart.png']);
+  const retried = requestText(requests[1]);
+  assert.equal(retried.match(/source-url=/g).length, 1, 'the kept link is one file block');
+  assert.equal(imageBlocks(requests[1]).length, 1);
 });
