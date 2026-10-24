@@ -97,12 +97,16 @@ function linkFilename(url: string) {
   } catch {
     /* A malformed escape keeps the raw segment. */
   }
-  const name = [...segment]
+  const safe = [...segment]
     .filter(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127 && char !== '/' && char !== '\\')
     .join('')
     .trim()
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu, '')
-    .slice(0, 200);
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu, '');
+  let name = '';
+  for (const char of safe) {
+    if (name.length + char.length > 200) break;
+    name += char;
+  }
   return name || 'linked-file';
 }
 
