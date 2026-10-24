@@ -338,6 +338,11 @@ export const modelFailureEndsTurn = (failure: string) => {
   return parsed.success && terminalModelFailures.has(parsed.data);
 };
 
+// Renewed well inside the 60 second lease, so one slow renewal does not let it lapse.
+const filesLeaseRenewMs = 20_000;
+// Reading a turn's files stops here; files not yet read are named for files.read instead of holding the reply.
+const turnFilesDeadlineMs = 120_000;
+
 export async function renewConversationReplyLease(
   tx: AuthorizationTransaction,
   fence: ReplyFence,
@@ -474,6 +479,37 @@ export function createConversationExecutor(
         return operation(bindFileSources(tx));
       }),
     );
+  }
+
+  /**
+   * Keeps the turn's lease while `work` runs, since reading files can outlast one lease. Losing the lease aborts `work`
+   * through its signal, so a stale attempt stops recognising, and billing, the rest of its files.
+   */
+  async function whileLeased<T>(fence: ReplyFence, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const lost = new AbortController();
+    let renewing = false;
+    const timer = setInterval(() => {
+      if (renewing || lost.signal.aborted) return;
+      renewing = true;
+      transaction(fence.workspaceId, tx => renewConversationReplyLease(tx, fence))
+        .catch(error => {
+          // Any other failure is retried on the next tick; the lease outlasts two of them.
+          if (error instanceof AccessDenied) lost.abort(new Error('conversation-turn-stale'));
+        })
+        .finally(() => {
+          renewing = false;
+        });
+    }, filesLeaseRenewMs);
+    try {
+      const result = await work(lost.signal);
+      lost.signal.throwIfAborted();
+      return result;
+    } catch (error) {
+      if (lost.signal.aborted) throw lost.signal.reason;
+      throw error;
+    } finally {
+      clearInterval(timer);
+    }
   }
 
   const settlements = new Map<string, ReplySettlement>();
@@ -1625,28 +1661,32 @@ export function createConversationExecutor(
         const pinned = source.imageModels;
         const recognitionModel = pinned.recognitionFamilyId;
         const read = await staged('files', () =>
-          readTurnFiles({
-            workspaceId: fence.workspaceId,
-            conversationId: fence.conversationId,
-            actor: source.requester,
-            parts: source.turnFileParts,
-            files,
-            google,
-            attachments: images.attachments,
-            family: images.family(pinned.familyId),
-            recognise: recognitionModel
-              ? request =>
-                  images.recognise(request, {
-                    workspaceId: fence.workspaceId,
-                    conversationId: fence.conversationId,
-                    turnId: fence.turnId,
-                    requester: source.requester,
-                    model: recognitionModel,
-                  })
-              : undefined,
-            recognitionModel: recognitionModel ?? undefined,
-            authorize,
-          }),
+          whileLeased(fence, signal =>
+            readTurnFiles({
+              signal,
+              deadline: AbortSignal.timeout(turnFilesDeadlineMs),
+              workspaceId: fence.workspaceId,
+              conversationId: fence.conversationId,
+              actor: source.requester,
+              parts: source.turnFileParts,
+              files,
+              google,
+              attachments: images.attachments,
+              family: images.family(pinned.familyId),
+              recognise: recognitionModel
+                ? request =>
+                    images.recognise(request, {
+                      workspaceId: fence.workspaceId,
+                      conversationId: fence.conversationId,
+                      turnId: fence.turnId,
+                      requester: source.requester,
+                      model: recognitionModel,
+                    })
+                : undefined,
+              recognitionModel: recognitionModel ?? undefined,
+              authorize,
+            }),
+          ),
         );
         fileSources.push(...read.sources);
         fileContext = read.context;

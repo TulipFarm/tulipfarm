@@ -57,7 +57,7 @@ function memoryBytes() {
   };
 }
 
-async function setup(t, { answer } = {}) {
+async function setup(t, { answer, recognition } = {}) {
   const f = await conversationFixture();
   const saved = Object.fromEntries(
     ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES'].map(key => [
@@ -82,6 +82,7 @@ async function setup(t, { answer } = {}) {
     if (isTitleRequest(body)) return Response.json(anthropicText('Files'));
     if (isRecognition(body)) {
       recognitions.push(body);
+      await recognition?.(options.signal);
       return Response.json(
         anthropicText(JSON.stringify({ status: 'ok', text: recognisedText, description: 'A receipt' })),
       );
@@ -504,4 +505,85 @@ test('files.read gives a paused image family’s text-only replacement the image
   assert.ok(f.requests.every(body => body.model.includes('haiku')));
   assert.equal(f.requests.flatMap(imageBlocks).length, 0);
   assert.match(JSON.stringify(toolResults(f.requests[1])), new RegExp(recognisedText));
+});
+
+/** Sets the turn's lease to end `seconds` from now, as if the reply had last renewed it long ago. */
+const leaseEndsIn = (f, turnId, seconds) =>
+  f.db.platform.query(
+    `UPDATE ${f.table('tf_conversation_turns')} SET lease_until=clock_timestamp()+$2*interval '1 second' WHERE id=$1`,
+    [turnId, seconds],
+  );
+const leaseSeconds = async (f, turnId) =>
+  (
+    await f.db.platform.query(
+      `SELECT extract(epoch FROM lease_until-clock_timestamp())::float AS left FROM ${f.table('tf_conversation_turns')} WHERE id=$1`,
+      [turnId],
+    )
+  ).rows[0].left;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('recognition that outlasts the turn lease keeps the lease and the turn completes', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let turnId;
+  const f = await setup(t, {
+    recognition: async () => {
+      await leaseEndsIn(f, turnId, 1);
+      t.mock.timers.tick(20_000);
+      for (let waited = 0; waited < 3_000 && (await leaseSeconds(f, turnId)) < 30; waited += 50) await sleep(50);
+      // Past the lease the turn had when recognition started.
+      await sleep(1_200);
+    },
+  });
+  const chatId = await f.chat();
+  const id = await f.attach(chatId, 'shot.png', 'image/png', await png(20, 10, '#d22'));
+  const sent = await f.store.send(f.w.id, f.w.userId, chatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    model: 'claude-haiku',
+    parts: [
+      { kind: 'attachment', attachmentId: id },
+      { kind: 'text', text: 'What is this?' },
+    ],
+  });
+  turnId = sent.turnId;
+  const status = await f
+    .activities()
+    .processConversationReply({ workspaceId: f.w.id, conversationId: chatId, turnId, generation: 0 });
+  assert.equal(status, 'completed');
+  assert.equal(f.recognitions.length, 1);
+  assert.match(requestText(f.requests[0]), new RegExp(recognisedText));
+});
+
+test('a turn that loses its lease during recognition stops recognising the rest of the file', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let turnId;
+  let aborted = false;
+  const f = await setup(t, {
+    recognition: async signal => {
+      await leaseEndsIn(f, turnId, -1);
+      t.mock.timers.tick(20_000);
+      for (let waited = 0; waited < 3_000 && !signal?.aborted; waited += 50) await sleep(50);
+      aborted = Boolean(signal?.aborted);
+      signal?.throwIfAborted();
+    },
+  });
+  const chatId = await f.chat();
+  const pdf = await f.attach(chatId, 'scan.pdf', 'application/pdf', await mediaPdf(['image', 'image', 'image']));
+  const sent = await f.store.send(f.w.id, f.w.userId, chatId, {
+    messageId: randomUUID(),
+    commandId: randomUUID(),
+    model: 'claude-haiku',
+    parts: [
+      { kind: 'attachment', attachmentId: pdf },
+      { kind: 'text', text: 'Summarize the scan' },
+    ],
+  });
+  turnId = sent.turnId;
+  await f
+    .activities()
+    .processConversationReply({ workspaceId: f.w.id, conversationId: chatId, turnId, generation: 0 })
+    .catch(() => {});
+  assert.ok(aborted, 'losing the lease aborts the recognition in flight');
+  assert.equal(f.recognitions.length, 1, 'no later page is recognised, and billed, after the lease is lost');
+  assert.equal(f.requests.length, 0);
 });

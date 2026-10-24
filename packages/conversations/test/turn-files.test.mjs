@@ -197,3 +197,41 @@ test('an attachment storage error is a named notice, not a failed turn', async (
     `<chat-attachment attachment-id="${attachmentId}" name="stock.xlsx" status="unavailable">This attachment is unavailable: access changed or its stored content failed verification. Its contents were not read. Do not describe or guess them.</chat-attachment>`,
   );
 });
+
+test('files the turn deadline cuts off are named with a files.read pointer, not shown half read', async () => {
+  const deadline = new AbortController();
+  const second = '00000000-0000-4000-8000-000000000003';
+  const scan = await mediaPdf(['image', 'image']);
+  const read = await readTurnFiles({
+    workspaceId: 'workspace-1',
+    conversationId: 'conversation-1',
+    actor,
+    parts: [
+      { kind: 'attachment', messageId, attachmentId, filename: 'scan.pdf' },
+      { kind: 'attachment', messageId, attachmentId: second, filename: 'notes.txt' },
+    ],
+    files: undefined,
+    google: undefined,
+    attachments: {
+      download: async (_workspace, _user, _chat, id) =>
+        id === attachmentId
+          ? { filename: 'scan.pdf', mediaType: 'application/pdf', size: scan.byteLength, bytes: scan }
+          : { filename: 'notes.txt', mediaType: 'text/plain', size: 5, bytes: Buffer.from('notes') },
+    },
+    family: { ...textFamily, maxInputTokens: 100_000, imageInputTokens: 1000 },
+    recognise: async ({ signal }) => {
+      deadline.abort(new DOMException('The files deadline passed', 'TimeoutError'));
+      signal?.throwIfAborted();
+      return recognised();
+    },
+    recognitionModel: 'vision',
+    authorize: check => check({}),
+    deadline: deadline.signal,
+  });
+  const pointer = id =>
+    `status="not-included">Reading this turn's files ran out of time before this file was read. Call files.read with source "${id}"`;
+  const block = read.context(messageId);
+  assert.ok(block.includes(`attachment-id="${attachmentId}" name="scan.pdf" ${pointer(attachmentId)}`), block);
+  assert.ok(block.includes(`attachment-id="${second}" name="notes.txt" ${pointer(second)}`), block);
+  assert.equal(read.sources.length, 0);
+});

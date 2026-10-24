@@ -463,6 +463,7 @@ type Entry = {
     | { kind: 'reading'; reading: FileReading }
     | { kind: 'unavailable'; cause: 'busy' | 'access' | GoogleUnavailable }
     | { kind: 'not-included' }
+    | { kind: 'out-of-time' }
     | { kind: 'unloaded' };
 };
 
@@ -508,6 +509,8 @@ class TurnFileContext {
             ? attachmentNotices[local]
             : unavailableNotices.tulipfarm[local];
       body = `<${tag} ${head(entry)} status="${cause === 'busy' ? 'temporarily-unavailable' : 'unavailable'}">${notice}</${tag}>`;
+    } else if (entry.result.kind === 'out-of-time') {
+      body = `<${tag} ${head(entry)} status="not-included">Reading this turn's files ran out of time before this file was read. ${readPointer(entry.id)}</${tag}>`;
     } else if (entry.result.kind === 'unloaded') {
       body = `<${tag} ${head(entry)} status="unloaded">This file was unloaded from context to save space and was not read in this turn. ${readPointer(entry.id)}</${tag}>`;
     } else if (entry.result.kind === 'not-included') {
@@ -822,8 +825,15 @@ export async function readTurnFiles(input: {
   recognise: ((request: MediaRecognitionRequest) => Promise<MediaRecognition>) | undefined;
   recognitionModel: string | undefined;
   authorize: Authorize;
+  /** Aborts the reading; it ends with the signal's reason. */
+  signal?: AbortSignal;
+  /** Ends the reading early: files not read by then are named with a `files.read` pointer. */
+  deadline?: AbortSignal;
 }) {
   const context = new TurnFileContext();
+  const stops = [input.signal, input.deadline].filter(signal => signal !== undefined);
+  const signal = stops.length ? AbortSignal.any(stops) : undefined;
+  const outOfTime = () => Boolean(input.deadline?.aborted) && !input.signal?.aborted;
   const sources: FileSource[] = [];
   const seen = new Set<string>();
   let remaining = Math.floor(input.family.maxInputTokens / 2);
@@ -833,26 +843,44 @@ export async function readTurnFiles(input: {
     if (seen.has(key)) continue;
     seen.add(key);
     const base = partEntry(part);
+    input.signal?.throwIfAborted();
+    if (outOfTime()) {
+      context.add({ ...base, result: { kind: 'out-of-time' } });
+      continue;
+    }
     if (remaining <= 0) {
       context.add(await notIncluded(base, part, input));
       continue;
     }
-    const read = await readTurnFile({
-      workspaceId: input.workspaceId,
-      conversationId: input.conversationId,
-      actor: input.actor,
-      part,
-      files: input.files,
-      google: input.google,
-      attachments: input.attachments,
-      authorize: input.authorize,
-      options: {
-        imageInput: input.family.imageInput,
-        maxImageBytes: input.family.maxImageBytes,
-        recognise: input.recognise,
-        recognitionModel: input.recognitionModel,
-      },
-    });
+    let read;
+    try {
+      read = await readTurnFile({
+        workspaceId: input.workspaceId,
+        conversationId: input.conversationId,
+        actor: input.actor,
+        part,
+        files: input.files,
+        google: input.google,
+        attachments: input.attachments,
+        authorize: input.authorize,
+        options: {
+          imageInput: input.family.imageInput,
+          maxImageBytes: input.family.maxImageBytes,
+          recognise: input.recognise,
+          recognitionModel: input.recognitionModel,
+          ...(signal ? { signal } : {}),
+        },
+      });
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (!outOfTime()) throw error;
+    }
+    input.signal?.throwIfAborted();
+    // A file the deadline cut short is named, not shown with whatever its interrupted reading kept.
+    if (!read || outOfTime()) {
+      context.add({ ...base, result: { kind: 'out-of-time' } });
+      continue;
+    }
     if (read.source) sources.push(read.source);
     const entry: Entry = {
       ...base,
