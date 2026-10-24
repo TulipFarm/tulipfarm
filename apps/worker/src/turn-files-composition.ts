@@ -1,5 +1,6 @@
 import { routeCapabilities, inferenceRouteSchema } from '@tulipfarm/agents/inference';
 import { pinTurnImageModels } from '@tulipfarm/agents/image-settings';
+import { fetchPublicFile } from '@tulipfarm/agents/web-fetch';
 import { defaultImageInputLimits, modelImageLimits } from '@tulipfarm/config';
 import { createAttachments, type AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
@@ -44,19 +45,12 @@ function turnLimited(turn: string, recognizer: MediaRecognizer): MediaRecognizer
 }
 
 /**
- * How chat reads attached and referenced files while the `images` flag is on. Recognition reuses the Knowledge media
- * recognizer and the workspace recognition cache on the turn's pinned recognition model, and is charged as the
- * requester's Knowledge credits.
+ * How chat reads attached, referenced and linked files while the `images` flag is on. Recognition reuses the Knowledge
+ * media recognizer and the workspace recognition cache on the turn's pinned recognition model, and is charged as the
+ * requester's Knowledge credits. Files shared as links are fetched once and kept as attachments of their message.
  */
-export function chatTurnFiles(
-  runtime: ConversationRuntime,
-  objects: { attachments: Pick<AttachmentBytes, 'read'> },
-): TurnFiles {
-  const attachments = createAttachments(runtime, {
-    read: (...args) => objects.attachments.read(...args),
-    putIfAbsent: () => Promise.reject(new Error('attachments-read-only')),
-    remove: () => Promise.reject(new Error('attachments-read-only')),
-  });
+export function chatTurnFiles(runtime: ConversationRuntime, objects: { attachments: AttachmentBytes }): TurnFiles {
+  const attachments = createAttachments(runtime, objects.attachments);
   return {
     enabled: workspaceId => isFeatureEnabled('images', null, { id: workspaceId }),
     family(familyId) {
@@ -88,6 +82,7 @@ export function chatTurnFiles(
     },
     attachments,
     pin: (tx, familyId) => pinTurnImageModels(tx, familyId),
+    links: { fetch: fetchPublicFile, keep: attachments.keepLink },
   };
 }
 

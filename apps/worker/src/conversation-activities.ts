@@ -13,6 +13,7 @@ import {
   type ToolInferenceContext,
 } from '@tulipfarm/agents/inference';
 import { chatTurnFiles } from './turn-files-composition.ts';
+import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { respondToConversation } from './conversation-responder.ts';
 import {
   conversationPlanning,
@@ -425,7 +426,7 @@ export function meteredReply(
 export function createConversationActivities(
   storage: ConversationRuntime,
   conversationReply?: ConversationReply,
-  objects?: Pick<TableImportOptions, 'attachments' | 'snapshots'>,
+  objects?: Pick<TableImportOptions, 'snapshots'> & { attachments: AttachmentBytes },
   mcp: McpExecutionFactory | undefined = workspaceMcpFromEnvironment(),
   files?: FileContent & FileOutputStore,
   knowledge?: KnowledgeToolsFactory,

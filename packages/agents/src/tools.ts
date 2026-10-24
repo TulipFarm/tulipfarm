@@ -57,7 +57,7 @@ import { humanReadableTableFiles, requireTableSources } from './table-sources.ts
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
 import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { FileContent, FileSource, GoogleFileReader } from '@tulipfarm/conversations/file-references';
-import { readChatFile, type TurnFiles } from '@tulipfarm/conversations/turn-files';
+import { readChatFile, readFetchedFile, type TurnFiles } from '@tulipfarm/conversations/turn-files';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
@@ -1203,6 +1203,53 @@ export function createChatTools(
     });
     return output;
   }
+  /**
+   * `web.fetch` while the workspace reads images: a link that serves a file is read like an attached file and not
+   * kept; a page, a failure or the flag off falls through to the Markdown fetch unchanged.
+   */
+  async function fetchFileTool(
+    context: Parameters<typeof invoke>[0],
+    call: Extract<FrameworkCall, { tool: 'web.fetch' }>,
+  ) {
+    const origin = context.origin;
+    const links = chatFiles?.turnFiles.links;
+    if (!origin || !chatFiles || !links || telemetryRuntime !== 'chat') return null;
+    if (!(await chatFiles.turnFiles.enabled(context.workspaceId))) return null;
+    const probe = await links.fetch(call.url, context.signal ?? new AbortController().signal);
+    if (probe.kind !== 'file') return null;
+    const read = await readFetchedFile({
+      workspaceId: context.workspaceId,
+      conversationId: origin.conversationId,
+      turnId: origin.turnId,
+      actor: context.actor,
+      file: { url: probe.url, name: probe.filename, mediaType: probe.mediaType, bytes: probe.bytes },
+      transaction: operation => withHuman(runtime, context.workspaceId, context.actor, 'read', operation),
+      turnFiles: chatFiles.turnFiles,
+      imageInput: chatFiles.imageInput,
+      signal: context.signal,
+    });
+    // A public-web result keeps the chat's web receipt; the file block rides beside it.
+    const result = {
+      kind: 'public-web' as const,
+      status: read.outcome === 'read' ? 'success' : read.outcome === 'partial' ? 'partial' : 'failed',
+      sources: [{ url: call.url, title: probe.filename.slice(0, 500), description: '', publishedAt: null }],
+      pages: [],
+      window: 'any' as const,
+      widened: false,
+      retrievedAt: new Date().toISOString(),
+      untrusted: true as const,
+      instruction:
+        read.outcome === 'partial'
+          ? 'This link served a file, read in the file block. Only part of it is included; say so and do not guess the rest.'
+          : 'This link served a file, read in the file block.',
+      file: read.file,
+    };
+    return {
+      result,
+      sources: [{ kind: 'public-web' as const, url: call.url }],
+      ...(read.images ? { images: read.images } : {}),
+    };
+  }
   async function readEarlierMessage(
     context: Parameters<typeof invoke>[0],
     call: Extract<FrameworkCall, { tool: 'conversation.messages.read' }>,
@@ -1434,6 +1481,10 @@ export function createChatTools(
       return invokeKnowledge(context, call);
     if (call.tool === 'conversation.messages.read') return readEarlierMessage(context, call);
     if (call.tool === 'files.read') return readFileTool(context, call);
+    if (call.tool === 'web.fetch') {
+      const fetched = await fetchFileTool(context, call);
+      if (fetched) return fetched;
+    }
     if (call.tool === 'slack.resolve') {
       if (!context.origin) throw new AccessDenied();
       const result = await invoke(context, call);
