@@ -1272,7 +1272,8 @@ const taskPointer = () => 'A task reads only this much of a file; do not describ
 
 /**
  * A task step's files and linked files as one user message in chat's labelled untrusted blocks, in order, within half
- * of the family's input window. A file cut to fit is labelled partial; `omitted` are the files that got no room.
+ * of the family's input window. A file cut to fit is labelled partial; `omitted` are the files that got no room, each
+ * kept as a block saying it was not read.
  */
 export function taskFileContent(
   reads: readonly TaskFileRead[],
@@ -1298,6 +1299,8 @@ export function taskFileContent(
     }
     const fitted = fit(reading.segments, budget, family);
     if (!fitted.kept.length && reading.segments.length) {
+      // Named as not read, so a link notice that points at this file's block finds it.
+      context.add({ ...entry, result: { kind: 'not-included' } });
       omitted.push({ origin, id, name, mediaType, size, reading });
       continue;
     }
