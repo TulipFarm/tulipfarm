@@ -504,17 +504,20 @@ class TurnFileContext {
       body = `<${tag} ${head(entry)} status="unreadable" reason="${reason}">${failures[reason]} Say so plainly and do not describe or guess its contents.</${tag}>`;
     } else {
       const shown = kept ?? { ...entry.result.reading };
-      const labels = [...new Set(shown.segments.flatMap(segment => (segment.label ? [segment.label] : [])))];
+      const labels = [
+        ...new Set(shown.segments.flatMap(segment => (segment.label ? [escapeContent(segment.label)] : []))),
+      ];
       const partial = shown.complete
         ? ''
         : ` Only part of this file is included${labels.length ? `: ${labels.join(', ')}` : ''}. ${readPointer(entry.id)}`;
       const content = shown.segments
         .map(segment => {
+          const name = segment.label && escapeContent(segment.label);
           const label =
             segment.kind === 'recognised'
-              ? `[${segment.label ? `${segment.label}, ` : ''}recognised text of an image]`
-              : segment.label
-                ? `[${segment.label}]`
+              ? `[${name ? `${name}, ` : ''}recognised text of an image]`
+              : name
+                ? `[${name}]`
                 : '';
           const value = segment.kind === 'image' ? this.marker(segment.image) : escapeContent(segment.text);
           return label ? `${label}\n${value}` : value;
