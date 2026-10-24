@@ -259,18 +259,27 @@ export function createPlanComposition(options: {
           sources = mergeSources([...sources, ...replay.sources]);
           return replay.result;
         }
-        // Image requests stop once the attempt loses its lease or its plan stops, as a turn's do on Stop.
+        // Image requests outlast a model step's lease, so each beat renews it; they stop once the attempt loses it or its plan stops.
         const live = new AbortController();
+        let beating = false;
         const heartbeat =
           call.tool === 'images.generate'
             ? setInterval(() => {
+                if (beating || live.signal.aborted) return;
+                beating = true;
                 guarded
-                  .transaction(assignment.workspaceId, commonCompatibility, async () => {})
+                  .transaction(assignment.workspaceId, commonCompatibility, tx =>
+                    plans.renewSpecialistLease(tx, assignment.attemptId),
+                  )
                   .catch(error => {
                     if (error instanceof AccessDenied) live.abort(error);
+                  })
+                  .finally(() => {
+                    beating = false;
                   });
               }, imageHeartbeatMs)
             : undefined;
+        heartbeat?.unref?.();
         const output = await tools
           .invokeWithSources(
             {
