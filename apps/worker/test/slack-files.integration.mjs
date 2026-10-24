@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { Client, Connection } from '@temporalio/client';
+import { NativeConnection, Worker } from '@temporalio/worker';
 import { shippedModelCatalogPath } from '@tulipfarm/config';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
@@ -411,6 +417,84 @@ test('an overlapping run for the same file DM never leaves an attachment whose b
   );
   assert.equal(f.bytes.objects.size, 2, 'the failed run left no bytes behind');
 });
+
+/** A local Temporal dev server running the compiled workflows, with `activities` on its own task queue. */
+async function temporal(t, activities) {
+  const reservation = createServer().listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const address = `127.0.0.1:${reservation.address().port}`;
+  await new Promise(resolve => reservation.close(resolve));
+  const [ip, port] = address.split(':');
+  const server = spawn(
+    process.env.TEST_TEMPORAL_CLI ?? 'temporal',
+    ['server', 'start-dev', '--ip', ip, '--port', port, '--headless', '--log-level', 'error'],
+    { stdio: 'ignore' },
+  );
+  t.after(async () => {
+    server.kill('SIGTERM');
+    await once(server, 'exit');
+  });
+  let clientConnection;
+  for (let i = 0; i < 100 && !clientConnection; i++)
+    clientConnection = await Connection.connect({ address, connectTimeout: '1 second' }).catch(async () => {
+      assert.equal(server.exitCode, null, 'the Temporal dev server is running');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+  assert.ok(clientConnection, 'the Temporal dev server accepts connections');
+  const connection = await NativeConnection.connect({ address });
+  const taskQueue = `slack-files-${randomUUID()}`;
+  const worker = await Worker.create({
+    connection,
+    taskQueue,
+    workflowsPath: fileURLToPath(new URL('../dist/workflows.js', import.meta.url)),
+    activities,
+  });
+  const running = worker.run();
+  t.after(async () => {
+    worker.shutdown();
+    await running;
+    await connection.close();
+    await clientConnection.close();
+  });
+  return { client: new Client({ connection: clientConnection }), taskQueue };
+}
+
+test(
+  'a file DM whose bytes can never be stored is not downloaded again on every dispatch pass',
+  { timeout: 120_000 },
+  async t => {
+    const f = await setup(t);
+    f.served.set(fileUrl, await png(32, 24));
+    f.bytes.failing = true;
+    const { client, taskQueue } = await temporal(t, { admitSlackDirectMessageFiles: f.dm.admitFiles });
+    const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
+    /** One dispatch pass as `slack-composition.ts` runs it, starting each file DM's own workflow. */
+    async function pass() {
+      const handles = [];
+      for (const work of (await f.dm.admitPending(f.workspace.id)).files)
+        handles.push(
+          await client.workflow.start('slackDirectMessageFiles', {
+            workflowId: `slack-dm-files-${work.workspaceId}-${work.eventId}`,
+            taskQueue,
+            args: [work],
+            workflowIdConflictPolicy: 'USE_EXISTING',
+            workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+          }),
+        );
+      return handles;
+    }
+    const [handle] = await pass();
+    for (let tick = 0; tick < 4; tick++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await pass();
+    }
+    assert.equal(f.downloads.length, 1, 'five passes over eight seconds download the file once');
+    f.bytes.failing = false;
+    assert.equal(await client.workflow.getHandle(handle.workflowId).result(), true, 'a later attempt admits it');
+    assert.equal(await f.admitted(eventId), true);
+    assert.equal(f.downloads.length, 2);
+  },
+);
 
 test('a file the workspace has no room for leaves no stored bytes behind', async t => {
   const f = await setup(t);
