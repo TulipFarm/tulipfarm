@@ -1070,9 +1070,14 @@ function textTurn(turn: ChatTurn): ChatTextTurn {
       .join('\n'),
   };
 }
-/** A JSON replacer that sizes image bytes instead of spelling them out index by index. */
+/**
+ * A JSON replacer that writes an image part's data as its size. It replaces the part, not the data, because
+ * `JSON.stringify` turns a `Buffer` into a number array through `toJSON` before a replacer sees it.
+ */
 const imageDataSize = (_key: string, value: unknown) =>
-  value instanceof Uint8Array ? `[${value.byteLength} bytes]` : value;
+  typeof value === 'object' && value !== null && 'type' in value && value.type === 'image' && 'mediaType' in value
+    ? { ...value, data: `[${imageByteLength(value as ChatImagePart)} bytes]` }
+    : value;
 const turnImages = (turns: Iterable<ChatTurn>) =>
   [...turns].flatMap(turn => ('content' in turn ? turn.content.filter(part => part.type === 'image') : []));
 const loopTurns = (items: readonly LoopItem[]) => items.flatMap(item => (item.kind === 'turn' ? [item.turn] : []));
