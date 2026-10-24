@@ -291,6 +291,7 @@ export function meteredReply(
               files: { ...outputs, read: outputs.read },
               attachments: chatFiles.turnFiles.attachments,
               autonomous: !requester,
+              ledger: runtime,
               choose: async (tx, turnId) =>
                 pinnedImageChoice(tx, await pinnedImageModels(tx, turnId, model, chatFiles.turnFiles)),
             }

@@ -195,6 +195,8 @@ export type ConversationToolContext = {
     generation?: number;
     epoch?: number;
   };
+  /** Aborted once the reply is stopped or loses its turn, so an external call stops its own requests. */
+  signal?: AbortSignal;
 };
 export type ConversationReplyOutcome = {
   outcome: 'completed' | 'idle' | 'retry' | 'failed' | 'stale';
@@ -343,6 +345,8 @@ export const modelFailureEndsTurn = (failure: string) => {
 
 // Renewed well inside the 60 second lease, so one slow renewal does not let it lapse.
 const filesLeaseRenewMs = 20_000;
+// How soon an external call learns its reply was stopped; each beat also renews the turn's lease.
+const toolHeartbeatMs = 3_000;
 // Reading a turn's files stops here; files not yet read are named for files.read instead of holding the reply.
 const turnFilesDeadlineMs = 120_000;
 
@@ -2050,7 +2054,25 @@ export function createConversationExecutor(
               };
               return { ...context, runtime: guardedRuntime };
             });
-            const result = await observeChatTool(() => operation(context));
+            // Stop, or another attempt taking the turn, makes the guarded runtime refuse; the call's signal then aborts.
+            const live = new AbortController();
+            let beating = false;
+            const heartbeat = setInterval(() => {
+              if (beating || live.signal.aborted) return;
+              beating = true;
+              context.runtime
+                .transaction(fence.workspaceId, commonCompatibility, async () => {})
+                .catch(error => {
+                  if (error instanceof AccessDenied) live.abort(error);
+                })
+                .finally(() => {
+                  beating = false;
+                });
+            }, toolHeartbeatMs);
+            heartbeat.unref?.();
+            const result = await observeChatTool(() => operation({ ...context, signal: live.signal })).finally(() =>
+              clearInterval(heartbeat),
+            );
             const mcp = mcpWaitSchema.safeParse(result);
             if (mcp.success) {
               if (!source.durable || mcp.data.result.actionId !== callId || name !== 'mcp.call')

@@ -13,7 +13,7 @@ import { createRecordBatchSchema, rowsListModelSchema, toolCallSchema } from './
 import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
-import { requireAgentPermission, withHuman } from './saved-policy.ts';
+import { requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
@@ -577,6 +577,8 @@ export type ChatImages = {
   files: ImageOutputStore;
   attachments: AttachmentReader;
   autonomous: boolean;
+  /** The unguarded workspace runtime: image holds settle through it even after the reply is stopped. */
+  ledger: Runtime;
   /** The turn's pinned image model and its provider call. */
   choose(tx: AuthorizationTransaction, turnId: string): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
 };
@@ -1132,9 +1134,11 @@ export function createChatTools(
         const origin = context.origin;
         const transaction = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
           withHuman(runtime, workspaceId, actor, 'read', operation);
+        const ledger = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
+          images.ledger.transaction(workspaceId, savedAgentCompatibility, operation);
         const { model, generate } = await transaction(tx => images.choose(tx, origin.turnId));
         return generateImageOutputs(
-          { files: images.files, attachments: images.attachments, transaction },
+          { files: images.files, attachments: images.attachments, transaction, ledger },
           {
             workspaceId,
             actor,

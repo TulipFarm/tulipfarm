@@ -14,8 +14,10 @@ import { imagePresets, sniffMediaType } from '@tulipfarm/media';
 import {
   CreditsExhausted,
   creditUnitsForProviderCost,
+  lockCredits,
   reserveCredits,
   settleCredits,
+  settleCreditsAtReservation,
 } from '@tulipfarm/workspace-storage/credits';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
@@ -84,8 +86,13 @@ export type ImageOutputStore = FileOutputStore & Pick<ReturnType<typeof createFi
 export type ImageOutputDeps = {
   files: ImageOutputStore;
   attachments?: AttachmentReader | undefined;
-  /** A workspace transaction for generation rows and credits. */
+  /** A workspace transaction that also checks the turn or run is still live: it admits rows and holds credits. */
   transaction: <T>(operation: (tx: AuthorizationTransaction) => Promise<T>) => Promise<T>;
+  /**
+   * A workspace transaction that checks no fence: it settles holds and closes rows, which must happen even after the
+   * turn is stopped or the run ends, since the provider may already have billed.
+   */
+  ledger: <T>(operation: (tx: AuthorizationTransaction) => Promise<T>) => Promise<T>;
 };
 
 export type ImageState = (typeof imageStates)[number];
@@ -225,6 +232,59 @@ function imageName(call: z.output<typeof generateImagesCallSchema>, index: numbe
   return `${base}${call.count > 1 ? ` ${index + 1}` : ''}.${extensions[mediaType] ?? 'png'}`;
 }
 
+async function imagesRemaining(tx: AuthorizationTransaction, origin: ImageOrigin, hash: string) {
+  const used = Number(
+    (
+      await tx.client.query(
+        `SELECT count(*)::int AS used FROM ${generationsTable(tx)} WHERE origin_kind=$1 AND origin_id=$2 AND call_hash<>$3`,
+        [origin.kind, originId(origin), hash],
+      )
+    ).rows[0]?.used ?? 0,
+  );
+  return Math.max(0, imagesPerOrigin - used);
+}
+
+const limitReached = (origin: ImageOrigin, remaining: number) =>
+  fail(
+    'image-limit-exceeded',
+    remaining === 0
+      ? `This ${origin.kind} already generated ${imagesPerOrigin} images, the most it can. Say so.`
+      : `This ${origin.kind} can generate ${remaining} more image${remaining === 1 ? '' : 's'}. Say so, or ask for at most ${remaining}.`,
+    { remaining },
+  );
+
+/**
+ * Settles the holds of images whose worker stopped without finishing them: rows still pending past the stale window,
+ * all of them or only `ids`. An image that reached Files is charged its hold, since the provider billed it and the
+ * usage is lost; any other is released and marked failed, so a repeat of its call tries it again.
+ */
+export async function recoverImageHolds(tx: AuthorizationTransaction, ids?: readonly string[]) {
+  if ((await tx.client.query(`SELECT to_regclass($1) AS present`, [generationsTable(tx)])).rows[0]?.present === null)
+    return 0;
+  const stale = z.array(z.object({ id: z.uuid(), usage_id: z.string().nullable(), saved: z.boolean() })).parse(
+    (
+      await tx.client.query(
+        `SELECT g.id,g.usage_id,EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_files')} f WHERE f.id=g.id) AS saved
+          FROM ${generationsTable(tx)} g
+          WHERE g.state='pending' AND g.updated_at < clock_timestamp() - make_interval(secs => $1)
+            AND ($2::uuid[] IS NULL OR g.id=ANY($2::uuid[]))
+          ORDER BY g.updated_at LIMIT 32 FOR UPDATE OF g SKIP LOCKED`,
+        [staleClaimMs / 1000, ids ?? null],
+      )
+    ).rows,
+  );
+  for (const row of stale) {
+    if (row.usage_id)
+      if (row.saved) await settleCreditsAtReservation(tx, row.usage_id);
+      else await settleCredits(tx, row.usage_id, '0');
+    await tx.client.query(
+      `UPDATE ${generationsTable(tx)} SET state=$2,failure=$3,updated_at=clock_timestamp() WHERE id=$1`,
+      [row.id, row.saved ? 'saved' : 'failed', row.saved ? null : 'generation-failed'],
+    );
+  }
+  return stale.length;
+}
+
 /**
  * `images.generate`: checks the call in order before any credits are held, then generates each image on its own:
  * hold the most it can cost, call the provider, save the bytes unchanged in Files, and settle at the billed cost.
@@ -254,25 +314,9 @@ export async function generateImageOutputs(
   const { model, catalogRevision } = context.model;
   const hash = imageCallHash(call);
   // 2. The origin's running count plus this call stays within the limit. A repeat of this call is not counted twice.
-  const used = await deps.transaction(async tx =>
-    Number(
-      (
-        await tx.client.query(
-          `SELECT count(*)::int AS used FROM ${generationsTable(tx)} WHERE origin_kind=$1 AND origin_id=$2 AND call_hash<>$3`,
-          [context.origin.kind, originId(context.origin), hash],
-        )
-      ).rows[0]?.used ?? 0,
-    ),
-  );
-  const remaining = Math.max(0, imagesPerOrigin - used);
-  if (call.count > remaining)
-    return fail(
-      'image-limit-exceeded',
-      remaining === 0
-        ? `This ${context.origin.kind} already generated ${imagesPerOrigin} images, the most it can. Say so.`
-        : `This ${context.origin.kind} can generate ${remaining} more image${remaining === 1 ? '' : 's'}. Say so, or ask for at most ${remaining}.`,
-      { remaining },
-    );
+  // Checked again, under the origin's lock, when the rows are added.
+  const remaining = await deps.transaction(async tx => imagesRemaining(tx, context.origin, hash));
+  if (call.count > remaining) return limitReached(context.origin, remaining);
   // 3. Edits need a model that edits, within its source limit.
   if (sources.length > 0 && !model.edits)
     return fail(
@@ -314,6 +358,14 @@ export async function generateImageOutputs(
   };
   const ids = Array.from({ length: call.count }, (_, index) => imageOutputId(context.origin, hash, index));
   const rows = await deps.transaction(async tx => {
+    // Two attempts of one turn can overlap, so the count and the new rows are one step per origin.
+    await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 761041))', [
+      `${tx.schema}:images:${context.origin.kind}:${originId(context.origin)}`,
+    ]);
+    const remaining = await imagesRemaining(tx, context.origin, hash);
+    if (call.count > remaining) return remaining;
+    // A dead attempt's holds are settled before its rows are claimed again.
+    await recoverImageHolds(tx, ids);
     const mine = new Set<string>();
     for (const [index, id] of ids.entries()) {
       const inserted = await tx.client.query(
@@ -357,6 +409,7 @@ export async function generateImageOutputs(
       .map(row => ({ ...row, claimed: mine.has(row.id) }));
   });
 
+  if (typeof rows === 'number') return limitReached(context.origin, rows);
   const images: GeneratedImage[] = rows.map(row => ({ index: row.ordinal, id: row.id, state: row.state }));
   const publish = () => context.progress?.(images.map(image => ({ ...image })));
   for (const [index, row] of rows.entries()) {
@@ -376,7 +429,7 @@ export async function generateImageOutputs(
   const hold = imageCost(model, call.quality, shape, pricingRevision);
   const finish = async (index: number, state: ImageState, extra: Partial<GeneratedImage> = {}) => {
     images[index] = { ...images[index]!, state, ...extra };
-    await deps.transaction(tx =>
+    await deps.ledger(tx =>
       tx.client.query(
         `UPDATE ${generationsTable(tx)} SET state=$2,failure=$3,updated_at=clock_timestamp() WHERE id=$1`,
         [images[index]!.id, state, state === 'failed' ? (extra.failure ?? 'generation-failed') : null],
@@ -391,6 +444,8 @@ export async function generateImageOutputs(
       if (context.signal?.aborted) return finish(index, 'cancelled');
       const usageId = `image:${row.id}:${randomUUID()}`;
       const held = await deps.transaction(async tx => {
+        // The allowance is read under the credit lock, so the images of one call are counted one after another.
+        await lockCredits(tx);
         if (context.credits.allowanceCredits !== undefined) {
           const spent = BigInt(
             String(
@@ -418,6 +473,7 @@ export async function generateImageOutputs(
             providerPicoUsd: hold,
             pricingRevision,
           });
+          await tx.client.query(`UPDATE ${generationsTable(tx)} SET usage_id=$2 WHERE id=$1`, [row.id, usageId]);
           return 'held' as const;
         } catch (error) {
           if (error instanceof CreditsExhausted) return 'credits-exhausted' as const;
@@ -425,7 +481,7 @@ export async function generateImageOutputs(
         }
       });
       if (held !== 'held') return finish(index, 'failed', { failure: held });
-      const settle = (cost: string) => deps.transaction(tx => settleCredits(tx, usageId, cost));
+      const settle = (cost: string) => deps.ledger(tx => settleCredits(tx, usageId, cost));
       let outcome: Awaited<ReturnType<ImageGenerator>>;
       try {
         outcome = await context.generate(

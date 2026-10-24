@@ -15,6 +15,8 @@ CREATE TABLE {{schema}}.tf_image_generations (
   catalog_revision text,
   sources jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(sources) = 'array'),
   failure text CHECK (failure IS NULL OR failure ~ '^[a-z][a-z-]{0,63}$'),
+  -- The credit hold of the image's latest attempt, so one a dead worker left open can be settled.
+  usage_id text,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (origin_kind, origin_id, call_hash, ordinal),
@@ -22,10 +24,11 @@ CREATE TABLE {{schema}}.tf_image_generations (
   CHECK ((state = 'failed') = (failure IS NOT NULL))
 );
 CREATE INDEX tf_image_generations_origin ON {{schema}}.tf_image_generations (origin_kind, origin_id);
+CREATE INDEX tf_image_generations_pending ON {{schema}}.tf_image_generations (updated_at) WHERE state = 'pending';
 
 REVOKE ALL ON {{schema}}.tf_image_generations FROM PUBLIC;
 GRANT SELECT, INSERT ON {{schema}}.tf_image_generations TO {{runtime}};
-GRANT UPDATE (state, failure, image_model_id, catalog_revision, updated_at) ON {{schema}}.tf_image_generations TO {{runtime}};
+GRANT UPDATE (state, failure, image_model_id, catalog_revision, usage_id, updated_at) ON {{schema}}.tf_image_generations TO {{runtime}};
 
 -- Agent, task and workflow runs pin their image models at admission, as chat turns do (0013).
 ALTER TABLE {{schema}}.tf_agent_runs

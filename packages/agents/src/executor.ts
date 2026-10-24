@@ -94,6 +94,8 @@ export { createAgentStore } from './store.ts';
 export { toolCallSchema, executionIdsSchema } from './contracts.ts';
 
 type Runtime = AgentStorage;
+// How soon a run's image requests learn the run stopped.
+const imageHeartbeatMs = 3_000;
 type Transaction = Parameters<Parameters<Runtime['transaction']>[2]>[0];
 type Options = {
   runtime: Runtime;
@@ -1073,9 +1075,27 @@ export function createAgentExecutor(options: Options) {
                 if (!(await work.live(tx))) throw new AccessDenied();
                 return operation(tx);
               });
+            // Holds settle and rows close even after the run stops, since the provider may already have billed.
+            const ledger = <T>(operation: (tx: Transaction) => Promise<T>) =>
+              runtime.transaction(ids.workspaceId, agentCompatibility, operation);
             const chosen = await transaction(async tx => images.choose(tx, ids.runId));
+            // Pausing, cancelling or running out of active time makes the guarded transaction refuse; requests then abort.
+            const live = new AbortController();
+            let beating = false;
+            const heartbeat = setInterval(() => {
+              if (beating || live.signal.aborted) return;
+              beating = true;
+              transaction(async () => {})
+                .catch(error => {
+                  if (error instanceof AccessDenied) live.abort(error);
+                })
+                .finally(() => {
+                  beating = false;
+                });
+            }, imageHeartbeatMs);
+            heartbeat.unref?.();
             const result = await generateImageOutputs(
-              { files: images.files, transaction },
+              { files: images.files, transaction, ledger },
               {
                 workspaceId: ids.workspaceId,
                 actor,
@@ -1090,9 +1110,10 @@ export function createAgentExecutor(options: Options) {
                   agentId: billing.agentId,
                   allowanceCredits: billing.allowanceCredits,
                 },
+                signal: live.signal,
               },
               call,
-            );
+            ).finally(() => clearInterval(heartbeat));
             return transaction(async tx => {
               await tx.client.query(
                 `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status='completed',result=$2 WHERE id=$1 AND status='waiting'`,
