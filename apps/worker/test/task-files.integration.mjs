@@ -265,6 +265,30 @@ test('a linked file that gets no room in the reading budget is named as not incl
   assert.doesNotMatch(read, /Quarterly notes/);
 });
 
+test('a linked file the workspace has no room for is named as storage full and not kept', async t => {
+  const f = await setup(t);
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_skill_package_objects')} (digest,size) SELECT encode(sha256(i::text::bytea),'hex'),10485760 FROM generate_series(1,103) i`,
+  );
+  const web = await localWeb(t, {
+    'charts.example/q3.png': send(200, await png(40, 30, '#123'), { 'content-type': 'image/png' }),
+  });
+  const task = await f.run('Describe https://charts.example/q3.png please');
+  assert.equal(task.status, 'completed');
+  assert.deepEqual(web.requests, ['charts.example/q3.png']);
+  const parts = filesTurn(f.requests[0]);
+  assert.equal(parts.filter(part => part.type === 'image').length, 0, 'the linked image is not read');
+  assert.match(
+    text(parts),
+    /https:\/\/charts.example\/q3.png[^\n]*the workspace's file storage is full, so it was not kept or read/,
+  );
+  assert.deepEqual(
+    [...f.objects.objects.keys()].filter(key => key.includes('/task-links/')).length,
+    1,
+    'only the record naming the failure is kept, not the bytes',
+  );
+});
+
 test('a later step of a task reads the kept copy of a link, not the link again', async t => {
   const f = await setup(t);
   const before = await png(40, 30, '#123');
