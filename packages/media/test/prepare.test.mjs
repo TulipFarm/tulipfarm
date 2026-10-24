@@ -165,6 +165,28 @@ test('converts HEIC to PNG at its original size', async () => {
   );
 });
 
+test('converts AVIF to PNG at its original size', async () => {
+  const prepared = await prepareUnchanged(await solid(30, 20, '#336699').avif().toBuffer(), generous);
+  const described = await describe(prepared);
+  assert.deepEqual(
+    { ...described, firstPixel: undefined },
+    {
+      mediaType: 'image/png',
+      sniffed: 'image/png',
+      width: 30,
+      height: 20,
+      decodedWidth: 30,
+      decodedHeight: 20,
+      downscaled: false,
+      firstPixel: undefined,
+    },
+  );
+  const expected = [51, 102, 153];
+  described.firstPixel.forEach((channel, index) =>
+    assert.ok(Math.abs(channel - expected[index]) <= 3, `${described.firstPixel}`),
+  );
+});
+
 test('converts an animated GIF to a PNG of its first frame', async () => {
   const input = await fixture('animated.gif');
   assert.equal((await sharp(input, { animated: true }).metadata()).pages, 2);

@@ -1070,9 +1070,14 @@ function textTurn(turn: ChatTurn): ChatTextTurn {
       .join('\n'),
   };
 }
-/** A JSON replacer that sizes image bytes instead of spelling them out index by index. */
+/**
+ * A JSON replacer that writes an image part's data as its size. It replaces the part, not the data, because
+ * `JSON.stringify` turns a `Buffer` into a number array through `toJSON` before a replacer sees it.
+ */
 const imageDataSize = (_key: string, value: unknown) =>
-  value instanceof Uint8Array ? `[${value.byteLength} bytes]` : value;
+  typeof value === 'object' && value !== null && 'type' in value && value.type === 'image' && 'mediaType' in value
+    ? { ...value, data: `[${imageByteLength(value as ChatImagePart)} bytes]` }
+    : value;
 const turnImages = (turns: Iterable<ChatTurn>) =>
   [...turns].flatMap(turn => ('content' in turn ? turn.content.filter(part => part.type === 'image') : []));
 const loopTurns = (items: readonly LoopItem[]) => items.flatMap(item => (item.kind === 'turn' ? [item.turn] : []));
@@ -2227,11 +2232,12 @@ export async function inferWithTools(
   let rereadOffered = false;
   /** The provider's prompt tokens for the last reply round, and that request's measure. */
   let baseline: (RequestMeasure & { tokens: number }) | undefined;
-  /** Text bytes of the last reply-round request, so a rejected one can recalibrate the estimate. */
-  let lastRequestBytes = 0;
+  /** The last reply-round request's measure, so a rejected one can recalibrate the estimate. */
+  let lastRequest: RequestMeasure = { inputBytes: 0, imageInputTokens: 0 };
   /**
    * How many real tokens one estimated token turned out to be. It starts at 1 and only grows when the provider rejects
-   * a request as too long: that request was at least the window, so later estimates are scaled up to match.
+   * a request as too long: that request was at least the window, so later estimates are scaled up to match. Only its
+   * text is rescaled; its image bounds are already the most each image can cost.
    */
   let tokenScale = 1;
   const scaled = (bytes: number) => Math.ceil(estimateInputTokens(bytes) * tokenScale);
@@ -2487,7 +2493,7 @@ export async function inferWithTools(
             tools?.answerText,
             target,
             (measure, usage) => {
-              lastRequestBytes = measure.inputBytes;
+              lastRequest = measure;
               baseline =
                 usage.kind === 'known'
                   ? {
@@ -2518,7 +2524,10 @@ export async function inferWithTools(
             overflow = error;
           }
           if (overflows >= 2) throw new Error('conversation-context-overflow', { cause: overflow });
-          tokenScale = Math.max(tokenScale, limits.window / Math.max(1, estimateInputTokens(lastRequestBytes)));
+          tokenScale = Math.max(
+            tokenScale,
+            (limits.window - lastRequest.imageInputTokens) / Math.max(1, estimateInputTokens(lastRequest.inputBytes)),
+          );
           baseline = undefined;
           await compactContext(
             step,

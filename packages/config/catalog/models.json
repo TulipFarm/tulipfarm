@@ -16,10 +16,12 @@
       "roles": ["title", "compaction", "heartbeat"],
       "limits": {
         "maxInputTokens": 200000,
-        "maxOutputTokens": 64000
+        "maxOutputTokens": 64000,
+        "imageInputTokens": 1600
       },
       "capabilities": {
-        "responseModelAliases": ["claude-haiku-4-5-20251001"]
+        "responseModelAliases": ["claude-haiku-4-5-20251001"],
+        "imageInput": true
       },
       "pricing": [
         {
@@ -33,7 +35,8 @@
         }
       ],
       "notes": [
-        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing"
+        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing",
+        "Image input (reviewed 2026-10-24): standard tier caps the long edge at 1568 px, about 1568 tokens per image: https://platform.claude.com/docs/en/build-with-claude/vision"
       ]
     },
     {
@@ -50,10 +53,12 @@
       "roles": ["review", "plan"],
       "limits": {
         "maxInputTokens": 1000000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 1600
       },
       "capabilities": {
-        "toolChoice": "auto"
+        "toolChoice": "auto",
+        "imageInput": true
       },
       "pricing": [
         {
@@ -67,7 +72,8 @@
         }
       ],
       "notes": [
-        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing"
+        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing",
+        "Image input (reviewed 2026-10-24): standard tier caps the long edge at 1568 px, about 1568 tokens per image: https://platform.claude.com/docs/en/build-with-claude/vision"
       ]
     },
     {
@@ -82,10 +88,12 @@
       ],
       "limits": {
         "maxInputTokens": 1000000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 4800
       },
       "capabilities": {
-        "toolChoice": "auto"
+        "toolChoice": "auto",
+        "imageInput": true
       },
       "pricing": [
         {
@@ -99,7 +107,8 @@
         }
       ],
       "notes": [
-        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing"
+        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing",
+        "Image input (reviewed 2026-10-24): high-resolution tier, at most 4,784 tokens per image: https://platform.claude.com/docs/en/build-with-claude/vision"
       ]
     },
     {
@@ -114,10 +123,12 @@
       ],
       "limits": {
         "maxInputTokens": 1000000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 4800
       },
       "capabilities": {
-        "toolChoice": "auto"
+        "toolChoice": "auto",
+        "imageInput": true
       },
       "pricing": [
         {
@@ -131,7 +142,8 @@
         }
       ],
       "notes": [
-        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing"
+        "Prices (anthropic, standard_global, reviewed 2026-09-29): https://platform.claude.com/docs/en/about-claude/pricing",
+        "Image input (reviewed 2026-10-24): high-resolution tier, at most 4,784 tokens per image: https://platform.claude.com/docs/en/build-with-claude/vision"
       ]
     },
     {
@@ -151,10 +163,12 @@
       "roles": ["public-guide"],
       "limits": {
         "maxInputTokens": 922000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
       },
       "capabilities": {
-        "reasoningOffForTools": true
+        "reasoningOffForTools": true,
+        "imageInput": true
       },
       "pricing": [
         {
@@ -178,7 +192,8 @@
       "notes": [
         "Prices (azure, eastus_global_standard, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
         "Prices (openai, standard_global, reviewed 2026-09-29): https://openai.com/api/pricing/",
-        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-luna."
+        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-luna.",
+        "Image input (reviewed 2026-10-24): detail high is a 2,500-patch budget; the 1.2 multiplier documented for gpt-6-astra bounds it, as luna's is undocumented: https://developers.openai.com/api/docs/guides/images-vision"
       ]
     },
     {
@@ -197,10 +212,12 @@
       ],
       "limits": {
         "maxInputTokens": 922000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
       },
       "capabilities": {
-        "reasoningOffForTools": true
+        "reasoningOffForTools": true,
+        "imageInput": true
       },
       "pricing": [
         {
@@ -224,7 +241,8 @@
       "notes": [
         "Prices (azure, eastus_global_standard, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
         "Prices (openai, standard_global, reviewed 2026-09-29): https://openai.com/api/pricing/",
-        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-sol."
+        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-sol.",
+        "Image input (reviewed 2026-10-24): detail high is a 2,500-patch budget; the 1.2 multiplier documented for gpt-6-astra bounds it, as sol's is undocumented: https://developers.openai.com/api/docs/guides/images-vision"
       ]
     },
     {
@@ -243,10 +261,12 @@
       ],
       "limits": {
         "maxInputTokens": 922000,
-        "maxOutputTokens": 128000
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
       },
       "capabilities": {
-        "api": "responses"
+        "api": "responses",
+        "imageInput": true
       },
       "pricing": [
         {
@@ -270,7 +290,8 @@
       "notes": [
         "Prices (azure, eastus_global_standard, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
         "Prices (openai, standard_global, reviewed 2026-09-29): https://openai.com/api/pricing/",
-        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-astra."
+        "Direct OpenAI API. Rates recorded equal to the Azure entry gpt-6-astra.",
+        "Image input (reviewed 2026-10-24): detail high is a 2,500-patch budget with a 1.2 token multiplier: https://developers.openai.com/api/docs/guides/images-vision"
       ]
     },
     {
@@ -346,7 +367,8 @@
         "maxOutputTokens": 128000
       },
       "capabilities": {
-        "reasoningTokensInOutput": true
+        "reasoningTokensInOutput": true,
+        "imageInput": true
       },
       "pricing": [
         {
@@ -370,7 +392,8 @@
         "User selected the retail API's $2/MTok base input rate over the $1.25/MTok Azure pricing page and LiteLLM rate on 2026-09-28. Retail meter 53db5e16-8c03-5971-b4f9-76c44873176a, effective 2026-09-01.",
         "LiteLLM lists a 200000 input limit and rates above 200000 prompt tokens. Both are preserved; the higher tier does not establish that this Azure deployment accepts longer prompts.",
         "Prices (xai, standard_global, reviewed 2026-09-29): https://docs.x.ai/docs/models",
-        "Direct xAI API. Rates recorded equal to the Azure entry grok-4-6."
+        "Direct xAI API. Rates recorded equal to the Azure entry grok-4-6.",
+        "Image input (reviewed 2026-10-24): no documented per-image token formula, so the default bound applies"
       ]
     },
     {
@@ -426,6 +449,9 @@
         "maxInputTokens": 262144,
         "maxOutputTokens": 262144
       },
+      "capabilities": {
+        "imageInput": true
+      },
       "pricing": [
         {
           "usdPerMillionTokens": {
@@ -438,7 +464,8 @@
       "notes": [
         "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
         "Azure deployment Kimi-K2.6, version 2026-04-20, returned HTTP 200 and model identity Kimi-K2.6 on 2026-09-29. Limits and text/image, reasoning, and tool capabilities follow the Azure Moonshot catalog.",
-        "Azure eastus Global retail meters inspected on 2026-09-29: input 1b0e81c0-8707-5f51-aae5-b32e9b4102c8, output 25869377-0946-5d07-8ec6-1717cb2d222e, cached input 531f0a72-a9a6-5f4d-8089-3f758a02f573."
+        "Azure eastus Global retail meters inspected on 2026-09-29: input 1b0e81c0-8707-5f51-aae5-b32e9b4102c8, output 25869377-0946-5d07-8ec6-1717cb2d222e, cached input 531f0a72-a9a6-5f4d-8089-3f758a02f573.",
+        "Image input (reviewed 2026-10-24): no documented per-image token formula, so the default bound applies"
       ]
     },
     {
@@ -455,6 +482,9 @@
         "maxInputTokens": 262144,
         "maxOutputTokens": 262144
       },
+      "capabilities": {
+        "imageInput": true
+      },
       "pricing": [
         {
           "usdPerMillionTokens": {
@@ -465,7 +495,8 @@
         }
       ],
       "notes": [
-        "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'"
+        "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
+        "Image input (reviewed 2026-10-24): no documented per-image token formula, so the default bound applies"
       ]
     },
     {
@@ -480,7 +511,11 @@
       ],
       "limits": {
         "maxInputTokens": 1048576,
-        "maxOutputTokens": 65536
+        "maxOutputTokens": 65536,
+        "imageInputTokens": 2240
+      },
+      "capabilities": {
+        "imageInput": true
       },
       "pricing": [
         {
@@ -502,7 +537,8 @@
       ],
       "notes": [
         "Prices (google, gemini_api_standard_paid, reviewed 2026-09-29): https://ai.google.dev/gemini-api/docs/pricing",
-        "Google's published promotional prices end on 2026-12-31. The second rate period records the announced 2027-01-01 prices."
+        "Google's published promotional prices end on 2026-12-31. The second rate period records the announced 2027-01-01 prices.",
+        "Image input (reviewed 2026-10-24): media_resolution ultra_high bounds an image at 2,240 tokens: https://ai.google.dev/gemini-api/docs/media-resolution"
       ]
     },
     {
@@ -517,7 +553,11 @@
       ],
       "limits": {
         "maxInputTokens": 1048576,
-        "maxOutputTokens": 65536
+        "maxOutputTokens": 65536,
+        "imageInputTokens": 2240
+      },
+      "capabilities": {
+        "imageInput": true
       },
       "pricing": [
         {
@@ -537,7 +577,8 @@
         }
       ],
       "notes": [
-        "Prices (google, gemini_api_standard_paid, reviewed 2026-09-29): https://ai.google.dev/gemini-api/docs/pricing"
+        "Prices (google, gemini_api_standard_paid, reviewed 2026-09-29): https://ai.google.dev/gemini-api/docs/pricing",
+        "Image input (reviewed 2026-10-24): media_resolution ultra_high bounds an image at 2,240 tokens: https://ai.google.dev/gemini-api/docs/media-resolution"
       ]
     }
   ]

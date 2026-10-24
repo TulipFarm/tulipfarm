@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { withChatMeasurements } from '@tulipfarm/observability';
 import { completionCheckEvidence, inferWithTools, ToolResultImages } from '../src/inference.ts';
 import {
   completionReply,
@@ -180,8 +181,8 @@ test('each image reserves the image token bound instead of its base64 bytes', as
   assert.deepEqual(
     small.map(({ step, imageInputTokens }) => ({ step, imageInputTokens })),
     [
-      { step: 0, imageInputTokens: 1600 },
-      { step: 1, imageInputTokens: 3200 },
+      { step: 0, imageInputTokens: 4800 },
+      { step: 1, imageInputTokens: 9600 },
       { step: 2, imageInputTokens: 0 },
     ],
   );
@@ -190,7 +191,7 @@ test('each image reserves the image token bound instead of its base64 bytes', as
 });
 
 test('a route without imageInput rejects image parts before any request, in history or from a tool', async t => {
-  const textRoute = nativeRoutes.anthropic;
+  const textRoute = { ...nativeRoutes.anthropic, capabilities: { imageInput: false } };
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async () => {
     requests++;
@@ -214,7 +215,8 @@ test('a fallback without imageInput is not tried for a turn with images', async 
     providers.push(String(url).includes('anthropic') ? 'anthropic' : 'azure');
     return new Response(JSON.stringify({ error: { code: 'DeploymentNotFound', message: 'missing' } }), { status: 404 });
   });
-  const fallback = { fallback: { route: nativeRoutes.anthropic, label: 'claude-fallback' } };
+  const textRoute = { ...nativeRoutes.anthropic, capabilities: { imageInput: false } };
+  const fallback = { fallback: { route: textRoute, label: 'claude-fallback' } };
   const primaryFailure = { name: 'ModelCallError', message: 'model-configuration', code: 'not_found' };
   await assert.rejects(
     inferWithTools(vision('azure'), history, fetched, undefined, false, null, fallback),
@@ -261,5 +263,102 @@ test('completion evidence names images by a placeholder, never their data', () =
       candidate: 'They match.',
       workBudgetRemaining: 3,
     }),
+  );
+});
+
+test('after a provider overflow with many images, only the text is rescaled, so summaries fit the goal', async t => {
+  const format = 'anthropic';
+  const route = { ...nativeRoutes.anthropic, model: 'claude-synthetic-vision', capabilities: { imageInput: true } };
+  const images = Array.from({ length: 30 }, () => ({ type: 'image', mediaType: 'image/png', data: png }));
+  const page = round => `page-${round} ${'lorem ipsum dolor '.repeat(660)}`;
+  let rounds = 0;
+  let rejected = 0;
+  let retried;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply(format));
+    rounds++;
+    if (rounds <= 6)
+      return Response.json(
+        nativeReply(format, { calls: [use('web.fetch', { url: `https://example.com/${rounds}` })] }),
+      );
+    if (!rejected) {
+      rejected++;
+      return Response.json(
+        {
+          type: 'error',
+          error: { type: 'invalid_request_error', message: 'prompt is too long: 105000 tokens > 100000' },
+        },
+        { status: 400 },
+      );
+    }
+    retried = conversation(format, body).flatMap(message =>
+      Array.isArray(message.content)
+        ? message.content.filter(block => block.type === 'tool_result').map(block => block.content)
+        : [],
+    );
+    return Response.json(nativeReply(format, { text: 'Answered.' }));
+  });
+  const summarised = [];
+  let executed = 0;
+  const result = await inferWithTools(
+    route,
+    [{ role: 'user', content: [{ type: 'text', text: 'Read these pages next to the screenshots.' }, ...images] }],
+    async () => ({ text: page(++executed) }),
+    undefined,
+    false,
+    null,
+    {
+      context: { window: 100000, triggerPercent: 90, targetPercent: 80 },
+      compactToolResults: async ({ round, text }) => {
+        summarised.push(round);
+        return JSON.stringify({
+          notes: JSON.parse(text).results.map(({ callId, tool }) => ({ callId, note: `${tool} read one page.` })),
+        });
+      },
+    },
+  );
+  assert.equal(result.text, 'Answered.');
+  assert.equal(rejected, 1);
+  assert.deepEqual(summarised, [7]);
+  assert.equal(retried.length, 6);
+  assert.ok(
+    retried.slice(0, -1).every(output => output.includes('summarised to save context')),
+    'older results keep their summaries',
+  );
+  assert.match(retried.at(-1), /"page-6 lorem/, 'the latest round stays verbatim');
+});
+
+test('request-size telemetry counts Buffer image data as a short size, not its bytes as numbers', async t => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('anthropic', { text: 'A grey square.' })));
+  const logs = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (typeof chunk === 'string' && chunk.startsWith('{"level":')) logs.push(JSON.parse(chunk));
+    else write(chunk, ...args);
+    return true;
+  });
+  const content = [
+    { type: 'text', text: 'What is this?' },
+    { type: 'image', mediaType: 'image/png', data: Buffer.alloc(300000, 7) },
+  ];
+  await withChatMeasurements(() => inferWithTools(vision('anthropic'), [{ role: 'user', content }], fetched));
+  const history = logs.find(record => record['chat.request.history_bytes'] !== undefined);
+  assert.equal(
+    history['chat.request.history_bytes'],
+    Buffer.byteLength(
+      JSON.stringify([
+        {
+          kind: 'turn',
+          turn: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is this?' },
+              { type: 'image', mediaType: 'image/png', data: '[300000 bytes]' },
+            ],
+          },
+        },
+      ]),
+    ),
   );
 });
