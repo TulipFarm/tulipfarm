@@ -12,7 +12,7 @@ import { createChatTools, frameworkCallSchema, type KnowledgeToolsFactory } from
 import { imageGenerationOffered, pinnedImageChoice } from '@tulipfarm/agents/image-generation';
 import { pinTurnImageModels } from '@tulipfarm/agents/image-settings';
 import { stepFamilyAvailable } from '@tulipfarm/agents/model-availability';
-import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
+import { recoverImageHolds, type ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
 import {
   calculateUsageCost,
   estimateInputTokens,
@@ -452,6 +452,8 @@ export function createPlanComposition(options: {
       },
       async recoverAgentPlanPage(workspaceId: string, after?: string) {
         try {
+          // Image holds of a specialist whose worker died settle here, without waiting for a chat reply.
+          if (!after) await runtime.transaction(workspaceId, commonCompatibility, tx => recoverImageHolds(tx));
           const page = await plans.due(workspaceId, after);
           for (const planId of page) await options.wakePlan(workspaceId, planId);
           return page.length === 100 ? (page.at(-1) ?? null) : null;
