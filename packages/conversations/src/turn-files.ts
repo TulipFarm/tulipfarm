@@ -202,22 +202,24 @@ function sliceRange(segments: FileSegment[], range: NonNullable<ReadSelection['r
   return out;
 }
 
-function gapNotes(gaps: readonly CoverageGap[]): string[] {
-  const limited = gaps.filter(gap => gap.reason === 'limit').length;
-  const other = gaps.filter(gap => gap.reason !== 'limit');
-  const reasons = [...new Set(other.map(gap => gap.reason))].join(', ');
-  return [
-    ...(limited
-      ? [
-          `Only the first ${mediaLimits.recognitionsPerFile} images or pages in this file were recognised; ${limited} more ${limited === 1 ? 'was' : 'were'} not read.`,
-        ]
-      : []),
-    ...(other.length
-      ? [
-          `${other.length} ${other.length === 1 ? 'image or page' : 'images or pages'} in this file could not be recognised (${reasons}); their content was not read.`,
-        ]
-      : []),
-  ];
+const unreadWhy = {
+  'unsupported-media': 'the image type cannot be read',
+  'recognition-unavailable': 'no credits or recognition was unavailable',
+  refused: 'the image reader declined',
+  empty: 'nothing was found to read',
+  limit: `past the ${mediaLimits.recognitionsPerFile} image limit`,
+  failed: 'recognition failed',
+} as const satisfies Record<CoverageGap['reason'] | 'failed', string>;
+
+/** One note per reason, naming how many images or pages in the file were not read and why. */
+function unreadNotes(gaps: readonly CoverageGap[], failed: number): string[] {
+  const counts = new Map<keyof typeof unreadWhy, number>();
+  for (const gap of gaps) counts.set(gap.reason, (counts.get(gap.reason) ?? 0) + 1);
+  if (failed) counts.set('failed', failed);
+  return [...counts].map(
+    ([reason, count]) =>
+      `${count} ${count === 1 ? 'image or page in this file was' : 'images or pages in this file were'} not read (${unreadWhy[reason]}).`,
+  );
 }
 
 /** The turn's recognition on its pinned recognition model; undefined when the turn has none. */
@@ -343,14 +345,7 @@ async function readDocument(
     kind: 'read',
     segments: options.selection?.range ? sliceRange(segments, options.selection.range) : segments,
     complete: kept.length === parsed.segments.length && !options.selection?.range,
-    notes: [
-      ...gapNotes(parsed.gaps),
-      ...(parsed.failedRecognitions
-        ? [
-            `${parsed.failedRecognitions} ${parsed.failedRecognitions === 1 ? 'image or page' : 'images or pages'} in this file could not be recognised because the image reader failed; their content was not read.`,
-          ]
-        : []),
-    ],
+    notes: unreadNotes(parsed.gaps, parsed.failedRecognitions),
   };
 }
 
