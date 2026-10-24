@@ -39,6 +39,7 @@ import {
   type GoogleUnavailable,
   storedReferenceSchema,
 } from './file-references.ts';
+import { AttachmentError } from './attachments.ts';
 import { pinnedImageModels, type TurnImageModels } from './turn-image-models.ts';
 
 const turnFilePartSchema = z.union([
@@ -440,6 +441,12 @@ const failures = {
   'recognition-refused': 'The image reader declined to read this image, so it was not read.',
 } as const satisfies Record<ReadFailure, string>;
 
+const attachmentNotices = {
+  busy: 'This attachment could not be read because attachment storage is busy. Its contents were not read. Say so, suggest sending the message again, and do not describe or guess them.',
+  access:
+    'This attachment is unavailable: access changed or its stored content failed verification. Its contents were not read. Do not describe or guess them.',
+} as const;
+
 const escapeContent = (text: string) =>
   text.replace(markerCharacters, '').replace(/<\/(chat-attachment|tulipfarm-file|google-drive-file)/gi, '<\\/$1');
 
@@ -492,10 +499,13 @@ class TurnFileContext {
     let body: string;
     if (entry.result.kind === 'unavailable') {
       const cause = entry.result.cause;
+      const local = cause === 'busy' ? 'busy' : 'access';
       const notice =
         entry.origin === 'google'
           ? unavailableNotices.google[cause]
-          : unavailableNotices.tulipfarm[cause === 'busy' ? 'busy' : 'access'];
+          : entry.origin === 'attachment'
+            ? attachmentNotices[local]
+            : unavailableNotices.tulipfarm[local];
       body = `<${tag} ${head(entry)} status="${cause === 'busy' ? 'temporarily-unavailable' : 'unavailable'}">${notice}</${tag}>`;
     } else if (entry.result.kind === 'not-included') {
       body = `<${tag} ${head(entry)} status="not-included">This file did not fit in this turn's reading budget and was not read. ${readPointer(entry.id)}</${tag}>`;
@@ -612,14 +622,20 @@ export async function readTurnFile(input: {
         reading,
       };
     } catch (error) {
-      if (!(error instanceof AccessDenied)) throw error;
+      const cause =
+        error instanceof AccessDenied || (error instanceof AttachmentError && error.code === 'attachment-integrity')
+          ? 'access'
+          : error instanceof AttachmentError && error.code === 'attachment-busy'
+            ? 'busy'
+            : null;
+      if (!cause) throw error;
       return {
         kind: 'attachment',
         name: null,
         mediaType: null,
         size: null,
         source: null,
-        reading: { kind: 'unavailable', cause: 'access' },
+        reading: { kind: 'unavailable', cause },
       };
     }
   }
