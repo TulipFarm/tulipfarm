@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   modelCapabilities,
   modelCapabilitiesSchema,
+  modelImageLimits,
   modelCatalogFileSchema,
   providerModelCapabilities,
   resolveModelCapabilities,
@@ -91,4 +92,19 @@ test('capabilities are optional, strict and checked against the provider', () =>
     model.id === 'kimi' ? { ...model, capabilities: { api: 'responses' } } : model,
   );
   assert.equal(parse(azureResponses).success, true);
+});
+
+test('image limits come from the catalog model a route serves, else the defaults', t => {
+  const catalog = structuredClone(shippedCatalog);
+  const haiku = catalog.models.find(model => model.routes.some(route => route.model === 'claude-haiku-4-5'));
+  haiku.capabilities = { ...haiku.capabilities, imageInput: true };
+  haiku.limits = { ...haiku.limits, imageInputTokens: 2400, maxImageBytes: 1048576 };
+  t.after(() => delete process.env.MODEL_CATALOG);
+  process.env.MODEL_CATALOG = JSON.stringify(catalog);
+  assert.deepEqual(modelImageLimits('anthropic', 'claude-haiku-4-5'), {
+    imageInputTokens: 2400,
+    maxImageBytes: 1048576,
+  });
+  assert.deepEqual(modelImageLimits('anthropic', 'custom-model'), { imageInputTokens: 1600, maxImageBytes: 5242880 });
+  assert.deepEqual(modelImageLimits('google', 'claude-haiku-4-5'), { imageInputTokens: 1600, maxImageBytes: 5242880 });
 });

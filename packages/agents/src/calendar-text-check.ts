@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { FrameworkCall } from './tools.ts';
-import type { ChatTurn } from './inference.ts';
+import type { ChatTextTurn } from './inference.ts';
 
 const source = z.strictObject({
   message: z.int().nonnegative(),
@@ -55,7 +55,7 @@ export function calendarTextTarget(call: FrameworkCall) {
 type BoundField = { mode: 'literal'; text: string } | { mode: 'rewrite' | 'unspecified' };
 export type CalendarTextBinding = { summary: BoundField; description: BoundField };
 
-export function bindCalendarText(value: unknown, messages: readonly ChatTurn[]): CalendarTextBinding | null {
+export function bindCalendarText(value: unknown, messages: readonly ChatTextTurn[]): CalendarTextBinding | null {
   const parsed = calendarTextCheckSchema.safeParse(value);
   if (!parsed.success) return null;
   function bind(field: z.infer<typeof fieldSchema>): BoundField | null {

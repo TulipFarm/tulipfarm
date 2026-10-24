@@ -43,7 +43,7 @@ import {
   type TableQueryTranslationStatus,
   type TranslationErrorCode,
 } from '@tulipfarm/tables/translation-contracts';
-import { inferWithSystem, type ChatTurn, type InferenceRoute, type InferenceUsage } from './inference.ts';
+import { inferWithSystem, type ChatTextTurn, type InferenceRoute, type InferenceUsage } from './inference.ts';
 import { modelEnvironment } from './model-environment.ts';
 
 /** Hard limits for one logical translation. Input tokens are admitted by request bytes, which never undercount tokens. */
@@ -594,7 +594,7 @@ export type TranslationProvider = {
   cost(usage: InferenceUsage): string | null;
   infer(
     system: string,
-    messages: readonly ChatTurn[],
+    messages: readonly ChatTextTurn[],
     context: TranslationContext,
     meter: TranslationMeter,
   ): Promise<string>;
@@ -961,7 +961,7 @@ export function createTableQueryTranslations(options: {
       capabilities,
       current,
     });
-    const messages: ChatTurn[] = [{ role: 'user', text: renderContext(context) }];
+    const messages: ChatTextTurn[] = [{ role: 'user', text: renderContext(context) }];
 
     const attempt = { membershipId: null as string | null, responded: false, settled: false, abandoned: false };
     const attemptId = (member: string) => `table-search:${member}:${input.requestId}`;

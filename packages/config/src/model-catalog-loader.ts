@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
+  defaultImageInputLimits,
   modelCatalogFileSchema,
   modelProviderDefaults,
   type ImageModelApi,
@@ -310,11 +311,23 @@ export function modelCapabilities(
   providerModelId: string,
   ...overrides: readonly (ModelCapabilityOverrides | undefined)[]
 ) {
+  return resolveModelCapabilities(provider, catalogModel(provider, providerModelId)?.capabilities, ...overrides);
+}
+
+/** Image input limits of a provider model: those of the catalog model it serves, else the defaults. */
+export function modelImageLimits(provider: ModelProvider, providerModelId: string) {
+  const limits = catalogModel(provider, providerModelId)?.limits;
+  return {
+    imageInputTokens: limits?.imageInputTokens ?? defaultImageInputLimits.imageInputTokens,
+    maxImageBytes: limits?.maxImageBytes ?? defaultImageInputLimits.maxImageBytes,
+  };
+}
+
+function catalogModel(provider: ModelProvider, providerModelId: string) {
   const { catalog } = readModelCatalog(process.env);
-  const model = catalog.models.find(candidate =>
+  return catalog.models.find(candidate =>
     candidate.routes.some(
       route => route.model === providerModelId && providerOf(catalog, route.provider).type === provider,
     ),
   );
-  return resolveModelCapabilities(provider, model?.capabilities, ...overrides);
 }
