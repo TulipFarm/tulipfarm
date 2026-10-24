@@ -12,6 +12,7 @@ import { chatAccess, type ChatAccessRule } from './chat-access.ts';
 import type { ConversationRuntime } from './runtime.ts';
 import { requireConversationMcpSources } from './source-access.ts';
 import { chargedBytes, type createFiles } from '@tulipfarm/files';
+import { linkReadsInstalled, messageLinkReads, type KeepLink, type LinkRead } from './links.ts';
 
 export const attachmentLimit = 10 * 1024 * 1024;
 export const reserveAttachmentSchema = z.strictObject({
@@ -236,11 +237,21 @@ export function createAttachments(
         if (
           current.state !== 'bound' ||
           !(
-            await tx.client.query(
-              `SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} WHERE conversation_id = $1 AND message_id = $2 AND attachment_id = $3`,
-              [target.conversationId, current.message_id, target.id],
-            )
-          ).rowCount
+            (
+              await tx.client.query(
+                `SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} WHERE conversation_id = $1 AND message_id = $2 AND attachment_id = $3`,
+                [target.conversationId, current.message_id, target.id],
+              )
+            ).rowCount ||
+            // A file shared as a link is kept as an attachment of the message that shared it.
+            ((await linkReadsInstalled(tx)) &&
+              (
+                await tx.client.query(
+                  `SELECT 1 FROM ${table(tx, 'tf_conversation_link_reads')} WHERE conversation_id = $1 AND message_id = $2 AND attachment_id = $3`,
+                  [target.conversationId, current.message_id, target.id],
+                )
+              ).rowCount)
+          )
         )
           throw new AccessDenied();
         return current;
@@ -319,5 +330,96 @@ export function createAttachments(
       published.push((await files.publishAttachment(target.workspaceId, userId, attachment.id)).id);
     return published;
   }
-  return { reserve, status, upload, download, cleanup, publishSent };
+  /**
+   * Keeps what reading one link of a human message produced, once per message and link. A file is stored and charged
+   * like an upload, as a bound attachment of that message from its sender carrying the link, and never published to
+   * Files. The outcome already kept wins a race, and the loser's bytes are removed.
+   */
+  const keepLink: KeepLink = async (workspaceId, input) => {
+    const target = ids(workspaceId, input.conversationId, input.messageId);
+    const { result } = input;
+    const kept = (tx: AuthorizationTransaction) => messageLinkReads(tx, target.conversationId, target.id);
+    const find = (reads: LinkRead[]) => reads.find(read => read.url === result.url);
+    async function record(tx: AuthorizationTransaction, outcome: 'page' | 'failed', reason: string | null) {
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_conversation_link_reads')} (conversation_id,message_id,ordinal,url,outcome,reason) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+        [target.conversationId, target.id, input.ordinal, result.url, outcome, reason],
+      );
+    }
+    async function sender(tx: AuthorizationTransaction) {
+      const row = (
+        await tx.client.query(
+          `SELECT membership_id AS "membershipId" FROM ${table(tx, 'tf_conversation_messages')} WHERE id = $1 AND conversation_id = $2 AND author_kind = 'human'`,
+          [target.id, target.conversationId],
+        )
+      ).rows[0];
+      if (!row) throw new AccessDenied();
+      return uuidSchema.parse(row.membershipId);
+    }
+    if (result.kind !== 'file') {
+      return transaction(target.workspaceId, async tx => {
+        await sender(tx);
+        await record(tx, result.kind, result.kind === 'failed' ? result.reason : null);
+        const read = find(await kept(tx));
+        if (!read) throw new Error('conversation-link-not-kept');
+        return read;
+      });
+    }
+    reserveAttachmentSchema.parse({
+      filename: result.filename,
+      mediaType: result.mediaType,
+      size: result.bytes.byteLength,
+      sha256: result.sha256,
+    });
+    if (digest(result.bytes) !== result.sha256) throw new AttachmentError('attachment-integrity');
+    const id = randomUUID();
+    const objectKey = randomUUID();
+    const key = `${target.workspaceId}/${objectKey}`;
+    await bytes.putIfAbsent(key, result.bytes);
+    let stored = false;
+    try {
+      return await transaction(target.workspaceId, async tx => {
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 209871))', [tx.schema]);
+        const membershipId = await sender(tx);
+        const prior = find(await kept(tx));
+        if (prior) return prior;
+        if ((await chargedBytes(tx)) + result.bytes.byteLength > quota) {
+          await record(tx, 'failed', 'storage-full');
+        } else {
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_attachments')} (id,conversation_id,membership_id,object_key,filename,media_type,size,sha256,state,message_id,source_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'bound',$9,$10)`,
+            [
+              id,
+              target.conversationId,
+              membershipId,
+              objectKey,
+              result.filename,
+              result.mediaType,
+              result.bytes.byteLength,
+              result.sha256,
+              target.id,
+              result.url,
+            ],
+          );
+          const inserted = await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_link_reads')} (conversation_id,message_id,ordinal,url,outcome,attachment_id) VALUES ($1,$2,$3,$4,'file',$5) ON CONFLICT DO NOTHING`,
+            [target.conversationId, target.id, input.ordinal, result.url, id],
+          );
+          stored = Boolean(inserted.rowCount);
+          if (!stored) throw new Error('conversation-link-conflict');
+        }
+        const read = find(await kept(tx));
+        if (!read) throw new Error('conversation-link-not-kept');
+        return read;
+      });
+    } catch (error) {
+      if (!(error instanceof Error && error.message === 'conversation-link-conflict')) throw error;
+      const read = await transaction(target.workspaceId, async tx => find(await kept(tx)));
+      if (!read) throw error;
+      return read;
+    } finally {
+      if (!stored) await bytes.remove(key).catch(() => {});
+    }
+  };
+  return { reserve, status, upload, download, cleanup, publishSent, keepLink };
 }

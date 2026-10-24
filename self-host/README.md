@@ -49,6 +49,19 @@ authenticated `GET /v2/team/credit-usage`, which reads usage without fetching pa
 or spending scrape credits. Keyless self-hosted services keep the `GET /health`
 probe. Both probes require 2xx and reject redirects.
 
+With the workspace `images` flag on, the worker also fetches files directly,
+without Firecrawl: files linked in a chat message and `web.fetch` links that
+serve a file. It needs egress from the worker to the public internet on port 443. Each fetch resolves the host to IPv4 only, refuses any private, loopback,
+link-local or metadata address, connects only to the addresses it checked (so a
+name cannot rebind between the check and the connection), follows at most 5
+redirects with each hop checked again, sends no cookie, authorization or
+referrer, and stops at 10 MiB or 25 seconds. HTML goes to Firecrawl as before.
+A linked file is kept as an attachment of its message and counts against
+workspace file storage. Without `FIRECRAWL_ENDPOINT`, links are not fetched and
+the model is told web access is off. Before turning the flag on, run
+`pnpm db workspace-rollout` so every workspace has common migration
+`0014_conversation_links.sql`; a workspace without it reads no links.
+
 ## Health
 
 The API health route is **`/v1/health`**, not `/health`. It returns 200 only when

@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
+import { Agent, request as undiciRequest, type Dispatcher } from 'undici';
 import { denyMcpEgress } from '@tulipfarm/access';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { publicWebResultSchema, publicWebUrlSchema, webPageSchema } from '@tulipfarm/conversations/contracts';
+import type { PublicFile, PublicFileFailure } from '@tulipfarm/conversations/public-web';
+import { sniffMediaType } from '@tulipfarm/media';
 import { z } from 'zod';
 
 export function publicIPv4(address: string) {
@@ -22,22 +26,200 @@ export function publicIPv4(address: string) {
   );
 }
 
-async function requirePublicUrl(input: string, signal: AbortSignal) {
-  const value = publicWebUrlSchema.parse(input);
+/**
+ * How public links reach the network. Production resolves IPv4 with the system resolver and connects each checked hop
+ * through an agent whose lookup can only return the addresses that were checked. Tests replace these two functions to
+ * reach a local server; nothing in configuration can.
+ */
+export const publicNetwork = {
+  resolve: async (hostname: string): Promise<string[]> =>
+    (await lookup(hostname, { all: true, family: 4 })).map(item => item.address),
+  dispatcher: (pinned: LookupFunction): Dispatcher =>
+    new Agent({ allowH2: false, connect: { lookup: pinned, timeout: 10_000 } }),
+};
+
+/** Resolves a public URL's host, or throws when it has no address or any address is not public. */
+async function publicAddresses(url: string, signal: AbortSignal) {
   signal.throwIfAborted();
-  const addresses = await new Promise<Awaited<ReturnType<typeof resolveAddresses>>>((resolve, reject) => {
+  const addresses = await new Promise<string[]>((resolve, reject) => {
     const abort = () => reject(new Error('web-timeout'));
     signal.addEventListener('abort', abort, { once: true });
-    resolveAddresses(value)
+    publicNetwork
+      .resolve(new URL(url).hostname)
       .then(resolve, reject)
       .finally(() => signal.removeEventListener('abort', abort));
   });
-  if (!addresses.length || !addresses.every(item => publicIPv4(item.address))) throw new Error('web-address-denied');
+  if (!addresses.length || !addresses.every(publicIPv4)) throw new Error('web-address-denied');
+  return addresses;
+}
+
+async function requirePublicUrl(input: string, signal: AbortSignal) {
+  const value = publicWebUrlSchema.parse(input);
+  await publicAddresses(value, signal);
   return value;
 }
 
-function resolveAddresses(url: string) {
-  return lookup(new URL(url).hostname, { all: true, family: 4 });
+/**
+ * A DNS lookup that answers only `hostname` and only with `addresses`, so the connection goes to an address that was
+ * checked even when the name would resolve differently a moment later.
+ */
+export function pinnedLookup(hostname: string, addresses: readonly string[]): LookupFunction {
+  return (name, options, callback) => {
+    if (name !== hostname) {
+      callback(Object.assign(new Error('web-address-denied'), { code: 'ENOTFOUND' }), '', 4);
+      return;
+    }
+    if (options.all)
+      (callback as unknown as (error: null, value: { address: string; family: 4 }[]) => void)(
+        null,
+        addresses.map(address => ({ address, family: 4 })),
+      );
+    else callback(null, addresses[0] ?? '', 4);
+  };
+}
+
+/** Bounds on one link fetch. The deadline is a property only so tests can shorten it. */
+export const publicFileLimits = { maxBytes: 10 * 1024 * 1024, maxRedirects: 5, deadlineMs: 25_000 };
+
+const pageTypes = new Set(['text/html', 'application/xhtml+xml']);
+const mediaTypePattern = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
+
+function looksLikeHtml(bytes: Uint8Array) {
+  const head = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 1024)).replace(/^\uFEFF/, '');
+  return /^\s*(<!--[\s\S]*?-->\s*)*<(!doctype\s+html|html|head|body)\b/i.test(head);
+}
+
+/** The last path segment of a link as a safe attachment name, or `linked-file`. */
+function linkFilename(url: string) {
+  let segment = new URL(url).pathname.split('/').filter(Boolean).at(-1) ?? '';
+  try {
+    segment = decodeURIComponent(segment);
+  } catch {
+    /* A malformed escape keeps the raw segment. */
+  }
+  const safe = [...segment]
+    .filter(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127 && char !== '/' && char !== '\\')
+    .join('')
+    .trim()
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu, '');
+  let name = '';
+  for (const char of safe) {
+    if (name.length + char.length > 200) break;
+    name += char;
+  }
+  return name || 'linked-file';
+}
+
+function declaredType(headers: Dispatcher.ResponseData['headers']) {
+  const value = headers['content-type'];
+  const type = (Array.isArray(value) ? value[0] : value)?.split(';')[0]?.trim().toLowerCase() ?? '';
+  return mediaTypePattern.test(type) && type.length <= 127 ? type : null;
+}
+
+class LinkFailure extends Error {
+  readonly reason: PublicFileFailure;
+  constructor(reason: PublicFileFailure) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+/**
+ * Fetches one public link for reading as a file. Every hop is checked as public, connected only to its checked IPv4
+ * addresses and followed manually at most five times; no cookie, authorization or referrer is sent. The body is
+ * streamed under a 10 MiB cap within 25 seconds and typed from its bytes: HTML is a `page` for `web.fetch`, anything
+ * else is a `file`. Aborting `signal` rejects with its reason; every other failure is a named `failed` result.
+ */
+export async function fetchPublicFile(input: string, signal: AbortSignal): Promise<PublicFile> {
+  denyMcpEgress();
+  if (!publicWebConfiguration()) return { kind: 'failed', url: input, reason: 'web-off' };
+  const deadline = AbortSignal.timeout(publicFileLimits.deadlineMs);
+  const bounded = AbortSignal.any([signal, deadline]);
+  let current = input;
+  try {
+    for (let hop = 0; ; hop++) {
+      const parsed = publicWebUrlSchema.safeParse(current);
+      if (!parsed.success) throw new LinkFailure('not-public');
+      const url = parsed.data;
+      const hostname = new URL(url).hostname;
+      const addresses = await publicAddresses(url, bounded).catch(error => {
+        if (bounded.aborted) throw error;
+        throw new LinkFailure(
+          error instanceof Error && error.message === 'web-address-denied' ? 'not-public' : 'unavailable',
+        );
+      });
+      const dispatcher = publicNetwork.dispatcher(pinnedLookup(hostname, addresses));
+      try {
+        const response = await undiciRequest(url, {
+          method: 'GET',
+          dispatcher,
+          signal: bounded,
+          headers: { accept: '*/*', 'user-agent': 'TulipFarm-LinkReader/1' },
+        });
+        const location = response.headers.location;
+        if (response.statusCode >= 300 && response.statusCode < 400 && location) {
+          await response.body.dump().catch(() => {});
+          if (hop >= publicFileLimits.maxRedirects) throw new LinkFailure('unavailable');
+          current = new URL(Array.isArray(location) ? (location[0] ?? '') : location, url).href;
+          continue;
+        }
+        if (response.statusCode === 401 || response.statusCode === 403) {
+          await response.body.dump().catch(() => {});
+          throw new LinkFailure('sign-in-required');
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await response.body.dump().catch(() => {});
+          throw new LinkFailure('unavailable');
+        }
+        const declared = declaredType(response.headers);
+        const length = Number(response.headers['content-length']);
+        if (Number.isFinite(length) && length > publicFileLimits.maxBytes) {
+          response.body.destroy();
+          throw new LinkFailure('too-large');
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let classified = false;
+        for await (const chunk of response.body as AsyncIterable<Buffer>) {
+          size += chunk.length;
+          if (size > publicFileLimits.maxBytes) {
+            response.body.destroy();
+            throw new LinkFailure('too-large');
+          }
+          chunks.push(chunk);
+          // A page is known from its first bytes; it is left for web.fetch without reading the rest.
+          if (!classified && size >= 1024) {
+            classified = true;
+            const head = Buffer.concat(chunks);
+            if (!sniffMediaType(head) && ((declared && pageTypes.has(declared)) || looksLikeHtml(head))) {
+              response.body.destroy();
+              return { kind: 'page', url: input };
+            }
+          }
+        }
+        const bytes = new Uint8Array(Buffer.concat(chunks));
+        const sniffed = sniffMediaType(bytes);
+        if (!sniffed && ((declared && pageTypes.has(declared)) || looksLikeHtml(bytes)))
+          return { kind: 'page', url: input };
+        if (!bytes.byteLength) throw new LinkFailure('unavailable');
+        return {
+          kind: 'file',
+          url: input,
+          bytes,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          mediaType: sniffed?.mediaType ?? declared ?? 'application/octet-stream',
+          filename: linkFilename(url),
+        };
+      } finally {
+        void dispatcher.destroy().catch(() => {});
+      }
+    }
+  } catch (error) {
+    if (error instanceof LinkFailure) return { kind: 'failed', url: input, reason: error.reason };
+    if (signal.aborted) throw signal.reason;
+    if (deadline.aborted) return { kind: 'failed', url: input, reason: 'timed-out' };
+    return { kind: 'failed', url: input, reason: 'unavailable' };
+  }
 }
 
 function boundedText(value: string, length: number) {

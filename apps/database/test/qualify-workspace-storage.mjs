@@ -282,6 +282,7 @@ try {
     'packages/workspace-storage/common/0011_knowledge_media.sql',
     'packages/workspace-storage/common/0012_image_settings.sql',
     'packages/workspace-storage/common/0013_turn_image_models.sql',
+    'packages/workspace-storage/common/0014_conversation_links.sql',
     ...['table-migrations', 'table-registry', 'credentials', 'operators'].map(
       name => `packages/workspaces/src/${name}.ts`,
     ),
@@ -309,6 +310,7 @@ try {
       '0011_knowledge_media.sql',
       '0012_image_settings.sql',
       '0013_turn_image_models.sql',
+      '0014_conversation_links.sql',
     ],
   );
   emit({

@@ -129,8 +129,10 @@ import {
   withImages,
   type ChatImage,
   type ReplyContent,
+  type TurnFilePart,
   type TurnFiles,
 } from './turn-files.ts';
+import { linkNotice, linkReadsInstalled, messageLinkReads, messageLinks, readMessageLinks } from './links.ts';
 
 export type ConversationRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type RuntimeTransaction = Parameters<Parameters<ConversationRuntime['transaction']>[2]>[0];
@@ -1355,6 +1357,14 @@ export function createConversationExecutor(
           const turnFileParts = images ? fileParts.filter(part => !cleaned.has(part.messageId)) : [];
           const turnModel = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
           const imageModels = images ? await pinnedImageModels(tx, fence.turnId, turnModel, images) : null;
+          // Links in the current message are read once, as files; their kept outcomes answer every later attempt.
+          const links =
+            images?.links && (await linkReadsInstalled(tx))
+              ? {
+                  ...messageLinks(currentMessage.text),
+                  kept: await messageLinkReads(tx, fence.conversationId, currentMessage.id),
+                }
+              : null;
           const timeZone = timeZoneSchema
             .nullable()
             .parse(
@@ -1587,6 +1597,7 @@ export function createConversationExecutor(
             model: turnModel,
             imageModels,
             turnFileParts,
+            links,
             currentMessage,
             messages,
             fileReferences: loadedReferences,
@@ -1666,26 +1677,64 @@ export function createConversationExecutor(
           turnId: fence.turnId,
           requester: source.requester,
         });
+        const currentId = source.currentMessage.id;
+        const { links } = source;
         const read = await staged('files', () =>
-          whileLeased(fence, signal =>
-            readTurnFiles({
+          whileLeased(fence, async signal => {
+            // Each link fetch has its own deadline, so link reading needs no share of the files deadline.
+            const linked =
+              links && images.links && links.read.length
+                ? await readMessageLinks({
+                    workspaceId: fence.workspaceId,
+                    conversationId: fence.conversationId,
+                    messageId: currentId,
+                    links: links.read,
+                    kept: links.kept,
+                    reader: images.links,
+                    signal,
+                  })
+                : { reads: [], webOff: false };
+            const linkParts: TurnFilePart[] = linked.reads.flatMap(link =>
+              link.outcome === 'file'
+                ? [
+                    {
+                      kind: 'attachment' as const,
+                      messageId: currentId,
+                      attachmentId: link.attachmentId,
+                      filename: link.filename,
+                      mediaType: link.mediaType,
+                      size: link.size,
+                      sourceUrl: link.url,
+                    },
+                  ]
+                : [],
+            );
+            const turnRead = await readTurnFiles({
               signal,
               deadline: AbortSignal.timeout(turnFilesDeadlineMs),
               workspaceId: fence.workspaceId,
               conversationId: fence.conversationId,
               actor: source.requester,
-              parts: source.turnFileParts,
+              parts: [
+                ...source.turnFileParts.filter(part => part.messageId === currentId),
+                ...linkParts,
+                ...source.turnFileParts.filter(part => part.messageId !== currentId),
+              ],
               files,
               google,
               attachments: images.attachments,
               family: images.family(pinned.familyId),
               recognition,
               authorize,
-            }),
-          ),
+            });
+            return { ...turnRead, notice: links ? linkNotice(linked.reads, links.extra, linked.webOff) : '' };
+          }),
         );
         fileSources.push(...read.sources);
-        fileContext = read.context;
+        fileContext = id =>
+          id === currentId && read.notice
+            ? [read.notice, read.context(id)].filter(Boolean).join('\n\n')
+            : read.context(id);
         fileImages = read.images;
       } else if (source.fileReferences.length) {
         const read = await staged('files', () =>

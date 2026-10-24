@@ -620,6 +620,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
         '0011_knowledge_media.sql',
         '0012_image_settings.sql',
         '0013_turn_image_models.sql',
+        '0014_conversation_links.sql',
       ],
     );
     assert.equal(

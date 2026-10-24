@@ -93,3 +93,27 @@ export function publicWebReceipt(
     sources: [...titles].map(([url, title]) => ({ url, title })),
   };
 }
+
+/** Why a shared link was not read as a file. */
+export const publicFileFailures = [
+  'sign-in-required',
+  'too-large',
+  'unavailable',
+  'timed-out',
+  'not-public',
+  'storage-full',
+  'web-off',
+] as const;
+export type PublicFileFailure = (typeof publicFileFailures)[number];
+
+/**
+ * What fetching a public link produced: the bytes of a file, a web page left for `web.fetch`, or why it failed.
+ * `mediaType` comes from the bytes when they are recognisable and from the declared type otherwise.
+ */
+export type PublicFile =
+  | { kind: 'file'; url: string; bytes: Uint8Array; sha256: string; mediaType: string; filename: string }
+  | { kind: 'page'; url: string }
+  | { kind: 'failed'; url: string; reason: PublicFileFailure };
+
+/** Fetches one public link; the agents package implements it and conversations receives it injected. */
+export type FetchPublicFile = (url: string, signal: AbortSignal) => Promise<PublicFile>;

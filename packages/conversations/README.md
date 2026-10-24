@@ -79,6 +79,18 @@ Every file yields content, recognised text or a named notice. Files share a budg
 
 The turn pins its family, the image reader and the image model with the catalog revision in `tf_conversation_turns.image_models` (common migration `0013_turn_image_models.sql`). The API pins them when it admits the turn. A turn admitted another way, such as from Slack, pins them the first time its files are read. With the flag off, the executor reads only referenced files as text, exactly as before.
 
+### Reading links
+
+Under the same flag, the executor reads files shared as links ([`links.ts`](src/links.ts)). It takes the current message's https links in order, deduplicated, and reads the first 5; the rest are named as not read. Each link is fetched once per message, at most 3 at once, inside the files stage, so the turn lease and abort apply. The fetcher is injected (`TurnFiles.links`); the worker passes `fetchPublicFile` from `@tulipfarm/agents/web-fetch`.
+
+`keepLink` records each outcome in `tf_conversation_link_reads` (common migration `0014_conversation_links.sql`) with `ON CONFLICT DO NOTHING`:
+
+- A file is stored through `AttachmentBytes` under the attachment quota as a bound attachment of the message, with `source_url`. It is then read like any attachment, so later turns read the kept copy without fetching it again. Link files are not taskable or readable by MCP.
+- A page (HTML) is not read. The model is told to call `web.fetch` if it needs the text.
+- A failure is a named notice: `sign-in-required`, `too-large`, `timed-out`, `not-public`, `unavailable` or `storage-full`. A failed fetch never fails the turn.
+
+With web access off (no `FIRECRAWL_ENDPOINT`), nothing is fetched or kept and the model is told the links were not read because web access is off. A `<chat-links>` block in front of the message tells the model which links were read as files and what happened to the others.
+
 Tasks read their Files and Google Drive inputs with `readFileText` and `readGoogleFileText`. Under the flag, the worker passes `recognisingExtract`, which is `readFile` without image input. Task inputs are then recognised, labelled and cached as in chat, charged to the task owner and limited to 4 recognitions at once per task. The rendered text must still fit the task's 16,000-character input.
 
 The executor persists at most five attempts, including abandoned leases. A transient failure releases the lease, advances generation, and schedules exponential delays of 2, 4, 8, and 16 seconds. The fifth failure becomes failed-blocking. Explicit retry/cancel commands require the expected generation and stable command identity. Generic controls refuse waiting and reconciling turns. The deterministic responder has no external effects to reconcile. This retry policy must not be reused for unknown tool effects without domain reconciliation.
