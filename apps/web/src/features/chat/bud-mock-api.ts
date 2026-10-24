@@ -286,7 +286,14 @@ function installBudMock() {
         onboarding: start !== 'empty',
         status: 'ready',
         version: 1,
-        items: start === 'empty' ? [] : start === 'mixed' ? [...tasks.slice(0, 3), ...setup.slice(1, 3)] : setup,
+        items:
+          start === 'empty'
+            ? []
+            : start === 'mixed'
+              ? [...tasks.slice(0, 3), ...setup.slice(1, 3)]
+              : start === 'sparse'
+                ? [tasks[0], ...setup.slice(0, 4)]
+                : setup,
       });
     }
     if (path.endsWith('/recommendations'))

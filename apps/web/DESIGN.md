@@ -367,16 +367,21 @@ Inspected 13 October 2026 in
 uses fictional dev-only data; it does not establish live provider or model behavior.
 
 Keep the composer as the main action. Place the welcome and its short explanation
-beside the avatar, with their text edges aligned. Anchor the empty-chat content
+beside the avatar, with their text edges aligned. The explanation is one action
+line, "Ask anything, or start from a task below."; the privacy fact belongs in the
+**Personal chat** control's tooltip, not the intro. Anchor the empty-chat content
 from the top rather than centering the entire growing list: opening setup must
-not move the greeting or composer. Let short screens scroll.
+not move the greeting or composer. Let short screens scroll, and leave enough
+bottom room on phones that the floating Bud button never covers the last control.
 
-Separate **Start with a task** from **Set up your workspace**. Show one saved setup
-action initially; put the remaining items behind **More setup options**, changing
-to **Fewer setup options** with an upward chevron when open. Do not repeat the
-heading inside the expanded list. State that setup is optional. An all-setup list
-also offers three general planning/drafting prompts; this implies no connected-data
-access. Preserve the saved-list loading, recovery, and privacy contract.
+Separate **Start with a task** from **Set up your workspace (optional)**; the
+heading carries the optional state, so add no separate footnote. Show one saved
+setup action initially; put the remaining items behind **More setup options**,
+changing to **Fewer setup options** with an upward chevron when open. Do not repeat
+the heading inside the expanded list. When the saved list has fewer than three
+prompts, top it up to three with general planning/drafting prompts, skipping any
+whose id or label is already shown; this implies no connected-data access.
+Preserve the saved-list loading, recovery, and privacy contract.
 Recovery reloads saved state, never starts generation.
 
 Use compact action rows, not a wall of cards. Keep trailing arrows visible at rest,

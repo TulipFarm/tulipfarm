@@ -207,7 +207,10 @@ try {
       'Business tasks have their own group',
     );
     assert.equal(
-      await region.getByRole('region', { name: 'Set up your workspace', exact: true }).getByRole('button').count(),
+      await region
+        .getByRole('region', { name: 'Set up your workspace (optional)', exact: true })
+        .getByRole('button')
+        .count(),
       1,
       'Setup starts with one next step',
     );

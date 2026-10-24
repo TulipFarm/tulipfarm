@@ -22,7 +22,7 @@ test(
     try {
       await page.goto(`${origin}bud-mock?start=setup`);
       const tasks = page.getByRole('region', { name: 'Start with a task', exact: true });
-      const setup = page.getByRole('region', { name: 'Set up your workspace', exact: true });
+      const setup = page.getByRole('region', { name: 'Set up your workspace (optional)', exact: true });
       await setup.waitFor();
       assert.equal(await tasks.getByRole('button').count(), 3);
       assert.equal(await setup.getByRole('button').count(), 1);
@@ -215,6 +215,25 @@ test(
       assert.equal(await tasks.getByRole('button').count(), 3);
       await page.getByRole('button', { name: 'More tasks (2)', exact: true }).click();
       assert.equal(await page.getByRole('button', { name: 'Write down a business process', exact: true }).count(), 1);
+      await page.goto(`${origin}bud-mock?start=sparse`);
+      await setup.waitFor();
+      assert.deepEqual(
+        await tasks.getByRole('button').allInnerTexts(),
+        ['Plan customer follow-ups', 'Draft a support reply', 'Plan my week'],
+        'A one-item saved list is topped up with general prompts, without repeating a label',
+      );
+      await page.setViewportSize({ width: 390, height: 844 });
+      const lastControl = page.getByRole('button', { name: /^More setup options/ });
+      await lastControl.scrollIntoViewIfNeeded();
+      await page
+        .getByRole('region', { name: 'Personal conversations' })
+        .evaluate(element => element.querySelector('.overflow-y-auto')?.scrollTo({ top: 1e6, behavior: 'instant' }));
+      const lastBounds = await lastControl.boundingBox();
+      const launcherBounds = await page.getByRole('button', { name: 'Open Bud', exact: true }).boundingBox();
+      assert.ok(
+        lastBounds.y + lastBounds.height <= launcherBounds.y,
+        'Bud quick chat never covers the last setup control',
+      );
       assert.deepEqual(errors, []);
     } catch (error) {
       console.error(error);
