@@ -106,11 +106,12 @@ async function setup(t) {
     parts: [{ kind: 'text', text: 'Make a poster.' }],
   });
   const drawn = Buffer.from(await png(16, 16, '#2a7'));
-  const state = { script: [], chat: [], images: [] };
+  const state = { script: [], chat: [], images: [], beforeImage: async () => {} };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     const host = new URL(url).host;
     if (imageHosts.includes(host)) {
       state.images.push({ host, body: JSON.parse(options.body) });
+      await state.beforeImage(options.signal);
       return Response.json({ data: [{ b64_json: drawn.toString('base64'), mime_type: 'image/png' }] });
     }
     assert.equal(url, 'https://api.anthropic.com/v1/messages');
@@ -238,5 +239,35 @@ test("a specialist generates images with its step family's paired image model, i
   assert.deepEqual(
     rows.map(row => [row.origin_kind, row.origin_id, row.state, row.image_model_id, row.flow_id, row.charged !== null]),
     [['run', attemptId, 'saved', 'grok-image', attemptId, true]],
+  );
+});
+
+test('a specialist image request that outlasts the lease of its last model step is saved, charged and the attempt completes', async t => {
+  const { f, create, run, state, folder } = await setup(t);
+  const plan = await create({ modelFamilyId: 'claude-haiku', tools: ['images.generate'] });
+  state.script.push([{ prompt: 'A spring poster', folderId: folder.id }], 'Drew it.');
+  // The last model step's lease has 4 s left when the provider starts drawing, and the drawing takes 7 s.
+  state.beforeImage = async signal => {
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_agent_plan_attempts')} SET lease_until=clock_timestamp()+interval '4 seconds' WHERE status='running'`,
+    );
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 7000);
+      signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      });
+    });
+  };
+  const { attemptId, attempt } = await run(plan);
+  assert.deepEqual([attempt.status, attempt.failure_code], ['completed', null], JSON.stringify(attempt));
+  const rows = (
+    await f.db.platform.query(
+      `SELECT g.origin_id,g.state,u.charged FROM ${f.table('tf_image_generations')} g JOIN ${f.table('tf_credit_usage')} u ON u.id=g.usage_id`,
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map(row => [row.origin_id, row.state, row.charged !== null && BigInt(row.charged) > 0n]),
+    [[attemptId, 'saved', true]],
   );
 });
