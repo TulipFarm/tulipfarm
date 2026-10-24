@@ -8,7 +8,12 @@ import { workspaceUrl } from './workspace.ts';
 
 // Scripted replies stand in for the model, so seeding never calls a provider or spends credits.
 const scriptedReply: ConversationReply = async ({ messages }) => {
-  const last = messages.at(-1)?.text ?? '';
+  const message = messages.at(-1);
+  const last = !message
+    ? ''
+    : 'text' in message
+      ? message.text
+      : message.content.flatMap(part => (part.type === 'text' ? [part.text] : [])).join('\n');
   return `Seeded reply (no model was called).\n\nYou asked about: "${last.slice(0, 160)}"\n\n- Next step: review the related records\n- Owner: the workspace team`;
 };
 
