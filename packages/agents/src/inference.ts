@@ -2227,11 +2227,12 @@ export async function inferWithTools(
   let rereadOffered = false;
   /** The provider's prompt tokens for the last reply round, and that request's measure. */
   let baseline: (RequestMeasure & { tokens: number }) | undefined;
-  /** Text bytes of the last reply-round request, so a rejected one can recalibrate the estimate. */
-  let lastRequestBytes = 0;
+  /** The last reply-round request's measure, so a rejected one can recalibrate the estimate. */
+  let lastRequest: RequestMeasure = { inputBytes: 0, imageInputTokens: 0 };
   /**
    * How many real tokens one estimated token turned out to be. It starts at 1 and only grows when the provider rejects
-   * a request as too long: that request was at least the window, so later estimates are scaled up to match.
+   * a request as too long: that request was at least the window, so later estimates are scaled up to match. Only its
+   * text is rescaled; its image bounds are already the most each image can cost.
    */
   let tokenScale = 1;
   const scaled = (bytes: number) => Math.ceil(estimateInputTokens(bytes) * tokenScale);
@@ -2487,7 +2488,7 @@ export async function inferWithTools(
             tools?.answerText,
             target,
             (measure, usage) => {
-              lastRequestBytes = measure.inputBytes;
+              lastRequest = measure;
               baseline =
                 usage.kind === 'known'
                   ? {
@@ -2518,7 +2519,10 @@ export async function inferWithTools(
             overflow = error;
           }
           if (overflows >= 2) throw new Error('conversation-context-overflow', { cause: overflow });
-          tokenScale = Math.max(tokenScale, limits.window / Math.max(1, estimateInputTokens(lastRequestBytes)));
+          tokenScale = Math.max(
+            tokenScale,
+            (limits.window - lastRequest.imageInputTokens) / Math.max(1, estimateInputTokens(lastRequest.inputBytes)),
+          );
           baseline = undefined;
           await compactContext(
             step,
