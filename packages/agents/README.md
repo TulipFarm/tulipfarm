@@ -113,7 +113,7 @@ chat is offered. Helpers cannot delegate again, and saved children start at dept
 300); one that reaches it ends as timed out, one stopped by the user or by stopping the reply ends as stopped, and both
 return their partial output. The tool result holds every report, bounded by the reply's 10% tool-result cap. Helpers
 charge the reply's credit hold; a saved child spends from its own task allowance (25 credits unless the call asks for
-up to 100), and its spending is counted in the call's total. The worker publishes live cards as `subagents` stream events, and the chat shows them with Sprout's `AgentFanout`.
+up to 100), and its spending is counted in the call's total. The worker publishes live cards as `subagents` stream events, and the chat shows them with Sprout's `AgentFanout`. A helper's card names the chat's model family, shown with its maker's logo; a saved agent's card names its `agentId`, shown with its `AgentAvatar`.
 Saved agents and Slack cannot use the tool. Telemetry records kind, outcome, duration, and credits only.
 
 Planning plans use `0046_planning.sql`: original requirements, receipt-backed
