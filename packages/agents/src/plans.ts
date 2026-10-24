@@ -18,6 +18,7 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { taskTransition } from './task-telemetry.ts';
 import { requirePlanEvidence } from './plan-evidence.ts';
+import { stepFamilyAvailable } from './model-availability.ts';
 import {
   AgentPlanError,
   applyPlanMutations,
@@ -328,11 +329,14 @@ export function createAgentPlans(runtime: AgentStorage) {
     version: number,
     specialists: readonly Specialist[],
   ) {
-    for (const specialist of specialists)
+    for (const specialist of specialists) {
+      if (specialist.modelFamilyId && !(await stepFamilyAvailable(tx, specialist.modelFamilyId)))
+        throw new PlanGraphError('model-unavailable', specialist.key);
       await tx.client.query(
         `INSERT INTO ${relation(tx, 'tf_agent_plan_specialists')} (plan_id,key,definition,created_version) VALUES ($1,$2,$3,$4)`,
         [planId, specialist.key, specialist, version],
       );
+    }
   }
   async function event(
     tx: AgentTransaction,

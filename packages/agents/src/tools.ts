@@ -67,6 +67,7 @@ import {
   generateImageOutputs,
   type ImageGenerator,
   type ImageModelChoice,
+  type ImageOrigin,
   type ImageOutputStore,
 } from '@tulipfarm/conversations/image-outputs';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
@@ -572,15 +573,23 @@ export type ChatToolsOptions = {
   /** Generates and saves images for `images.generate`; without it, the tool is refused. */
   images?: ChatImages | undefined;
 };
-/** What a chat turn generates images with. The model is the one pinned on the turn at admission. */
+/** What a chat turn or plan specialist generates images with. The model is the one pinned when the work was admitted. */
 export type ChatImages = {
   files: ImageOutputStore;
-  attachments: AttachmentReader;
+  attachments?: AttachmentReader | undefined;
   autonomous: boolean;
   /** The unguarded workspace runtime: image holds settle through it even after the reply is stopped. */
   ledger: Runtime;
-  /** The turn's pinned image model and its provider call. */
-  choose(tx: AuthorizationTransaction, turnId: string): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
+  /** The pinned image model of the turn or run, and its provider call. */
+  choose(
+    tx: AuthorizationTransaction,
+    originId: string,
+  ): Promise<{ model: ImageModelChoice; generate: ImageGenerator }>;
+  /**
+   * A plan specialist's attempt: its images count against the attempt rather than a chat turn, and are billed to the
+   * attempt's flow within its credit allowance.
+   */
+  run?: { runId: string; allowanceCredits: string } | undefined;
 };
 /** What `files.read` reads with: Files, Google Drive and the images reader of the workspace. */
 export type ChatFiles = {
@@ -1130,23 +1139,32 @@ export function createChatTools(
       case 'plans.start':
         return (await invokePlan(context, call)).result;
       case 'images.generate': {
-        if (!images || !context.origin) throw new AccessDenied();
-        const origin = context.origin;
+        const turn = context.origin,
+          run = images?.run;
+        if (!images || (!run && !turn)) throw new AccessDenied();
+        const origin: ImageOrigin = run
+          ? { kind: 'run', runId: run.runId }
+          : { kind: 'turn', conversationId: turn!.conversationId, turnId: turn!.turnId };
         const transaction = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
           withHuman(runtime, workspaceId, actor, 'read', operation);
         const ledger = <T>(operation: (tx: Parameters<Parameters<typeof withHuman>[4]>[0]) => Promise<T>) =>
           images.ledger.transaction(workspaceId, savedAgentCompatibility, operation);
-        const { model, generate } = await transaction(tx => images.choose(tx, origin.turnId));
+        const { model, generate } = await transaction(tx =>
+          images.choose(tx, origin.kind === 'run' ? origin.runId : origin.turnId),
+        );
         return generateImageOutputs(
           { files: images.files, attachments: images.attachments, transaction, ledger },
           {
             workspaceId,
             actor,
             autonomous: images.autonomous,
-            origin: { kind: 'turn', conversationId: origin.conversationId, turnId: origin.turnId },
+            origin,
             model,
             generate,
-            credits: { flowId: origin.conversationId, activity: 'chat', agentId: null },
+            credits:
+              origin.kind === 'run'
+                ? { flowId: origin.runId, activity: 'agent', agentId: null, allowanceCredits: run!.allowanceCredits }
+                : { flowId: origin.conversationId, activity: 'chat', agentId: null },
             signal: context.signal,
           },
           call,

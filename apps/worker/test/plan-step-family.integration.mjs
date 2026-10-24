@@ -197,7 +197,10 @@ test('a plan step naming a family the workspace turned off, or one not served, i
         },
       ],
       mutations: [
-        { op: 'add', task: { key: 'other', title: 'Other', assignee: { kind: 'specialist', specialist: 'other' } } },
+        {
+          op: 'add',
+          task: { key: 'other-poster', title: 'Other', assignee: { kind: 'specialist', specialist: 'other' } },
+        },
       ],
     }),
     error => error.code === 'model-unavailable',

@@ -188,6 +188,7 @@ async function run() {
             wakePlan: planDispatch.wake,
             wakeTask: (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
             knowledge: createKnowledgeTools({ runtime: resources.runtime }),
+            files: chatObjects ? createFiles(guarded, chatObjects) : undefined,
           })
         : undefined;
     slack = guarded
