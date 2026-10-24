@@ -47,8 +47,8 @@ export class KnowledgeAdminRequired extends Error {
 /** The first common storage version with the media tables (0011). Older workspaces keep the switch on and store no gaps. */
 export const mediaStorageVersion = 11;
 export const mediaLimitsForStorage = Object.freeze({
-  /** Orphaned recognitions younger than this are kept, so a read in progress can still use them. */
-  orphanHours: 24,
+  /** Recognitions older than this are pruned when new ones are written. */
+  cacheDays: 180,
   cacheBytes: 256 * 1024,
   pruneBatch: 100,
   /** Revisions re-queued per sweep once recognition becomes available. */
@@ -113,15 +113,18 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
           (await tx.client.query(`SELECT recognition FROM ${table(tx, 'recognitions')} WHERE key=$1`, [key])).rows[0],
         undefined,
       );
-      // The stored row also names the file it was read from, for the orphan sweep; readers never see it.
-      const { source: _, ...stored } = z.record(z.string(), z.unknown()).catch({}).parse(row?.recognition);
-      const parsed = mediaRecognitionSchema.safeParse(stored);
+      const parsed = mediaRecognitionSchema.safeParse(row?.recognition);
       return parsed.success ? parsed.data : undefined;
     },
-    async set(key, value, source) {
-      const json = JSON.stringify({ ...mediaRecognitionSchema.parse(value), source });
+    async set(key, value) {
+      const json = JSON.stringify(mediaRecognitionSchema.parse(value));
       if (Buffer.byteLength(key) > 1024 || Buffer.byteLength(json) > mediaLimitsForStorage.cacheBytes) return;
       await run(async tx => {
+        await tx.client.query(
+          `DELETE FROM ${table(tx, 'recognitions')} WHERE key IN (SELECT key FROM ${table(tx, 'recognitions')}
+            WHERE created_at<clock_timestamp()-make_interval(days=>$1) ORDER BY created_at LIMIT $2)`,
+          [mediaLimitsForStorage.cacheDays, mediaLimitsForStorage.pruneBatch],
+        );
         await tx.client.query(
           `INSERT INTO ${table(tx, 'recognitions')} (key,recognition) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING`,
           [key, json],
@@ -129,28 +132,6 @@ export function createRecognitionCache(runtime: Runtime, workspaceId: string): M
       }, undefined);
     },
   };
-}
-
-/**
- * Deletes one batch of orphaned recognitions, oldest first along the created_at index: those whose source file (the
- * file the media was read from, recorded when it was written) is no longer held by any file, live chat attachment or
- * Knowledge revision here. A recognition younger than `orphanHours` is kept so a read in progress can still use it.
- */
-export async function pruneRecognitions(tx: Tx) {
-  if (!(await mediaInstalled(tx))) return 0;
-  const held = (sha: string) => `EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_files')} f WHERE f.sha256=${sha})
-    OR EXISTS (SELECT 1 FROM ${qualified(tx.schema, 'tf_conversation_attachments')} a
-      JOIN ${qualified(tx.schema, 'tf_conversations')} c ON c.id=a.conversation_id
-      WHERE a.sha256=${sha} AND a.state<>'abandoned' AND c.deleted_at IS NULL)
-    OR EXISTS (SELECT 1 FROM ${table(tx, 'revisions')} r WHERE r.original->>'sha256'=${sha})`;
-  const result = await tx.client.query(
-    `DELETE FROM ${table(tx, 'recognitions')} WHERE key IN (SELECT key FROM ${table(tx, 'recognitions')} k
-      WHERE k.created_at<clock_timestamp()-make_interval(hours=>$1)
-        AND NOT (${held(`COALESCE(k.recognition->>'source',split_part(k.key,':',1))`)})
-      ORDER BY k.created_at LIMIT $2)`,
-    [mediaLimitsForStorage.orphanHours, mediaLimitsForStorage.pruneBatch],
-  );
-  return result.rowCount ?? 0;
 }
 
 /**

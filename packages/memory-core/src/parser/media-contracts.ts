@@ -205,8 +205,7 @@ export interface MediaRecognizer {
 /** Workspace-scoped reuse of recognitions. Keys already include the model id and prompt version. */
 export interface MediaRecognitionCache {
   get(key: string): Promise<MediaRecognition | undefined>;
-  /** `source` is the SHA-256 of the file the media came from; the recognition is kept while a file holds it. */
-  set(key: string, value: MediaRecognition, source: string): Promise<void>;
+  set(key: string, value: MediaRecognition): Promise<void>;
 }
 
 export interface KnowledgeRecognitionOptions {

@@ -182,7 +182,6 @@ function imageExtraction(input: KnowledgeParseInput): KnowledgeExtraction {
 function fileRecognition(
   recognizer: MediaRecognizer,
   { cache, signal, failedRecognition = 'throw', images }: KnowledgeRecognitionOptions,
-  source: string | undefined,
 ) {
   const limit = createLimit(recognitionConcurrency);
   const results = new Map<string, Promise<RecognitionOutcome>>();
@@ -213,7 +212,7 @@ function fileRecognition(
         }),
       );
       used = true;
-      await cache?.set(key, result, source ?? sha256);
+      await cache?.set(key, result);
       return result;
     } catch (error) {
       if (error instanceof MediaRecognitionUnavailable) {
@@ -254,15 +253,14 @@ function fileRecognition(
 /**
  * The one entry point for recognising the units of a file, used by chat, tasks and, through
  * `readKnowledgeSegments`, Knowledge: the cache, deduplication, concurrency, the per-file cap and per-unit credit
- * failures. The recognizer is bound by the host to the requester who pays and the model that reads. `source` is the
- * SHA-256 of the file the units came from, so the cache keeps a recognition only while some file holds it; it
- * defaults to each unit's own bytes. Outcomes are in unit order.
+ * failures. The recognizer is bound by the host to the requester who pays and the model that reads. Outcomes are in
+ * unit order.
  */
 export async function recognise(
   units: readonly RecognitionUnit[],
-  options: KnowledgeRecognitionOptions & { recognizer: MediaRecognizer; source?: string },
+  options: KnowledgeRecognitionOptions & { recognizer: MediaRecognizer },
 ): Promise<RecognitionOutcome[]> {
-  const recognition = fileRecognition(options.recognizer, options, options.source);
+  const recognition = fileRecognition(options.recognizer, options);
   return Promise.all(units.map(unit => recognition.recognise(unit)));
 }
 
@@ -284,7 +282,7 @@ async function recognizeMedia(
     return { recognized, gaps, failed };
   }
 
-  const recognition = fileRecognition(recognizer, options, createHash('sha256').update(input.bytes).digest('hex'));
+  const recognition = fileRecognition(recognizer, options);
   const settle = (item: MediaItem, result: RecognitionOutcome) => {
     if (result.kind === 'failed') failed += 1;
     else if (result.kind === 'recognized') recognized.set(item.id, result);

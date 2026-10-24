@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { parseKnowledgeDocument, recognise, KnowledgeParseError, MediaRecognitionUnavailable } from '../dist/parser.js';
 import { png as realPng } from './fixtures/parser-media.mjs';
@@ -240,25 +239,22 @@ test('under the images rules a file recognises its first 100 units and names the
   );
 });
 
-test('under the images rules cached units count toward the cap and are stored against their file', async () => {
+test('under the images rules cached units count toward the cap', async () => {
   const ids = Array.from({ length: 101 }, (_, index) => `m${index + 1}`);
   const fake = sandbox({
     segments: [{ location: slide1, markdown: ids.map(id => mediaPlaceholder(id)).join('\n\n') }],
     media: ids.map(id => image(id, slide1, { alt: id })),
   });
   const store = new Map();
-  const sources = new Set();
   const cache = {
     get: async key => store.get(key),
-    set: async (key, value, source) => {
+    set: async (key, value) => {
       store.set(key, value);
-      sources.add(source);
     },
   };
   const first = recognizer();
   await parseKnowledgeDocument(input, { recognizer: first, cache, images: true }, fake);
   assert.equal(first.calls.length, 100);
-  assert.deepEqual([...sources], [createHash('sha256').update(input.bytes).digest('hex')]);
   const second = recognizer();
   const again = await parseKnowledgeDocument(input, { recognizer: second, cache, images: true }, fake);
   assert.equal(second.calls.length, 0, 'the second read is answered from the cache');

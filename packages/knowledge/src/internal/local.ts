@@ -35,7 +35,6 @@ import {
   publicationGaps,
   readKnowledgeSettings,
   recognitionFailed,
-  pruneRecognitions,
   recognitionOptions,
   recordParse,
   publicationSeed,
@@ -572,7 +571,6 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     const available = recognitionAvailable ? await recognitionAvailable(workspaceId) : false;
     return jobTransaction(workspaceId, async tx => {
       if (available) await requeueLocalRecognition(tx, mediaLimitsForStorage.sweepBatch);
-      await pruneRecognitions(tx);
       await tx.client
         .query(`UPDATE ${table(tx, 'work')} w SET parsing=CASE WHEN w.attempts>=8 THEN 'failed' ELSE 'queued' END,failure=CASE WHEN w.attempts>=8 THEN 'provider' ELSE NULL END
         FROM ${table(tx, 'jobs')} j WHERE w.revision_id=j.revision_id AND w.parsing='parsing' AND j.lease_until<=clock_timestamp()`);

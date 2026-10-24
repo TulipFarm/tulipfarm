@@ -269,7 +269,7 @@ async function readImage(
     };
   if (!options.recognition) return { failure: 'recognition-unavailable' };
   // Keyed by the file's own bytes, so Knowledge and chat share one recognition of the same image.
-  const source = sha256(bytes);
+  const digest = sha256(bytes);
   const [result] = await recognise(
     [
       {
@@ -279,12 +279,11 @@ async function readImage(
         width: prepared.width,
         height: prepared.height,
         alt: '',
-        sha256: source,
+        sha256: digest,
       },
     ],
     {
       ...options.recognition,
-      source,
       images: true,
       failedRecognition: 'count',
       ...(options.signal ? { signal: options.signal } : {}),
