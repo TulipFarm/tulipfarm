@@ -100,6 +100,15 @@ test('HTML is a page whatever its declared type, and other text is a file', asyn
   assert.equal(csv.filename, 'data.csv');
 });
 
+test('a long link name is cut at 200 characters without splitting an emoji', async t => {
+  const name = `a${'😀'.repeat(120)}`;
+  await localWeb(t, {
+    [`site.example.com/${encodeURIComponent(name)}`]: send(200, 'a,b\n', { 'content-type': 'text/csv' }),
+  });
+  const file = await fetchPublicFile(`https://site.example.com/${encodeURIComponent(name)}`, AbortSignal.timeout(5000));
+  assert.equal(file.filename, `a${'😀'.repeat(99)}`);
+});
+
 test('401 and 403 need sign-in and other errors are unavailable', async t => {
   await localWeb(t, {
     'private.example.com/a': send(401),
