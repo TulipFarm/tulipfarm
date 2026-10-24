@@ -279,12 +279,13 @@ export function createPlanComposition(options: {
       specialistBrief(assignment),
       assignment.tools as Parameters<typeof inferSpecialist>[3],
       execute,
-      async ({ step, inputBytes, maxOutputTokens, provider, model }) => {
+      async ({ step, inputBytes, imageInputTokens, maxOutputTokens, provider, model }) => {
         if (Date.now() >= retained.deadlineAt || Date.now() - started > assignment.allowance.activeMilliseconds)
           throw new Error('time-limit');
         if (provider !== validated.provider || model !== validated.model) throw new Error('model-unpriced');
-        if (estimateInputTokens(inputBytes) + 4096 > price.maxInputTokens) throw new Error('context-overflow');
-        const maxInputTokens = Math.min(inputBytes + 4096, price.maxInputTokens);
+        if (estimateInputTokens(inputBytes) + imageInputTokens + 4096 > price.maxInputTokens)
+          throw new Error('context-overflow');
+        const maxInputTokens = Math.min(inputBytes + imageInputTokens + 4096, price.maxInputTokens);
         const quote = {
           modelId: price.modelId,
           pricingRevision: price.pricingRevision,

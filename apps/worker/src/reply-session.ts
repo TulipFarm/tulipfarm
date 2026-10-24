@@ -402,13 +402,14 @@ export async function beginReplySession(input: {
     );
     if (!model) throw new Error('conversation-model-unpriced');
     // Request bytes bound the hold, never the context: the reply loop compacts by estimated tokens, so size never fails it.
-    const maxInputTokens = Math.min(attempt.inputBytes + 4096, model.price.maxInputTokens);
+    // Image data is left out of the bytes and bounded by the model's image token limit instead.
+    const inputBound = attempt.inputBytes + attempt.imageInputTokens;
+    const maxInputTokens = Math.min(inputBound + 4096, model.price.maxInputTokens);
     const needCost = quote(model, maxInputTokens, attempt.maxOutputTokens);
     const need = units(needCost.toString());
     const overPlan =
       plan !== null && (plan.remainingUnits < consumed() + need || plan.remainingMilliseconds <= unflushed());
-    if (!hold || hold.held - consumed() < need + 1n || overPlan)
-      await topUp(attempt.step, model, needCost, attempt.inputBytes);
+    if (!hold || hold.held - consumed() < need + 1n || overPlan) await topUp(attempt.step, model, needCost, inputBound);
     const call: Call = {
       id: chatId(attempt.step),
       modelId: model.price.modelId,
@@ -420,7 +421,7 @@ export async function beginReplySession(input: {
     // Sub-agent calls use their own step range; the reply's checkpoints keep following the chat's own steps.
     if (!spent) {
       lastStep = Math.max(lastStep, attempt.step);
-      lastInputBytes = attempt.inputBytes;
+      lastInputBytes = inputBound;
     }
     const date = new Date().toISOString().slice(0, 10);
     return async (usage: InferenceUsage, outcome?: { rejected: boolean }) => {
