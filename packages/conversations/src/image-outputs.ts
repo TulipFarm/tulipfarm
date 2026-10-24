@@ -217,7 +217,7 @@ const sourceTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 function imageName(call: z.output<typeof generateImagesCallSchema>, index: number, mediaType: string) {
   const base =
     (call.name ?? call.prompt)
-      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+      .replace(/[\\/:*?"<>|\p{Cc}]+/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80)

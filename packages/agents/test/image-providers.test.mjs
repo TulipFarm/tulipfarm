@@ -153,7 +153,12 @@ test('responses read into an image with usage, a refusal, or nothing', () => {
       data: [{ b64_json: pngBase64 }],
       usage: { input_tokens: 12, output_tokens: 4160 },
     }),
-    { kind: 'image', bytes: Buffer.from(png), mediaType: 'image/png', usage: { kind: 'known', input: 12, output: 4160 } },
+    {
+      kind: 'image',
+      bytes: Buffer.from(png),
+      mediaType: 'image/png',
+      usage: { kind: 'known', input: 12, output: 4160 },
+    },
   );
   assert.deepEqual(readImageResponse('xai-images', { data: [{ b64_json: pngBase64, mime_type: 'image/jpeg' }] }), {
     kind: 'image',
@@ -162,16 +167,15 @@ test('responses read into an image with usage, a refusal, or nothing', () => {
     usage: { kind: 'unknown' },
   });
   const gemini = readImageResponse('gemini-images', {
-    candidates: [{ content: { parts: [{ text: 'here' }, { inlineData: { mimeType: 'image/png', data: pngBase64 } }] } }],
+    candidates: [
+      { content: { parts: [{ text: 'here' }, { inlineData: { mimeType: 'image/png', data: pngBase64 } }] } },
+    ],
     usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1290 },
   });
   assert.equal(gemini.kind, 'image');
   assert.deepEqual(gemini.usage, { kind: 'known', input: 10, output: 1290 });
   assert.equal(readImageResponse('gemini-images', { promptFeedback: { blockReason: 'SAFETY' } }).kind, 'refused');
-  assert.equal(
-    readImageResponse('gemini-images', { candidates: [{ finishReason: 'IMAGE_SAFETY' }] }).kind,
-    'refused',
-  );
+  assert.equal(readImageResponse('gemini-images', { candidates: [{ finishReason: 'IMAGE_SAFETY' }] }).kind, 'refused');
   assert.equal(readImageResponse('gemini-images', { candidates: [{ finishReason: 'STOP' }] }), null);
   assert.equal(readImageResponse('openai-images', { data: [] }), null);
 });
@@ -185,7 +189,12 @@ test('a moderation rejection is an unbilled refusal without provider text; other
     new Response(JSON.stringify({ error: { code: 'invalid_request', message: 'bad size' } }), { status: 400 }),
   ];
   t.mock.method(globalThis, 'fetch', async () => replies.shift());
-  const refused = await requestProviderImage(routes.openai, { prompt, size: '1024x1024', quality: 'standard', sources: [] });
+  const refused = await requestProviderImage(routes.openai, {
+    prompt,
+    size: '1024x1024',
+    quality: 'standard',
+    sources: [],
+  });
   assert.deepEqual(refused, { kind: 'refused', usage: { kind: 'unknown' } });
   await assert.rejects(
     requestProviderImage(routes.openai, { prompt, size: '1024x1024', quality: 'standard', sources: [] }),
@@ -205,8 +214,5 @@ test('a route needs its credential and never uses Anthropic', () => {
   };
   assert.equal(imageProviderRoute(model, {}), null);
   assert.equal(imageProviderRoute(model, { IMAGE_TEST_KEY: 'key' })?.apiKey, 'key');
-  assert.equal(
-    imageProviderRoute({ route: { ...model.route, type: 'anthropic' } }, { IMAGE_TEST_KEY: 'key' }),
-    null,
-  );
+  assert.equal(imageProviderRoute({ route: { ...model.route, type: 'anthropic' } }, { IMAGE_TEST_KEY: 'key' }), null);
 });
