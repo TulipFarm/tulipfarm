@@ -55,6 +55,7 @@ const { createAgentExecutor } = await import('../src/executor.ts');
 const { modelEnvironment } = await import('../src/model-environment.ts');
 const { modelNativeTools } = await import('../src/model.ts');
 const { runImageChoice } = await import('../src/image-generation.ts');
+const { creditUnitsForProviderCost } = await import('@tulipfarm/workspace-storage/credits');
 
 /** A PNG with an ancillary `caBX` chunk after IHDR, standing in for a C2PA manifest the provider signed. */
 async function signedPng() {
@@ -70,118 +71,163 @@ async function signedPng() {
   return Buffer.concat([image.subarray(0, afterHeader), length, type, data, crc, image.subarray(afterHeader)]);
 }
 
+/**
+ * A workspace with a member who owns a task agent that lists images.generate, a Posters folder, and a task engine whose
+ * model answers with `decisions` in order. Image requests go to `state.draw(signal, n)`, which answers one signed PNG.
+ */
+async function setup(t, { choose = runImageChoice } = {}) {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    delete process.env.FEATURE_FLAG_IMAGES;
+    await runtime?.close();
+    await db.close();
+  });
+  await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+  const w = await db.create(await workspaceTableMigrations()),
+    table = name => `"${w.names.schema}".${name}`;
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=$1,granted=$1`, ['100000000000000']);
+  const user = randomUUID(),
+    member = randomUUID();
+  await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+    member,
+    user,
+  ]);
+  const agent = await savedTaskAgent(db, w, runtime, user, member, [], ['images.generate']);
+  await createAgentExecutor({ runtime }).configure(
+    w.id,
+    { kind: 'human', userId: w.userId, membershipId: w.membershipId },
+    { agentId: agent.agentId, version: 0, enabled: true, teamIds: [agent.teamId], limits: [] },
+  );
+  const objects = new Map();
+  const files = createFiles(runtime, {
+    putIfAbsent: async (key, value) => {
+      if (!objects.has(key)) objects.set(key, Buffer.from(value));
+    },
+    read: async key => objects.get(key),
+    remove: async key => {
+      objects.delete(key);
+    },
+  });
+  const folder = await files.createFolder(w.id, user, randomUUID(), { name: 'Posters', parentId: null });
+
+  const signed = await signedPng();
+  const providerCalls = [];
+  const realFetch = globalThis.fetch;
+  const answer = () =>
+    Response.json({ data: [{ b64_json: signed.toString('base64') }], usage: { input_tokens: 10, output_tokens: 100 } });
+  const state = { draw: async () => answer() };
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    if (String(input) !== 'https://api.openai.com/v1/images/generations') return realFetch(input, init);
+    providerCalls.push({ headers: init.headers, body: JSON.parse(init.body) });
+    return state.draw(init.signal, providerCalls.length);
+  });
+
+  const decisions = [];
+  const inputs = [];
+  const model = {
+    ...modelEnvironment().continuity(key => createModelRouteHealth(db.platform, key)),
+    infer: async (_resolution, input) => {
+      inputs.push(input);
+      return {
+        kind: 'success',
+        decision: decisions.shift() ?? { kind: 'answer', text: 'Done.' },
+        actualModel: 'acme-chat-1',
+        requestId: randomUUID(),
+        usage: { kind: 'known', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
+      };
+    },
+  };
+  const tasks = createAgentTasks(runtime);
+  const engine = createTaskRuntime(
+    runtime,
+    model,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { files, choose },
+  );
+  const start = (text, limits = {}) =>
+    tasks.start(w.id, user, {
+      requestId: randomUUID(),
+      agentId: agent.agentId,
+      scope: [],
+      text,
+      limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000, ...limits },
+    });
+  const run = async id => {
+    for (let n = 0; n < 16 && ['pending', 'waiting-approval'].includes((await tasks.read(w.id, user, id)).status); n++)
+      await engine.process(w.id, id);
+    return tasks.read(w.id, user, id);
+  };
+  const imageCredits = async () =>
+    (
+      await db.platform.query(
+        `SELECT id,flow_id,activity,agent_id,provider_pico_usd::text,charged::text FROM ${table('tf_credit_usage')} WHERE id LIKE 'image:%'`,
+      )
+    ).rows;
+
+  return {
+    db,
+    w,
+    table,
+    runtime,
+    user,
+    member,
+    agent,
+    files,
+    objects,
+    folder,
+    signed,
+    answer,
+    state,
+    providerCalls,
+    decisions,
+    inputs,
+    tasks,
+    engine,
+    start,
+    run,
+    imageCredits,
+  };
+}
+
 test(
   'a private task generates images with images.generate only into a folder its owner names, billed in the task flow',
   { timeout: 180000 },
   async t => {
-    const db = await fixture();
-    let runtime;
-    t.after(async () => {
-      delete process.env.FEATURE_FLAG_IMAGES;
-      await runtime?.close();
-      await db.close();
-    });
-    await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
-${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
-    const w = await db.create(await workspaceTableMigrations()),
-      table = name => `"${w.names.schema}".${name}`;
-    runtime = createWorkspaceRuntime({
-      replicaCount: 1,
-      reservedConnections: 2,
-      databaseConnectionBudget: 20,
-      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
-    });
-    await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=$1,granted=$1`, ['100000000000000']);
-    const user = randomUUID(),
-      member = randomUUID();
-    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
-      member,
+    const {
+      db,
+      w,
+      table,
       user,
-    ]);
-    const agent = await savedTaskAgent(db, w, runtime, user, member, [], ['images.generate']);
-    await createAgentExecutor({ runtime }).configure(
-      w.id,
-      { kind: 'human', userId: w.userId, membershipId: w.membershipId },
-      { agentId: agent.agentId, version: 0, enabled: true, teamIds: [agent.teamId], limits: [] },
-    );
-    const objects = new Map();
-    const files = createFiles(runtime, {
-      putIfAbsent: async (key, value) => {
-        if (!objects.has(key)) objects.set(key, Buffer.from(value));
-      },
-      read: async key => objects.get(key),
-      remove: async key => {
-        objects.delete(key);
-      },
-    });
-    const folder = await files.createFolder(w.id, user, randomUUID(), { name: 'Posters', parentId: null });
-
-    const signed = await signedPng();
-    const providerCalls = [];
-    const realFetch = globalThis.fetch;
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
-      if (String(input) !== 'https://api.openai.com/v1/images/generations') return realFetch(input, init);
-      providerCalls.push({ headers: init.headers, body: JSON.parse(init.body) });
-      return Response.json({
-        data: [{ b64_json: signed.toString('base64') }],
-        usage: { input_tokens: 10, output_tokens: 100 },
-      });
-    });
-
+      member,
+      agent,
+      files,
+      objects,
+      folder,
+      signed,
+      providerCalls,
+      decisions,
+      inputs,
+      tasks,
+      start,
+      run,
+      imageCredits,
+    } = await setup(t);
     const prompt = 'A watercolour poster of tulips at dawn';
-    const decisions = [];
-    const inputs = [];
-    const model = {
-      ...modelEnvironment().continuity(key => createModelRouteHealth(db.platform, key)),
-      infer: async (_resolution, input) => {
-        inputs.push(input);
-        return {
-          kind: 'success',
-          decision: decisions.shift() ?? { kind: 'answer', text: 'Done.' },
-          actualModel: 'acme-chat-1',
-          requestId: randomUUID(),
-          usage: { kind: 'known', input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
-        };
-      },
-    };
-    const tasks = createAgentTasks(runtime);
-    const engine = createTaskRuntime(
-      runtime,
-      model,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { files, choose: runImageChoice },
-    );
-    const start = text =>
-      tasks.start(w.id, user, {
-        requestId: randomUUID(),
-        agentId: agent.agentId,
-        scope: [],
-        text,
-        limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
-      });
-    const run = async id => {
-      for (
-        let n = 0;
-        n < 16 && ['pending', 'waiting-approval'].includes((await tasks.read(w.id, user, id)).status);
-        n++
-      )
-        await engine.process(w.id, id);
-      return tasks.read(w.id, user, id);
-    };
-    const imageCredits = async () =>
-      (
-        await db.platform.query(
-          `SELECT id,flow_id,activity,agent_id,provider_pico_usd::text,charged::text FROM ${table('tf_credit_usage')} WHERE id LIKE 'image:%'`,
-        )
-      ).rows;
-
     decisions.push(
       { kind: 'tool', text: 'Draw the poster', call: { tool: 'images.generate', prompt } },
       {
@@ -291,3 +337,119 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal((await imageCredits()).length, 1);
   },
 );
+
+/**
+ * A provider request that waits for its signal. One left running past `lateMs` answers with an image anyway, as a
+ * provider does when nothing cancels the request.
+ */
+const hang = (signal, answer, aborted, lateMs = 8000) =>
+  new Promise((resolve, reject) => {
+    const late = setTimeout(() => resolve(answer()), lateMs);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(late);
+        aborted.push(true);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+
+test(
+  'a task whose active time ends mid-generation aborts its image requests and settles every hold',
+  { timeout: 120000 },
+  async t => {
+    const f = await setup(t);
+    const aborted = [];
+    f.state.draw = async (signal, n) => {
+      // The task's active time runs out while the provider is drawing both images.
+      if (n === 2)
+        await f.db.platform.query(
+          `UPDATE ${f.table('tf_agent_task_activity')} SET expires_at=clock_timestamp() WHERE status='running'`,
+        );
+      return hang(signal, f.answer, aborted);
+    };
+    f.decisions.push({
+      kind: 'tool',
+      text: 'Draw two posters',
+      call: { tool: 'images.generate', prompt: 'Two tulip posters', count: 2, folderId: f.folder.id },
+    });
+    const task = await f.start('Make two posters.');
+    await f.run(task.id).catch(() => {});
+    const generations = async () =>
+      (await f.db.platform.query(`SELECT state FROM ${f.table('tf_image_generations')} ORDER BY ordinal`)).rows.map(
+        row => row.state,
+      );
+    // Long enough for a request nothing cancelled to answer late.
+    for (let n = 0; n < 240 && (await generations()).includes('pending'); n++)
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+    assert.equal(f.providerCalls.length, 2);
+    assert.equal(aborted.length, 2, 'both provider requests are aborted');
+    assert.deepEqual(await generations(), ['cancelled', 'cancelled']);
+    const credits = await f.imageCredits();
+    assert.equal(credits.length, 2);
+    assert.deepEqual(
+      credits.map(row => [row.provider_pico_usd, row.charged]),
+      [
+        ['0', '0'],
+        ['0', '0'],
+      ],
+      'every hold is released',
+    );
+  },
+);
+
+test('concurrent images of one call never spend past the task allowance', { timeout: 120000 }, async t => {
+  const hold = creditUnitsForProviderCost(40000000000n);
+  const f = await setup(t, {
+    // Earlier spend in the task's flow leaves room for one and a half images when the call runs.
+    choose: async (tx, runId) => {
+      const flow = (
+        await f.db.platform.query(
+          `SELECT t.flow_id FROM ${f.table('tf_agent_task_runs')} r JOIN ${f.table('tf_agent_tasks')} t ON t.id=r.task_id WHERE r.run_id=$1`,
+          [runId],
+        )
+      ).rows[0].flow_id;
+      const spent = BigInt(
+        (
+          await f.db.platform.query(
+            `SELECT COALESCE(sum(COALESCE(charged,reserved)),0)::text AS spent FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`,
+            [flow],
+          )
+        ).rows[0].spent,
+      );
+      // Units per pico-USD are linear, so the filler's charge matches its provider cost under the flow's rounding.
+      const perPico = hold / 40000000000n;
+      const filler = (100n * 1_000_000_000_000n - spent - (hold * 3n) / 2n) / perPico;
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_credit_usage')} (id,flow_id,model_id,activity,reserved,charged,provider_pico_usd,pricing_revision) VALUES ($1,$2,'acme-chat','agent',$3,$3,$4,'test')`,
+        [`test:${randomUUID()}`, flow, (filler * perPico).toString(), filler.toString()],
+      );
+      // Hold the credit lock briefly so the images' allowance checks overlap, as they do across busy connections.
+      const key = [`${f.w.names.schema}:credits`];
+      await f.db.platform.query('SELECT pg_advisory_lock(hashtextextended($1, 761040))', key);
+      setTimeout(() => void f.db.platform.query('SELECT pg_advisory_unlock(hashtextextended($1, 761040))', key), 500);
+      return runImageChoice(tx, runId);
+    },
+  });
+  f.decisions.push({
+    kind: 'tool',
+    text: 'Draw four posters',
+    call: { tool: 'images.generate', prompt: 'Four tulip posters', count: 4, folderId: f.folder.id },
+  });
+  const task = await f.start('Make four posters.');
+  await f.run(task.id);
+  const result = (
+    await f.db.platform.query(`SELECT result FROM ${f.table('tf_agent_tool_calls')} ORDER BY sequence LIMIT 1`)
+  ).rows[0].result;
+  assert.deepEqual(result.images.map(image => [image.state, image.failure]).sort(), [
+    ['failed', 'task-credits'],
+    ['failed', 'task-credits'],
+    ['failed', 'task-credits'],
+    ['saved', undefined],
+  ]);
+  assert.equal(f.providerCalls.length, 1, 'only the image within the allowance reaches the provider');
+  assert.equal((await f.imageCredits()).length, 1);
+});

@@ -186,8 +186,8 @@ async function setup(t, { flag = 'true' } = {}) {
     await attachments.upload(w.id, user, chatId, id, bytes);
     return id;
   };
-  /** Sends one message and runs its reply as the worker does; returns the tool results the model saw, parsed. */
-  const turn = async (chatId, script, familyId = 'claude-sonnet', text = 'Draw it.', parts = []) => {
+  /** Sends one message and starts its reply as the worker does; `reply` settles with the reply's outcome. */
+  const send = async (chatId, script, familyId = 'claude-sonnet', text = 'Draw it.', parts = []) => {
     state.script = [...script];
     const sent = await f.store.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
@@ -195,15 +195,20 @@ async function setup(t, { flag = 'true' } = {}) {
       model: familyId,
       parts: [...parts, { kind: 'text', text }],
     });
-    const from = state.chat.length;
-    const status = await createConversationActivities(
+    const reply = createConversationActivities(
       f.runtime,
       undefined,
       { attachments: attachmentBytes, snapshots: attachmentBytes },
       undefined,
       files,
     ).processConversationReply({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
-    assert.equal(status, 'completed');
+    return { turnId: sent.turnId, reply };
+  };
+  /** Sends one message and runs its reply to completion; returns the tool results the model saw, parsed. */
+  const turn = async (chatId, script, familyId, text, parts) => {
+    const from = state.chat.length;
+    const sent = await send(chatId, script, familyId, text, parts);
+    assert.equal(await sent.reply, 'completed');
     const last = state.chat.at(-1);
     // The last request carries every tool result of the turn, in order.
     return {
@@ -232,7 +237,25 @@ async function setup(t, { flag = 'true' } = {}) {
     );
   const membership = async () =>
     (await f.db.platform.query(`SELECT id FROM ${f.table('tf_memberships')} WHERE user_id=$1`, [w.userId])).rows[0].id;
-  return { ...f, w, files, chat, attach, turn, state, rows, imageUsage, generations, membership };
+  /** What a direct images.generate call needs: deps over plain workspace transactions and a chat-like context. */
+  const direct = async () => {
+    const transaction = operation => f.runtime.transaction(w.id, commonCompatibility, operation);
+    const chosen = await transaction(tx =>
+      pinnedImageChoice(tx, { familyId: 'claude-sonnet', imageModelId: 'gpt-image', catalogRevision: 'test' }),
+    );
+    return {
+      deps: { files, transaction, ledger: transaction },
+      context: {
+        workspaceId: w.id,
+        actor: { kind: 'human', userId: w.userId, membershipId: await membership() },
+        autonomous: false,
+        model: chosen.model,
+        generate: chosen.generate,
+        credits: { flowId: randomUUID(), activity: 'agent', agentId: null },
+      },
+    };
+  };
+  return { ...f, w, files, chat, attach, send, turn, direct, state, rows, imageUsage, generations, membership };
 }
 
 const openAiImage = bytes =>
@@ -518,44 +541,174 @@ test('with the images flag off, images.generate is not a tool and nothing is gen
   assert.deepEqual(await f.imageUsage(), []);
 });
 
-test('stopping mid-batch cancels unfinished images and keeps the saved one and its charge', async t => {
-  const f = await setup(t);
-  const controller = new AbortController();
-  const drawn = await signedPng();
-  let calls = 0;
-  f.state.draw = async (_request, signal) => {
-    if (++calls === 1) {
-      setTimeout(() => controller.abort(), 200);
-      return openAiImage(drawn);
-    }
-    await new Promise((_, reject) =>
-      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }),
+/** Resolves once `check` returns a truthy value, polling the database-backed state every 50ms. */
+async function until(check, ms = 20000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await check();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error('condition not reached');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
+
+/**
+ * A provider request that waits for its signal. One left running past `lateMs` answers with an image anyway, as a
+ * provider does when nothing cancels the request.
+ */
+const hang = (signal, bytes, aborted, lateMs = 8000) =>
+  new Promise((resolve, reject) => {
+    const late = setTimeout(() => resolve(openAiImage(bytes)), lateMs);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(late);
+        aborted.push(true);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
     );
+  });
+
+test(
+  'stopping the turn mid-batch aborts unfinished image requests, settles every hold and keeps the saved image',
+  { timeout: 60000 },
+  async t => {
+    const f = await setup(t);
+    const drawn = await signedPng();
+    const aborted = [];
+    let calls = 0;
+    f.state.draw = async (_request, signal) =>
+      ++calls === 1 ? openAiImage(drawn) : hang(signal, await signedPng('#22a'), aborted);
+    const chatId = await f.chat();
+    const { turnId, reply } = await f.send(chatId, [[{ prompt: 'Three tulips', count: 3 }], 'Done.']);
+    await until(async () => calls === 3 && (await f.generations()).some(row => row.state === 'saved'));
+    await f.store.cancel(f.w.id, f.w.userId, chatId, turnId, { commandId: randomUUID(), expectedGeneration: 0 });
+    await reply;
+    // Long enough for a request nothing cancelled to answer late.
+    await until(async () => (await f.generations()).every(row => row.state !== 'pending'), 12000).catch(() => {});
+
+    assert.equal(aborted.length, 2, 'Stop aborts both unfinished provider requests');
+    const generations = await f.generations();
+    assert.deepEqual(generations.map(row => row.state).sort(), ['cancelled', 'cancelled', 'saved']);
+    const usage = await f.imageUsage();
+    assert.deepEqual(
+      usage.filter(row => row.charged === null),
+      [],
+      'no image hold is left open',
+    );
+    assert.deepEqual(usage.map(row => row.provider_pico_usd).sort(), ['0', '0', '40000000000']);
+    const files = await f.rows(`SELECT id FROM ${f.table('tf_files')} WHERE kind='file'`);
+    assert.deepEqual(
+      files.map(row => row.id),
+      generations.filter(row => row.state === 'saved').map(row => row.id),
+    );
+    // The saved image keeps its card on the stopped turn.
+    const history = await f.store.history(f.w.id, f.w.userId, chatId);
+    const tool = history.messages.flatMap(message => message.tools ?? []).find(t => t.tool === 'images.generate');
+    assert.deepEqual(tool?.images?.map(image => image.state).sort(), ['cancelled', 'cancelled', 'saved']);
+  },
+);
+
+test('two overlapping calls of one origin never take it past eight images', { timeout: 120000 }, async t => {
+  // A chat step runs one changing tool at a time, so two calls of one origin overlap only across attempts: a stale
+  // attempt still generating while the next attempt of the turn runs.
+  const f = await setup(t);
+  f.state.draw = async () => openAiImage(await signedPng());
+  const { deps, context } = await f.direct();
+  const origin = { kind: 'run', runId: randomUUID() };
+  const generate = (prompt, count) =>
+    generateImageOutputs(deps, { ...context, origin }, { tool: 'images.generate', prompt, count });
+  assert.equal((await generate('Four tulips', 4)).error, undefined);
+  assert.equal((await generate('Two daisies', 2)).error, undefined);
+  const results = await Promise.all([generate('Two roses', 2), generate('Two lilies', 2)]);
+  assert.deepEqual(results.map(result => result.error ?? 'ok').sort(), ['image-limit-exceeded', 'ok']);
+  assert.equal((await f.generations()).length, 8);
+  assert.equal(f.state.images.length, 8);
+});
+
+/**
+ * Starts a call whose worker dies mid-image: `saved` decides whether the image reached Files first. The call never
+ * returns; its rows are then made older than the stale window.
+ */
+async function crashed(f, deps, context, prompt, saved) {
+  let reached = false;
+  f.state.draw = async () => {
+    reached = true;
+    return saved ? openAiImage(await signedPng()) : new Promise(() => {});
   };
-  const w = f.w;
-  const actor = { kind: 'human', userId: w.userId, membershipId: await f.membership() };
-  const transaction = operation => f.runtime.transaction(w.id, commonCompatibility, operation);
-  const chosen = await transaction(tx =>
-    pinnedImageChoice(tx, { familyId: 'claude-sonnet', imageModelId: 'gpt-image', catalogRevision: 'test' }),
-  );
-  const result = await generateImageOutputs(
-    { files: f.files, transaction },
-    {
-      workspaceId: w.id,
-      actor,
-      autonomous: false,
-      origin: { kind: 'run', runId: randomUUID() },
-      model: chosen.model,
-      generate: chosen.generate,
-      credits: { flowId: randomUUID(), activity: 'agent', agentId: null },
-      signal: controller.signal,
+  const files = {
+    ...deps.files,
+    createDerived: async (...args) => {
+      await deps.files.createDerived(...args);
+      reached = 'saved';
+      return new Promise(() => {});
     },
-    { tool: 'images.generate', prompt: 'Three tulips', count: 3 },
+  };
+  void generateImageOutputs({ ...deps, files }, context, { tool: 'images.generate', prompt });
+  await until(() => (saved ? reached === 'saved' : reached));
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_image_generations')} SET updated_at=updated_at-interval '11 minutes' WHERE prompt=$1`,
+    [prompt],
   );
-  assert.deepEqual(result.images.map(image => image.state).sort(), ['cancelled', 'cancelled', 'saved']);
+}
+
+test('a reply start settles image holds a dead worker left open', { timeout: 120000 }, async t => {
+  const f = await setup(t);
+  const { deps, context } = await f.direct();
+  await crashed(f, deps, { ...context, origin: { kind: 'run', runId: randomUUID() } }, 'Saved tulip', true);
+  await crashed(f, deps, { ...context, origin: { kind: 'run', runId: randomUUID() } }, 'Lost tulip', false);
+  assert.equal((await f.imageUsage()).filter(row => row.charged === null).length, 2);
+
+  await f.turn(await f.chat(), ['Hello.']);
+  const rows = await f.rows(
+    `SELECT g.prompt,g.state,u.reserved::text,u.charged::text FROM ${f.table('tf_image_generations')} g JOIN ${f.table('tf_credit_usage')} u ON u.id LIKE 'image:' || g.id || ':%' ORDER BY g.prompt`,
+  );
+  assert.deepEqual(
+    rows.map(row => [
+      row.prompt,
+      row.state,
+      row.charged === null
+        ? 'open'
+        : row.charged === '0'
+          ? 'released'
+          : row.charged === row.reserved
+            ? 'held'
+            : row.charged,
+    ]),
+    [
+      ['Lost tulip', 'failed', 'released'],
+      ['Saved tulip', 'saved', 'held'],
+    ],
+  );
+});
+
+test('a repeat of a call a dead worker left settles its old hold before trying again', { timeout: 120000 }, async t => {
+  const f = await setup(t);
+  const { deps, context } = await f.direct();
+  const origin = { kind: 'run', runId: randomUUID() };
+  await crashed(f, deps, { ...context, origin }, 'Lost tulip', false);
+  f.state.draw = async () => openAiImage(await signedPng());
+  const result = await generateImageOutputs(
+    deps,
+    { ...context, origin },
+    { tool: 'images.generate', prompt: 'Lost tulip' },
+  );
+  assert.deepEqual(
+    result.images.map(image => image.state),
+    ['saved'],
+  );
   const usage = await f.imageUsage();
-  assert.deepEqual(usage.map(row => row.provider_pico_usd).sort(), ['0', '0', '40000000000']);
-  assert.equal((await f.rows(`SELECT id FROM ${f.table('tf_files')} WHERE kind='file'`)).length, 1);
+  assert.equal(usage.length, 2);
+  assert.deepEqual(
+    usage.filter(row => row.charged === null),
+    [],
+    'the dead attempt hold is settled',
+  );
+  assert.deepEqual(
+    usage.map(row => row.provider_pico_usd),
+    ['0', '40000000000'],
+  );
 });
 
 test('a repeated call returns the stored files without a second provider call or charge', async t => {
@@ -568,28 +721,10 @@ test('a repeated call returns the stored files without a second provider call or
     }
     return openAiImage(await signedPng());
   };
-  const w = f.w;
-  const actor = { kind: 'human', userId: w.userId, membershipId: await f.membership() };
-  const transaction = operation => f.runtime.transaction(w.id, commonCompatibility, operation);
-  const chosen = await transaction(tx =>
-    pinnedImageChoice(tx, { familyId: 'claude-sonnet', imageModelId: 'gpt-image', catalogRevision: 'test' }),
-  );
+  const { deps, context } = await f.direct();
   const origin = { kind: 'run', runId: randomUUID() };
-  const flowId = randomUUID();
   const run = () =>
-    generateImageOutputs(
-      { files: f.files, transaction },
-      {
-        workspaceId: w.id,
-        actor,
-        autonomous: false,
-        origin,
-        model: chosen.model,
-        generate: chosen.generate,
-        credits: { flowId, activity: 'agent', agentId: null },
-      },
-      { tool: 'images.generate', prompt: 'Two tulips', count: 2 },
-    );
+    generateImageOutputs(deps, { ...context, origin }, { tool: 'images.generate', prompt: 'Two tulips', count: 2 });
   const first = await run();
   assert.deepEqual(first.images.map(image => image.state).sort(), ['failed', 'saved']);
   assert.equal(f.state.images.length, 2);
