@@ -36,6 +36,7 @@ import {
   readKnowledgeSettings,
   recognitionFailed,
   recognitionOptions,
+  recognitionRefused,
   recordParse,
   publicationSeed,
   requeueLocalRecognition,
@@ -706,14 +707,16 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     } catch (error) {
       const failure = recognitionFailed(error)
         ? 'provider'
-        : error instanceof KnowledgeParseError
-          ? error.failure
-          : error instanceof KnowledgeError && error.code === 'quota'
-            ? 'resource-limited'
-            : (error instanceof KnowledgeError && error.code === 'integrity') ||
-                (error instanceof FileError && error.code === 'integrity')
-              ? 'malformed'
-              : 'provider';
+        : recognitionRefused(error)
+          ? 'credits'
+          : error instanceof KnowledgeParseError
+            ? error.failure
+            : error instanceof KnowledgeError && error.code === 'quota'
+              ? 'resource-limited'
+              : (error instanceof KnowledgeError && error.code === 'integrity') ||
+                  (error instanceof FileError && error.code === 'integrity')
+                ? 'malformed'
+                : 'provider';
       return jobTransaction(work.workspaceId, async tx => {
         const job = await tx.client.query(
           `SELECT 1 FROM ${table(tx, 'jobs')} WHERE revision_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,

@@ -49,7 +49,8 @@ export type KnowledgeSegments = {
 
 /**
  * Extracts a document in the sandbox and recognizes its media on the host, keeping each page, slide or sheet as its
- * own segment. Media that isn't recognized becomes a coverage gap; a document left with no text is `ocr-required`.
+ * own segment. Media that isn't recognized becomes a coverage gap; a document left with no text is `ocr-required`,
+ * with reason `recognition-unavailable` when under the `images` rules a recognizer refused units, as for credits.
  */
 export async function readKnowledgeSegments(
   input: KnowledgeParseInput,
@@ -75,8 +76,14 @@ export async function readKnowledgeSegments(
     ),
   }));
   const gaps = [...extraction.gaps, ...outcome.gaps];
-  if (!segments.some(segment => segment.markdown.trim()))
+  if (!segments.some(segment => segment.markdown.trim())) {
+    const refused =
+      recognition.images &&
+      recognition.recognizer &&
+      outcome.gaps.some(gap => gap.reason === 'recognition-unavailable');
+    if (refused) throw new KnowledgeParseError('ocr-required', { reason: 'recognition-unavailable' });
     throw new KnowledgeParseError(gaps.length || outcome.failed ? 'ocr-required' : 'malformed');
+  }
   return {
     segments,
     gaps,

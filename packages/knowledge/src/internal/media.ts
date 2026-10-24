@@ -195,6 +195,13 @@ export async function recordParse(
 export const recognitionFailed = (error: unknown) =>
   error instanceof KnowledgeParseError && error.reason === 'recognition-failed';
 
+/**
+ * A recognizer refused every unit of a document left with no text, as for credits. It is recorded as a `credits`
+ * failure the recognition sweep retries, not `ocr-unavailable`, which stays for the switch off or no model.
+ */
+export const recognitionRefused = (error: unknown) =>
+  error instanceof KnowledgeParseError && error.reason === 'recognition-unavailable';
+
 const gapRow = z.object({
   kind: z.enum(['image', 'video', 'audio', 'object', 'other']),
   reason: z.enum(['unsupported-media', 'recognition-unavailable', 'refused', 'empty', 'limit']),
@@ -227,7 +234,8 @@ export async function publicationGaps(tx: Tx, publicationId: string | null): Pro
 
 // A revision waits for recognition when its current publication has images that could not be recognized, or when
 // nothing was left but images. The retry marker keeps a sweep from re-parsing it again before the backoff ends.
-const waiting = (tx: Tx) => `(w.parsing='ocr-unavailable' OR (w.parsing='ready' AND EXISTS (
+const waiting = (tx: Tx) => `(w.parsing='ocr-unavailable' OR (w.parsing='failed' AND w.failure='credits')
+  OR (w.parsing='ready' AND EXISTS (
   SELECT 1 FROM ${table(tx, 'coverage_gaps')} g WHERE g.publication_id=d.lexical_publication_id AND g.reason='recognition-unavailable')))
   AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'recognition_retries')} x WHERE x.revision_id=r.id AND x.retry_after>clock_timestamp())`;
 

@@ -32,6 +32,7 @@ export const parseReasonSchema = z.enum([
   'invalid-output',
   'unsupported-platform',
   'recognition-failed',
+  'recognition-unavailable',
 ]);
 export type KnowledgeParseReason = z.infer<typeof parseReasonSchema>;
 
