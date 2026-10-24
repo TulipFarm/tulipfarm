@@ -62,7 +62,7 @@ export function GitHubSelectionForm({
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
   const [pendingAccount, setPendingAccount] = useState<string | null>(null);
   const [selected, setSelected] = useState<GitHubRepositoryChoice[]>([]);
-  const [mode, setMode] = useState<'all' | 'chosen'>('all');
+  const [mode, setMode] = useState<'all' | 'chosen'>('chosen');
   const [content, setContent] = useState(defaultGitHubContent);
   const [shared, setShared] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
