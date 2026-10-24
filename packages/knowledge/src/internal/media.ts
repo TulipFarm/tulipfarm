@@ -44,8 +44,8 @@ export class KnowledgeAdminRequired extends Error {
   }
 }
 
-/** The first common storage version with the media tables. Older workspaces keep the switch on and store no gaps. */
-export const mediaStorageVersion = 4;
+/** The first common storage version with the media tables (0011). Older workspaces keep the switch on and store no gaps. */
+export const mediaStorageVersion = 11;
 export const mediaLimitsForStorage = Object.freeze({
   /** Recognitions older than this are pruned when new ones are written. */
   cacheDays: 180,
