@@ -417,6 +417,28 @@ test('web.fetch on a PDF link returns its text, and on a page falls through to F
   assert.deepEqual(f.scrapes, ['https://blog.example.com/post']);
 });
 
+test('web.fetch on a large quote-heavy JSON file returns its start marked partial', async t => {
+  const rows = Array.from({ length: 4000 }, (_, index) => ({ id: `row-${index}`, note: `"quoted" ${index}` }));
+  await localWeb(t, {
+    'files.example.com/rows.json': send(200, JSON.stringify(rows, null, 2), { 'content-type': 'application/json' }),
+  });
+  const f = await setup(t, {
+    answer: (_body, requests) =>
+      requests.length === 1
+        ? anthropicTools([{ tool: 'web.fetch', url: 'https://files.example.com/rows.json' }])
+        : anthropicText('Done.'),
+  });
+  const chatId = await f.chat();
+  const requests = await f.say(chatId, 'Fetch the rows', 'claude-haiku');
+  const [result] = toolResults(requests[1]);
+  assert.doesNotMatch(result, /result-too-large/);
+  assert.match(result, /"status":"partial"/);
+  assert.match(result, /Only part of it is included/);
+  const firstRow = '"id": "row-0",\n    "note": "\\"quoted\\" 0"';
+  assert.ok(result.includes(JSON.stringify(firstRow).slice(1, -1)), 'the first row reaches the model');
+  assert.doesNotMatch(result, /row-3999/);
+});
+
 test('with the images flag off links are not fetched and web.fetch only uses Firecrawl', async t => {
   const chart = await png(8, 8);
   const web = await localWeb(t, { 'files.example.com/chart.png': send(200, chart, { 'content-type': 'image/png' }) });
