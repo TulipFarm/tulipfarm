@@ -188,7 +188,7 @@ function imageExtraction(input: KnowledgeParseInput): KnowledgeExtraction {
  */
 function fileRecognition(
   recognizer: MediaRecognizer,
-  { cache, signal, failedRecognition = 'throw', images }: KnowledgeRecognitionOptions,
+  { cache, signal, failedRecognition = 'throw', images, source }: KnowledgeRecognitionOptions,
 ) {
   const limit = createLimit(recognitionConcurrency);
   const results = new Map<string, Promise<RecognitionOutcome>>();
@@ -215,6 +215,8 @@ function fileRecognition(
           width: unit.width,
           height: unit.height,
           alt: unit.alt,
+          sha256,
+          ...(source ? { source } : {}),
           ...(signal ? { signal } : {}),
         }),
       );

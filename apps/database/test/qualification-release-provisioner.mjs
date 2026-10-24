@@ -139,6 +139,7 @@ try {
     'packages/workspace-storage/common/0013_turn_image_models.sql',
     'packages/workspace-storage/common/0014_conversation_links.sql',
     'packages/workspace-storage/common/0015_image_generations.sql',
+    'packages/workspace-storage/common/0016_recognition_receipts.sql',
   ];
   emit({
     event: 'sources',
@@ -181,6 +182,7 @@ try {
       '0013_turn_image_models.sql',
       '0014_conversation_links.sql',
       '0015_image_generations.sql',
+      '0016_recognition_receipts.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

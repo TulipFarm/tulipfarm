@@ -8,6 +8,9 @@ export const creditActivitySchema = z.enum([
   'knowledge-ingestion',
   'knowledge-query',
   'knowledge-reindex',
+  // Only under the workspace `images` flag; otherwise they are counted as the activity that charged them.
+  'image-generation',
+  'image-recognition',
 ]);
 
 // Workspace scope reports all usage, including agent identities, to admins. Personal scope covers only

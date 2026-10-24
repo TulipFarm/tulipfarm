@@ -87,7 +87,15 @@ export type RecognitionContext = {
  * The recognizer a read uses and the workspace cache that answers before it. The recognizer throws
  * `MediaRecognitionUnavailable` when a unit cannot be paid for, and `MediaRecognitionFailed` when the call fails.
  */
-export type FileRecognition = { recognizer: MediaRecognizer; cache?: MediaRecognitionCache };
+export type FileRecognition = { recognizer: MediaRecognizer; cache?: MediaRecognitionCache; source?: string };
+
+/**
+ * `options` with the file being read named for recognition receipts: `attachment:<id>`, `file:<id>`,
+ * `google:<id>` or `link:<sha256>`. A link is named by its content hash so its address is never kept.
+ */
+export function readingSource(options: ReadOptions, source: string): ReadOptions {
+  return options.recognition ? { ...options, recognition: { ...options.recognition, source } } : options;
+}
 
 export type AttachmentReader = {
   download(
@@ -675,7 +683,7 @@ export async function readTurnFile(input: {
       );
       const reading = await readFile(
         { name: file.filename, mediaType: file.mediaType, bytes: file.bytes },
-        input.options,
+        readingSource(input.options, `attachment:${part.attachmentId}`),
       );
       return {
         kind: 'attachment',
@@ -716,7 +724,10 @@ export async function readTurnFile(input: {
       await input.authorize(check);
       const file = await input.files.download(input.workspaceId, actor.userId, part.fileId);
       const mediaType = file.mediaType ?? 'application/octet-stream';
-      const reading = await readFile({ name: file.name, mediaType, bytes: file.bytes }, input.options);
+      const reading = await readFile(
+        { name: file.name, mediaType, bytes: file.bytes },
+        readingSource(input.options, `file:${part.fileId}`),
+      );
       await input.authorize(check);
       return {
         kind: 'file',
@@ -769,7 +780,7 @@ export async function readTurnFile(input: {
       : google.fileText(input.workspaceId, actor.userId, request));
     const reading = await readFile(
       { name: file.metadata.name, mediaType: file.contentType, bytes: file.bytes },
-      input.options,
+      readingSource(input.options, `google:${fileId}`),
     );
     await input.authorize(check);
     return {
@@ -1201,17 +1212,23 @@ export async function readFetchedFile(input: {
     return pinnedImageModels(tx, input.turnId, model, input.turnFiles);
   });
   const family = input.turnFiles.family(pinned.familyId);
-  const reading = await readFile(input.file, {
-    imageInput: family.imageInput && input.imageInput,
-    maxImageBytes: family.maxImageBytes,
-    recognition: turnRecognition(input.turnFiles, pinned.recognitionFamilyId, {
-      workspaceId: input.workspaceId,
-      conversationId: input.conversationId,
-      turnId: input.turnId,
-      requester: input.actor,
-    }),
-    signal: input.signal,
-  });
+  const reading = await readFile(
+    input.file,
+    readingSource(
+      {
+        imageInput: family.imageInput && input.imageInput,
+        maxImageBytes: family.maxImageBytes,
+        recognition: turnRecognition(input.turnFiles, pinned.recognitionFamilyId, {
+          workspaceId: input.workspaceId,
+          conversationId: input.conversationId,
+          turnId: input.turnId,
+          requester: input.actor,
+        }),
+        signal: input.signal,
+      },
+      `link:${sha256(input.file.bytes)}`,
+    ),
+  );
   const entry: Entry = {
     messageId: input.turnId,
     origin: 'web',

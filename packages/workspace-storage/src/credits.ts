@@ -7,11 +7,13 @@ import { creditActivitySchema, creditSummarySchema } from './credits-contracts.t
 
 type Transaction = { client: SqlClient; schema: string };
 const units = z.string().regex(/^(0|[1-9]\d{0,29})$/);
+// What a ledger row is charged as; the image activities exist only in summaries.
+const ledgerActivitySchema = creditActivitySchema.exclude(['image-generation', 'image-recognition']);
 const row = z.object({
   flow_id: z.string(),
   model_id: z.string(),
   agent_id: z.string().nullable(),
-  activity: creditActivitySchema,
+  activity: ledgerActivitySchema,
   reserved: units,
   charged: units.nullable(),
 });
@@ -313,9 +315,39 @@ export async function recoverReplyHolds(tx: Transaction, flowId: string, current
 // Balances stay workspace-wide. A workspace view covers all usage. A personal view covers
 // only the given flows: its totals and rows exclude every other flow and workspace knowledge spend.
 // Without a view, the ledger is returned unchanged.
-export type CreditUsageView = { kind: 'workspace' } | { kind: 'personal'; flowIds: readonly string[] };
+/**
+ * Who the summary is for. With `images` (the workspace `images` flag), image generations and image recognitions are
+ * their own activities, `image-generation` and `image-recognition`, instead of the chat, agent or Knowledge ingestion
+ * spend they are charged as.
+ */
+export type CreditUsageView = ({ kind: 'workspace' } | { kind: 'personal'; flowIds: readonly string[] }) & {
+  images?: boolean;
+};
 
-export async function creditSummary(tx: Transaction, view?: CreditUsageView) {
+// The common migrations that add tf_image_generations (0015) and tf_recognition_receipts (0016).
+const imageGenerationsVersion = 15;
+const recognitionReceiptsVersion = 16;
+
+/** The ledger's activity for a row of `tf_credit_usage` aliased `u`, with image generations named when asked. */
+function usageActivity(tx: Transaction & { commonVersion?: number }, view: CreditUsageView | undefined) {
+  if (!view?.images || (tx.commonVersion ?? 0) < imageGenerationsVersion) return { activity: 'u.activity', join: '' };
+  return {
+    activity: `CASE WHEN g.usage_id IS NULL THEN u.activity ELSE 'image-generation' END`,
+    join: `LEFT JOIN (SELECT DISTINCT usage_id FROM ${table(tx, 'tf_image_generations')} WHERE usage_id IS NOT NULL) g ON g.usage_id=u.id`,
+  };
+}
+
+/** The activity for a Knowledge attempt aliased `a`, with image recognitions named when asked. */
+function knowledgeActivity(tx: Transaction & { commonVersion?: number }, view: CreditUsageView | undefined) {
+  if (!view?.images || (tx.commonVersion ?? 0) < recognitionReceiptsVersion)
+    return { activity: `'knowledge-' || a.purpose`, join: '' };
+  return {
+    activity: `CASE WHEN r.credit_attempt_id IS NULL THEN 'knowledge-' || a.purpose ELSE 'image-recognition' END`,
+    join: `LEFT JOIN ${table(tx, 'tf_recognition_receipts')} r ON r.credit_attempt_id=a.id`,
+  };
+}
+
+export async function creditSummary(tx: Transaction & { commonVersion?: number }, view?: CreditUsageView) {
   // The balance belongs to the registered credit gate; the default gate is unlimited (null).
   const gate = creditGate();
   const account = gate.balance
@@ -340,7 +372,8 @@ export async function creditSummary(tx: Transaction, view?: CreditUsageView) {
           )
         ).rows[0],
       );
-    const activity = `SELECT model_id,agent_id,activity,charged,created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} WHERE created_at >= ${periodStart} AND flow_id = ANY($1::text[])`;
+    const kind = usageActivity(tx, view);
+    const activity = `SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart} AND u.flow_id = ANY($1::text[])`;
     const { days, breakdown, series } = await usageRows(tx, activity, [flows]);
     return creditSummarySchema.parse({
       scope: 'personal',
@@ -369,11 +402,13 @@ export async function creditSummary(tx: Transaction, view?: CreditUsageView) {
     held: (BigInt(sums.held) + round(BigInt(sums.known) + BigInt(sums.pending)) - knowledgeUsed).toString(),
     unfunded: sums.unfunded,
   };
+  const kind = usageActivity(tx, view);
+  const knowledge = knowledgeActivity(tx, view);
   const usage = `
-    SELECT model_id,agent_id,activity,charged,created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} WHERE created_at >= ${periodStart}
+    SELECT u.model_id,u.agent_id,${kind.activity} AS activity,u.charged,u.created_at AS occurred_at FROM ${table(tx, 'tf_credit_usage')} u ${kind.join} WHERE u.created_at >= ${periodStart}
     UNION ALL
-    SELECT a.model_id,NULL::uuid AS agent_id,'knowledge-' || a.purpose AS activity,o.charged,o.observed_at AS occurred_at
-    FROM ${table(tx, 'tf_knowledge_credit_observations')} o JOIN ${table(tx, 'tf_knowledge_credit_attempts')} a ON a.id=o.attempt_id WHERE o.observed_at >= ${periodStart}`;
+    SELECT a.model_id,NULL::uuid AS agent_id,${knowledge.activity} AS activity,o.charged,o.observed_at AS occurred_at
+    FROM ${table(tx, 'tf_knowledge_credit_observations')} o JOIN ${table(tx, 'tf_knowledge_credit_attempts')} a ON a.id=o.attempt_id ${knowledge.join} WHERE o.observed_at >= ${periodStart}`;
   const { days, breakdown, series } = await usageRows(tx, usage, []);
   return creditSummarySchema.parse({
     ...(view ? { scope: view.kind } : {}),
