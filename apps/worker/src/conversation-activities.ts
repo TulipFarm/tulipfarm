@@ -6,7 +6,13 @@ import {
   type ConversationRuntime,
   type ExternalConversationContext,
 } from '@tulipfarm/conversations/runtime';
-import { inferenceRouteSchema, type InferenceRoute, type ToolInferenceContext } from '@tulipfarm/agents/inference';
+import {
+  inferenceRouteSchema,
+  routeCapabilities,
+  type InferenceRoute,
+  type ToolInferenceContext,
+} from '@tulipfarm/agents/inference';
+import { chatTurnFiles } from './turn-files-composition.ts';
 import { respondToConversation } from './conversation-responder.ts';
 import {
   conversationPlanning,
@@ -41,7 +47,7 @@ import {
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
 import { withMcpSourceContext } from '@tulipfarm/access';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
-import type { KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
+import type { ChatFiles, KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { slackActionsFromEnvironment, slackAgentSetupFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import type { SlackActionsFactory } from '@tulipfarm/agents/slack-actions';
@@ -97,7 +103,27 @@ export type MeteredReplyOptions = {
   inventory?: ConversationInventoryReads | undefined;
   /** Summarises a long reply's older tool results. Without it, they are cut to stubs that can be reread. */
   compactor?: ConversationCompactor | undefined;
+  /** Reads this chat's files for `files.read` when the turn used the images reader. */
+  chatFiles?: ChatFiles | undefined;
 };
+/** A paused family's replacement may not read images that the pinned family would have. */
+function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
+  return messages.map(message =>
+    'text' in message
+      ? message
+      : {
+          role: message.role,
+          text: message.content
+            .map(part =>
+              part.type === 'text'
+                ? part.text
+                : '[An image here was left out: the model answering cannot read images.]',
+            )
+            .join(''),
+        },
+  );
+}
+
 export function meteredReply(
   runtime: ConversationRuntime,
   {
@@ -113,6 +139,7 @@ export function meteredReply(
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
     inventory,
     compactor,
+    chatFiles,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   return async ({
@@ -128,6 +155,7 @@ export function meteredReply(
     priorCalls = 0,
     priorToolCalls = [],
     earlierMessages = false,
+    chatFiles: chatFilesOffered = false,
     retainedSources = [],
     describedHandles = [],
     project,
@@ -203,7 +231,7 @@ export function meteredReply(
             },
           ]
         : []),
-      ...messages,
+      ...(routeCapabilities(validatedRoute).imageInput ? messages : withoutImages(messages)),
     ]);
     const publisher = createReplyTextPublisher(runtime, fence);
     // Previews reach every project member before the saved answer's audience check, so project chats show only the saved answer.
@@ -251,6 +279,7 @@ export function meteredReply(
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
+      chatFiles,
     });
     try {
       return await respondToConversation(
@@ -339,6 +368,7 @@ export function meteredReply(
               priorCalls,
               priorToolCalls,
               earlierMessages,
+              chatFiles: chatFilesOffered && Boolean(chatFiles),
               ...(answerText ? { answerText } : {}),
               progress,
               ...replyContext,
@@ -363,6 +393,7 @@ export function meteredReply(
               priorCalls,
               priorToolCalls,
               earlierMessages,
+              chatFiles: chatFilesOffered && Boolean(chatFiles),
               ...(answerText ? { answerText } : {}),
               progress,
               ...replyContext,
@@ -408,7 +439,9 @@ export function createConversationActivities(
   let google: ReturnType<typeof googleOperations> | undefined;
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
+    fileDocument: (...args) => (google ??= googleOperations(runtime)).fileDocument(...args),
   };
+  const turnFiles = objects ? chatTurnFiles(runtime, objects) : undefined;
   const generateTitle = conversationTitleActivity(storage);
   const run = <T>(
     work: unknown,
@@ -434,6 +467,7 @@ export function createConversationActivities(
             wakeTask,
             inventory,
             compactor: effectiveCompactor,
+            chatFiles: turnFiles ? { files, google: googleFiles, turnFiles } : undefined,
           }),
         undefined,
         slack?.resumeConversation,
@@ -459,6 +493,7 @@ export function createConversationActivities(
         chatSkills,
         effectiveCompactor,
         conversationPlanning,
+        turnFiles,
       );
       return process(executor, parsed);
     });

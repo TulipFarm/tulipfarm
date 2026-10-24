@@ -30,6 +30,13 @@ export type FileSource = Extract<SourceDependency, { kind: 'tulipfarm-file' | 'g
 /** Reads a Drive file's current text through the exact integration binding it is given; the Google operations service supplies it. */
 export type GoogleFileReader = {
   fileText(workspaceId: string, userId: string, input: GoogleFileRead, signal?: AbortSignal): Promise<GoogleFileText>;
+  /** Native Docs, Slides and Sheets as office documents, for the images reader. */
+  fileDocument?(
+    workspaceId: string,
+    userId: string,
+    input: GoogleFileRead,
+    signal?: AbortSignal,
+  ): Promise<GoogleFileText>;
 };
 /** A reference as stored on a sent message part. */
 export const storedReferenceSchema = z.discriminatedUnion('kind', [
@@ -201,8 +208,8 @@ export type FileReading =
     }
   | { kind: 'unavailable'; origin: 'tulipfarm'; cause: 'busy' | 'access' }
   | { kind: 'unavailable'; origin: 'google'; cause: GoogleUnavailable };
-type GoogleUnavailable = 'busy' | 'access' | 'source' | 'provider';
-type UnreadableReason = 'unsupported' | 'failed' | 'too-large' | 'download-restricted' | 'not-exportable';
+export type GoogleUnavailable = 'busy' | 'access' | 'source' | 'provider';
+export type UnreadableReason = 'unsupported' | 'failed' | 'too-large' | 'download-restricted' | 'not-exportable';
 
 type Extraction = { representation: 'text' | 'extracted'; text: string } | { failure: 'unsupported' | 'failed' };
 
@@ -227,8 +234,8 @@ async function extract(file: { name: string; mediaType: string; bytes: Uint8Arra
   }
 }
 
-type Authorize = (check: (tx: AuthorizationTransaction) => Promise<void>) => Promise<void>;
-const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+export type Authorize = (check: (tx: AuthorizationTransaction) => Promise<void>) => Promise<void>;
+export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /**
  * Reads current content for one chat reference under the sender's current access.
@@ -304,7 +311,7 @@ export async function readFileText(files: FileContent, workspaceId: string, user
 }
 
 /** How a failed Google read is told to the model. Unknown failures propagate so the turn retries instead of answering without the file. */
-function googleFailure(
+export function googleFailure(
   error: unknown,
 ): { kind: 'unavailable'; cause: GoogleUnavailable } | { kind: 'unreadable'; reason: UnreadableReason } | null {
   if (error instanceof AccessDenied || error instanceof GoogleLifecycleError)
@@ -517,9 +524,9 @@ export async function readReferencedFiles(input: {
   };
 }
 
-const attribute = (value: string) => JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
+export const attribute = (value: string) => JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
 const tags = { tulipfarm: 'tulipfarm-file', google: 'google-drive-file' } as const;
-const unavailable = {
+export const unavailableNotices = {
   tulipfarm: {
     busy: 'A referenced file could not be read because Files is busy. Its contents were not read. Say so, suggest sending the message again, and do not describe or guess them.',
     access:
@@ -555,7 +562,7 @@ function fileContext(readings: readonly FileReading[]) {
   return readings.map(reading => {
     const tag = tags[reading.origin];
     if (reading.kind === 'unavailable')
-      return `<${tag} status="${reading.cause === 'busy' ? 'temporarily-unavailable' : 'unavailable'}">${reading.origin === 'tulipfarm' ? unavailable.tulipfarm[reading.cause] : unavailable.google[reading.cause]}</${tag}>`;
+      return `<${tag} status="${reading.cause === 'busy' ? 'temporarily-unavailable' : 'unavailable'}">${reading.origin === 'tulipfarm' ? unavailableNotices.tulipfarm[reading.cause] : unavailableNotices.google[reading.cause]}</${tag}>`;
     const revision =
       reading.source?.kind === 'google-file'
         ? `${reading.source.read.modifiedTime ? ` modified-time=${attribute(reading.source.read.modifiedTime)}` : ''}${reading.source.read.version ? ` version=${attribute(reading.source.read.version)}` : ''}`

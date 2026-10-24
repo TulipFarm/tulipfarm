@@ -75,6 +75,7 @@ export const toolActivityLabels = {
   'knowledge.retrieve': 'Reading knowledge sources',
   'web.fetch': 'Reading a web page',
   'conversation.messages.read': 'Rereading an earlier message',
+  'files.read': 'Reading an attached file',
   'files.create': 'Saving a file to Files',
   'slack.resolve': 'Finding a Slack channel or person',
   'slack.message.send': 'Sending a Slack message',

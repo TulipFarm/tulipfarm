@@ -619,6 +619,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
         '0010_github_knowledge_commits_backfill.sql',
         '0011_knowledge_media.sql',
         '0012_image_settings.sql',
+        '0013_turn_image_models.sql',
       ],
     );
     assert.equal(

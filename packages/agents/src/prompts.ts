@@ -229,6 +229,7 @@ type ContextInput =
       kind: 'tools';
       mcp?: McpModelCatalog | undefined;
       earlierMessages?: boolean;
+      chatFiles?: boolean;
       personalMemory?: PersonalMemoryContext | undefined;
       inventory?: WorkspaceInventory | undefined;
     }
@@ -246,7 +247,12 @@ export function runtimeReminder(context: ContextInput, timeZone: string | null =
                 selectedSkills: (context.input.definition.skills?.length ?? 0) > 0,
                 mcp: context.input.mcp,
               }
-            : { kind: 'chat', mcp: context.mcp, earlierMessages: context.earlierMessages ?? false },
+            : {
+                kind: 'chat',
+                mcp: context.mcp,
+                earlierMessages: context.earlierMessages ?? false,
+                chatFiles: context.chatFiles ?? false,
+              },
         );
   const has = (name: string) => tools.some(tool => tool === name);
   const now = new Date();

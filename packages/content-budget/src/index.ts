@@ -20,3 +20,11 @@ export function boundFileText(text: string, maximumBytes: number): BoundedText {
   if (!prefix.trim()) return { kind: 'unavailable', reason: 'budget-too-small' };
   return { kind: 'text', text: prefix, truncated: true, sourceBytes: encoded.byteLength };
 }
+
+/** Characters per token for budgeting text a model will read. Providers count more tokens only for unusual scripts. */
+export const charactersPerToken = 4;
+
+/** An upper estimate of the tokens `text` costs a model. */
+export function textTokens(text: string): number {
+  return Math.ceil(text.length / charactersPerToken);
+}

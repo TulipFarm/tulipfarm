@@ -269,6 +269,7 @@ export async function resultSources(
     case 'knowledge.read':
     case 'knowledge.retrieve':
     case 'conversation.messages.read':
+    case 'files.read':
       return [];
     case 'web.fetch':
       return [{ kind: 'public-web', url: call.url }];

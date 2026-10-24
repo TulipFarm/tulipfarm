@@ -183,8 +183,25 @@ const textExports: Record<string, string> = {
   'application/vnd.google-apps.presentation': 'text/plain',
   'application/vnd.google-apps.spreadsheet': 'text/csv',
 };
+/** Office exports keep a native file's embedded images, sheets and slide order for a reader that parses documents. */
+const documentExports: Record<string, string> = {
+  'application/vnd.google-apps.document': googleExportFormats.docx.mimeType,
+  'application/vnd.google-apps.presentation': googleExportFormats.pptx.mimeType,
+  'application/vnd.google-apps.spreadsheet': googleExportFormats.xlsx.mimeType,
+};
 /** Reads a file for a text reader: native Docs, Slides, and Sheets through Google's text exports, other files as stored. */
-export async function readGoogleFileText(fileId: string, credential: Credential): Promise<GoogleFileText> {
+export function readGoogleFileText(fileId: string, credential: Credential): Promise<GoogleFileText> {
+  return readGoogleFileAs(fileId, credential, textExports);
+}
+/** Reads a file for a document reader: native Docs, Slides, and Sheets as DOCX, PPTX and XLSX, other files as stored. */
+export function readGoogleFileDocument(fileId: string, credential: Credential): Promise<GoogleFileText> {
+  return readGoogleFileAs(fileId, credential, documentExports);
+}
+async function readGoogleFileAs(
+  fileId: string,
+  credential: Credential,
+  exports: Record<string, string>,
+): Promise<GoogleFileText> {
   const found = await getGoogleFile(fileId, credential);
   if (found.trashed) throw new GoogleFileError('source-not-found');
   if (found.capabilities?.canDownload === false)
@@ -196,7 +213,7 @@ export async function readGoogleFileText(fileId: string, credential: Credential)
     ...(found.version ? { version: found.version } : {}),
     ...(found.modifiedTime ? { modifiedTime: found.modifiedTime } : {}),
   };
-  const exported = textExports[found.mimeType];
+  const exported = exports[found.mimeType];
   if (!exported && found.mimeType.startsWith('application/vnd.google-apps.'))
     throw new GoogleFileError('unsupported-representation');
   const url = new URL(`${drive}/${encodeURIComponent(fileId)}${exported ? '/export' : ''}`);

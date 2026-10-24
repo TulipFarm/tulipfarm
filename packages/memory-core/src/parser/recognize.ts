@@ -13,6 +13,7 @@ import {
 import type {
   CoverageGap,
   KnowledgeExtraction,
+  KnowledgeLocation,
   KnowledgeRecognitionOptions,
   MediaBytes,
   MediaItem,
@@ -33,15 +34,22 @@ const defaultSandbox: KnowledgeParserSandbox = {
   readMedia: (...args) => retryTransientParse(() => readKnowledgeMedia(...args)),
 };
 
+/** The document's text in reading order, one segment per page, slide or sheet, with recognized media in place. */
+export type KnowledgeSegments = {
+  segments: { location: KnowledgeLocation; markdown: string }[];
+  gaps: CoverageGap[];
+  pages: number;
+};
+
 /**
- * Parses a document in the sandbox, recognizes its media on the host and chunks the merged result.
- * Media that isn't recognized becomes a coverage gap; a revision left with no text is `ocr-required`.
+ * Extracts a document in the sandbox and recognizes its media on the host, keeping each page, slide or sheet as its
+ * own segment. Media that isn't recognized becomes a coverage gap; a document left with no text is `ocr-required`.
  */
-export async function parseKnowledgeDocument(
+export async function readKnowledgeSegments(
   input: KnowledgeParseInput,
   recognition: KnowledgeRecognitionOptions = {},
   sandbox: KnowledgeParserSandbox = defaultSandbox,
-): Promise<KnowledgeParseResult> {
+): Promise<KnowledgeSegments & { extraction: KnowledgeExtraction; used?: MediaRecognizer }> {
   const signal = recognition.signal;
   const extraction = await sandbox.extract(input, signal ? { signal } : {});
   const outcome = await recognizeMedia(input, extraction, recognition, sandbox);
@@ -60,6 +68,25 @@ export async function parseKnowledgeDocument(
   const gaps = [...extraction.gaps, ...outcome.gaps];
   if (!segments.some(segment => segment.markdown.trim()))
     throw new KnowledgeParseError(gaps.length ? 'ocr-required' : 'malformed');
+  return {
+    segments,
+    gaps,
+    pages: extraction.pages,
+    extraction,
+    ...(outcome.used ? { used: outcome.used } : {}),
+  };
+}
+
+/**
+ * Parses a document in the sandbox, recognizes its media on the host and chunks the merged result.
+ * Media that isn't recognized becomes a coverage gap; a revision left with no text is `ocr-required`.
+ */
+export async function parseKnowledgeDocument(
+  input: KnowledgeParseInput,
+  recognition: KnowledgeRecognitionOptions = {},
+  sandbox: KnowledgeParserSandbox = defaultSandbox,
+): Promise<KnowledgeParseResult> {
+  const { segments, gaps, extraction, used } = await readKnowledgeSegments(input, recognition, sandbox);
   const markdown = normalizeMarkdown(
     segments
       .map(segment => segment.markdown.replace(/^\n+/, '').trimEnd())
@@ -68,7 +95,7 @@ export async function parseKnowledgeDocument(
   );
   const { chunks, tokens } = chunkSegments(segments);
   const base = `${extraction.engine}-${extraction.version}-${extraction.normalization}`;
-  const recognizer = outcome.used;
+  const recognizer = used;
   return {
     markdown,
     pages: extraction.pages,

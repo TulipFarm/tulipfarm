@@ -1,4 +1,9 @@
-import { inferWithTools, type ToolInferenceContext } from '@tulipfarm/agents/inference';
+import {
+  inferWithTools,
+  ToolResultImages,
+  type ChatImagePart,
+  type ToolInferenceContext,
+} from '@tulipfarm/agents/inference';
 import type { FrameworkCall } from '@tulipfarm/agents/tools';
 import {
   mergeSources,
@@ -14,6 +19,8 @@ const toolResultSchema = z.strictObject({
   result: z.unknown(),
   sources: sourceDependenciesSchema,
   receiptId: z.uuid().optional(),
+  /** `files.read` images, which the inference loop shows after the tool results. */
+  images: z.object({ label: z.string(), images: z.array(z.custom<ChatImagePart>()) }).optional(),
 });
 
 export async function respondToConversation(
@@ -74,12 +81,14 @@ export async function respondToConversation(
           widenedWebSearch = true;
         sources.push(...captured.data.sources);
         const value = captured.data.result;
-        return captured.data.receiptId
+        const result = captured.data.receiptId
           ? {
               ...(value !== null && typeof value === 'object' && !Array.isArray(value) ? value : { value }),
               toolReceipt: { callId: captured.data.receiptId },
             }
           : value;
+        const shown = captured.data.images;
+        return shown ? new ToolResultImages(result, shown.label, shown.images) : result;
       }
       sources.push({ kind: 'unavailable' });
       return output;

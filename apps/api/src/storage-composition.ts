@@ -21,6 +21,8 @@ import type { createTemporalClient } from './temporal.ts';
 import { emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { authConfig } from './auth.ts';
 import { createConversations } from '@tulipfarm/conversations';
+import { pinTurnImageModels } from '@tulipfarm/agents/image-settings';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerConversations } from './conversations.ts';
 import { createConversationEventHub } from './conversation-events.ts';
 import { registerProjects } from './projects.ts';
@@ -244,7 +246,10 @@ export function registerStorageComposition(
   const replies = createReplyDispatch({ runtime, temporal });
   registerConversations(app, {
     auth: dependencies.auth,
-    service: createConversations(runtime, chatSkills),
+    service: createConversations(runtime, chatSkills, {
+      pinTurn: async (tx, workspaceId, familyId) =>
+        (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
+    }),
     requests: createConversationRequests(runtime),
     approvals: { read: approvalRequests.read, decide: confirmation.approvals.decide },
     attachments,

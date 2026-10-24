@@ -19,7 +19,13 @@ import {
   googleFileContentRequestSchema,
   type GoogleFileReference,
 } from './file-contracts.ts';
-import { listGoogleFiles, getGoogleFile, readGoogleFile, readGoogleFileText } from './file-provider.ts';
+import {
+  listGoogleFiles,
+  getGoogleFile,
+  readGoogleFile,
+  readGoogleFileDocument,
+  readGoogleFileText,
+} from './file-provider.ts';
 import { dispatchGoogleOperation, readGoogleRevision } from './operation-provider.ts';
 import {
   GoogleLifecycleError,
@@ -216,6 +222,18 @@ export function createGoogleOperations(options: {
         value.expectedIntegration,
         ['https://www.googleapis.com/auth/drive'],
         credential => readGoogleFileText(value.fileId, credential),
+        signal,
+      );
+    },
+    /** Like `fileText`, with native Docs, Slides and Sheets exported as office documents so embedded images survive. */
+    async fileDocument(workspaceId: string, userId: string, input: GoogleFileReference, signal?: AbortSignal) {
+      const value = googleFileReferenceSchema.parse(input);
+      return fileRead(
+        workspaceId,
+        userId,
+        value.expectedIntegration,
+        ['https://www.googleapis.com/auth/drive'],
+        credential => readGoogleFileDocument(value.fileId, credential),
         signal,
       );
     },

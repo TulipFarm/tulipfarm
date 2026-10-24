@@ -136,6 +136,7 @@ try {
     'packages/workspace-storage/common/0010_github_knowledge_commits_backfill.sql',
     'packages/workspace-storage/common/0011_knowledge_media.sql',
     'packages/workspace-storage/common/0012_image_settings.sql',
+    'packages/workspace-storage/common/0013_turn_image_models.sql',
   ];
   emit({
     event: 'sources',
@@ -175,6 +176,7 @@ try {
       '0010_github_knowledge_commits_backfill.sql',
       '0011_knowledge_media.sql',
       '0012_image_settings.sql',
+      '0013_turn_image_models.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

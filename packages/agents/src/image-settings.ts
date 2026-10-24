@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -14,6 +14,7 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
 import { modelAvailability } from './model-availability.ts';
+import type { TurnImageModels } from '@tulipfarm/conversations/turn-image-models';
 import {
   imageSettingsCommandSchema,
   imageSettingsReceiptSchema,
@@ -139,6 +140,26 @@ export async function resolveImageModels(
         : settings.effective.recognitionFamilyId
           ? { status: 'available', familyId: settings.effective.recognitionFamilyId }
           : { status: 'unavailable', reason: 'recognition-model-unavailable' },
+  };
+}
+
+/** A content hash of the served catalog, stored with pinned models so a later catalog change is visible. */
+export function catalogRevision(catalog: ServedModelCatalog = loadModelCatalog()) {
+  return `catalog-${createHash('sha256').update(canonicalJson(catalog.catalog)).digest('hex').slice(0, 32)}`;
+}
+
+/** The models a chat turn on `familyId` is admitted with; stored on the turn and read back for every attempt. */
+export async function pinTurnImageModels(
+  tx: AgentTransaction,
+  familyId: string,
+  catalog: ServedModelCatalog = loadModelCatalog(),
+): Promise<TurnImageModels> {
+  const resolved = await resolveImageModels(tx, familyId, catalog);
+  return {
+    familyId,
+    recognitionFamilyId: resolved.recognition.status === 'available' ? resolved.recognition.familyId : null,
+    imageModelId: resolved.image.status === 'available' ? resolved.image.imageModelId : null,
+    catalogRevision: catalogRevision(catalog),
   };
 }
 

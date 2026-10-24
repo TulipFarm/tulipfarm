@@ -67,7 +67,7 @@ for (const [label, args] of Object.entries(catalogs))
   });
 
 test('native tool names and descriptions follow the registered chat tools', () => {
-  const { tools } = nativeChatTools(undefined, true);
+  const { tools } = nativeChatTools(undefined, true, undefined, true);
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)
     .filter(tool => !tool.startsWith('mcp.'));
@@ -84,6 +84,8 @@ test('optional tools appear only when their context admits them', () => {
   const names = (...args) => nativeChatTools(...args).tools.map(tool => tool.name);
   assert.equal(names().includes('conversation_messages_read'), false);
   assert.ok(names(undefined, true).includes('conversation_messages_read'));
+  assert.equal(names().includes('files_read'), false);
+  assert.ok(names(undefined, false, undefined, true).includes('files_read'));
   for (const name of ['mcp_search', 'mcp_describe']) {
     assert.equal(names().includes(name), false);
     assert.equal(names(createMcpCatalog([entry]).model()).includes(name), false);
