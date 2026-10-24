@@ -198,41 +198,31 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
     });
 
-    await t.test('the sweep deletes recognitions no file holds and keeps those a file still holds', async () => {
-      const held = await count('recognitions');
-      assert.ok(held >= 2);
-      const sources = (
-        await db.platform.query(`SELECT DISTINCT recognition->>'source' AS source FROM ${table('recognitions')}`)
-      ).rows.map(row => row.source);
-      const files = (await db.platform.query(`SELECT sha256 FROM ${table('tf_files')} WHERE kind='file'`)).rows.map(
-        row => row.sha256,
-      );
+    await t.test('the sweep keeps every recognition and a new write prunes those past 180 days', async () => {
+      const stored = (await db.platform.query(`SELECT recognition FROM ${table('recognitions')}`)).rows;
+      assert.ok(stored.length >= 2);
       assert.ok(
-        sources.every(source => files.includes(source)),
-        'each recognition records the file it came from',
+        stored.every(row => !('source' in row.recognition)),
+        'a cached recognition holds only what readers see',
       );
-      const orphan = 'f'.repeat(64);
-      const recent = 'e'.repeat(64);
+      const old = `${'f'.repeat(64)}:vision-test:media-v1`;
+      const unheld = `${'e'.repeat(64)}:vision-test:media-v1`;
       await db.platform.query(
         `INSERT INTO ${table('recognitions')} (key,recognition,created_at) VALUES
-          ($1,$2,clock_timestamp()-interval '2 days'),($3,$4,clock_timestamp())`,
-        [
-          `${orphan}:vision-test:media-v1`,
-          { kind: 'empty', source: orphan },
-          `${recent}:vision-test:media-v1`,
-          { kind: 'empty', source: recent },
-        ],
+          ($1,$2,clock_timestamp()-interval '181 days'),($3,$2,clock_timestamp()-interval '2 days')`,
+        [old, { kind: 'empty' }, unheld],
       );
-      await db.platform.query(
-        `UPDATE ${table('recognitions')} SET created_at=clock_timestamp()-interval '2 days'
-        WHERE key NOT LIKE $1`,
-        [`${recent}:%`],
-      );
+      const before = await count('recognitions');
       await api.due(one.id);
+      assert.equal(await count('recognitions'), before, 'scheduling work deletes no recognition');
+
+      answer = () => ({ kind: 'recognized', text: 'Seed trays go under the bench.', description: '' });
+      const tray = await upload('Seed tray', await png(90, 60, '#a64'), 'tray.png', 'image/png');
+      assert.equal(await process(tray.commandId), 'ready');
       const kept = (await db.platform.query(`SELECT key FROM ${table('recognitions')}`)).rows.map(row => row.key);
-      assert.equal(kept.length, held + 1);
-      assert.ok(!kept.includes(`${orphan}:vision-test:media-v1`), 'an orphan past the grace period is deleted');
-      assert.ok(kept.includes(`${recent}:vision-test:media-v1`), 'a fresh orphan is kept for a read in progress');
+      assert.equal(kept.length, before);
+      assert.ok(!kept.includes(old), 'a recognition past 180 days is pruned when a new one is written');
+      assert.ok(kept.includes(unheld), 'a younger recognition is kept whether or not a file holds it');
     });
   } finally {
     await runtime?.close();
