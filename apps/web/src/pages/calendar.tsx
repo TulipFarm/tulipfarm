@@ -360,7 +360,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                         : 'secondary'
                     }
                   >
-                    <Status state={taskStatusStates[task.status]} size="sm" aria-hidden="true" />
+                    <Status state={taskStatusStates[task.status]} size="sm" tooltip={false} aria-hidden="true" />
                     {taskStatusLabels[task.status]}
                   </Badge>
                   <Button variant="outline" size="md" onClick={() => openCreate(day, '09:00', task.title)}>

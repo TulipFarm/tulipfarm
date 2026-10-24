@@ -83,7 +83,7 @@ test(
       await step(1).locator('[data-slot="source-favicon"][data-status="loaded"]').first().waitFor();
       await step(4).locator('[data-slot="source-favicon"][data-status="failed"]').waitFor();
       assert.equal(await step(4).locator('[data-slot="source-favicon"] img').count(), 0);
-      assert.equal(await step(4).locator('[data-slot="source-favicon"] svg').count(), 1);
+      assert.equal(await step(4).locator('[data-slot="source-favicon"]').innerText(), 'E');
       await step(3).getByText('No usable results. Try a different search.', { exact: true }).waitFor();
       await step(4).getByText('Page read failed', { exact: true }).waitFor();
       assert.equal(
@@ -137,7 +137,7 @@ test(
             }),
           );
           assert.ok(chips.every(chip => chip.labelHeight <= chip.lineHeight && chip.overflow === 'ellipsis'));
-          assert.ok(chips.filter(chip => chip.iconWidth).every(chip => chip.iconWidth === 20));
+          assert.ok(chips.filter(chip => chip.iconWidth).every(chip => chip.iconWidth === 14));
           if (screenshots) {
             await mkdir(screenshots, { recursive: true });
             await page.screenshot({ path: `${screenshots}/web-${width}-${colorScheme}.png` });

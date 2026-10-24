@@ -141,7 +141,12 @@ export function AgentTasksPage() {
                                   : 'warning'
                             }
                           >
-                            <Status state={taskStatusStates[task.status]} size="sm" aria-hidden="true" />
+                            <Status
+                              state={taskStatusStates[task.status]}
+                              size="sm"
+                              tooltip={false}
+                              aria-hidden="true"
+                            />
                             {taskStatusLabel(task)}
                           </Badge>
                           {task.status === 'paused' && (
