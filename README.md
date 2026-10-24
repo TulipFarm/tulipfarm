@@ -3,6 +3,11 @@
 TulipFarm lets people describe business operations in chat. Agents build and use
 business records, knowledge, skills, and automations within explicit permissions.
 
+> **Research preview.** TulipFarm is early and changes quickly, so expect rough
+> edges and breaking changes. Try the hosted version at
+> [tulipfarm.ai](https://tulipfarm.ai), and if the project is useful to you,
+> star this repository so others can find it.
+
 This repository is the open-source TulipFarm monorepo: the web app, API, Temporal
 worker, and shared packages. It uses pnpm workspaces, Turborepo, Oxlint, and
 TypeScript.
