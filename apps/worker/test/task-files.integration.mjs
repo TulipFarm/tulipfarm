@@ -43,6 +43,7 @@ const isRecognition = body => JSON.stringify(body.system ?? '').includes('You re
 function memoryBytes() {
   const objects = new Map();
   return {
+    objects,
     putIfAbsent: async (key, body) => {
       if (!objects.has(key)) objects.set(key, Buffer.from(body));
     },
@@ -110,20 +111,29 @@ async function setup(t, { reader = 'claude-sonnet', images = true } = {}) {
       sources,
       limits: { toolCalls: 10, credits, activeMilliseconds: 600000 },
     });
-    for (let n = 0; n < 8 && (await tasks.read(w.id, w.userId, task.id)).status === 'pending'; n++) {
+    return step(task.id);
+  };
+  const step = async taskId => {
+    for (let n = 0; n < 8 && (await tasks.read(w.id, w.userId, taskId)).status === 'pending'; n++) {
       const composition = createTaskComposition(f.runtime, undefined, undefined, undefined, objects);
       try {
-        await composition.activities.processAgentTaskStep(w.id, task.id);
+        await composition.activities.processAgentTaskStep(w.id, taskId);
       } finally {
         await composition.close();
       }
     }
     const row = (
-      await f.db.platform.query(`SELECT status,pause_reason FROM ${f.table('tf_agent_tasks')} WHERE id=$1`, [task.id])
+      await f.db.platform.query(`SELECT status,pause_reason FROM ${f.table('tf_agent_tasks')} WHERE id=$1`, [taskId])
     ).rows[0];
-    return { ...row, history: await tasks.history(w.id, w.userId, task.id) };
+    return { id: taskId, ...row, history: await tasks.history(w.id, w.userId, taskId) };
   };
-  return { ...f, requests, recognitions, upload, run };
+  /** Continues a completed task with `text` and steps it as `run` does. */
+  const reopen = async (taskId, text) => {
+    const { generation } = await tasks.read(w.id, w.userId, taskId);
+    await tasks.reopen(w.id, w.userId, taskId, { requestId: randomUUID(), expectedGeneration: generation, text });
+    return step(taskId);
+  };
+  return { ...f, objects, requests, recognitions, upload, run, reopen };
 }
 
 /** The user turn the task's files are sent in: the turn after the task prompt. */
@@ -253,4 +263,40 @@ test('a linked file that gets no room in the reading budget is named as not incl
     'the block the link notice points to says the file was not read',
   );
   assert.doesNotMatch(read, /Quarterly notes/);
+});
+
+test('a later step of a task reads the kept copy of a link, not the link again', async t => {
+  const f = await setup(t);
+  const before = await png(40, 30, '#123');
+  const routes = { 'charts.example/q3.png': send(200, before, { 'content-type': 'image/png' }) };
+  const web = await localWeb(t, routes);
+  const task = await f.run('Describe https://charts.example/q3.png please');
+  assert.equal(task.status, 'completed');
+  assert.deepEqual(web.requests, ['charts.example/q3.png']);
+  routes['charts.example/q3.png'] = send(200, await png(40, 30, '#c33'), { 'content-type': 'image/png' });
+  const again = await f.reopen(task.id, 'Describe it once more');
+  assert.equal(again.status, 'completed');
+  assert.deepEqual(web.requests, ['charts.example/q3.png'], 'the second step fetches nothing');
+  const images = filesTurn(f.requests.at(-1)).filter(part => part.type === 'image');
+  assert.deepEqual(
+    images.map(part => part.source.data),
+    [Buffer.from(before).toString('base64')],
+    'the second step reads the bytes the first step fetched',
+  );
+});
+
+test('a link that failed is kept as failed and not fetched again', async t => {
+  const f = await setup(t);
+  const routes = { 'charts.example/gone.png': send(404) };
+  const web = await localWeb(t, routes);
+  const task = await f.run('Describe https://charts.example/gone.png please');
+  assert.equal(task.status, 'completed');
+  routes['charts.example/gone.png'] = send(200, await png(8, 8), { 'content-type': 'image/png' });
+  await f.reopen(task.id, 'Try again');
+  assert.deepEqual(web.requests, ['charts.example/gone.png']);
+  assert.match(text(filesTurn(f.requests.at(-1))), /charts.example\/gone.png/);
+  assert.equal(
+    filesTurn(f.requests.at(-1)).some(part => part.type === 'image'),
+    false,
+  );
 });
