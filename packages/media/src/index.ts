@@ -8,3 +8,4 @@ export {
   type PreparedImage,
 } from './prepare.ts';
 export { sniffMediaType, type MediaFamily, type MediaType, type SniffedMedia } from './sniff.ts';
+export { imagePresetNames, imagePresets, imageShapes, type ImagePreset, type ImageShape } from './presets.ts';

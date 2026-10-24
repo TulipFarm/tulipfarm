@@ -119,6 +119,10 @@
       "types": "./dist/office-documents.d.ts",
       "default": "./dist/office-documents.js"
     },
+    "./image-outputs": {
+      "types": "./dist/image-outputs.d.ts",
+      "default": "./dist/image-outputs.js"
+    },
     "./file-outputs": {
       "types": "./dist/file-outputs.d.ts",
       "default": "./dist/file-outputs.js"

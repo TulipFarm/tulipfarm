@@ -229,6 +229,15 @@ const imageModelSchema = z
         z.array(rateSchema).min(1).describe('Token rates, for providers that report image tokens'),
       ])
       .describe('"unmetered", a price per image, or token rates'),
+    maxTokens: z
+      .strictObject({
+        input: z.number().int().min(1).max(1_000_000).default(32_768),
+        output: z.number().int().min(1).max(1_000_000).default(16_384),
+      })
+      .default({ input: 32_768, output: 16_384 })
+      .describe(
+        'With token rates: the most tokens one image request is held for. A request reporting more is charged its hold.',
+      ),
     notes: z.array(z.string()).optional().describe('Free-form notes, such as where prices were checked'),
   })
   .describe('One model that generates images');

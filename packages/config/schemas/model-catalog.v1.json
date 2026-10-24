@@ -638,6 +638,29 @@
             ],
             "description": "\"unmetered\", a price per image, or token rates"
           },
+          "maxTokens": {
+            "default": {
+              "input": 32768,
+              "output": 16384
+            },
+            "description": "With token rates: the most tokens one image request is held for. A request reporting more is charged its hold.",
+            "type": "object",
+            "properties": {
+              "input": {
+                "default": 32768,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              },
+              "output": {
+                "default": 16384,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            },
+            "additionalProperties": false
+          },
           "notes": {
             "description": "Free-form notes, such as where prices were checked",
             "type": "array",
