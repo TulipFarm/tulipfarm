@@ -46,7 +46,7 @@ export type LinkRead =
   | { url: string; outcome: 'page' }
   | { url: string; outcome: 'failed'; reason: PublicFileFailure };
 
-/** What the link notice needs of a read: a task's links are read for one step and not kept. */
+/** What the link notice needs of a read; a task keeps its links in object storage, not as attachments. */
 export type NoticedLink =
   | { url: string; outcome: 'file'; filename: string }
   | { url: string; outcome: 'page' }

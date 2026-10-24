@@ -79,7 +79,7 @@ export function createTaskComposition(
       files: files ?? undefined,
       google: drive,
       recognition: taskFileRecognition(runtime),
-      links: fetchPublicFile,
+      links: objects ? { fetch: fetchPublicFile, objects } : undefined,
     },
   );
   const progress = createTaskProgress(runtime);

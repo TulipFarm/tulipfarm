@@ -678,11 +678,13 @@ export function createTaskRuntime(
             .map(source => [fileKey(source), withoutRead(source)]),
         ).values(),
       ];
-      const ownerTexts = c.history.filter(message => message.role === 'owner').map(message => message.text);
+      const ownerTexts = c.history
+        .filter(message => message.role === 'owner')
+        .map(message => ({ sequence: message.sequence, text: message.text }));
       const images =
         !materializing &&
         reading !== undefined &&
-        (sources.length > 0 || ownerTexts.some(text => messageLinks(text).read.length > 0)) &&
+        (sources.length > 0 || ownerTexts.some(message => messageLinks(message.text).read.length > 0)) &&
         (await reading.enabled(workspaceId));
       if (!materializing && (sources.length || images)) {
         const activity = await reserveTaskWork(tx, taskId, 'files');

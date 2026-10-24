@@ -1,4 +1,5 @@
-import type { z } from 'zod';
+import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { FileError } from '@tulipfarm/files';
 import {
@@ -8,7 +9,8 @@ import {
   type GoogleFileReader,
 } from '@tulipfarm/conversations/file-references';
 import { linkNotice, messageLinks, linkFetchConcurrency, type NoticedLink } from '@tulipfarm/conversations/links';
-import type { FetchPublicFile } from '@tulipfarm/conversations/public-web';
+import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
+import { publicFileFailures, type FetchPublicFile, type PublicFile } from '@tulipfarm/conversations/public-web';
 import {
   readFailureText,
   readFile,
@@ -37,9 +39,15 @@ export type TaskFileReading = {
   google?: GoogleFileReader | undefined;
   /** The owner's recognizer on the workspace recognition model, and the image size that model accepts. */
   recognition(scope: Scope): Promise<{ recognition: FileRecognition | undefined; maxImageBytes: number }>;
-  /** Fetches public links; absent, instruction links are left to `web.fetch`. */
-  links?: FetchPublicFile | undefined;
+  /**
+   * Fetches public links and keeps what each returned in the chat object store, so every later step of the task reads
+   * the same bytes; absent, instruction links are left to `web.fetch`.
+   */
+  links?: { fetch: FetchPublicFile; objects: AttachmentBytes } | undefined;
 };
+
+/** An owner message of the task, whose links are read. */
+export type TaskInstruction = { sequence: number; text: string };
 
 /**
  * Why a step stops on a file before the model. A file that cannot be read, or that gets no room, is named with why;
@@ -155,54 +163,135 @@ async function readSource(
   };
 }
 
-/** Reads the first five links of each owner message, three at a time; a failed link is named, never fatal. */
+/** One link fetch and the read of what it returned stop after 25 seconds, as a chat link does. */
+const linkDeadlineMs = 25_000;
+/** A kept link record is padded to this size, since the object store reads an object of a known size. */
+const keptRecordBytes = 8192;
+/** What a link of an owner message returned when it was first read, kept for every later step of the task. */
+const keptLinkSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({
+    url: z.string(),
+    outcome: z.literal('file'),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    filename: z.string(),
+    mediaType: z.string(),
+    size: z.number().int().positive(),
+    objectKey: z.string(),
+  }),
+  z.strictObject({ url: z.string(), outcome: z.literal('page') }),
+  z.strictObject({ url: z.string(), outcome: z.literal('failed'), reason: z.enum(publicFileFailures) }),
+]);
+type KeptLink = z.infer<typeof keptLinkSchema>;
+
+const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
+
+async function keptLink(objects: AttachmentBytes, key: string): Promise<KeptLink | null> {
+  let body: Uint8Array;
+  try {
+    body = await objects.read(key, keptRecordBytes);
+  } catch {
+    return null;
+  }
+  return keptLinkSchema.parse(JSON.parse(Buffer.from(body).toString('utf8')));
+}
+
+/**
+ * Keeps what a link returned under `key`: a file's bytes first, then the record naming them. When another step kept
+ * the link first, its record is the one returned.
+ */
+async function keepLink(objects: AttachmentBytes, key: string, result: PublicFile) {
+  let record: KeptLink;
+  if (result.kind === 'file') {
+    const objectKey = `${key}-${result.sha256}`;
+    await objects.putIfAbsent(objectKey, result.bytes);
+    record = {
+      url: result.url,
+      outcome: 'file',
+      sha256: result.sha256,
+      filename: result.filename,
+      mediaType: result.mediaType,
+      size: result.bytes.byteLength,
+      objectKey,
+    };
+  } else
+    record =
+      result.kind === 'page'
+        ? { url: result.url, outcome: 'page' }
+        : { url: result.url, outcome: 'failed', reason: result.reason };
+  const json = Buffer.from(JSON.stringify(keptLinkSchema.parse(record)));
+  if (json.byteLength > keptRecordBytes) throw new Error('task-link-record-too-large');
+  await objects.putIfAbsent(key, Buffer.concat([json, Buffer.alloc(keptRecordBytes - json.byteLength, ' ')]));
+  return (await keptLink(objects, key)) ?? record;
+}
+
+/**
+ * Reads the first five links of each owner message, three at a time. A link is fetched once, by the first step that
+ * reads its message, and what it returned is kept; later steps read the kept copy. Web access being off is not kept,
+ * so the link is read once it is on. A failed link is named, never fatal, and no link is fetched once the step's
+ * file-reading time is spent.
+ */
 async function readLinks(
-  fetch: FetchPublicFile,
-  texts: readonly string[],
+  links: NonNullable<TaskFileReading['links']>,
+  scope: Scope,
+  messages: readonly TaskInstruction[],
   options: { imageInput: boolean; maxImageBytes: number; recognition: FileRecognition | undefined },
+  withinAllowance: () => boolean,
 ) {
-  const found = texts.map(text => messageLinks(text));
-  const urls = [...new Set(found.flatMap(links => links.read))];
-  const extra = [...new Set(found.flatMap(links => links.extra))].filter(url => !urls.includes(url));
+  const found = messages.map(message => ({ sequence: message.sequence, ...messageLinks(message.text) }));
+  const jobs: { sequence: number; url: string }[] = [];
+  for (const message of found)
+    for (const url of message.read)
+      if (!jobs.some(job => job.url === url)) jobs.push({ sequence: message.sequence, url });
+  const extra = [...new Set(found.flatMap(message => message.extra))].filter(url => !jobs.some(job => job.url === url));
   const notices: (NoticedLink | undefined)[] = [];
   const files: (TaskFileRead | undefined)[] = [];
   let webOff = false;
   let next = 0;
   const worker = async () => {
-    while (next < urls.length) {
+    while (next < jobs.length) {
       const index = next++;
-      const url = urls[index]!;
-      const signal = AbortSignal.timeout(30_000);
-      const result = await fetch(url, signal).catch(() => ({
-        kind: 'failed' as const,
-        url,
-        reason: 'unavailable' as const,
-      }));
-      if (result.kind === 'failed') {
-        if (result.reason === 'web-off') webOff = true;
-        notices[index] = { url, outcome: 'failed', reason: result.reason };
+      const { sequence, url } = jobs[index]!;
+      if (!withinAllowance()) {
+        notices[index] = { url, outcome: 'failed', reason: 'timed-out' };
         continue;
       }
-      if (result.kind === 'page') {
-        notices[index] = { url, outcome: 'page' };
+      const signal = AbortSignal.timeout(linkDeadlineMs);
+      const key = `${scope.workspaceId}/task-links/${scope.taskId}/${sequence}-${hash(url)}`;
+      let kept = await keptLink(links.objects, key);
+      let bytes: Uint8Array | null = null;
+      if (!kept) {
+        const result = await links.fetch(url, signal).catch(() => ({
+          kind: 'failed' as const,
+          url,
+          reason: 'unavailable' as const,
+        }));
+        if (result.kind === 'failed' && result.reason === 'web-off') {
+          webOff = true;
+          notices[index] = { url, outcome: 'failed', reason: result.reason };
+          continue;
+        }
+        kept = await keepLink(links.objects, key, result);
+        if (result.kind === 'file' && kept.outcome === 'file' && kept.sha256 === result.sha256) bytes = result.bytes;
+      }
+      if (kept.outcome !== 'file') {
+        notices[index] = kept;
         continue;
       }
-      const reading = await readFile(
-        { name: result.filename, mediaType: result.mediaType, bytes: result.bytes },
-        { ...options, signal },
-      );
-      notices[index] = { url, outcome: 'file', filename: result.filename };
+      bytes ??= await links.objects.read(kept.objectKey, kept.size, signal);
+      if (hash(bytes) !== kept.sha256) throw new Error('task-link-integrity');
+      const reading = await readFile({ name: kept.filename, mediaType: kept.mediaType, bytes }, { ...options, signal });
+      notices[index] = { url, outcome: 'file', filename: kept.filename };
       files[index] = {
         origin: 'web',
         id: url,
-        name: result.filename,
-        mediaType: result.mediaType,
-        size: result.bytes.byteLength,
+        name: kept.filename,
+        mediaType: kept.mediaType,
+        size: kept.size,
         reading,
       };
     }
   };
-  await Promise.all(Array.from({ length: Math.min(linkFetchConcurrency, urls.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(linkFetchConcurrency, jobs.length) }, worker));
   return {
     files: files.filter(file => file !== undefined),
     notice: linkNotice(
@@ -224,7 +313,7 @@ export async function readTaskFiles(input: {
   scope: Scope;
   family: TaskReadingFamily;
   sources: readonly FileSource[];
-  instructions: readonly string[];
+  instructions: readonly TaskInstruction[];
   /** False once the step's file-reading time is spent; the remaining sources are not read. */
   withinAllowance: () => boolean;
 }): Promise<{ stop: TaskFileStop } | { content: TaskFileContent | null; receipts: TaskSource[] }> {
@@ -248,7 +337,7 @@ export async function readTaskFiles(input: {
   }
   const links =
     reading.links && input.instructions.length
-      ? await readLinks(reading.links, input.instructions, options)
+      ? await readLinks(reading.links, scope, input.instructions, options, input.withinAllowance)
       : { files: [], notice: '' };
   if (!reads.length && !links.files.length && !links.notice) return { content: null, receipts };
   const { content, omitted } = taskFileContent([...reads, ...links.files], family, links.notice);
