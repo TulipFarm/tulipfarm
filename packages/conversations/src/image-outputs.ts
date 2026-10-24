@@ -19,6 +19,7 @@ import {
   settleCredits,
   settleCreditsAtReservation,
 } from '@tulipfarm/workspace-storage/credits';
+import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
 import type { ImageReceipt } from './contracts.ts';
@@ -458,7 +459,7 @@ export async function generateImageOutputs(
             ),
           );
           if (
-            spent + creditUnitsForProviderCost(BigInt(hold)) >
+            spent + (await knowledgeTaskSpend(tx, context.credits.flowId)) + creditUnitsForProviderCost(BigInt(hold)) >
             BigInt(context.credits.allowanceCredits) * 1_000_000_000_000n
           )
             return 'task-credits' as const;
