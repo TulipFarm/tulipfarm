@@ -183,6 +183,8 @@ export type GitHubSyncOptions = {
   concurrency: number;
   // How often a progressing run extends its 15-minute lease.
   leaseRenewMs: number;
+  // How long a source that finished cleanly waits before its next pass; webhooks start it sooner.
+  idleRecheckMs: number;
   sleep: (ms: number) => Promise<void>;
   random: () => number;
 };
@@ -253,6 +255,7 @@ export function createGitHubKnowledge({
     runBudgetMs: 5 * 60_000,
     concurrency: 4,
     leaseRenewMs: 60_000,
+    idleRecheckMs: 10 * 60_000,
     sleep: ms => wait(ms),
     random: Math.random,
     ...sync,
@@ -2031,7 +2034,7 @@ export function createGitHubKnowledge({
             // A change GitHub reported during the pass moved next_attempt_at past the claim's, so the next pass starts now.
             await tx.client.query(
               `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,
-              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+interval '10 minutes' END WHERE source_id=$1`,
+              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+$5::double precision*interval '1 millisecond' END WHERE source_id=$1`,
               [
                 claim.source_id,
                 initialCursor({
@@ -2045,6 +2048,7 @@ export function createGitHubKnowledge({
                 }),
                 Object.keys(cursor.isolated ?? {}).length ? 'transient' : null,
                 claim.marker,
+                tuning.idleRecheckMs,
               ],
             );
           });
