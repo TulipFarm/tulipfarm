@@ -10,7 +10,8 @@ import {
   slackCredentialCipher,
   type SlackRuntime,
 } from '@tulipfarm/slack';
-import { createBackgroundJob, errorAttributes, log } from '@tulipfarm/observability';
+import { createBackgroundJob, errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
+import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { createSlackDirectMessages } from '@tulipfarm/slack';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
@@ -58,6 +59,7 @@ export async function createSlackPromptComposition(
   runtime: SlackRuntime,
   model: ModelContinuity | null = null,
   modelFamilyId?: string,
+  attachments?: AttachmentBytes,
 ) {
   const outboundSettings = slackActionSettings();
   const settings = slackPromptSettings();
@@ -70,6 +72,15 @@ export async function createSlackPromptComposition(
         ...settings,
         appId: settings.config.appId,
         ...(modelFamilyId ? { modelFamilyId } : {}),
+        // Files shared in a direct message become its attachments while the `images` flag is on.
+        ...(attachments
+          ? {
+              files: {
+                enabled: (workspaceId: string) => isFeatureEnabled('images', null, { id: workspaceId }),
+                bytes: attachments,
+              },
+            }
+          : {}),
       })
     : undefined;
   const channelOptions = {
@@ -170,7 +181,24 @@ export async function createSlackPromptComposition(
         }
         if (direct) {
           try {
-            await direct.admitPending(workspaceId);
+            const admission = await direct.admitPending(workspaceId);
+            for (const error of admission.failures) report(error, 'direct-admission');
+            // Files are downloaded by each message's own workflow, so a slow download holds up no other message.
+            for (const work of admission.files) {
+              try {
+                await connection.withDeadline(Date.now() + 5000, () =>
+                  client.workflow.start('slackDirectMessageFiles', {
+                    workflowId: `slack-dm-files-${work.workspaceId}-${work.eventId}`,
+                    taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+                    args: [work],
+                    workflowIdConflictPolicy: 'USE_EXISTING',
+                    workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+                  }),
+                );
+              } catch (error) {
+                report(error, 'direct-files-start');
+              }
+            }
           } catch (error) {
             report(error, 'direct-admission');
           }
@@ -237,6 +265,12 @@ export async function createSlackPromptComposition(
         if (!direct) throw new Error('slack-workspace-disabled');
         await installations.requireInstalled(work.workspaceId);
         return direct.process(work);
+      },
+      admitSlackDirectMessageFiles: async (value: unknown) => {
+        const work = slackPromptWorkSchema.parse(value);
+        if (!direct) throw new Error('slack-workspace-disabled');
+        await installations.requireInstalled(work.workspaceId);
+        return direct.admitFiles(work);
       },
       deliverSlackChannelAgent: async (value: unknown) => {
         const work = slackPromptWorkSchema.parse(value);

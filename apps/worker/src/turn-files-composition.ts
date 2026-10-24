@@ -4,8 +4,8 @@ import { fetchPublicFile } from '@tulipfarm/agents/web-fetch';
 import { defaultImageInputLimits, modelImageLimits } from '@tulipfarm/config';
 import { createAttachments, type AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
-import { recognisingExtract, type TurnFiles } from '@tulipfarm/conversations/turn-files';
-import type { TaskFileExtraction } from '@tulipfarm/agents/task-runtime';
+import type { TurnFiles } from '@tulipfarm/conversations/turn-files';
+import type { TaskFileReading } from '@tulipfarm/agents/task-files';
 import { createRecognitionCache } from '@tulipfarm/knowledge';
 import type { MediaRecognizer } from '@tulipfarm/memory-core/parser/media-contracts';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -87,16 +87,14 @@ export function chatTurnFiles(runtime: ConversationRuntime, objects: { attachmen
 }
 
 /**
- * How tasks read Files and Drive inputs: under the workspace `images` flag, the chat reader on the workspace
- * recognition model, sharing the recognition cache and charged to the owner as Knowledge credits. Without the flag,
- * the legacy text extraction.
+ * How a task recognises the images in its files and links: the chat recognizer on the workspace recognition model,
+ * sharing the recognition cache and one concurrency bound per task, charged to the owner as Knowledge credits.
  */
-export function taskFileExtraction(
+export function taskFileRecognition(
   runtime: ConversationRuntime,
   model: WorkspaceRecognitionModel = workspaceRecognitionModel(runtime),
-): TaskFileExtraction {
+): TaskFileReading['recognition'] {
   return async scope => {
-    if (!(await isFeatureEnabled('images', null, { id: scope.workspaceId }))) return undefined;
     const resolved = await model(scope.workspaceId);
     const recognizer = createMediaRecognizer(
       runtime,
@@ -104,12 +102,16 @@ export function taskFileExtraction(
       () => resolved,
     );
     const route = resolved && inferenceRouteSchema.parse(resolved.route);
-    return recognisingExtract(
-      recognizer && {
-        recognizer: turnLimited(`task:${scope.taskId}`, recognizer),
-        cache: createRecognitionCache(runtime, scope.workspaceId),
-      },
-      route ? modelImageLimits(route.provider, route.model).maxImageBytes : defaultImageInputLimits.maxImageBytes,
-    );
+    return {
+      recognition: recognizer
+        ? {
+            recognizer: turnLimited(`task:${scope.taskId}`, recognizer),
+            cache: createRecognitionCache(runtime, scope.workspaceId),
+          }
+        : undefined,
+      maxImageBytes: route
+        ? modelImageLimits(route.provider, route.model).maxImageBytes
+        : defaultImageInputLimits.maxImageBytes,
+    };
   };
 }

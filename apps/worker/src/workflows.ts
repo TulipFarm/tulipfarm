@@ -7,7 +7,7 @@ export { boundedAgentTool } from '@tulipfarm/agents/workflows';
 export { prepareAgentSave } from './agent-authoring-workflows.ts';
 export { conversationReply } from './conversation-workflows.ts';
 export { conversationMaintenance } from './conversation-maintenance-workflows.ts';
-export { slackLinkPrompt, slackDirectMessage, slackChannelAgent } from './slack-workflows.ts';
+export { slackLinkPrompt, slackDirectMessage, slackDirectMessageFiles, slackChannelAgent } from './slack-workflows.ts';
 export { gmailHeartbeat } from './google-heartbeat-workflows.ts';
 export { businessWorkflowV1 } from '@tulipfarm/workflows/temporal';
 export { agentTaskStep, agentTaskRecovery } from './task-workflows.ts';

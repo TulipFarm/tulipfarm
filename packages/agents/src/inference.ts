@@ -378,6 +378,7 @@ function request(route: z.output<typeof inferenceRouteSchema>, input: Parameters
     [
       { kind: 'turn', turn: { role: 'user', text: context } },
       { kind: 'turn', turn: { role: 'user', text: input.prompt } },
+      ...(input.files ? [{ kind: 'turn' as const, turn: { role: 'user' as const, content: input.files } }] : []),
     ],
     catalog.tools,
   );

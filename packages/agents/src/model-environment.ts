@@ -1,5 +1,6 @@
 import {
   loadModelCatalog,
+  modelImageLimits,
   ModelResolutionError,
   resolveModelBundle,
   servedModelBundle,
@@ -99,6 +100,10 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
         budgetPicoUsd: () => runBudgetPicoUsd,
         defaultFamily: () => defaultFamily,
         paused,
+        imageInput: resolution => {
+          const route = inference(resolution);
+          return route && routeCapabilities(route).imageInput ? modelImageLimits(route.provider, route.model) : null;
+        },
         health: health(deploymentKey),
         infer: (resolution, input, timeoutMs, signal) => {
           const route = inference(resolution);

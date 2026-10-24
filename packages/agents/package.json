@@ -135,6 +135,10 @@
       "types": "./dist/plan-contracts.d.ts",
       "default": "./dist/plan-contracts.js"
     },
+    "./task-files": {
+      "types": "./dist/task-files.d.ts",
+      "default": "./dist/task-files.js"
+    },
     "./task-runtime": {
       "types": "./dist/task-runtime.d.ts",
       "default": "./dist/task-runtime.js"

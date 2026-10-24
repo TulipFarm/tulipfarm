@@ -123,6 +123,10 @@
       "types": "./dist/file-outputs.d.ts",
       "default": "./dist/file-outputs.js"
     },
+    "./links": {
+      "types": "./dist/links.d.ts",
+      "default": "./dist/links.js"
+    },
     "./turn-files": {
       "types": "./dist/turn-files.d.ts",
       "default": "./dist/turn-files.js"

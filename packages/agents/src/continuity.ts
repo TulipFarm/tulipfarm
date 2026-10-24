@@ -4,6 +4,7 @@ import { retryModelReceiptSchema } from './chat-contracts.ts';
 export { retryModelSchema, retryModelReceiptSchema } from './chat-contracts.ts';
 import {
   calculateModelCost,
+  estimateInputTokens,
   modelBundleSchema,
   modelUsageSchema,
   parseModelResolution,
@@ -46,6 +47,8 @@ export type ModelContinuity = {
   defaultFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
   /** True for a family the operator paused: closed to new agents and chats, still served for existing ones. */
   paused?: (familyId: string) => boolean;
+  /** What an image costs a resolution that reads images, or null when it does not; absent, no route reads images. */
+  imageInput?: (resolution: ResolvedModel) => { imageInputTokens: number; maxImageBytes: number } | null;
 };
 const amount = z.string().regex(/^(0|[1-9]\d{0,29})$/);
 const bindingSchema = z.object({
@@ -277,6 +280,26 @@ function reservation(resolution: ResolvedModel, date: string, trustedBundle: Mod
   return maximum.toString();
 }
 
+/**
+ * An input's size for context fit and credit holds. Instruction bytes count as tokens, as before. A task's file content
+ * counts as chat counts it: text at the estimate for fit and its bytes for the hold, and each image at the model's
+ * catalog bound rather than its base64. Null when the input has images and the resolution does not read them.
+ */
+function inputSize(config: ModelContinuity, resolution: ResolvedModel, input: Input) {
+  const { files, ...rest } = input;
+  const bytes = Buffer.byteLength(JSON.stringify(rest), 'utf8');
+  if (!files) return { bytes, files: { contextTokens: 0, holdTokens: 0 } };
+  const images = files.filter(part => part.type === 'image').length;
+  const reading = images ? config.imageInput?.(resolution) : null;
+  if (images && !reading) return null;
+  const textBytes = files.reduce((sum, part) => sum + (part.type === 'text' ? Buffer.byteLength(part.text) : 0), 0);
+  const imageTokens = images * (reading?.imageInputTokens ?? 0);
+  return {
+    bytes,
+    files: { contextTokens: estimateInputTokens(textBytes) + imageTokens, holdTokens: textBytes + imageTokens },
+  };
+}
+
 export async function claimAttempt(
   tx: AgentTransaction,
   config: ModelContinuity,
@@ -328,7 +351,12 @@ export async function claimAttempt(
     return null;
   }
   const envelopeBytes = Buffer.byteLength(JSON.stringify(modelNativeTools(input).tools), 'utf8') + 2048;
-  if (Buffer.byteLength(JSON.stringify(input), 'utf8') + envelopeBytes > resolution.route.maxInputTokens) {
+  const size = inputSize(config, resolution, input);
+  if (!size) {
+    await failGeneration(tx, generation, 'image-input-unavailable');
+    return null;
+  }
+  if (size.bytes + envelopeBytes + size.files.contextTokens > resolution.route.maxInputTokens) {
     await failGeneration(tx, generation, 'context-overflow');
     return null;
   }
@@ -336,7 +364,7 @@ export async function claimAttempt(
     resolution,
     now.toISOString().slice(0, 10),
     await config.trustedBundle(generation.binding.bundleId),
-    Buffer.byteLength(JSON.stringify(input), 'utf8') + envelopeBytes,
+    Math.min(resolution.route.maxInputTokens, size.bytes + envelopeBytes + size.files.holdTokens),
   );
   const spending = BigInt(generation.spent_pico_usd) + BigInt(reserved);
   if (

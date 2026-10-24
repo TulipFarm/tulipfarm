@@ -1,4 +1,5 @@
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { modelImageMediaTypes } from '@tulipfarm/media';
 import { z } from 'zod';
 import { agentDefinitionSchema, scopeSchema, toolCallSchema, taskMutationSchema } from './contracts.ts';
 import { googleAgentToolCallSchema } from './google-tool-contracts.ts';
@@ -38,6 +39,19 @@ export const modelDecisionSchema = z.discriminatedUnion('kind', [
     calls: z.array(taskMutationSchema).min(1).max(50),
   }),
 ]);
+/**
+ * A task step's files and instruction links as the chat reader renders them: labelled untrusted blocks, with images
+ * as image parts. The model reads it as a user message after the prompt.
+ */
+export const taskFileContentSchema = z
+  .array(
+    z.discriminatedUnion('type', [
+      z.strictObject({ type: z.literal('text'), text: z.string().min(1) }),
+      z.strictObject({ type: z.literal('image'), mediaType: z.enum(modelImageMediaTypes), data: z.base64() }),
+    ]),
+  )
+  .min(1);
+export type TaskFileContent = z.infer<typeof taskFileContentSchema>;
 export const agentModelInputSchema = z
   .strictObject({
     prompt: z.string().min(1).max(32000),
@@ -53,8 +67,11 @@ export const agentModelInputSchema = z
       })
       .optional(),
     mcp: mcpModelCatalogSchema.optional(),
+    files: taskFileContentSchema.optional(),
   })
   .superRefine((input, ctx) => {
+    if (input.files && !input.task)
+      ctx.addIssue({ code: 'custom', message: 'File content requires a member-owned private task' });
     if (input.task && input.runtime)
       ctx.addIssue({ code: 'custom', message: 'Task inputs cannot select a Slack channel runtime' });
     if (input.personalMemory && !input.task)
