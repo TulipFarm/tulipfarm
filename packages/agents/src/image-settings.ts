@@ -135,6 +135,10 @@ export async function resolveImageModels(
   };
 }
 
+/** Whether the workspace lets models generate images now; work admitted earlier stops generating once it is off. */
+export async function imageGenerationEnabled(tx: AgentTransaction) {
+  return (await stored(tx))?.generationEnabled ?? true;
+}
 /** The Knowledge recognition switch, stored from common version 11. */
 async function recognitionSwitchedOn(tx: AgentTransaction) {
   const row = z

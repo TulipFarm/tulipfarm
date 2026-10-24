@@ -195,6 +195,10 @@
       "types": "./dist/model-policy.d.ts",
       "default": "./dist/model-policy.js"
     },
+    "./image-generation": {
+      "types": "./dist/image-generation.d.ts",
+      "default": "./dist/image-generation.js"
+    },
     "./image-providers": {
       "types": "./dist/image-providers.d.ts",
       "default": "./dist/image-providers.js"

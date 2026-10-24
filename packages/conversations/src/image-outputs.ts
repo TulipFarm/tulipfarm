@@ -97,6 +97,7 @@ export type ImageOutputDeps = {
 /** Each image moves from `pending` to exactly one final state. Only `failed` and `cancelled` images are tried again. */
 export type ImageState = 'pending' | 'saved' | 'refused' | 'failed' | 'cancelled';
 export type ImageFailure =
+  | 'content-refused'
   | 'credits-exhausted'
   | 'task-credits'
   | 'generation-failed'
@@ -130,7 +131,7 @@ export type ImageCallError =
   | 'source-unreadable'
   | 'destination-required';
 export type ImageOutputResult =
-  | { images: GeneratedImage[]; instruction: string }
+  | { images: GeneratedImage[]; instruction: string; error?: 'content-refused' }
   | {
       error: ImageCallError;
       instruction: string;
@@ -401,6 +402,7 @@ export async function generateImageOutputs(
     } else if (row.state === 'pending') images[index] = { ...images[index]!, state: 'failed', failure: 'in-progress' };
     else if (row.state === 'failed')
       images[index] = { ...images[index]!, failure: (row.failure ?? 'generation-failed') as ImageFailure };
+    else if (row.state === 'refused') images[index] = { ...images[index]!, failure: 'content-refused' };
   }
   publish();
 
@@ -480,7 +482,7 @@ export async function generateImageOutputs(
             ? imageCost(model, call.quality, shape, pricingRevision, outcome.usage)
             : '0',
         );
-        return finish(index, 'refused');
+        return finish(index, 'refused', { failure: 'content-refused' });
       }
       const cost = imageCost(model, call.quality, shape, pricingRevision, outcome.usage);
       const sniffed = sniffMediaType(outcome.bytes)?.mediaType;
@@ -528,6 +530,8 @@ export async function generateImageOutputs(
   const saved = images.filter(image => image.state === 'saved').length;
   const refused = images.filter(image => image.state === 'refused').length;
   return {
+    // Every image refused is the call's outcome; the provider's own wording is never returned.
+    ...(refused === images.length ? { error: 'content-refused' as const } : {}),
     images,
     instruction: [
       saved
