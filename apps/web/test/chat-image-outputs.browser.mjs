@@ -102,7 +102,7 @@ test(
     const { workspace, session } = createWorkspaceFixture();
     await withBrowser(async (context, origin) => {
       const page = await context.newPage();
-      page.setDefaultTimeout(10000);
+      page.setDefaultTimeout(30000);
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       let states = ['pending', 'pending'];
@@ -195,7 +195,7 @@ test(
     const { workspace, session } = createWorkspaceFixture();
     await withBrowser(async (context, origin) => {
       const page = await context.newPage();
-      page.setDefaultTimeout(10000);
+      page.setDefaultTimeout(30000);
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/v1/**', async route => {

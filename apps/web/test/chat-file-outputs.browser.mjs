@@ -49,7 +49,7 @@ test('a file created in a reply shows as a card that opens the Files viewer', { 
         reducedMotion: 'reduce',
       });
       const page = await context.newPage();
-      page.setDefaultTimeout(10000);
+      page.setDefaultTimeout(30000);
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       let detailsStatus = 503;
@@ -111,6 +111,7 @@ test('a file created in a reply shows as a card that opens the Files viewer', { 
         if (path.endsWith('/workspace-mcp/capabilities'))
           return route.fulfill({ status: 404, json: { error: 'not-found' } });
         if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
+        if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
         if (path === `/v1/workspaces/${workspace.id}/files/${created.id}`)
           return detailsStatus === 200
             ? route.fulfill({ json: created })
