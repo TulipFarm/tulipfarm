@@ -111,9 +111,13 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
   const served = new Map();
   const downloads = [];
   const slack = { stalled: false };
+  /** Responses for particular file URLs, on any host, in place of the default file server. */
+  const routes = new Map();
   const fetcher = async (url, init) => {
-    if (new URL(url).hostname !== 'files.slack.com') return f.options.fetcher(url, init);
+    const route = routes.get(url);
+    if (!route && new URL(url).hostname !== 'files.slack.com') return f.options.fetcher(url, init);
     downloads.push({ url, authorization: new Headers(init?.headers).get('authorization') });
+    if (route) return route(init);
     if (slack.stalled)
       return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)));
     const body = served.get(url);
@@ -191,7 +195,7 @@ async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, 
     ).rows;
     return { requests: requests.slice(from), parts };
   }
-  return { ...f, dm, served, downloads, slack, recognitions, bytes, failures, admit, admitted, receive };
+  return { ...f, dm, served, routes, downloads, slack, recognitions, bytes, failures, admit, admitted, receive };
 }
 
 const fileShare = (files, text = '') => ({ text, subtype: 'file_share', files });
@@ -373,4 +377,92 @@ test('a file the workspace has no room for leaves no stored bytes behind', async
   assert.match(parts[0].text, /File not read: whiteboard.png; the workspace's attachment storage is full/);
   assert.equal(f.downloads.length, 1);
   assert.equal(f.bytes.objects.size, 0, 'the staged bytes were removed');
+});
+
+test('a Slack redirect to a Slack file host is followed without the token', async t => {
+  const f = await setup(t);
+  const image = await png(32, 24, '#3a3');
+  const edge = 'https://files-edge.slack-edge.com/TONE-F1/whiteboard.png';
+  f.routes.set(fileUrl, () => new Response(null, { status: 302, headers: { location: edge } }));
+  f.routes.set(edge, () => new Response(image, { headers: { 'content-type': 'image/png' } }));
+  const { requests, parts } = await f.receive(fileShare([whiteboard]));
+  assert.deepEqual(
+    f.downloads.map(download => download.url),
+    [fileUrl, edge],
+  );
+  assert.ok(f.downloads[0].authorization, 'the token goes to files.slack.com');
+  assert.equal(f.downloads[1].authorization, null, 'the token does not follow the redirect');
+  assert.deepEqual(
+    parts.map(part => part.filename),
+    ['whiteboard.png'],
+  );
+  assert.equal(imageBlocks(requests[0]).length, 1);
+});
+
+test('a Slack redirect to a host outside Slack is refused', async t => {
+  const f = await setup(t);
+  f.routes.set(fileUrl, () => new Response(null, { status: 302, headers: { location: 'https://evil.example.com/x' } }));
+  const { parts } = await f.receive(fileShare([whiteboard]));
+  assert.deepEqual(
+    f.downloads.map(download => download.url),
+    [fileUrl],
+    'the other host is never asked',
+  );
+  assert.match(parts[0].text, /^\[File not read: whiteboard.png; Slack did not return it\]$/);
+  assert.equal(f.bytes.objects.size, 0);
+});
+
+test('a Slack file whose body runs past 10 MiB is cut off and named as too large', async t => {
+  const f = await setup(t);
+  let sent = 0;
+  f.routes.set(
+    fileUrl,
+    () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (sent >= 11) return controller.close();
+            sent++;
+            controller.enqueue(new Uint8Array(1024 * 1024));
+          },
+        }),
+        { headers: { 'content-type': 'image/png' } },
+      ),
+  );
+  const { parts } = await f.receive(fileShare([whiteboard]));
+  assert.ok(sent <= 11);
+  assert.match(parts[0].text, /^\[File not read: whiteboard.png; it is larger than 10 MiB\]$/);
+  assert.equal(f.bytes.objects.size, 0);
+});
+
+test('a Slack file whose body stalls is named as timed out', { timeout: 60_000 }, async t => {
+  const f = await setup(t);
+  f.routes.set(
+    fileUrl,
+    init =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(16));
+            init.signal.addEventListener('abort', () => controller.error(init.signal.reason));
+          },
+        }),
+        { headers: { 'content-type': 'image/png' } },
+      ),
+  );
+  const { parts } = await f.receive(fileShare([whiteboard]));
+  assert.match(parts[0].text, /^\[File not read: whiteboard.png; downloading it from Slack timed out\]$/);
+  assert.equal(f.bytes.objects.size, 0);
+});
+
+test('an HTML page in place of a Slack file is not read', async t => {
+  const f = await setup(t);
+  f.routes.set(
+    fileUrl,
+    () => new Response('<html>sign in</html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+  );
+  const { requests, parts } = await f.receive(fileShare([whiteboard]));
+  assert.match(parts[0].text, /^\[File not read: whiteboard.png; Slack did not return it\]$/);
+  assert.doesNotMatch(requestText(requests[0]), /sign in/);
+  assert.equal(f.bytes.objects.size, 0);
 });
