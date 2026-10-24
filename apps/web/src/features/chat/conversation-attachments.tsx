@@ -108,16 +108,25 @@ function uploadSummary(files: ReturnType<typeof useConversationAttachments>['fil
   return '';
 }
 
+/**
+ * Whether the assistant reads attached files, and whether the selected model sees images or reads a text description.
+ * `imageInput` is null while the model catalog loads or fails, so no claim about images is made then.
+ */
+export type AttachmentReading = { imageInput: boolean | null };
+
 export function StagedAttachments({
   uploads,
   disabled,
   references,
   blocked,
+  reading,
 }: {
   uploads: ReturnType<typeof useConversationAttachments>;
   disabled: boolean;
   blocked?: ReactNode;
   references?: { items: readonly FileReference[]; notice: string | null };
+  /** Absent while the `images` flag is off, when the assistant cannot read uploaded files. */
+  reading?: AttachmentReading | undefined;
 }) {
   const referenced = references?.items ?? [];
   if (!uploads.files.length && !uploads.error && !referenced.length && !references?.notice) return null;
@@ -180,9 +189,17 @@ export function StagedAttachments({
       <p role="status" className="sr-only">
         {uploadSummary(uploads.files)}
       </p>
-      {!!uploads.files.length && (
+      {!!uploads.files.length && !reading && (
         <p className="text-xs text-muted-foreground">
           Stored privately for download. The assistant can’t read uploaded files.
+        </p>
+      )}
+      {!!uploads.files.length && reading && (
+        <p className="text-xs text-muted-foreground">
+          Stored privately. The assistant reads attached files for your requests in this chat.
+          {reading.imageInput === false && uploads.files.some(item => item.file.type.startsWith('image/'))
+            ? ' This model can’t see images, so it reads a text description of each image instead.'
+            : ''}
         </p>
       )}
     </div>
