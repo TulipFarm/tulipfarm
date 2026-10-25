@@ -510,11 +510,6 @@ export function SlackKnowledgeSources({ workspaceId }: { workspaceId: string }) 
               </Button>
             </div>
           )}
-          {sources.state.refreshing && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Checking Slack source status…
-            </p>
-          )}
           {!visibleSources.length ? (
             <StatePanel
               kind="empty"

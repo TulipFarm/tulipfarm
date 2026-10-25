@@ -647,11 +647,6 @@ export function GitHubKnowledgeSources({
                     </Button>
                   </div>
                 )}
-                {sources.state.refreshing && (
-                  <p role="status" className="text-sm text-muted-foreground">
-                    Checking GitHub source status…
-                  </p>
-                )}
                 {!visibleSources.length ? (
                   !selecting &&
                   !sources.state.error && (

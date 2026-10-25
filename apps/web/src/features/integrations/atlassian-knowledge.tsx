@@ -590,11 +590,6 @@ export function AtlassianKnowledgeSources({
               </Button>
             </div>
           )}
-          {sources.state.refreshing && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Checking {name} source status…
-            </p>
-          )}
           {!visibleSources.length ? (
             <StatePanel
               kind="empty"

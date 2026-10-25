@@ -428,11 +428,6 @@ export function GoogleKnowledgeSources({ workspaceId, kinds }: { workspaceId: st
               </Button>
             </div>
           )}
-          {sources.state.refreshing && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Checking Google source status…
-            </p>
-          )}
           {!visibleSources.length ? (
             <StatePanel
               kind="empty"
