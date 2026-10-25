@@ -39,7 +39,7 @@ async function installationFixture() {
   };
 }
 
-test('with images on, an installation without files:read asks for it and keeps working until it is granted', async t => {
+test('with images on, an installation without files:read or files:write asks for them and keeps working until they are granted', async t => {
   withImages(t, true);
   const f = await installationFixture();
   try {
@@ -70,29 +70,35 @@ test('with images on, an installation without files:read asks for it and keeps w
     });
     const start = async () => {
       const url = new URL((await installations.begin(f.w.id, f.w.userId, 'scope-session')).url);
-      assert.equal(url.searchParams.get('scope'), 'chat:write,files:read');
+      assert.equal(url.searchParams.get('scope'), 'chat:write,files:read,files:write');
       return url.searchParams.get('state');
     };
     // Slack granting only the configured scopes still activates it: shared files go unread, nothing else stops.
     assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
     const attention = await installations.status(f.w.id, f.w.userId);
     assert.equal(attention.state, 'permissions-required');
-    assert.deepEqual(attention.missingScopes, ['files:read']);
+    assert.deepEqual(attention.missingScopes, ['files:read', 'files:write']);
+    // An installation that has files:read from step 7 still asks for files:write, which image delivery needs.
     granted = { ...token, scope: 'chat:write,files:read' };
+    assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
+    const partial = await installations.status(f.w.id, f.w.userId);
+    assert.equal(partial.state, 'permissions-required');
+    assert.deepEqual(partial.missingScopes, ['files:write']);
+    granted = { ...token, scope: 'chat:write,files:read,files:write' };
     assert.equal((await installations.complete('code', await start(), 'scope-session', f.w.userId)).state, 'active');
     const updated = await installations.status(f.w.id, f.w.userId);
     assert.equal(updated.state, 'active');
     assert.equal(updated.missingScopes, undefined);
     assert.deepEqual(
       (await f.db.platform.query(`SELECT scopes FROM ${f.table('tf_slack_installations')}`)).rows[0].scopes,
-      ['chat:write', 'files:read'],
+      ['chat:write', 'files:read', 'files:write'],
     );
   } finally {
     await f.close();
   }
 });
 
-test('with images off, files:read is not asked for', async t => {
+test('with images off, files:read and files:write are not asked for', async t => {
   withImages(t, false);
   const f = await installationFixture();
   try {

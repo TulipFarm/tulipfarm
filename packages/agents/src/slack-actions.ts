@@ -39,12 +39,15 @@ import { canAccessSlackInstallation, SlackChannelAccessError, slackResolveSchema
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { errorType, log } from '@tulipfarm/observability';
+import { deliverRunImages, type DeliveredMessage, type SlackImageFiles } from './slack-images.ts';
 
 type Transaction = AgentTransaction & { commonVersion: number };
 type Options = Parameters<typeof createChannelProvider>[0] & {
   runtime: AgentStorage;
   audienceSources?: (tx: AgentTransaction, workspaceId: string, actor: HumanActor, runId: string) => Promise<void>;
   appSenderEnabled?: (workspaceId: string, userId: string) => Promise<boolean>;
+  /** Reads the images a run generated, so a delivered message can carry them as Slack files. */
+  images?: SlackImageFiles;
 };
 export type SlackActionsFactory = (runtime: AgentStorage) => ReturnType<typeof createSlackActions>;
 const range = commonCompatibility;
@@ -391,7 +394,7 @@ export function createSlackActions(options: Options) {
     await sources(tx, workspaceId, actor, row.run_id, row.id);
     const final = await provider.observe(tx, workspaceId, actor, source(row, row.action), false);
     if (canonicalJson(final.members) !== canonicalJson(observed.members)) throw new AccessDenied();
-    return actor;
+    return { actor, audience: { members: final.members, botUserId: final.botUserId } };
   }
   async function prepare(workspaceId: string, runId: string, callId: string, value: unknown) {
     const action = slackActionSchema.parse(value);
@@ -564,7 +567,9 @@ export function createSlackActions(options: Options) {
       return { kind: 'claimed' as const };
     });
     if (claimed.kind === 'view') return claimed.value;
+    let delivered = null as DeliveredMessage | null;
     await transaction(workspaceId, async tx => {
+      delivered = null;
       const origin = await conversationOrigin(tx, runId, callId);
       if (origin)
         await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_conversations')} WHERE id=$1 FOR UPDATE`, [
@@ -590,7 +595,7 @@ export function createSlackActions(options: Options) {
       try {
         if ((await workflowOrigin(tx, runId, callId)) && (!row.approval_required || row.decision !== 'approve'))
           throw new Error('slack-action-stale');
-        const actor = await fresh(tx, workspaceId, row);
+        const { actor, audience } = await fresh(tx, workspaceId, row);
         if (row.expires_at.getTime() <= Date.now()) state = 'expired';
         else {
           sentMessageTs =
@@ -607,6 +612,19 @@ export function createSlackActions(options: Options) {
               row.sender ?? 'user',
             )) ?? null;
           state = 'sent';
+          const threadTs = row.action.tool === 'slack.thread.reply' ? row.action.threadTs : sentMessageTs;
+          if (threadTs && row.action.tool !== 'slack.reaction.add')
+            delivered = {
+              workspaceId,
+              actionId: row.id,
+              runId: row.run_id,
+              userId: row.user_id,
+              installationId: row.installation_id,
+              generation: row.generation,
+              channel: row.channel,
+              threadTs,
+              ...audience,
+            };
         }
       } catch (error) {
         if (error instanceof SlackApiError && error.code === 'rate-limited') {
@@ -628,6 +646,14 @@ export function createSlackActions(options: Options) {
           [callId, state, seconds],
         );
     });
+    // Only the attempt that sent the message shares its images; a retry finds the message sent and stops above.
+    if (delivered && options.images)
+      await deliverRunImages(delivered, {
+        transaction: operation => transaction(workspaceId, operation),
+        files: options.images,
+        cipher: options.cipher,
+        fetcher: options.fetcher,
+      });
     return transaction(workspaceId, async tx => view(await load(tx, callId)));
   }
   async function notify(workspaceId: string, callId: string) {
@@ -699,7 +725,7 @@ export function createSlackActions(options: Options) {
         channel: string | null = null,
         ts: string | null = null;
       try {
-        const actor = await fresh(tx, workspaceId, row);
+        const { actor } = await fresh(tx, workspaceId, row);
         const identity = await provider.identity(tx, actor, source(row, row.action));
         const raw = (
           await tx.client.query(
