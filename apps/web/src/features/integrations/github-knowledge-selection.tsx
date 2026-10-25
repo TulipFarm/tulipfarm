@@ -48,6 +48,7 @@ export function GitHubSelectionForm({
   onClose,
   onReconnect,
   accountBusy = false,
+  installUrl = null,
   footerTarget,
 }: {
   api: GitHubKnowledgeApi;
@@ -56,6 +57,7 @@ export function GitHubSelectionForm({
   onClose: () => void;
   onReconnect?: ((id: string) => void) | undefined;
   accountBusy?: boolean;
+  installUrl?: string | null;
   footerTarget: HTMLElement | null;
 }) {
   const formId = useId();
@@ -445,6 +447,20 @@ export function GitHubSelectionForm({
                             </a>
                             , then reopen this picker.
                           </p>
+                          {installUrl && (
+                            <p>
+                              Private repositories appear only after the TulipFarm GitHub App is installed on them.{' '}
+                              <a
+                                className="underline underline-offset-4"
+                                href={installUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Install the App
+                              </a>
+                              .
+                            </p>
+                          )}
                         </PopoverContent>
                       </Popover>
                     </div>
@@ -455,6 +471,15 @@ export function GitHubSelectionForm({
                         title="No repositories available"
                         description="GitHub returned no repositories for this integration. Check organization access in GitHub or use another connected account."
                       >
+                        {installUrl && (
+                          <Button
+                            variant="outline"
+                            nativeButton={false}
+                            render={<a href={installUrl} target="_blank" rel="noreferrer" />}
+                          >
+                            Install the TulipFarm GitHub App
+                          </Button>
+                        )}
                         <Button variant="outline" onClick={() => void discovery.refresh()}>
                           Check GitHub repositories again
                         </Button>

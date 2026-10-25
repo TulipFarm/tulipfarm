@@ -1238,6 +1238,15 @@ export const settings: readonly Setting[] = [
 
   ...oauthClient('GITHUB_OAUTH', 'GitHub', 'GitHub', apps, false),
   {
+    name: 'GITHUB_APP_SLUG',
+    group: 'GitHub',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'URL name of the GitHub App, for example `tulipfarm-app` in `github.com/apps/tulipfarm-app`. When set, the GitHub Knowledge sheet shows an "Install the App" link so members can give the App access to private repositories.',
+  },
+  {
     name: 'GITHUB_WEBHOOK_APP_ID',
     group: 'GitHub',
     services: ['api'],

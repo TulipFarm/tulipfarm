@@ -124,7 +124,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     if (path.endsWith('/recommendations/events')) return new Response(null, { status: 204 });
     if (path.endsWith('/slack/status'))
       return Response.json({ state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] });
-    if (path.endsWith('/github/accounts')) return Response.json({ configured: false, accounts: [] });
+    if (path.endsWith('/github/accounts')) return Response.json({ configured: false, installUrl: null, accounts: [] });
     if (path.endsWith('/atlassian/accounts')) return Response.json({ accounts: [], providers: [] });
     if (path.endsWith('/workspace-mcp/capabilities')) return Response.json({ enabled: false });
     if (path.endsWith('/recent')) return Response.json([]);
