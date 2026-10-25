@@ -63,6 +63,14 @@ const blend = (top: string | Rgb, bottom: string | Rgb, alpha: number) => {
 /** Paints a possibly translucent token over an opaque one. */
 const over = (top: string, bottom: string) => blend(top, bottom, opacity(top));
 
+test('idle input edges keep at least 1.5:1 contrast against the control surface in both themes', () => {
+  for (const theme of [0, 1])
+    assert.ok(
+      contrast(themeColor('input')[theme], themeColor('card')[theme]) >= 1.5,
+      `input on card (${theme ? 'dark' : 'light'})`,
+    );
+});
+
 test('small grey shell text meets WCAG AA in light and dark themes', () => {
   const token = themeColor;
   // `accent` and `muted` are translucent overlays, so each is checked over the surface it sits on.

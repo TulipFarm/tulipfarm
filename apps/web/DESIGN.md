@@ -21,7 +21,7 @@ colors:
   muted-foreground: 'light-dark(#5c5c5e, #949597)'
   accent: 'light-dark(#0000000a, #ffffff0d)'
   border: 'light-dark(#dedede, #232426)'
-  input: 'light-dark(#d3d3d3, #323336)'
+  input: 'light-dark(#d2d2d2, #35373a)'
   field: 'light-dark(#89898e, #727277)'
   ring: 'light-dark(#188038, #75ce8e)'
   destructive: 'light-dark(#b42332, #ff929d)'
@@ -148,7 +148,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 23 October 2026 against Sprout 0.8.0. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 against Sprout 0.10.0. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -186,7 +186,8 @@ Titles and emphasized labels use `foreground`; default body text uses
 `faint-foreground` is reserved for nonessential hints, not required information.
 Decorative separators use `border`. Editable fields, outline buttons, and toggle
 groups share the light `input` edge; idle inputs, textareas, and outline buttons
-are flat rather than shadowed. These subtle idle edges do not promise 3:1 contrast.
+are flat rather than shadowed. These subtle idle edges maintain at least 1.5:1
+contrast against the control surface in both themes, but do not promise 3:1 contrast.
 Visible labels and strong focus, invalid, and checked states remain. The `field`
 token still supplies high-contrast keyboard outlines for scroll regions.
 This shared-control policy was approved and inspected on 12 October 2026.
