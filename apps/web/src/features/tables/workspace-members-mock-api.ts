@@ -559,7 +559,8 @@ export function createWorkspaceMembersMock(scenario?: string) {
       if (path === `${root}/google-workspace`) return Response.json({ status: 'disconnected' });
       if (path === `${root}/slack/status`)
         return Response.json({ state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] });
-      if (path === `${root}/github/accounts`) return Response.json({ configured: false, installUrl: null, accounts: [] });
+      if (path === `${root}/github/accounts`)
+        return Response.json({ configured: false, installUrl: null, accounts: [] });
       if (path === `${root}/atlassian/accounts`) return Response.json({ accounts: [], providers: [] });
       if (path === `${root}/bud`)
         return Response.json({
