@@ -37,6 +37,7 @@ const reasons = {
   'timed-out': 'downloading it from Slack timed out',
   extra: 'only five files are read per message',
   'storage-full': "the workspace's attachment storage is full",
+  failed: 'reading it failed after repeated attempts',
 } as const;
 export type SlackFileFailure = keyof typeof reasons;
 

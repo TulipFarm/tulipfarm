@@ -70,16 +70,15 @@ export function createSlackDirectMessages(options: {
   }
   /**
    * Admits one held message as a chat turn. With `files` set to 'defer', a message that shares files is checked but
-   * not admitted, returning 'files' so its files are downloaded outside the dispatch pass. `adopted` collects the
-   * object keys of staged files that became attachments.
+   * not admitted, returning 'files' so its files are downloaded outside the dispatch pass. With 'failed', every
+   * shared file is named as not read. `adopted` collects the object keys of staged files that became attachments.
    */
   async function admit(
     workspaceId: string,
     eventId: string,
-    files: SlackFileShare | 'defer' | null,
+    files: SlackFileShare | 'defer' | 'failed' | null,
     adopted = new Set<string>(),
   ) {
-    const share = files === 'defer' ? null : files;
     return transaction(workspaceId, async (tx): Promise<boolean | 'files'> => {
       const table = (name: string) => qualified(tx.schema, name);
       await tx.client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,93572))`, [`${tx.schema}:${eventId}`]);
@@ -123,6 +122,15 @@ export function createSlackDirectMessages(options: {
         ).rowCount
       )
         return false;
+      const share =
+        files === 'failed'
+          ? {
+              staged: [],
+              unread: (message.shared_files ?? []).map(file => ({ file, reason: unreadSlackFileLine(file, 'failed') })),
+            }
+          : files === 'defer'
+            ? null
+            : files;
       // Files that are read leave the text as attachments; files that are not keep a line naming why.
       const unread = (share?.unread ?? []).map(({ file, reason }) => ({ line: file.line, replacement: reason }));
       const read = (share?.staged ?? []).map(({ file }) => ({ line: file.line, replacement: '' }));
@@ -305,6 +313,19 @@ export function createSlackDirectMessages(options: {
       if (shared && share) await discardSlackFiles(shared, work.workspaceId, share, adopted);
     }
   }
+  /**
+   * Admits a held message whose files could not be read on any attempt, with each file named as not read, so the
+   * sender gets a reply and later messages in its thread are no longer held behind it.
+   */
+  async function admitUnreadFiles(value: unknown) {
+    const work = slackPromptWorkSchema.parse(value);
+    try {
+      return (await admit(work.workspaceId, work.eventId, 'failed')) === true;
+    } catch (error) {
+      if (held(error)) return false;
+      throw error;
+    }
+  }
   async function due(workspaceId: string): Promise<SlackPromptWork[]> {
     return transaction(workspaceId, async tx => {
       const rows = z
@@ -409,5 +430,5 @@ export function createSlackDirectMessages(options: {
       return outcome.kind;
     });
   }
-  return { discover, admitPending, admitFiles, due, process };
+  return { discover, admitPending, admitFiles, admitUnreadFiles, due, process };
 }

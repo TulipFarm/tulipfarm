@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { ActivityFailure, proxyActivities } from '@temporalio/workflow';
 import type { createSlackLinkPrompts, SlackPromptWork } from '@tulipfarm/slack';
 import type { createSlackDirectMessages } from '@tulipfarm/slack';
 import type { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
@@ -32,9 +32,23 @@ const { admitSlackDirectMessageFiles } = proxyActivities<{
   // download a message that keeps failing every two seconds.
   retry: { initialInterval: '10 seconds', backoffCoefficient: 2, maximumInterval: '10 minutes', maximumAttempts: 10 },
 });
-/** Downloads the files shared in one held direct message and admits it, outside the dispatch pass. */
+const { admitSlackDirectMessageUnreadFiles } = proxyActivities<{
+  admitSlackDirectMessageUnreadFiles: ReturnType<typeof createSlackDirectMessages>['admitUnreadFiles'];
+}>({
+  startToCloseTimeout: '30 seconds',
+  retry: { initialInterval: '10 seconds', backoffCoefficient: 2, maximumInterval: '10 minutes', maximumAttempts: 10 },
+});
+/**
+ * Downloads the files shared in one held direct message and admits it, outside the dispatch pass. When every attempt
+ * fails, the message is admitted with its files named as not read, so it does not hold its thread forever.
+ */
 export async function slackDirectMessageFiles(work: SlackPromptWork) {
-  return admitSlackDirectMessageFiles(work);
+  try {
+    return await admitSlackDirectMessageFiles(work);
+  } catch (error) {
+    if (!(error instanceof ActivityFailure)) throw error;
+    return admitSlackDirectMessageUnreadFiles(work);
+  }
 }
 const { deliverSlackChannelAgent } = proxyActivities<{
   deliverSlackChannelAgent: ReturnType<typeof createSlackChannelAgents>['process'];
