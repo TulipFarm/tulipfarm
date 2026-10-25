@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceDependencySchema } from '@tulipfarm/access/source-dependencies';
+import { channelImageProblems } from '@tulipfarm/media/presets';
 import { xTextLimits, xWeightedLength } from './x-text.ts';
 
 export const platforms = [
@@ -445,6 +446,8 @@ export type ContentContext = {
   channelKind: ChannelKind;
   /** The kind of each media item's File, by `fileId`. Items without a known kind are reported. */
   mediaKinds: ReadonlyMap<string, MediaKind>;
+  /** Each media item's File type and size, by `fileId`; image Files are held to the platform's image rules. */
+  mediaFiles?: ReadonlyMap<string, { mediaType: string; size: number }>;
   /** Whether the X account reported a Premium subscription when its channel was added or refreshed. */
   xPremium?: boolean;
 };
@@ -458,6 +461,10 @@ export function contentIssues(content: PlatformContent, context: ContentContext)
   const kinds = content.media.map(item => context.mediaKinds.get(item.fileId));
   content.media.forEach((item, index) => {
     if (!context.mediaKinds.has(item.fileId)) add(['media', index], 'media-kind-unknown');
+    const file = context.mediaFiles?.get(item.fileId);
+    // The rules images.generate checks for a channel (Images PRODUCT 50); Files keep no dimensions, so not the ratio.
+    if (file && kinds[index] === 'image')
+      for (const code of channelImageProblems(content.platform, file)) add(['media', index], code);
   });
   const primaryKinds = content.media.flatMap((item, index) => (item.role === 'primary' ? [kinds[index]] : []));
   const roleKinds = (role: MediaItem['role']) =>

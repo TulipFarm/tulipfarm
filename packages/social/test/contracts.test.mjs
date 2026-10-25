@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as c from '../dist/contracts.js';
+import { channelImageProblems, channelImageRules, imageChannels, imagePresets } from '@tulipfarm/media/presets';
 
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const hex = 'a'.repeat(64);
@@ -776,4 +777,32 @@ test('channel grants have only member and team subjects', () => {
     c.socialAccountGrantsSchema.safeParse({ expectedVersion: 1, memberIds: [], teamIds: [], agentIds: [] }).success,
     false,
   );
+});
+
+test('Images PRODUCT 50: every platform has image rules, and its preset passes them', () => {
+  assert.deepEqual([...imageChannels].sort(), [...c.platforms].sort());
+  for (const platform of c.platforms) {
+    const rule = channelImageRules[platform];
+    const [width, height] = imagePresets[rule.preset].ratio.split(':').map(Number);
+    assert.deepEqual(
+      channelImageProblems(platform, { mediaType: rule.mediaTypes[0], size: rule.maxBytes, width, height }),
+      [],
+      platform,
+    );
+  }
+});
+
+test('Images PRODUCT 50: an attached image File is held to its platform’s type and size rules', () => {
+  const media = [image(1)];
+  const context = (mediaType, size) => ({
+    channelKind: c.channelKindsByPlatform.tiktok[0],
+    mediaKinds: new Map([[media[0].fileId, 'image']]),
+    mediaFiles: new Map([[media[0].fileId, { mediaType, size }]]),
+  });
+  const tiktok = { platform: 'tiktok', caption: 'Hello', media };
+  const codes = (content, mediaType, size) =>
+    c.contentIssues(content, context(mediaType, size)).map(issue => issue.code);
+  assert.deepEqual(codes(tiktok, 'image/jpeg', 1000), []);
+  assert.deepEqual(codes(tiktok, 'image/png', 1000), ['image-type']);
+  assert.deepEqual(codes(tiktok, 'image/jpeg', 20_000_001), ['image-too-large']);
 });

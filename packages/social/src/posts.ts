@@ -406,6 +406,7 @@ export function createSocialPosts(options: {
     const issues = contentIssues(content, {
       channelKind: checked.authorized.channel.channelKind,
       mediaKinds: bound.kinds,
+      mediaFiles: bound.files,
       xPremium: false,
     })
       .filter(issue => !(issue.code === 'media-kind-unknown' && unusable.has(issue.path[1])))
