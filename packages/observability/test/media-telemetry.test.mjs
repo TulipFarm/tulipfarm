@@ -43,9 +43,15 @@ test('media spans and failure logs keep counts, sizes, media types and outcomes,
     report.media(leaky);
     report.media({ 'media.outcome': 'image', 'media.type': 'image/png', 'media.bytes': 2048 });
   });
+  // A generated image delivered to Slack records its type, size and delivery outcome, never its name.
+  await observeMedia(
+    'media.deliver',
+    { 'media.kind': 'image', 'media.type': 'image/png; name="PRIVATE.png"', 'media.bytes': 2048 },
+    async record => record({ 'media.outcome': 'withheld' }),
+  );
 
   const media = span => Object.fromEntries(Object.entries(span.attributes).filter(([key]) => key.startsWith('media.')));
-  const [recognize, generate] = spans.getFinishedSpans();
+  const [recognize, generate, deliver] = spans.getFinishedSpans();
   assert.equal(recognize.name, 'media.recognize');
   // A rejected value replaces the earlier one on the span, so the key is dropped rather than kept stale.
   assert.deepEqual(media(recognize), { 'media.outcome': 'failed' });
@@ -56,6 +62,8 @@ test('media spans and failure logs keep counts, sizes, media types and outcomes,
     'media.type': 'image/png',
     'media.bytes': 2048,
   });
+  assert.equal(deliver.name, 'media.deliver');
+  assert.deepEqual(media(deliver), { 'media.kind': 'image', 'media.bytes': 2048, 'media.outcome': 'withheld' });
   const failed = lines.map(line => JSON.parse(line)).find(line => line.event === 'call_failed');
   assert.equal(failed.operation, 'media.recognize');
   assert.equal(failed['media.outcome'], 'failed');
