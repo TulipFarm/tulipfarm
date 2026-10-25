@@ -101,6 +101,7 @@ const SkillDetailPage = lazyRouteComponent(() => import('@/pages/skills'), 'Skil
 const AgentTasksPage = lazyRouteComponent(() => import('@/pages/agent-tasks'), 'AgentTasksPage');
 const AgentTaskPage = lazyRouteComponent(() => import('@/pages/agent-tasks'), 'AgentTaskPage');
 const IntegrationsPage = lazyRouteComponent(() => import('@/pages/integrations'), 'IntegrationsPage');
+const IntegrationDetailPage = lazyRouteComponent(() => import('@/pages/integration-detail'), 'IntegrationDetailPage');
 const ModelsPage = lazyRouteComponent(() => import('@/pages/models'), 'ModelsPage');
 const SettingsPage = lazyRouteComponent(() => import('@/pages/settings'), 'SettingsPage');
 const AccountSettingsPage = lazyRouteComponent(() => import('@/pages/account-settings'), 'AccountSettingsPage');
@@ -668,7 +669,8 @@ export const workspaceRoute = createRoute({
           temporary &&
           !abortController.signal.aborted &&
           cause === 'stay' &&
-          location.pathname === `/${params.workspaceSlug}/integrations` &&
+          (location.pathname === `/${params.workspaceSlug}/integrations` ||
+            location.pathname.startsWith(`/${params.workspaceSlug}/integrations/`)) &&
           previous
         ) {
           const membership = await loadOwnMembership(previous.workspace.id, abortController.signal).catch(denied);
@@ -965,6 +967,18 @@ export const integrationsRoute = createRoute({
   validateSearch: search => z.object({ returnChat: z.uuid().optional().catch(undefined) }).parse(search),
   component: IntegrationsPage,
 });
+export const integrationDetailRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'integrations/$integrationId',
+  validateSearch: search =>
+    z
+      .object({
+        tab: z.enum(['accounts', 'knowledge', 'settings', 'advanced']).optional().catch(undefined),
+        returnChat: z.uuid().optional().catch(undefined),
+      })
+      .parse(search),
+  component: IntegrationDetailPage,
+});
 export const router = createRouter({
   scrollRestoration: true,
   getScrollRestorationKey: location =>
@@ -1024,6 +1038,7 @@ export const router = createRouter({
       workspaceTeamsRoute,
       workspaceGrantsRoute,
       integrationsRoute,
+      integrationDetailRoute,
       tablesRoute,
       newTableRoute,
       tableDetailRoute,

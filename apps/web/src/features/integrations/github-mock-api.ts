@@ -4,7 +4,7 @@ import type { GitHubRepositoryChoice, GitHubSource } from './github-knowledge-ap
 export const githubMockEnabled =
   import.meta.env.DEV &&
   ['localhost', '127.0.0.1'].includes(window.location.hostname) &&
-  window.location.pathname === '/seed-github-ux/integrations' &&
+  window.location.pathname.startsWith('/seed-github-ux/integrations') &&
   new URLSearchParams(window.location.search).has('githubMock');
 
 if (githubMockEnabled) {
@@ -83,7 +83,7 @@ if (githubMockEnabled) {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     const path = url.pathname;
     if (
-      window.location.pathname !== '/seed-github-ux/integrations' ||
+      !window.location.pathname.startsWith('/seed-github-ux/integrations') ||
       !['localhost', '127.0.0.1'].includes(url.hostname) ||
       !/^\/v1\/workspaces\/[^/]+\/(?:github\/accounts|knowledge\/github)(?:\/|$)/.test(path)
     )

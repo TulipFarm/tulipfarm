@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Hash, Plus, X } from 'lucide-react';
+import { Hash, LockIcon, Plus, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -165,8 +165,13 @@ export function BuilderSlack({
                           value={item.conversationId}
                           disabled={value.some(selected => selected.channel === item.conversationId)}
                         >
-                          <Hash aria-hidden="true" className="size-4" />
+                          {item.kind === 'private' ? (
+                            <LockIcon aria-hidden="true" className="size-4" />
+                          ) : (
+                            <Hash aria-hidden="true" className="size-4" />
+                          )}
                           {item.title}
+                          {item.kind === 'private' && <span className="sr-only">Private channel</span>}
                         </SelectItem>
                       ))}
                   </SelectContent>

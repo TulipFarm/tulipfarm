@@ -318,6 +318,9 @@ if (
           { protocol: 'trello', configured: false },
         ],
       });
+    if (path.endsWith('/knowledge/atlassian/sources')) return Response.json({ items: jiraSources() });
+    if (/\/knowledge\/atlassian\/sources\/[^/]+\/documents$/.test(path))
+      return Response.json({ items: [], nextCursor: null });
     if (path.endsWith('/atlassian/sources'))
       return Response.json({
         sources: [],
@@ -349,3 +352,36 @@ if (
     return Response.json({ error: 'not-available-in-default-knowledge-demo' }, { status: 404 });
   };
 }
+
+const jiraCloud = '7f0c2a4e-1b3d-4c5e-8f6a-9b0c1d2e3f4a';
+const jiraSource = (
+  n: number,
+  key: string,
+  title: string,
+  sync: 'queued' | 'syncing' | 'ready' | 'failed',
+  counts: { total: number; ready: number; failed: number } | null,
+  failure: string | null = null,
+) => ({
+  sourceId: `5a5a5a5a-5a5a-4a5a-8a5a-00000000000${n}`,
+  product: 'jira',
+  selection: {
+    product: 'jira',
+    cloudId: jiraCloud,
+    targets: [{ kind: 'project', id: `1000${n}`, descendants: false }],
+  },
+  memberIds: Array.from({ length: n === 2 ? 3 : 1 }, (_, i) => `6b6b6b6b-6b6b-4b6b-8b6b-00000000000${i}`),
+  title,
+  state: 'active',
+  syncState: sync,
+  failure,
+  nextAttemptAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+  targets: [{ kind: 'project', id: `1000${n}`, key, title, descendants: false, state: 'active', failure: null }],
+  counts,
+  canManage: true,
+});
+const jiraSources = () => [
+  jiraSource(1, 'ENG', 'Engineering', 'ready', { total: 1_284, ready: 1_284, failed: 0 }),
+  jiraSource(2, 'OPS', 'Operations', 'syncing', { total: 412, ready: 268, failed: 0 }),
+  jiraSource(3, 'SUP', 'Customer support', 'ready', { total: 2_031, ready: 1_998, failed: 33 }),
+  jiraSource(4, 'MKT', 'Marketing', 'queued', null),
+];

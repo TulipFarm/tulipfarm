@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { TriangleAlertIcon } from 'lucide-react';
+import { CirclePauseIcon, TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { Status } from '@tulipfarm/sprout/status';
 import { consentUrl } from '@/features/atlassian/accounts';
 import { useFlag } from '@/lib/feature-flags';
 import { atlassianApi, atlassianError } from '@/lib/atlassian';
@@ -24,13 +25,14 @@ import { connector } from './connect';
 import { useAtlassianAccounts, useIntegrationChanges, useGitHubAccounts, useSlackIntegration } from './queries';
 import { startSlackInstall } from './slack';
 import { CommandFeedback, useCommand } from './slack-knowledge-shared';
+import { KnowledgeMeter, searchablePercent } from './knowledge-meter';
 
 type Disclosure = { name: string; scope: string; coverage: string; excluded: string; scopes: string; sources: string };
 const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   'google-drive': {
     name: 'Google Drive',
     scopes: 'drives and shared files',
-    sources: 'Your account below',
+    sources: 'the source list below',
     scope:
       'Every Drive file you can open: My Drive, shared drives and files shared with you, including files added later.',
     coverage: 'The current version of each file.',
@@ -39,7 +41,7 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   gmail: {
     name: 'Gmail',
     scopes: 'mailboxes',
-    sources: 'Your account below',
+    sources: 'the source list below',
     scope: 'Your mailbox, including new mail.',
     coverage: 'Mail from the last 90 days. Older mail leaves Knowledge as the window moves.',
     excluded: 'Spam and Trash. Attachments are not imported.',
@@ -47,7 +49,7 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   slack: {
     name: 'Slack',
     scopes: 'channels',
-    sources: 'Your account below',
+    sources: 'the source list below',
     scope:
       'Public and private channels you’ve joined, including channels you join later. TulipFarm never joins channels for you.',
     coverage: 'Messages from the last 90 days. Older messages leave Knowledge as the window moves.',
@@ -56,7 +58,7 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   github: {
     name: 'GitHub',
     scopes: 'repositories',
-    sources: 'Repositories below',
+    sources: 'Repositories in Knowledge',
     scope:
       'Every repository this GitHub account can read, including new ones: docs, code, issues, pull requests, discussions and commits.',
     coverage:
@@ -67,7 +69,7 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   jira: {
     name: 'Jira',
     scopes: 'projects',
-    sources: 'Your account below',
+    sources: 'the source list below',
     scope: 'Issues in every project you can see on each connected site, including new projects.',
     coverage: 'The current content of each issue.',
     excluded: 'Restricted comments, attachments, worklogs and change history.',
@@ -75,7 +77,7 @@ const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   confluence: {
     name: 'Confluence',
     scopes: 'spaces',
-    sources: 'Your account below',
+    sources: 'the source list below',
     scope: 'Pages in every space you can see on each connected site, including new spaces.',
     coverage: 'The current version of each page.',
     excluded: 'Attachments, blog posts, whiteboards and page history.',
@@ -181,8 +183,8 @@ function useRepair(workspaceId: string, product: DefaultKnowledgeProduct, accoun
     return {
       kind: 'hint',
       text: data
-        ? 'This GitHub login is no longer connected here. Connect it again in GitHub accounts below, then choose Retry now.'
-        : 'Check GitHub accounts below, reconnect this login, then choose Retry now.',
+        ? 'This GitHub login is no longer connected here. Connect it again in Accounts, then choose Retry now.'
+        : 'Check Accounts, reconnect this login, then choose Retry now.',
     };
   }
   if (atlassianProduct) {
@@ -256,6 +258,55 @@ function statusBadge(intent: DefaultKnowledgeIntent, issue: Problem | null) {
   if (counts.failed + counts.skipped + counts.quotaLimited > 0 || intent.groupFailures.length > 0)
     return <Badge variant="warning">Partly searchable</Badge>;
   return <Badge variant="success">Sync complete</Badge>;
+}
+
+const indexing = (intent: DefaultKnowledgeIntent) =>
+  intent.state === 'active' &&
+  (intent.syncState === 'queued' ||
+    intent.syncState === 'discovering' ||
+    intent.counts.queued > 0 ||
+    intent.ingestion.state === 'pending');
+
+/** A ring that fills as items become searchable, or spins while TulipFarm is still finding them. */
+function IntentMark({ intent, issue }: { intent: DefaultKnowledgeIntent; issue: Problem | null }) {
+  if (intent.state === 'opted-out') return <Status state="stopped" aria-hidden="true" tooltip={false} />;
+  if (issue)
+    return <Status state={issue.badge === 'Sync failed' ? 'error' : 'warning'} aria-hidden="true" tooltip={false} />;
+  if (indexing(intent))
+    return (
+      <Status
+        state="running"
+        value={intent.counts.total > 0 ? searchablePercent(intent.counts) : undefined}
+        aria-hidden="true"
+        tooltip={false}
+      />
+    );
+  return (
+    <Status
+      state={
+        intent.counts.failed + intent.counts.skipped + intent.counts.quotaLimited > 0 || intent.groupFailures.length
+          ? 'warning'
+          : 'success'
+      }
+      aria-hidden="true"
+      tooltip={false}
+    />
+  );
+}
+
+/** Automatic Knowledge for one product, polled while anything is still indexing. */
+export function useDefaultKnowledge(workspaceId: string) {
+  const enabled = useFlag('default-connection-knowledge');
+  const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
+  const read = useFeatureRead({
+    key: [...defaultKnowledgeKeys, 'list'],
+    enabled,
+    load: api.list,
+    staleTime: 0,
+    pollWhile: data => data.items.some(indexing),
+    maxChecks: 20,
+  });
+  return { enabled: enabled && !(read.state.kind === 'ready' && !read.state.data.enabled), read };
 }
 
 function Checking() {
@@ -405,10 +456,29 @@ function IntentRow({
   const incomplete = counts.failed + counts.skipped + counts.quotaLimited > 0;
   const pending = command.state.kind === 'sending';
   return (
-    <li aria-label={`${disclosure.name} ${intent.accountLabel}`} className="space-y-3 py-4">
+    <li
+      aria-label={`${disclosure.name} ${intent.accountLabel}`}
+      className="space-y-4 rounded-xl border border-border bg-card p-4"
+    >
       <div className="flex flex-wrap items-center gap-2">
+        <IntentMark intent={intent} issue={issue} />
         <p className="min-w-0 flex-1 basis-40 break-words font-medium">{intent.accountLabel}</p>
         {statusBadge(intent, issue)}
+        {intent.state === 'active' && !confirm && (
+          <Button
+            ref={stopRef}
+            variant="outline"
+            size="sm"
+            disabled={command.locked}
+            onClick={() => {
+              focus.current = 'confirm';
+              setConfirm(true);
+            }}
+          >
+            <CirclePauseIcon aria-hidden="true" />
+            Stop automatic Knowledge
+          </Button>
+        )}
       </div>
       {intent.state === 'active' && (
         <>
@@ -434,25 +504,7 @@ function IntentRow({
               they appear.
             </p>
           )}
-          {counts.total > 0 && (
-            <p className="text-sm tabular-nums">
-              {[
-                `${counts.ready} searchable`,
-                `${counts.queued} queued`,
-                `${counts.failed} failed`,
-                `${counts.skipped} skipped`,
-                `${counts.quotaLimited} over limit`,
-              ].map((part, index, parts) => (
-                <span key={part}>
-                  <span className="whitespace-nowrap">
-                    {part}
-                    {index < parts.length - 1 ? ' ·' : ''}
-                  </span>
-                  {index < parts.length - 1 ? ' ' : ''}
-                </span>
-              ))}
-            </p>
-          )}
+          {counts.total > 0 && <KnowledgeMeter counts={counts} />}
           {intent.syncState === 'ready' && !issue && (
             <p className="text-sm text-muted-foreground">
               {intent.ingestion.state === 'pending'
@@ -505,7 +557,7 @@ function IntentRow({
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 empty:hidden">
         {intent.state === 'active' && issue?.recovery === 'reconnect' && action && (
           <RepairAction workspaceId={workspaceId} repair={action} />
         )}
@@ -520,19 +572,6 @@ function IntentRow({
             onClick={() => void command.send('retry')}
           >
             {issue?.recovery === 'check' ? 'Check again' : 'Retry now'}
-          </Button>
-        )}
-        {intent.state === 'active' && !confirm && (
-          <Button
-            ref={stopRef}
-            variant="ghost"
-            disabled={command.locked}
-            onClick={() => {
-              focus.current = 'confirm';
-              setConfirm(true);
-            }}
-          >
-            Stop automatic Knowledge
           </Button>
         )}
         {intent.state === 'opted-out' && (
@@ -707,56 +746,22 @@ export function DefaultKnowledge({
   product: DefaultKnowledgeProduct;
   connected: boolean;
 }) {
-  const enabled = useFlag('default-connection-knowledge');
-  const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
-  const read = useFeatureRead({
-    key: [...defaultKnowledgeKeys, 'list'],
-    enabled,
-    load: api.list,
-    staleTime: 0,
-    pollWhile: data =>
-      data.items.some(
-        intent =>
-          intent.state === 'active' &&
-          (intent.syncState === 'queued' ||
-            intent.syncState === 'discovering' ||
-            intent.counts.queued > 0 ||
-            intent.ingestion.state === 'pending'),
-      ),
-    maxChecks: 20,
-  });
-  if (!enabled || (read.state.kind === 'ready' && !read.state.data.enabled)) return null;
+  const { enabled, read } = useDefaultKnowledge(workspaceId);
+  if (!enabled) return null;
   const disclosure = disclosures[product];
   const items = read.state.kind === 'ready' ? read.state.data.items.filter(intent => intent.product === product) : [];
   const atlassian = product === 'jira' || product === 'confluence' ? product : null;
   return (
     <section aria-labelledby={`default-knowledge-${product}`} className="space-y-4">
       <div className="space-y-1">
-        <h3 id={`default-knowledge-${product}`} className="text-base font-semibold">
+        <h2 id={`default-knowledge-${product}`} className="text-base font-semibold">
           Automatic Knowledge
-        </h3>
+        </h2>
         <p className="max-w-prose text-muted-foreground">
           When you connect, TulipFarm imports {disclosure.name} content in the background so you can search it. Existing
           integrations are not imported automatically.
         </p>
       </div>
-      <dl className="grid max-w-prose gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
-        <dt className="font-medium">Included</dt>
-        <dd className="text-muted-foreground sm:col-span-3">{disclosure.scope}</dd>
-        <dt className="font-medium">Who can search</dt>
-        <dd className="text-muted-foreground sm:col-span-3">
-          Only you. Sharing is a separate choice, and each person still needs their own access.
-        </dd>
-        <dt className="font-medium">Coverage</dt>
-        <dd className="text-muted-foreground sm:col-span-3">{disclosure.coverage}</dd>
-        <dt className="font-medium">Not included</dt>
-        <dd className="text-muted-foreground sm:col-span-3">{disclosure.excluded}</dd>
-        <dt className="font-medium">Credits</dt>
-        <dd className="text-muted-foreground sm:col-span-3">
-          Indexing uses workspace Knowledge credits and storage limits. Content over a limit waits and is shown as over
-          limit.
-        </dd>
-      </dl>
       {read.state.kind === 'loading' && <Checking />}
       {(read.state.kind === 'error' || read.state.kind === 'unavailable') && (
         <StatePanel
@@ -805,7 +810,7 @@ export function DefaultKnowledge({
             </div>
           )}
           {items.length > 0 ? (
-            <ul className="divide-y divide-border" aria-label={`Automatic ${disclosure.name} Knowledge`}>
+            <ul className="space-y-3" aria-label={`Automatic ${disclosure.name} Knowledge`}>
               {items.map(intent => (
                 <IntentRow key={intent.intentId} workspaceId={workspaceId} intent={intent} disclosure={disclosure} />
               ))}
@@ -822,6 +827,24 @@ export function DefaultKnowledge({
           )}
         </>
       )}
+      <h3 className="pt-2 text-sm font-medium text-muted-foreground">What gets imported</h3>
+      <dl className="grid gap-x-4 gap-y-2 rounded-xl border border-border p-4 text-sm sm:grid-cols-4">
+        <dt className="font-medium">Included</dt>
+        <dd className="text-muted-foreground sm:col-span-3">{disclosure.scope}</dd>
+        <dt className="font-medium">Who can search</dt>
+        <dd className="text-muted-foreground sm:col-span-3">
+          Only you. Sharing is a separate choice, and each person still needs their own access.
+        </dd>
+        <dt className="font-medium">Coverage</dt>
+        <dd className="text-muted-foreground sm:col-span-3">{disclosure.coverage}</dd>
+        <dt className="font-medium">Not included</dt>
+        <dd className="text-muted-foreground sm:col-span-3">{disclosure.excluded}</dd>
+        <dt className="font-medium">Credits</dt>
+        <dd className="text-muted-foreground sm:col-span-3">
+          Indexing uses workspace Knowledge credits and storage limits. Content over a limit waits and is shown as over
+          limit.
+        </dd>
+      </dl>
     </section>
   );
 }

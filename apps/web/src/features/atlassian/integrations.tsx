@@ -113,10 +113,7 @@ export function AtlassianIntegrations({
   const connected = productAccounts.filter(account => account.state === 'active' || account.state === 'refreshing');
   const unfinished = productAccounts.filter(account => account.state !== 'active' && account.state !== 'refreshing');
   return (
-    <section
-      className="min-w-0 space-y-6 border-t border-border pt-6 text-foreground"
-      aria-labelledby="atlassian-heading"
-    >
+    <section className="min-w-0 space-y-6 text-foreground" aria-labelledby="atlassian-heading">
       <h2 id="atlassian-heading" className="sr-only">
         {product === 'trello' ? 'Trello integration' : 'Jira and Confluence integration'}
       </h2>
@@ -155,7 +152,7 @@ export function AtlassianIntegrations({
             onChanged={() => void refresh()}
           />
           <ul
-            className="divide-y divide-border empty:hidden"
+            className="divide-y divide-border rounded-xl border border-border px-4 empty:hidden"
             aria-label={advanced ? 'Atlassian accounts' : 'Connected accounts'}
           >
             {(advanced ? accounts.data.accounts : connected).map(account => (

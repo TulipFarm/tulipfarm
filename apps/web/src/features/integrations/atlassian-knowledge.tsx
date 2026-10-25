@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { EllipsisIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@tulipfarm/sprout/dropdown-menu';
+import { Progress, ProgressLabel } from '@tulipfarm/sprout/progress';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { AtlassianSelectionForm } from './atlassian-knowledge-selection';
@@ -276,7 +286,8 @@ function SourceRow({
   const busy = command.state.kind === 'sending';
   const locked = disabled || command.locked || refresh.kind === 'loading';
   const blocked = source.targets?.filter(target => target.state === 'unavailable') ?? [];
-  const [item, items] = itemNames[source.product];
+  const items = itemNames[source.product][1];
+  const attention = blocked.length > 0 || (source.counts?.failed ?? 0) > 0;
   async function refreshAccess() {
     if (controller.current || locked) return;
     const current = new AbortController();
@@ -302,62 +313,128 @@ function SourceRow({
     if (!locked) void command.send({ commandId: crypto.randomUUID(), action });
   };
   return (
-    <li aria-label={source.title} className="space-y-3 p-4">
-      <div className="flex flex-wrap items-start gap-3">
-        <BrandIcon brand={source.product} size="sm" />
-        <div className="min-w-0 flex-1 basis-48">
-          <h4 className="break-words text-base font-medium">{source.title}</h4>
-          {source.selection && (
-            <p className="text-sm text-muted-foreground">
-              {source.memberIds.length} selected {source.memberIds.length === 1 ? 'member' : 'members'}, including the
-              owner
+    <li aria-label={source.title} className="space-y-3 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="flex min-w-0 flex-1 basis-56 items-center gap-3">
+          <BrandIcon brand={source.product} size="sm" />
+          <div className="min-w-0">
+            <h4 className="break-words text-sm font-medium">{source.title}</h4>
+            <p className="text-xs text-muted-foreground">
+              {[
+                source.targets
+                  ?.map(
+                    target =>
+                      `${target.key ?? targetKinds[target.kind]}${target.descendants ? ' and child pages' : ''}`,
+                  )
+                  .join(', '),
+                source.selection &&
+                  (source.memberIds.length === 1
+                    ? 'Only the owner can search'
+                    : `${source.memberIds.length} people can search, including the owner`),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
+          </div>
+        </div>
+        <div className="w-full sm:w-48">
+          {source.counts && source.counts.total > 0 ? (
+            <div>
+              <Progress
+                value={Math.floor((source.counts.ready / source.counts.total) * 100)}
+                aria-label={`${source.title} ${items} ready`}
+                getAriaValueText={() => `${source.counts?.ready} of ${source.counts?.total} ${items} ready`}
+              >
+                <ProgressLabel>
+                  <span className="text-xs font-normal tabular-nums text-muted-foreground">
+                    {source.counts.ready.toLocaleString()} of {source.counts.total.toLocaleString()} {items}
+                    {source.counts.failed > 0 && (
+                      <span className="text-destructive"> · {source.counts.failed.toLocaleString()} failed</span>
+                    )}
+                  </span>
+                </ProgressLabel>
+              </Progress>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No {items} counted yet</p>
           )}
         </div>
-        <Badge
-          variant={
-            source.syncState === 'failed' || blocked.length > 0 || (source.counts?.failed ?? 0) > 0
-              ? 'warning'
-              : 'secondary'
-          }
-        >
-          {syncLabels[source.syncState]}
-        </Badge>
-        {source.state !== 'active' && (
-          <Badge variant="outline">
-            {source.state === 'paused' ? 'Paused' : source.state === 'disconnected' ? 'Disconnected' : 'Removed'}
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="flex sm:w-32 sm:justify-end">
+            {source.state !== 'active' ? (
+              <Badge variant="outline">
+                {source.state === 'paused' ? 'Paused' : source.state === 'disconnected' ? 'Disconnected' : 'Removed'}
+              </Badge>
+            ) : (
+              <Badge variant={source.syncState === 'failed' || attention ? 'warning' : 'secondary'}>
+                {source.syncState === 'ready' && attention ? 'Needs attention' : syncLabels[source.syncState]}
+              </Badge>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-expanded={showDocuments}
+            disabled={disabled || source.state !== 'active'}
+            onClick={() => setShowDocuments(value => !value)}
+          >
+            {showDocuments ? `Hide ${items}` : `View ${items}`}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={`More actions for ${source.title}`}
+                  disabled={locked && refresh.kind !== 'loading'}
+                />
+              }
+            >
+              <EllipsisIcon aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                <DropdownMenuItem disabled={locked || source.state !== 'active'} onClick={() => void refreshAccess()}>
+                  {refresh.kind === 'error' ? 'Retry access refresh' : 'Refresh my access'}
+                </DropdownMenuItem>
+                {source.canManage && source.state === 'active' && (
+                  <DropdownMenuItem disabled={locked} onClick={() => manage('pause')}>
+                    Pause source
+                  </DropdownMenuItem>
+                )}
+                {source.canManage && source.state === 'paused' && (
+                  <DropdownMenuItem disabled={locked} onClick={() => manage('resume')}>
+                    Resume source
+                  </DropdownMenuItem>
+                )}
+                {source.canManage && (source.syncState === 'failed' || attention) && (
+                  <DropdownMenuItem disabled={locked} onClick={() => manage('retry')}>
+                    Retry source
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuGroup>
+              {source.canManage && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" disabled={locked} onClick={() => setConfirmRemove(true)}>
+                    Remove source
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      {source.counts && (
-        <p className="text-sm tabular-nums">
-          {source.counts.ready} ready · {source.counts.failed} failed · {source.counts.total} {items} discovered
+      {blocked.map(target => (
+        <p key={`${target.kind}:${target.id}`} className="text-sm text-warning">
+          {targetKinds[target.kind]} {target.key ?? target.title} is blocked.{' '}
+          {target.failure
+            ? (targetFailures[target.failure] ??
+              'Permissions for this selection cannot be verified. Its content stays hidden.')
+            : ''}
         </p>
-      )}
-      {source.targets && (
-        <ul aria-label="Selected content" className="space-y-1 text-sm">
-          {source.targets.map(target => (
-            <li key={`${target.kind}:${target.id}`} className="flex flex-wrap items-center gap-2">
-              <span className="break-words">
-                {targetKinds[target.kind]}: {target.title}
-                {target.key ? ` (${target.key})` : ''}
-                {target.descendants ? ' and child pages' : ''}
-              </span>
-              {target.state === 'unavailable' ? (
-                <Badge variant="warning">Blocked</Badge>
-              ) : (
-                <Badge variant="secondary">Active</Badge>
-              )}
-              {target.failure && (
-                <span className="w-full text-muted-foreground">
-                  {targetFailures[target.failure] ??
-                    'Permissions for this selection cannot be verified. Its content stays hidden.'}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      ))}
       {(source.failure || (source.counts?.failed ?? 0) > 0) && (
         <Alert variant="destructive">
           <AlertDescription>
@@ -368,55 +445,13 @@ function SourceRow({
           </AlertDescription>
         </Alert>
       )}
-      <p className="text-sm text-muted-foreground">
-        Sync readiness does not confirm your own access. Search and evidence require a check of each {item} through your
-        own Atlassian account within the last five minutes.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          disabled={disabled || source.state !== 'active'}
-          onClick={() => setShowDocuments(value => !value)}
-        >
-          {showDocuments ? 'Hide import details' : 'View import details'}
-        </Button>
-        <Button
-          variant="outline"
-          disabled={locked || source.state !== 'active'}
-          aria-busy={refresh.kind === 'loading'}
-          onClick={() => void refreshAccess()}
-        >
-          {refresh.kind === 'loading'
-            ? 'Refreshing my access…'
-            : refresh.kind === 'error'
-              ? 'Retry access refresh'
-              : 'Refresh my access'}
-        </Button>
-        {source.canManage && (
-          <>
-            {source.state === 'active' && (
-              <Button variant="outline" disabled={locked} onClick={() => manage('pause')}>
-                Pause source
-              </Button>
-            )}
-            {source.state === 'paused' && (
-              <Button variant="outline" disabled={locked} onClick={() => manage('resume')}>
-                Resume source
-              </Button>
-            )}
-            {(source.syncState === 'failed' || blocked.length > 0 || (source.counts?.failed ?? 0) > 0) && (
-              <Button variant="outline" disabled={locked} onClick={() => manage('retry')}>
-                Retry source
-              </Button>
-            )}
-            <Button variant="ghost" disabled={locked} onClick={() => setConfirmRemove(true)}>
-              Remove source
-            </Button>
-          </>
-        )}
-      </div>
       {!source.canManage && (
         <p className="text-sm text-muted-foreground">Only the source owner can pause, resume, retry, or remove it.</p>
+      )}
+      {refresh.kind === 'loading' && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Refreshing your access…
+        </p>
       )}
       {showDocuments && source.state === 'active' && (
         <SourceDocuments api={api} sourceId={source.sourceId} product={source.product} />
@@ -520,7 +555,8 @@ export function AtlassianKnowledgeSources({
       <p className="text-sm text-muted-foreground">
         Make selected {product === 'jira' ? 'Jira projects' : 'Confluence spaces and pages'} searchable as workspace
         knowledge. Import uses your own Atlassian account, and each reader must still be able to view an{' '}
-        {itemNames[product][0]} in {name} to see it.
+        {itemNames[product][0]} in {name} to see it. Search checks each {itemNames[product][0]} against your own
+        Atlassian access, at most five minutes old, before showing it.
       </p>
       {saved && (
         <p role="status" className="text-sm">
@@ -554,11 +590,6 @@ export function AtlassianKnowledgeSources({
               </Button>
             </div>
           )}
-          {sources.state.refreshing && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Checking {name} source status…
-            </p>
-          )}
           {!visibleSources.length ? (
             <StatePanel
               kind="empty"
@@ -571,7 +602,7 @@ export function AtlassianKnowledgeSources({
               }
             />
           ) : (
-            <ul className="divide-y rounded-lg border">
+            <ul aria-label={`${name} sources`} className="divide-y rounded-lg border">
               {visibleSources.map(source => (
                 <SourceRow
                   key={source.sourceId}

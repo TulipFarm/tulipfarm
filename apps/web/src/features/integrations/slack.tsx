@@ -6,6 +6,7 @@ import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Label } from '@tulipfarm/sprout/label';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -149,7 +150,7 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function SlackAccount({ workspaceId }: { workspaceId: string }) {
+export function SlackAccount({ workspaceId, knowledge = true }: { workspaceId: string; knowledge?: boolean }) {
   const read = useSlackIntegration(workspaceId);
   if (read.state.kind === 'loading')
     return (
@@ -201,9 +202,32 @@ export function SlackAccount({ workspaceId }: { workspaceId: string }) {
           Reconnect my Slack account
         </Button>
       )}
-      {value.state === 'active' && <SlackKnowledgeSources workspaceId={workspaceId} />}
+      {value.state === 'active' && !knowledge && (
+        <div className="flex min-h-12 items-center gap-3 rounded-lg border border-border px-3 py-2">
+          <BrandIcon brand="slack" size="sm" />
+          <p className="min-w-0 flex-1 text-sm">
+            {value.linked ? (
+              <span className="font-medium">Your Slack account is linked</span>
+            ) : (
+              <>
+                <span className="font-medium">Not linked yet.</span>{' '}
+                <span className="text-muted-foreground">Message TulipFarm in Slack to link your account.</span>
+              </>
+            )}
+          </p>
+        </div>
+      )}
+      {value.state === 'active' && knowledge && <SlackKnowledgeSources workspaceId={workspaceId} />}
     </section>
   );
+}
+
+/** Slack channels in Knowledge, once the workspace is connected. */
+export function SlackKnowledge({ workspaceId }: { workspaceId: string }) {
+  const read = useSlackIntegration(workspaceId);
+  if (read.state.kind !== 'ready' || read.state.data === 'unavailable' || read.state.data.state !== 'active')
+    return null;
+  return <SlackKnowledgeSources workspaceId={workspaceId} />;
 }
 
 const recipients = z.object({ memberIds: z.array(z.uuid()), teamIds: z.array(z.uuid()) });

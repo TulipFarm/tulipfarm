@@ -3,7 +3,6 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
-import { Card, CardContent } from '@tulipfarm/sprout/card';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { githubApi, githubConsent, githubError } from '@/lib/github';
@@ -11,22 +10,13 @@ import { useGitHubAccounts, useIntegrationChanges } from './queries';
 import { GitHubKnowledgeSources } from './github-knowledge';
 import { githubMockEnabled } from './github-mock-api';
 
-export function GitHubAccounts({
-  workspaceId,
-  onChanged,
-  footerTarget = null,
-}: {
-  workspaceId: string;
-  onChanged: () => void;
-  footerTarget?: HTMLElement | null;
-}) {
+export function GitHubAccounts({ workspaceId, onChanged }: { workspaceId: string; onChanged: () => void }) {
   const { state, refresh } = useGitHubAccounts(workspaceId);
   const changes = useIntegrationChanges();
   const pending = useRef(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [managing, setManaging] = useState(false);
   const visibleAccounts =
     state.kind === 'ready'
       ? state.data.accounts.filter(account => account.identity || account.state !== 'disconnected')
@@ -64,234 +54,225 @@ export function GitHubAccounts({
       setBusy(null);
     }
   };
-  const retry = (
+  const checking = state.kind === 'ready' && state.refreshing;
+  const check = (variant: 'outline' | 'ghost') => (
     <Button
-      variant="outline"
-      disabled={state.kind === 'ready' && state.refreshing}
+      variant={variant}
+      disabled={checking}
+      aria-busy={checking}
       onClick={() => {
         void refresh();
         onChanged();
       }}
     >
-      Check GitHub accounts
+      {checking ? 'Checking…' : 'Check again'}
     </Button>
   );
+  const ready = state.kind === 'ready' ? state : null;
+  const locked = !!busy || !!ready?.error;
   return (
-    <section aria-label="Personal GitHub accounts" className="space-y-5">
-      <Card surface="raised">
-        <CardContent>
-          <div className="space-y-4">
-            {state.kind === 'loading' && (
-              <div role="status" className="space-y-2">
-                <p>Loading GitHub accounts…</p>
-                <Skeleton />
-                <Skeleton />
-              </div>
-            )}
-            {state.kind === 'error' && (
-              <StatePanel kind="error" title="Could not load GitHub accounts" description={state.message}>
-                {retry}
-              </StatePanel>
-            )}
-            {state.kind === 'unavailable' && (
-              <StatePanel
-                kind="unavailable"
-                title="GitHub account access unavailable"
-                description="Your session or workspace access changed. Sign in again or return to a workspace you can access."
+    <section aria-labelledby="github-accounts-title" className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h2 id="github-accounts-title" className="text-base font-semibold text-foreground">
+            GitHub logins
+          </h2>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Agents act with the access of these logins. Connect another login to reach repositories it can see.
+          </p>
+        </div>
+        {ready && visibleAccounts.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {!failure && !ready.error && check('ghost')}
+            {ready.data.configured && (
+              <Button
+                variant="outline"
+                disabled={locked}
+                aria-busy={busy === 'new'}
+                onClick={() => void run('connect')}
               >
-                {retry}
-              </StatePanel>
+                {busy === 'new' ? 'Opening GitHub…' : 'Connect another login'}
+              </Button>
             )}
-            {failure && (
-              <Alert variant="destructive">
-                <AlertDescription>{failure}</AlertDescription>
-              </Alert>
-            )}
-            {(failure || (state.kind === 'ready' && state.error)) && retry}
-            {notice && (
-              <Alert>
-                <AlertDescription>{notice}</AlertDescription>
-              </Alert>
-            )}
-            {state.kind === 'ready' && (
-              <>
-                {state.error && (
-                  <Alert variant="destructive">
-                    <AlertDescription>Account status may be stale. {githubError(state.error)}</AlertDescription>
-                  </Alert>
-                )}
-                {!state.data.configured && (
-                  <StatePanel
-                    kind="unavailable"
-                    title="GitHub is not configured"
-                    description="Ask your operator to configure the GitHub App. Existing accounts can still be disconnected."
-                  />
-                )}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="sr-only">GitHub accounts</h3>
-                  {!visibleAccounts.length && (
-                    <StatePanel
-                      kind="empty"
-                      title="No personal GitHub accounts"
-                      description="Connect your GitHub login to use the personal and organization repositories you can access."
+          </div>
+        )}
+      </div>
+      {state.kind === 'loading' && (
+        <div role="status" className="space-y-2 rounded-lg border p-4">
+          <p className="sr-only">Loading GitHub accounts…</p>
+          <Skeleton />
+          <Skeleton />
+        </div>
+      )}
+      {state.kind === 'error' && (
+        <StatePanel kind="error" title="Could not load GitHub accounts" description={state.message}>
+          {check('outline')}
+        </StatePanel>
+      )}
+      {state.kind === 'unavailable' && (
+        <StatePanel
+          kind="unavailable"
+          title="GitHub account access unavailable"
+          description="Your session or workspace access changed. Sign in again or return to a workspace you can access."
+        >
+          {check('outline')}
+        </StatePanel>
+      )}
+      {failure && (
+        <Alert variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
+      {ready?.error && (
+        <Alert variant="destructive">
+          <AlertDescription>Account status may be stale. {githubError(ready.error)}</AlertDescription>
+        </Alert>
+      )}
+      {(failure || ready?.error) && check('outline')}
+      {notice && (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
+      {ready && !ready.data.configured && (
+        <StatePanel
+          kind="unavailable"
+          title="GitHub is not configured"
+          description="Ask your operator to configure the GitHub App. Existing accounts can still be disconnected."
+        />
+      )}
+      {ready && !visibleAccounts.length && (
+        <StatePanel
+          kind="empty"
+          title="No personal GitHub accounts"
+          description="Connect your GitHub login to use the personal and organization repositories you can access."
+        >
+          {ready.data.configured && (
+            <Button disabled={locked} aria-busy={busy === 'new'} onClick={() => void run('connect')}>
+              {busy === 'new' ? 'Opening GitHub…' : 'Connect GitHub account'}
+            </Button>
+          )}
+        </StatePanel>
+      )}
+      {ready && visibleAccounts.length > 0 && (
+        <ul aria-label="GitHub accounts" className="divide-y rounded-lg border">
+          {visibleAccounts.map(account => {
+            const login = account.identity ? `@${account.identity.login}` : null;
+            return (
+              <li key={account.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                <BrandIcon brand="github" size="sm" />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="min-w-0 break-all text-sm font-medium text-foreground">
+                      {login ?? 'Unfinished integration'}
+                    </p>
+                    <Badge
+                      variant={
+                        account.state === 'active'
+                          ? 'success'
+                          : account.state === 'disconnected'
+                            ? 'secondary'
+                            : 'warning'
+                      }
                     >
-                      {state.data.configured && (
-                        <Button
-                          disabled={!!busy || !!state.error}
-                          aria-busy={busy === 'new'}
-                          onClick={() => void run('connect')}
-                        >
-                          {busy === 'new' ? 'Opening GitHub…' : 'Connect GitHub account'}
-                        </Button>
-                      )}
-                    </StatePanel>
+                      {account.state === 'active'
+                        ? 'Connected'
+                        : !account.identity
+                          ? 'Not connected'
+                          : account.state === 'authorizing'
+                            ? 'Waiting for GitHub'
+                            : account.state === 'disconnected'
+                              ? 'Disconnected'
+                              : 'Reconnect required'}
+                    </Badge>
+                  </div>
+                  {account.state !== 'active' && account.state !== 'disconnected' && (
+                    <p className="text-sm text-muted-foreground">
+                      {account.identity
+                        ? 'Reconnect with this same GitHub login to restore access.'
+                        : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
+                    </p>
                   )}
-                  {visibleAccounts.length > 0 && (
-                    <ul aria-label="GitHub accounts" className="min-w-40 flex-1 divide-y divide-foreground/10">
-                      {visibleAccounts.map(account => (
-                        <li key={account.id} className="space-y-2 py-2 first:pt-0 last:pb-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <BrandIcon brand="github" size="sm" />
-                            <p className="min-w-0 break-all text-sm font-medium text-foreground">
-                              {account.identity ? `@${account.identity.login}` : 'Unfinished integration'}
-                            </p>
-                            <Badge
-                              variant={
-                                account.state === 'active'
-                                  ? 'success'
-                                  : account.state === 'disconnected'
-                                    ? 'secondary'
-                                    : 'warning'
-                              }
-                            >
-                              {account.state === 'active'
-                                ? 'Connected'
-                                : !account.identity
-                                  ? 'Not connected'
-                                  : account.state === 'authorizing'
-                                    ? 'Waiting for GitHub'
-                                    : account.state === 'disconnected'
-                                      ? 'Disconnected'
-                                      : 'Reconnect required'}
-                            </Badge>
-                          </div>
-                          {account.state !== 'active' && (
-                            <div className="space-y-2">
-                              <p className="text-sm text-muted-foreground">
-                                {account.identity
-                                  ? 'Reconnect with this same GitHub login to restore access.'
-                                  : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  variant="outline"
-                                  disabled={!!busy || !state.data.configured || !!state.error}
-                                  aria-busy={busy === account.id}
-                                  onClick={() => void run('reconnect', account.id)}
-                                >
-                                  {account.identity ? `Reconnect @${account.identity.login}` : 'Finish connecting'}
-                                </Button>
-                                {!account.identity && (
-                                  <Button
-                                    variant="ghost"
-                                    disabled={!!busy || !!state.error}
-                                    onClick={() => void run('disconnect', account.id)}
-                                  >
-                                    Dismiss attempt
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {visibleAccounts.length > 0 && (
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {account.state !== 'disconnected' && (
                     <Button
-                      variant="outline"
+                      variant={account.state === 'active' ? 'ghost' : 'outline'}
                       size="sm"
-                      aria-expanded={managing}
-                      aria-controls="github-account-management"
-                      onClick={() => setManaging(value => !value)}
+                      disabled={locked || !ready.data.configured}
+                      aria-busy={busy === account.id}
+                      aria-label={login ? `Reconnect ${login}` : undefined}
+                      onClick={() => void run('reconnect', account.id)}
                     >
-                      {managing ? 'Hide account settings' : 'Manage accounts'}
+                      {login ? 'Reconnect' : 'Finish connecting'}
+                    </Button>
+                  )}
+                  {(account.identity ? account.state !== 'disconnected' : true) && (
+                    <Button
+                      variant="ghost-destructive"
+                      size="sm"
+                      disabled={locked}
+                      aria-label={login ? `Disconnect ${login}` : undefined}
+                      onClick={() => void run('disconnect', account.id)}
+                    >
+                      {login ? 'Disconnect' : 'Dismiss attempt'}
                     </Button>
                   )}
                 </div>
-                {managing && visibleAccounts.length > 0 && (
-                  <section
-                    id="github-account-management"
-                    aria-label="Account settings"
-                    className="space-y-4 rounded-lg bg-muted p-4"
-                  >
-                    <p className="text-sm text-muted-foreground">
-                      Need a different login? Connect another account. Reconnecting keeps the same identity and asks for
-                      fresh approval of future changes.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {state.data.configured && (
-                        <Button
-                          variant="outline"
-                          disabled={!!busy || !!state.error}
-                          aria-busy={busy === 'new'}
-                          onClick={() => void run('connect')}
-                        >
-                          {busy === 'new' ? 'Opening GitHub…' : 'Connect another GitHub account'}
-                        </Button>
-                      )}
-                      {!failure && !state.error && retry}
-                    </div>
-                    {state.data.accounts
-                      .filter(account => account.identity)
-                      .map(account => (
-                        <div
-                          key={account.id}
-                          className="flex flex-wrap items-center justify-between gap-2 border-t pt-3"
-                        >
-                          <p className="min-w-0 break-all text-sm font-medium">@{account.identity?.login}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {account.state === 'active' && (
-                              <Button
-                                variant="outline"
-                                disabled={!!busy || !state.data.configured || !!state.error}
-                                aria-busy={busy === account.id}
-                                onClick={() => void run('reconnect', account.id)}
-                              >
-                                Reconnect @{account.identity?.login}
-                              </Button>
-                            )}
-                            <Button
-                              variant="destructive"
-                              disabled={!!busy || account.state === 'disconnected' || !!state.error}
-                              onClick={() => void run('disconnect', account.id)}
-                            >
-                              Disconnect @{account.identity?.login}
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    <p className="text-xs text-muted-foreground">
-                      Disconnecting stops new TulipFarm calls. Your GitHub repositories are not changed.
-                    </p>
-                  </section>
-                )}
-              </>
-            )}
-            {githubMockEnabled && (
-              <p className="text-xs text-muted-foreground">Local demo · Mock GitHub data · No real GitHub changes</p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-      {state.kind === 'ready' && state.data.configured && (
-        <GitHubKnowledgeSources
-          workspaceId={workspaceId}
-          onReconnect={id => void run('reconnect', id)}
-          accountBusy={!!busy}
-          footerTarget={footerTarget}
-        />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {ready && visibleAccounts.some(account => account.identity) && (
+        <p className="text-xs text-muted-foreground">
+          Reconnecting keeps the same login and asks GitHub for fresh approval. Disconnecting stops new TulipFarm calls;
+          your repositories are not changed.
+        </p>
+      )}
+      {githubMockEnabled && (
+        <p className="text-xs text-muted-foreground">Local demo · Mock GitHub data · No real GitHub changes</p>
       )}
     </section>
+  );
+}
+
+/** Repositories in Knowledge, with reconnect for a login whose access expired. */
+export function GitHubKnowledge({ workspaceId }: { workspaceId: string }) {
+  const { state } = useGitHubAccounts(workspaceId);
+  const changes = useIntegrationChanges();
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  if (state.kind !== 'ready' || !state.data.configured) return null;
+  const reconnect = async (id: string) => {
+    if (pending.current || githubMockEnabled) return;
+    pending.current = true;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await githubApi.reconnect(workspaceId, id);
+      await changes.authority('github-personal');
+      githubConsent(result.url);
+    } catch (error) {
+      setFailure(githubError(error));
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      {failure && (
+        <Alert variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
+      <GitHubKnowledgeSources
+        workspaceId={workspaceId}
+        onReconnect={id => void reconnect(id)}
+        accountBusy={busy}
+        footerTarget={null}
+      />
+    </div>
   );
 }

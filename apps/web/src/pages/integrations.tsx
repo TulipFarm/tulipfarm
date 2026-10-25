@@ -1,38 +1,44 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate } from '@tanstack/react-router';
-import { Add } from 'reicon-react/icons/Add';
+import { Link, Navigate, useLinkProps, useLocation } from '@tanstack/react-router';
+import { ChevronRightIcon } from 'lucide-react';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
+import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
-import { GlassBanner, GlassChip } from '@tulipfarm/sprout/glass-banner';
-import { Card, CardAction, CardDescription, CardHeader, CardTitle } from '@tulipfarm/sprout/card';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { IntegrationsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
-import {
-  categories,
-  integrationFromHash,
-  integrations,
-  type Category,
-  type Integration,
-} from '@/features/integrations/catalog';
-import { actionFor, IntegrationSheet, StatusBadge, type Tab } from '@/features/integrations/integration-sheet';
-import { statusOf, useIntegrationStatus, type Statuses } from '@/features/integrations/status';
-import { workspaceRoute, integrationsRoute } from '@/router';
+import { Status as StatusMark } from '@tulipfarm/sprout/status';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
+import { categories, integrationFromHash, integrations, type Integration } from '@/features/integrations/catalog';
+import { statusOf, useIntegrationStatus, type Status } from '@/features/integrations/status';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
 import { WorkspaceMcpIntegrations } from '@/features/workspace-mcp/integrations';
+import { integrationsRoute, workspaceRoute } from '@/router';
 
-type Filter = 'all' | 'connected' | Category;
-const examples: { brand: Brand; text: string }[] = [
-  { brand: 'gmail', text: 'Drafted 3 follow-ups' },
-  { brand: 'slack', text: 'Answered in #support' },
-  { brand: 'jira', text: 'Triaged 5 new issues' },
-];
+type Filter = 'all' | 'connected' | 'attention';
+const available = integrations.filter(app => app.provider !== 'soon');
+const upcoming = integrations.filter(app => app.provider === 'soon');
+const isConnected = (status: Status | null) => status?.kind === 'connected' || status?.kind === 'installed';
+const needsAttention = (status: Status | null) => status?.kind === 'attention' || status?.kind === 'error';
 
 export function IntegrationsPage() {
   const { workspace, user, sessionId } = workspaceRoute.useRouteContext();
+  const { returnChat } = integrationsRoute.useSearch();
+  const hash = useLocation({ select: location => location.hash });
+  // Old links opened a sheet from the hash; send them to the integration's own page.
+  const target = integrationFromHash(hash);
+  if (target)
+    return (
+      <Navigate
+        to="/$workspaceSlug/integrations/$integrationId"
+        params={{ workspaceSlug: workspace.slug, integrationId: target.app.id }}
+        search={{ tab: target.tab === 'overview' ? undefined : target.tab, returnChat }}
+        replace
+      />
+    );
   return (
     <IntegrationsContent
       key={`${workspace.id}:${user.id}:${sessionId}`}
@@ -45,265 +51,285 @@ export function IntegrationsPage() {
 function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const { workspaceStale } = workspaceRoute.useRouteContext();
   const { returnChat } = integrationsRoute.useSearch();
-  const hash = useLocation({ select: location => location.hash });
-  const navigate = useNavigate();
   const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
-  const target = integrationFromHash(hash);
-  const [chosen, setChosen] = useState<{ hash: string; tab: Tab } | null>(null);
-  const tab = chosen?.hash === hash ? chosen.tab : (target?.tab ?? 'overview');
+  const loading = Object.values(statuses).some(status => status.kind === 'loading');
+  const errors = Object.entries(statuses).filter(([, status]) => status.kind === 'error');
+  const connected = available.filter(app => isConnected(statusOf(statuses, app)));
+  const attention = available.filter(app => needsAttention(statusOf(statuses, app)));
 
-  const go = (id: string) =>
-    void navigate({
-      to: '/$workspaceSlug/integrations',
-      params: { workspaceSlug: slug },
-      search: { returnChat },
-      hash: id,
-      replace: true,
-      resetScroll: false,
-    });
-  const open = (app: Integration, next: Tab = 'overview') => {
-    setChosen({ hash: app.id, tab: next });
-    go(app.id);
-  };
-
-  const connected = integrations.filter(app => statusOf(statuses, app)?.kind === 'connected');
   const sections = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (needle)
       return [
         {
           title: 'Results',
-          apps: integrations.filter(app => `${app.name} ${app.blurb}`.toLowerCase().includes(needle)),
+          apps: integrations.filter(app => `${app.name} ${app.blurb} ${app.category}`.toLowerCase().includes(needle)),
         },
       ];
     if (filter === 'connected') return [{ title: 'Connected', apps: connected }];
-    if (filter !== 'all') return [{ title: filter, apps: integrations.filter(app => app.category === filter) }];
+    if (filter === 'attention') return [{ title: 'Needs attention', apps: attention }];
     return [
-      { title: 'Recommended', apps: integrations.filter(app => app.recommended) },
+      { title: 'Recommended', apps: available.filter(app => app.recommended) },
       ...categories
         .map(category => ({
           title: category,
-          apps: integrations.filter(app => app.category === category && !app.recommended),
+          apps: available.filter(app => app.category === category && !app.recommended),
         }))
         .filter(section => section.apps.length),
     ];
-  }, [query, filter, connected]);
+  }, [query, filter, connected, attention]);
+
+  const empty = (title: string) =>
+    query.trim() ? (
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        icon={Plug}
+        title={`No apps match “${query.trim()}”`}
+        description="Try another name or clear your search."
+      >
+        <Button variant="outline" onClick={() => setQuery('')}>
+          Clear search
+        </Button>
+      </StatePanel>
+    ) : loading ? (
+      <StatePanel kind="loading" title="Checking your apps" description="Loading each app’s status." />
+    ) : errors.length ? (
+      <StatePanel kind="error" title="App status couldn’t be confirmed" description="Check each app’s status again.">
+        <Button variant="outline" onClick={() => void refresh()}>
+          Check app status again
+        </Button>
+      </StatePanel>
+    ) : title === 'Needs attention' ? (
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        icon={Plug}
+        title="Nothing needs attention"
+        description="Every connected app is working."
+      >
+        <Button variant="outline" onClick={() => setFilter('all')}>
+          Show all apps
+        </Button>
+      </StatePanel>
+    ) : (
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        icon={Plug}
+        title="Nothing connected yet"
+        description="Connect the apps your team already uses, like Slack, Gmail, or GitHub. Agents can then read and act there, always within the access you approve."
+        sample={<IntegrationsSample />}
+      >
+        <Button onClick={() => setFilter('all')}>Browse apps</Button>
+      </StatePanel>
+    );
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <PageContent>
-        {returnChat && (
-          <Button
-            variant="ghost"
-            nativeButton={false}
-            render={<Link to="/$workspaceSlug/chat/$chatId" params={{ workspaceSlug: slug, chatId: returnChat }} />}
-          >
-            Back to chat
-          </Button>
-        )}
-        <PageHeader title="Integrations" description="Connect the apps your agents work in." />
+        <PageHeader
+          title="Integrations"
+          description="Connect the apps your agents work in. Open an app to manage accounts, Knowledge, and settings."
+          back={
+            returnChat
+              ? {
+                  label: 'Back to chat',
+                  link: <Link to="/$workspaceSlug/chat/$chatId" params={{ workspaceSlug: slug, chatId: returnChat }} />,
+                }
+              : undefined
+          }
+        />
         <WorkspaceRefreshNotice />
-        <fieldset disabled={workspaceStale} className="min-w-0 space-y-6">
-          <SearchField label="Search apps" value={query} onChange={setQuery} placeholder="Search apps" />
-          {Object.values(statuses).some(status => status.kind === 'error') && (
-            <section aria-label="App status errors" className="space-y-3">
-              <Alert variant="destructive">
-                <AlertDescription>
-                  <ul className="space-y-2">
-                    {Object.entries(statuses).map(
-                      ([provider, status]) =>
-                        status.kind === 'error' && (
-                          <li key={provider}>
-                            Could not check{' '}
-                            {integrations
-                              .filter(app => app.provider === provider)
-                              .map(app => app.name)
-                              .join(', ')}
-                            . {status.detail}
-                          </li>
-                        ),
-                    )}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-              <Button variant="outline" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>
-                {refreshing ? 'Checking app status…' : 'Check app status again'}
-              </Button>
-            </section>
-          )}
-          <div className="flex flex-col gap-6 md:flex-row">
-            <nav
-              aria-label="Filter apps"
-              className="-mx-4 flex gap-1 overflow-x-auto px-4 md:sticky md:top-0 md:mx-0 md:w-44 md:shrink-0 md:flex-col md:self-start md:px-0"
-            >
-              <Rail
-                label="All"
-                count={integrations.length}
-                active={filter === 'all' && !query}
-                onClick={() => {
-                  setFilter('all');
-                  setQuery('');
-                }}
-              />
-              <Rail
-                label="Connected"
-                count={connected.length}
-                active={filter === 'connected' && !query}
-                onClick={() => {
-                  setFilter('connected');
-                  setQuery('');
-                }}
-              />
-              <p className="hidden px-2.5 pt-4 pb-1 text-xs font-medium text-muted-foreground md:block">Categories</p>
-              {categories.map(category => (
-                <Rail
-                  key={category}
-                  label={category}
-                  active={filter === category && !query}
-                  onClick={() => {
-                    setFilter(category);
+        <fieldset disabled={workspaceStale} className="min-w-0">
+          <div className="max-w-4xl space-y-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <SearchField label="Search apps" value={query} onChange={setQuery} placeholder="Search apps" />
+              <div className="shrink-0 overflow-x-auto">
+                <ToggleGroup
+                  aria-label="Show apps"
+                  variant="outline"
+                  size="sm"
+                  spacing={0}
+                  value={[filter]}
+                  onValueChange={value => {
+                    const next = value[0] as Filter | undefined;
+                    if (!next) return;
+                    setFilter(next);
                     setQuery('');
                   }}
-                />
-              ))}
-            </nav>
-            <div className="min-w-0 flex-1 space-y-8">
-              {filter === 'all' && !query && (
-                <GlassBanner title="Connect once. Your agents work there." caption="Example activity">
-                  {examples.map(item => (
-                    <GlassChip key={item.text} icon={<BrandIcon brand={item.brand} size="glyph" />}>
-                      {item.text}
-                    </GlassChip>
-                  ))}
-                </GlassBanner>
-              )}
-              {sections.map(section => (
-                <section key={section.title} aria-labelledby={`section-${section.title}`} className="space-y-3">
-                  <h2 id={`section-${section.title}`} className="text-sm font-medium text-muted-foreground">
-                    {section.title}
-                  </h2>
-                  {section.apps.length ? (
-                    <ul className="grid auto-rows-fr gap-2 lg:grid-cols-2">
-                      {section.apps.map(app => (
-                        <li key={app.id} className="grid">
-                          <Row app={app} statuses={statuses} onOpen={() => open(app)} />
+                >
+                  <ToggleGroupItem value="all">
+                    All <Count value={available.length} />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="connected">
+                    Connected <Count value={loading ? null : connected.length} />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="attention">
+                    Needs attention <Count value={loading ? null : attention.length} />
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+            </div>
+            {errors.length > 0 && (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <ul className="space-y-1">
+                      {errors.map(([provider, status]) => (
+                        <li key={provider}>
+                          Couldn’t check{' '}
+                          {available
+                            .filter(app => app.provider === provider)
+                            .map(app => app.name)
+                            .join(', ')}
+                          . {status.kind === 'error' && status.detail}
                         </li>
                       ))}
                     </ul>
-                  ) : query ? (
-                    <StatePanel
-                      kind="empty"
-                      heading="h3"
-                      icon={Plug}
-                      title={`No apps match “${query.trim()}”`}
-                      description="Try another name or clear your search."
+                    <Button variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>
+                      {refreshing ? 'Checking…' : 'Check again'}
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+            {sections.map(section => (
+              <section key={section.title} aria-labelledby={`section-${section.title}`} className="space-y-2">
+                <h2 id={`section-${section.title}`} className="text-sm font-medium text-muted-foreground">
+                  {section.title}
+                </h2>
+                {section.apps.length ? (
+                  <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                    {section.apps.map(app => (
+                      <li key={app.id}>
+                        <Row app={app} status={statusOf(statuses, app)} slug={slug} />
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  empty(section.title)
+                )}
+              </section>
+            ))}
+            {filter === 'all' && !query.trim() && (
+              <section aria-labelledby="section-soon" className="space-y-3">
+                <h2 id="section-soon" className="text-sm font-medium text-muted-foreground">
+                  Coming soon
+                </h2>
+                <ul className="flex flex-wrap gap-2">
+                  {upcoming.map(app => (
+                    <li
+                      key={app.id}
+                      className="flex h-7 items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-muted-foreground"
                     >
-                      <Button variant="outline" onClick={() => setQuery('')}>
-                        Clear search
-                      </Button>
-                    </StatePanel>
-                  ) : Object.values(statuses).some(status => status.kind === 'loading') ? (
-                    <StatePanel kind="loading" title="Checking connected apps" description="Loading provider status." />
-                  ) : Object.values(statuses).some(status => status.kind === 'error') ? (
-                    <StatePanel
-                      kind="error"
-                      title="Connected apps could not be confirmed"
-                      description="Retry the provider status check."
-                    >
-                      <Button variant="outline" onClick={() => void refresh()}>
-                        Check connected apps
-                      </Button>
-                    </StatePanel>
-                  ) : (
-                    <StatePanel
-                      kind="empty"
-                      heading="h3"
-                      icon={Plug}
-                      title="Nothing connected yet"
-                      description="Connect the apps your team already uses, like Slack, Gmail, or GitHub. Agents can then read and act there, always within the access you approve."
-                      sample={<IntegrationsSample />}
-                    >
-                      <Button onClick={() => setFilter('all')}>
-                        <Add size={16} aria-hidden="true" />
-                        Browse apps
-                      </Button>
-                    </StatePanel>
-                  )}
-                </section>
-              ))}
-            </div>
+                      <BrandIcon brand={app.brand} size="glyph" />
+                      {app.name}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
-          <WorkspaceMcpIntegrations workspaceId={workspaceId} />
+          <div className="pt-10">
+            <WorkspaceMcpIntegrations workspaceId={workspaceId} />
+          </div>
         </fieldset>
-        <IntegrationSheet
-          app={target?.app ?? null}
-          status={target ? statusOf(statuses, target.app) : null}
-          tab={tab}
-          workspaceId={workspaceId}
-          slug={slug}
-          onClose={() => go('')}
-          onChanged={refresh}
-        />
       </PageContent>
     </div>
   );
 }
 
-function Rail({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count?: number;
-  active: boolean;
-  onClick: () => void;
-}) {
+function Count({ value }: { value: number | null }) {
   return (
-    <Button
-      variant={active ? 'secondary' : 'ghost'}
-      size="md"
-      aria-current={active ? 'page' : undefined}
-      onClick={onClick}
-    >
-      <span className="flex-1 whitespace-nowrap">{label}</span>
-      {count !== undefined && <span className="pl-2 text-muted-foreground tabular-nums">{count}</span>}
-    </Button>
+    <span className="inline-block w-4 text-end text-muted-foreground tabular-nums">{value === null ? '–' : value}</span>
   );
 }
 
-function Row({ app, statuses, onOpen }: { app: Integration; statuses: Statuses; onOpen: () => void }) {
-  const status = statusOf(statuses, app);
-  const { membership } = workspaceRoute.useRouteContext();
-  const action = actionFor(app, status, membership?.role === 'admin');
-  const label =
-    action.kind === 'connect' || action.kind === 'settings'
-      ? action.label
-      : action.kind === 'workflow'
-        ? 'Set up'
-        : null;
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          <BrandIcon brand={app.brand} />{' '}
-          <Button variant="link" onClick={onOpen}>
-            {app.name}
-          </Button>
-        </CardTitle>
-        <CardDescription>{app.blurb}</CardDescription>
-        <CardAction>
-          <StatusBadge status={status} soon={app.provider === 'soon'} />{' '}
-          {label && (
-            <Button variant="outline" size="sm" aria-label={`${label} ${app.name}`} onClick={onOpen}>
-              {label}
-            </Button>
-          )}
-        </CardAction>
-      </CardHeader>
-    </Card>
+function Row({ app, status, slug }: { app: Integration; status: Status | null; slug: string }) {
+  const soon = app.provider === 'soon';
+  const link = useLinkProps({
+    to: '/$workspaceSlug/integrations/$integrationId',
+    params: { workspaceSlug: slug, integrationId: app.id },
+  });
+  const body = (
+    <>
+      <BrandIcon brand={app.brand} size="md" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-foreground">{app.name}</span>
+        <span className="block truncate text-sm text-muted-foreground">{app.blurb}</span>
+      </span>
+      <StatusCell app={app} status={status} />
+      <span className="w-4 shrink-0 text-muted-foreground">
+        {!soon && <ChevronRightIcon aria-hidden="true" className="size-4" />}
+      </span>
+    </>
   );
+  if (soon) return <div className="flex min-h-16 items-center gap-3 px-4 py-3">{body}</div>;
+  return (
+    <a
+      {...link}
+      className="flex min-h-16 items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+    >
+      {body}
+    </a>
+  );
+}
+
+const marks = {
+  connected: 'success',
+  installed: 'pending',
+  attention: 'warning',
+  error: 'error',
+} as const;
+
+/** A fixed-width column so rows don’t move while each app’s status loads. */
+function StatusCell({ app, status }: { app: Integration; status: Status | null }) {
+  const label = statusLabel(app, status);
+  const detail = status?.kind === 'connected' ? status.detail : null;
+  const mark = status && status.kind in marks ? marks[status.kind as keyof typeof marks] : null;
+  return (
+    <span className="flex w-28 shrink-0 flex-col items-end text-end sm:w-40">
+      {status?.kind === 'loading' ? (
+        <span className="block w-16" role="status" aria-label="Checking status">
+          <Skeleton />
+        </span>
+      ) : (
+        <>
+          <span
+            className={
+              mark ? 'flex items-center gap-1.5 text-sm font-medium text-foreground' : 'text-sm text-muted-foreground'
+            }
+          >
+            {mark && <StatusMark state={mark} size="sm" aria-hidden="true" tooltip={false} />}
+            {label}
+          </span>
+          {detail && <span className="block max-w-full truncate text-xs text-muted-foreground">{detail}</span>}
+        </>
+      )}
+    </span>
+  );
+}
+
+function statusLabel(app: Integration, status: Status | null) {
+  if (app.provider === 'soon') return 'Coming soon';
+  if (app.provider === 'workflow') return 'Workflow trigger';
+  switch (status?.kind) {
+    case 'connected':
+      return 'Connected';
+    case 'installed':
+      return 'Installed';
+    case 'attention':
+      return 'Needs attention';
+    case 'error':
+      return 'Couldn’t check';
+    case 'unavailable':
+      return 'Unavailable';
+    case 'off':
+      return status.granted ? 'Not granted' : 'Not connected';
+    default:
+      return '';
+  }
 }
