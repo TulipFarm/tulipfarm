@@ -584,8 +584,7 @@ function Accounts({
       </div>
     );
   if (app.provider === 'slack') return <SlackAccount workspaceId={workspaceId} knowledge={false} />;
-  if (app.provider === 'github-personal')
-    return <GitHubAccounts workspaceId={workspaceId} onChanged={onChanged} knowledge={false} />;
+  if (app.provider === 'github-personal') return <GitHubAccounts workspaceId={workspaceId} onChanged={onChanged} />;
   if (app.provider === 'atlassian' || app.provider === 'trello')
     return (
       <AtlassianIntegrations
