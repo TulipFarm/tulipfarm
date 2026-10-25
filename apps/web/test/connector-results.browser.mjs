@@ -51,21 +51,11 @@ test(
         'monochrome app logos fill the same tile interior as color logos',
       );
       assert.equal(await canvas.count(), 0);
-      const activity = page.getByRole('region', { name: 'Activity: Recorded activity', exact: true });
-      assert.deepEqual(
-        await activity.locator('[data-result-app]').evaluateAll(nodes => nodes.map(node => node.dataset.resultApp)),
-        ['jira', 'confluence'],
+      assert.equal(
+        await page.getByRole('region', { name: 'Activity: Recorded activity', exact: true }).count(),
+        0,
+        'connector tool calls stay in the tool call list instead of a separate card',
       );
-      await activity.getByRole('button', { name: '3 more apps', exact: true }).click();
-      const popup = page.getByRole('dialog', { name: '3 more apps', exact: true });
-      for (const name of ['Trello', 'Gmail', 'Connected apps'])
-        await popup.getByRole('heading', { name, exact: true }).waitFor();
-      await page.keyboard.press('Escape');
-      await activity.getByRole('button', { name: 'View activity' }).click();
-      await canvas
-        .getByRole('region', { name: 'Jira', exact: true })
-        .getByText('Search Jira issues', { exact: true })
-        .waitFor();
       await page.getByRole('button', { name: 'View GitHub changes', exact: true }).click();
       await canvas.getByRole('heading', { name: '1. issue.create · succeeded', exact: true }).waitFor();
       assert.equal(await canvas.getByRole('button', { name: 'Approve exact batch' }).count(), 0);

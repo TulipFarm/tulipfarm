@@ -51,8 +51,6 @@ import { MessageActions } from '@tulipfarm/sprout/message-actions';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
-import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
-import { ActivityResultCard } from './activity-result-card';
 import { newestTools, reconcileLiveTools, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, type OutgoingMessage } from './current-reply';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
@@ -1703,39 +1701,8 @@ function ConversationTools({
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
   const recordChanges = useMemo(() => recordChangesForTools(message.id, message.tools), [message.id, message.tools]);
-  const activity = useMemo(
-    () =>
-      message.tools
-        .filter(
-          tool =>
-            /^(google|atlassian|slack|github|mcp)\./.test(tool.tool) &&
-            !tool.googleProposalId &&
-            !message.calendarResults.some(result => result.callId === tool.id) &&
-            ![
-              'slack.message.send',
-              'slack.thread.reply',
-              'slack.reaction.add',
-              'github.personal.propose',
-              'github.personal.execute',
-              'github.personal.account',
-              'github.investigation.account',
-              'google.status',
-              'atlassian.proposal',
-              'mcp.search',
-              'mcp.describe',
-            ].includes(tool.tool),
-        )
-        .map(tool => ({
-          id: tool.id,
-          tool: tool.tool,
-          status: tool.activityStatus ?? tool.status,
-          presentation: tool.presentation ?? toolPresentation(tool.tool, undefined, tool.activity),
-        })),
-    [message.tools, message.calendarResults],
-  );
   return (
     <section aria-label={`Activity for message ${message.sequence}`} className="space-y-3">
-      <ActivityResultCard id={`activity:${message.id}`} items={activity} />
       {message.tools
         .flatMap(tool => (tool.status === 'completed' && tool.rowView ? [tool.rowView] : []))
         .map(reference => (
