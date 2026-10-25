@@ -13,7 +13,7 @@ import { generateImageOutputs } from '../../../packages/conversations/src/image-
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { pinnedImageChoice } from '../../../packages/agents/src/image-generation.ts';
 import { createFiles } from '../../../packages/files/src/index.ts';
-import { png } from '../../../packages/memory-core/test/fixtures/parser-media.mjs';
+import { jpeg, png } from '../../../packages/memory-core/test/fixtures/parser-media.mjs';
 import { createConversationActivities } from '../src/conversation-activities.ts';
 import { createPlanComposition } from '../src/plan-composition.ts';
 import { createTaskRecovery } from '../src/task-dispatch.ts';
@@ -371,6 +371,86 @@ test(
   },
 );
 
+test('an image for a named channel uses its preset and is checked against its media rules', async t => {
+  const f = await setup(t);
+  // The provider answers a square JPEG for a square request and, as xAI and Gemini may, a 2:3 PNG for a portrait.
+  f.state.draw = async request =>
+    openAiImage(
+      request.body.size === '1024x1024'
+        ? await jpeg(16, 16)
+        : request.body.size === '1024x1536'
+          ? await png(16, 24)
+          : await png(24, 16),
+    );
+  const chatId = await f.chat();
+  const calls = [
+    { prompt: 'A tulip post', channel: 'instagram' },
+    { prompt: 'A tall tulip post', channel: 'instagram', preset: 'instagram-feed' },
+    { prompt: 'A tulip post for X', channel: 'x' },
+  ];
+  const { results } = await f.turn(chatId, [...calls.map(call => [call]), 'Done.']);
+
+  // Instagram's default preset is square, since every model's portrait is narrower than Instagram's 4:5; the feed
+  // portrait is an explicit choice. Instagram takes only JPEG, so that is what is asked for. X takes PNG, so its
+  // images stay PNG, at X's landscape preset.
+  assert.deepEqual(
+    f.state.images.map(request => [request.body.size, request.body.output_format]),
+    [
+      ['1024x1024', 'jpeg'],
+      ['1024x1536', 'jpeg'],
+      ['1536x1024', 'png'],
+    ],
+  );
+  assert.deepEqual(
+    results.map(result => result.images.map(image => [image.state, image.file.mediaType, image.channel])),
+    [
+      [['saved', 'image/jpeg', { name: 'instagram', usable: true, problems: [] }]],
+      [['saved', 'image/png', { name: 'instagram', usable: false, problems: ['image-type', 'image-aspect-ratio'] }]],
+      [['saved', 'image/png', { name: 'x', usable: true, problems: [] }]],
+    ],
+  );
+  assert.match(results[0].instruction, /meets instagram's media rules/);
+  assert.match(
+    results[1].instruction,
+    /does not meet instagram's media rules \(image-type, image-aspect-ratio\)\. Do not offer it/,
+  );
+  assert.equal(f.state.images.length, 3);
+});
+
+test("a generated image outside its channel's ratio is reported, and calls without a channel are not checked", async t => {
+  const f = await setup(t);
+  const tall = await jpeg(16, 32);
+  f.state.draw = async () => openAiImage(tall);
+  const { deps, context } = await f.direct();
+  const origin = { kind: 'run', runId: randomUUID() };
+  const portrait = await generateImageOutputs(
+    deps,
+    { ...context, origin },
+    { tool: 'images.generate', prompt: 'Tall', channel: 'instagram' },
+  );
+  assert.deepEqual(portrait.images[0].channel, { name: 'instagram', usable: false, problems: ['image-aspect-ratio'] });
+  assert.match(portrait.instruction, /does not meet instagram's media rules \(image-aspect-ratio\)/);
+  // A repeat returns the stored image, checked again, with no second provider call.
+  const calls = f.state.images.length;
+  const again = await generateImageOutputs(
+    deps,
+    { ...context, origin },
+    { tool: 'images.generate', prompt: 'Tall', channel: 'instagram' },
+  );
+  assert.deepEqual(again.images, portrait.images);
+  assert.equal(f.state.images.length, calls);
+
+  const plain = await generateImageOutputs(
+    deps,
+    { ...context, origin },
+    { tool: 'images.generate', prompt: 'Tall', preset: 'instagram-feed' },
+  );
+  assert.equal(plain.images[0].state, 'saved');
+  assert.equal('channel' in plain.images[0], false);
+  assert.doesNotMatch(plain.instruction, /media rules/);
+  assert.equal(f.state.images.at(-1).body.output_format, 'png');
+});
+
 test('xAI edits send the attachment and Files sources, and an unreadable source is refused before any charge', async t => {
   const f = await setup(t);
   const drawn = await signedPng();
@@ -535,7 +615,7 @@ test('a provider refusal is not charged and returns no provider text', async t =
 test('with the images flag off, images.generate is not a tool and nothing is generated', async t => {
   const f = await setup(t, { flag: 'false' });
   const chatId = await f.chat();
-  const { results, requests } = await f.turn(chatId, [[{ prompt: 'A tulip' }], 'I cannot.']);
+  const { results, requests } = await f.turn(chatId, [[{ prompt: 'A tulip', channel: 'instagram' }], 'I cannot.']);
   assert.ok(requests.every(request => !JSON.stringify(request.tools ?? []).includes('images_generate')));
   assert.ok(typeof results[0] === 'string' || !('images' in results[0]));
   assert.match(JSON.stringify(results[0]), /Unknown tool|not available|not permitted/i);

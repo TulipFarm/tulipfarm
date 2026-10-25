@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
 import { currentMember, protectedSourceClosure, requireProtectedSource } from '@tulipfarm/access';
+import { createFiles } from '@tulipfarm/files';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { connect, denied, fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createSocialAccounts } from '../dist/accounts.js';
@@ -26,6 +27,7 @@ const env = {
   ...operator('SOCIAL_LINKEDIN', 'community-management'),
   ...operator('SOCIAL_X', 'paid'),
   ...operator('SOCIAL_TIKTOK', 'unaudited'),
+  ...operator('SOCIAL_INSTAGRAM', 'standard'),
 };
 const code = expected => error => error?.code === expected;
 const deniedAccess = error => error?.message === 'Resource not found';
@@ -57,6 +59,15 @@ const discovered = {
     {
       platformChannelId: 'tt-brand',
       channelKind: 'tiktok-account',
+      displayName: 'Brand',
+      handle: 'brand',
+      avatarUrl: null,
+    },
+  ],
+  instagram: [
+    {
+      platformChannelId: 'ig-brand',
+      channelKind: 'instagram-business',
       displayName: 'Brand',
       handle: 'brand',
       avatarUrl: null,
@@ -186,13 +197,13 @@ async function chat(person = admin()) {
   return id;
 }
 /** A ready File the person created. */
-async function file(person = admin(), mediaType = 'image/png') {
+async function file(person = admin(), mediaType = 'image/png', size = 10) {
   const id = randomUUID();
   const sha256 = createHash('sha256').update(id).digest('hex');
   await db.platform.query(
     `INSERT INTO ${table('tf_files')} (id,kind,creator_membership_id,name,object_key,media_type,size,sha256,ready)
-     VALUES ($1,'file',$2,'media',$3,$4,10,$5,true)`,
-    [id, person.membershipId, randomUUID(), mediaType, sha256],
+     VALUES ($1,'file',$2,'media',$3,$4,$6,$5,true)`,
+    [id, person.membershipId, randomUUID(), mediaType, sha256, size],
   );
   return { fileId: id, contentDigest: sha256, role: 'primary' };
 }
@@ -243,6 +254,12 @@ const tiktok = (channel, media) => ({
   channelId: channel.id,
   expectedChannelVersion: channel.version,
   content: { platform: 'tiktok', caption: 'Launch clip', media },
+  publishAt: null,
+});
+const instagram = (channel, media) => ({
+  channelId: channel.id,
+  expectedChannelVersion: channel.version,
+  content: { platform: 'instagram', caption: 'Spring', media, format: 'feed' },
   publishAt: null,
 });
 const prepare = (conversationId, variants, commandId = randomUUID()) => ({
@@ -844,6 +861,97 @@ test('PRODUCT 19: attaching a file does not widen access to it, and the approval
   );
   await assert.rejects(posts.decide(ws.id, other.userId, submit(post)), code('media-unreadable'));
   assert.equal(await count('decisions'), 0);
+});
+
+test('Images 49-50: a generated image attaches like any Files image, and each platform’s image rules apply', async () => {
+  const { posts, personal } = service();
+  const profile = await personal('linkedin');
+  const account = await personal('tiktok');
+  const handle = await personal('x');
+  const conversationId = await chat();
+  // Saved the way images.generate saves an image: a derived File holding the provider's PNG bytes.
+  const bytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'base64',
+  );
+  const objects = new Map();
+  const files = createFiles(runtime, {
+    putIfAbsent: async (key, body) => void objects.set(key, Buffer.from(body)),
+    read: async key => objects.get(key),
+    remove: async key => void objects.delete(key),
+  });
+  const saved = await files.createDerived(
+    ws.id,
+    admin().userId,
+    randomUUID(),
+    {
+      name: 'Tulip.png',
+      parentId: null,
+      mediaType: 'image/png',
+    },
+    bytes,
+  );
+  const generated = {
+    fileId: saved.id,
+    contentDigest: createHash('sha256').update(bytes).digest('hex'),
+    role: 'primary',
+  };
+
+  const { post, variants } = await posts.prepare(
+    ws.id,
+    admin().userId,
+    prepare(conversationId, [linkedin(profile, 'Spring is here', [generated])]),
+    sourcesOf(conversationId),
+  );
+  assert.deepEqual(variants[0].errors, []);
+  // The approval covers the exact bytes: the variant carries their digest, and approving checks it against the File.
+  const approved = await posts.decide(ws.id, admin().userId, submit(post));
+  assert.ok(current(approved).decision);
+  assert.equal(variantFor(approved, profile).content.media[0].contentDigest, generated.contentDigest);
+
+  // TikTok takes no PNG, and X takes at most 5 MB: the same rules images.generate checks for a channel.
+  const big = await file(admin(), 'image/png', 5_000_001);
+  const checked = await posts.prepare(
+    ws.id,
+    admin().userId,
+    prepare(conversationId, [
+      tiktok(account, [generated]),
+      { ...x(handle), content: { ...x(handle).content, media: [big] } },
+    ]),
+    sourcesOf(conversationId),
+  );
+  assert.deepEqual(
+    checked.variants.map(item => item.errors),
+    [
+      [{ path: ['content', 'media', 0], code: 'image-type' }],
+      [{ path: ['content', 'media', 0], code: 'image-too-large' }],
+    ],
+  );
+});
+
+test('the platform image rules apply only with the images flag on', async () => {
+  const { posts, personal } = service();
+  const feed = await personal('instagram');
+  const conversationId = await chat();
+  const photo = await file(admin(), 'image/png');
+  const errorsWith = async flag => {
+    const previous = process.env.FEATURE_FLAG_IMAGES;
+    process.env.FEATURE_FLAG_IMAGES = flag;
+    try {
+      const { variants } = await posts.prepare(
+        ws.id,
+        admin().userId,
+        prepare(conversationId, [instagram(feed, [photo])]),
+        sourcesOf(conversationId),
+      );
+      return variants[0].errors;
+    } finally {
+      if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
+      else process.env.FEATURE_FLAG_IMAGES = previous;
+    }
+  };
+  assert.deepEqual(await errorsWith('false'), []);
+  assert.deepEqual(await errorsWith('true'), [{ path: ['content', 'media', 0], code: 'image-type' }]);
 });
 
 test('PRODUCT 20: a post is approved only by a person who can read every source', async () => {

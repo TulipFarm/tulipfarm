@@ -48,6 +48,16 @@ type DecodedImage = {
   needsReencode: boolean;
 };
 
+/** The displayed width and height of an image, after its EXIF orientation; null when sharp cannot read it. */
+export async function imageDimensions(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
+  try {
+    const { autoOrient } = await sharp(bytes, { limitInputPixels: maxInputPixels }).metadata();
+    return { width: autoOrient.width, height: autoOrient.height };
+  } catch {
+    return null;
+  }
+}
+
 export async function prepareImageForModel(bytes: Uint8Array, options: PrepareImageOptions): Promise<PreparedImage> {
   const { maxBytes, maxEdge = 2048 } = options;
   const sniffed = sniffMediaType(bytes);

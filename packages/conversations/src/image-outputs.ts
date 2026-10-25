@@ -10,7 +10,14 @@ import {
   type ServedImageModel,
 } from '@tulipfarm/config';
 import { FileError, requireReadableFile, type createFiles } from '@tulipfarm/files';
-import { imagePresets, sniffMediaType } from '@tulipfarm/media';
+import {
+  channelImageProblems,
+  channelImageRules,
+  imageDimensions,
+  imagePresets,
+  sniffMediaType,
+  type ImageChannel,
+} from '@tulipfarm/media';
 import {
   CreditsExhausted,
   creditUnitsForProviderCost,
@@ -54,7 +61,14 @@ export type ImageModelChoice =
   | { status: 'unavailable'; alternativeFamilyId: string | null; turnedOff?: boolean };
 
 export type ImageGenerator = (
-  request: { prompt: string; size: string; quality: 'standard' | 'high'; sources: readonly ImageSourceBytes[] },
+  request: {
+    prompt: string;
+    size: string;
+    quality: 'standard' | 'high';
+    sources: readonly ImageSourceBytes[];
+    /** The type to ask for, when the image's channel does not take PNG. Providers that cannot choose ignore it. */
+    format?: 'jpeg';
+  },
   signal: AbortSignal | undefined,
 ) => Promise<
   { kind: 'image'; bytes: Uint8Array; mediaType: string; usage: ImageUsage } | { kind: 'refused'; usage: ImageUsage }
@@ -131,6 +145,8 @@ export function imageCallHash(call: z.output<typeof generateImagesCallSchema>) {
         call.name ?? null,
         call.folderId ?? null,
         call.sources ?? [],
+        // Appended only when given, so calls without a channel keep their identity.
+        ...(call.channel ? [call.channel] : []),
       ]),
     )
     .digest('hex');
@@ -349,7 +365,12 @@ export async function generateImageOutputs(
         : 'Work that no person requested in a private chat must name a Files folder the requester can add to. Ask for a destination folder.',
     );
 
-  const shape: Shape = call.preset ? imagePresets[call.preset].shape : (call.aspect ?? 'square');
+  const channel = call.channel ? channelImageRules[call.channel] : undefined;
+  const preset = call.preset ?? (call.aspect ? undefined : channel?.preset);
+  const shape: Shape = preset ? imagePresets[preset].shape : (call.aspect ?? 'square');
+  const format = channel && !(channel.mediaTypes as readonly string[]).includes('image/png') ? 'jpeg' : undefined;
+  const checked = async (bytes: Uint8Array, mediaType: string) =>
+    call.channel ? { channel: await channelCheck(call.channel, bytes, mediaType) } : {};
   const record: ImageGenerationRecord = {
     prompt: call.prompt,
     imageModelId: model.id,
@@ -417,8 +438,12 @@ export async function generateImageOutputs(
     if (row.claimed) continue;
     if (row.state === 'saved') {
       const file = await savedFile(deps, context, row.id);
-      if (file) images[index] = { ...images[index]!, file };
-      else images[index] = { ...images[index]!, state: 'failed', failure: 'conflict' };
+      if (!file) images[index] = { ...images[index]!, state: 'failed', failure: 'conflict' };
+      else if (!call.channel) images[index] = { ...images[index]!, file };
+      else {
+        const { bytes } = await deps.files.download(context.workspaceId, context.actor.userId, row.id);
+        images[index] = { ...images[index]!, file, ...(await checked(bytes, file.mediaType)) };
+      }
     } else if (row.state === 'pending') images[index] = { ...images[index]!, state: 'failed', failure: 'in-progress' };
     else if (row.state === 'failed')
       images[index] = { ...images[index]!, failure: (row.failure ?? 'generation-failed') as ImageFailure };
@@ -486,7 +511,13 @@ export async function generateImageOutputs(
       let outcome: Awaited<ReturnType<ImageGenerator>>;
       try {
         outcome = await context.generate(
-          { prompt: call.prompt, size: model.aspects[shape], quality: call.quality, sources: read },
+          {
+            prompt: call.prompt,
+            size: model.aspects[shape],
+            quality: call.quality,
+            sources: read,
+            ...(format ? { format } : {}),
+          },
           context.signal,
         );
       } catch (error) {
@@ -538,6 +569,7 @@ export async function generateImageOutputs(
             size: file.size ?? outcome.bytes.byteLength,
             parentId: file.parentId,
           },
+          ...(await checked(outcome.bytes, sniffed)),
         });
       } catch (error) {
         // The provider billed the image even though it could not be saved.
@@ -552,6 +584,7 @@ export async function generateImageOutputs(
 
   const saved = images.filter(image => image.state === 'saved').length;
   const refused = images.filter(image => image.state === 'refused').length;
+  const unusable = images.filter(image => image.channel && !image.channel.usable);
   return {
     // Every image refused is the call's outcome; the provider's own wording is never returned.
     ...(refused === images.length ? { error: 'content-refused' as const } : {}),
@@ -560,6 +593,16 @@ export async function generateImageOutputs(
       saved
         ? `${saved} image${saved === 1 ? ' is' : 's are'} saved in Files and shown as cards under your reply. Refer to them by name.`
         : 'No image was saved.',
+      call.channel && saved
+        ? unusable.length
+          ? unusable
+              .map(
+                image =>
+                  `Image ${image.index + 1} does not meet ${call.channel}'s media rules (${image.channel!.problems.join(', ')}). Do not offer it for the ${call.channel} post; say why.`,
+              )
+              .join(' ')
+          : `Each saved image meets ${call.channel}'s media rules.`
+        : '',
       refused
         ? `${refused} image${refused === 1 ? ' was' : 's were'} refused under the provider's content policy. Say so, and do not rewrite the prompt to get around it.`
         : '',
@@ -573,6 +616,13 @@ export async function generateImageOutputs(
       .filter(Boolean)
       .join(' '),
   };
+}
+
+/** Whether saved bytes meet a channel's media rules: the same check social makes when they are attached to a post. */
+async function channelCheck(name: ImageChannel, bytes: Uint8Array, mediaType: string) {
+  const dimensions = await imageDimensions(bytes);
+  const problems = channelImageProblems(name, { mediaType, size: bytes.byteLength, ...dimensions });
+  return { name, usable: problems.length === 0, problems };
 }
 
 async function readSource(

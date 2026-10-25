@@ -16,7 +16,9 @@ export function mediaKind(mediaType: string): MediaKind | null {
   return null;
 }
 
-type Bound = { kind: MediaKind | null } | { problem: 'media-unreadable' | 'media-changed' };
+type Bound =
+  | { kind: MediaKind | null; mediaType: string; size: number }
+  | { problem: 'media-unreadable' | 'media-changed' };
 
 /**
  * Binds one media item to its File for `reader`. Attaching a file never widens access to it: the reader must
@@ -32,24 +34,31 @@ async function bind(tx: AuthorizationTransaction, reader: HumanActor, item: Medi
   }
   if (file.sha256 !== item.contentDigest) return { problem: 'media-changed' };
   const row = z
-    .object({ media_type: z.string() })
+    .object({ media_type: z.string(), size: z.coerce.number() })
     .parse(
-      (await tx.client.query(`SELECT media_type FROM ${qualified(tx.schema, 'tf_files')} WHERE id=$1`, [item.fileId]))
-        .rows[0],
+      (
+        await tx.client.query(`SELECT media_type,size FROM ${qualified(tx.schema, 'tf_files')} WHERE id=$1`, [
+          item.fileId,
+        ])
+      ).rows[0],
     );
-  return { kind: mediaKind(row.media_type) };
+  return { kind: mediaKind(row.media_type), mediaType: row.media_type, size: row.size };
 }
 
-/** The kind of each readable item's File, and an issue for each item the reader cannot use. */
+/** The kind, type and size of each readable item's File, and an issue for each item the reader cannot use. */
 export async function bindMedia(tx: AuthorizationTransaction, reader: HumanActor, media: readonly MediaItem[]) {
   const kinds = new Map<string, MediaKind>();
+  const files = new Map<string, { mediaType: string; size: number }>();
   const issues: ContentIssue[] = [];
   for (const [index, item] of media.entries()) {
     const bound = await bind(tx, reader, item);
     if ('problem' in bound) issues.push({ path: ['content', 'media', index], code: bound.problem });
-    else if (bound.kind) kinds.set(item.fileId, bound.kind);
+    else {
+      if (bound.kind) kinds.set(item.fileId, bound.kind);
+      files.set(item.fileId, { mediaType: bound.mediaType, size: bound.size });
+    }
   }
-  return { kinds, issues };
+  return { kinds, files, issues };
 }
 
 /** Refuses unless `reader` can read every item's File with the bound digest. */

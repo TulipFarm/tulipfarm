@@ -19,6 +19,15 @@ export async function png(width = 64, height = 48, color = '#2a7') {
   return canvas.encode('png');
 }
 
+/** A JPEG with real pixels. */
+export async function jpeg(width = 64, height = 48, color = '#2a7') {
+  const canvas = createCanvas(width, height);
+  const context = canvas.getContext('2d');
+  context.fillStyle = color;
+  context.fillRect(0, 0, width, height);
+  return canvas.encode('jpeg');
+}
+
 /** A large but highly compressible PNG: its pixel data is stored uncompressed, so the archive stays small. */
 export function storedPng(side) {
   const row = Buffer.alloc(1 + side * 4, 0x80);

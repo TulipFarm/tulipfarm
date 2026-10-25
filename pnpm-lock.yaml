@@ -1354,6 +1354,9 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../integrations
+      '@tulipfarm/media':
+        specifier: workspace:*
+        version: link:../media
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
