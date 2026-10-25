@@ -77,7 +77,11 @@ builds the container images for GHCR; it stays disabled until the first release.
 upgrades `@tulipfarm/sprout` when Sprout publishes a release: Copilot migrates
 the code from the changelog and source diff, following
 [`.github/sprout-upgrade/PROMPT.md`](.github/sprout-upgrade/PROMPT.md), and the
-workflow opens a pull request, as a draft if any check fails.
+workflow opens a pull request, as a draft if any check fails. If the upgrade
+passes, a second Copilot run follows
+[`.github/sprout-upgrade/ADOPT.md`](.github/sprout-upgrade/ADOPT.md) to replace
+hand-rolled code with components the release added, and opens that as a
+separate pull request stacked on the upgrade.
 
 ## Layout
 
