@@ -394,17 +394,22 @@ export const integrations: Integration[] = [
   },
 ];
 
-const legacyHashes: Record<string, { id: string; tab: 'manage' | 'approvals' }> = {
-  'google-workspace': { id: 'gmail', tab: 'manage' },
-  'google-proposals-heading': { id: 'gmail', tab: 'approvals' },
-  'github-integrations': { id: 'github', tab: 'manage' },
-  'github-accounts': { id: 'github-personal', tab: 'manage' },
-  'slack-account': { id: 'slack', tab: 'manage' },
-  'atlassian-heading': { id: 'jira', tab: 'manage' },
-  'trello-accounts': { id: 'trello', tab: 'manage' },
+export const integrationTabs = ['overview', 'accounts', 'knowledge', 'settings', 'advanced'] as const;
+export type IntegrationTab = (typeof integrationTabs)[number];
+
+const legacyHashes: Record<string, { id: string; tab: IntegrationTab }> = {
+  'google-workspace': { id: 'gmail', tab: 'accounts' },
+  'google-proposals-heading': { id: 'gmail', tab: 'accounts' },
+  'github-integrations': { id: 'github', tab: 'settings' },
+  'github-accounts': { id: 'github-personal', tab: 'accounts' },
+  'slack-account': { id: 'slack', tab: 'accounts' },
+  'atlassian-heading': { id: 'jira', tab: 'accounts' },
+  'trello-accounts': { id: 'trello', tab: 'accounts' },
 };
+/** Maps an old `/integrations#…` sheet link to its integration page and tab. */
 export function integrationFromHash(hash: string) {
   const legacy = legacyHashes[hash];
-  const app = integrations.find(item => item.id === (legacy?.id ?? hash) && item.provider !== 'soon');
+  const app = integrations.find(item => item.id === (legacy?.id ?? hash));
   return app ? { app, tab: legacy?.tab ?? ('overview' as const) } : null;
 }
+export const integrationById = (id: string) => integrations.find(item => item.id === id);

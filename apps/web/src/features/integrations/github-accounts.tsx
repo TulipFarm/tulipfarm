@@ -15,10 +15,13 @@ export function GitHubAccounts({
   workspaceId,
   onChanged,
   footerTarget = null,
+  knowledge = true,
 }: {
   workspaceId: string;
   onChanged: () => void;
   footerTarget?: HTMLElement | null;
+  /** Also show the repositories imported into Knowledge below the accounts. */
+  knowledge?: boolean;
 }) {
   const { state, refresh } = useGitHubAccounts(workspaceId);
   const changes = useIntegrationChanges();
@@ -26,7 +29,8 @@ export function GitHubAccounts({
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [managing, setManaging] = useState(false);
+  // On its own Accounts tab, the account settings are the point of the page, so start open.
+  const [managing, setManaging] = useState(!knowledge);
   const visibleAccounts =
     state.kind === 'ready'
       ? state.data.accounts.filter(account => account.identity || account.state !== 'disconnected')
@@ -207,7 +211,7 @@ export function GitHubAccounts({
                       ))}
                     </ul>
                   )}
-                  {visibleAccounts.length > 0 && (
+                  {knowledge && visibleAccounts.length > 0 && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -284,7 +288,7 @@ export function GitHubAccounts({
           </div>
         </CardContent>
       </Card>
-      {state.kind === 'ready' && state.data.configured && (
+      {knowledge && state.kind === 'ready' && state.data.configured && (
         <GitHubKnowledgeSources
           workspaceId={workspaceId}
           onReconnect={id => void run('reconnect', id)}
@@ -293,5 +297,45 @@ export function GitHubAccounts({
         />
       )}
     </section>
+  );
+}
+
+/** Repositories in Knowledge, with reconnect for a login whose access expired. */
+export function GitHubKnowledge({ workspaceId }: { workspaceId: string }) {
+  const { state } = useGitHubAccounts(workspaceId);
+  const changes = useIntegrationChanges();
+  const pending = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  if (state.kind !== 'ready' || !state.data.configured) return null;
+  const reconnect = async (id: string) => {
+    if (pending.current || githubMockEnabled) return;
+    pending.current = true;
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await githubApi.reconnect(workspaceId, id);
+      await changes.authority('github-personal');
+      githubConsent(result.url);
+    } catch (error) {
+      setFailure(githubError(error));
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      {failure && (
+        <Alert variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+      )}
+      <GitHubKnowledgeSources
+        workspaceId={workspaceId}
+        onReconnect={id => void reconnect(id)}
+        accountBusy={busy}
+        footerTarget={null}
+      />
+    </div>
   );
 }
