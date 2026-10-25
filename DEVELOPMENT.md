@@ -73,6 +73,11 @@ script in `package.json`. Every tested workspace belongs to exactly one group, a
 `tooling/test-groups.test.mjs` fails the lint job when a workspace or a CI job is
 missing. [`.github/workflows/images.yml`](.github/workflows/images.yml)
 builds the container images for GHCR; it stays disabled until the first release.
+[`.github/workflows/sprout-upgrade.yml`](.github/workflows/sprout-upgrade.yml)
+upgrades `@tulipfarm/sprout` when Sprout publishes a release: Copilot migrates
+the code from the changelog and source diff, following
+[`.github/sprout-upgrade/PROMPT.md`](.github/sprout-upgrade/PROMPT.md), and the
+workflow opens a pull request, as a draft if any check fails.
 
 ## Layout
 
