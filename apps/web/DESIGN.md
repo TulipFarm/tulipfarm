@@ -306,13 +306,23 @@ button together; repository configuration belongs in a separate panel.
 Default badges have a tinted green fill and green text. Feedback
 variants use the corresponding semantic colors.
 
-Integration sheets can lead with a `GradientBanner` example carousel below the title,
-followed by account and repository settings. Keep carousel spacing compact and
-place demo disclosures inside the account panel. A repository picker uses one
-vertical scrolling body with its selected count and actions in a fixed footer,
-associated with the owning form through the native `form` attribute.
+Integrations is a directory, not a sheet. The list page has a `SearchField`, an
+outline `ToggleGroup` filter (All, Connected, Needs attention) with fixed-width
+counts, then one bordered list per section in stable catalog order. Each row is a
+link with a `BrandIcon`, name, one-line blurb, and a fixed-width status column
+(Sprout `Status` mark, label, detail) so rows never move while statuses load.
 
-For sheets whose controls arrive asynchronously, set `initialFocus` to a stable
+Each app opens its own page at `/$workspaceSlug/integrations/<id>`, with a
+breadcrumb, a hero (`BrandIcon` xl, name, status badge, maker and category, blurb,
+one primary action), and line `Tabs` stored in the `tab` search param: Overview,
+Accounts, Knowledge, Settings (admins), and Advanced. Overview pairs what the app
+can do and example prompts with an "At a glance" aside. Knowledge progress uses
+`KnowledgeMeter`: a stacked bar of searchable, queued, failed, skipped, and
+over-limit items whose legend always lists all five states. A repository picker
+keeps one vertical scrolling body with its selected count and actions in a
+footer, associated with the owning form through the native `form` attribute.
+
+For dialogs whose controls arrive asynchronously, set `initialFocus` to a stable
 title ref with `tabIndex={-1}`. Do not let loading order focus an unrelated
 disclosure, and do not suppress keyboard focus rings on controls. Preserve Tab,
 Escape, and focus return to the opening control.
@@ -333,8 +343,8 @@ to the right from 640px; rows stack below that width.
 with a file visual, truncated label, and optional remove action. Only the composer
 attachment row uses the carousel. Other chip rows wrap.
 
-`GlassBanner` and `GlassChip` (`@tulipfarm/sprout/glass-banner`) supply the
-illustrative header pattern used by Integrations. Sky-blue or dark-navy artwork
+`GlassBanner` and `GlassChip` (`@tulipfarm/sprout/glass-banner`) supply an
+illustrative header pattern. Sky-blue or dark-navy artwork
 holds frosted pills with brand icons. Chips stack in narrow containers and scatter
 across the art from 44rem. The float and pointer drag are decorative. Their colors
 stay in the scoped `--glass-*` stylesheet tokens, separate from the action palette.

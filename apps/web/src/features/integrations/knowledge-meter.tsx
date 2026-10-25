@@ -5,31 +5,31 @@ const segments = [
   {
     key: 'ready',
     label: 'Searchable',
-    bar: 'fill-success transition-all duration-500 ease-out motion-reduce:transition-none',
+    bar: 'fill-success',
     swatch: 'size-2 shrink-0 rounded-full bg-success',
   },
   {
     key: 'queued',
     label: 'Queued',
-    bar: 'fill-info transition-all duration-500 ease-out motion-reduce:transition-none',
+    bar: 'fill-info',
     swatch: 'size-2 shrink-0 rounded-full bg-info',
   },
   {
     key: 'failed',
     label: 'Failed',
-    bar: 'fill-destructive transition-all duration-500 ease-out motion-reduce:transition-none',
+    bar: 'fill-destructive',
     swatch: 'size-2 shrink-0 rounded-full bg-destructive',
   },
   {
     key: 'skipped',
     label: 'Skipped',
-    bar: 'fill-muted-foreground transition-all duration-500 ease-out motion-reduce:transition-none',
+    bar: 'fill-muted-foreground',
     swatch: 'size-2 shrink-0 rounded-full bg-muted-foreground',
   },
   {
     key: 'quotaLimited',
     label: 'Over limit',
-    bar: 'fill-warning transition-all duration-500 ease-out motion-reduce:transition-none',
+    bar: 'fill-warning',
     swatch: 'size-2 shrink-0 rounded-full bg-warning',
   },
 ] as const;
