@@ -86,8 +86,6 @@ const cursorSchema = z.strictObject({
 type Cursor = z.infer<typeof cursorSchema>;
 const initialCursor = (carry: Pick<Cursor, 'marks' | 'reconciledAt' | 'reconcile'> = {}) =>
   cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0, ...carry });
-// Even when webhooks deliver every change, a full pass this often catches missed events and silent deletions.
-const fullReconciliationMs = 24 * 60 * 60_000;
 const later = (a: string | undefined, b: string | undefined) =>
   a === undefined ? b : b === undefined ? a : Date.parse(a) >= Date.parse(b) ? a : b;
 function mergeMark(base: GitHubRepositoryMark | undefined, next: GitHubRepositoryMark | undefined) {
@@ -183,6 +181,9 @@ export type GitHubSyncOptions = {
   concurrency: number;
   // How often a progressing run extends its 15-minute lease.
   leaseRenewMs: number;
+  // How long a source that finished cleanly waits before its next pass; webhooks start it sooner. A full pass is also
+  // due once the last one is this old, so missed events and silent deletions are caught at this pace.
+  idleRecheckMs: number;
   sleep: (ms: number) => Promise<void>;
   random: () => number;
 };
@@ -253,6 +254,7 @@ export function createGitHubKnowledge({
     runBudgetMs: 5 * 60_000,
     concurrency: 4,
     leaseRenewMs: 60_000,
+    idleRecheckMs: 10 * 60_000,
     sleep: ms => wait(ms),
     random: Math.random,
     ...sync,
@@ -1690,7 +1692,7 @@ export function createGitHubKnowledge({
         cursor.pages === 0 &&
         !cursor.reconcile &&
         cursor.reconciledAt !== undefined &&
-        clock.now() - Date.parse(cursor.reconciledAt) < fullReconciliationMs
+        clock.now() - Date.parse(cursor.reconciledAt) < tuning.idleRecheckMs
           ? 'incremental'
           : 'full';
     const incremental = cursor.mode === 'incremental';
@@ -2031,7 +2033,7 @@ export function createGitHubKnowledge({
             // A change GitHub reported during the pass moved next_attempt_at past the claim's, so the next pass starts now.
             await tx.client.query(
               `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,reconciliation=reconciliation+1,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='ready',failure=$3,
-              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+interval '1 minute' END WHERE source_id=$1`,
+              next_attempt_at=CASE WHEN next_attempt_at>$4::timestamptz THEN clock_timestamp() ELSE clock_timestamp()+$5::double precision*interval '1 millisecond' END WHERE source_id=$1`,
               [
                 claim.source_id,
                 initialCursor({
@@ -2045,6 +2047,7 @@ export function createGitHubKnowledge({
                 }),
                 Object.keys(cursor.isolated ?? {}).length ? 'transient' : null,
                 claim.marker,
+                tuning.idleRecheckMs,
               ],
             );
           });

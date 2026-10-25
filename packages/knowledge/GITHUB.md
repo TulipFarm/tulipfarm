@@ -363,8 +363,8 @@ repository's last completed listing, recorded per repository in the source curso
 An incremental pass re-reads only unseen items that previously failed with a
 retryable failure, or whose kind was denied; tombstoning by absence happens only in
 full passes. A pass is full when the source has no completed full pass, the last one
-is 24 hours old, a fallback asked for one, or the cursor was reset (a settings
-change, reconnect, manual retry or an invalid cursor). A daily full pass therefore
+is older than the recheck interval (`GITHUB_KNOWLEDGE_RECHECK_MINUTES`), a fallback asked for one, or the cursor was reset (a settings
+change, reconnect, manual retry or an invalid cursor). A full pass therefore
 catches missed webhooks, deleted or transferred issues, and discussion comments that
 do not change a discussion's `updatedAt`. Repository marks live in the cursor, so no
 migration is needed.
@@ -403,8 +403,9 @@ whose storage version the API cannot use is skipped and counted in
 `cloud_dispatch_skipped_workspaces` (labels `dispatcher` and
 `reason=incompatible_version`; no workspace label).
 
-A ready source is due again one minute after its pass. Polling remains the safety
-net; webhooks make changes appear within seconds.
+A ready source is due again after its pass, ten minutes by default
+(`GITHUB_KNOWLEDGE_RECHECK_MINUTES`, 1 to 1440). Polling is the safety net
+for missed events; webhooks make changes appear within seconds.
 
 ### Webhooks
 

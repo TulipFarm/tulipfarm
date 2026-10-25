@@ -7,6 +7,16 @@ import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { createGitHubKnowledgeActivities } from './knowledge-github-activities.ts';
 import { workerTelemetry, type WorkerTelemetry } from './telemetry.ts';
 
+const defaultRecheckMinutes = 10;
+function githubRecheckMs(value: string | undefined) {
+  const text = value?.trim();
+  if (!text) return defaultRecheckMinutes * 60_000;
+  const minutes = Number(text);
+  if (!/^[0-9]+$/.test(text) || minutes < 1 || minutes > 1440)
+    throw new Error('GITHUB_KNOWLEDGE_RECHECK_MINUTES must be a whole number from 1 to 1440');
+  return minutes * 60_000;
+}
+
 export function createWorkerGitHubKnowledge(dependencies: {
   runtime: Parameters<typeof createGitHubKnowledge>[0]['runtime'];
   gate?: KnowledgeSourceGate;
@@ -22,6 +32,7 @@ export function createWorkerGitHubKnowledge(dependencies: {
         ...(dependencies.env ? { env: dependencies.env } : {}),
       }),
     ...(dependencies.gate ? { gate: dependencies.gate } : {}),
+    sync: { idleRecheckMs: githubRecheckMs((dependencies.env ?? process.env).GITHUB_KNOWLEDGE_RECHECK_MINUTES) },
   });
 }
 
