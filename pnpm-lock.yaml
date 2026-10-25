@@ -357,8 +357,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/slack
       '@tulipfarm/sprout':
-        specifier: https://github.com/TulipFarm/sprout/releases/download/v0.9.0/tulipfarm-sprout-0.9.0.tgz
-        version: https://github.com/TulipFarm/sprout/releases/download/v0.9.0/tulipfarm-sprout-0.9.0.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.0(@tiptap/core@3.32.0(@tiptap/pm@3.32.0))(@tiptap/pm@3.32.0))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)
+        specifier: https://github.com/TulipFarm/sprout/releases/download/v0.10.0/tulipfarm-sprout-0.10.0.tgz
+        version: https://github.com/TulipFarm/sprout/releases/download/v0.10.0/tulipfarm-sprout-0.10.0.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.0(@tiptap/core@3.32.0(@tiptap/pm@3.32.0))(@tiptap/pm@3.32.0))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../../packages/tables
@@ -4019,9 +4019,9 @@ packages:
   '@ts-morph/common@0.27.0':
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
 
-  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.9.0/tulipfarm-sprout-0.9.0.tgz':
-    resolution: {integrity: sha512-EolWJJNdaW/cM7xfPxEsvD2IXgqAhujyzQKffItaHRg0xkyIyOZcrrA3584ALgSAgHbkddyJzWIadW7upA8Irw==, tarball: https://github.com/TulipFarm/sprout/releases/download/v0.9.0/tulipfarm-sprout-0.9.0.tgz}
-    version: 0.9.0
+  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.10.0/tulipfarm-sprout-0.10.0.tgz':
+    resolution: {integrity: sha512-hIO57f60ujlJK21vRKc+G1R0RhV8UveJlpVAtchznMJIUkIHZEdQnzK+KDEVgBdtBu5gMNXURfSWi4jAcD/a1A==, tarball: https://github.com/TulipFarm/sprout/releases/download/v0.10.0/tulipfarm-sprout-0.10.0.tgz}
+    version: 0.10.0
     peerDependencies:
       nuqs: ^2.0.0
       react: ^19.0.0
@@ -9936,7 +9936,7 @@ snapshots:
       minimatch: 10.2.6
       path-browserify: 1.0.1
 
-  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.9.0/tulipfarm-sprout-0.9.0.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.0(@tiptap/core@3.32.0(@tiptap/pm@3.32.0))(@tiptap/pm@3.32.0))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)':
+  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.10.0/tulipfarm-sprout-0.10.0.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.0(@tiptap/core@3.32.0(@tiptap/pm@3.32.0))(@tiptap/pm@3.32.0))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)':
     dependencies:
       '@base-ui/react': 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
