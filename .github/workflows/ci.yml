@@ -14,24 +14,73 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - id: classify
+        name: Detect code changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          code=true
+          if [[ "$EVENT" == pull_request ]] &&
+            files=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR/files" --jq '.[].filename') &&
+            [[ -n "$files" ]]; then
+            code=false
+            while IFS= read -r file; do
+              case "$file" in
+                # Skills ship as runtime content; test Markdown files are fixtures.
+                */skills/* | test/* | */test/*) code=true ;;
+                *.md | *.mdx | docs/* | LICENSE) ;;
+                *) code=true ;;
+              esac
+              echo "$file"
+            done <<<"$files"
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
   check:
     name: ${{ matrix.task }}
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         task: [lint, typecheck, 'test:apps', 'test:memory', 'test:integrations', 'test:platform']
+    env:
+      # Lint always runs; typecheck and tests are skipped when only docs changed.
+      RUN: ${{ matrix.task == 'lint' || needs.changes.outputs.code == 'true' }}
     steps:
+      - name: Skip ${{ matrix.task }} for docs-only change
+        if: env.RUN != 'true'
+        run: echo "Only documentation changed; skipping $TASK."
+        env:
+          TASK: ${{ matrix.task }}
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: env.RUN == 'true'
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: env.RUN == 'true'
         with:
           node-version-file: .node-version
       - name: Install pnpm
+        if: env.RUN == 'true'
         run: npm install --global pnpm@11.5.3
       - name: Cache pnpm store
+        if: env.RUN == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.pnpm-store
@@ -39,8 +88,10 @@ jobs:
           restore-keys: |
             pnpm-${{ runner.os }}-${{ runner.arch }}-
       - name: Install repository dependencies
+        if: env.RUN == 'true'
         run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
       - name: Run ${{ matrix.task }}
+        if: env.RUN == 'true'
         env:
           TASK: ${{ matrix.task }}
         run: pnpm run "$TASK"
