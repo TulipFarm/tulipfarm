@@ -4,6 +4,8 @@ import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts
 import { createSlackChannelAgents } from './slack-channels.ts';
 import type { AgentSetupOptions } from './setup.ts';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
+import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
+import { createFiles } from '@tulipfarm/files';
 
 export function slackAgentSetupFromEnvironment(
   runtime: Pick<WorkspaceRuntime, 'transaction'>,
@@ -41,7 +43,13 @@ export function slackActionSettings(env: NodeJS.ProcessEnv = process.env) {
       isFeatureEnabled('slack-app-sender', { id: userId }, { id: workspaceId }),
   };
 }
+let objects: ReturnType<typeof chatObjectStore> | undefined;
+/** Slack actions as configured. With file storage configured, a delivered message carries the images its run saved. */
 export function slackActionsFromEnvironment(): SlackActionsFactory | undefined {
   const settings = slackActionSettings();
-  return settings ? runtime => createSlackActions({ ...settings, runtime }) : undefined;
+  if (!settings) return undefined;
+  return runtime => {
+    objects ??= chatObjectStore();
+    return createSlackActions({ ...settings, runtime, ...(objects ? { images: createFiles(runtime, objects) } : {}) });
+  };
 }

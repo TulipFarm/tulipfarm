@@ -49,14 +49,18 @@ export type SlackConfiguration = z.infer<typeof slackConfigurationSchema>;
 
 /** The bot scope that lets TulipFarm download files people share with it in Slack. */
 export const slackFileScope = 'files:read';
+/** The bot scope that lets TulipFarm upload the images a run generated to the Slack destination it delivers to. */
+export const slackFileUploadScope = 'files:write';
 
 /**
- * The bot scopes an installation needs. Reading shared files adds `files:read` while the `images` flag is on, so an
- * installation without it shows the notice to update Slack permissions.
+ * The bot scopes an installation needs. While the `images` flag is on, reading shared files adds `files:read` and
+ * delivering generated images adds `files:write`, so an installation without them shows the notice to update Slack
+ * permissions.
  */
-export function requiredBotScopes(config: Pick<SlackConfiguration, 'scopeApproval'>, readsFiles: boolean) {
+export function requiredBotScopes(config: Pick<SlackConfiguration, 'scopeApproval'>, images: boolean) {
   const scopes = config.scopeApproval.botScopes;
-  return readsFiles && !scopes.includes(slackFileScope) ? [...scopes, slackFileScope] : scopes;
+  if (!images) return scopes;
+  return [...scopes, ...[slackFileScope, slackFileUploadScope].filter(scope => !scopes.includes(scope))];
 }
 export const eventEnvelopeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('url_verification'), challenge: z.string().min(1).max(1024) }),

@@ -115,8 +115,20 @@ export {
 } from './model-errors.ts';
 
 const scope = 'tulipfarm';
-/** Outcomes of one recognised unit or one generated image. */
-export const mediaOutcomes = ['recognized', 'empty', 'refused', 'failed', 'unavailable', 'image'] as const;
+/**
+ * Outcomes of one recognised unit, one generated image, or one generated image a run delivered to Slack: `delivered` as
+ * a file, `withheld` because someone there cannot read it in Files, `unavailable` because the app cannot upload files.
+ */
+export const mediaOutcomes = [
+  'recognized',
+  'empty',
+  'refused',
+  'failed',
+  'unavailable',
+  'image',
+  'delivered',
+  'withheld',
+] as const;
 export type MediaOutcome = (typeof mediaOutcomes)[number];
 /**
  * What a recognition or image call may record: the unit kind, its sniffed media type, sizes and counts, the quality
@@ -2031,11 +2043,12 @@ export async function observeCall<T>(
 }
 
 /**
- * Observes one recognition of an image or page: a span and call metrics with the unit kind, media type, size and
- * outcome. The model call inside it is observed by `observeInference`; nothing about the content is recorded.
+ * Observes one recognition of an image or page, or one delivery of a generated image to Slack: a span and call metrics
+ * with the unit kind, media type, size and outcome. A model call inside it is observed by `observeInference`; nothing
+ * about the content is recorded.
  */
 export async function observeMedia<T>(
-  operation: 'media.recognize',
+  operation: 'media.recognize' | 'media.deliver',
   attributes: MediaAttributes,
   call: (record: (values: MediaAttributes) => void) => Promise<T>,
 ): Promise<T> {

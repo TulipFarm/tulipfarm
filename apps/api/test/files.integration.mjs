@@ -623,6 +623,7 @@ test('default current aggregate serves Files through HTTP and signed object tran
         '0014_conversation_links.sql',
         '0015_image_generations.sql',
         '0016_recognition_receipts.sql',
+        '0017_slack_image_deliveries.sql',
       ],
     );
     assert.equal(

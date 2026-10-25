@@ -4,7 +4,13 @@ export { createSlackLinkPrompts, slackPromptWorkSchema, type SlackPromptWork } f
 export { createSlackMemberLinking } from './member-linking.ts';
 export { slackLinkFailure, slackOAuthErrorCode } from './link-diagnostics.ts';
 export { slackCredentialCipher } from './credentials.ts';
-export { eventEnvelopeSchema, slackConfigurationSchema, type SlackConfiguration } from './contracts.ts';
+export {
+  eventEnvelopeSchema,
+  slackConfigurationSchema,
+  slackFileUploadScope,
+  type SlackConfiguration,
+} from './contracts.ts';
+export { postSlackThreadNote, shareSlackFiles, type SlackUpload } from './file-uploads.ts';
 export { createSlackDirectMessages } from './direct-messages.ts';
 export { createChannelProvider, threadSnapshotSchema } from './channel-provider.ts';
 export { messageSchema, slackId } from './contracts.ts';
