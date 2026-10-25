@@ -1,5 +1,6 @@
 export {
   ImagePreparationError,
+  imageDimensions,
   modelImageMediaTypes,
   prepareImageForModel,
   type ImagePreparationErrorCode,
@@ -8,4 +9,16 @@ export {
   type PreparedImage,
 } from './prepare.ts';
 export { sniffMediaType, type MediaFamily, type MediaType, type SniffedMedia } from './sniff.ts';
-export { imagePresetNames, imagePresets, imageShapes, type ImagePreset, type ImageShape } from './presets.ts';
+export {
+  channelImageProblemCodes,
+  channelImageProblems,
+  channelImageRules,
+  imageChannels,
+  imagePresetNames,
+  imagePresets,
+  imageShapes,
+  type ChannelImageProblem,
+  type ImageChannel,
+  type ImagePreset,
+  type ImageShape,
+} from './presets.ts';
