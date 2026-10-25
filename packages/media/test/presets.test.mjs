@@ -11,17 +11,35 @@ const atRatio = ratio => {
     : { width: 1080, height: Math.round((1080 * h) / w) };
 };
 
-test('every social channel has a preset whose image passes its own rules', () => {
+/**
+ * The pixels each kind of catalog image model returns for a shape. OpenAI takes a size; xAI and Gemini take a ratio,
+ * and Gemini answers it at its own sizes.
+ */
+const modelSizes = {
+  openai: {
+    square: { width: 1024, height: 1024 },
+    portrait: { width: 1024, height: 1536 },
+    landscape: { width: 1536, height: 1024 },
+  },
+  xai: { square: atRatio('1:1'), portrait: atRatio('3:4'), landscape: atRatio('16:9') },
+  gemini: {
+    square: { width: 1024, height: 1024 },
+    portrait: { width: 864, height: 1184 },
+    landscape: { width: 1344, height: 768 },
+  },
+};
+
+test('every social channel’s default preset passes its own rules at the size each image model returns', () => {
   for (const channel of imageChannels) {
     const rule = channelImageRules[channel];
-    const preset = imagePresets[rule.preset];
-    assert.ok(preset, `${channel} names a preset`);
-    for (const mediaType of rule.mediaTypes)
-      assert.deepEqual(
-        channelImageProblems(channel, { mediaType, size: rule.maxBytes, ...atRatio(preset.ratio) }),
-        [],
-        `${channel} accepts a ${mediaType} at ${preset.ratio}`,
-      );
+    const { shape } = imagePresets[rule.preset];
+    for (const [model, sizes] of Object.entries(modelSizes))
+      for (const mediaType of rule.mediaTypes)
+        assert.deepEqual(
+          channelImageProblems(channel, { mediaType, size: rule.maxBytes, ...sizes[shape] }),
+          [],
+          `${channel} accepts a ${mediaType} from ${model} at its ${rule.preset} size`,
+        );
   }
 });
 

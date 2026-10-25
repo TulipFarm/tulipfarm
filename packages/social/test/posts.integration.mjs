@@ -27,6 +27,7 @@ const env = {
   ...operator('SOCIAL_LINKEDIN', 'community-management'),
   ...operator('SOCIAL_X', 'paid'),
   ...operator('SOCIAL_TIKTOK', 'unaudited'),
+  ...operator('SOCIAL_INSTAGRAM', 'standard'),
 };
 const code = expected => error => error?.code === expected;
 const deniedAccess = error => error?.message === 'Resource not found';
@@ -58,6 +59,15 @@ const discovered = {
     {
       platformChannelId: 'tt-brand',
       channelKind: 'tiktok-account',
+      displayName: 'Brand',
+      handle: 'brand',
+      avatarUrl: null,
+    },
+  ],
+  instagram: [
+    {
+      platformChannelId: 'ig-brand',
+      channelKind: 'instagram-business',
       displayName: 'Brand',
       handle: 'brand',
       avatarUrl: null,
@@ -244,6 +254,12 @@ const tiktok = (channel, media) => ({
   channelId: channel.id,
   expectedChannelVersion: channel.version,
   content: { platform: 'tiktok', caption: 'Launch clip', media },
+  publishAt: null,
+});
+const instagram = (channel, media) => ({
+  channelId: channel.id,
+  expectedChannelVersion: channel.version,
+  content: { platform: 'instagram', caption: 'Spring', media, format: 'feed' },
   publishAt: null,
 });
 const prepare = (conversationId, variants, commandId = randomUUID()) => ({
@@ -911,6 +927,31 @@ test('Images 49-50: a generated image attaches like any Files image, and each pl
       [{ path: ['content', 'media', 0], code: 'image-too-large' }],
     ],
   );
+});
+
+test('the platform image rules apply only with the images flag on', async () => {
+  const { posts, personal } = service();
+  const feed = await personal('instagram');
+  const conversationId = await chat();
+  const photo = await file(admin(), 'image/png');
+  const errorsWith = async flag => {
+    const previous = process.env.FEATURE_FLAG_IMAGES;
+    process.env.FEATURE_FLAG_IMAGES = flag;
+    try {
+      const { variants } = await posts.prepare(
+        ws.id,
+        admin().userId,
+        prepare(conversationId, [instagram(feed, [photo])]),
+        sourcesOf(conversationId),
+      );
+      return variants[0].errors;
+    } finally {
+      if (previous === undefined) delete process.env.FEATURE_FLAG_IMAGES;
+      else process.env.FEATURE_FLAG_IMAGES = previous;
+    }
+  };
+  assert.deepEqual(await errorsWith('false'), []);
+  assert.deepEqual(await errorsWith('true'), [{ path: ['content', 'media', 0], code: 'image-type' }]);
 });
 
 test('PRODUCT 20: a post is approved only by a person who can read every source', async () => {
