@@ -137,6 +137,89 @@ components:
 
 # Design System: TulipFarm web
 
+This file is the single design source for the web app: Product, Personas, Brand,
+and the Design System. Product, Personas, and Brand were confirmed by the owner
+on 25 October 2026.
+
+## Product
+
+- **What it is:** One workspace where agents run business operations from the
+  same records, knowledge, and tools as the team.
+- **Why it's different:** People set the approval gates, so agents propose and
+  a person approves the actions that matter. It replaces the copy and paste
+  between a CRM, docs, the inbox, and spreadsheets, and it is open source
+  (AGPL-3.0) and self-hostable.
+- **Surfaces:** workspace app: chat, Bud, Canvas, tables, files, agents, skills,
+  workflows, connections, settings (Operate); auth and workspace signup
+  (Persuade/Convert). The marketing site and docs live outside this repository.
+- **Success looks like:** the Persona asks for work in chat or Slack, sees what
+  the agents did and why, approves or rejects at the gates, and trusts the
+  records left behind.
+- **Constraints:** Pristine default standard (WCAG 2.2 AA; evergreen browsers;
+  reduced motion respected; LCP < 2.5s on mobile; no new fonts or dependencies
+  without approval). Exceptions: the app is a client-rendered single-page app
+  behind sign-in, so it is not readable with JavaScript off. Colors, type,
+  motion, and shadows must come from Sprout's `tulipfarm` theme. Must-keep
+  assets: `public/logo-ink.svg`, `public/logo-white.svg`, favicons, and the
+  research-preview status.
+
+## Personas
+
+### Ops lead: operations lead at a 5–50 person business (primary)
+
+- **Context:** desktop browser, all day, every working day; switches between
+  sales, support, and back-office work.
+- **Job:** keep records accurate and work moving, and delegate repeatable work
+  to agents and workflows.
+- **Expertise:** domain expert; comfortable with spreadsheets and SaaS tools;
+  not a developer.
+- **Must feel in 5 seconds:** "I'm in control: I can see what the agents did and
+  nothing important happens without my OK."
+- **Deal-breakers:** an agent acting without a visible gate; ambiguous status
+  (saved vs. active vs. completed); lost drafts; jargon such as MIME types,
+  IDs, or raw payloads in the main view.
+- **Delighted by:** dense but calm screens, keyboard speed, honest outcome
+  labels, and recovery that keeps their work.
+
+### Founder: owner on the go
+
+- **Context:** phone or laptop between other tasks; short, frequent visits.
+- **Job:** approve pending actions, ask quick questions, check that work got done.
+- **Expertise:** knows the business deeply; little patience for setup.
+- **Must feel in 5 seconds:** what needs a decision and how to give it.
+- **Deal-breakers:** controls under 44px on touch; approvals hidden behind
+  navigation; layouts that break at 390px.
+
+### Builder: technical builder
+
+- **Context:** desktop; self-hosts or configures the Cloud workspace.
+- **Job:** define tables, agents, skills, workflows, and connections.
+- **Expertise:** developer or ops engineer.
+- **Must feel in 5 seconds:** the system's rules (permissions, revisions,
+  approvals) are explicit and inspectable.
+- **Delighted by:** exact state, revision badges, and details available in one
+  collapsed **Details** disclosure rather than hidden.
+
+### Teammate: occasional reviewer
+
+- **Context:** works mostly in Slack; opens the web app from a link to review or
+  approve.
+- **Job:** understand one item and decide quickly.
+- **Expertise:** knows their own area, not TulipFarm.
+- **Must feel in 5 seconds:** what they were sent here to do.
+- **Deal-breakers:** landing somewhere without the item in focus; terms they
+  have never seen.
+
+## Brand
+
+- **Personality:** calm, precise, trustworthy.
+- **Voice:** plain and short. Name outcomes exactly ("Saved in Files", "Plan
+  complete"); never claim an outcome without evidence. Sentence case. Use the
+  domain terms in the repository guide (table/row, saved/active/completed).
+  Avoid hype, exclamation marks, and "AI magic" phrasing.
+- **Admired references:** Linear, Attio. **Anti-reference:** Salesforce-style
+  dense enterprise chrome.
+
 ## Overview
 
 **Creative North Star: "Quiet control room"**
@@ -157,8 +240,7 @@ own color values. Change colors in Sprout, not here. Component details come from
 the sprout library (`@tulipfarm/sprout`) and app-local
 [`src/components/`](src/components/), and shell composition from
 [`src/pages/workspace.tsx`](src/pages/workspace.tsx). This is a source inspection,
-not a new browser verification. The broader implementation guide is
-`docs/design-system.md`.
+not a new browser verification.
 
 **Key Characteristics:**
 
@@ -198,6 +280,19 @@ The optional setup divider uses the quieter `muted-foreground/30` edge.
 Destructive, warning, and information colors carry feedback. Success shares the
 green text and subtle-background values. Feedback includes text or an icon as well
 as color. File-type and provider colors remain specialized tokens in the stylesheet.
+
+### Charts
+
+Charts use `--chart-1` to `--chart-5` in order: green `#188038`/`#75ce8e`,
+blue `#245cba`/`#9cbdff`, amber `#8a4b08`/`#edc17c`, violet `#7c4eb0`/`#c6a4ed`,
+red `#b42332`/`#ff929d` (light/dark). Series also differ by label or shape.
+
+### Dark mode
+
+`src/lib/theme.ts` stores **System**, **Light**, or **Dark** under
+`tulipfarm.theme` and sets a `light` or `dark` class on the root. Without a
+class, `prefers-color-scheme` decides. Tokens use `light-dark()`, so review
+every change in both themes.
 
 ## Typography
 
@@ -249,8 +344,9 @@ hover and selection read the same on every background. Anything that must hide
 content scrolling beneath it, such as sticky headers, pinned columns and floating
 controls, layers the overlay on an opaque base:
 `linear-gradient(var(--muted) 0 0) var(--card)`. Mixing an overlay into a base
-with `color-mix` stays translucent. Exact shadow expressions live in the accompanying
-design sidecar and originate in `src/index.css`.
+with `color-mix` stays translucent. Shadows come from Sprout's
+`--sprout-shadow-control` and `--sprout-shadow-overlay`, mapped in `src/index.css`
+to `--elevation-control`, `--elevation-popover`, and `--elevation-dialog`.
 
 Transitions default to 150ms with `ease`; dialogs also use 150ms. Sidebar movement
 uses 200ms linear transitions. The global reduced-motion rule reduces animation
@@ -263,6 +359,11 @@ and dialogs have 12px corners. Small internal elements use 4px corners. Badges,
 avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 
 ## Components
+
+Icons come from `reicon-react` (per-icon imports such as
+`reicon-react/icons/Add`), sized 16px in controls and navigation and 14px in
+dense rows; some older screens still use `lucide-react`. Third-party marks use
+`BrandIcon`.
 
 ### Business record tables
 
