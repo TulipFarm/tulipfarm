@@ -80,7 +80,7 @@ export function createTaskComposition(
       files: files ?? undefined,
       google: drive,
       recognition: taskFileRecognition(runtime),
-      links: objects ? { fetch: fetchPublicFile, objects } : undefined,
+      links: objects && attachments ? { fetch: fetchPublicFile, objects, hasRoom: attachments.hasRoom } : undefined,
     },
     files ? { files, choose: runImageChoice } : undefined,
   );

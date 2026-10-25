@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { Client, Connection } from '@temporalio/client';
+import { NativeConnection, Worker } from '@temporalio/worker';
 import { shippedModelCatalogPath } from '@tulipfarm/config';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
@@ -74,7 +80,11 @@ function memoryBytes() {
     objects,
     /** While set, every write fails as an unavailable object store does. */
     failing: false,
+    puts: 0,
+    /** Runs before every write with its 1-based call number, to hold or fail particular writes. */
+    beforePut: async () => {},
     putIfAbsent: async (key, body) => {
+      await store.beforePut(++store.puts);
       if (store.failing) throw new Error('chat-object-write-unavailable');
       if (!objects.has(key)) objects.set(key, Buffer.from(body));
     },
@@ -362,6 +372,179 @@ test('a Slack download that never finishes does not delay admission for the work
   assert.equal(f.downloads.length, 0, 'admission itself downloads nothing');
   assert.equal(await f.admitted(textEvent), true);
 });
+
+test('an overlapping run for the same file DM never leaves an attachment whose bytes are gone', async t => {
+  const f = await setup(t);
+  const notes = { ...whiteboard, id: 'F2', name: 'notes.png', url_private: `${fileUrl}-2` };
+  f.served.set(whiteboard.url_private, await png(32, 24));
+  f.served.set(notes.url_private, await png(24, 32));
+  const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard, notes]));
+  const admission = await f.dm.admitPending(f.workspace.id);
+  assert.deepEqual(admission.files, [{ workspaceId: f.workspace.id, eventId }]);
+  const [work] = admission.files;
+  let failFirst, firstStuck;
+  const firstAtSecondFile = new Promise(resolve => (firstStuck = resolve));
+  let first;
+  f.bytes.beforePut = async call => {
+    if (call === 2) {
+      firstStuck();
+      await new Promise(resolve => (failFirst = resolve));
+      throw new Error('chat-object-write-unavailable');
+    }
+    if (call === 4) {
+      failFirst();
+      await first.catch(() => {});
+    }
+  };
+  first = f.dm.admitFiles(work);
+  await firstAtSecondFile;
+  const later = await f.dm.admitFiles(work);
+  await assert.rejects(first, /chat-object-write-unavailable/);
+  assert.equal(later, true, 'the later run admits the message');
+  const attachments = (
+    await f.db.platform.query(
+      `SELECT a.filename,a.object_key FROM ${f.table('tf_conversation_parts')} p JOIN ${f.table('tf_conversation_attachments')} a ON a.id=p.attachment_id WHERE p.message_id=$1 ORDER BY p.ordinal`,
+      [eventId],
+    )
+  ).rows;
+  assert.deepEqual(
+    attachments.map(row => [row.filename, f.bytes.objects.has(`${f.workspace.id}/${row.object_key}`)]),
+    [
+      ['whiteboard.png', true],
+      ['notes.png', true],
+    ],
+    'every attachment of the message has its bytes',
+  );
+  assert.equal(f.bytes.objects.size, 2, 'the failed run left no bytes behind');
+});
+
+const temporalCli = process.env.TEST_TEMPORAL_CLI ?? 'temporal';
+const withoutTemporal = spawnSync(temporalCli, ['--version']).error ? 'the temporal CLI is not installed' : false;
+
+/**
+ * A local Temporal dev server running the compiled workflows on their own task queue, with `f`'s file DM activities.
+ * `pass` runs one dispatch pass as `slack-composition.ts` does, starting each file DM's own workflow.
+ */
+async function temporal(t, f, { workflowModules = [] } = {}) {
+  const reservation = createServer().listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const address = `127.0.0.1:${reservation.address().port}`;
+  await new Promise(resolve => reservation.close(resolve));
+  const [ip, port] = address.split(':');
+  const server = spawn(
+    temporalCli,
+    ['server', 'start-dev', '--ip', ip, '--port', port, '--headless', '--log-level', 'error'],
+    { stdio: 'ignore' },
+  );
+  t.after(async () => {
+    server.kill('SIGTERM');
+    await once(server, 'exit');
+  });
+  let clientConnection;
+  for (let i = 0; i < 100 && !clientConnection; i++)
+    clientConnection = await Connection.connect({ address, connectTimeout: '1 second' }).catch(async () => {
+      assert.equal(server.exitCode, null, 'the Temporal dev server is running');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+  assert.ok(clientConnection, 'the Temporal dev server accepts connections');
+  const connection = await NativeConnection.connect({ address });
+  const taskQueue = `slack-files-${randomUUID()}`;
+  const worker = await Worker.create({
+    connection,
+    taskQueue,
+    workflowsPath: fileURLToPath(new URL('../dist/workflows.js', import.meta.url)),
+    interceptors: { workflowModules },
+    activities: {
+      admitSlackDirectMessageFiles: f.dm.admitFiles,
+      admitSlackDirectMessageUnreadFiles: f.dm.admitUnreadFiles,
+    },
+  });
+  const running = worker.run();
+  t.after(async () => {
+    worker.shutdown();
+    await running;
+    await connection.close();
+    await clientConnection.close();
+  });
+  const client = new Client({ connection: clientConnection });
+  async function pass() {
+    const handles = [];
+    for (const work of (await f.dm.admitPending(f.workspace.id)).files)
+      handles.push(
+        await client.workflow.start('slackDirectMessageFiles', {
+          workflowId: `slack-dm-files-${work.workspaceId}-${work.eventId}`,
+          taskQueue,
+          args: [work],
+          workflowIdConflictPolicy: 'USE_EXISTING',
+          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+        }),
+      );
+    return handles;
+  }
+  return { client, pass };
+}
+
+test(
+  'a file DM whose bytes can never be stored is not downloaded again on every dispatch pass',
+  { timeout: 120_000, skip: withoutTemporal },
+  async t => {
+    const f = await setup(t);
+    f.served.set(fileUrl, await png(32, 24));
+    f.bytes.failing = true;
+    const { client, pass } = await temporal(t, f);
+    const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
+    const [handle] = await pass();
+    for (let tick = 0; tick < 4; tick++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await pass();
+    }
+    assert.equal(f.downloads.length, 1, 'five passes over eight seconds download the file once');
+    f.bytes.failing = false;
+    assert.equal(await client.workflow.getHandle(handle.workflowId).result(), true, 'a later attempt admits it');
+    assert.equal(await f.admitted(eventId), true);
+    assert.equal(f.downloads.length, 2);
+  },
+);
+
+test(
+  'a file DM whose bytes are never stored is admitted with the file named as not read, and its thread moves on',
+  { timeout: 120_000, skip: withoutTemporal },
+  async t => {
+    const f = await setup(t);
+    f.served.set(fileUrl, await png(32, 24));
+    f.bytes.failing = true;
+    const { pass } = await temporal(t, f, {
+      workflowModules: [fileURLToPath(new URL('./fixtures/short-activity-backoff.mjs', import.meta.url))],
+    });
+    const fileEvent = await f.event('UPERSON', 'DONE', fileShare([whiteboard], 'Can you read this?'));
+    const [{ ts: root }] = (
+      await f.db.platform.query(`SELECT payload->>'ts' AS ts FROM ${f.table('tf_slack_events')} WHERE id=$1`, [
+        fileEvent,
+      ])
+    ).rows;
+    const textEvent = await f.event('UPERSON', 'DONE', { text: 'Any luck?', thread_ts: root });
+    const [handle] = await pass();
+    assert.equal(await f.admitted(textEvent), false, 'the reply waits for the file DM before it in its thread');
+    assert.equal(await handle.result(), true, 'the last failed attempt still admits the message');
+    assert.equal(f.downloads.length, 10, 'every attempt downloads the file once');
+    const parts = (
+      await f.db.platform.query(
+        `SELECT kind,text FROM ${f.table('tf_conversation_parts')} WHERE message_id=$1 ORDER BY ordinal`,
+        [fileEvent],
+      )
+    ).rows;
+    assert.deepEqual(parts, [
+      {
+        kind: 'text',
+        text: 'Can you read this?\n[File not read: whiteboard.png; reading it failed after repeated attempts]',
+      },
+    ]);
+    assert.deepEqual(await pass(), [], 'no file workflow starts again');
+    assert.equal(await f.admitted(textEvent), true, 'the reply in the same thread is admitted');
+    assert.equal(f.downloads.length, 10, 'nothing is downloaded after the message is admitted');
+    assert.equal(f.bytes.objects.size, 0);
+  },
+);
 
 test('a file the workspace has no room for leaves no stored bytes behind', async t => {
   const f = await setup(t);

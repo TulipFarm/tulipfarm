@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { lockAuthorization, AccessDenied } from '@tulipfarm/access';
 import {
@@ -20,13 +19,7 @@ export type SlackFileReading = {
   bytes: AttachmentBytes;
 };
 
-type SharedAttachments = Pick<ReturnType<typeof createAttachments>, 'stageShared' | 'stagedBytes' | 'discardShared'>;
-
-/** The object key of the `index`th file of a message, the same on every run so a repeated run reuses its bytes. */
-function stagedKey(eventId: string, index: number) {
-  const hex = createHash('sha256').update(`slack-file:${eventId}:${index}`).digest('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${((parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
-}
+type SharedAttachments = Pick<ReturnType<typeof createAttachments>, 'stageShared' | 'discardShared'>;
 
 /** At most five files of one message are read, each at most 10 MiB, within 25 seconds: the chat attachment limits. */
 export const slackFileLimits = { files: 5, maxBytes: attachmentLimit, deadlineMs: 25_000, maxRedirects: 3 };
@@ -44,6 +37,7 @@ const reasons = {
   'timed-out': 'downloading it from Slack timed out',
   extra: 'only five files are read per message',
   'storage-full': "the workspace's attachment storage is full",
+  failed: 'reading it failed after repeated attempts',
 } as const;
 export type SlackFileFailure = keyof typeof reasons;
 
@@ -191,13 +185,9 @@ export async function stageSlackFiles(input: {
         share.unread.push({ file, reason: unreadSlackFileLine(file, 'extra') });
         continue;
       }
-      const objectKey = stagedKey(eventId, index);
-      let bytes =
-        file.size !== undefined && file.size > 0 && file.size <= slackFileLimits.maxBytes
-          ? await attachments.stagedBytes(workspaceId, objectKey, file.size)
-          : null;
+      let bytes: Uint8Array;
       try {
-        bytes ??= await download(file, token, input.fetcher, deadline);
+        bytes = await download(file, token, input.fetcher, deadline);
       } catch (error) {
         const reason =
           error instanceof DownloadFailure ? error.reason : deadline.aborted ? 'timed-out' : ('unavailable' as const);
@@ -205,7 +195,6 @@ export async function stageSlackFiles(input: {
         continue;
       }
       const staged = await attachments.stageShared(workspaceId, {
-        objectKey,
         filename: attachmentName(file),
         declaredType:
           file.mimetype && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(file.mimetype) ? file.mimetype : null,

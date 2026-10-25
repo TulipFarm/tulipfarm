@@ -272,6 +272,12 @@ export async function createSlackPromptComposition(
         await installations.requireInstalled(work.workspaceId);
         return direct.admitFiles(work);
       },
+      admitSlackDirectMessageUnreadFiles: async (value: unknown) => {
+        const work = slackPromptWorkSchema.parse(value);
+        if (!direct) throw new Error('slack-workspace-disabled');
+        await installations.requireInstalled(work.workspaceId);
+        return direct.admitUnreadFiles(work);
+      },
       deliverSlackChannelAgent: async (value: unknown) => {
         const work = slackPromptWorkSchema.parse(value);
         if (!channels) throw new Error('slack-workspace-disabled');

@@ -424,16 +424,16 @@ export function createAttachments(
   };
   /**
    * Stores bytes received from outside chat, such as a file shared in a Slack direct message, before any transaction.
-   * The caller names the object, so a repeated run for the same source stores to the same key. The type is taken from
-   * the bytes, falling back to the type the source declared. `adoptShared` then makes them a ready attachment, and
+   * Each call stores under a new key, so runs that overlap for the same source never share an object. The type is taken
+   * from the bytes, falling back to the type the source declared. `adoptShared` then makes them a ready attachment, and
    * `discardShared` removes bytes that were never adopted.
    */
   async function stageShared(
     workspaceId: string,
-    file: { objectKey: string; filename: string; declaredType: string | null; bytes: Uint8Array },
+    file: { filename: string; declaredType: string | null; bytes: Uint8Array },
   ): Promise<SharedAttachment> {
     const staged = {
-      objectKey: uuidSchema.parse(file.objectKey),
+      objectKey: randomUUID(),
       ...reserveAttachmentSchema.parse({
         filename: file.filename,
         mediaType: sniffMediaType(file.bytes)?.mediaType ?? file.declaredType ?? 'application/octet-stream',
@@ -443,14 +443,6 @@ export function createAttachments(
     };
     await bytes.putIfAbsent(`${uuidSchema.parse(workspaceId)}/${staged.objectKey}`, file.bytes);
     return staged;
-  }
-  /** The bytes an earlier run already staged under `objectKey`, so a repeated run does not download them again. */
-  async function stagedBytes(workspaceId: string, objectKey: string, size: number) {
-    try {
-      return await bytes.read(`${uuidSchema.parse(workspaceId)}/${uuidSchema.parse(objectKey)}`, size);
-    } catch {
-      return null;
-    }
   }
   /**
    * Makes staged bytes a ready attachment of `userId` in a chat they may send to, charged like an upload, so their next
@@ -484,7 +476,11 @@ export function createAttachments(
       return true;
     });
   }
-  /** Removes staged bytes unless a run for the same source made them an attachment. */
+  /** Whether the workspace's attachment storage has room for `size` more bytes. */
+  async function hasRoom(workspaceId: string, size: number) {
+    return transaction(uuidSchema.parse(workspaceId), async tx => (await chargedBytes(tx)) + size <= quota);
+  }
+  /** Removes staged bytes unless they became an attachment. */
   async function discardShared(workspaceId: string, staged: SharedAttachment) {
     const adopted = await transaction(workspaceId, async tx =>
       Boolean(
@@ -506,9 +502,9 @@ export function createAttachments(
     publishSent,
     keepLink,
     stageShared,
-    stagedBytes,
     adoptShared,
     discardShared,
+    hasRoom,
   };
 }
 
