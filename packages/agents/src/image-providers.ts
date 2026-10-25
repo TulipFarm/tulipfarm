@@ -17,6 +17,8 @@ export type ImageProviderRequest = {
   size: string;
   quality: 'standard' | 'high';
   sources: readonly { bytes: Uint8Array; mediaType: string; name: string }[];
+  /** JPEG for a channel that does not take PNG. Only the OpenAI Images API can choose; the others ignore it. */
+  format?: 'jpeg';
 };
 
 /** Tokens the provider reports for one image request, or unknown when it reports none. */
@@ -110,7 +112,7 @@ export function imageHttpRequest(
     n: '1',
     size: request.size,
     quality: openAiQuality[request.quality],
-    output_format: 'png',
+    output_format: request.format ?? 'png',
   };
   if (!edit)
     return {

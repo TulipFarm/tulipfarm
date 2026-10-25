@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { imageAspects, imageQualities } from '@tulipfarm/config/model-catalog-file';
-import { imagePresetNames } from '@tulipfarm/media/presets';
+import { channelImageProblemCodes, imageChannels, imagePresetNames } from '@tulipfarm/media/presets';
 
 /** Most images one turn or run may generate, across all of its calls. */
 export const imagesPerOrigin = 8;
@@ -12,6 +12,12 @@ export const generateImagesCallSchema = z.strictObject({
   count: z.number().int().min(1).max(4).default(1).describe('How many images, 1 to 4'),
   aspect: z.enum(imageAspects).optional().describe('square, portrait or landscape; square when neither is given'),
   preset: z.enum(imagePresetNames).optional().describe('A named destination such as instagram-feed, instead of aspect'),
+  channel: z
+    .enum(imageChannels)
+    .optional()
+    .describe(
+      "The social network the image is for, such as instagram: uses its preset unless aspect or preset is given, and checks each image against the network's media rules",
+    ),
   quality: z.enum(imageQualities).default('standard'),
   name: z.string().min(1).max(120).optional().describe('File name without extension'),
   folderId: z.uuid().optional().describe('Files folder to save into'),
@@ -59,6 +65,14 @@ export const generatedImageSchema = z.strictObject({
     })
     .optional(),
   failure: z.enum(imageFailures).optional(),
+  /** For a call naming a channel: whether the saved image meets the channel's media rules, and which it breaks. */
+  channel: z
+    .strictObject({
+      name: z.enum(imageChannels),
+      usable: z.boolean(),
+      problems: z.array(z.enum(channelImageProblemCodes)),
+    })
+    .optional(),
 });
 /** What an `images.generate` call returns to the model, and what runs store as the call's result. */
 export const imageOutputResultSchema = z.union([
