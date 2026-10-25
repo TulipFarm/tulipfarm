@@ -728,8 +728,12 @@ export function createGitHubCorpusProvider(options: {
         log('warn', 'dependency', 'call_failed', {
           'dependency.endpoint': endpoint,
           'http.response.status_code': response.status,
-          ...(remaining !== null && Number.isSafeInteger(Number(remaining)) ? { 'github.ratelimit_remaining': Number(remaining) } : {}),
-          ...(response.headers.has('retry-after') && Number.isFinite(retry) ? { 'github.retry_after_s': Math.ceil(retry) } : {}),
+          ...(remaining !== null && Number.isSafeInteger(Number(remaining))
+            ? { 'github.ratelimit_remaining': Number(remaining) }
+            : {}),
+          ...(response.headers.has('retry-after') && Number.isFinite(retry)
+            ? { 'github.retry_after_s': Math.ceil(retry) }
+            : {}),
           'github.ratelimit_resource': response.headers.get('x-ratelimit-resource') ?? 'none',
         });
       }
