@@ -10,6 +10,7 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from '@tulipfarm/access';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { creditSummary } from '@tulipfarm/workspace-storage/credits';
 import { creditSummarySchema, type CreditSummary } from '@tulipfarm/workspace-storage/credits-contracts';
 import { qualified, StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -129,14 +130,15 @@ export function registerCredits(
       if (!session) return reply.code(401).send({ error: 'sign-in-required' });
       const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
       try {
+        const images = await isFeatureEnabled('images', null, { id: workspaceId });
         return await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
           await lockAuthorization(tx);
           const actor = await resolveHuman(tx, session.user.id);
           if ((await currentMember(tx, actor)).role === 'admin')
-            return namedUsage(tx, await creditSummary(tx, { kind: 'workspace' }));
+            return namedUsage(tx, await creditSummary(tx, { kind: 'workspace', images }));
           return namedUsage(
             tx,
-            await creditSummary(tx, { kind: 'personal', flowIds: await ownFlowIds(tx, actor) }),
+            await creditSummary(tx, { kind: 'personal', flowIds: await ownFlowIds(tx, actor), images }),
             actor,
           );
         });

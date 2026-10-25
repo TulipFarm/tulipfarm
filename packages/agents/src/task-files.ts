@@ -14,6 +14,7 @@ import { publicFileFailures, type FetchPublicFile, type PublicFile } from '@tuli
 import {
   readFailureText,
   readFile,
+  readingSource,
   taskFileContent,
   type AttachmentReader,
   type FileRecognition,
@@ -90,7 +91,10 @@ async function readSource(
       source.conversationId,
       source.attachmentId,
     );
-    const result = await readFile({ name: file.filename, mediaType: file.mediaType, bytes: file.bytes }, options);
+    const result = await readFile(
+      { name: file.filename, mediaType: file.mediaType, bytes: file.bytes },
+      readingSource(options, `attachment:${source.attachmentId}`),
+    );
     return {
       read: {
         origin: 'attachment',
@@ -111,7 +115,10 @@ async function readSource(
         throw error instanceof FileError && error.code === 'integrity' ? new AccessDenied() : error;
       });
     const mediaType = file.mediaType ?? 'application/octet-stream';
-    const result = await readFile({ name: file.name, mediaType, bytes: file.bytes }, options);
+    const result = await readFile(
+      { name: file.name, mediaType, bytes: file.bytes },
+      readingSource(options, `file:${source.fileId}`),
+    );
     const read = {
       readAt: new Date().toISOString(),
       sha256: sha256(file.bytes),
@@ -147,7 +154,10 @@ async function readSource(
     if (failure.cause === 'busy') throw new Error('task-google-file-busy');
     return { kind: failure.cause };
   }
-  const result = await readFile({ name: file.metadata.name, mediaType: file.contentType, bytes: file.bytes }, options);
+  const result = await readFile(
+    { name: file.metadata.name, mediaType: file.contentType, bytes: file.bytes },
+    readingSource(options, `google:${fileId}`),
+  );
   return {
     read: {
       origin: 'google',
@@ -288,7 +298,10 @@ async function readLinks(
       }
       bytes ??= await links.objects.read(kept.objectKey, kept.size, signal);
       if (hash(bytes) !== kept.sha256) throw new Error('task-link-integrity');
-      const reading = await readFile({ name: kept.filename, mediaType: kept.mediaType, bytes }, { ...options, signal });
+      const reading = await readFile(
+        { name: kept.filename, mediaType: kept.mediaType, bytes },
+        readingSource({ ...options, signal }, `link:${kept.sha256}`),
+      );
       notices[index] = { url, outcome: 'file', filename: kept.filename };
       files[index] = {
         origin: 'web',

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { modelEndpointProblem, type ImageModelApi, type ServedImageModel } from '@tulipfarm/config';
-import { ModelCallError } from '@tulipfarm/observability';
+import { ModelCallError, observeInference } from '@tulipfarm/observability';
 import { modelHttpError, openAiWire, type InferenceRoute, type OpenAiShapedRoute } from './inference.ts';
 import { providerFetch } from './provider-fetch.ts';
 
@@ -213,12 +213,44 @@ function isRefusal(body: unknown) {
 
 /**
  * Sends one image request. An HTTP content-policy rejection is an unbilled refusal; other rejections, timeouts and
- * transport failures throw `ModelCallError`. `signal` cancels the request.
+ * transport failures throw `ModelCallError`. `signal` cancels the request. The call is observed like other model calls,
+ * recording only counts, sizes, media types and the outcome.
  */
 export async function requestProviderImage(
   route: ImageProviderRoute,
   request: ImageProviderRequest,
   signal?: AbortSignal,
+): Promise<ProviderImageOutcome> {
+  return observeInference(
+    { provider: route.provider, model: route.model, operation: 'image_generation' },
+    async report => {
+      report.media({
+        'media.sources': request.sources.length,
+        'media.source_bytes': request.sources.reduce((sum, source) => sum + source.bytes.byteLength, 0),
+        'media.quality': request.quality,
+      });
+      try {
+        const outcome = await sendImageRequest(route, request, signal);
+        if (outcome.usage.kind === 'known') report.usage(outcome.usage.input, outcome.usage.output);
+        report.media(
+          outcome.kind === 'image'
+            ? { 'media.outcome': 'image', 'media.bytes': outcome.bytes.byteLength, 'media.type': outcome.mediaType }
+            : { 'media.outcome': 'refused' },
+        );
+        return outcome;
+      } catch (error) {
+        report.media({ 'media.outcome': 'failed' });
+        report.error(error);
+        throw error;
+      }
+    },
+  );
+}
+
+async function sendImageRequest(
+  route: ImageProviderRoute,
+  request: ImageProviderRequest,
+  signal: AbortSignal | undefined,
 ): Promise<ProviderImageOutcome> {
   const http = imageHttpRequest(route, request);
   const timeout = AbortSignal.timeout(route.timeoutMs);
@@ -242,7 +274,14 @@ export async function requestProviderImage(
   }
   if (!response.ok) {
     if (isRefusal(body)) return { kind: 'refused', usage: { kind: 'unknown' } };
-    throw modelHttpError(response, body, route.provider);
+    // The prompt and source names are passed so a provider error that quotes them is redacted before it is logged.
+    throw modelHttpError(
+      response,
+      body,
+      route.provider,
+      false,
+      [request.prompt, ...request.sources.map(source => source.name)].join('\n'),
+    );
   }
   const outcome = readImageResponse(route.api, body);
   if (!outcome) throw new ModelCallError('invalid-decision', { status: response.status, outputStarted: false });

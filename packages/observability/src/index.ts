@@ -115,6 +115,42 @@ export {
 } from './model-errors.ts';
 
 const scope = 'tulipfarm';
+/** Outcomes of one recognised unit or one generated image. */
+export const mediaOutcomes = ['recognized', 'empty', 'refused', 'failed', 'unavailable', 'image'] as const;
+export type MediaOutcome = (typeof mediaOutcomes)[number];
+/**
+ * What a recognition or image call may record: the unit kind, its sniffed media type, sizes and counts, the quality
+ * tier and the outcome. Prompts, file names, URLs, recognised text and bytes never are.
+ */
+export type MediaAttributes = {
+  'media.kind'?: 'image' | 'page';
+  'media.type'?: string;
+  'media.bytes'?: number;
+  'media.sources'?: number;
+  'media.source_bytes'?: number;
+  'media.quality'?: 'standard' | 'high';
+  'media.outcome'?: MediaOutcome;
+};
+const mediaAttributeKeys = [
+  'media.kind',
+  'media.type',
+  'media.bytes',
+  'media.sources',
+  'media.source_bytes',
+  'media.quality',
+  'media.outcome',
+] as const satisfies readonly (keyof MediaAttributes)[];
+// A sniffed media type such as image/png or application/pdf; parameters and anything longer are dropped.
+const mediaTypePattern = /^(image|application)\/[a-z0-9][a-z0-9.+-]{0,63}$/;
+
+function safeMediaAttribute(key: string, value: unknown) {
+  if (key === 'media.kind') return value === 'image' || value === 'page';
+  if (key === 'media.type') return typeof value === 'string' && mediaTypePattern.test(value);
+  if (key === 'media.quality') return value === 'standard' || value === 'high';
+  if (key === 'media.outcome') return (mediaOutcomes as readonly unknown[]).includes(value);
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 const spanAttributes = new Set([
   'http.request.method',
   'http.route',
@@ -194,6 +230,7 @@ const spanAttributes = new Set([
   'fallback.model',
   'model_usage',
   'usage.unknown_reason',
+  ...mediaAttributeKeys,
 ]);
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
 const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message', 'usage.shape', 'slack.event_id']);
@@ -240,6 +277,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
   if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);
   if (key === 'http.response.status_code' || key.startsWith('catalog.')) return safeDiagnosticNumber(key, value);
+  if (key.startsWith('media.')) return safeMediaAttribute(key, value);
   return true;
 }
 
@@ -1992,6 +2030,48 @@ export async function observeCall<T>(
     });
 }
 
+/**
+ * Observes one recognition of an image or page: a span and call metrics with the unit kind, media type, size and
+ * outcome. The model call inside it is observed by `observeInference`; nothing about the content is recorded.
+ */
+export async function observeMedia<T>(
+  operation: 'media.recognize',
+  attributes: MediaAttributes,
+  call: (record: (values: MediaAttributes) => void) => Promise<T>,
+): Promise<T> {
+  return trace
+    .getTracer(scope)
+    .startActiveSpan(
+      operation,
+      { attributes: { category: 'activity', operation, ...attributes, 'build.commit': buildCommit } },
+      async span => {
+        const start = performance.now();
+        const media: MediaAttributes = { ...attributes };
+        let outcome = 'success';
+        try {
+          return await call(values => {
+            Object.assign(media, values);
+            span.setAttributes(values);
+          });
+        } catch (error) {
+          outcome = 'error';
+          const details = errorAttributes(error);
+          span.setAttributes(details);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          log('error', 'activity', 'call_failed', { operation, ...media, ...details });
+          throw error;
+        } finally {
+          span.setAttribute('outcome', outcome);
+          callMetrics('activity', operation, outcome, (performance.now() - start) / 1000, {
+            ...(media['media.kind'] ? { 'media.kind': media['media.kind'] } : {}),
+            ...(media['media.outcome'] ? { 'media.outcome': media['media.outcome'] } : {}),
+          });
+          span.end();
+        }
+      },
+    );
+}
+
 export type ToolRuntime = 'chat' | 'task' | 'slack' | 'agent';
 export type ToolOutcome = 'success' | 'error' | 'result_error' | 'waiting' | 'blocked';
 /**
@@ -2383,8 +2463,10 @@ export function withTelemetryContext<T>(parent: Context, call: () => T): T {
 }
 
 export async function observeInference<T>(
-  model: { provider: string; model: string; operation: 'chat' | 'embeddings' },
+  model: { provider: string; model: string; operation: 'chat' | 'embeddings' | 'image_generation' },
   call: (report: {
+    /** Records counts, sizes, the media type and the outcome of an image call on its span and failure log. */
+    media: (values: MediaAttributes) => void;
     firstToken: () => void;
     usage: (input: number, output: number) => void;
     /**
@@ -2420,6 +2502,7 @@ export async function observeInference<T>(
           if (error !== undefined && failure === undefined) failure = error;
         };
         let errorType: string | undefined;
+        const media: MediaAttributes = {};
         const finishFailure = () => {
           if (outcome !== 'error') return;
           const details = failure === undefined ? { 'error.type': 'unknown' } : errorAttributes(failure);
@@ -2440,6 +2523,7 @@ export async function observeInference<T>(
           span.setStatus({ code: SpanStatusCode.ERROR });
           log('error', 'inference', 'call_failed', {
             ...attributes,
+            ...media,
             ...spanDetails,
             ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
             ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
@@ -2447,6 +2531,10 @@ export async function observeInference<T>(
         };
         try {
           return await call({
+            media(values) {
+              Object.assign(media, values);
+              span.setAttributes(values);
+            },
             firstToken() {
               if (firstToken) return;
               firstToken = true;

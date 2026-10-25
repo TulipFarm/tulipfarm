@@ -174,6 +174,10 @@ export interface MediaRecognitionRequest {
   width: number;
   height: number;
   alt: string;
+  /** The unit's own content hash, when the reader computed it; receipts keep it in place of the bytes. */
+  sha256?: string;
+  /** The file or attachment the unit came from, such as `file:<id>`, when the host knows it; used for receipts. */
+  source?: string;
   signal?: AbortSignal;
 }
 
@@ -221,10 +225,12 @@ export interface KnowledgeRecognitionOptions {
    * `[Recognised image]`, and a standalone image file is read as one unit.
    */
   images?: boolean;
+  /** The file or attachment being read, such as `file:<id>`; passed to the recognizer with every unit. */
+  source?: string;
 }
 
 /** One image or page ready for the recognizer, from a document or a file that is itself an image. */
-export type RecognitionUnit = Omit<MediaRecognitionRequest, 'signal'> & { sha256?: string };
+export type RecognitionUnit = Omit<MediaRecognitionRequest, 'signal' | 'source'>;
 
 /** What recognising one unit produced: its recognition, or why it has none. */
 export type RecognitionOutcome =

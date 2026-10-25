@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { workspaceRecognitionFamily } from '@tulipfarm/agents/image-settings';
 import {
   inferenceRouteSchema,
@@ -10,7 +10,7 @@ import { calculateUsageCost, loadModelCatalog, reserveModelCost, usageTokenCount
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { KnowledgeRecognitionAvailability, KnowledgeRecognitionPort } from '@tulipfarm/knowledge';
 import { recordUsage } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import { errorType, isFeatureEnabled, log, observeMedia, type MediaOutcome } from '@tulipfarm/observability';
 import {
   MediaRecognitionFailed,
   MediaRecognitionUnavailable,
@@ -24,7 +24,7 @@ import {
   recordKnowledgeCreditOutcome,
   reserveKnowledgeCredits,
 } from '@tulipfarm/workspace-storage/knowledge-credits';
-import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { conversationModel, type ConversationModel } from './conversation-model.ts';
 
@@ -144,38 +144,107 @@ export function createMediaRecognizer(
     promptVersion: mediaRecognitionPromptVersion,
     async recognize(request: MediaRecognitionRequest): Promise<MediaRecognition> {
       request.signal?.throwIfAborted();
-      const text = instruction(request);
-      const meter = recognitionMeter(runtime, scope, resolved, {
-        textBytes: Buffer.byteLength(mediaRecognitionSystemPrompt) + Buffer.byteLength(text),
-        width: request.width,
-        height: request.height,
-      });
-      let result: ContentInferenceResult;
-      try {
-        result = await inferWithContent(
-          route,
-          mediaRecognitionSystemPrompt,
-          [
-            { type: 'text', text },
-            { type: 'image', mediaType: request.mediaType, data: request.bytes },
-          ],
-          { meter: meter.meter, signal: request.signal },
-        );
-      } catch (error) {
-        await meter.abandon();
-        if (request.signal?.aborted) throw request.signal.reason;
-        if (error instanceof CreditsExhausted) throw new MediaRecognitionUnavailable('Credits are exhausted');
-        throw new MediaRecognitionFailed('The document-vision model call failed', { cause: error });
-      }
-      if (result.kind === 'refused') return { kind: 'refused' };
-      if (result.kind === 'truncated')
-        throw new MediaRecognitionFailed('The document-vision answer reached its output limit');
-      const recognition = parseMediaAnswer(result.text);
-      if (!recognition) throw new MediaRecognitionFailed('The document-vision model returned an invalid answer');
-      return recognition;
+      return observeMedia(
+        'media.recognize',
+        { 'media.kind': request.kind, 'media.type': request.mediaType, 'media.bytes': request.bytes.byteLength },
+        async record => {
+          const text = instruction(request);
+          const meter = recognitionMeter(runtime, scope, resolved, {
+            textBytes: Buffer.byteLength(mediaRecognitionSystemPrompt) + Buffer.byteLength(text),
+            width: request.width,
+            height: request.height,
+          });
+          const finish = async (outcome: Exclude<MediaOutcome, 'image'>) => {
+            record({ 'media.outcome': outcome });
+            await writeRecognitionReceipt(runtime, scope, {
+              modelId: resolved.id,
+              request,
+              outcome,
+              attemptId: meter.attempt(),
+            });
+          };
+          let result: ContentInferenceResult;
+          try {
+            result = await inferWithContent(
+              route,
+              mediaRecognitionSystemPrompt,
+              [
+                { type: 'text', text },
+                { type: 'image', mediaType: request.mediaType, data: request.bytes },
+              ],
+              { meter: meter.meter, signal: request.signal },
+            );
+          } catch (error) {
+            await meter.abandon();
+            const unavailable = error instanceof CreditsExhausted;
+            await finish(unavailable ? 'unavailable' : 'failed');
+            if (request.signal?.aborted) throw request.signal.reason;
+            if (unavailable) throw new MediaRecognitionUnavailable('Credits are exhausted');
+            throw new MediaRecognitionFailed('The document-vision model call failed', { cause: error });
+          }
+          if (result.kind === 'refused') {
+            await finish('refused');
+            return { kind: 'refused' };
+          }
+          const recognition = result.kind === 'truncated' ? undefined : parseMediaAnswer(result.text);
+          await finish(recognition?.kind ?? 'failed');
+          if (result.kind === 'truncated')
+            throw new MediaRecognitionFailed('The document-vision answer reached its output limit');
+          if (!recognition) throw new MediaRecognitionFailed('The document-vision model returned an invalid answer');
+          return recognition;
+        },
+      );
     },
   });
 }
+
+/**
+ * Records one recognition model call in the workspace's receipts: who asked, the model, the file it read, the unit's
+ * kind, type, size and hash, its outcome and the credit attempt that charged it. A failed write is logged and does not
+ * fail the read, whose charge is already in the credit ledger.
+ */
+async function writeRecognitionReceipt(
+  runtime: ConversationRuntime,
+  scope: MediaRecognizerScope,
+  receipt: {
+    modelId: string;
+    request: MediaRecognitionRequest;
+    outcome: Exclude<MediaOutcome, 'image'>;
+    attemptId: string | undefined;
+  },
+) {
+  const { request } = receipt;
+  try {
+    await runtime.transaction(scope.workspaceId, commonCompatibility, async tx => {
+      if (tx.commonVersion < recognitionReceiptsVersion) return;
+      await tx.client.query(
+        `INSERT INTO ${qualified(tx.schema, 'tf_recognition_receipts')}
+          (id,flow_id,requester_kind,requester_id,source,model_id,prompt_version,unit_kind,media_type,bytes,media_sha256,outcome,credit_attempt_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          randomUUID(),
+          scope.flowId,
+          'sourceId' in scope ? 'source' : 'member',
+          'sourceId' in scope ? scope.sourceId : scope.memberId,
+          request.source ?? null,
+          receipt.modelId,
+          mediaRecognitionPromptVersion,
+          request.kind,
+          request.mediaType,
+          request.bytes.byteLength,
+          request.sha256 ?? createHash('sha256').update(request.bytes).digest('hex'),
+          receipt.outcome,
+          receipt.attemptId ?? null,
+        ],
+      );
+    });
+  } catch (error) {
+    log('error', 'activity', 'call_failed', { operation: 'media.receipt', 'error.type': errorType(error) });
+  }
+}
+
+/** The common migration that adds `tf_recognition_receipts`. */
+const recognitionReceiptsVersion = 16;
 
 /**
  * An upper bound on the image's prompt tokens. Providers tile or patch images at 14 px or more per token side, so
@@ -195,8 +264,9 @@ function recognitionMeter(
   scope: MediaRecognizerScope,
   model: ConversationModel,
   input: { textBytes: number; width: number; height: number },
-): { meter: ToolModelMeter; abandon: () => Promise<void> } {
+): { meter: ToolModelMeter; abandon: () => Promise<void>; attempt: () => string | undefined } {
   let open: string | undefined;
+  let attempt: string | undefined;
   const outcome = (value: Parameters<typeof recordKnowledgeCreditOutcome>[1]) =>
     runtime.transaction(scope.workspaceId, commonCompatibility, tx => recordKnowledgeCreditOutcome(tx, value));
   const meter: ToolModelMeter = async ({ maxOutputTokens }) => {
@@ -232,6 +302,7 @@ function recognitionMeter(
     });
     if (!admitted) throw new Error('model-request-not-dispatched');
     open = id;
+    attempt = id;
     return async (usage, result) => {
       open = undefined;
       if (usage.kind !== 'known') {
@@ -266,6 +337,7 @@ function recognitionMeter(
   };
   return {
     meter,
+    attempt: () => attempt,
     abandon: async () => {
       const id = open;
       open = undefined;
