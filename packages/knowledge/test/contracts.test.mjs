@@ -36,7 +36,7 @@ test('provider coverage blocks unqualified connected sources and limits are fini
   assert.equal(knowledgeLimits.permissionAgeMs, 300000);
   assert.equal(knowledgeLimits.retentionDays, 30);
   assert.equal(knowledgeLimits.originalBytes, 10485760);
-  assert.equal(knowledgeLimits.documents, 10000);
+  assert.equal(knowledgeLimits.documents, 50000);
 });
 
 test('browser-safe admission accepts only user content and rejects forged parser or original metadata', () => {
