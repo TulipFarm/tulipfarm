@@ -418,8 +418,11 @@ test('an overlapping run for the same file DM never leaves an attachment whose b
   assert.equal(f.bytes.objects.size, 2, 'the failed run left no bytes behind');
 });
 
-/** A local Temporal dev server running the compiled workflows, with `activities` on its own task queue. */
-async function temporal(t, activities) {
+/**
+ * A local Temporal dev server running the compiled workflows on their own task queue, with `f`'s file DM activities.
+ * `pass` runs one dispatch pass as `slack-composition.ts` does, starting each file DM's own workflow.
+ */
+async function temporal(t, f, { workflowModules = [] } = {}) {
   const reservation = createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');
   const address = `127.0.0.1:${reservation.address().port}`;
@@ -447,7 +450,11 @@ async function temporal(t, activities) {
     connection,
     taskQueue,
     workflowsPath: fileURLToPath(new URL('../dist/workflows.js', import.meta.url)),
-    activities,
+    interceptors: { workflowModules },
+    activities: {
+      admitSlackDirectMessageFiles: f.dm.admitFiles,
+      admitSlackDirectMessageUnreadFiles: f.dm.admitUnreadFiles,
+    },
   });
   const running = worker.run();
   t.after(async () => {
@@ -456,7 +463,22 @@ async function temporal(t, activities) {
     await connection.close();
     await clientConnection.close();
   });
-  return { client: new Client({ connection: clientConnection }), taskQueue };
+  const client = new Client({ connection: clientConnection });
+  async function pass() {
+    const handles = [];
+    for (const work of (await f.dm.admitPending(f.workspace.id)).files)
+      handles.push(
+        await client.workflow.start('slackDirectMessageFiles', {
+          workflowId: `slack-dm-files-${work.workspaceId}-${work.eventId}`,
+          taskQueue,
+          args: [work],
+          workflowIdConflictPolicy: 'USE_EXISTING',
+          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+        }),
+      );
+    return handles;
+  }
+  return { client, pass };
 }
 
 test(
@@ -466,23 +488,8 @@ test(
     const f = await setup(t);
     f.served.set(fileUrl, await png(32, 24));
     f.bytes.failing = true;
-    const { client, taskQueue } = await temporal(t, { admitSlackDirectMessageFiles: f.dm.admitFiles });
+    const { client, pass } = await temporal(t, f);
     const eventId = await f.event('UPERSON', 'DONE', fileShare([whiteboard]));
-    /** One dispatch pass as `slack-composition.ts` runs it, starting each file DM's own workflow. */
-    async function pass() {
-      const handles = [];
-      for (const work of (await f.dm.admitPending(f.workspace.id)).files)
-        handles.push(
-          await client.workflow.start('slackDirectMessageFiles', {
-            workflowId: `slack-dm-files-${work.workspaceId}-${work.eventId}`,
-            taskQueue,
-            args: [work],
-            workflowIdConflictPolicy: 'USE_EXISTING',
-            workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-          }),
-        );
-      return handles;
-    }
     const [handle] = await pass();
     for (let tick = 0; tick < 4; tick++) {
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -493,6 +500,46 @@ test(
     assert.equal(await client.workflow.getHandle(handle.workflowId).result(), true, 'a later attempt admits it');
     assert.equal(await f.admitted(eventId), true);
     assert.equal(f.downloads.length, 2);
+  },
+);
+
+test(
+  'a file DM whose bytes are never stored is admitted with the file named as not read, and its thread moves on',
+  { timeout: 120_000 },
+  async t => {
+    const f = await setup(t);
+    f.served.set(fileUrl, await png(32, 24));
+    f.bytes.failing = true;
+    const { pass } = await temporal(t, f, {
+      workflowModules: [fileURLToPath(new URL('./fixtures/short-activity-backoff.mjs', import.meta.url))],
+    });
+    const fileEvent = await f.event('UPERSON', 'DONE', fileShare([whiteboard], 'Can you read this?'));
+    const [{ ts: root }] = (
+      await f.db.platform.query(`SELECT payload->>'ts' AS ts FROM ${f.table('tf_slack_events')} WHERE id=$1`, [
+        fileEvent,
+      ])
+    ).rows;
+    const textEvent = await f.event('UPERSON', 'DONE', { text: 'Any luck?', thread_ts: root });
+    const [handle] = await pass();
+    assert.equal(await f.admitted(textEvent), false, 'the reply waits for the file DM before it in its thread');
+    assert.equal(await handle.result(), true, 'the last failed attempt still admits the message');
+    assert.equal(f.downloads.length, 10, 'every attempt downloads the file once');
+    const parts = (
+      await f.db.platform.query(
+        `SELECT kind,text FROM ${f.table('tf_conversation_parts')} WHERE message_id=$1 ORDER BY ordinal`,
+        [fileEvent],
+      )
+    ).rows;
+    assert.deepEqual(parts, [
+      {
+        kind: 'text',
+        text: 'Can you read this?\n[File not read: whiteboard.png; reading it failed after repeated attempts]',
+      },
+    ]);
+    assert.deepEqual(await pass(), [], 'no file workflow starts again');
+    assert.equal(await f.admitted(textEvent), true, 'the reply in the same thread is admitted');
+    assert.equal(f.downloads.length, 10, 'nothing is downloaded after the message is admitted');
+    assert.equal(f.bytes.objects.size, 0);
   },
 );
 
