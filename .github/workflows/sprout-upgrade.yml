@@ -11,12 +11,12 @@
 # an hourly poll in case a dispatch is missed, and a manual run.
 #
 # Setup:
-# - Secret SPROUT_UPGRADE_TOKEN: fine-grained token with Contents and Pull
-#   requests read and write on this repository. It pushes the branch and opens
-#   the pull request, so the pull request's CI runs (GITHUB_TOKEN can't do that).
-# - Copilot authenticates with GITHUB_TOKEN (`copilot-requests: write`), billed to
-#   the organisation. The org policy "Allow use of Copilot CLI billed to the
-#   organization" must be on.
+# - Secret SPROUT_UPGRADE_TOKEN: fine-grained token of the tulipfarm-dot bot
+#   account, owner TulipFarm, with Contents and Pull requests read and write on
+#   this repository. The bot pushes the branch and opens the pull request, so the
+#   pull request's CI runs (GITHUB_TOKEN can't do that).
+# - Secret SPROUT_UPGRADE_COPILOT_TOKEN: fine-grained token of the Copilot user
+#   whose seat pays for the run, with the "Copilot Requests" permission.
 # - Optional variable SPROUT_UPGRADE_MODEL picks the Copilot model.
 name: Sprout upgrade
 
@@ -97,7 +97,6 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
-      copilot-requests: write
     env:
       SPROUT_CURRENT: ${{ needs.resolve.outputs.current }}
       SPROUT_TARGET: ${{ needs.resolve.outputs.target }}
@@ -148,7 +147,7 @@ jobs:
         id: copilot
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.SPROUT_UPGRADE_COPILOT_TOKEN }}
           COPILOT_MODEL: ${{ vars.SPROUT_UPGRADE_MODEL }}
         run: |
           copilot ${COPILOT_MODEL:+--model "$COPILOT_MODEL"} \
@@ -190,8 +189,8 @@ jobs:
           # Copilot must not change workflows or this automation.
           git restore --source=HEAD --staged --worktree -- .github
           git clean -fdq -- .github
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name tulipfarm-dot
+          git config user.email 291055112+tulipfarm-dot@users.noreply.github.com
           git switch -c "$BRANCH"
           git add -A
           git commit -qm "chore(deps): upgrade @tulipfarm/sprout to $SPROUT_TARGET"
