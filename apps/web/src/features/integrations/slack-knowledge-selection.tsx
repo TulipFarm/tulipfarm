@@ -23,7 +23,7 @@ import {
   type SlackSource,
 } from './slack-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand } from './slack-knowledge-shared';
-import { PrivateMark } from '@/components/private-mark';
+import { SlackChannelName, slackChannelMatches } from '@/components/slack-channel-name';
 
 const day = 86_400_000;
 const isoDate = (time: number) => new Date(time).toISOString().slice(0, 10);
@@ -43,6 +43,7 @@ export function SlackSelectionForm({
   const [shared, setShared] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const cursor = cursors.at(-1) ?? null;
@@ -99,6 +100,8 @@ export function SlackSelectionForm({
         : current.filter(value => value.conversationId !== item.conversationId),
     );
   const automatic = useFlag('default-connection-knowledge');
+  const matching = (items: readonly SlackConversationChoice[]) =>
+    items.filter(item => slackChannelMatches(item.title, query));
   return (
     <section aria-label="Select Slack conversations" className="space-y-4 border-t pt-4">
       <h4 className="text-base font-medium">Select Slack conversations</h4>
@@ -133,6 +136,7 @@ export function SlackSelectionForm({
                 if (result.success) {
                   setKind(result.data);
                   setSelected([]);
+                  setQuery('');
                   setCursors([null]);
                   setAttempted(false);
                   if (result.data === 'personal') {
@@ -189,25 +193,39 @@ export function SlackSelectionForm({
                       aria-describedby={attempted && !selected.length ? 'slack-choice-error' : undefined}
                     >
                       <legend className="text-sm font-medium">Conversations</legend>
-                      <ul className="max-h-64 space-y-3 overflow-y-auto p-3">
-                        {data.items.map(item => (
-                          <li key={item.conversationId} className="flex items-center gap-3">
-                            <Checkbox
-                              id={`slack-conversation-${item.conversationId}`}
-                              checked={selected.some(value => value.conversationId === item.conversationId)}
-                              disabled={
-                                !selected.some(value => value.conversationId === item.conversationId) &&
-                                selected.length >= 50
-                              }
-                              onCheckedChange={checked => toggle(item, checked)}
-                            />
-                            <Label htmlFor={`slack-conversation-${item.conversationId}`}>
-                              {item.title}
-                              {item.kind === 'private' && <PrivateMark label="Private channel" />}
-                            </Label>
-                          </li>
-                        ))}
-                      </ul>
+                      <SearchField
+                        label={kind === 'personal' ? 'Search conversations' : 'Search channels'}
+                        value={query}
+                        onChange={setQuery}
+                      />
+                      {matching(data.items).length === 0 ? (
+                        <p role="status" className="p-3 text-sm text-muted-foreground">
+                          No conversations on this page match “{query.trim()}”.
+                        </p>
+                      ) : (
+                        <ul className="max-h-64 space-y-3 overflow-y-auto p-3">
+                          {matching(data.items).map(item => (
+                            <li key={item.conversationId} className="flex items-center gap-3">
+                              <Checkbox
+                                id={`slack-conversation-${item.conversationId}`}
+                                checked={selected.some(value => value.conversationId === item.conversationId)}
+                                disabled={
+                                  !selected.some(value => value.conversationId === item.conversationId) &&
+                                  selected.length >= 50
+                                }
+                                onCheckedChange={checked => toggle(item, checked)}
+                              />
+                              <Label htmlFor={`slack-conversation-${item.conversationId}`}>
+                                {item.kind === 'public' || item.kind === 'private' ? (
+                                  <SlackChannelName title={item.title} private={item.kind === 'private'} />
+                                ) : (
+                                  item.title
+                                )}
+                              </Label>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </fieldset>
                   )}
                   {(cursors.length > 1 || data.nextCursor) && (

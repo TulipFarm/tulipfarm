@@ -3,7 +3,9 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
+import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { SlackChannelName, slackChannelMatches, slackListSearchFrom } from '@/components/slack-channel-name';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { SlackSelectionForm } from './slack-knowledge-selection';
 import {
@@ -226,6 +228,7 @@ function SlackSourceRow({
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
+  const [query, setQuery] = useState('');
   const { change } = useFeatureChanges();
   const [refresh, setRefresh] = useState<
     { kind: 'idle' | 'loading' } | { kind: 'done'; refreshed: number; unavailable: number } | { kind: 'error' }
@@ -308,24 +311,40 @@ function SlackSourceRow({
         </p>
       )}
       {source.conversations && (
-        <ul aria-label="Selected conversations" className="space-y-1 text-sm">
-          {source.conversations.map(conversation => (
-            <li key={conversation.conversationId} className="flex flex-wrap items-center gap-2">
-              <span className="break-words">{conversation.title}</span>
-              {conversation.state === 'unavailable' ? (
-                <Badge variant="warning">Blocked</Badge>
-              ) : (
-                <Badge variant="secondary">Active</Badge>
-              )}
-              {conversation.failure && (
-                <span className="w-full text-muted-foreground">
-                  {conversationFailures[conversation.failure] ??
-                    'Permissions for this conversation cannot be verified. Its messages stay hidden.'}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-2">
+          {source.conversations.length > slackListSearchFrom && (
+            <SearchField label="Search selected conversations" value={query} onChange={setQuery} />
+          )}
+          <ul aria-label="Selected conversations" className="space-y-1 text-sm">
+            {source.conversations
+              .filter(conversation => slackChannelMatches(conversation.title, query))
+              .map(conversation => (
+                <li key={conversation.conversationId} className="flex flex-wrap items-center gap-2">
+                  {conversation.kind === 'public' || conversation.kind === 'private' ? (
+                    <SlackChannelName title={conversation.title} private={conversation.kind === 'private'} />
+                  ) : (
+                    <span className="break-words">{conversation.title}</span>
+                  )}
+                  {conversation.state === 'unavailable' ? (
+                    <Badge variant="warning">Blocked</Badge>
+                  ) : (
+                    <Badge variant="secondary">Active</Badge>
+                  )}
+                  {conversation.failure && (
+                    <span className="w-full text-muted-foreground">
+                      {conversationFailures[conversation.failure] ??
+                        'Permissions for this conversation cannot be verified. Its messages stay hidden.'}
+                    </span>
+                  )}
+                </li>
+              ))}
+          </ul>
+          {!source.conversations.some(conversation => slackChannelMatches(conversation.title, query)) && (
+            <p role="status" className="text-sm text-muted-foreground">
+              No selected conversations match “{query.trim()}”.
+            </p>
+          )}
+        </div>
       )}
       {(source.failure || (source.counts?.failed ?? 0) > 0) && (
         <Alert variant="destructive">

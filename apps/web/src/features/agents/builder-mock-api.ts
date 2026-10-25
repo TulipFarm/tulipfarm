@@ -134,6 +134,11 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
           items: [
             { conversationId: 'CMOCKPEOPLE', title: 'ask-people-ops', kind: 'public' },
             { conversationId: 'CMOCKSTARTERS', title: 'new-starters', kind: 'public' },
+            { conversationId: 'CMOCKGENERAL', title: '#all-company', kind: 'public' },
+            { conversationId: 'GMOCKLEADS', title: '#people-leads', kind: 'private' },
+            { conversationId: 'CMOCKBENEFITS', title: '#benefits-questions', kind: 'public' },
+            { conversationId: 'GMOCKHIRING', title: '#hiring-committee', kind: 'private' },
+            { conversationId: 'CMOCKRANDOM', title: '#random', kind: 'public' },
           ],
           nextCursor: null,
         });

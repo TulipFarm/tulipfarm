@@ -3,14 +3,13 @@ import { Button, type ButtonState } from '@tulipfarm/sprout/button';
 import { Field } from '@tulipfarm/sprout/field';
 import { Form, FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ReadError, ReadFeedback } from '@/components/read-feedback';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
 import { useAgentSlackApi, useAgentSlackChannel, useAgentSlackChoices } from './slack-queries';
-import { PrivateMark } from '@/components/private-mark';
+import { SlackChannelPicker } from './slack-channel-picker';
 
 const channelPattern = /^[CG][A-Z0-9]+$/;
 
@@ -139,31 +138,14 @@ export function AgentSlackChannel({ workspaceId, agentId }: { workspaceId: strin
                           : undefined
                       }
                     >
-                      <Select
-                        value={channel}
-                        onValueChange={value => {
-                          if (value) select(value);
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose a channel">
-                            {channel
-                              ? (data.items.find(item => item.conversationId === channel)?.title ??
-                                'Selected channel on another page')
-                              : undefined}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {data.items
-                            .filter(item => item.kind === 'public' || item.kind === 'private')
-                            .map(item => (
-                              <SelectItem key={item.conversationId} value={item.conversationId}>
-                                {item.title}
-                                {item.kind === 'private' && <PrivateMark label="Private channel" />}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
+                      <SlackChannelPicker
+                        id="agent-slack-channel"
+                        items={data.items}
+                        value={channel || null}
+                        placeholder="Search Slack channels"
+                        invalid={showErrors && !channelPattern.test(channel)}
+                        onPick={item => select(item.conversationId)}
+                      />
                     </Field>
                     {!data.items.length && (
                       <StatePanel

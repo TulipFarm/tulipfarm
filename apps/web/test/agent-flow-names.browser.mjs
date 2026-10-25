@@ -542,11 +542,14 @@ test('agent flows resolve permitted names without changing commands or approvals
       await slack.getByRole('combobox', { name: 'Slack channel', exact: true }).click();
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Enter');
-      await slack.getByText('Customer operations', { exact: true }).waitFor();
+      await page.waitForFunction(
+        input => input.value === 'Customer operations',
+        await slack.getByRole('combobox', { name: 'Slack channel', exact: true }).elementHandle(),
+      );
       await capture('slack-picker');
       await slack.getByRole('button', { name: 'Next channels', exact: true }).click();
       await slack.getByRole('combobox', { name: 'Slack channel', exact: true }).click();
-      await page.getByRole('option', { name: 'Customer escalations (private)', exact: true }).click();
+      await page.getByRole('option', { name: 'Customer escalations (private channel)', exact: true }).click();
       if (width === 1440) {
         const before = writes.length;
         await slack.getByRole('button', { name: 'Check channel', exact: true }).click();
@@ -583,7 +586,7 @@ test('agent flows resolve permitted names without changing commands or approvals
         slackEmpty = false;
         await retryChannelList();
         await slack.getByRole('combobox', { name: 'Slack channel', exact: true }).click();
-        await page.getByRole('option', { name: 'Customer escalations (private)', exact: true }).waitFor();
+        await page.getByRole('option', { name: 'Customer escalations (private channel)', exact: true }).waitFor();
         await page.keyboard.press('Escape');
       }
       noActivations = false;

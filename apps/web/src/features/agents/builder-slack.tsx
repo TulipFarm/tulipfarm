@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Hash, LockIcon, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -8,8 +8,9 @@ import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { CheckboxField, ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Disclosure } from '@/components/disclosure';
+import { SlackChannelName } from '@/components/slack-channel-name';
+import { SlackChannelPicker } from './slack-channel-picker';
 import { TableRequestError } from '@/features/tables/request-state';
 import { useAgentSlackApi, useAgentSlackChoices } from './slack-queries';
 import { AgentRead } from './feedback';
@@ -23,6 +24,8 @@ export type BuilderChannel = {
   channelResponses: boolean | null;
   replaceConsent: boolean;
   detach?: boolean | undefined;
+  /** Known only for channels picked from the list in this session; saved drafts don't record it. */
+  private?: boolean | undefined;
 };
 
 export function BuilderSlack({
@@ -61,7 +64,7 @@ export function BuilderSlack({
     },
     [],
   );
-  async function check(id: string, name: string) {
+  async function check(id: string, name: string, isPrivate?: boolean) {
     if (disabled || pending.current) return;
     if (!/^[CG][A-Z0-9]{1,63}$/.test(id)) {
       setError('Use a public or private Slack channel ID, starting with C or G.');
@@ -83,6 +86,7 @@ export function BuilderSlack({
           ...previous,
           channel: id,
           name,
+          private: isPrivate ?? previous?.private,
           expectedVersion: current.version,
           replaceAgentId: current.agentId,
           channelResponses: current.channelResponses,
@@ -145,37 +149,14 @@ export function BuilderSlack({
                 optional
                 helper="Only checked channels can be attached. Nothing is posted while drafting."
               >
-                <Select
-                  value={null}
+                <SlackChannelPicker
+                  id="builder-slack-channel"
+                  items={data.items}
+                  placeholder={checking ? 'Checking channel…' : 'Search Slack channels'}
                   disabled={disabled || checking || choices.state.kind !== 'ready' || choices.state.refreshing}
-                  onValueChange={id => {
-                    const item = data.items.find(item => item.conversationId === id);
-                    if (item) void check(item.conversationId, item.title);
-                  }}
-                >
-                  <SelectTrigger width="full">
-                    <SelectValue placeholder={checking ? 'Checking channel…' : 'Choose a Slack channel'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {data.items
-                      .filter(item => item.kind === 'public' || item.kind === 'private')
-                      .map(item => (
-                        <SelectItem
-                          key={item.conversationId}
-                          value={item.conversationId}
-                          disabled={value.some(selected => selected.channel === item.conversationId)}
-                        >
-                          {item.kind === 'private' ? (
-                            <LockIcon aria-hidden="true" className="size-4" />
-                          ) : (
-                            <Hash aria-hidden="true" className="size-4" />
-                          )}
-                          {item.title}
-                          {item.kind === 'private' && <span className="sr-only">Private channel</span>}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                  isTaken={id => value.some(selected => selected.channel === id)}
+                  onPick={item => void check(item.conversationId, item.title, item.kind === 'private')}
+                />
               </Field>
               {!data.items.length && (
                 <p className="text-sm text-muted-foreground">
@@ -239,8 +220,19 @@ export function BuilderSlack({
             {value.map(item => (
               <li key={item.channel} className="grid gap-2 border-t pt-4">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Hash aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 wrap-anywhere text-sm font-medium">{item.name}</span>
+                  <span className="min-w-0 grow basis-40 text-sm font-medium">
+                    <SlackChannelName
+                      title={item.name}
+                      private={
+                        item.private ??
+                        (choices.state.kind === 'ready' &&
+                          choices.state.data.kind === 'available' &&
+                          choices.state.data.items.some(
+                            choice => choice.conversationId === item.channel && choice.kind === 'private',
+                          ))
+                      }
+                    />
+                  </span>
                   <Badge variant={item.channelResponses ? 'secondary' : 'warning'}>
                     {item.detach
                       ? 'Detach on activation'
