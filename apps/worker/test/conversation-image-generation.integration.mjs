@@ -373,24 +373,31 @@ test(
 
 test('an image for a named channel uses its preset and is checked against its media rules', async t => {
   const f = await setup(t);
-  // The provider answers a 4:5 JPEG for a portrait request and a square PNG otherwise, whatever type was asked for.
+  // The provider answers a square JPEG for a square request and, as xAI and Gemini may, a 2:3 PNG for a portrait.
   f.state.draw = async request =>
-    openAiImage(request.body.size === '1024x1536' ? await jpeg(16, 20) : await png(16, 16));
+    openAiImage(
+      request.body.size === '1024x1024'
+        ? await jpeg(16, 16)
+        : request.body.size === '1024x1536'
+          ? await png(16, 24)
+          : await png(24, 16),
+    );
   const chatId = await f.chat();
   const calls = [
     { prompt: 'A tulip post', channel: 'instagram' },
-    { prompt: 'A square tulip post', channel: 'instagram', aspect: 'square' },
+    { prompt: 'A tall tulip post', channel: 'instagram', preset: 'instagram-feed' },
     { prompt: 'A tulip post for X', channel: 'x' },
   ];
   const { results } = await f.turn(chatId, [...calls.map(call => [call]), 'Done.']);
 
-  // Instagram's preset is instagram-feed, a portrait; Instagram takes only JPEG, so that is what is asked for. X takes
-  // PNG, so its images stay PNG, at X's landscape preset.
+  // Instagram's default preset is square, since every model's portrait is narrower than Instagram's 4:5; the feed
+  // portrait is an explicit choice. Instagram takes only JPEG, so that is what is asked for. X takes PNG, so its
+  // images stay PNG, at X's landscape preset.
   assert.deepEqual(
     f.state.images.map(request => [request.body.size, request.body.output_format]),
     [
-      ['1024x1536', 'jpeg'],
       ['1024x1024', 'jpeg'],
+      ['1024x1536', 'jpeg'],
       ['1536x1024', 'png'],
     ],
   );
@@ -398,12 +405,15 @@ test('an image for a named channel uses its preset and is checked against its me
     results.map(result => result.images.map(image => [image.state, image.file.mediaType, image.channel])),
     [
       [['saved', 'image/jpeg', { name: 'instagram', usable: true, problems: [] }]],
-      [['saved', 'image/png', { name: 'instagram', usable: false, problems: ['image-type'] }]],
+      [['saved', 'image/png', { name: 'instagram', usable: false, problems: ['image-type', 'image-aspect-ratio'] }]],
       [['saved', 'image/png', { name: 'x', usable: true, problems: [] }]],
     ],
   );
   assert.match(results[0].instruction, /meets instagram's media rules/);
-  assert.match(results[1].instruction, /does not meet instagram's media rules \(image-type\)\. Do not offer it/);
+  assert.match(
+    results[1].instruction,
+    /does not meet instagram's media rules \(image-type, image-aspect-ratio\)\. Do not offer it/,
+  );
   assert.equal(f.state.images.length, 3);
 });
 

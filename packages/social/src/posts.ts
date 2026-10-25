@@ -10,6 +10,7 @@ import {
   type HumanActor,
   type SourceDependency,
 } from '@tulipfarm/access';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import type { SocialPlatformAdapter } from './adapter.ts';
@@ -399,14 +400,19 @@ export function createSocialPosts(options: {
     required: ReviewChoiceField[] | null;
   };
   /** Binds media for the author and adds the rules that need the Files (PRODUCT 13, 19). */
-  async function draft(tx: AuthorizationTransaction, author: HumanActor, checked: Checked): Promise<Draft> {
+  async function draft(
+    tx: AuthorizationTransaction,
+    author: HumanActor,
+    checked: Checked,
+    images: boolean,
+  ): Promise<Draft> {
     const content = checked.input.content;
     const bound = await bindMedia(tx, author, content.media);
     const unusable = new Set(bound.issues.map(issue => issue.path[2]));
     const issues = contentIssues(content, {
       channelKind: checked.authorized.channel.channelKind,
       mediaKinds: bound.kinds,
-      mediaFiles: bound.files,
+      ...(images && { mediaFiles: bound.files }),
       xPremium: false,
     })
       .filter(issue => !(issue.code === 'media-kind-unknown' && unusable.has(issue.path[1])))
@@ -514,6 +520,7 @@ export function createSocialPosts(options: {
       const input = prepareInputSchema(now()).parse(raw);
       const dependencies = sourcesInputSchema.parse(sources).dependencies;
       const checked = await checkVariants(workspaceId, principal, input.variants);
+      const images = await isFeatureEnabled('images', null, { id: workspaceId });
       return transaction(workspaceId, async tx => {
         const { sponsor } = await principalIn(tx, principal);
         for (const item of checked)
@@ -521,7 +528,7 @@ export function createSocialPosts(options: {
             channelVersion: item.input.expectedChannelVersion,
           });
         const drafts: Draft[] = [];
-        for (const item of checked) drafts.push(await draft(tx, sponsor, item));
+        for (const item of checked) drafts.push(await draft(tx, sponsor, item, images));
         const digest = contentDigest(drafts);
         const id = randomUUID();
         const inserted = await tx.client.query(
@@ -593,6 +600,7 @@ export function createSocialPosts(options: {
           },
       );
       const checked = await checkVariants(workspaceId, principal, next);
+      const images = await isFeatureEnabled('images', null, { id: workspaceId });
       return transaction(workspaceId, async tx => {
         const { sponsor } = await principalIn(tx, principal);
         const post = await loadPost(tx, postId, true);
@@ -618,7 +626,7 @@ export function createSocialPosts(options: {
           return true;
         });
         const drafts: Draft[] = [];
-        for (const item of checked) drafts.push(await draft(tx, sponsor, item));
+        for (const item of checked) drafts.push(await draft(tx, sponsor, item, images));
         const number = post.current_revision + 1;
         const variants = await writeRevision(tx, post.id, number, drafts, await sourceFlags(tx, sponsor, dependencies));
         await tx.client.query(`UPDATE ${relation(tx, 'variants')} SET state='superseded' WHERE id=ANY($1::uuid[])`, [

@@ -46,7 +46,8 @@ export const channelImageRules = Object.freeze({
     maxBytes: 4_000_000,
   },
   instagram: {
-    preset: 'instagram-feed',
+    // Every model's portrait (2:3 or 3:4) is narrower than Instagram's 4:5, so a feed image starts square.
+    preset: 'instagram-square',
     mediaTypes: ['image/jpeg'],
     maxBytes: 8_000_000,
     ratio: { min: '4:5', max: '1.91:1' },
