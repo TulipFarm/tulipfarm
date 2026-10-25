@@ -13,7 +13,7 @@ import { createFiles } from '../../files/dist/index.js';
  * A workspace with a Slack installation, alice and bob linked to it, an HR destination on channel CHR and an agent that
  * may post there, with a fake Slack server behind `fetcher`. With `images`, Slack actions read generated images from an
  * in-memory Files store, and the fake server answers Slack's external file upload: `files` records each `files.*` call
- * and `uploads` each upload URL post.
+ * and `uploads` each upload URL post. `bodies` keeps the body of every request sent to Slack.
  */
 export async function outboundFixture({ channelName, prepareActors, images = false } = {}) {
   let actors;
@@ -35,7 +35,8 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
   const effects = [],
     cards = [],
     files = [],
-    uploads = [];
+    uploads = [],
+    bodies = [];
   const users = [{ id: 'UBOB', name: 'bob', profile: { display_name: 'Bob' } }];
   let directoryResponse = method =>
     method === 'conversations.list'
@@ -130,6 +131,9 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const fetcher = (url, init) => {
+    bodies.push(
+      init?.body instanceof Uint8Array ? Buffer.from(init.body).toString('latin1') : String(init?.body ?? ''),
+    );
     if (new URL(String(url)).hostname === 'files.slack.com')
       return fetch(`http://127.0.0.1:${server.address().port}/upload${new URL(String(url)).pathname}`, init);
     const method = slackUserCall(url, init),
@@ -326,6 +330,7 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
       cards,
       files,
       uploads,
+      bodies,
       imageFiles,
       setMode: value => {
         mode = value;
