@@ -26,6 +26,10 @@ import { connector } from '@/features/integrations/connect';
 import { DefaultKnowledge, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
 import { GitHubIntegrations } from '@/features/integrations/github';
 import { GitHubAccounts, GitHubKnowledge } from '@/features/integrations/github-accounts';
+import {
+  GitHubRepositoryContentPrototype,
+  githubRepositoryPrototypeEnabled,
+} from '@/features/integrations/github-repository-content-prototype';
 import { GoogleKnowledgeSources } from '@/features/integrations/google-knowledge';
 import {
   actionFor,
@@ -609,7 +613,12 @@ function KnowledgeTab({ app, status, workspaceId }: { app: Integration; status: 
       <DefaultKnowledge workspaceId={workspaceId} product={product} connected={connected} />
       {app.provider === 'google' && <GoogleSources workspaceId={workspaceId} gmail={app.id === 'gmail'} />}
       {app.provider === 'slack' && <SlackKnowledge workspaceId={workspaceId} />}
-      {app.provider === 'github-personal' && <GitHubKnowledge workspaceId={workspaceId} />}
+      {app.provider === 'github-personal' &&
+        (githubRepositoryPrototypeEnabled ? (
+          <GitHubRepositoryContentPrototype />
+        ) : (
+          <GitHubKnowledge workspaceId={workspaceId} />
+        ))}
       {app.provider === 'atlassian' && (app.id === 'jira' || app.id === 'confluence') && (
         <AtlassianKnowledgeSources workspaceId={workspaceId} product={app.id} />
       )}
