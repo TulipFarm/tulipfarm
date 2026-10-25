@@ -12,5 +12,7 @@ export function githubAccounts(runtime: AccountRuntime | undefined, env: NodeJS.
     if (configuration) throw new Error('GitHub OAuth requires workspace storage');
     return null;
   }
-  return createGitHubAccounts({ runtime, configuration, keyring });
+  const slug = env.GITHUB_APP_SLUG;
+  const installUrl = slug ? `https://github.com/apps/${encodeURIComponent(slug)}/installations/new` : null;
+  return createGitHubAccounts({ runtime, configuration, keyring, installUrl });
 }

@@ -407,6 +407,14 @@ A ready source is due again after its pass, ten minutes by default
 (`GITHUB_KNOWLEDGE_RECHECK_MINUTES`, 1 to 1440). Polling is the safety net
 for missed events; webhooks make changes appear within seconds.
 
+### Install link
+
+Sign-in does not install the App. Private repositories show up only where the App is
+installed. Set `GITHUB_APP_SLUG` (the `tulipfarm-app` in `github.com/apps/tulipfarm-app`)
+and the repository picker shows an "Install the App" link to
+`https://github.com/apps/<slug>/installations/new`. An organization owner must
+approve the install.
+
 ### Webhooks
 
 With `GITHUB_WEBHOOK_APP_ID` and `GITHUB_WEBHOOK_SECRET` set, the API accepts

@@ -15,7 +15,11 @@ export const accountSchema = z.strictObject({
   generation: z.number().int().positive(),
   scopes: scopesSchema,
 });
-export const accountListSchema = z.strictObject({ configured: z.boolean(), accounts: z.array(accountSchema).max(20) });
+export const accountListSchema = z.strictObject({
+  configured: z.boolean(),
+  installUrl: z.url().nullable().default(null),
+  accounts: z.array(accountSchema).max(20),
+});
 export const authorizationSchema = z.strictObject({ accountId: z.uuid(), url: z.url() });
 export const completionSchema = z.strictObject({ workspaceId: z.uuid(), account: accountSchema });
 export const disconnectionSchema = z.strictObject({

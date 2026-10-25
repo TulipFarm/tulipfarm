@@ -617,6 +617,7 @@ export function GitHubKnowledgeSources({
                 accounts={active}
                 onReconnect={onReconnect}
                 accountBusy={accountBusy}
+                installUrl={accounts.state.kind === 'ready' ? accounts.state.data.installUrl : null}
                 footerTarget={footerTarget}
                 onClose={close}
                 onSaved={async source => {

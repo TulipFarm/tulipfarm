@@ -71,6 +71,7 @@ export function createGitHubAccounts(options: {
   runtime: AccountRuntime;
   configuration: Configuration | null;
   keyring: IntegrationKeyring | null;
+  installUrl?: string | null;
   fetcher?: typeof fetch;
   defaultKnowledge?: DefaultKnowledgeHook;
 }) {
@@ -200,6 +201,7 @@ export function createGitHubAccounts(options: {
     async list(workspaceId: string, userId: string) {
       return authorized(workspaceId, userId, async (tx, actor) => ({
         configured: configuration !== null,
+        installUrl: options.installUrl ?? null,
         accounts: z
           .array(rowSchema)
           .max(20)
