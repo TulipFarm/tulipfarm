@@ -245,7 +245,15 @@ const spanAttributes = new Set([
   ...mediaAttributeKeys,
 ]);
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
-const logOnlyAttributes = new Set(['provider.error_code', 'provider.error_message', 'usage.shape', 'slack.event_id']);
+const logOnlyAttributes = new Set([
+  'provider.error_code',
+  'provider.error_message',
+  'usage.shape',
+  'slack.event_id',
+  'github.ratelimit_remaining',
+  'github.retry_after_s',
+  'github.ratelimit_resource',
+]);
 // A stored Slack event's own row id: it locates the event in the database and carries no Slack content.
 const rowIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -276,6 +284,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'provider.error_code') return safeProviderCode(value) === value;
     if (key === 'usage.shape') return safeUsageShape(value);
     if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
+    if (key === 'github.ratelimit_resource') return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value);
+    if (key.startsWith('github.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
