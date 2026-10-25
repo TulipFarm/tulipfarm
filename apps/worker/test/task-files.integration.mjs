@@ -190,6 +190,26 @@ test('a task on a text-only family reads an image file source as recognised text
   );
   assert.match(text(parts), /\[Recognised image\]\n/);
   assert.match(text(parts), new RegExp(recognisedText));
+  const receipts = (
+    await f.db.platform.query(
+      `SELECT r.flow_id,r.requester_kind,r.source,r.model_id,r.outcome,o.charged > 0 AS charged FROM ${f.table('tf_recognition_receipts')} r
+      JOIN ${f.table('tf_knowledge_credit_observations')} o ON o.attempt_id=r.credit_attempt_id`,
+    )
+  ).rows;
+  assert.deepEqual(
+    receipts,
+    [
+      {
+        flow_id: `task:${task.id}`,
+        requester_kind: 'member',
+        source: `file:${slip}`,
+        model_id: 'claude-sonnet',
+        outcome: 'recognized',
+        charged: true,
+      },
+    ],
+    'the recognition leaves a receipt in the task flow, naming the file and its charge',
+  );
 });
 
 test('a task file that cannot be read pauses the task with the file reason and names the file', async t => {
