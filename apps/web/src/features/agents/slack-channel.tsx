@@ -10,6 +10,7 @@ import { ReadError, ReadFeedback } from '@/components/read-feedback';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
 import { useAgentSlackApi, useAgentSlackChannel, useAgentSlackChoices } from './slack-queries';
+import { PrivateMark } from '@/components/private-mark';
 
 const channelPattern = /^[CG][A-Z0-9]+$/;
 
@@ -158,7 +159,7 @@ export function AgentSlackChannel({ workspaceId, agentId }: { workspaceId: strin
                             .map(item => (
                               <SelectItem key={item.conversationId} value={item.conversationId}>
                                 {item.title}
-                                {item.kind === 'private' ? ' (private)' : ''}
+                                {item.kind === 'private' && <PrivateMark label="Private channel" />}
                               </SelectItem>
                             ))}
                         </SelectContent>

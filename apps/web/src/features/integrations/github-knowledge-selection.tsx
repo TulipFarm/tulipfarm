@@ -32,6 +32,7 @@ import {
   describeGitHubContent,
   GitHubContentOptions,
 } from './github-knowledge-content';
+import { GitHubRepositoryChoices } from './github-repository-choices';
 
 const repositoryLimit = githubCorpusLimits.repositories;
 const reconnectErrors = new Set([
@@ -504,15 +505,13 @@ export function GitHubSelectionForm({
                       </StatePanel>
                     ) : (
                       <div role="region" aria-label="Available repositories">
-                        <ChoiceGroup
-                          type="checkbox"
+                        <GitHubRepositoryChoices
                           legend="Repositories"
-                          legendVisibility="screen-reader"
-                          required
                           value={selected.map(item => item.repositoryId)}
                           options={visible.map(item => ({
-                            value: item.repositoryId,
-                            label: `${item.fullName}${item.visibility === 'public' ? '' : ` (${item.visibility})`}`,
+                            repositoryId: item.repositoryId,
+                            fullName: item.fullName,
+                            visibility: item.visibility,
                             disabled:
                               selected.length >= repositoryLimit &&
                               !selected.some(value => value.repositoryId === item.repositoryId),

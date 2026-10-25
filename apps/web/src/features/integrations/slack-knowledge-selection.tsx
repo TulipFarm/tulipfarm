@@ -23,6 +23,7 @@ import {
   type SlackSource,
 } from './slack-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand } from './slack-knowledge-shared';
+import { PrivateMark } from '@/components/private-mark';
 
 const day = 86_400_000;
 const isoDate = (time: number) => new Date(time).toISOString().slice(0, 10);
@@ -202,7 +203,7 @@ export function SlackSelectionForm({
                             />
                             <Label htmlFor={`slack-conversation-${item.conversationId}`}>
                               {item.title}
-                              {item.kind === 'private' ? ' (private)' : ''}
+                              {item.kind === 'private' && <PrivateMark label="Private channel" />}
                             </Label>
                           </li>
                         ))}

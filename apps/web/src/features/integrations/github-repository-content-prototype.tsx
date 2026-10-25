@@ -7,6 +7,7 @@ import { SearchField } from '@tulipfarm/sprout/search-field';
 import { Switch } from '@tulipfarm/sprout/switch';
 import { Table, type TableColumn } from '@tulipfarm/sprout/table';
 import { type GitHubKind } from './github-knowledge-api';
+import { PrivateMark } from '@/components/private-mark';
 
 // Prototype only: the API stores content types per source, not per repository.
 export const githubRepositoryPrototypeEnabled =
@@ -154,7 +155,7 @@ export function GitHubRepositoryContentPrototype() {
           <span className="min-w-0">
             <span className="flex flex-wrap items-center gap-2">
               <span className="break-all font-medium text-foreground">{repository.name}</span>
-              {repository.visibility === 'private' && <Badge variant="outline">Private</Badge>}
+              {repository.visibility === 'private' && <PrivateMark />}
             </span>
             <span className="block text-xs tabular-nums text-muted-foreground">{summary(repository)}</span>
           </span>

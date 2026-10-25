@@ -1,6 +1,5 @@
 import { useId, useState } from 'react';
 import { Button } from '@tulipfarm/sprout/button';
-import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -13,6 +12,7 @@ import {
 import { checkGitHubContent, GitHubContentOptions, githubContentValue } from './github-knowledge-content';
 import { filterGitHubRepositories } from './github-repositories';
 import { CommandFeedback, useCommand } from './slack-knowledge-shared';
+import { GitHubRepositoryChoices } from './github-repository-choices';
 
 /**
  * Opt-out settings for one source: every repository and content kind is indexed unless a member leaves it out here.
@@ -106,17 +106,14 @@ export function GitHubSourceSettings({
                     </Button>
                   </StatePanel>
                 ) : (
-                  <ChoiceGroup
-                    type="checkbox"
+                  <GitHubRepositoryChoices
                     legend="Included repositories"
-                    legendVisibility="screen-reader"
-                    required
                     value={visible.filter(item => !excluded.has(item.repositoryId)).map(item => item.repositoryId)}
                     options={visible.map(item => ({
-                      value: item.repositoryId,
-                      label: `${item.fullName}${item.visibility === 'public' ? '' : ` (${item.visibility})`}${
-                        item.indexedBy ? ` · indexed by ${item.indexedBy.title}` : ''
-                      }`,
+                      repositoryId: item.repositoryId,
+                      fullName: item.fullName,
+                      visibility: item.visibility,
+                      detail: item.indexedBy ? `indexed by ${item.indexedBy.title}` : undefined,
                     }))}
                     error={attempted && !included ? 'Keep at least one repository, or remove the source.' : undefined}
                     onValueChange={ids =>

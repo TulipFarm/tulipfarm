@@ -24,6 +24,7 @@ import {
 } from './github-knowledge-api';
 import { CommandFeedback, ReadResult, useCommand, useExpired } from './slack-knowledge-shared';
 import { KnowledgeSourceFailures } from './knowledge-source-failures';
+import { PrivateMark } from '@/components/private-mark';
 
 const statusLabels = {
   queued: 'Queued for import',
@@ -367,7 +368,7 @@ function GitHubSourceRow({
             <li key={repository.repositoryId} className="flex flex-wrap items-center gap-2">
               <span className="break-all">{repository.fullName}</span>
               {repository.visibility !== 'public' && (
-                <Badge variant="outline">{repository.visibility === 'private' ? 'Private' : 'Internal'}</Badge>
+                <PrivateMark label={repository.visibility === 'private' ? 'Private' : 'Internal'} />
               )}
               {repository.status === 'excluded' ? (
                 <Badge variant="outline">Excluded</Badge>

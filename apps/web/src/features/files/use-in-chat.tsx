@@ -31,6 +31,7 @@ import { useTaskApi, useTaskDestinations, type TaskDestination } from '@/feature
 import { errorMessage, type FilesApi, type FileSummary } from './api';
 import type { GoogleBinding, GoogleFileMetadata } from './google-api';
 import { SharingDialog, type FinalFocus } from './sharing';
+import { PrivateMark } from '@/components/private-mark';
 
 /**
  * Where the references go, and how far the audience check has got.
@@ -465,7 +466,13 @@ function Destinations({
               <span className="min-w-0 flex-1 truncate text-start" title={chat.title}>
                 {chat.title}
               </span>
-              <span className="ml-auto shrink-0 text-xs text-muted-foreground">{chat.projectName ?? 'Private'}</span>
+              {chat.projectName ? (
+                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{chat.projectName}</span>
+              ) : (
+                <span className="ml-auto">
+                  <PrivateMark label="Private chat" />
+                </span>
+              )}
             </Button>
           </li>
         ))}
