@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { HumanActor } from '@tulipfarm/access';
 import { fileReaders, type createFiles } from '@tulipfarm/files';
-import { errorType, isFeatureEnabled, log, observeMedia, type MediaOutcome } from '@tulipfarm/observability';
+import { errorType, log, observeMedia, type MediaOutcome } from '@tulipfarm/observability';
 import { postSlackThreadNote, shareSlackFiles, slackCredentialCipher, slackFileUploadScope } from '@tulipfarm/slack';
 import { relation, type AgentTransaction } from './store.ts';
 
@@ -33,25 +33,36 @@ const imageSchema = z.object({
   sha256: z.string(),
 });
 type Image = z.infer<typeof imageSchema>;
-type Plan = { token: string; upload: boolean; images: (Image & { readable: boolean })[] };
+type Plan = { token: string; upload: boolean; images: (Image & { readable: boolean; overflow: boolean })[] };
 
 /**
- * The saved images a message carries. Each image of a run goes with the first message or reply the run asked for after
- * the image was saved, so a run that posts several times never shares one image twice, and a retried delivery finds
- * the same images.
+ * Claims, for a message the caller is recording as sent in the same transaction, the images its run saved before the
+ * message was asked for that no other message has. A draft that is never sent claims nothing, and two messages sent at
+ * once never claim the same image. Returns whether there is anything to deliver.
  */
+export async function claimRunImages(tx: AgentTransaction, message: Pick<DeliveredMessage, 'runId' | 'actionId'>) {
+  return !!(
+    await tx.client.query(
+      `UPDATE ${relation(tx, 'tf_image_generations')} SET slack_action_id=$2 WHERE id IN (
+        SELECT g.id FROM ${relation(tx, 'tf_image_generations')} g
+        WHERE g.origin_kind='run' AND g.origin_id=$1 AND g.state='saved' AND g.slack_action_id IS NULL
+          AND g.updated_at<(SELECT a.created_at FROM ${relation(tx, 'tf_slack_actions')} a WHERE a.id=$2)
+          AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_files')} f WHERE f.id=g.id AND f.kind='file' AND f.sha256 IS NOT NULL)
+        FOR UPDATE OF g SKIP LOCKED)`,
+      [message.runId, message.actionId],
+    )
+  ).rowCount;
+}
+
+/** The images a message claimed, oldest first. */
 async function messageImages(tx: AgentTransaction, message: DeliveredMessage) {
   return z.array(imageSchema).parse(
     (
       await tx.client.query(
         `SELECT g.id,f.name,f.media_type,f.size,f.sha256 FROM ${relation(tx, 'tf_image_generations')} g
-        JOIN ${relation(tx, 'tf_files')} f ON f.id=g.id AND f.kind='file' AND f.sha256 IS NOT NULL
-        WHERE g.origin_kind='run' AND g.origin_id=$1 AND g.state='saved'
-          AND (SELECT a.id FROM ${relation(tx, 'tf_slack_actions')} a WHERE a.run_id=$1
-            AND a.action->>'tool' IN ('slack.message.send','slack.thread.reply') AND a.created_at>g.updated_at
-            ORDER BY a.created_at,a.id LIMIT 1)=$2
-        ORDER BY g.updated_at,g.id LIMIT ${imagesPerMessage}`,
-        [message.runId, message.actionId],
+        JOIN ${relation(tx, 'tf_files')} f ON f.id=g.id
+        WHERE g.slack_action_id=$1 ORDER BY g.updated_at,g.id`,
+        [message.actionId],
       )
     ).rows,
   );
@@ -91,11 +102,10 @@ async function audienceReaders(tx: AgentTransaction, message: DeliveredMessage):
  * person in the destination can read it in Files now, and only while the app holds `files:write`.
  */
 async function plan(
-  tx: AgentTransaction & { commonVersion: number },
+  tx: AgentTransaction,
   message: DeliveredMessage,
   cipher: ReturnType<typeof slackCredentialCipher>,
 ): Promise<Plan | null> {
-  if (tx.commonVersion < 15) return null;
   const images = await messageImages(tx, message);
   if (!images.length) return null;
   const installation = z
@@ -130,44 +140,52 @@ async function plan(
   return {
     token,
     upload: installation.scopes.includes(slackFileUploadScope),
-    images: images.map(image => {
+    images: images.map((image, index) => {
       const entry = readable.get(image.id);
       return {
         ...image,
         readable: !!readers && entry?.sha256 === image.sha256 && entry.readers.size === readers.length,
+        overflow: index >= imagesPerMessage,
       };
     }),
   };
 }
 
-const note = (names: readonly string[]) =>
-  names.length === 1
-    ? `An image from this run is in TulipFarm Files and was not attached here: ${names[0]}`
-    : `${names.length} images from this run are in TulipFarm Files and were not attached here: ${names.join(', ')}`;
+/**
+ * The thread note for images left out. Only images everyone in the destination can read in Files are named: a
+ * generated image is named after its prompt, so a withheld one's name would leak the prompt.
+ */
+function note(count: number, names: readonly string[]) {
+  const lead =
+    count === 1
+      ? 'An image from this run is in TulipFarm Files and was not attached here'
+      : `${count} images from this run are in TulipFarm Files and were not attached here`;
+  if (!names.length) return `${lead}.`;
+  return `${lead}${names.length < count ? ', including' : ''}: ${names.join(', ')}`;
+}
 
 /**
- * Shares the images a run saved in the Slack message it just delivered, once: the caller runs this only after its own
- * claimed send succeeded, and a retried send finds the message already sent. Images someone in the destination cannot
- * read in Files, and every image while the app lacks `files:write`, stay out; a note in the thread names them instead.
- * Nothing here fails the delivery.
+ * Shares the images a message claimed (`claimRunImages`) in its thread, once: the caller runs this only after the send
+ * that claimed them committed, and a retried send finds the message already sent. Images someone in the destination
+ * cannot read in Files, every image while the app lacks `files:write`, and those past the first eight stay out; a note
+ * in the thread counts them, naming only those everyone there can read. Nothing here fails the delivery.
  */
 export async function deliverRunImages(
   message: DeliveredMessage,
   options: {
-    transaction: <T>(operation: (tx: AgentTransaction & { commonVersion: number }) => Promise<T>) => Promise<T>;
+    transaction: <T>(operation: (tx: AgentTransaction) => Promise<T>) => Promise<T>;
     files: SlackImageFiles;
     cipher: ReturnType<typeof slackCredentialCipher>;
     fetcher?: typeof fetch | undefined;
   },
 ) {
   try {
-    if (!(await isFeatureEnabled('images', null, { id: message.workspaceId }))) return;
     const decided = await options.transaction(tx => plan(tx, message, options.cipher));
     if (!decided) return;
     const outcomes = new Map<string, MediaOutcome>();
     const uploads: { image: Image; bytes: Uint8Array }[] = [];
     for (const image of decided.images) {
-      if (!decided.upload) outcomes.set(image.id, 'unavailable');
+      if (!decided.upload || image.overflow) outcomes.set(image.id, 'unavailable');
       else if (!image.readable) outcomes.set(image.id, 'withheld');
       else {
         try {
@@ -197,7 +215,10 @@ export async function deliverRunImages(
         token: decided.token,
         channel: message.channel,
         threadTs: message.threadTs,
-        text: note(left.map(image => image.name)),
+        text: note(
+          left.length,
+          left.filter(image => image.readable && !image.overflow).map(image => image.name),
+        ),
         ...fetcher,
       }).catch(() => {});
     for (const image of decided.images)

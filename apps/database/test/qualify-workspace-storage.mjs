@@ -285,6 +285,7 @@ try {
     'packages/workspace-storage/common/0014_conversation_links.sql',
     'packages/workspace-storage/common/0015_image_generations.sql',
     'packages/workspace-storage/common/0016_recognition_receipts.sql',
+    'packages/workspace-storage/common/0017_slack_image_deliveries.sql',
     ...['table-migrations', 'table-registry', 'credentials', 'operators'].map(
       name => `packages/workspaces/src/${name}.ts`,
     ),
@@ -315,6 +316,7 @@ try {
       '0014_conversation_links.sql',
       '0015_image_generations.sql',
       '0016_recognition_receipts.sql',
+      '0017_slack_image_deliveries.sql',
     ],
   );
   emit({
