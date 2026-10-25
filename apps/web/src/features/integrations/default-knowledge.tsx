@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { TriangleAlertIcon } from 'lucide-react';
+import { CirclePauseIcon, TriangleAlertIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -464,6 +464,21 @@ function IntentRow({
         <IntentMark intent={intent} issue={issue} />
         <p className="min-w-0 flex-1 basis-40 break-words font-medium">{intent.accountLabel}</p>
         {statusBadge(intent, issue)}
+        {intent.state === 'active' && !confirm && (
+          <Button
+            ref={stopRef}
+            variant="outline"
+            size="sm"
+            disabled={command.locked}
+            onClick={() => {
+              focus.current = 'confirm';
+              setConfirm(true);
+            }}
+          >
+            <CirclePauseIcon aria-hidden="true" />
+            Stop automatic Knowledge
+          </Button>
+        )}
       </div>
       {intent.state === 'active' && (
         <>
@@ -542,7 +557,7 @@ function IntentRow({
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 empty:hidden">
         {intent.state === 'active' && issue?.recovery === 'reconnect' && action && (
           <RepairAction workspaceId={workspaceId} repair={action} />
         )}
@@ -557,19 +572,6 @@ function IntentRow({
             onClick={() => void command.send('retry')}
           >
             {issue?.recovery === 'check' ? 'Check again' : 'Retry now'}
-          </Button>
-        )}
-        {intent.state === 'active' && !confirm && (
-          <Button
-            ref={stopRef}
-            variant="ghost"
-            disabled={command.locked}
-            onClick={() => {
-              focus.current = 'confirm';
-              setConfirm(true);
-            }}
-          >
-            Stop automatic Knowledge
           </Button>
         )}
         {intent.state === 'opted-out' && (
