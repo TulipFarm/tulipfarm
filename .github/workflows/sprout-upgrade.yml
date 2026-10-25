@@ -1,11 +1,16 @@
-# Upgrades @tulipfarm/sprout when Sprout publishes a release, then opens a pull request.
+# Upgrades @tulipfarm/sprout when Sprout publishes a release, then opens two pull
+# requests: the upgrade, and a stacked one that adopts what the release added.
 #
 # 1. resolve: compares the latest Sprout release with the pin. It stops if the pin
 #    is current or a pull request for that version already exists.
 # 2. upgrade: bumps the pin, has Copilot CLI migrate the code with the changelog
 #    and the source diff (brief: .github/sprout-upgrade/PROMPT.md), re-runs the
 #    checks itself, and opens the pull request. If a check fails, the pull request
-#    opens as a draft with the failures listed. Older open upgrade PRs are closed.
+#    opens as a draft with the failures listed. Checks: .github/sprout-upgrade/checks.sh.
+# 3. adopt (same job, only if the upgrade passed): Copilot replaces hand-rolled
+#    code with components, props or tokens the release added (brief: ADOPT.md),
+#    the checks run again, and a pull request onto the upgrade branch opens if
+#    anything changed. Older open upgrade and adoption PRs are closed.
 #
 # Triggers: a `sprout-release` dispatch from Sprout's notify-consumers workflow,
 # an hourly poll in case a dispatch is missed, and a manual run.
@@ -94,13 +99,14 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.upgrade == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
     env:
       SPROUT_CURRENT: ${{ needs.resolve.outputs.current }}
       SPROUT_TARGET: ${{ needs.resolve.outputs.target }}
       BRANCH: ${{ needs.resolve.outputs.branch }}
+      ADOPT_BRANCH: sprout-adopt/v${{ needs.resolve.outputs.target }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -117,9 +123,11 @@ jobs:
             echo "SPROUT_DIR=$RUNNER_TEMP/sprout"
             echo "CONTEXT_DIR=$RUNNER_TEMP/sprout-upgrade"
             echo "REPORT_FILE=$RUNNER_TEMP/sprout-upgrade/report.md"
+            echo "ADOPT_REPORT_FILE=$RUNNER_TEMP/sprout-upgrade/adopt-report.md"
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/sprout-upgrade"
           git clone --quiet --filter=blob:none https://github.com/TulipFarm/sprout.git "$RUNNER_TEMP/sprout"
+          git -C "$RUNNER_TEMP/sprout" checkout --quiet "v$SPROUT_TARGET"
           awk -v to="[$SPROUT_TARGET]" -v from="[$SPROUT_CURRENT]" '
             /^#+ \[[0-9]/ { if (index($0, from)) exit; if (index($0, to)) on = 1 }
             on
@@ -158,44 +166,20 @@ jobs:
       - name: Verify
         id: verify
         run: |
-          results="$CONTEXT_DIR/checks.md"
-          printf '| Check | Result |\n| --- | --- |\n' > "$results"
-          passed=true
-          check() {
-            local name=$1
-            shift
-            echo "::group::$name"
-            if "$@"; then
-              echo "| \`$name\` | ✅ passed |" >> "$results"
-            else
-              echo "| \`$name\` | ❌ failed |" >> "$results"
-              passed=false
-            fi
-            echo "::endgroup::"
-          }
-          check 'pnpm install --frozen-lockfile' pnpm install --frozen-lockfile
-          check 'pnpm lint' pnpm lint
-          check 'turbo run typecheck build test --filter=@tulipfarm/web' \
-            pnpm exec turbo run typecheck build test --filter=@tulipfarm/web
+          # Copilot must not change workflows or this automation, including the checks.
+          git restore --source=HEAD --staged --worktree -- .github
+          git clean -fdq -- .github
+          if bash .github/sprout-upgrade/checks.sh "$CONTEXT_DIR/checks.md"; then passed=true; else passed=false; fi
           echo "passed=$passed" >> "$GITHUB_OUTPUT"
-          cat "$results" >> "$GITHUB_STEP_SUMMARY"
+          cat "$CONTEXT_DIR/checks.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Open the pull request
+      - name: Open the upgrade pull request
+        id: upgrade-pr
         env:
           GH_TOKEN: ${{ secrets.SPROUT_UPGRADE_TOKEN }}
           PASSED: ${{ steps.verify.outputs.passed == 'true' && steps.copilot.outcome == 'success' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # Copilot must not change workflows or this automation.
-          git restore --source=HEAD --staged --worktree -- .github
-          git clean -fdq -- .github
-          git config user.name tulipfarm-dot
-          git config user.email 291055112+tulipfarm-dot@users.noreply.github.com
-          git switch -c "$BRANCH"
-          git add -A
-          git commit -qm "chore(deps): upgrade @tulipfarm/sprout to $SPROUT_TARGET"
-          git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$BRANCH"
-
           sprout=https://github.com/TulipFarm/sprout
           {
             echo "Upgrades \`@tulipfarm/sprout\` from $SPROUT_CURRENT to $SPROUT_TARGET ([release]($sprout/releases/tag/v$SPROUT_TARGET), [diff]($sprout/compare/v$SPROUT_CURRENT...v$SPROUT_TARGET))."
@@ -222,20 +206,85 @@ jobs:
             echo "Opened by the [Sprout upgrade workflow]($RUN_URL). Review the diff before merging."
           } | head -c 60000 > "$RUNNER_TEMP/body.md"
 
-          title="chore(deps): upgrade @tulipfarm/sprout to $SPROUT_TARGET"
-          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = OPEN ]; then
-            gh pr edit "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"
-            if [ "$PASSED" = true ]; then gh pr ready "$BRANCH" || true; else gh pr ready --undo "$BRANCH" || true; fi
-            url=$(gh pr view "$BRANCH" --json url --jq .url)
-          else
-            draft=()
-            [ "$PASSED" = true ] || draft=(--draft)
-            url=$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md" "${draft[@]}")
-          fi
-          echo "Pull request: $url" >> "$GITHUB_STEP_SUMMARY"
+          url=$(BASE=main TITLE="chore(deps): upgrade @tulipfarm/sprout to $SPROUT_TARGET" \
+            BODY_FILE="$RUNNER_TEMP/body.md" bash .github/sprout-upgrade/open-pr.sh)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Upgrade pull request: $url" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Adopt new components with Copilot
+        id: adopt
+        if: steps.verify.outputs.passed == 'true' && steps.copilot.outcome == 'success'
+        continue-on-error: true
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.SPROUT_UPGRADE_COPILOT_TOKEN }}
+          COPILOT_MODEL: ${{ vars.SPROUT_UPGRADE_MODEL }}
+        run: |
+          copilot ${COPILOT_MODEL:+--model "$COPILOT_MODEL"} \
+            --no-ask-user --allow-all-tools --add-dir "$RUNNER_TEMP" \
+            --deny-tool='shell(git push)' --deny-tool='shell(git commit)' --deny-tool='shell(gh)' \
+            -p "Follow .github/sprout-upgrade/ADOPT.md. SPROUT_CURRENT=$SPROUT_CURRENT SPROUT_TARGET=$SPROUT_TARGET SPROUT_DIR=$SPROUT_DIR CONTEXT_DIR=$CONTEXT_DIR REPORT_FILE=$REPORT_FILE ADOPT_REPORT_FILE=$ADOPT_REPORT_FILE"
+
+      - name: Verify the adoption
+        id: verify-adopt
+        if: steps.adopt.outcome == 'success' || steps.adopt.outcome == 'failure'
+        run: |
+          git restore --source=HEAD --staged --worktree -- .github
+          git clean -fdq -- .github
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'Copilot adopted nothing.' | tee -a "$GITHUB_STEP_SUMMARY"
+            [ -s "$ADOPT_REPORT_FILE" ] && cat "$ADOPT_REPORT_FILE" >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if bash .github/sprout-upgrade/checks.sh "$CONTEXT_DIR/adopt-checks.md"; then passed=true; else passed=false; fi
+          {
+            echo "changed=true"
+            echo "passed=$passed"
+          } >> "$GITHUB_OUTPUT"
+          cat "$CONTEXT_DIR/adopt-checks.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open the adoption pull request
+        id: adopt-pr
+        if: steps.verify-adopt.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SPROUT_UPGRADE_TOKEN }}
+          PASSED: ${{ steps.verify-adopt.outputs.passed == 'true' && steps.adopt.outcome == 'success' }}
+          UPGRADE_URL: ${{ steps.upgrade-pr.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "Adopts what \`@tulipfarm/sprout\` $SPROUT_TARGET added, where it replaces code written here by hand. Stacked on $UPGRADE_URL: merge that first. This pull request then retargets to \`main\`; select **Update branch** so the diff shows only the adoption."
+            echo
+            if [ "$PASSED" != true ]; then
+              echo '> [!WARNING]'
+              echo '> Checks fail after the adoption, or Copilot did not finish. Fix them on this branch, or close this pull request; the upgrade does not depend on it.'
+              echo
+            fi
+            echo '## Checks'
+            echo
+            cat "$CONTEXT_DIR/adopt-checks.md"
+            echo
+            echo '## Adoption notes'
+            echo
+            if [ -s "$ADOPT_REPORT_FILE" ]; then cat "$ADOPT_REPORT_FILE"; else echo "Copilot wrote no report. See the [workflow run]($RUN_URL)."; fi
+            echo
+            echo "Opened by the [Sprout upgrade workflow]($RUN_URL). Try the changed screens before merging."
+          } | head -c 60000 > "$RUNNER_TEMP/adopt-body.md"
+
+          upgrade_branch=$BRANCH
+          url=$(BRANCH="$ADOPT_BRANCH" BASE="$upgrade_branch" TITLE="refactor(web): adopt new @tulipfarm/sprout $SPROUT_TARGET components" \
+            BODY_FILE="$RUNNER_TEMP/adopt-body.md" bash .github/sprout-upgrade/open-pr.sh)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Adoption pull request: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close superseded pull requests
+        if: steps.upgrade-pr.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ secrets.SPROUT_UPGRADE_TOKEN }}
+          UPGRADE_URL: ${{ steps.upgrade-pr.outputs.url }}
+        run: |
           gh pr list --state open --json number,headRefName \
-            --jq ".[] | select(.headRefName | startswith(\"sprout-upgrade/v\")) | select(.headRefName != \"$BRANCH\") | .number" |
+            --jq ".[] | select(.headRefName | test(\"^sprout-(upgrade|adopt)/v\")) | select(.headRefName != \"$BRANCH\" and .headRefName != \"$ADOPT_BRANCH\") | .number" |
             while read -r number; do
-              gh pr close "$number" --comment "Superseded by $url."
+              gh pr close "$number" --comment "Superseded by $UPGRADE_URL."
             done

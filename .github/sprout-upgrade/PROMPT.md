@@ -23,21 +23,15 @@ The workflow has already:
    For the exact new API, read `$SPROUT_DIR/packages/sprout/src`. For usage
    rules, read `$SPROUT_DIR/skills/sprout/SKILL.md`.
 4. Update version mentions of Sprout in docs, such as `DESIGN.md`.
-5. Run the checks below and fix every failure the upgrade caused. Leave
-   failures that already happen on `main` alone and report them.
-
-## Checks
-
-```sh
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm exec turbo run typecheck build test --filter=@tulipfarm/web
-```
+5. Run `bash .github/sprout-upgrade/checks.sh "$CONTEXT_DIR/checks.md"` and
+   fix every failure the upgrade caused. Leave failures that already happen on
+   `main` alone and report them.
 
 ## Rules
 
 - Keep the change to what the upgrade needs. If a new Sprout component could
-  replace code here, list it under follow-ups instead of adopting it.
+  replace code here, list it under follow-ups instead of adopting it. A second
+  run adopts follow-ups in a separate pull request (brief: `ADOPT.md`).
 - Never weaken a check to make it pass: no skipped or deleted tests, removed
   assertions, `@ts-ignore`, `@ts-expect-error`, lint-disable comments, `any`,
   or loosened thresholds.
