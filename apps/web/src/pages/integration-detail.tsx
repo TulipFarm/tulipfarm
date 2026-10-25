@@ -43,6 +43,7 @@ import { KnowledgeMeter } from '@/features/integrations/knowledge-meter';
 import { useGoogleIntegration, useIntegrationChanges } from '@/features/integrations/queries';
 import { SlackAccount, SlackIntegration, SlackKnowledge } from '@/features/integrations/slack';
 import { SlackBotChannels } from '@/features/integrations/slack-channels';
+import { SlackChannelContentPrototype } from '@/features/integrations/slack-channel-content-prototype';
 import { statusOf, useIntegrationStatus, type Status } from '@/features/integrations/status';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
 import { useFlag } from '@/lib/feature-flags';
@@ -612,6 +613,7 @@ function KnowledgeTab({ app, status, workspaceId }: { app: Integration; status: 
     <div className="space-y-10">
       <DefaultKnowledge workspaceId={workspaceId} product={product} connected={connected} />
       {app.provider === 'google' && <GoogleSources workspaceId={workspaceId} gmail={app.id === 'gmail'} />}
+      {app.provider === 'slack' && githubRepositoryPrototypeEnabled && <SlackChannelContentPrototype />}
       {app.provider === 'slack' && <SlackKnowledge workspaceId={workspaceId} />}
       {app.provider === 'github-personal' &&
         (githubRepositoryPrototypeEnabled ? (
