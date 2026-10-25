@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -418,6 +418,9 @@ test('an overlapping run for the same file DM never leaves an attachment whose b
   assert.equal(f.bytes.objects.size, 2, 'the failed run left no bytes behind');
 });
 
+const temporalCli = process.env.TEST_TEMPORAL_CLI ?? 'temporal';
+const withoutTemporal = spawnSync(temporalCli, ['--version']).error ? 'the temporal CLI is not installed' : false;
+
 /**
  * A local Temporal dev server running the compiled workflows on their own task queue, with `f`'s file DM activities.
  * `pass` runs one dispatch pass as `slack-composition.ts` does, starting each file DM's own workflow.
@@ -429,7 +432,7 @@ async function temporal(t, f, { workflowModules = [] } = {}) {
   await new Promise(resolve => reservation.close(resolve));
   const [ip, port] = address.split(':');
   const server = spawn(
-    process.env.TEST_TEMPORAL_CLI ?? 'temporal',
+    temporalCli,
     ['server', 'start-dev', '--ip', ip, '--port', port, '--headless', '--log-level', 'error'],
     { stdio: 'ignore' },
   );
@@ -483,7 +486,7 @@ async function temporal(t, f, { workflowModules = [] } = {}) {
 
 test(
   'a file DM whose bytes can never be stored is not downloaded again on every dispatch pass',
-  { timeout: 120_000 },
+  { timeout: 120_000, skip: withoutTemporal },
   async t => {
     const f = await setup(t);
     f.served.set(fileUrl, await png(32, 24));
@@ -505,7 +508,7 @@ test(
 
 test(
   'a file DM whose bytes are never stored is admitted with the file named as not read, and its thread moves on',
-  { timeout: 120_000 },
+  { timeout: 120_000, skip: withoutTemporal },
   async t => {
     const f = await setup(t);
     f.served.set(fileUrl, await png(32, 24));
