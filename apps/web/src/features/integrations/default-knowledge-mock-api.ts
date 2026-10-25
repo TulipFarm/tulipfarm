@@ -369,7 +369,7 @@ const jiraSource = (
     cloudId: jiraCloud,
     targets: [{ kind: 'project', id: `1000${n}`, descendants: false }],
   },
-  memberIds: [],
+  memberIds: Array.from({ length: n === 2 ? 3 : 1 }, (_, i) => `6b6b6b6b-6b6b-4b6b-8b6b-00000000000${i}`),
   title,
   state: 'active',
   syncState: sync,
