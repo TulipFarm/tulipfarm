@@ -289,13 +289,13 @@ test(
             await f.page.getByRole('button', { name: 'Save Slack source', exact: true }).click();
             await f.page.getByText('Choose at least one Slack conversation before saving.').waitFor();
             assert.equal(f.writes.filter(write => write.kind === 'save').length, 0);
-            await f.page.getByRole('checkbox', { name: '#leadership (private)' }).click();
+            await f.page.getByRole('checkbox', { name: 'leadership (private channel)' }).click();
             await f.page.getByRole('button', { name: 'Next conversations' }).click();
-            await f.page.getByRole('checkbox', { name: '#archive-2025' }).click();
+            await f.page.getByRole('checkbox', { name: 'archive-2025' }).click();
             assert.ok(f.reads.some(read => read.query.cursor === 'page-2'));
             await f.page.getByText('2 conversations selected.').waitFor();
             await f.page.getByRole('button', { name: 'Previous conversations' }).click();
-            await f.page.getByRole('checkbox', { name: '#general' }).click();
+            await f.page.getByRole('checkbox', { name: 'general', exact: true }).click();
             f.faults.save = 503;
             f.faults.saveDelay = 500;
             await f.page.getByRole('button', { name: 'Save Slack source', exact: true }).dblclick();
@@ -337,7 +337,7 @@ test(
           assert.deepEqual(personal.selection, { kind: 'personal', conversationIds: ['DFRIEND'], after });
           assert.deepEqual(personal.memberIds, []);
           await f.select();
-          await f.page.getByRole('checkbox', { name: '#general' }).click();
+          await f.page.getByRole('checkbox', { name: 'general', exact: true }).click();
           f.faults.members = 503;
           await f.page.getByRole('checkbox', { name: 'Share with selected workspace members' }).click();
           await f.page.getByRole('button', { name: 'Retry loading workspace members' }).waitFor();

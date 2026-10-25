@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { HashIcon, LockIcon } from 'lucide-react';
+import { SlackChannelName, slackChannelMatches } from '@/components/slack-channel-name';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
@@ -80,10 +80,7 @@ export function SlackChannelContentPrototype() {
   const [saved, setSaved] = useState(seed);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<string | null>(null);
-  const shown = useMemo(
-    () => channels.filter(channel => channel.name.includes(query.trim().replace(/^#/, '').toLowerCase())),
-    [channels, query],
-  );
+  const shown = useMemo(() => channels.filter(channel => slackChannelMatches(channel.name, query)), [channels, query]);
   const dirty = JSON.stringify(channels) !== JSON.stringify(saved);
   const update = (id: string, change: (channel: Channel) => Channel) => {
     setStatus(null);
@@ -132,14 +129,8 @@ export function SlackChannelContentPrototype() {
             onCheckedChange={on => update(channel.id, item => ({ ...item, on }))}
           />
           <span className="min-w-0">
-            <span className="flex items-center gap-1 font-medium text-foreground">
-              {channel.visibility === 'private' ? (
-                <LockIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-              ) : (
-                <HashIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="break-all">{channel.name}</span>
-              {channel.visibility === 'private' && <span className="sr-only">(private channel)</span>}
+            <span className="flex font-medium text-foreground">
+              <SlackChannelName title={channel.name} private={channel.visibility === 'private'} />
             </span>
             <span className="block text-xs tabular-nums text-muted-foreground">
               {channel.members} members · {summary(channel)}

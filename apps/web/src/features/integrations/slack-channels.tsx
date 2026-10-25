@@ -1,8 +1,10 @@
-import { HashIcon, LockIcon } from 'lucide-react';
+import { useState } from 'react';
 import { z } from 'zod';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
+import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { SlackChannelName, slackChannelMatches, slackListSearchFrom } from '@/components/slack-channel-name';
 import { apiOrigin } from '@/lib/auth';
 import { IntegrationRequestError } from '@/lib/integrations';
 import { jsonResponse, readJson, requestSignal } from '@/lib/http';
@@ -31,6 +33,9 @@ export function SlackBotChannels({ workspaceId }: { workspaceId: string }) {
   });
   const state = read.state;
   const refreshing = state.kind === 'ready' && state.refreshing;
+  const [query, setQuery] = useState('');
+  const shown =
+    state.kind === 'ready' ? state.data.channels.filter(channel => slackChannelMatches(channel.name, query)) : [];
   return (
     <section className="space-y-3" aria-labelledby="slack-bot-channels">
       <div className="flex items-center justify-between gap-3">
@@ -98,18 +103,21 @@ export function SlackBotChannels({ workspaceId }: { workspaceId: string }) {
         />
       ) : (
         <>
+          {state.data.channels.length > slackListSearchFrom && (
+            <SearchField label="Search channels" value={query} onChange={setQuery} />
+          )}
           <ul className="divide-y divide-border" aria-label="Slack channels with TulipFarm">
-            {state.data.channels.map(channel => (
-              <li key={channel.id} className="flex min-h-9 items-center gap-2 py-2 text-sm">
-                {channel.private ? (
-                  <LockIcon role="img" aria-label="Private channel" className="size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <HashIcon role="img" aria-label="Public channel" className="size-4 shrink-0 text-muted-foreground" />
-                )}
-                <span className="min-w-0 break-words">{channel.name}</span>
+            {shown.map(channel => (
+              <li key={channel.id} className="flex min-h-9 items-center py-2 text-sm">
+                <SlackChannelName title={channel.name} private={channel.private} />
               </li>
             ))}
           </ul>
+          {shown.length === 0 && (
+            <p role="status" className="text-sm text-muted-foreground">
+              No channels match “{query.trim()}”.
+            </p>
+          )}
           {!state.data.complete && (
             <p className="text-sm text-muted-foreground">Showing the first {state.data.channels.length} channels.</p>
           )}

@@ -99,9 +99,7 @@ try {
   await section.getByRole('button', { name: 'Refresh', exact: true }).click();
   const list = section.getByRole('list', { name: 'Slack channels with TulipFarm' });
   await list.waitFor();
-  assert.deepEqual(await list.getByRole('listitem').allInnerTexts(), ['leadership', 'random']);
-  await list.getByRole('img', { name: 'Private channel' }).waitFor();
-  await list.getByRole('img', { name: 'Public channel' }).waitFor();
+  assert.deepEqual(await list.getByRole('listitem').allInnerTexts(), ['leadership\n(private channel)', 'random']);
   await page.screenshot({ path: screenshot, fullPage: false });
   assert.equal(await section.getByText('2', { exact: true }).count(), 1);
   for (const colorScheme of ['light', 'dark']) {
