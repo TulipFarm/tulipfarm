@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { isIPv4, isIPv6 } from 'node:net';
 import { buildInfoSchema, productionBuildSchema, type BuildInfo } from '@tulipfarm/build-info';
 import {
@@ -43,6 +44,7 @@ import {
   trace,
   TraceFlags,
   type Attributes,
+  type BatchObservableCallback,
   type Context,
   type Span,
 } from '@opentelemetry/api';
@@ -702,6 +704,7 @@ export function startTelemetry(build: BuildInfo) {
         'cloud_workspace_connection_duration',
         'cloud_background_job_duration',
         'cloud_dependency_duration',
+        'cloud_temporal_schedule_to_start',
       ].map((instrumentName): ViewOptions => ({
         instrumentName,
         aggregation: {
@@ -747,6 +750,7 @@ export function startTelemetry(build: BuildInfo) {
   meter.createObservableGauge('cloud_process_memory', { unit: 'By' }).addCallback(result => {
     result.observe(process.memoryUsage().rss, dimensions);
   });
+  createRuntimeMetrics();
   log('info', 'lifecycle', 'service_started');
   return {
     resource,
@@ -1014,6 +1018,173 @@ export async function observeWorkspaceConnection<T>(phase: 'wait' | 'hold', call
         /* Export failures must not replace storage errors. */
       }
     }
+  }
+}
+
+/**
+ * Event-loop delay and utilisation, heap and CPU for this process: one series each, read at every export.
+ * Event-loop delay covers only the interval since the previous export.
+ */
+export function createRuntimeMetrics(resolutionMs = 20) {
+  const meter = metrics.getMeter(scope);
+  const delay = monitorEventLoopDelay({ resolution: resolutionMs });
+  delay.enable();
+  let previous = performance.eventLoopUtilization();
+  const p99 = meter.createObservableGauge('cloud_process_event_loop_delay_p99', {
+    unit: 's',
+    description: '99th percentile event-loop delay since the previous export',
+  });
+  const max = meter.createObservableGauge('cloud_process_event_loop_delay_max', {
+    unit: 's',
+    description: 'Longest event-loop delay since the previous export',
+  });
+  const utilization = meter.createObservableGauge('cloud_process_event_loop_utilization', {
+    description: 'Share of time the event loop was busy since the previous export',
+  });
+  const heap = meter.createObservableGauge('cloud_process_heap_used', { unit: 'By' });
+  const cpu = meter.createObservableCounter('cloud_process_cpu', {
+    unit: 's',
+    description: 'User and system CPU time of this process',
+  });
+  const observables = [p99, max, utilization, heap, cpu];
+  const callback: BatchObservableCallback = result => {
+    // The histogram reports nanoseconds and is empty until the loop has run for one resolution period.
+    if (delay.count > 0) {
+      result.observe(p99, delay.percentile(99) / 1e9, dimensions);
+      result.observe(max, delay.max / 1e9, dimensions);
+    }
+    delay.reset();
+    const current = performance.eventLoopUtilization();
+    result.observe(utilization, performance.eventLoopUtilization(current, previous).utilization, dimensions);
+    previous = current;
+    result.observe(heap, process.memoryUsage().heapUsed, dimensions);
+    const usage = process.cpuUsage();
+    result.observe(cpu, (usage.user + usage.system) / 1e6, dimensions);
+  };
+  meter.addBatchObservableCallback(callback, observables);
+  return {
+    stop() {
+      meter.removeBatchObservableCallback(callback, observables);
+      delay.disable();
+    },
+  };
+}
+
+export type TemporalSlotReading = {
+  taskQueue: string;
+  kind: 'activity' | 'workflow';
+  used: number;
+  limit: number;
+};
+const temporalSlotReaders = new Set<() => Iterable<TemporalSlotReading>>();
+let temporalSlotsRegistered = false;
+
+/** Reports used and configured task slots of running Temporal workers; task queue names are fixed per deployment. */
+export function observeTemporalSlots(read: () => Iterable<TemporalSlotReading>): () => void {
+  temporalSlotReaders.add(read);
+  if (!temporalSlotsRegistered) {
+    temporalSlotsRegistered = true;
+    const meter = metrics.getMeter(scope);
+    const used = meter.createObservableGauge('cloud_temporal_worker_slots_used', {
+      description: 'Activity or workflow tasks this worker is executing',
+    });
+    const limit = meter.createObservableGauge('cloud_temporal_worker_slots_limit', {
+      description: 'Activity or workflow tasks this worker may execute at once',
+    });
+    meter.addBatchObservableCallback(
+      result => {
+        for (const reader of temporalSlotReaders) {
+          try {
+            for (const reading of reader()) {
+              const labels = { ...dimensions, task_queue: reading.taskQueue, kind: reading.kind };
+              result.observe(used, reading.used, labels);
+              result.observe(limit, reading.limit, labels);
+            }
+          } catch {
+            /* A stopped worker must not prevent the other readings. */
+          }
+        }
+      },
+      [used, limit],
+    );
+  }
+  return () => temporalSlotReaders.delete(read);
+}
+
+/** Time a Temporal activity attempt waited between being scheduled and starting on this worker. */
+export function recordTemporalScheduleToStart(taskQueue: string, seconds: number) {
+  try {
+    metrics
+      .getMeter(scope)
+      .createHistogram('cloud_temporal_schedule_to_start', {
+        unit: 's',
+        description: 'Delay between scheduling an activity attempt and a worker starting it',
+      })
+      .record(Math.max(0, seconds), { ...dimensions, task_queue: taskQueue, kind: 'activity' });
+  } catch {
+    /* Telemetry must not fail the activity. */
+  }
+}
+
+export type WorkspaceAdmissionReading = {
+  active: number;
+  activeBackground: number;
+  queued: number;
+  queuedBackground: number;
+  limit: number;
+};
+const admissionReaders = new Set<() => WorkspaceAdmissionReading>();
+let admissionRegistered = false;
+
+/** Reports workspace-storage transaction admission: admitted, queued and the configured limit, summed over runtimes. */
+export function observeWorkspaceAdmission(read: () => WorkspaceAdmissionReading): () => void {
+  admissionReaders.add(read);
+  if (!admissionRegistered) {
+    admissionRegistered = true;
+    const meter = metrics.getMeter(scope);
+    const transactions = meter.createObservableGauge('cloud_workspace_storage_transactions', {
+      description: 'Workspace transactions admitted or queued for admission',
+    });
+    const limit = meter.createObservableGauge('cloud_workspace_storage_transactions_limit', {
+      description: 'Workspace transactions this process admits at once',
+    });
+    meter.addBatchObservableCallback(
+      result => {
+        const total = { active: 0, activeBackground: 0, queued: 0, queuedBackground: 0, limit: 0 };
+        for (const reader of admissionReaders) {
+          try {
+            const reading = reader();
+            for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += reading[key];
+          } catch {
+            /* A closed runtime must not prevent the other readings. */
+          }
+        }
+        for (const [state, work, value] of [
+          ['active', 'request', total.active - total.activeBackground],
+          ['active', 'background', total.activeBackground],
+          ['queued', 'request', total.queued],
+          ['queued', 'background', total.queuedBackground],
+        ] as const)
+          result.observe(transactions, value, { ...dimensions, state, work });
+        result.observe(limit, total.limit, dimensions);
+      },
+      [transactions, limit],
+    );
+  }
+  return () => admissionReaders.delete(read);
+}
+
+/** Counts transactions refused admission or a connection; `reason` is a fixed storage error code. */
+export function recordWorkspaceAdmissionRejection(reason: string, background: boolean) {
+  try {
+    metrics
+      .getMeter(scope)
+      .createCounter('cloud_workspace_storage_rejections', {
+        description: 'Workspace transactions refused before running',
+      })
+      .add(1, { ...dimensions, reason, work: background ? 'background' : 'request' });
+  } catch {
+    /* Telemetry must not replace the storage error. */
   }
 }
 

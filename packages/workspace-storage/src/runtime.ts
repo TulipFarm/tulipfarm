@@ -4,7 +4,9 @@ import {
   inBackgroundJob,
   observeChatDetail,
   observeChatTransaction,
+  observeWorkspaceAdmission,
   observeWorkspaceConnection,
+  recordWorkspaceAdmissionRejection,
 } from '@tulipfarm/observability';
 import { commonTables, qualified, workspaceIdSchema, workspaceNames } from './names.ts';
 import { inTransaction, resetClient, type SqlClient } from './transactions.ts';
@@ -228,6 +230,13 @@ export function createWorkspaceRuntime(
     Math.min(config.idleTimeoutMs, 1_000),
   );
   eviction.unref();
+  const stopAdmissionMetrics = observeWorkspaceAdmission(() => ({
+    active,
+    activeBackground,
+    queued: queue.length,
+    queuedBackground: backgroundQueue.length,
+    limit: config.maxConcurrentTransactions,
+  }));
 
   function admissible(background: boolean) {
     return active < config.maxConcurrentTransactions && (!background || activeBackground < maxBackground);
@@ -247,8 +256,10 @@ export function createWorkspaceRuntime(
       return Promise.resolve();
     }
     // Queued jobs never fill the queue for requests.
-    if ((background ? queue.length + backgroundQueue.length : queue.length) >= config.maxQueue)
+    if ((background ? queue.length + backgroundQueue.length : queue.length) >= config.maxQueue) {
+      recordWorkspaceAdmissionRejection('queue_full', background);
       return Promise.reject(new StorageUnavailableError('queue_full'));
+    }
     const waiting = background ? backgroundQueue : queue;
     return new Promise((resolve, reject) => {
       const cleanup = () => {
@@ -267,7 +278,10 @@ export function createWorkspaceRuntime(
           reject(error);
         },
       };
-      const abort = () => waiter.reject(new StorageUnavailableError('wait_timeout'));
+      const abort = () => {
+        recordWorkspaceAdmissionRejection('wait_timeout', background);
+        waiter.reject(new StorageUnavailableError('wait_timeout'));
+      };
       const timer = setTimeout(abort, config.waitTimeoutMs);
       deadline.signal.addEventListener('abort', abort, { once: true });
       waiting.push(waiter);
@@ -303,6 +317,7 @@ export function createWorkspaceRuntime(
           const timer = setTimeout(() => {
             const index = waiting.indexOf(grant);
             if (index >= 0) waiting.splice(index, 1);
+            recordWorkspaceAdmissionRejection('connection_timeout', background);
             reject(new StorageUnavailableError('wait_timeout'));
           }, config.connectionTimeoutMs);
           waiting.push(grant);
@@ -553,6 +568,7 @@ export function createWorkspaceRuntime(
     if (shutdown) return shutdown;
     closed = true;
     clearInterval(eviction);
+    stopAdmissionMetrics();
     for (const waiter of [...queue.splice(0), ...backgroundQueue.splice(0)])
       waiter.reject(new StorageUnavailableError('closed'));
     shutdown = (async () => {
