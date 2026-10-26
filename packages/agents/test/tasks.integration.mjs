@@ -168,7 +168,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const agent = await savedTaskAgent(db, w, runtime, user, member, selection);
   let tasks = createAgentTasks(runtime);
   const input = { requestId: randomUUID(), agentId: agent.agentId, text: 'Clean records only after exact approval.' };
-  let first;
+  let first, capped;
   await t.test('concurrent and changed replays never duplicate work or produce an executable run', async () => {
     const receipts = await Promise.all([tasks.start(w.id, user, input), tasks.start(w.id, user, input)]);
     first = receipts[0];
@@ -200,26 +200,32 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   });
   await t.test('agent task maxima clamp starts and continuations', async () => {
     const taskLimits = { toolCalls: 2, credits: 25, activeMilliseconds: 60000 };
-    await db.platform.query(`UPDATE ${table('tf_agent_limits')} SET task_limits=$2 WHERE agent_id=$1`, [
-      agent.agentId,
-      JSON.stringify(taskLimits),
-    ]);
-    const capped = await tasks.start(w.id, user, {
-      ...input,
-      requestId: randomUUID(),
-      limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
-    });
-    assert.deepEqual((await tasks.read(w.id, user, capped.id)).limits, taskLimits);
-    await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='paused' WHERE id=$1`, [capped.id]);
-    const sequence = (await tasks.history(w.id, user, capped.id)).messages.at(-1).sequence;
-    await tasks.continueTask(w.id, user, capped.id, {
-      requestId: randomUUID(),
-      expectedGeneration: 0,
-      expectedSequence: sequence,
-      text: 'Continue within the agent maximum.',
-      limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
-    });
-    assert.deepEqual((await tasks.read(w.id, user, capped.id)).limits, taskLimits);
+    // Configuring the agent creates its limits row; this agent was never configured.
+    await db.platform.query(
+      `INSERT INTO ${table('tf_agent_limits')} (agent_id,scope,task_limits) VALUES ($1,'[]',$2) ON CONFLICT (agent_id) DO UPDATE SET task_limits=EXCLUDED.task_limits`,
+      [agent.agentId, JSON.stringify(taskLimits)],
+    );
+    try {
+      capped = await tasks.start(w.id, user, {
+        ...input,
+        requestId: randomUUID(),
+        limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
+      });
+      assert.deepEqual((await tasks.read(w.id, user, capped.id)).limits, taskLimits);
+      await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='paused' WHERE id=$1`, [capped.id]);
+      const sequence = (await tasks.history(w.id, user, capped.id)).messages.at(-1).sequence;
+      await tasks.continueTask(w.id, user, capped.id, {
+        requestId: randomUUID(),
+        expectedGeneration: 0,
+        expectedSequence: sequence,
+        text: 'Continue within the agent maximum.',
+        limits: { toolCalls: 10, credits: 100, activeMilliseconds: 600000 },
+      });
+      assert.deepEqual((await tasks.read(w.id, user, capped.id)).limits, taskLimits);
+    } finally {
+      // Later tests reopen tasks of this agent and expect its default maxima.
+      await db.platform.query(`DELETE FROM ${table('tf_agent_limits')} WHERE agent_id=$1`, [agent.agentId]);
+    }
   });
   await t.test(
     'new tasks select latest activation while old tasks retain reviewed procedure and definition revisions',
@@ -244,10 +250,14 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await tasks.read(w.id, user, second.id)).definitionRevision, latest.revision);
       assert.deepEqual((await tasks.read(w.id, user, first.id)).skills, selection);
       assert.equal((await tasks.read(w.id, user, first.id)).definitionRevision, agent.revision);
-      const page = await tasks.list(w.id, user, { limit: 1 });
-      const next = await tasks.list(w.id, user, { limit: 1, after: page.nextCursor });
-      assert.deepEqual(new Set([...page.tasks, ...next.tasks].map(item => item.id)), new Set([first.id, second.id]));
-      assert.equal(next.nextCursor, null);
+      const listed = [];
+      for (let after; ;) {
+        const page = await tasks.list(w.id, user, { limit: 1, ...(after ? { after } : {}) });
+        listed.push(...page.tasks.map(item => item.id));
+        if (!page.nextCursor) break;
+        after = page.nextCursor;
+      }
+      assert.deepEqual(listed.toSorted(), [first.id, capped.id, second.id].toSorted());
     },
   );
   await t.test(

@@ -141,6 +141,7 @@ try {
     'packages/workspace-storage/common/0015_image_generations.sql',
     'packages/workspace-storage/common/0016_recognition_receipts.sql',
     'packages/workspace-storage/common/0017_slack_image_deliveries.sql',
+    'packages/workspace-storage/common/0018_confirmation_conversation_activity.sql',
   ];
   emit({
     event: 'sources',
@@ -185,6 +186,7 @@ try {
       '0015_image_generations.sql',
       '0016_recognition_receipts.sql',
       '0017_slack_image_deliveries.sql',
+      '0018_confirmation_conversation_activity.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

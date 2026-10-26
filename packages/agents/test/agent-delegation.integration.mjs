@@ -242,7 +242,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             [bypass.callId],
           )
         ).rows[0].error,
-        'knowledge-budget-exhausted',
+        'knowledge-action-required',
+        'the shared root has spent its initial search, so the child must expand instead',
       );
       const deep = await queue(childRun.runId, 1, {
         tool: 'knowledge.retrieve',

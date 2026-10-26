@@ -1213,6 +1213,20 @@ test('safe diagnostics traverse bounded causes and aggregates without leaking ra
       assert.equal(lines[0][key], undefined);
     assert.doesNotMatch(JSON.stringify(lines), /PRIVATE/);
   });
+
+  test('log boundary keeps chat reply stages and catalog phases', t => {
+    const lines = [];
+    t.mock.method(process.stdout, 'write', line => {
+      lines.push(JSON.parse(line));
+      return true;
+    });
+    for (const stage of ['model', 'tool-recovery', 'metadata'])
+      log('warn', 'activity', 'chat_failed', { 'error.stage': stage });
+    assert.deepEqual(
+      lines.map(line => line['error.stage']),
+      ['model', 'tool-recovery', 'metadata'],
+    );
+  });
   for (const code of [
     'runtime_unavailable',
     'closed',

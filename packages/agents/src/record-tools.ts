@@ -482,7 +482,9 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           try {
             visible.push(await createAgentRecordTools(local({ ...tx, workspaceId })).status(workspaceId, actor, id));
           } catch (error) {
-            if (!(error instanceof AccessDenied)) throw error;
+            // A table still being created has no applied definition yet; it must not hide every other table.
+            if (!(error instanceof AccessDenied) && !(error instanceof TableError && error.code === 'table-not-found'))
+              throw error;
           }
         }
         const page = visible.filter(item => !query.after || item.id > query.after);

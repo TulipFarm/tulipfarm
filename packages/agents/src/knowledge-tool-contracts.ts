@@ -67,7 +67,15 @@ const hitSchema = z.strictObject({
   excerpt: z.string().max(600),
   source: kinds,
   ...freshness,
+  location: z.string().optional(),
+  note: z.string().optional(),
 });
+// Mirrors the Knowledge passage location: the page, slide or sheet a retrieved passage came from.
+const passageLocation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('page'), page: z.number().int().min(1) }),
+  z.strictObject({ kind: z.literal('slide'), slide: z.number().int().min(1) }),
+  z.strictObject({ kind: z.literal('sheet'), sheet: z.number().int().min(1), name: z.string() }),
+]);
 const sources = z.array(knowledgeSourceDependencySchema).max(12);
 const budget = z
   .strictObject({
@@ -84,6 +92,7 @@ export const knowledgeToolResultSchema = z.union([
     reason: z.string().nullable(),
     coverage: z.enum(['complete', 'partial', 'keyword-only']),
     hits: z.array(hitSchema).max(8),
+    notices: z.array(z.string()).optional(),
     instruction: z.string(),
     sources,
     budget,
@@ -97,6 +106,7 @@ export const knowledgeToolResultSchema = z.union([
     text: z.string().max(4000),
     truncated: z.boolean(),
     ...freshness,
+    location: z.string().optional(),
     instruction: z.string(),
     sources,
     budget,
@@ -140,12 +150,14 @@ export const knowledgeToolResultSchema = z.union([
                 completeness: z.enum(['complete', 'partial']),
                 omitted: z.boolean(),
                 ...freshness,
+                coverageGaps: z.boolean().optional(),
                 passages: z.array(
                   z.strictObject({
                     citationId: knowledgeCitationIdSchema,
                     heading: z.string(),
                     text: z.string(),
                     truncated: z.boolean(),
+                    location: passageLocation.optional(),
                   }),
                 ),
               }),

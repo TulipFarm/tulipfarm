@@ -286,6 +286,7 @@ try {
     'packages/workspace-storage/common/0015_image_generations.sql',
     'packages/workspace-storage/common/0016_recognition_receipts.sql',
     'packages/workspace-storage/common/0017_slack_image_deliveries.sql',
+    'packages/workspace-storage/common/0018_confirmation_conversation_activity.sql',
     ...['table-migrations', 'table-registry', 'credentials', 'operators'].map(
       name => `packages/workspaces/src/${name}.ts`,
     ),
@@ -317,6 +318,7 @@ try {
       '0015_image_generations.sql',
       '0016_recognition_receipts.sql',
       '0017_slack_image_deliveries.sql',
+      '0018_confirmation_conversation_activity.sql',
     ],
   );
   emit({
@@ -689,12 +691,12 @@ try {
       await check(`${workspace.label} ${capability} agent authorization read`, async () => {
         assert.equal((await client.query(`SELECT id FROM ${at('tf_agents')}`)).rowCount, 1);
       });
+      // The common baseline lets both roles read agent definitions and confirmation read tool calls, to check agent work.
       for (const table of [
         'tf_invitations',
         'tf_invitation_redemptions',
         'tf_retired_teams',
-        'tf_agent_definitions',
-        'tf_agent_tool_calls',
+        ...(capability === 'migration' ? ['tf_agent_tool_calls'] : []),
       ]) {
         await deny(
           client,

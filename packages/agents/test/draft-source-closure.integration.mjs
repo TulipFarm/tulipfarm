@@ -40,12 +40,16 @@ test('finite resource results retain every returned source and distinguish schem
       permission,
     ]);
   }
-  await assert.rejects(
-    createChatTools(f.runtime).invokeWithSources(
+  // Neither table has an applied definition yet, so listing omits both instead of failing.
+  const { tables } = (
+    await createChatTools(f.runtime).invokeWithSources(
       { workspaceId: w.id, actor, callId: randomUUID() },
       { tool: 'tables.list' },
-    ),
-    AccessDenied,
+    )
+  ).result;
+  assert.deepEqual(
+    tables.filter(table => table.id === first || table.id === second),
+    [],
   );
   const listed = {
     tables: [

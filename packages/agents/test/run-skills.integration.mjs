@@ -81,7 +81,11 @@ async function ownedObjects(t) {
 
 test(
   'run-bound reviewed workspace skills survive Soul saves and enforce live execution authority',
-  { timeout: 180000 },
+  {
+    timeout: 180000,
+    skip:
+      !process.env.RUSTFS_BINARY && 'Set RUSTFS_BINARY to a local RustFS executable. This test starts its own service.',
+  },
   async t => {
     const db = await fixture();
     let runtime;

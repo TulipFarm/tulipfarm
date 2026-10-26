@@ -16,7 +16,7 @@ import { createAgentAuthoring } from '../dist/authoring.js';
 import { createSavedAgentService } from '../dist/saved-service.js';
 import { agentCompatibility, createAgentStore } from '../dist/store.js';
 import { createAgentSchedules } from '../dist/schedules.js';
-import { policyVersion } from './soul-fixture.mjs';
+import { policyVersion, soulStorageSkip } from './soul-fixture.mjs';
 
 async function saveRace(owner, table, operations) {
   await owner.query('BEGIN');
@@ -45,7 +45,7 @@ async function saveRace(owner, table, operations) {
 
 test(
   'saved agents accept immutable Soul revisions with live grants and exact activations',
-  { timeout: 180000 },
+  { timeout: 180000, skip: soulStorageSkip },
   async () => {
     const soul = soulStorageConfig();
     assert.equal(soul.bucket, 'tulipfarm-cloud-soul-local');

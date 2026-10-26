@@ -229,7 +229,15 @@ async function sourceClosure(
           );
           if (receipts.rows.length > 1000) throw new AccessDenied();
           for (const receipt of receipts.rows) {
-            if (receipt.result?.sources) append(receipt.result.sources);
+            if (receipt.result?.kind === 'public-web')
+              // Web results list the pages they read, not source dependencies; each page is a public-web dependency.
+              append(
+                z
+                  .array(z.object({ url: z.string() }))
+                  .parse(receipt.result.sources ?? [])
+                  .map(page => ({ kind: 'public-web', url: page.url })),
+              );
+            else if (receipt.result?.sources) append(receipt.result.sources);
             if (full && receipt.call.tableId) append([{ kind: 'table', tableId: receipt.call.tableId }]);
             if (full && receipt.call.tool === 'tables.list' && receipt.result?.tables) {
               const tables = z.array(z.object({ id: uuidSchema })).parse(receipt.result.tables);

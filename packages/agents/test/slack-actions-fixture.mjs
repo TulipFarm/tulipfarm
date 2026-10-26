@@ -43,6 +43,7 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
       ? { channels: [{ id: 'CHR', name: 'slack-bot-test' }], response_metadata: { next_cursor: '' } }
       : { members: users, response_metadata: { next_cursor: '' } };
   let mode = 'success',
+    retryAfter = '1',
     audience = ['UALICE', 'UBOB', 'UGUEST', 'BOTHERBOT', 'UBOT'],
     messages = [{ user: 'UALICE', text: 'Shared request', ts: '1.000001' }];
   const server = createServer(async (req, res) => {
@@ -65,7 +66,7 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
         return;
       }
       if (mode === 'retry') {
-        res.writeHead(429, { 'retry-after': '1' }).end();
+        res.writeHead(429, { 'retry-after': retryAfter }).end();
         return;
       }
       if (mode === 'auth') {
@@ -332,8 +333,9 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
       uploads,
       bodies,
       imageFiles,
-      setMode: value => {
+      setMode: (value, seconds = '1') => {
         mode = value;
+        retryAfter = seconds;
       },
       setAudience: value => {
         audience = value;

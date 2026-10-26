@@ -199,12 +199,22 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     }
     assert.fail('Execution did not converge');
   };
-  const schema = (item, label) => ({
+  // Table titles are fixed after creation, so each schema change adds a field labelled with the change.
+  const schema = (item, change) => ({
     kind: 'schema',
     tableId: item.id,
     expectedRevision: item.revision,
     dependsOn: [],
-    target: { ...item.definition, label },
+    target:
+      change === item.definition.label
+        ? item.definition
+        : {
+            ...item.definition,
+            fields: [
+              ...item.definition.fields,
+              { id: randomUUID(), label: change, kind: 'text', required: false, maxLength: 1000 },
+            ],
+          },
     transforms: { outputs: [] },
   });
   const create = async () => {
@@ -247,6 +257,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     decisions,
   };
 }
+
+const hasField = (definition, label) => definition.fields.some(field => field.label === label);
 
 for (const scenario of ['resume', 'external-change', 'revoked-read'])
   test(`two discovery-sourced schema groups preserve exact proposal provenance: ${scenario}`, async t => {
@@ -385,8 +397,8 @@ for (const scenario of ['resume', 'external-change', 'revoked-read'])
       assert.equal(completed.freshness, 'current');
       assert.equal((await effects()).total, 0);
       const current = await f.tableService.definitions(f.ws.id, f.actor);
-      assert.equal(current.tables.find(row => row.id === a.id).definition.label, 'Completed A');
-      assert.equal(current.tables.find(row => row.id === b.id).definition.label, 'Dependent B');
+      assert.ok(hasField(current.tables.find(row => row.id === a.id).definition, 'Completed A'));
+      assert.ok(hasField(current.tables.find(row => row.id === b.id).definition, 'Dependent B'));
     } else {
       await assert.rejects(review(), AccessDenied);
       await assert.rejects(effects(), AccessDenied);
@@ -443,7 +455,7 @@ test('chat discovery provenance survives its own label/schema publication and re
     await f.transaction(tx => requireDraftSources(tx, f.actor, p.sources));
     assert.equal(await f.finish(p), 'completed');
     const current = (await f.tableService.definitions(f.ws.id, f.actor)).tables.find(row => row.id === item.id);
-    assert.equal(current.definition.label, `Updated ${change}`);
+    assert.ok(hasField(current.definition, `Updated ${change}`));
     assert.equal(
       (
         await f.tableService.read(f.ws.id, f.actor, {
@@ -550,7 +562,7 @@ test('schema.context provenance completes its own publication and rejects other 
   const completed = await review(own);
   assert.deepEqual([completed.status, completed.freshness], ['completed', 'current']);
   const renamed = await latest();
-  assert.equal(renamed.definition.label, 'Context rename');
+  assert.ok(hasField(renamed.definition, 'Context rename'));
   assert.equal(renamed.revision, published.target_revision);
   assert.equal(
     (await f.tableService.read(f.ws.id, f.actor, { tableId: item.id, revision: renamed.revision, recordId: record.id }))
@@ -595,7 +607,8 @@ test('schema.context provenance completes its own publication and rejects other 
   // Remove only the pause to exercise executor admission independently of resume.
   await f.db.platform.query(`DELETE FROM ${f.s}.tf_table_proposal_controls WHERE proposal_id=$1`, [paused.id]);
   assert.equal(await f.advance(f.ws.id, paused.id), 'blocked');
-  assert.equal((await latest()).definition.label, 'Other rename');
+  assert.ok(hasField((await latest()).definition, 'Other rename'));
+  assert.ok(!hasField((await latest()).definition, 'Paused rename'));
 
   const revoked = await viaContext('Revoked rename');
   await publishOwn(revoked);
@@ -606,15 +619,14 @@ test('schema.context provenance completes its own publication and rejects other 
       .rows[0].error_code,
     'access-denied',
   );
-  assert.equal(
-    (
-      await f.db.platform.query(
-        `SELECT definition->>'label' AS label FROM ${f.s}.tf_table_generations WHERE table_id=$1 AND state='active'`,
-        [item.id],
-      )
-    ).rows[0].label,
-    'Other rename',
-  );
+  const active = (
+    await f.db.platform.query(
+      `SELECT definition FROM ${f.s}.tf_table_generations WHERE table_id=$1 AND state='active'`,
+      [item.id],
+    )
+  ).rows[0].definition;
+  assert.ok(hasField(active, 'Other rename'));
+  assert.ok(!hasField(active, 'Revoked rename'));
 });
 
 test('transfer then chat discovery/proposal/apply uses current owner and preserves historical definitions', async t => {
@@ -721,8 +733,7 @@ test('transfer then chat discovery/proposal/apply uses current owner and preserv
     granted: false,
   });
   await assert.rejects(f.publish(f.ws.id, revoked.id), AccessDenied);
-  assert.equal(
-    (await f.tableService.definitions(f.ws.id, newActor)).tables.find(row => row.id === item.id).definition.label,
-    'Transferred and updated',
-  );
+  const transferred = (await f.tableService.definitions(f.ws.id, newActor)).tables.find(row => row.id === item.id);
+  assert.ok(hasField(transferred.definition, 'Transferred and updated'));
+  assert.ok(!hasField(transferred.definition, 'Revoked direct grant'));
 });

@@ -118,7 +118,7 @@ test('provisioning removes global and schema runtime defaults without erasing fo
         'GRANT SELECT ON {{schema}}.tf_soul_head TO {{migration}}; GRANT UPDATE (revision) ON {{schema}}.tf_soul_head TO {{migration}}; REVOKE DELETE ON {{schema}}.tf_outbox FROM {{runtime}};';
       const stream = [
         ...db.baseline,
-        { name: '0005_forward_grants.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+        { name: '9999_forward_grants.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
       ];
       await rolloutCommonMigrations({
         connectionString: db.connectionString,

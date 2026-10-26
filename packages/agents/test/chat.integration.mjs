@@ -12,7 +12,7 @@ import { createAgentStore } from '../dist/store.js';
 import { createAgentChat as createContinuityChat } from '../dist/chat.js';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { createSavedAgentService } from '../dist/saved-service.js';
-import { createSoulAgentFixture, policyVersion } from './soul-fixture.mjs';
+import { createSoulAgentFixture, policyVersion, soulStorageSkip } from './soul-fixture.mjs';
 import { provisionTestPgvector } from '../../workspace-storage/test/integration/pgvector.fixture.mjs';
 import { registerPlatformWorkspace } from '../../workspace-storage/test/integration/fixture.mjs';
 
@@ -20,7 +20,7 @@ const createAgentChat = (runtime, model) => createContinuityChat(runtime, model 
 
 test(
   'persisted chat pins revisions, serializes replay, executes real authorized tools and rejects revoked or hostile model decisions',
-  { timeout: 180000 },
+  { timeout: 180000, skip: soulStorageSkip },
   async () => {
     const workspaceId = randomUUID();
     const membershipId = randomUUID();

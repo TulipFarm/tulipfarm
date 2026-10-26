@@ -7,7 +7,7 @@ import { createGoogleOperations } from '@tulipfarm/google-workspace/operations';
 import { createChatTools } from '../src/tools.ts';
 import { googleRuntimeFixture } from './google-fixture.mjs';
 import { respondToConversation } from '../../../apps/worker/src/conversation-responder.ts';
-import { azureChat } from '../../../apps/worker/test/native-chat-fixture.mjs';
+import { azureChat, completionReply, isCompletionRequest } from '../../../apps/worker/test/native-chat-fixture.mjs';
 
 const cases = [
   { request: "Use description 'We're ready.'", description: "We're ready.", rejected: 'We' },
@@ -60,6 +60,7 @@ test('Calendar descriptions reach persisted owner review without English-regex c
             });
           t.mock.method(globalThis, 'fetch', async (_url, options) => {
             const body = JSON.parse(options.body);
+            if (isCompletionRequest(body)) return Response.json(completionReply('azure'));
             requests.push(body);
             const last = body.messages.at(-1).content;
             let decision;

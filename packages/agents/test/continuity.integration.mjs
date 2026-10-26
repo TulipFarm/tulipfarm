@@ -23,9 +23,12 @@ import { provisionTestPgvector } from '../../workspace-storage/test/integration/
 import { registerPlatformWorkspace } from '../../workspace-storage/test/integration/fixture.mjs';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension, installCreditAccount } from '@tulipfarm/workspace-storage/credit-account';
+import { hostedCreditPricingExtension } from '../../workspace-storage/test/hosted-credit-pricing.mjs';
 
 // These tests assert workspace balances, so they fund work from the credit account as a billing extension would.
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
+// They also assert whole-credit charges, so usage is priced as a billing extension would.
+await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
 const unavailable = {
   kind: 'failure',
@@ -1016,7 +1019,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         const before = (await owner.query(`SELECT id,call FROM ${table('tf_agent_tool_calls')} WHERE run_id=$1`, [id]))
           .rows;
         assert.equal(before.length, 1);
-        assert.equal(before[0].id, id);
+        assert.deepEqual(before[0].call, { tool: 'schema.inspect', tableId });
         await owner.query(`UPDATE ${table('tf_agent_chat_turns')} SET status='failed' WHERE id=$1`, [id]);
         await assert.rejects(
           chat.retry(workspaceId, ownerUserId, agentId, id, { requestId: randomUUID(), expectedGeneration: 0 }),

@@ -206,7 +206,7 @@ test('cancellation fences a subsequent tool and hides raw failures from history'
   }
 });
 
-test('competing completions cannot both execute a tool at the same sequence', async () => {
+test('competing deliveries of one reply execute its tool once', async () => {
   const f = await conversationFixture();
   try {
     const w = f.workspace,
@@ -217,30 +217,19 @@ test('competing completions cannot both execute a tool at the same sequence', as
       messageId: randomUUID(),
       parts: [{ kind: 'text', text: 'Run once' }],
     });
-    let arrivals = 0,
-      operations = 0;
-    let release;
-    const ready = new Promise(resolve => {
-      release = resolve;
-    });
+    let operations = 0;
     const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
-      if (++arrivals === 2) release();
-      await ready;
       await executeTool('skills.list', false, async () => {
         operations++;
         return { skills: [] };
       });
       return 'Done';
     });
-    const fence = await executor.claim({
-      workspaceId: w.id,
-      conversationId: chatId,
-      turnId: sent.turnId,
-      generation: 0,
-    });
-    const results = await Promise.allSettled([executor.complete(fence), executor.complete(fence)]);
+    // Tool receipts take the turn's next free sequence, so the claim lease, not the sequence, admits one delivery.
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    const results = await Promise.all([executor.process(work), executor.process(work)]);
     assert.equal(operations, 1);
-    assert.equal(results.filter(result => result.status === 'fulfilled' && result.value === 'completed').length, 1);
+    assert.deepEqual(results.toSorted(), ['completed', 'idle']);
     assert.equal((await f.store.history(w.id, w.userId, chatId)).messages[0].tools.length, 1);
   } finally {
     await f.close();
