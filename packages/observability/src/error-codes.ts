@@ -293,8 +293,26 @@ export type ErrorStage = (typeof errorStages)[number];
 const stages = new Set<string>(errorStages);
 const errorStage = new WeakMap<object, ErrorStage>();
 
+export const chatStages = [
+  'resume',
+  'claim',
+  'context',
+  'prepare',
+  'compaction',
+  'files',
+  'model',
+  'memory',
+  'tool',
+  'tool-recovery',
+  'delivery',
+  'dispatch',
+  'recovery',
+] as const;
+export type ChatStage = (typeof chatStages)[number];
+const loggedStages = new Set<string>([...errorStages, ...chatStages]);
+
 export function safeErrorStage(value: unknown): boolean {
-  return typeof value === 'string' && stages.has(value);
+  return typeof value === 'string' && loggedStages.has(value);
 }
 
 const catalogFields = {

@@ -141,6 +141,7 @@ test('a denied reply fails without retrying and logs the stage where the denial 
       id: sent.turnId,
       status: 'failed',
       generation: 1,
+      epoch: 1,
       errorCode: 'access-denied',
     });
     const failure = lines.map(line => JSON.parse(line)).find(record => record.operation === 'conversation.reply');

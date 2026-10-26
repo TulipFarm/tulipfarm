@@ -91,7 +91,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         [1, 2, 3],
       );
       assert.deepEqual(older.messages[0].parts, send.parts);
-      assert.deepEqual(older.messages[0].turn, { id: first.turnId, status: 'queued', generation: 0 });
+      assert.deepEqual(older.messages[0].turn, { id: first.turnId, status: 'queued', generation: 0, epoch: 0 });
       assert.equal(older.nextBefore, null);
       assert.deepEqual(
         (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('tf_conversation_outbox')}`)).rows,

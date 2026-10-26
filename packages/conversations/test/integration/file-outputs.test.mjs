@@ -465,8 +465,8 @@ test('a referenced input revoked before or during publication blocks the output'
     );
     assert.deepEqual(
       (await f.receipts(duringChat)).map(row => row.status),
-      ['failed'],
-      'the interrupted call is never completed',
+      ['blocked'],
+      'the revoked call is blocked, never completed',
     );
     assert.deepEqual(
       (await f.rows()).map(row => row.name),

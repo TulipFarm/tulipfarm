@@ -26,7 +26,7 @@ test(
       const stream = [
         ...db.baseline,
         migration(
-          '9999_rollout_probe.sql',
+          '9998_rollout_probe.sql',
           "CREATE TABLE {{schema}}.tf_atomic_probe (id integer); INSERT INTO {{schema}}.tf_atomic_probe VALUES (42); CREATE TABLE {{schema}}.tf_rollout_probe (id integer PRIMARY KEY, value text NOT NULL); INSERT INTO {{schema}}.tf_rollout_probe VALUES (1, 'once');",
         ),
       ];
@@ -128,7 +128,7 @@ test(
       const recovery = [
         ...stream,
         migration(
-          '0008_forward_recovery.sql',
+          '9999_forward_recovery.sql',
           'ALTER TABLE {{schema}}.tf_rollout_probe ADD COLUMN release integer NOT NULL DEFAULT 3;',
         ),
       ];

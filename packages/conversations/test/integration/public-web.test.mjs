@@ -6,7 +6,11 @@ import { createConversations } from '../../src/index.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { createChatTools } from '../../../agents/src/tools.ts';
 import { respondToConversation } from '../../../../apps/worker/src/conversation-responder.ts';
-import { anthropicChat } from '../../../../apps/worker/test/native-chat-fixture.mjs';
+import {
+  anthropicChat,
+  completionReply,
+  isCompletionRequest,
+} from '../../../../apps/worker/test/native-chat-fixture.mjs';
 
 test(
   'a parallel model decision persists concurrent page receipts and retains successes alongside a failed read',
@@ -22,8 +26,9 @@ test(
       peak = 0,
       step = 0,
       pending;
-    t.mock.method(globalThis, 'fetch', async () =>
-      Response.json(
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      if (isCompletionRequest(JSON.parse(init.body))) return Response.json(completionReply('anthropic'));
+      return Response.json(
         anthropicChat(
           step++ === 0
             ? {
@@ -32,8 +37,8 @@ test(
               }
             : { kind: 'answer', text: 'Three pages read; one was unavailable.' },
         ),
-      ),
-    );
+      );
+    });
     try {
       await f.store.create(f.workspace.id, f.workspace.userId, { chatId, commandId: randomUUID() });
       const executor = createConversationExecutor(f.runtime, input =>

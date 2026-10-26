@@ -69,7 +69,7 @@ async function stop(child, signal = 'SIGKILL') {
 
 test(
   'compiled task composition progresses independently of API and resumes persisted human commands',
-  { timeout: 240000 },
+  { timeout: 900000 },
   async t => {
     const originalEnv = process.env;
     process.env = {
@@ -241,6 +241,8 @@ test(
             ? { calls: decision.calls.map(call => useCall(call, decision.text)) }
             : { text: decision.text };
       const result = nativeReply('anthropic', selected);
+      // The runtime fails generations whose reported model is not the configured one.
+      result.model = body.model;
       result.usage = { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
       response.writeHead(200, { 'content-type': 'application/json', 'request-id': randomUUID() });
       response.end(JSON.stringify(result));
@@ -271,7 +273,8 @@ test(
       ).rows;
     async function startApi() {
       const child = fork(new URL('../../../apps/api/test/task-progress-process.mjs', import.meta.url), [], {
-        env: process.env,
+        // The API validates the model catalog at startup, so it needs the same served model as the worker.
+        env: { ...process.env, MODEL_CATALOG: modelCatalogOf(['claude-opus']), ANTHROPIC_API_KEY: 'synthetic-only' },
         stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
       });
       apis.push(child);
@@ -304,9 +307,14 @@ test(
       workers.push(child);
       const messages = [];
       child.on('message', message => messages.push(message));
+      // Worker.create bundles the workflows with webpack, which alone can exceed the step budget on a loaded host.
       await until(
-        () => messages,
+        () => {
+          assert.equal(child.exitCode ?? child.signalCode, null, 'worker exited before it was ready');
+          return messages;
+        },
         rows => rows.some(row => row.ready),
+        180000,
       );
       return { child, messages };
     }

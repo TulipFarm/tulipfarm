@@ -23,7 +23,7 @@ import { modelNativeTools } from '../src/model.ts';
 import { readableTableFiles } from '../src/table-sources.ts';
 import { commonCompatibility } from '@tulipfarm/workspaces/storage';
 
-test('named-agent task records preserve exact protected approval with typed records', { timeout: 120000 }, async t => {
+test('named-agent task records preserve exact protected approval with typed records', { timeout: 600000 }, async t => {
   const db = await fixture();
   let runtime, migration;
   t.after(async () => {
@@ -1115,7 +1115,15 @@ test('named-agent task records preserve exact protected approval with typed reco
     const pending = await start([update({ [fieldId]: { kind: 'text', value: 'Stale' } })]);
     const approved = await start([update({ [fieldId]: { kind: 'text', value: 'Stale' } })]);
     await approved.approve();
-    generation = await activate(definition, 'b'.repeat(40), generation.id, [await read()]);
+    // The new generation must carry every live row, including ones earlier subtests created.
+    const live = await db.platform.query(
+      `SELECT row_id FROM ${table('tf_table_identities')} WHERE table_id=$1 AND live`,
+      [tableId],
+    );
+    const rows = await Promise.all(
+      live.rows.map(row => tableService.read(w.id, user, { tableId, revision, recordId: row.row_id })),
+    );
+    generation = await activate(definition, 'b'.repeat(40), generation.id, rows);
     await assert.rejects(pending.approve(), e => e.code === 'stale-proposal');
     assert.equal(await approved.execute(), 'failed');
     const refreshed = await approvals.recover(w.id, user, pending.task.id, pending.proposal.id, {

@@ -18,13 +18,21 @@ import { slackUserCall, slackUserRead, slackUserRequest } from '../../slack/test
 import { createSlackChannelAgents } from '../src/slack-channels.ts';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { inferDecision } from '../src/inference.ts';
-import { createSoulAgentFixture, policyVersion } from './soul-fixture.mjs';
+import { createSoulAgentFixture, policyVersion, soulStorageSkip } from './soul-fixture.mjs';
 import { createAgentStore } from '../src/store.ts';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createIntegrationService } from '../../integrations/src/service.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { nativeReply, useCall } from './native-fixture.mjs';
+import { existsSync } from 'node:fs';
+
+// Every scenario runs the real Slack workflow through a local Temporal server and the built worker.
+const workflowSkip = !process.env.TEST_TEMPORAL_CLI
+  ? 'Set TEST_TEMPORAL_CLI to a local Temporal CLI binary for the real workflow proof'
+  : !existsSync(new URL('../../../apps/worker/dist/slack-composition.js', import.meta.url))
+    ? 'Build @tulipfarm/worker first: pnpm exec turbo run build --filter=@tulipfarm/worker'
+    : false;
 
 for (const scenario of [
   'github',
@@ -41,7 +49,7 @@ for (const scenario of [
   'poison',
   'starvation',
 ])
-  test(`channel agent ${scenario}`, async () => {
+  test(`channel agent ${scenario}`, { skip: workflowSkip || (scenario === 'journey' && soulStorageSkip) }, async () => {
     const f = await conversationFixture();
     const cipher = slackCredentialCipher({ activeKeyId: 'fixture', keys: { fixture: 'ab'.repeat(32) } });
     const installationId = randomUUID(),
@@ -510,8 +518,12 @@ for (const scenario of [
         assert.equal(delivered[0].channel, 'DALICE');
         assert.match(delivered[0].text, /Shared issue/);
         assert.deepEqual(
-          (await f.db.platform.query(`SELECT sources FROM ${f.table('tf_slack_tool_sources')} WHERE call_id=$1`, [id]))
-            .rows[0].sources,
+          (
+            await f.db.platform.query(
+              `SELECT s.sources FROM ${f.table('tf_slack_tool_sources')} s JOIN ${f.table('tf_agent_tool_calls')} c ON c.id=s.call_id WHERE c.run_id=$1`,
+              [id],
+            )
+          ).rows[0].sources,
           [{ kind: 'github-source', integrationId, sourceId, generation: 1, grantsVersion: 2 }],
         );
         await composition.close();

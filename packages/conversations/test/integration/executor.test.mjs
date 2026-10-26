@@ -128,6 +128,7 @@ test('exhausted provider failures retain a safe diagnostic reason in history', a
       id: sent.turnId,
       status: 'failed',
       generation: 5,
+      epoch: 5,
       errorCode: 'model-invalid-decision',
     });
     const retried = await f.store.retry(w.id, w.userId, chatId, sent.turnId, {
@@ -217,6 +218,7 @@ test('unfinished replies stop automatic retries and permit explicit recovery wit
       id: sent.turnId,
       status: 'failed',
       generation: 1,
+      epoch: 1,
       errorCode: 'model-incomplete-response',
     });
     const retried = await f.store.retry(w.id, w.userId, chatId, sent.turnId, {

@@ -6,7 +6,10 @@ import { Client } from 'pg';
 import { createModelRouteHealth } from '../src/model-health.ts';
 
 test('deployment health has one shared probe across workspaces and fences stale completion', async () => {
-  const base = process.env.CONTINUITY_POSTGRES_URL ?? 'postgresql://postgres:local-postgres@127.0.0.1:5432/postgres';
+  const base =
+    process.env.CONTINUITY_POSTGRES_URL ??
+    process.env.TEST_ADMIN_DATABASE_URL ??
+    'postgresql://postgres:local-postgres@127.0.0.1:5432/postgres';
   const admin = new Client({ connectionString: base });
   await admin.connect();
   const database = `model_health_${randomUUID().replaceAll('-', '')}`;

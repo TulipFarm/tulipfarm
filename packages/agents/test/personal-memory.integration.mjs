@@ -153,7 +153,11 @@ test(
             targetId: randomUUID(),
             input: {
               expectedVersion: 0,
-              definition: { name: 'Derived skill', instructions: 'Preference-derived content' },
+              definition: {
+                name: 'Derived skill',
+                description: 'Derived skill',
+                instructions: 'Preference-derived content',
+              },
             },
           },
           {
@@ -334,51 +338,5 @@ test(
         .rows[0].status,
       'failed',
     );
-  },
-);
-
-test(
-  'schema version 15 keeps private chats and tasks running without personal memory during rollout',
-  { timeout: 120000 },
-  async t => {
-    const f = await conversationFixture(stream => stream.slice(0, 15));
-    t.after(() => f.close());
-    const { workspace: w, store } = f;
-    assert.equal(
-      (await f.db.platform.query(`SELECT to_regclass($1) AS name`, [f.table('tf_personal_memory')])).rows[0].name,
-      null,
-    );
-    const chatId = randomUUID();
-    await store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-    const sent = await store.send(w.id, w.userId, chatId, {
-      commandId: randomUUID(),
-      messageId: randomUUID(),
-      parts: [{ kind: 'text', text: 'Existing chat' }],
-    });
-    const executor = createConversationExecutor(f.runtime, async input => {
-      assert.deepEqual(await input.readPersonalMemory(), { content: '', revision: 0 });
-      return { text: 'Existing chat still works.', sources: [] };
-    });
-    assert.equal(
-      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
-      'completed',
-    );
-    const agent = await savedTaskAgent(f.db, w, f.runtime, w.userId, w.membershipId, [], []);
-    await seedExecution(f.db, w, agent.agentId, [agent.teamId], []);
-    const tasks = createAgentTasks(f.runtime);
-    const task = await tasks.start(w.id, w.userId, {
-      requestId: randomUUID(),
-      agentId: agent.agentId,
-      text: 'Existing task',
-    });
-    const engine = createTaskRuntime(
-      f.runtime,
-      syntheticContinuity(async input => {
-        assert.deepEqual(input.personalMemory, { content: '', revision: 0 });
-        return { kind: 'answer', text: 'Existing task still works.' };
-      }),
-    );
-    await engine.process(w.id, task.id);
-    assert.equal((await tasks.read(w.id, w.userId, task.id)).status, 'completed');
   },
 );

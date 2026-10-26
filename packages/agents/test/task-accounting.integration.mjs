@@ -27,7 +27,7 @@ import { hostedCreditPricingExtension } from '../../workspace-storage/test/hoste
 // Budget and balance assertions here count whole credits, so they use the hosted price.
 await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
-test('task accounting preserves work, authority and crash reservations', { timeout: 120000 }, async t => {
+test('task accounting preserves work, authority and crash reservations', { timeout: 600000 }, async t => {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -178,7 +178,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.fail('boundary not reached');
   };
   const engine = createTaskRuntime(runtime, model);
-  const heldReservation = '23000000000000';
+  // One attempt's hold: its request bytes, including the rows.get and rows.update tool schemas, priced as input tokens.
+  const heldReservation = '25000000000000';
 
   await t.test('failed admitted reads consume the limit once across replay', async () => {
     choose = async () => ({
@@ -352,6 +353,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     try {
       await app.ready();
+      // Discovery runs on an interval; poll for the settlement rather than guessing how long a loaded host needs.
+      for (const deadline = Date.now() + 120000; (await state(task.id)).cost.heldCreditUnits !== '0';) {
+        assert.ok(Date.now() < deadline, 'discovery did not settle the late usage');
+        await delay(250);
+      }
+      // Keep discovery running so a repeated dispatch would show up in the count below.
       await delay(4500);
     } finally {
       await app.close();
@@ -421,7 +428,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         ])
       ).rows[0].attempt_id;
       await db.platform.query(
-        `UPDATE ${table('tf_model_attempts')} SET lease_until=clock_timestamp()+interval '300 milliseconds' WHERE id=$1`,
+        `UPDATE ${table('tf_model_attempts')} SET lease_until=clock_timestamp()+interval '30 seconds' WHERE id=$1`,
         [attempt],
       );
       assert.notEqual(
@@ -439,7 +446,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         ).rows[0].pending,
         true,
       );
-      await delay(350);
+      // Expire the lease directly, so a slow test host cannot let it lapse before the live checks above.
+      await db.platform.query(
+        `UPDATE ${table('tf_model_attempts')} SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`,
+        [attempt],
+      );
       assert.deepEqual(await progress(w.id, task.id), { kind: 'accounting' });
       assert.ok((await engine.pending(w.id)).includes(task.id));
       await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=clock_timestamp() WHERE id=$1`, [

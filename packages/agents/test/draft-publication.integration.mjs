@@ -13,9 +13,10 @@ import { fixture, connect } from '../../workspace-storage/test/integration/fixtu
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createAgentAuthoring } from '../src/authoring.ts';
+import { soulStorageSkip } from './soul-fixture.mjs';
 
 for (const when of ['before-worker', 'during-object-io', 'authorized', 'publication-wins'])
-  test(`draft source authorization at Soul publication ${when}`, async t => {
+  test(`draft source authorization at Soul publication ${when}`, { skip: soulStorageSkip }, async t => {
     const db = await fixture(),
       soul = soulStorageConfig();
     let runtime;

@@ -858,9 +858,10 @@ export function createAgentExecutor(options: Options) {
                   return 'completed';
                 }
                 if (row.status === 'failed' || row.status === 'blocked') return row.status;
+                // A record conflict is settled: the model is told to re-read, so it must not hold back that read.
                 const predecessor = await transaction.client.query(
-                  `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id = $1 AND sequence < $2 AND status <> 'completed' LIMIT 1`,
-                  [ids.runId, row.sequence],
+                  `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id = $1 AND sequence < $2 AND status <> 'completed' AND NOT (status = 'failed' AND result = $3::jsonb) LIMIT 1`,
+                  [ids.runId, row.sequence, JSON.stringify(recordConflict)],
                 );
                 if (!batch && !taskAssociated && predecessor.rowCount) return 'waiting';
                 const result = await registry.invoke(

@@ -161,15 +161,16 @@ export function createSlackChannelAgents(options: {
         await requireDraftSources(tx, actor, sources, new Set(), undefined, publicOnly);
       }
     const calls = z
-      .array(z.object({ call: toolCallSchema, result: toolResultSchema, status: z.string() }))
+      .array(z.object({ id: z.uuid(), call: toolCallSchema, result: toolResultSchema, status: z.string() }))
       .parse(
         (
-          await tx.client.query(`SELECT call,result,status FROM ${table(tx, 'tf_agent_tool_calls')} WHERE run_id=$1`, [
-            eventId,
-          ])
+          await tx.client.query(
+            `SELECT id,call,result,status FROM ${table(tx, 'tf_agent_tool_calls')} WHERE run_id=$1`,
+            [eventId],
+          )
         ).rows,
       );
-    for (const { call, result, status } of calls) {
+    for (const { id, call, result, status } of calls) {
       if (status === 'completed')
         await requireDraftSources(tx, actor, await resultSources(tx, call, result), new Set(), undefined, publicOnly);
       if ('tableId' in call) {
@@ -180,7 +181,7 @@ export function createSlackChannelAgents(options: {
           if (!(await canAccessAsset(tx, actor, resource.id, 'table.row.read'))) throw new AccessDenied();
       } else if (call.tool === 'github.issue.read' || call.tool.startsWith('google.')) {
         const stored = (
-          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_slack_tool_sources')} WHERE call_id=$1`, [eventId])
+          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_slack_tool_sources')} WHERE call_id=$1`, [id])
         ).rows[0];
         if (!stored) throw new AccessDenied();
         await requireDraftSources(tx, actor, sourceDependenciesSchema.parse(stored.sources));

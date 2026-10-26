@@ -62,6 +62,7 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
 import {
   errorAttributes,
+  type ChatStage,
   safeDiagnosticNumber,
   safeErrorReason,
   safeErrorStage,
@@ -86,7 +87,7 @@ import { alwaysSample, chatTurnSpan, telemetrySampler } from './sampling.ts';
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
 export { alwaysSample, chatTurnSpan, TelemetryRootSampler, telemetrySampler } from './sampling.ts';
 export { errorAttributes, telemetryErrorCode };
-export { withErrorStage, type ErrorStage } from './error-codes.ts';
+export { withErrorStage, type ChatStage, type ErrorStage } from './error-codes.ts';
 export {
   registerFlagSubjectResolver,
   resetFlagSubjects,
@@ -1237,20 +1238,6 @@ export function observeFetch(
         );
 }
 
-export type ChatStage =
-  | 'resume'
-  | 'claim'
-  | 'context'
-  | 'prepare'
-  | 'compaction'
-  | 'files'
-  | 'model'
-  | 'memory'
-  | 'tool'
-  | 'tool-recovery'
-  | 'delivery'
-  | 'dispatch'
-  | 'recovery';
 export async function observeChatStage<T>(
   phase: ChatStage,
   call: () => Promise<T>,

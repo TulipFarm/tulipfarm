@@ -231,6 +231,7 @@ test('GENERAL default answers use complete current audiences and retain private 
     };
     process.env.WEB_ORIGIN = 'https://app.example.test';
     process.env.BETTER_AUTH_URL = 'https://api.example.test';
+    process.env.ANTHROPIC_API_KEY = 'fixture';
     api.register(
       async routes =>
         registerSlack(

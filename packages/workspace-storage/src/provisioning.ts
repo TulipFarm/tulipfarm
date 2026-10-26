@@ -315,7 +315,9 @@ export async function verifyWorkspaceIsolation(client: SqlClient, workspaceId: s
       `
       SELECT 'relation' AS kind, n.nspname || '.' || c.relname AS object FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', $2) AND n.nspname NOT LIKE 'pg_toast%'
-        AND ((c.relkind IN ('r', 'p', 'v', 'm', 'f') AND (has_table_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR has_any_column_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,REFERENCES')))
+        AND ((c.relkind IN ('r', 'p', 'v', 'm', 'f') AND (has_table_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+          -- Column grants live only in attacl; checking every relation's columns made each provision scale with the workspace count.
+          OR (c.oid IN (SELECT attrelid FROM pg_attribute WHERE attacl IS NOT NULL) AND has_any_column_privilege($1, c.oid, 'SELECT,INSERT,UPDATE,REFERENCES'))))
           OR (c.relkind = 'S' AND has_sequence_privilege($1, c.oid, 'USAGE,SELECT,UPDATE')))
       UNION ALL
       SELECT 'schema', n.nspname FROM pg_namespace n WHERE n.nspname <> $2 AND has_schema_privilege($1, n.oid, 'CREATE')

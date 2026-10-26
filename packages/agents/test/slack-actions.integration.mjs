@@ -20,6 +20,8 @@ import { outboundFixture } from './slack-actions-fixture.mjs';
 
 export { outboundFixture };
 
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 test('outbound fixture binds supplied actors before Slack identities and grants', async () => {
   const aliceUserId = randomUUID(),
     bobUserId = randomUUID();
@@ -302,6 +304,7 @@ for (const rotating of [false, true])
                 session_id: 'session',
                 user_id: f.alice.userId,
                 membership_id: f.alice.membershipId,
+                expired: false,
               },
             ],
           }),
@@ -737,6 +740,10 @@ test('multi-step task resumes a legacy pending Slack approval using its original
 test('slow actual Slack task effect charges outbound duration once and cannot resume inference after exhaustion', async () => {
   const f = await outboundFixture();
   try {
+    // The send outlasts the remaining active time. The margin is wide because the reservation lease equals the
+    // remaining time, so a loaded host must still dispatch the send before the lease expires.
+    const remaining = 5000,
+      slow = remaining + 300;
     let selections = 0;
     const model = syntheticContinuity(async () => {
       selections++;
@@ -761,7 +768,7 @@ test('slow actual Slack task effect charges outbound duration once and cannot re
         runtime,
         fetcher: async (url, init) => {
           const response = await f.settings.fetcher(url, init);
-          if (slackUserCall(url, init) === 'chat.postMessage') await delay(1300);
+          if (slackUserCall(url, init) === 'chat.postMessage') await delay(slow);
           return response;
         },
       });
@@ -769,14 +776,14 @@ test('slow actual Slack task effect charges outbound duration once and cannot re
     await engine.process(f.workspace.id, task.id);
     const before = await tasks.read(f.workspace.id, f.bob.userId, task.id);
     await f.db.platform.query(
-      `UPDATE ${f.table('tf_agent_tasks')} SET limits=jsonb_set(limits,'{activeMilliseconds}',to_jsonb(active_milliseconds+1000)) WHERE id=$1`,
-      [task.id],
+      `UPDATE ${f.table('tf_agent_tasks')} SET limits=jsonb_set(limits,'{activeMilliseconds}',to_jsonb(active_milliseconds+$2::bigint)) WHERE id=$1`,
+      [task.id, remaining],
     );
     await engine.process(f.workspace.id, task.id);
     const after = await tasks.read(f.workspace.id, f.bob.userId, task.id);
     assert.equal(after.status, 'paused');
     assert.equal(after.toolCalls, 1);
-    assert.ok(Number(after.activeMilliseconds) - Number(before.activeMilliseconds) >= 1300);
+    assert.ok(Number(after.activeMilliseconds) - Number(before.activeMilliseconds) >= slow);
     assert.equal(selections, 1);
     assert.deepEqual(f.effects, [{ token: 'Bearer xoxp-bob', name: 'send', channel: 'CHR', text: 'Slow task update' }]);
     await createTaskRuntime(f.runtime, model, undefined, factory).process(f.workspace.id, task.id);
@@ -816,7 +823,8 @@ test('Slack task Retry-After polls do not reserve more time or dispatch before t
       limits: { toolCalls: 10, credits: 100, activeMilliseconds: 60000 },
     });
     await engine.process(f.workspace.id, task.id);
-    f.setMode('retry');
+    // A long Retry-After keeps the action waiting however slow the machine is; the test then makes it due.
+    f.setMode('retry', '600');
     await engine.process(f.workspace.id, task.id);
     const before = await tasks.read(f.workspace.id, f.bob.userId, task.id);
     assert.equal(before.status, 'waiting-approval');
@@ -828,7 +836,7 @@ test('Slack task Retry-After polls do not reserve more time or dispatch before t
       before.activeMilliseconds,
     );
     assert.equal(f.effects.length, 0);
-    await delay(1100);
+    await f.db.platform.query(`UPDATE ${f.table('tf_slack_action_effects')} SET next_attempt_at=clock_timestamp()`);
     f.setMode('success');
     assert.deepEqual(await createTaskProgress(f.runtime)(f.workspace.id, task.id), { kind: 'runnable' });
     await engine.process(f.workspace.id, task.id);

@@ -27,6 +27,11 @@ import { nativeReply } from './native-fixture.mjs';
 import { createTaskComposition } from '../../../apps/worker/dist/task-composition.js';
 import { createServer } from 'node:http';
 import { modelCatalogOf } from '../../../apps/worker/test/model-catalog-fixture.mjs';
+import { registerExtension } from '@tulipfarm/extensions';
+import { hostedCreditPricingExtension } from '../../workspace-storage/test/hosted-credit-pricing.mjs';
+
+// Cost assertions here count whole credits, so they use the hosted price.
+await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
 const route = {
   id: 'task-test',
@@ -218,7 +223,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     resolveConfirmationCredential: async () => db.login(w, 'confirmation'),
   });
   await decide(w.id, user, task.id, proposal.id, { digest: proposal.digest, decision: 'approve' });
-  await Promise.all([engine.process(w.id, task.id), engine.process(w.id, task.id)]);
+  // The competing worker waits on the task lock. On a slow database it may hit the 5 s lock timeout, which the
+  // activity retries; exactly-once execution is asserted from the receipts below.
+  const competing = await Promise.allSettled([engine.process(w.id, task.id), engine.process(w.id, task.id)]);
+  assert.ok(competing.some(outcome => outcome.status === 'fulfilled'));
+  for (const outcome of competing)
+    if (outcome.status === 'rejected') assert.equal(outcome.reason.code, '55P03', outcome.reason.stack);
   for (let n = 0; n < 3 && (await service.read(w.id, user, task.id)).status !== 'completed'; n++)
     await engine.process(w.id, task.id);
   assert.equal((await service.read(w.id, user, task.id)).status, 'completed');
@@ -356,12 +366,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
-    const timer = setTimeout(() => child.kill('SIGKILL'), 15000);
+    // Only a hang guard: a cold child under a loaded host can take well over 15 s to reach its boundary.
+    const timer = setTimeout(() => child.kill('SIGKILL'), 120000);
     try {
       const event = await Promise.race([
         once(child, 'message').then(([message]) => message),
-        once(child, 'exit').then(() => {
-          throw new Error('Process exited before boundary');
+        once(child, 'exit').then(([code, signal]) => {
+          throw new Error(`Process exited before boundary (code ${code}, signal ${signal})`);
         }),
       ]);
       assert.deepEqual(event, { boundary: mode === 'claim' ? 'provider-dispatched' : 'step-committed' });
@@ -716,23 +727,29 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const server = createServer(async (request, response) => {
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
-      requests.push(JSON.parse(Buffer.concat(chunks)));
+      const sent = JSON.parse(Buffer.concat(chunks));
+      requests.push(sent);
       const body = nativeReply('anthropic', { text: 'Confirmed through server configuration.' });
+      // The runtime fails generations whose reported model is not the configured one.
+      body.model = sent.model;
       body.usage = { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify(body));
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    const fetch = globalThis.fetch;
+    const fetch = globalThis.fetch,
+      urls = [];
+    // Record rather than assert here: a throw inside fetch reaches the runtime as a transport error and hides the cause.
     t.mock.method(globalThis, 'fetch', (url, options) => {
-      assert.equal(String(url), 'https://api.anthropic.com/v1/messages');
+      urls.push(String(url));
       return fetch(`http://127.0.0.1:${server.address().port}/v1/messages`, options);
     });
     const composed = createTaskComposition(runtime);
     try {
       const next = await start();
       await composed.activities.processAgentTask(w.id, next.id);
+      assert.deepEqual(urls, ['https://api.anthropic.com/v1/messages']);
       assert.equal((await service.read(w.id, user, next.id)).status, 'completed');
       assert.equal(requests.length, 1);
       assert.equal(

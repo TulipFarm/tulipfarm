@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccessDenied, lockAuthorization, requireCurrentActor } from '@tulipfarm/access';
 import { fixture } from '../../integrations/test/fixture.mjs';
-import { createSoulAgentFixture } from './soul-fixture.mjs';
+import { createSoulAgentFixture, soulStorageSkip } from './soul-fixture.mjs';
 import { agentCompatibility } from '../src/store.ts';
 
 test(
   'current agent authority requires a Soul-backed live agent even for persisted legacy runs',
-  { timeout: 60000 },
+  { timeout: 60000, skip: soulStorageSkip },
   async () => {
     const f = await fixture();
     let soul;

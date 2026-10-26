@@ -5,6 +5,16 @@ import { initializeSoul, soulStorageConfig } from '@tulipfarm/workspaces/soul';
 import { prepareSoulRevision } from '@tulipfarm/workspaces/soul-revisions';
 import { createAgentAuthoring } from '../src/authoring.ts';
 
+/** A skip reason when no Soul object storage is configured, so Soul-backed tests skip instead of failing. */
+export const soulStorageSkip = (() => {
+  try {
+    soulStorageConfig().client.destroy();
+    return false;
+  } catch (error) {
+    return `${error.message}; set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, or TULIPFARM_OBJECT_STORAGE_SOUL_BUCKET`;
+  }
+})();
+
 export async function policyVersion(owner, table, agentId) {
   return (await owner.query(`SELECT policy_version FROM ${table('tf_agents')} WHERE id = $1`, [agentId])).rows[0]
     .policy_version;

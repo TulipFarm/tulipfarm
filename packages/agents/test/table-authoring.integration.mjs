@@ -54,6 +54,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence) VALUES($1,$2,$3,1)`,
     [turnId, conversationId, message],
   );
+  // Every admin belongs to the internal _admin team, which can own assets before anyone creates a team.
+  const adminTeam = {
+    id: (await db.platform.query(`SELECT id FROM ${s}.tf_teams WHERE name='_admin'`)).rows[0].id,
+    name: '_admin',
+  };
   const tools = createChatTools(runtime);
   const context = { workspaceId: ws.id, actor, callId: randomUUID(), origin: { conversationId, turnId, sources: [] } };
   const input = {
@@ -82,12 +87,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   };
   const count = async table =>
     (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}.${table}`)).rows[0].count;
+  // The workspace starts with its system tables already in the catalog.
+  const catalogTables = await count('tf_table_catalog');
   await t.test('eligible admin can prepare an exact review without creating data', async () => {
     const discovery = (await tools.invokeWithSources(context, { tool: 'schema.context' })).result;
     assert.equal(discovery.capabilityTableId, null);
     assert.deepEqual(discovery.creation, {
       allowed: true,
-      eligibleOwningTeams: [{ id: team, name: 'qa-20261003-cloud-operations' }],
+      eligibleOwningTeams: [adminTeam, { id: team, name: 'qa-20261003-cloud-operations' }].sort((a, b) =>
+        a.id < b.id ? -1 : 1,
+      ),
     });
     assert.equal(discovery.capabilities.manageSchema, false);
     const output = (await tools.invokeWithSources(context, { tool: 'tables.propose', input: JSON.stringify(input) }))
@@ -97,7 +106,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(review.manifest.plans[0].effectCount, 0);
     assert.deepEqual(review.manifest.plans[0].after, input.plans[0].target);
     assert.equal(await count('tf_table_proposals'), 1);
-    assert.equal(await count('tf_table_catalog'), 0);
+    assert.equal(await count('tf_table_catalog'), catalogTables);
   });
   await t.test('invalid JSON and incomplete definitions are argument errors, not permission denials', async () => {
     for (const input of [
@@ -190,10 +199,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ).result;
       assert.deepEqual(
         [...discovery.creation.eligibleOwningTeams].sort((a, b) => a.id.localeCompare(b.id)),
-        [
-          { id: team, name: 'qa-20261003-cloud-operations' },
-          { id: hidden, name: null },
-        ].sort((a, b) => a.id.localeCompare(b.id)),
+        [adminTeam, { id: team, name: 'qa-20261003-cloud-operations' }, { id: hidden, name: null }].sort((a, b) =>
+          a.id.localeCompare(b.id),
+        ),
       );
     } finally {
       await db.platform.query(`DELETE FROM ${s}.tf_teams WHERE id=$1`, [hidden]);
@@ -211,6 +219,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       AccessDenied,
     );
     assert.equal(await count('tf_table_proposals'), 1);
-    assert.equal(await count('tf_table_catalog'), 0);
+    assert.equal(await count('tf_table_catalog'), catalogTables);
   });
 });
