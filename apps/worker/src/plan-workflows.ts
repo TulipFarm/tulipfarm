@@ -52,7 +52,7 @@ export async function agentPlanRecovery(after: string | null = null): Promise<vo
 
 /**
  * Advances one plan until nothing can change without a wake. Saved-agent tasks do not signal plans, so a waiting plan
- * rereads them every 30 seconds. Specialists run as activities beside the loop and wake it when they finish.
+ * rereads them every 30 seconds, or later when the step says their sources can't be checked until then. Specialists run as activities beside the loop and wake it when they finish.
  */
 export async function agentPlanStep(workspaceId: string, planId: string): Promise<void> {
   let wakes = 0;
@@ -81,7 +81,7 @@ export async function agentPlanStep(workspaceId: string, planId: string): Promis
     if (wakes !== observed) continue;
     if (progress.kind === 'terminal' && !running.size) return;
     if (progress.kind === 'terminal') await condition(() => wakes !== observed);
-    else await condition(() => wakes !== observed, '30 seconds');
+    else await condition(() => wakes !== observed, progress.retryAfterMs ?? '30 seconds');
     if (workflowInfo().continueAsNewSuggested && !running.size) break;
   }
   await condition(() => running.size === 0);

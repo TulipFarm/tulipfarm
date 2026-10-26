@@ -148,6 +148,11 @@ const skillReference = `jsonb_build_object('kind', p.kind, 'skillId', to_jsonb(p
 export type ConversationAdmission = {
   /** Pins the turn's image models when the workspace reads images; null leaves the turn unpinned. */
   pinTurn?: (tx: AuthorizationTransaction, workspaceId: string, familyId: string) => Promise<TurnImageModels | null>;
+  /** Runs in the retry's transaction, after the failed turn is queued again, so work the turn owns can continue. */
+  retryTurn?: (
+    tx: AuthorizationTransaction & { commonVersion: number },
+    retry: { workspaceId: string; conversationId: string; turnId: string; actor: HumanActor },
+  ) => Promise<void>;
 };
 
 export function createConversations(runtime: Runtime, skills?: ChatSkills, admission: ConversationAdmission = {}) {
@@ -975,12 +980,13 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             `UPDATE ${table(tx, 'tf_conversation_turns')} SET compaction_requested=true WHERE id=$1`,
             [turnId],
           );
-        if (operation === 'retry')
+        if (operation === 'retry') {
           await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,$3)`,
             [turnId, chatId, generation],
           );
-        else
+          await admission.retryTurn?.(tx, { workspaceId, conversationId: chatId, turnId, actor });
+        } else
           await tx.client.query(
             `UPDATE ${table(tx, 'tf_conversation_outbox')} SET next_attempt_at = clock_timestamp(), dispatched_at = NULL WHERE conversation_id = $1 AND turn_id = (SELECT id FROM ${table(tx, 'tf_conversation_turns')} WHERE conversation_id = $1 AND status NOT IN ('completed', 'cancelled', 'blocked') ORDER BY accepted_sequence LIMIT 1)`,
             [chatId],

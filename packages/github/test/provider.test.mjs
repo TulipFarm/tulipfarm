@@ -153,3 +153,39 @@ test('refresh sends the single-use refresh token and treats an error body as a r
     /account-unavailable/,
   );
 });
+
+test('a refresh is not started after its admission deadline, and an admitted one is never cut short', async () => {
+  let calls = 0;
+  await assert.rejects(
+    refresh(
+      config,
+      'refresh-old',
+      async () => {
+        calls++;
+        return Response.json({});
+      },
+      Date.now() - 1,
+    ),
+    /account-unavailable/,
+  );
+  assert.equal(calls, 0);
+  const granted = await refresh(
+    config,
+    'refresh-old',
+    async (_url, init) => {
+      await new Promise((resolve, reject) => {
+        setTimeout(resolve, 300);
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+      return Response.json({
+        access_token: 'access-new',
+        token_type: 'bearer',
+        expires_in: 28800,
+        refresh_token: 'refresh-new',
+        refresh_token_expires_in: 15811200,
+      });
+    },
+    Date.now() + 20,
+  );
+  assert.equal(granted.refreshToken, 'refresh-new');
+});

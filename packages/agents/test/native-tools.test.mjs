@@ -66,7 +66,13 @@ for (const [label, args] of Object.entries(catalogs))
     }
   });
 
-test('native tool names and descriptions follow the registered chat tools', () => {
+test('native tool names and descriptions follow the registered chat tools', t => {
+  const previous = process.env.SLACK_OUTBOUND_ENABLED;
+  process.env.SLACK_OUTBOUND_ENABLED = 'true';
+  t.after(() => {
+    if (previous === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
+    else process.env.SLACK_OUTBOUND_ENABLED = previous;
+  });
   const { tools } = nativeChatTools(undefined, true, undefined, true);
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)

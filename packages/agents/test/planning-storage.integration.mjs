@@ -220,7 +220,7 @@ test(
       { toolCalls: 0, activeMilliseconds: 10 },
     );
     assert.ok(
-      (await scheduler.due(w.id)).includes(delegated.id),
+      (await scheduler.due(w.id)).some(due => due.id === delegated.id),
       'recovery finds a plan even when its completion wake was lost',
     );
     await scheduler.step(w.id, delegated.id);

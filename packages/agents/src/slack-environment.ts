@@ -2,6 +2,7 @@ import { slackConfigurationSchema, slackCredentialCipher } from '@tulipfarm/slac
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts';
 import { createSlackChannelAgents } from './slack-channels.ts';
+import { slackOutboundEnabled } from './slack-outbound.ts';
 import type { AgentSetupOptions } from './setup.ts';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
@@ -32,7 +33,7 @@ export function slackAgentSetupFromEnvironment(
 
 export function slackActionSettings(env: NodeJS.ProcessEnv = process.env) {
   if (!env.SLACK_OUTBOUND_ENABLED || env.SLACK_OUTBOUND_ENABLED === 'false') return null;
-  if (env.SLACK_OUTBOUND_ENABLED !== 'true') throw new Error('slack-outbound-configuration-invalid');
+  if (!slackOutboundEnabled(env)) throw new Error('slack-outbound-configuration-invalid');
   const config = slackConfigurationSchema.parse(JSON.parse(env.SLACK_CONFIGURATION ?? ''));
   if (!config.memberLinking) throw new Error('slack-outbound-configuration-invalid');
   return {

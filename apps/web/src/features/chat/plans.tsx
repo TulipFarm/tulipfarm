@@ -55,6 +55,7 @@ const failures: Record<string, string> = {
   'plan-closed': 'This plan has already finished or stopped.',
   'budget-lowered': 'A plan’s budget can only go up.',
   'not-starter': 'Only the person who started this plan can control it.',
+  'plan-source-unavailable': 'A source this plan uses can’t be checked right now. Try again in a few minutes.',
 };
 
 export function planApi(workspaceId: string) {
@@ -364,10 +365,15 @@ function PlanNotice({ view }: { view: PlanView }) {
                 title: 'Needs attention',
                 body: 'Work stopped before all requirements were verified. Check the task details and existing action results before resuming.',
               }
-            : {
-                title: 'Paused',
-                body: `Running specialists stopped and will start again on resume. Saved agents finish their current task. Nothing new starts until ${view.canControl ? 'you resume it' : 'the person who started it resumes it'}.`,
-              }
+            : view.pause === 'sources-unavailable'
+              ? {
+                  title: 'Needs attention',
+                  body: `A saved agent's sources, such as GitHub, couldn't be checked for over an hour. Nothing was revoked. ${view.canControl ? 'Resume' : 'The person who started it can resume'} the plan to try again.`,
+                }
+              : {
+                  title: 'Paused',
+                  body: `Running specialists stopped and will start again on resume. Saved agents finish their current task. Nothing new starts until ${view.canControl ? 'you resume it' : 'the person who started it resumes it'}.`,
+                }
       : view.lifecycle === 'draft'
         ? {
             title: 'Plan only',
@@ -477,6 +483,7 @@ export function PlanCanvas({
                   <Badge variant={check.status === 'verified' ? 'success' : 'warning'}>
                     {check.status === 'verified' ? 'Checked' : check.status === 'unknown' ? 'Not checked' : 'Blocked'}
                   </Badge>
+                  {check.optional && check.status !== 'verified' && <Badge variant="outline">Optional</Badge>}
                 </div>
                 {check.reason && check.status !== 'verified' && (
                   <p className="mt-1 text-sm text-muted-foreground">{check.reason}</p>
@@ -629,8 +636,15 @@ function PlanReference({
   const canvas = useCanvas();
   const read = usePlan(api, chatId, plan.id);
   const view = read.state.kind === 'ready' ? read.state.data : null;
-  const current = view ?? plan;
-  const { status, tone } = planStatus({ ...current, pause: view?.pause ?? null });
+  // A refetch that fails keeps the last details, which may be older than the plan list.
+  const retryable = read.state.kind === 'error' || (read.state.kind === 'ready' && read.state.error !== null);
+  const failed = retryable || read.state.kind === 'unavailable';
+  const latest = view && view.version >= plan.version ? view : null;
+  const current = latest ?? plan;
+  // The summary's version is enough to pause or stop, so a failed or stale detail read never strands a running plan
+  // or acts on an old version.
+  const controlled = latest ?? (view || failed ? plan : null);
+  const { status, tone } = planStatus({ ...current, pause: latest?.pause ?? null });
   useResultAttention(`plan:${plan.id}`, tone === 'attention', 'A plan needs your attention');
   const evidence = new Set(
     view?.tasks.flatMap(task =>
@@ -664,7 +678,23 @@ function PlanReference({
       ) : (
         <p className="text-xs text-muted-foreground tabular-nums">{planProgress(current.counts)}</p>
       )}
-      {view?.canControl && open(view) && <PlanControls api={api} chatId={chatId} view={view} />}
+      {failed && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="status" className="text-xs text-muted-foreground">
+            {read.state.kind === 'unavailable'
+              ? 'This plan’s details can’t be shown right now.'
+              : view
+                ? 'Couldn’t refresh this plan’s details.'
+                : 'Couldn’t load this plan’s details.'}
+          </p>
+          {retryable && (
+            <Button size="sm" variant="ghost" onClick={() => void read.refresh()}>
+              Load details again
+            </Button>
+          )}
+        </div>
+      )}
+      {controlled?.canControl && open(controlled) && <PlanControls api={api} chatId={chatId} view={controlled} />}
     </ResultCard>
   );
 }
@@ -678,18 +708,28 @@ function raised(budget: PlanView['budget']): PlanView['budget'] {
 }
 
 /** Starter-only controls. They live beside the reference in chat, never inside the read-only outline. */
-function PlanControls({ api, chatId, view }: { api: PlanApi; chatId: string; view: PlanView }) {
+function PlanControls({
+  api,
+  chatId,
+  view,
+}: {
+  api: PlanApi;
+  chatId: string;
+  view: Pick<PlanView, 'id' | 'lifecycle' | 'version'> & Partial<Pick<PlanView, 'pause' | 'budget'>>;
+}) {
   const { change } = useFeatureChanges();
   const [busy, setBusy] = useState<PlanControl['action'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
   const request = useRef<{ key: string; id: string } | null>(null);
-  const budget = view.pause === 'budget' ? raised(view.budget) : undefined;
+  const current = view.pause === 'budget' ? view.budget : undefined;
+  const budget = current && raised(current);
   const atMaximum =
     !!budget &&
-    budget.credits === view.budget.credits &&
-    budget.toolCalls === view.budget.toolCalls &&
-    budget.activeMilliseconds === view.budget.activeMilliseconds;
+    !!current &&
+    budget.credits === current.credits &&
+    budget.toolCalls === current.toolCalls &&
+    budget.activeMilliseconds === current.activeMilliseconds;
   const run = async (control: PlanControl) => {
     const key = `${control.action}:${view.version}`;
     if (request.current?.key !== key) request.current = { key, id: crypto.randomUUID() };

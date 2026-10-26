@@ -70,6 +70,12 @@ export const planSpecificationSchema = z
           status: z.enum(['verified', 'blocked', 'unknown']),
           evidence,
           reason: reason.optional(),
+          optional: z
+            .boolean()
+            .optional()
+            .describe(
+              'True only when the affected tasks can still be done without this check. An unresolved optional check is shown as a warning and does not block them. Omit for checks the tasks need.',
+            ),
         }),
       )
       .max(planLimits.tasks),
@@ -287,8 +293,11 @@ export const planControlSchema = z.discriminatedUnion('action', [
   z.strictObject({ requestId: uuidSchema, action: z.literal('stop'), expectedVersion: z.number().int().nonnegative() }),
 ]);
 export type PlanControl = z.infer<typeof planControlSchema>;
-/** Why a plan is paused: its starter paused it, it used its budget, or its starter lost access to the chat. */
-export const planPauseSchema = z.enum(['starter', 'budget', 'starter-access', 'progress']);
+/**
+ * Why a plan is paused: its starter paused it, it used its budget, its starter lost access to the chat, work stopped
+ * before it was verified, or a saved agent's sources couldn't be checked for too long.
+ */
+export const planPauseSchema = z.enum(['starter', 'budget', 'starter-access', 'progress', 'sources-unavailable']);
 
 export type PlanGraphErrorCode =
   | 'duplicate-key'
@@ -498,31 +507,85 @@ export function compilePlan(nodes: readonly PlanNode[]) {
   return { prerequisites, children: idx.children, lineage };
 }
 
-export type PlanTransition = { key: string; from: PlanTaskState; to: PlanTaskState };
-/** Derives readiness: only completed prerequisites release work; a failed, cancelled or blocked prerequisite blocks it. */
+/** `reason` explains a blocked task and is null for every other state. */
+export type PlanTransition = { key: string; from: PlanTaskState; to: PlanTaskState; reason: string | null };
+/** Names the first failed, cancelled or blocked prerequisite that holds a task back, with that task's own reason. */
+function dependencyBlock(
+  nodes: ReadonlyMap<string, PlanNode>,
+  needs: Iterable<string>,
+  state: ReadonlyMap<string, PlanTaskState>,
+  reasons: ReadonlyMap<string, string | null>,
+) {
+  for (const need of needs) {
+    const current = state.get(need)!;
+    if (!failingStates.has(current)) continue;
+    const why = reasons.get(need);
+    const outcome = current === 'failed' ? 'failed' : current === 'cancelled' ? 'was cancelled' : 'is blocked';
+    return `Waiting on "${nodes.get(need)?.title ?? need}", which ${outcome}${why ? `: ${why}` : '.'}`.slice(
+      0,
+      planLimits.reason,
+    );
+  }
+  return null;
+}
+/**
+ * Derives readiness: only completed prerequisites release work; a failed, cancelled or blocked prerequisite blocks it.
+ * A blocked task always carries a reason. For waiting work this pass decides, the reason is rebuilt on every pass from
+ * the unresolved prerequisite checks (`prerequisiteBlock`) or the dependency now holding it back, never read back from
+ * the stored reason, so it cannot keep naming a dependency that has since completed. A stored reason changes only
+ * through a reason-only transition. Reasons a task owns, such as a failure or a waiting question, belong to states
+ * this pass never changes.
+ */
 export function advancePlan(nodes: readonly PlanNode[]): PlanTransition[] {
   const { prerequisites } = compilePlan(nodes);
+  const byKey = new Map(nodes.map(node => [node.key, node]));
   const state = new Map(nodes.map(node => [node.key, node.state]));
+  const reasons = new Map(nodes.map(node => [node.key, node.reason || null]));
   const changes = new Map<string, PlanTransition>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [key, needs] of prerequisites) {
       const from = state.get(key)!;
       if (from !== 'pending' && from !== 'ready' && from !== 'blocked') continue;
-      const states = [...needs].map(need => state.get(need)!);
-      const to: PlanTaskState =
-        nodes.find(node => node.key === key)?.prerequisiteBlock || states.some(item => failingStates.has(item))
-          ? 'blocked'
-          : states.every(item => item === 'completed')
-            ? 'ready'
-            : 'pending';
-      if (to === from) continue;
+      const block = byKey.get(key)?.prerequisiteBlock || dependencyBlock(byKey, needs, state, reasons);
+      const to: PlanTaskState = block
+        ? 'blocked'
+        : [...needs].every(need => state.get(need) === 'completed')
+          ? 'ready'
+          : 'pending';
+      const reason = to === 'blocked' ? block : null;
+      if (to === from && (to !== 'blocked' || reason === reasons.get(key))) continue;
       state.set(key, to);
-      changes.set(key, { key, from: changes.get(key)?.from ?? from, to });
+      reasons.set(key, reason);
+      changes.set(key, { key, from: changes.get(key)?.from ?? from, to, reason });
       changed = true;
     }
   }
-  return [...changes.values()].filter(change => change.from !== change.to);
+  return [...changes.values()].filter(
+    change => change.from !== change.to || change.reason !== (byKey.get(change.key)?.reason || null),
+  );
+}
+/** Reasons for blocked work stored without one, derived from its prerequisite checks and the work it waits for. */
+export function missingBlockReasons(nodes: readonly PlanNode[]) {
+  const { prerequisites } = compilePlan(nodes);
+  const byKey = new Map(nodes.map(node => [node.key, node]));
+  const state = new Map(nodes.map(node => [node.key, node.state]));
+  const reasons = new Map(nodes.map(node => [node.key, node.reason || null]));
+  const derived = new Map<string, string>();
+  const explain = (key: string, seen: Set<string>): string | null => {
+    if (reasons.get(key) || state.get(key) !== 'blocked' || seen.has(key)) return reasons.get(key) ?? null;
+    seen.add(key);
+    for (const need of prerequisites.get(key) ?? []) explain(need, seen);
+    const reason =
+      byKey.get(key)?.prerequisiteBlock || dependencyBlock(byKey, prerequisites.get(key) ?? [], state, reasons);
+    if (reason) {
+      reasons.set(key, reason);
+      derived.set(key, reason);
+    }
+    return reason;
+  };
+  for (const key of prerequisites.keys()) explain(key, new Set());
+  return derived;
 }
 
 export type PlanCounts = Record<PlanTaskState, number> & { total: number };
@@ -716,7 +779,11 @@ export function buildInitialPlan(input: z.infer<typeof createPlanSchema>) {
   );
   validatePlanning(built.nodes, input.planning);
   const nodes = applyPlanningPrerequisites(built.nodes, input.planning);
-  for (const change of advancePlan(nodes)) nodes.find(node => node.key === change.key)!.state = change.to;
+  for (const change of advancePlan(nodes))
+    Object.assign(
+      nodes.find(node => node.key === change.key)!,
+      { state: change.to, reason: change.reason },
+    );
   return { ...built, nodes };
 }
 
@@ -739,7 +806,13 @@ export function validatePlanning(
   }
   for (const original of previous?.prerequisites ?? []) {
     const current = specification.prerequisites.find(check => check.key === original.key);
-    if (!current || current.title !== original.title || original.tasks.some(key => !current.tasks.includes(key)))
+    // A check the tasks needed cannot later become optional to release them.
+    if (
+      !current ||
+      current.title !== original.title ||
+      original.tasks.some(key => !current.tasks.includes(key)) ||
+      (current.optional && !original.optional)
+    )
       throw new PlanGraphError('planning-prerequisite', original.key);
   }
   const work = new Map(nodes.filter(node => node.kind === 'work').map(node => [node.key, node]));
@@ -780,7 +853,9 @@ export function validatePlanning(
 export function applyPlanningPrerequisites(nodes: readonly PlanNode[], specification?: PlanSpecification): PlanNode[] {
   return nodes.map(node => {
     const unresolved =
-      specification?.prerequisites.filter(check => check.status !== 'verified' && check.tasks.includes(node.key)) ?? [];
+      specification?.prerequisites.filter(
+        check => check.status !== 'verified' && !check.optional && check.tasks.includes(node.key),
+      ) ?? [];
     const prerequisiteBlock = unresolved.length
       ? unresolved
           .map(check => `${check.title}: ${check.reason}`)
@@ -823,7 +898,7 @@ export function validatePlanReport(
   if (node.key !== specification.verificationTask) return;
   if (
     nodes.some(task => task.kind === 'work' && task.key !== node.key && task.state !== 'completed') ||
-    specification.prerequisites.some(check => check.status !== 'verified')
+    specification.prerequisites.some(check => check.status !== 'verified' && !check.optional)
   )
     throw new PlanGraphError('planning-verification', node.key);
   const verified = new Map(report.requirements.map(requirement => [requirement.key, requirement]));
@@ -900,6 +975,8 @@ export const planListItemSchema = planViewSchema.pick({
   updatedAt: true,
   counts: true,
   outcome: true,
+  // Lets the starter pause or stop a plan whose full view can't be read right now.
+  canControl: true,
 });
 export const planReceiptSchema = z.object({
   id: uuidSchema,

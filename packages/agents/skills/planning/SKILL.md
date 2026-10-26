@@ -44,6 +44,10 @@ to a specialist that cannot perform the exact check.
 
 Record each prerequisite as verified with real receipt evidence, unknown, or
 blocked. Name the affected tasks and a precise recovery for an unresolved check.
+An unresolved check blocks its tasks. Mark a check `optional` only when those
+tasks can still be done without it, such as an agent that can start with an
+empty channel list; it then shows as a warning instead. A check saved as
+required cannot later become optional.
 Use the runtime's `toolReceipt.callId` for evidence references, or the recorded
 receipt ID when resuming; never invent a receipt ID.
 Do not cite the plan itself, another model's confidence, a pending operation, or

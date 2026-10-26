@@ -196,6 +196,7 @@ test(
       const plans = fixtures();
       let listed = [plans.waitlist, plans.budget];
       let failRead = null;
+      let failedReads = 0;
       const controls = [];
       browser = await chromium.launch({ headless: true });
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
@@ -236,11 +237,20 @@ test(
           if (body.action === 'pause') listed = [plans.waitlist, plans.budget, plans.later];
           json = { id: plan.id, version: plan.version, added: [], yielded: false };
         } else if (plan) {
-          if (failRead?.id === plan.id)
+          if (failRead?.id === plan.id) {
+            failedReads++;
             return route.fulfill({
               status: failRead.status,
-              json: { error: failRead.status === 404 ? 'plan-not-found' : 'unavailable' },
+              json: {
+                error:
+                  failRead.status === 404
+                    ? 'plan-not-found'
+                    : failRead.status === 503
+                      ? 'plan-source-unavailable'
+                      : 'unavailable',
+              },
             });
+          }
           json = plan;
         } else if (path.endsWith('/messages'))
           json = {
@@ -360,6 +370,38 @@ test(
       await canvas.getByRole('button', { name: 'Load plan again' }).click();
       await canvas.getByRole('heading', { name: 'Draft the launch email' }).waitFor();
 
+      const later = page.getByRole('region', { name: 'Plan: Draft the launch email' });
+      const laterVersion = plans.later.version;
+      failRead = { id: plans.later.id, status: 503 };
+      await later.getByRole('button', { name: 'Pause plan' }).click();
+      await later.getByText('Couldn’t refresh this plan’s details.').waitFor();
+      await later.getByRole('button', { name: 'Resume plan' }).waitFor();
+      assert.equal(
+        await later.getByRole('button', { name: 'Pause plan' }).count(),
+        0,
+        'controls follow the newer listed plan, not details that failed to refresh',
+      );
+      const refreshes = failedReads;
+      await later.getByRole('button', { name: 'Resume plan' }).click();
+      await later.getByRole('button', { name: 'Pause plan' }).waitFor();
+      while (failedReads === refreshes) await delay(100);
+      await later.getByRole('button', { name: 'Load details again' }).waitFor();
+      failRead = null;
+      // A refresh still in flight may succeed first and remove the button.
+      await later
+        .getByRole('button', { name: 'Load details again' })
+        .click({ timeout: 5000 })
+        .catch(() => {});
+      await later.getByText('Couldn’t refresh this plan’s details.').waitFor({ state: 'detached' });
+      assert.deepEqual(
+        controls.slice(-2).map(({ plan, action, expectedVersion }) => [plan, action, expectedVersion]),
+        [
+          ['Draft the launch email', 'pause', laterVersion],
+          ['Draft the launch email', 'resume', laterVersion + 1],
+        ],
+        'a control after a failed refresh uses the listed version',
+      );
+
       failRead = { id: plans.budget.id, status: 404 };
       await page
         .getByRole('region', { name: 'Plan: Research competitor pricing' })
@@ -370,6 +412,27 @@ test(
         await canvas.getByText('Collect public pricing pages').count(),
         0,
         'nothing from an unavailable plan is shown',
+      );
+
+      failRead = { id: plans.budget.id, status: 503 };
+      await page.reload();
+      const blocked = page.getByRole('region', { name: 'Plan: Research competitor pricing' });
+      await blocked.getByText('Couldn’t load this plan’s details.').waitFor();
+      await blocked.getByRole('button', { name: 'Open plan' }).click();
+      await canvas.getByText('Couldn’t load this plan', { exact: true }).waitFor();
+      assert.equal(
+        await canvas.getByText('Plan unavailable').count(),
+        0,
+        'a source that can’t be checked is not removal',
+      );
+      const listedVersion = plans.budget.version;
+      await blocked.getByRole('button', { name: 'Stop plan' }).click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Stop plan' }).click();
+      await blocked.getByRole('button', { name: 'Stop plan' }).waitFor({ state: 'detached' });
+      assert.deepEqual(
+        [controls.at(-1).plan, controls.at(-1).action, controls.at(-1).expectedVersion],
+        ['Research competitor pricing', 'stop', listedVersion],
+        'the starter stops a plan from its summary when its details fail to load',
       );
       failRead = null;
 

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   advancePlan,
   applyPlanMutations,
+  missingBlockReasons,
   buildInitialPlan,
   compilePlan,
   createPlanSchema,
@@ -166,9 +167,14 @@ test('only completed prerequisites release work; failures block dependents but n
     work('e', { dependsOn: ['d'] }),
   ];
   assert.deepEqual(advancePlan(nodes), [
-    { key: 'b', from: 'pending', to: 'blocked' },
-    { key: 'c', from: 'pending', to: 'blocked' },
-    { key: 'e', from: 'pending', to: 'ready' },
+    { key: 'b', from: 'pending', to: 'blocked', reason: 'Waiting on "a", which failed.' },
+    {
+      key: 'c',
+      from: 'pending',
+      to: 'blocked',
+      reason: 'Waiting on "b", which is blocked: Waiting on "a", which failed.',
+    },
+    { key: 'e', from: 'pending', to: 'ready', reason: null },
   ]);
   const blocked = nodes.map(node => ({
     ...node,
@@ -392,4 +398,90 @@ test('input schemas bound text, keys, batches and specialist tools', () => {
     dependsOn: [],
     assignee: null,
   });
+});
+
+test('work blocked only by its dependencies always explains which dependency it waits on', () => {
+  const nodes = [
+    work('a', {
+      title: 'Resolve the channel',
+      state: 'blocked',
+      reason: 'Slack is not connected.',
+      prerequisiteBlock: 'Slack is not connected.',
+    }),
+    work('b', { title: 'Draft the agent', dependsOn: ['a'], state: 'blocked', reason: null }),
+    work('c', { title: 'Verify setup', dependsOn: ['b'] }),
+  ];
+  assert.deepEqual(advancePlan(nodes), [
+    {
+      key: 'b',
+      from: 'blocked',
+      to: 'blocked',
+      reason: 'Waiting on "Resolve the channel", which is blocked: Slack is not connected.',
+    },
+    {
+      key: 'c',
+      from: 'pending',
+      to: 'blocked',
+      reason:
+        'Waiting on "Draft the agent", which is blocked: Waiting on "Resolve the channel", which is blocked: Slack is not connected.',
+    },
+  ]);
+  const stale = nodes.map(node => (node.key === 'b' ? { ...node, reason: 'Waiting on something else.' } : node));
+  assert.equal(
+    advancePlan(stale).find(change => change.key === 'b').reason,
+    'Waiting on "Resolve the channel", which is blocked: Slack is not connected.',
+    'a stored blocked reason is rebuilt, not kept',
+  );
+  const long = [work('a', { state: 'failed', title: 'x'.repeat(planLimits.reason) }), work('b', { dependsOn: ['a'] })];
+  assert.equal(advancePlan(long)[0].reason.length, planLimits.reason);
+});
+
+test('stored blocked work without a reason gets one derived for display', () => {
+  const derived = missingBlockReasons([
+    work('a', { title: 'Resolve the channel', state: 'cancelled' }),
+    work('b', { title: 'Draft', dependsOn: ['a'], state: 'blocked', reason: null }),
+    work('c', { title: 'Verify', dependsOn: ['b'], state: 'blocked', reason: null }),
+    work('d', { state: 'blocked', reason: 'Own reason.' }),
+  ]);
+  assert.deepEqual(Object.fromEntries(derived), {
+    b: 'Waiting on "Resolve the channel", which was cancelled.',
+    c: 'Waiting on "Draft", which is blocked: Waiting on "Resolve the channel", which was cancelled.',
+  });
+});
+
+test('a derived blocked reason moves on when the dependency it names completes', () => {
+  const blocked = {
+    title: 'Resolve the channel',
+    state: 'blocked',
+    reason: 'Slack is not connected.',
+    prerequisiteBlock: 'Slack is not connected.',
+  };
+  const nodes = [
+    work('a', { title: 'Collect alerts', state: 'completed' }),
+    work('b', blocked),
+    work('c', {
+      title: 'Verify setup',
+      dependsOn: ['a', 'b'],
+      state: 'blocked',
+      reason: 'Waiting on "Collect alerts", which failed.',
+    }),
+  ];
+  assert.deepEqual(advancePlan(nodes), [
+    {
+      key: 'c',
+      from: 'blocked',
+      to: 'blocked',
+      reason: 'Waiting on "Resolve the channel", which is blocked: Slack is not connected.',
+    },
+  ]);
+  const settled = nodes.map(node =>
+    node.key === 'c'
+      ? { ...node, reason: 'Waiting on "Resolve the channel", which is blocked: Slack is not connected.' }
+      : node,
+  );
+  assert.deepEqual(advancePlan(settled), [], 'an unchanged reason makes no transition');
+  const released = settled.map(node =>
+    node.key === 'b' ? { ...node, state: 'completed', reason: null, prerequisiteBlock: undefined } : node,
+  );
+  assert.deepEqual(advancePlan(released), [{ key: 'c', from: 'blocked', to: 'ready', reason: null }]);
 });

@@ -6,7 +6,8 @@ import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
-import { createAgentPlans } from '../src/plans.ts';
+import { createConversations } from '@tulipfarm/conversations';
+import { createAgentPlans, resumeOwnerEndedPlans } from '../src/plans.ts';
 import {
   coordinatorAdmission,
   createPlanRuntime,
@@ -347,5 +348,203 @@ test(
       partialView.planning.requirements,
       'bounded repair never weakens the original requirement',
     );
+  },
+);
+
+test(
+  'a planning plan whose owning reply ended pauses for attention and explains every blocked task',
+  { timeout: 60000 },
+  async t => {
+    const db = await fixture();
+    let runtime;
+    t.after(async () => {
+      await runtime?.close();
+      await db.close();
+    });
+    await loadPlatformBaseline(db.platform);
+    const w = await db.create(await workspaceTableMigrations());
+    runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async () => ({ workspaceId: w.id, generation: 1, connectionString: db.login(w) }),
+    });
+    const table = name => `"${w.names.schema}".${name}`;
+    const chatId = randomUUID(),
+      turnId = randomUUID(),
+      messageId = randomUUID();
+    await db.platform.query(
+      `INSERT INTO ${table('tf_conversations')} (id,owner_user_id,owner_membership_id) VALUES ($1,$2,$3)`,
+      [chatId, w.userId, w.membershipId],
+    );
+    await db.platform.query(
+      `INSERT INTO ${table('tf_conversation_messages')} (id,conversation_id,sequence,author_kind,membership_id) VALUES ($1,$2,1,'human',$3)`,
+      [messageId, chatId, w.membershipId],
+    );
+    await db.platform.query(
+      `INSERT INTO ${table('tf_conversation_turns')} (id,conversation_id,source_message_id,accepted_sequence,responder,status,attempt_epoch,lease_until)
+    VALUES ($1,$2,$3,1,'reverse-text-v1','processing',1,clock_timestamp()+interval '60 seconds')`,
+      [turnId, chatId, messageId],
+    );
+    const plans = createAgentPlans(runtime),
+      scheduler = createPlanRuntime(runtime);
+    const created = await plans.create(
+      w.id,
+      w.userId,
+      chatId,
+      randomUUID(),
+      {
+        title: 'Alert triage agent',
+        planning: {
+          requirements: [
+            { key: 'agent', description: 'An alert triage agent', tasks: ['draft-agent'] },
+            { key: 'report', description: 'A digest of new alerts', tasks: ['digest'] },
+          ],
+          prerequisites: [
+            {
+              key: 'slack',
+              title: 'Slack channel can be resolved',
+              status: 'blocked',
+              evidence: [],
+              reason: 'Slack is not connected.',
+              tasks: ['draft-agent'],
+            },
+            {
+              key: 'history',
+              title: 'Past alerts are readable',
+              status: 'unknown',
+              evidence: [],
+              reason: 'The digest can start from new alerts only.',
+              tasks: ['digest'],
+              optional: true,
+            },
+          ],
+          verificationTask: 'verify-setup',
+        },
+        tasks: [
+          {
+            key: 'draft-agent',
+            title: 'Draft the agent',
+            criteria: ['Agent draft exists'],
+            assignee: { kind: 'coordinator' },
+          },
+          { key: 'digest', title: 'Write the digest', criteria: ['Digest exists'], assignee: { kind: 'coordinator' } },
+          {
+            key: 'verify-setup',
+            title: 'Verify setup',
+            criteria: ['All requirements met'],
+            dependsOn: ['draft-agent', 'digest'],
+            assignee: { kind: 'coordinator' },
+          },
+        ],
+      },
+      turnId,
+    );
+    const read = () => plans.read(w.id, w.userId, created.id);
+    const view = await read();
+    const task = key => view.tasks.find(item => item.key === key);
+    assert.equal(view.lifecycle, 'active');
+    assert.equal(task('draft-agent').state, 'blocked');
+    assert.match(task('draft-agent').reason, /Slack channel can be resolved: Slack is not connected\./);
+    assert.equal(task('digest').state, 'ready', 'an unresolved optional check does not block its task');
+    assert.equal(task('verify-setup').state, 'blocked');
+    assert.match(task('verify-setup').reason, /^Waiting on "Draft the agent", which is blocked: /);
+
+    // Plans saved before blocked work always carried a reason still show one.
+    await db.platform.query(
+      `UPDATE ${table('tf_agent_plan_tasks')} SET reason=NULL WHERE plan_id=$1 AND key='verify-setup'`,
+      [created.id],
+    );
+    assert.match(
+      (await read()).tasks.find(item => item.key === 'verify-setup').reason,
+      /^Waiting on "Draft the agent", which is blocked: /,
+    );
+
+    await scheduler.step(w.id, created.id);
+    assert.equal((await read()).lifecycle, 'active', 'a live owning reply keeps the plan running');
+    const recovery = async () => (await scheduler.due(w.id)).find(due => due.id === created.id);
+    assert.equal((await recovery()).liveOwners, 1, 'recovery sees the live owning reply');
+    await db.platform.query(
+      `UPDATE ${table('tf_conversation_turns')} SET status='queued',lease_until=NULL,error_code='transient-failure',retry_at=clock_timestamp()+interval '1 minute' WHERE id=$1`,
+      [turnId],
+    );
+    await scheduler.step(w.id, created.id);
+    assert.equal((await read()).lifecycle, 'active', 'a reply waiting for its automatic retry still owns the plan');
+
+    await db.platform.query(
+      `UPDATE ${table('tf_conversation_turns')} SET status='failed',lease_until=NULL,error_code='attempts-exhausted' WHERE id=$1`,
+      [turnId],
+    );
+    assert.equal(
+      (await recovery())?.liveOwners,
+      0,
+      'recovery still visits the orphaned plan and sees its owners ended, so a backed-off plan wakes at once',
+    );
+    assert.equal((await scheduler.step(w.id, created.id)).kind, 'terminal');
+    const paused = await read();
+    assert.equal(paused.lifecycle, 'paused');
+    assert.equal(paused.pause, 'progress');
+    const lifecycle = (
+      await db.platform.query(
+        `SELECT changes FROM ${table('tf_agent_plan_events')} WHERE plan_id=$1 ORDER BY version`,
+        [created.id],
+      )
+    ).rows
+      .flatMap(row => row.changes)
+      .filter(change => change.op === 'lifecycle');
+    assert.deepEqual(lifecycle, [{ op: 'lifecycle', to: 'paused', reason: 'progress', cause: 'owner-ended' }]);
+    assert.ok(
+      !(await scheduler.due(w.id)).some(due => due.id === created.id),
+      'a paused plan leaves the recovery queue',
+    );
+
+    // Continue on the failed reply carries the plan on with it; the reply's next model call is admitted.
+    const conversations = createConversations(runtime, undefined, { retryTurn: resumeOwnerEndedPlans });
+    let epoch = 1;
+    const claim = async () => {
+      epoch += 1;
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET status='processing',attempt_epoch=$2,lease_until=clock_timestamp()+interval '60 seconds' WHERE id=$1`,
+        [turnId, epoch],
+      );
+      const { generation } = (
+        await db.platform.query(`SELECT generation FROM ${table('tf_conversation_turns')} WHERE id=$1`, [turnId])
+      ).rows[0];
+      return { workspaceId: w.id, conversationId: chatId, turnId, generation, epoch };
+    };
+    const admit = async fence =>
+      runtime.transaction(w.id, scheduler.compatibility, tx => coordinatorAdmission(tx, fence, {}));
+    await assert.rejects(admit(await claim()), AccessDenied, 'a paused plan admits no model call');
+    const fail = () =>
+      db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET status='failed',lease_until=NULL,error_code='attempts-exhausted' WHERE id=$1`,
+        [turnId],
+      );
+    const retry = async () => {
+      const { generation } = (
+        await db.platform.query(`SELECT generation FROM ${table('tf_conversation_turns')} WHERE id=$1`, [turnId])
+      ).rows[0];
+      return conversations.retry(w.id, w.userId, chatId, turnId, {
+        commandId: randomUUID(),
+        expectedGeneration: generation,
+      });
+    };
+    await fail();
+    assert.equal((await retry()).status, 'queued');
+    const resumed = await read();
+    assert.equal(resumed.lifecycle, 'active');
+    assert.equal(resumed.version, paused.version + 1);
+    assert.equal(await admit(await claim()), null, 'the retried reply is admitted again');
+
+    // A pause the starter chose stays in place when the reply is retried.
+    await plans.control(w.id, w.userId, created.id, {
+      requestId: randomUUID(),
+      expectedVersion: (await read()).version,
+      action: 'pause',
+    });
+    await fail();
+    await retry();
+    assert.equal((await read()).lifecycle, 'paused');
+    assert.equal((await read()).pause, 'starter');
   },
 );

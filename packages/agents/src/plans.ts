@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  deferRemoteSourceChecks,
   lockAuthorization,
   requireTaskInvocation,
   resolveHuman,
@@ -39,6 +40,7 @@ import {
   updatePlanSchema,
   advancePlan,
   applyPlanningPrerequisites,
+  missingBlockReasons,
   planSpecificationSchema,
   planReportSchema,
   planLifecycleSchema,
@@ -48,7 +50,11 @@ import {
   type PlanView,
 } from './plan-contracts.ts';
 
-export const planCompatibility = Object.freeze({ minimum: 1, maximum: commonCompatibility.maximum });
+/**
+ * Plans need the common migration that records when to recheck a saved task's sources (`*_plan_source_checks.sql`).
+ * Older workspaces report storage as incompatible for plan operations, and chat skips plan work there.
+ */
+export const planCompatibility = Object.freeze({ minimum: 19, maximum: commonCompatibility.maximum });
 
 const planRowSchema = z.object({
   id: uuidSchema,
@@ -146,6 +152,46 @@ export async function wakePlanWait(tx: AgentTransaction, plan: { id: string; cha
     SELECT id,conversation_id,generation FROM resumed`,
     [plan.chatId, plan.id],
   );
+}
+/** The lifecycle change the runtime records when a planning plan's owning turns have all ended. */
+export const ownerEndedPause = { op: 'lifecycle', to: 'paused', reason: 'progress', cause: 'owner-ended' } as const;
+/**
+ * Reactivates the plans a retried turn owns that the runtime paused only because that turn had ended, so the retry
+ * can carry on with them. A pause by the starter, the budget or anything else stays in place. Call it in the retry's
+ * transaction after the conversation and turn rows are locked.
+ */
+export async function resumeOwnerEndedPlans(
+  tx: AgentTransaction & { commonVersion: number },
+  retry: { workspaceId: string; conversationId: string; turnId: string; actor: HumanActor },
+) {
+  if (tx.commonVersion < planCompatibility.minimum) return;
+  const plans = z.array(z.object({ id: uuidSchema, version: z.number().int() })).parse(
+    (
+      await tx.client.query(
+        `SELECT p.id,p.version FROM ${relation(tx, 'tf_agent_plans')} p
+      WHERE p.conversation_id=$1 AND p.lifecycle='paused' AND p.planning IS NOT NULL
+        AND p.starter_user_id=$3 AND p.starter_membership_id=$4
+        AND (p.source_turn_id=$2 OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_conversation_turns')} t WHERE t.id=$2 AND t.plan_id=p.id)
+          OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_plan_attempts')} a WHERE a.plan_id=p.id AND a.turn_id=$2))
+        AND (SELECT change->>'cause' FROM ${relation(tx, 'tf_agent_plan_events')} e, jsonb_array_elements(e.changes) change
+          WHERE e.plan_id=p.id AND change->>'op'='lifecycle' ORDER BY e.version DESC LIMIT 1)=$5
+      ORDER BY p.id FOR UPDATE OF p`,
+        [retry.conversationId, retry.turnId, retry.actor.userId, retry.actor.membershipId, ownerEndedPause.cause],
+      )
+    ).rows,
+  );
+  for (const plan of plans) {
+    const version = plan.version + 1;
+    await tx.client.query(
+      `UPDATE ${relation(tx, 'tf_agent_plans')} SET lifecycle='active',version=$2,updated_at=clock_timestamp() WHERE id=$1`,
+      [plan.id, version],
+    );
+    await tx.client.query(
+      `INSERT INTO ${relation(tx, 'tf_agent_plan_events')} (plan_id,version,actor,kind,changes) VALUES ($1,$2,'runtime','advanced',$3)`,
+      [plan.id, version, JSON.stringify([{ op: 'lifecycle', to: 'active', cause: 'owner-retried' }])],
+    );
+    await notifyPlanChange(tx, retry.workspaceId, { id: plan.id, chatId: retry.conversationId });
+  }
 }
 export async function pausePlanWork(tx: AgentTransaction, planId: string, nodes: PlanNode[]) {
   const cancelled = z.array(z.object({ key: planKeySchema, coordinator: z.boolean() })).parse(
@@ -256,8 +302,9 @@ export function createAgentPlans(runtime: AgentStorage) {
     user: string,
     write: boolean,
     operation: (tx: AgentTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
+    compatibility: { minimum: number; maximum: number } = planCompatibility,
   ) {
-    return runtime.transaction(uuidSchema.parse(workspaceId), planCompatibility, async tx => {
+    return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
       await lockAuthorization(tx, write ? 'write' : 'read');
       return operation(tx, await resolveHuman(tx, user));
     });
@@ -395,6 +442,9 @@ export function createAgentPlans(runtime: AgentStorage) {
     const nodes = applyPlanningPrerequisites(tasks.map(toNode), plan.planning ?? undefined);
     const summary = summarizePlan(nodes, plan.planning ?? undefined);
     const names = new Map(specialists.map(item => [item.key, item.name]));
+    // Plans saved before blocked work always carried a reason still explain it.
+    const blockReasons = new Map(nodes.map(node => [node.key, node.reason || null]));
+    for (const [key, reason] of missingBlockReasons(nodes)) blockReasons.set(key, reason);
     return planViewSchema.parse({
       id: plan.id,
       chatId: plan.chatId,
@@ -423,7 +473,7 @@ export function createAgentPlans(runtime: AgentStorage) {
         criteria: task.criteria,
         dependsOn: task.dependsOn,
         state: task.state,
-        reason: task.reason,
+        reason: task.state === 'blocked' && !task.reason ? (blockReasons.get(task.key) ?? null) : task.reason,
         assignee: task.coordinator
           ? { kind: 'coordinator' }
           : task.agentId
@@ -595,7 +645,11 @@ export function createAgentPlans(runtime: AgentStorage) {
         for (const check of planning?.prerequisites ?? [])
           await requirePlanEvidence(tx, actor, plan, check.evidence, check.status === 'verified');
         const nodes = applyPlanningPrerequisites(result.nodes, planning);
-        for (const change of advancePlan(nodes)) nodes.find(node => node.key === change.key)!.state = change.to;
+        for (const change of advancePlan(nodes))
+          Object.assign(
+            nodes.find(node => node.key === change.key)!,
+            { state: change.to, reason: change.reason },
+          );
         await requireAssignable(
           tx,
           actor,
@@ -613,7 +667,11 @@ export function createAgentPlans(runtime: AgentStorage) {
         if (command.planning)
           changes.push({
             op: 'planning',
-            prerequisites: planning?.prerequisites.map(({ key, status }) => ({ key, status })),
+            prerequisites: planning?.prerequisites.map(({ key, status, optional }) => ({
+              key,
+              status,
+              ...(optional ? { optional } : {}),
+            })),
           });
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_agent_plans')} SET version=$2, planning=$3, updated_at=clock_timestamp() WHERE id=$1`,
@@ -671,6 +729,11 @@ export function createAgentPlans(runtime: AgentStorage) {
           lifecycleChanges.push({ op: 'lifecycle', to: 'paused', reason: 'starter' });
         } else if (command.action === 'resume' || command.action === 'start') {
           lifecycle = 'active';
+          // Resuming rereads saved agents' tasks at once, even those waiting for their sources to be checked again.
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET source_check_after=NULL, sources_unavailable_since=NULL WHERE plan_id=$1 AND settled_at IS NULL AND source_check_after IS NOT NULL`,
+            [plan.id],
+          );
           if (command.action === 'start')
             await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET execution='execute' WHERE id=$1`, [
               plan.id,
@@ -779,40 +842,43 @@ export function createAgentPlans(runtime: AgentStorage) {
     },
     /** Returns the read-only projection to anyone who can read the chat; only the starter receives `canControl`. */
     async read(workspaceId: string, user: string, planId: string) {
-      return transaction(workspaceId, user, false, async (tx, actor) => {
-        const plan = await loadPlan(tx, actor, planId, false);
-        for (const check of plan.planning?.prerequisites ?? [])
-          await requirePlanEvidence(tx, actor, plan, check.evidence, false);
-        const projection = view(
-          plan,
-          await loadTasks(tx, plan.id),
-          await loadSpecialists(tx, plan.id),
-          actor,
-          await pauseReason(tx, plan),
-          await waitingTasks(tx, plan, actor),
-        );
-        const reports = z.array(z.object({ key: planKeySchema, report: planReportSchema })).parse(
-          (
-            await tx.client.query(
-              `SELECT DISTINCT ON (task_key) task_key AS key,report FROM ${relation(tx, 'tf_agent_plan_attempts')}
-          WHERE plan_id=$1 AND coordinator AND report IS NOT NULL ORDER BY task_key,generation DESC`,
-              [plan.id],
-            )
-          ).rows,
-        );
-        for (const { key, report } of reports) {
-          await requirePlanEvidence(
-            tx,
-            actor,
+      // Reading is repeatable, so remote source checks run between its transactions instead of holding them open.
+      return deferRemoteSourceChecks(() =>
+        transaction(workspaceId, user, false, async (tx, actor) => {
+          const plan = await loadPlan(tx, actor, planId, false);
+          for (const check of plan.planning?.prerequisites ?? [])
+            await requirePlanEvidence(tx, actor, plan, check.evidence, false);
+          const projection = view(
             plan,
-            [...report.checks, ...report.requirements].flatMap(check => check.evidence),
-            false,
+            await loadTasks(tx, plan.id),
+            await loadSpecialists(tx, plan.id),
+            actor,
+            await pauseReason(tx, plan),
+            await waitingTasks(tx, plan, actor),
           );
-          const task = projection.tasks.find(task => task.key === key);
-          if (task) task.report = report;
-        }
-        return projection;
-      });
+          const reports = z.array(z.object({ key: planKeySchema, report: planReportSchema })).parse(
+            (
+              await tx.client.query(
+                `SELECT DISTINCT ON (task_key) task_key AS key,report FROM ${relation(tx, 'tf_agent_plan_attempts')}
+          WHERE plan_id=$1 AND coordinator AND report IS NOT NULL ORDER BY task_key,generation DESC`,
+                [plan.id],
+              )
+            ).rows,
+          );
+          for (const { key, report } of reports) {
+            await requirePlanEvidence(
+              tx,
+              actor,
+              plan,
+              [...report.checks, ...report.requirements].flatMap(check => check.evidence),
+              false,
+            );
+            const task = projection.tasks.find(task => task.key === key);
+            if (task) task.report = report;
+          }
+          return projection;
+        }),
+      );
     },
     /**
      * Returns the latest completed result of each task, with the sources it depends on. Workers ran with the starter's
@@ -850,25 +916,32 @@ export function createAgentPlans(runtime: AgentStorage) {
         }));
       });
     },
-    /** Lists a chat's plans, newest first. */
+    /** Lists a chat's plans, newest first. A workspace not yet migrated for plans lists none, as if plans were off. */
     async list(workspaceId: string, user: string, chatId: string) {
-      return transaction(workspaceId, user, false, async (tx, actor) => {
-        await requireChat(tx, actor, chatId, 'read');
-        const plans = z
-          .array(planRowSchema)
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT ${planColumns} FROM ${relation(tx, 'tf_agent_plans')} WHERE conversation_id=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
-                [chatId],
-              )
-            ).rows,
-          );
-        const items = [];
-        for (const plan of plans)
-          items.push(planListItemSchema.parse(view(plan, await loadTasks(tx, plan.id), [], actor)));
-        return items;
-      });
+      return transaction(
+        workspaceId,
+        user,
+        false,
+        async (tx, actor) => {
+          await requireChat(tx, actor, chatId, 'read');
+          if (tx.commonVersion < planCompatibility.minimum) return [];
+          const plans = z
+            .array(planRowSchema)
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT ${planColumns} FROM ${relation(tx, 'tf_agent_plans')} WHERE conversation_id=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
+                  [chatId],
+                )
+              ).rows,
+            );
+          const items = [];
+          for (const plan of plans)
+            items.push(planListItemSchema.parse(view(plan, await loadTasks(tx, plan.id), [], actor)));
+          return items;
+        },
+        commonCompatibility,
+      );
     },
   };
 }

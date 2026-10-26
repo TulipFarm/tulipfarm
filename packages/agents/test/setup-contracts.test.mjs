@@ -147,7 +147,13 @@ test('authoring context exposes only current bundled metadata', () => {
   assert.deepEqual(agentContextSchema.parse({ currentSoulRevision: 'a'.repeat(40), teams: [] }).builtinSkills, []);
 });
 
-test('create agent discovery loads setup, Slack checks and publication status together', () => {
+test('create agent discovery loads setup, Slack checks and publication status together', t => {
+  const previous = process.env.SLACK_OUTBOUND_ENABLED;
+  process.env.SLACK_OUTBOUND_ENABLED = 'true';
+  t.after(() => {
+    if (previous === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
+    else process.env.SLACK_OUTBOUND_ENABLED = previous;
+  });
   const loaded = new Set();
   const tools = nativeChatTools(undefined, false, loaded).search('create agent');
   for (const name of ['agents_context', 'agents_draft', 'agents_list', 'agents_read', 'slack_resolve', 'agents_status'])

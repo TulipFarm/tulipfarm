@@ -946,7 +946,11 @@ export function createSlackActions(options: Options) {
           ).rows[0],
         );
       if (!installation)
-        return { error: 'slack-unavailable', instruction: 'Ask a workspace admin to connect Slack to this workspace.' };
+        return {
+          error: 'slack-unavailable',
+          instruction:
+            'This workspace has not connected Slack. Ask a workspace admin to connect Slack in Integrations, then call slack.resolve again.',
+        };
       const source = { installationId: installation.id, generation: installation.generation };
       try {
         await provider.identity(tx, actor, source);

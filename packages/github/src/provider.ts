@@ -118,7 +118,15 @@ export async function exchange(config: Configuration, code: string, verifier: st
   };
 }
 // GitHub answers a bad or reused refresh token with HTTP 200 and an `error` field, and refresh tokens are single-use.
-export async function refresh(config: Configuration, refreshToken: string, fetcher: typeof fetch) {
+// A refresh isn't started after `admitBy`. Once started it gets its full window, never cut short: GitHub may already
+// have spent the old token, and aborting before the replacement arrives would force the member to reconnect.
+export async function refresh(
+  config: Configuration,
+  refreshToken: string,
+  fetcher: typeof fetch,
+  admitBy = Number.POSITIVE_INFINITY,
+) {
+  if (Date.now() >= admitBy) throw new GitHubAccountError('account-unavailable');
   const body = await request(
     'https://github.com/login/oauth/access_token',
     {
