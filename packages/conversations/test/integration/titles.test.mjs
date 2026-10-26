@@ -138,3 +138,63 @@ test('a first reply is delivered before its title, which then saves once and nev
     await f.close();
   }
 });
+
+test('a first turn that fails for good still gets its generated title once, and a retried reply keeps it', async () => {
+  const f = await conversationFixture();
+  try {
+    const { workspace: w, store } = f;
+    const titles = createConversationTitles(f.runtime);
+    const id = randomUUID();
+    await store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });
+    const sent = await store.send(w.id, w.userId, id, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: placeholder }],
+    });
+    const work = { workspaceId: w.id, conversationId: id, turnId: sent.turnId, generation: 0 };
+    const failing = createConversationExecutor(f.runtime, async () => {
+      throw new Error('model-refusal');
+    });
+    const failed = await failing.processReply(work);
+    assert.deepEqual(failed, { outcome: 'failed', title: { titleRevision: 1, generation: 1 } });
+    const titleWork = { ...work, ...failed.title };
+    assert.equal((await titles.request(titleWork)).text, placeholder);
+    // The reply's own generation no longer names the turn, so stale title work finds nothing.
+    assert.equal(await titles.request({ ...work, titleRevision: 1 }), null);
+    assert.equal(await titles.save(titleWork, 'Customer follow-ups'), 'generated');
+    assert.equal(await titles.request(titleWork), null);
+
+    const retried = await store.retry(w.id, w.userId, id, sent.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: failed.title.generation,
+    });
+    const answered = await createConversationExecutor(f.runtime, async () => ({
+      text: 'Your follow-up plan is ready.',
+      sources: [],
+    })).processReply({ ...work, generation: retried.generation });
+    assert.deepEqual(answered, { outcome: 'completed' });
+    assert.equal((await store.read(w.id, w.userId, id)).title, 'Customer follow-ups');
+
+    const transient = randomUUID();
+    await store.create(w.id, w.userId, { chatId: transient, commandId: randomUUID() });
+    const queued = await store.send(w.id, w.userId, transient, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: placeholder }],
+    });
+    const retrying = createConversationExecutor(f.runtime, async () => {
+      throw Object.assign(new Error('lock timeout'), { code: '55P03' });
+    });
+    assert.deepEqual(
+      await retrying.processReply({
+        workspaceId: w.id,
+        conversationId: transient,
+        turnId: queued.turnId,
+        generation: 0,
+      }),
+      { outcome: 'retry' },
+    );
+  } finally {
+    await f.close();
+  }
+});

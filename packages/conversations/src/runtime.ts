@@ -200,9 +200,23 @@ export type ConversationToolContext = {
 };
 export type ConversationReplyOutcome = {
   outcome: 'completed' | 'idle' | 'retry' | 'failed' | 'stale';
-  /** Present when the delivered first reply's chat still needs its generated title, at this title revision. */
-  title?: { titleRevision: number };
+  /**
+   * Present when the chat still needs its generated title, at this title revision, after its first turn was delivered
+   * or failed for good. A failed turn names its final generation, which the title work must use instead of the reply's.
+   */
+  title?: { titleRevision: number; generation?: number };
 };
+/** Hears, after the turn's final write commits, that its chat still needs its first generated title. */
+type TitleListener = (titleRevision: number, generation?: number) => void;
+// Accepting a chat's first message sets its placeholder title at this revision, so a later one is a generated title.
+const placeholderTitleRevision = 1;
+/** Whether a private chat still has its placeholder title, which a generated title may replace. */
+const needsGeneratedTitle = (chat: {
+  title_manual: boolean;
+  title_revision: number;
+  slack: unknown;
+  context: unknown;
+}) => !chat.title_manual && chat.title_revision <= placeholderTitleRevision && !chat.slack && !chat.context;
 /** A reply's final credit write. It runs inside the executor's last transaction for the attempt. */
 export type ReplySettlement = (tx: ReplyTransaction) => Promise<void>;
 export type ReplyTransaction = RuntimeTransaction;
@@ -1219,10 +1233,7 @@ export function createConversationExecutor(
   }
 
   /** `onTitle` hears, after delivery commits, that this reply's chat still needs its first generated title. */
-  async function complete(
-    value: unknown,
-    onTitle?: (titleRevision: number) => void,
-  ): Promise<'completed' | 'stale' | 'retry'> {
+  async function complete(value: unknown, onTitle?: TitleListener): Promise<'completed' | 'stale' | 'retry'> {
     const fence = fenceSchema.parse(value);
     const previousFailure = previousFailures.get(attempt(fence));
     previousFailures.delete(attempt(fence));
@@ -1621,7 +1632,7 @@ export function createConversationExecutor(
             planningMode: turn.planning_mode,
             planningSkill,
             planningContext,
-            generateTitle: turn.accepted_sequence === 1 && !chat.title_manual && !chat.slack && !chat.context,
+            generateTitle: turn.accepted_sequence === 1 && needsGeneratedTitle(chat),
             titleRevision: chat.title_revision,
             project,
           };
@@ -2480,10 +2491,14 @@ export function createConversationExecutor(
     denied = false,
     planningFailure?: 'plan-budget',
     cause?: string,
+    onTitle?: TitleListener,
   ): Promise<'retry' | 'failed' | 'stale'> {
     const fence = fenceSchema.parse(value);
-    return finalTransaction(fence, async tx => {
-      if (!(await root(tx, fence))) return 'stale';
+    let title: { titleRevision: number; generation: number } | undefined;
+    const result = await finalTransaction(fence, async tx => {
+      title = undefined;
+      const chat = await root(tx, fence);
+      if (!chat) return 'stale';
       const turn = await head(tx, fence.conversationId);
       if (
         !turn ||
@@ -2520,8 +2535,13 @@ export function createConversationExecutor(
           `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation, next_attempt_at) SELECT id, conversation_id, generation, retry_at FROM ${table(tx, 'tf_conversation_turns')} WHERE id = $1`,
           [turn.id],
         );
+      // The title comes from the requester's message alone, so a first turn that failed for good still gets one.
+      if (exhausted && turn.accepted_sequence === 1 && needsGeneratedTitle(chat))
+        title = { titleRevision: chat.title_revision, generation: turn.generation + 1 };
       return exhausted ? 'failed' : 'retry';
     });
+    if (result === 'failed' && title) onTitle?.(title.titleRevision, title.generation);
+    return result;
   }
 
   /** Only the API cancels a turn, so a run that lost its fence to a cancellation records it here. */
@@ -2532,7 +2552,7 @@ export function createConversationExecutor(
 
   async function process(
     value: unknown,
-    onTitle?: (titleRevision: number) => void,
+    onTitle?: TitleListener,
   ): Promise<'completed' | 'idle' | 'retry' | 'failed' | 'stale'> {
     const reply = replyWorkSchema.safeParse(value);
     return withChatMeasurements(
@@ -2739,6 +2759,7 @@ export function createConversationExecutor(
                   denied,
                   planning?.failure?.(error)?.code,
                   replyFailureCause(error),
+                  onTitle,
                 );
                 await noteCancelled(fence, result);
                 return result;
@@ -2870,13 +2891,13 @@ export function createConversationExecutor(
     });
   }
 
-  /** Processes a reply and reports whether its delivered first reply still needs a generated title. */
+  /** Processes a reply and reports whether its first turn, delivered or failed for good, still needs a generated title. */
   async function processReply(value: unknown): Promise<ConversationReplyOutcome> {
-    let titleRevision: number | undefined;
-    const outcome = await process(value, revision => {
-      titleRevision = revision;
+    let title: ConversationReplyOutcome['title'];
+    const outcome = await process(value, (titleRevision, generation) => {
+      title = generation === undefined ? { titleRevision } : { titleRevision, generation };
     });
-    return outcome === 'completed' && titleRevision !== undefined ? { outcome, title: { titleRevision } } : { outcome };
+    return (outcome === 'completed' || outcome === 'failed') && title ? { outcome, title } : { outcome };
   }
 
   return { claim, complete, fail, process, processReply, due, lease, release, acknowledge };

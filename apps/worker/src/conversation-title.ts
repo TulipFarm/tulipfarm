@@ -43,7 +43,7 @@ function classify(error: unknown): { outcome: 'failed' | 'timeout'; code: string
 }
 
 /**
- * Generates a delivered first reply's chat title, after the reply and outside its transactions. The model call is billed
+ * Generates a chat's title once its first turn was delivered or failed for good, outside the reply's transactions. The model call is billed
  * like the chat's other calls, in its own short reserve and settle. A failure keeps the placeholder title; on a final attempt
  * it logs one warning, otherwise a transient failure asks the workflow to try again.
  */

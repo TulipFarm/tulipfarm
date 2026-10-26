@@ -20,7 +20,7 @@ const chatSchema = z.object({
 });
 
 /**
- * The first reply's generated title, applied after that reply was delivered. Each step is one short transaction,
+ * The chat's generated title, applied after its first turn was delivered or failed for good. Each step is one short transaction,
  * so no transaction is held across the model call, and a title the user set in the meantime always wins.
  */
 export function createConversationTitles(runtime: ConversationRuntime) {
@@ -41,7 +41,7 @@ export function createConversationTitles(runtime: ConversationRuntime) {
             `SELECT c.owner_user_id, c.owner_membership_id, c.title_manual, c.title_revision, t.responder,
               COALESCE((SELECT string_agg(p.text, '' ORDER BY p.ordinal) FROM ${table('tf_conversation_parts')} p WHERE p.message_id = t.source_message_id AND p.kind = 'text'), '') AS text
             FROM ${table('tf_conversations')} c JOIN ${table('tf_conversation_turns')} t ON t.conversation_id = c.id
-            WHERE c.id = $1 AND c.kind = 'private' AND t.id = $2 AND t.generation = $3 AND t.status = 'completed' AND t.accepted_sequence = 1`,
+            WHERE c.id = $1 AND c.kind = 'private' AND t.id = $2 AND t.generation = $3 AND t.status IN ('completed', 'failed') AND t.accepted_sequence = 1`,
             [work.conversationId, work.turnId, work.generation],
           )
         ).rows[0],

@@ -34,6 +34,7 @@ import {
   type AgentModel,
 } from './model.ts';
 import { readOnlyTools, type FrameworkCall } from './tools.ts';
+import { toolNameSchema } from './tool-capabilities.ts';
 import { providerFetch } from './provider-fetch.ts';
 import {
   agentInstructionsPrompt,
@@ -1266,6 +1267,11 @@ export type ToolInferenceContext = {
    * reply's model round, so each call is its own metered step. When absent or failing, results become stubs.
    */
   compactToolResults?: ((input: { round: number; system: string; text: string }) => Promise<string>) | undefined;
+  /**
+   * Ends the reply when aborted: a pending model request stops, no further request starts, and the reply rejects
+   * with the signal's reason.
+   */
+  signal?: AbortSignal | undefined;
 };
 
 /** `ref` names a stored full output for `tool_result_read`; `compacted` marks a result already summarised or stubbed. */
@@ -1283,6 +1289,17 @@ type LoopItem =
   | { kind: 'turn'; turn: ChatTurn }
   | { kind: 'model'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'results'; results: ToolResult[] };
+/** Every framework tool's native name, including tools a chat has not loaded yet. */
+const nativeFrameworkToolNames = new Set(toolNameSchema.options.map(nativeToolName));
+/** Why the reply loop returned a tool request unrun, as logged. */
+type ToolRejection =
+  | 'bud-batch'
+  | 'bud-limit'
+  | 'bud-invalid'
+  | 'unknown-tool'
+  | 'invalid-arguments'
+  | 'write-batch'
+  | 'mcp-invalid';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure };
@@ -2154,25 +2171,35 @@ export async function inferWithTools(
     log('warn', 'activity', 'call_failed', { operation: 'chat.tool-budget', 'error.type': reason });
   };
   const calendarBindings = new Map<string, CalendarTextBinding>();
-  const send = <T>(
+  const signal = tools?.signal;
+  const send = async <T>(
     wire: { url: string; headers: Record<string, string>; body: object; turns: readonly ChatTurn[] },
     select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
     answerText?: ToolInferenceContext['answerText'],
     target = config,
     settled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
-  ) =>
-    sendChatRequest(
-      target,
-      requestStep++,
-      meter,
-      wire,
-      select,
-      answerText,
-      () => {
-        outputProduced = true;
-      },
-      settled,
-    );
+  ) => {
+    signal?.throwIfAborted();
+    try {
+      return await sendChatRequest(
+        target,
+        requestStep++,
+        meter,
+        wire,
+        select,
+        answerText,
+        () => {
+          outputProduced = true;
+        },
+        settled,
+        signal,
+      );
+    } catch (error) {
+      // An aborted request fails as a transport error; the reply ends with the reason it was stopped instead.
+      signal?.throwIfAborted();
+      throw error;
+    }
+  };
   /**
    * Runs a reply step on the chat route and, when it fails before the turn produced any output with a failure another model
    * can fix, once more on the configured fallback, which then answers the rest of the turn. The chat model's failure is
@@ -2216,7 +2243,14 @@ export async function inferWithTools(
       return result;
     }
   }
-  const reject = (results: ToolResult[]) => {
+  /** Returns the model's rejected tool request with a correction. The third correction in a reply ends it. */
+  const reject = (results: ToolResult[], reason: ToolRejection, tools: readonly string[]) => {
+    log('warn', 'activity', 'call_failed', {
+      operation: 'chat.tool-rejected',
+      'error.type': reason,
+      tool: [...new Set(tools)].sort().join(','),
+      attempt: corrections + 1,
+    });
     if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: outputProduced });
     items.push({ kind: 'results', results });
   };
@@ -2711,12 +2745,14 @@ export async function inferWithTools(
               true,
             ),
           ),
+          only ? 'bud-limit' : 'bud-batch',
+          [budToolName],
         );
         continue;
       }
       const parsed = parseBudState(only.input);
       if (!parsed.ok) {
-        reject([result(only, parsed.error, true)]);
+        reject([result(only, parsed.error, true)], 'bud-invalid', [budToolName]);
         continue;
       }
       expressionCalls++;
@@ -2777,10 +2813,17 @@ export async function inferWithTools(
     }
     const resolved = selected.calls.map(call => ({ native: call, resolved: active.resolve(call) }));
     if (resolved.some(entry => !entry.resolved.ok)) {
+      const unresolved = resolved.filter(entry => !entry.resolved.ok).map(entry => entry.native.name);
+      // Only a real tool's name is logged, never a name the model made up.
+      const offered = unresolved.filter(
+        name => nativeFrameworkToolNames.has(name) || active.tools.some(tool => tool.name === name),
+      );
       reject(
         resolved.map(({ native, resolved }) =>
           result(native, resolved.ok ? notRun : `${resolved.error} ${formatOnly}`, true),
         ),
+        offered.length < unresolved.length ? 'unknown-tool' : 'invalid-arguments',
+        unresolved.map(name => (offered.includes(name) ? name : 'unknown')),
       );
       continue;
     }
@@ -2788,7 +2831,11 @@ export async function inferWithTools(
       resolved.ok ? [{ native, call: resolved.call, activity: resolved.activity }] : [],
     );
     if (valid.length > 1 && valid.some(({ call }) => !readOnlyTools.has(call.tool))) {
-      reject(valid.map(({ native, call }) => result(native, readOnlyTools.has(call.tool) ? notRun : writeAlone, true)));
+      reject(
+        valid.map(({ native, call }) => result(native, readOnlyTools.has(call.tool) ? notRun : writeAlone, true)),
+        'write-batch',
+        valid.flatMap(({ call }) => (readOnlyTools.has(call.tool) ? [] : [call.tool])),
+      );
       continue;
     }
     const mcpFailure = valid.find(({ call }) => {
@@ -2811,6 +2858,8 @@ export async function inferWithTools(
             true,
           ),
         ),
+        'mcp-invalid',
+        [mcpFailure.call.tool],
       );
       continue;
     }
