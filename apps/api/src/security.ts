@@ -59,7 +59,13 @@ export function registerSecurity(app: FastifyInstance, webOrigin: string) {
     // TLS and HTTPS redirects are owned by Container Apps ingress.
     hsts: false,
   });
-  app.register(rateLimit, { global: false, max: 300, timeWindow: 60_000, cache: 10_000 });
+  const max = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100_000)
+    .parse(process.env.API_RATE_LIMIT_PER_MINUTE ?? 300);
+  app.register(rateLimit, { global: false, max, timeWindow: 60_000, cache: 10_000 });
   app.register(cors, {
     delegator: (request, callback) => {
       const guide = /^\/v1\/public\/guide\/(?:options|session|messages|signup)(?:\?|$)/.test(request.url);

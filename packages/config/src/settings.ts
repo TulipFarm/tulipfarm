@@ -376,6 +376,16 @@ export const settings: readonly Setting[] = [
       'How long a chat reply started on send may stay unclaimed before the background sweep starts it again.',
   },
   {
+    name: 'API_RATE_LIMIT_PER_MINUTE',
+    group: 'Runtime',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: '300',
+    description:
+      'Requests one client address may make per minute before the API answers 429. Raise it only for a load test.',
+  },
+  {
     name: 'API_PROXY_MODE',
     group: 'Runtime',
     services: ['api'],
