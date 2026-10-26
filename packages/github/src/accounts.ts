@@ -1,9 +1,11 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
   AccessDenied,
   currentMember,
   lockAuthorization,
+  remoteSourceCheckDeadline,
   resolveHuman,
   type AuthorizationTransaction,
   type HumanActor,
@@ -103,13 +105,13 @@ export function createGitHubAccounts(options: {
       return operation(tx, actor);
     });
   }
-  async function load(tx: AuthorizationTransaction, actor: HumanActor, id: string) {
+  async function load(tx: AuthorizationTransaction, actor: HumanActor, id: string, lock = true) {
     const row = rowSchema
       .optional()
       .parse(
         (
           await tx.client.query(
-            `SELECT * FROM ${relation(tx, 'accounts')} WHERE id=$1 AND owner_membership_id=$2 FOR UPDATE`,
+            `SELECT * FROM ${relation(tx, 'accounts')} WHERE id=$1 AND owner_membership_id=$2 ${lock ? 'FOR UPDATE' : ''}`,
             [uuidSchema.parse(id), actor.membershipId],
           )
         ).rows[0],
@@ -357,6 +359,8 @@ export function createGitHubAccounts(options: {
       operation: (credential: GitHubCredential, tx: AuthorizationTransaction) => Promise<T>,
       expectedGeneration?: number,
       beforeAccount?: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<void>,
+      // Reads the account without a row lock; only a refresh or a rejection locks it.
+      shared = false,
     ): Promise<T> {
       workspaceId = uuidSchema.parse(workspaceId);
       const { configuration, cipher } = enabled();
@@ -364,7 +368,11 @@ export function createGitHubAccounts(options: {
         row.refresh_credential !== null &&
         row.access_expires_at !== null &&
         row.access_expires_at.getTime() <= Date.now() + margin;
-      const reject = async (tx: AuthorizationTransaction, actor: HumanActor, row: Row) => {
+      const reject = async (tx: AuthorizationTransaction, actor: HumanActor, read: Row) => {
+        const row = shared ? await load(tx, actor, read.id) : read;
+        // A concurrent refresh may have replaced the credential this read used; only the one that failed is rejected.
+        if (row.generation !== read.generation || !isDeepStrictEqual(row.credential, read.credential))
+          return { kind: 'retry' as const };
         const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
           githubRecommendations(tx, row.id),
         );
@@ -389,10 +397,13 @@ export function createGitHubAccounts(options: {
           if (!staleAccess(row, 30 * 60 * 1000)) return { kind: 'renewed' as const };
           let renewed: Awaited<ReturnType<typeof refresh>>;
           try {
+            // Within a remote-check budget, a refresh starts only before the budget's deadline. Its replacement token is
+            // committed here, in its own transaction, even when the read that needed it then reports unavailable.
             renewed = await refresh(
               configuration,
               cipher.decrypt(binding(workspaceId, row, 'refresh'), row.refresh_credential),
               fetcher,
+              remoteSourceCheckDeadline(),
             );
           } catch (error) {
             if (error instanceof GitHubCredentialRejected) return reject(tx, actor, row);
@@ -413,7 +424,7 @@ export function createGitHubAccounts(options: {
       for (let renewals = 0; ; renewals++) {
         const result = await authorized(workspaceId, principal, async (tx, actor) => {
           await beforeAccount?.(tx, actor);
-          const row = await load(tx, actor, id);
+          const row = await load(tx, actor, id, !shared);
           if (!available(row)) throw new GitHubAccountError('account-reconnect-required');
           if (
             row.config_hash !== configurationHash(configuration) ||
@@ -443,10 +454,12 @@ export function createGitHubAccounts(options: {
           }
         });
         if (result.kind === 'renew') {
-          if ((await renew()).kind === 'rejected') throw new GitHubAccountError('account-reconnect-required');
+          if ((await renew()).kind !== 'renewed') throw new GitHubAccountError('account-reconnect-required');
           continue;
         }
-        if (result.kind === 'rejected') throw new GitHubAccountError('account-reconnect-required');
+        if (result.kind === 'rejected' || (result.kind === 'retry' && renewals > 0))
+          throw new GitHubAccountError('account-reconnect-required');
+        if (result.kind === 'retry') continue;
         return result.value;
       }
     },
@@ -459,36 +472,65 @@ export function createGitHubAccounts(options: {
       expectedGeneration?: number,
       requireAccess?: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<void>,
     ): Promise<T> {
-      const credential = await accounts.withCredential(
+      let credential = await accounts.withCredential(
         workspaceId,
         principal,
         id,
         async credential => credential,
         expectedGeneration,
         requireAccess,
+        true,
       );
       const actor: HumanActor = {
         kind: 'human',
         userId: typeof principal === 'string' ? principal : principal.userId,
         membershipId: credential.membershipId,
       };
-      let outcome: { kind: 'success'; value: T } | { kind: 'failure'; error: unknown };
-      try {
-        outcome = { kind: 'success', value: await operation(credential) };
-      } catch (error) {
-        outcome = { kind: 'failure', error };
+      const replaced = Symbol('replaced');
+      for (let attempt = 0; ; attempt++) {
+        const used = credential;
+        let outcome: { kind: 'success'; value: T } | { kind: 'failure'; error: unknown };
+        try {
+          outcome = { kind: 'success', value: await operation(used) };
+        } catch (error) {
+          outcome = { kind: 'failure', error };
+        }
+        const result = await accounts.withCredential(
+          workspaceId,
+          actor,
+          id,
+          async current => {
+            if (outcome.kind === 'success') return outcome.value;
+            // A concurrent refresh replaced the token that GitHub rejected; retry with the stored one instead.
+            // Never replay the rejection against a credential that wasn't the one used.
+            if (outcome.error instanceof GitHubCredentialRejected && current.accessToken !== used.accessToken) {
+              if (attempt > 0) throw new GitHubAccountError('account-unavailable');
+              credential = current;
+              return replaced;
+            }
+            throw outcome.error;
+          },
+          used.generation,
+          requireAccess,
+          true,
+        );
+        if (result !== replaced) return result as T;
       }
-      return accounts.withCredential(
-        workspaceId,
-        actor,
-        id,
-        async () => {
-          if (outcome.kind === 'failure') throw outcome.error;
-          return outcome.value;
-        },
-        credential.generation,
-        requireAccess,
-      );
+    },
+    /** Checks, without a row lock or a provider call, that the account can still serve `expectedGeneration`. */
+    async requireUsable(workspaceId: string, principal: string | HumanActor, id: string, expectedGeneration: number) {
+      const { configuration } = enabled();
+      await authorized(workspaceId, principal, async (tx, actor) => {
+        const row = await load(tx, actor, id, false);
+        if (
+          row.state !== 'active' ||
+          row.identity === null ||
+          row.generation !== expectedGeneration ||
+          row.config_hash !== configurationHash(configuration) ||
+          (row.expires_at && row.expires_at.getTime() <= Date.now())
+        )
+          throw new GitHubAccountError('account-reconnect-required');
+      });
     },
   };
   return accounts;

@@ -102,8 +102,24 @@ for the budget. It also pauses when its starter loses membership or chat access.
   retries with a new attempt, up to three in total. A stale attempt cannot settle.
 
 The `agentPlanStep` workflow carries only IDs. It runs specialists beside its loop and steps again when one finishes.
-Saved tasks do not signal plans, so a waiting plan reads them again every 30 seconds. `agentPlanRecovery` wakes every
-active plan each minute.
+Saved tasks do not signal plans, so a waiting plan reads them again every 30 seconds. When a saved task's sources
+can't be checked right now, for example because GitHub is rate limited, the attempt stays open and records when to read
+it again (`source_check_after`, common migration `*_plan_source_checks.sql`; until a workspace has it, its chats
+list no plans and recovery skips it). The wait is as long as the sources have been unavailable, from
+30 seconds up to 30 minutes, and the step's `retryAfterMs` tells the workflow to sleep until then. After an hour the
+plan pauses with reason `sources-unavailable`; nothing is revoked, and resuming reads the task at once. A successful read
+clears the wait. `agentPlanRecovery` runs each minute. It wakes every active plan with an open attempt that isn't
+waiting for such a check. A quiet plan, with no other open attempt, such as one whose tasks are all blocked, is woken
+when its version or its count of running owner turns changes, and otherwise after intervals that double from a minute
+up to an hour. The intervals are kept in each worker process, so a restart wakes each plan once.
+
+Advancing a plan, reading a saved task's result and reading a plan run inside `deferRemoteSourceChecks` from
+`@tulipfarm/access`. In that scope a GitHub source is not checked with the provider while the transaction holds the
+authorization lock or the account row. The transaction rolls back, the checks run with no database lock held, at most
+once per source, and the operation reruns with their results. A source that is no longer readable still denies; one
+the provider cannot check right now, for example when rate limited, raises `SourceAuthorizationUnavailable`. The plan
+API answers that with 503 `plan-source-unavailable`, and the plan card keeps Stop and Pause, using the listed version,
+when the plan's details cannot be loaded.
 
 When the task summary reaches completed or failed, the scheduler closes an active plan with that outcome.
 A failed branch blocks its dependents but does not stop independent work. Failed plans are terminal:
@@ -138,6 +154,20 @@ visible under task details after current source access is checked. A worker
 return enters `verifying`; plain prose cannot complete a Planning requirement.
 Legacy completed plans are not labelled newly verified.
 
+A prerequisite that is not verified blocks the tasks it names, unless the model marks it `optional` because those tasks
+can be done without it; the plan then shows it as a warning. Stored checks without the flag stay blocking, and a
+required check cannot later become optional. Every blocked task carries a reason: one held back only by its
+dependencies names the first failed, cancelled or blocked dependency and that task's reason, and the plan view derives
+the same reason for older saved tasks that have none.
+
+A planning plan is continued by the turns that own it: its source turn, turns linked by `plan_id`, and coordinator
+attempt turns. When every one of them has ended, for example after a reply fails for good, and no worker attempt is
+open, the next plan step pauses the plan with reason `progress` and records `cause: 'owner-ended'` in its lifecycle
+change. The minute-by-minute recovery sweep runs that step, and the plan card then offers Resume. A turn queued for
+an automatic retry still owns its plan. When the starter retries (Continue) a failed owning turn, the same transaction
+reactivates plans whose latest pause has that cause and records `cause: 'owner-retried'`. Pauses chosen by the starter
+or caused by the budget or lost access stay in place.
+
 The Normal/Plan composer control persists typed intent on the send command and
 turn. Plan mode automatically loads Planning and rejects writes, business drafts,
 activation, and dispatch before their callbacks. `plans.start` or the starter's
@@ -157,7 +187,7 @@ version-checked, replay their receipt, and record a `controlled` event by `start
 
 A saved task that waits for an answer or approval keeps its question in that task. The plan view gives the starter its
 `waitingTaskId` so the canvas can link to the existing task page. The view also reports why a paused plan stopped
-(`starter`, `budget`, `starter-access`, or `progress`). Every plan write sends a chat change notification with the `planId`, so
+(`starter`, `budget`, `starter-access`, `progress`, or `sources-unavailable`). Every plan write sends a chat change notification with the `planId`, so
 an open chat can read the plan again.
 
 The web chat lists a chat's plans after its messages and opens one in the Canvas as a read-only outline

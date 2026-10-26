@@ -23,6 +23,7 @@ export * from './protected-source.ts';
 export * from './workflow-source.ts';
 export * from './team-permissions.ts';
 export * from './manager-handoff.ts';
+export * from './remote-checks.ts';
 export type AuthorizationTransaction = {
   client: Pick<Client, 'query'>;
   schema: string;

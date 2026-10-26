@@ -242,3 +242,30 @@ test('workers report blocked checks explicitly and cannot omit criteria from a p
     /model-invalid-decision/,
   );
 });
+
+test('an optional prerequisite that is not verified warns without blocking its tasks', () => {
+  const plan = input();
+  const optional = {
+    ...plan.planning.prerequisites[0],
+    status: 'blocked',
+    evidence: [],
+    reason: 'No channel yet; the agent can start with an empty channel list.',
+    optional: true,
+  };
+  const planning = { ...plan.planning, prerequisites: [optional] };
+  const built = buildInitialPlan({ ...plan, planning });
+  assert.equal(built.nodes[0].state, 'ready');
+  assert.equal(built.nodes[0].reason ?? null, null);
+  assert.equal(createPlanSchema.parse({ ...plan, planning }).planning.prerequisites[0].optional, true);
+  assert.equal(input().planning.prerequisites[0].optional, undefined);
+  const done = built.nodes.map(node => ({ ...node, state: 'completed' }));
+  assert.equal(summarizePlan(done, planning).outcome, 'completed');
+});
+
+test('a required prerequisite cannot later be relaxed to optional', () => {
+  const plan = input();
+  const { nodes } = buildInitialPlan(plan);
+  const relaxed = { ...plan.planning, prerequisites: [{ ...plan.planning.prerequisites[0], optional: true }] };
+  assert.throws(() => validatePlanning(nodes, relaxed, plan.planning), /planning-prerequisite/);
+  assert.doesNotThrow(() => validatePlanning(nodes, relaxed, relaxed));
+});

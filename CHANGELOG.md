@@ -41,6 +41,30 @@ One version identifies all apps and images of a release.
   attempt, so a reply that ends after three rejections can be diagnosed.
 - A chat whose first reply fails for good now gets a generated title instead
   of keeping the start of the first message.
+- Advancing a plan, reading a saved task's result and opening a plan no longer
+  call GitHub while holding workspace database locks. They check each GitHub
+  source once with no lock held, including GitHub task batches, then confirm it
+  in the database. An expired GitHub sign-in is renewed once, outside the
+  checking transaction, so the renewal is kept. A plan whose sources needed
+  many provider checks could previously hold locks for seconds and exhaust the
+  workspace's database connections. Revoked access still denies.
+- A plan with no running work, for example one whose tasks are all blocked, is
+  no longer advanced every minute. Recovery wakes it when the plan or its owner
+  turns change, and otherwise backs off from a minute to an hour.
+- A saved agent's task whose GitHub sources can't be checked is reread after a
+  growing wait, from 30 seconds up to 30 minutes, instead of every 30 seconds.
+  After an hour the plan pauses with a "Needs attention" notice; resuming
+  checks again. Source checks in one step share a 10-second budget and stop
+  after the first unavailable source, so many slow sources can't add up their
+  timeouts. A GitHub sign-in renewal starts only while that budget lasts; once
+  started it runs to completion and keeps its new token, even if it outlasts
+  the budget. Plans need the `plan_source_checks` workspace storage migration.
+  Until a workspace has it, its chats list no plans and plan recovery skips it.
+- A plan whose sources GitHub can't check right now, for example when rate
+  limited, now returns 503 `plan-source-unavailable` with a retry, instead of
+  "Plan unavailable". The plan card keeps Stop and Pause when the plan's
+  details can't be loaded or refreshed, and uses the latest listed plan version
+  for them.
 - New chats use the configured default model; the default model setting was
   previously ignored for them.
 - A reply on a model that can't serve it, for example a deployment that

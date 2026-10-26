@@ -24,7 +24,12 @@ import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encryptCredential } from '../../workspaces/dist/credentials.js';
 import { provisionTableRegistry } from '../../workspaces/dist/table-registry.js';
-import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
+import {
+  AccessDenied,
+  deferRemoteSourceChecks,
+  lockAuthorization,
+  SourceAuthorizationUnavailable,
+} from '@tulipfarm/access';
 import { loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { modelCatalogOf } from '../../../apps/worker/test/model-catalog-fixture.mjs';
@@ -90,8 +95,20 @@ const emptyCatalogMcp = () => ({
     throw new Error('No MCP tool is offered');
   },
 });
-async function setup(t, mcpSlots) {
+const refreshTokens = n => ({
+  access_token: `access-${n}`,
+  token_type: 'bearer',
+  scope: '',
+  expires_in: 28800,
+  refresh_token: `refresh-${n}`,
+  refresh_token_expires_in: 15811200,
+});
+async function setup(t, mcpSlots, { refreshable = false } = {}) {
   const f = await githubFixture();
+  if (refreshable)
+    f.setBehavior(async (url, init) =>
+      url.endsWith('/access_token') ? Response.json(refreshTokens(0)) : f.defaultBehavior(url, init),
+    );
   t.after(() => f.close());
   const actor = { kind: 'human', ...f.member };
   const agent = await savedTaskAgent(
@@ -126,8 +143,11 @@ async function setup(t, mcpSlots) {
     return Response.json(result, { status: 201 });
   };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (url, init) =>
+  const routed = (url, init) =>
     String(url).startsWith('https://api.github.com/') ? fetcher(url, init) : originalFetch(url, init);
+  // Services capture `fetch` when they are created, so tests change routing through this hook instead.
+  let intercept;
+  globalThis.fetch = (url, init) => (intercept ? intercept(url, init, routed) : routed(url, init));
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
@@ -189,6 +209,9 @@ async function setup(t, mcpSlots) {
     effects,
     accountId,
     options,
+    intercept(value) {
+      intercept = value;
+    },
   };
 }
 
@@ -722,6 +745,193 @@ test('GitHub source reverification separates unavailable GitHub from revoked acc
   await failure(() => Response.json({}, { status: 404 }), 'source-access-revoked', false);
   globalThis.fetch = async () => Response.json({ id: 1, name: 'private' });
   assert.equal((await f.executor.readResult(read, f.actor)).result.data.data.name, 'private');
+});
+
+test('deferred GitHub source reverification fetches with no database lock held and still denies revoked access', async t => {
+  const f = await setup(t);
+  await f.select();
+  const read = await f.queue({
+    tool: 'github.personal.read',
+    operation: { kind: 'repository.read', owner: 'octocat', repo: 'private' },
+  });
+  assert.equal(await f.executor.execute(read), 'completed');
+  let fetches = 0;
+  globalThis.fetch = async () => {
+    fetches++;
+    return Response.json({ id: 1, name: 'private' });
+  };
+  await f.executor.readResult(read, f.actor);
+  const inline = fetches;
+  fetches = 0;
+
+  const entered = Promise.withResolvers();
+  const released = Promise.withResolvers();
+  globalThis.fetch = async () => {
+    fetches++;
+    entered.resolve();
+    await released.promise;
+    return Response.json({ id: 1, name: 'private' });
+  };
+  const pending = deferRemoteSourceChecks(() => f.executor.readResult(read, f.actor));
+  try {
+    await entered.promise;
+    let timer;
+    await Promise.race([
+      f.runtime.transaction(f.one.id, commonCompatibility, async tx => {
+        await lockAuthorization(tx, 'write');
+        await tx.client.query(`SELECT 1 FROM ${f.table('tf_github_accounts')} WHERE id=$1 FOR UPDATE`, [f.accountId]);
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('a GitHub fetch held a database lock')), 1500);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  } finally {
+    released.resolve();
+  }
+  assert.equal((await pending).result.data.data.name, 'private');
+  assert.equal(fetches, inline, 'each source is fetched once, as inline');
+
+  const failure = async (respond, code, unavailable) => {
+    globalThis.fetch = async () => respond();
+    await assert.rejects(
+      deferRemoteSourceChecks(() => f.executor.readResult(read, f.actor)),
+      error =>
+        error instanceof AccessDenied &&
+        error instanceof SourceAuthorizationUnavailable === unavailable &&
+        (code === undefined || error.code === code),
+    );
+  };
+  await failure(() => Response.json({}, { status: 429 }), 'github-rate-limited', true);
+  await failure(() => Response.json({}, { status: 403 }), 'source-access-revoked', false);
+  await failure(
+    async () => {
+      // Nothing holds the account while GitHub answers, so it can be disconnected meanwhile; the retry still denies.
+      await f.service.disconnect(f.one.id, f.actor.userId, f.accountId);
+      return Response.json({ id: 1, name: 'private' });
+    },
+    undefined,
+    false,
+  );
+});
+
+test('a deferred batch source refreshes its credential once, outside the rolled-back transaction, with no lock held during GitHub reads', async t => {
+  const f = await setup(t, undefined, { refreshable: true });
+  await f.select();
+  const read = await f.queue(repositoryRead);
+  assert.equal(await f.executor.execute(read), 'completed');
+  const proposal = await f.queue({ tool: 'github.personal.propose', actions: [change] });
+  assert.equal(await f.executor.execute(proposal), 'waiting');
+  const batch = (await f.batches.list(f.one.id, f.actor.userId, { taskId: f.task.id })).batches[0];
+  await f.decide(f.one.id, f.actor.userId, { taskId: f.task.id }, batch.snapshot.id, {
+    digest: batch.digest,
+    decision: 'approve',
+  });
+  assert.equal(await f.executor.execute(proposal), 'completed');
+
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_github_accounts')} SET access_expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+    [f.accountId],
+  );
+  let grants = 0;
+  let reads = 0;
+  const locked = [];
+  f.intercept(async (url, init, routed) => {
+    if (String(url).endsWith('/access_token')) {
+      grants++;
+      const token = new URLSearchParams(init.body).get('refresh_token');
+      return token === `refresh-${grants - 1}`
+        ? Response.json(refreshTokens(grants))
+        : Response.json({ error: 'bad_refresh_token' });
+    }
+    if (String(url).startsWith('https://api.github.com/') && (init?.method ?? 'GET') === 'GET') {
+      reads++;
+      try {
+        await f.runtime.transaction(f.one.id, commonCompatibility, async tx => {
+          await tx.client.query(`SET LOCAL lock_timeout='1000ms'`);
+          await lockAuthorization(tx, 'write');
+          await tx.client.query(`SELECT 1 FROM ${f.table('tf_github_accounts')} WHERE id=$1 FOR UPDATE`, [f.accountId]);
+        });
+      } catch (error) {
+        locked.push(`${url}: ${error.code ?? error.message}`);
+      }
+    }
+    return routed(url, init);
+  });
+  const result = await deferRemoteSourceChecks(() => f.executor.readResult(proposal, f.actor));
+  assert.equal(result.result.data.actions[0].status, 'succeeded');
+  assert.ok(reads > 0, 'the batch and its sources were checked with GitHub');
+  assert.deepEqual(locked, [], 'no GitHub read ran while a database lock was held');
+  assert.equal(grants, 1, 'the single-use refresh token was spent once');
+  const account = (
+    await f.db.platform.query(`SELECT state,access_expires_at FROM ${f.table('tf_github_accounts')} WHERE id=$1`, [
+      f.accountId,
+    ])
+  ).rows[0];
+  assert.equal(account.state, 'active', 'the refreshed credential was kept, so no reconnection is needed');
+  assert.ok(account.access_expires_at.getTime() > Date.now() + 7 * 3600000);
+  assert.equal(
+    (await deferRemoteSourceChecks(() => f.executor.readResult(proposal, f.actor))).result.data.actions[0].status,
+    'succeeded',
+  );
+  assert.equal(grants, 1);
+});
+
+test('a GitHub token replaced during every deferred check leaves the source unavailable, not revoked', async t => {
+  const f = await setup(t, undefined, { refreshable: true });
+  await f.select();
+  const read = await f.queue(repositoryRead);
+  assert.equal(await f.executor.execute(read), 'completed');
+  const proposal = await f.queue({ tool: 'github.personal.propose', actions: [change] });
+  assert.equal(await f.executor.execute(proposal), 'waiting');
+  const batch = (await f.batches.list(f.one.id, f.actor.userId, { taskId: f.task.id })).batches[0];
+  await f.decide(f.one.id, f.actor.userId, { taskId: f.task.id }, batch.snapshot.id, {
+    digest: batch.digest,
+    decision: 'approve',
+  });
+  assert.equal(await f.executor.execute(proposal), 'completed');
+  const account = async () =>
+    (
+      await f.db.platform.query(`SELECT state,generation FROM ${f.table('tf_github_accounts')} WHERE id=$1`, [
+        f.accountId,
+      ])
+    ).rows[0];
+  const before = await account();
+
+  let grants = 0;
+  f.setBehavior(async (url, init) => {
+    if (!url.endsWith('/access_token')) return f.defaultBehavior(url, init);
+    if (new URLSearchParams(init.body).get('grant_type') !== 'refresh_token') return Response.json(refreshTokens(0));
+    grants++;
+    return Response.json(refreshTokens(grants));
+  });
+  f.intercept(async (url, init, routed) => {
+    if (!String(url).startsWith('https://api.github.com/') || (init?.method ?? 'GET') !== 'GET')
+      return routed(url, init);
+    // Another process refreshes the account while this request is in flight, so GitHub refuses the token it used.
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_github_accounts')} SET access_expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+      [f.accountId],
+    );
+    await f.service.withCredential(f.one.id, f.actor.userId, f.accountId, async () => {});
+    return Response.json({ message: 'Bad credentials' }, { status: 401 });
+  });
+  for (const call of [read, proposal])
+    await assert.rejects(
+      deferRemoteSourceChecks(() => f.executor.readResult(call, f.actor)),
+      error => error instanceof SourceAuthorizationUnavailable && error.code === 'github-unavailable',
+    );
+  assert.ok(grants > 0, 'the token was replaced during the checks');
+  assert.deepEqual(await account(), before, 'a token replaced mid-request never forces reconnection');
+
+  f.intercept(undefined);
+  assert.equal(
+    (await deferRemoteSourceChecks(() => f.executor.readResult(read, f.actor))).result.data.data.name,
+    'private',
+  );
+  assert.equal(
+    (await deferRemoteSourceChecks(() => f.executor.readResult(proposal, f.actor))).result.data.actions[0].status,
+    'succeeded',
+  );
 });
 
 test('reconnect requires fresh task selection and invalidates the reviewed batch', async t => {

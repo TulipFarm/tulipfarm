@@ -1345,7 +1345,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     default: 'false',
-    description: '`true` lets agents post to Slack.',
+    description: '`true` lets agents post to Slack. When unset or `false`, chat is not offered Slack tools.',
   },
   {
     name: 'SLACK_CHANNEL_AGENTS_ENABLED',

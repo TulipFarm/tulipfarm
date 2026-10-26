@@ -2,9 +2,12 @@ import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   AccessDenied,
+  deferRemoteSourceChecks,
   lockAuthorization,
+  withRemoteSourceCheckBudget,
   requireTaskInvocation,
   resolveHuman,
+  SourceAuthorizationUnavailable,
   uuidSchema,
   type HumanActor,
 } from '@tulipfarm/access';
@@ -41,6 +44,7 @@ import {
   loadTasks,
   notifyPlanChange,
   pausePlanWork,
+  ownerEndedPause,
   persist,
   planCompatibility,
   toNode,
@@ -61,6 +65,12 @@ export const specialistLeaseMilliseconds = 120000;
 export const specialistAttemptLimits = { toolCalls: 16, activeMilliseconds: 600000 } as const;
 /** A task gets this many attempts before it fails; a failed task blocks only the work that depends on it. */
 export const planTaskAttempts = 3;
+/**
+ * How long the step waits before rereading a saved agent's task whose sources couldn't be checked: as long as they
+ * have been unavailable, between `minimumSeconds` and `maximumSeconds`. Once that is `pauseSeconds` or more, the plan
+ * pauses for attention instead of checking again.
+ */
+export const sourceCheckBackoff = { minimumSeconds: 30, maximumSeconds: 1800, pauseSeconds: 3600 } as const;
 const minimumAllowance = { toolCalls: 1, activeMilliseconds: 1000, credits: 1 } as const;
 
 const allowanceSchema = z.strictObject({
@@ -98,18 +108,28 @@ const attemptSchema = z.object({
   open: z.boolean(),
   toolCalls: z.number().int().nonnegative(),
   activeMilliseconds: z.coerce.number().int().nonnegative(),
+  checkAfterMs: z.number().int().positive().nullable(),
 });
 type Attempt = z.infer<typeof attemptSchema>;
 const attemptColumns = `id, task_key AS "taskKey", generation, coordinator, agent_id AS "agentId", activation_id AS "activationId", specialist_key AS specialist, status,
   agent_task_id AS "agentTaskId", allowance, COALESCE(lease_until <= clock_timestamp(), false) AS "leaseExpired", settled_at IS NULL AS open,
-  tool_calls AS "toolCalls", active_milliseconds AS "activeMilliseconds"`;
+  tool_calls AS "toolCalls", active_milliseconds AS "activeMilliseconds",
+  CASE WHEN source_check_after > clock_timestamp() THEN ceil(extract(epoch FROM source_check_after - clock_timestamp()) * 1000)::integer END AS "checkAfterMs"`;
 
-/** What a saved agent's task reported when the step last read it. Reads happen as the starter, outside the plan lock. */
+/**
+ * What a saved agent's task reported when the step last read it. Reads happen as the starter, outside the plan lock.
+ * `unavailable` means its sources couldn't be checked right now, which revokes nothing.
+ */
 export type SavedTaskObservation =
   | { attemptId: string; status: string; result?: string }
-  | { attemptId: string; failure: string };
-/** `waiting` means open attempts remain, so the step should run again later. `terminal` means nothing will change until a new wake. */
-export type PlanProgress = { kind: 'waiting' | 'terminal'; specialists: string[] };
+  | { attemptId: string; failure: string }
+  | { attemptId: string; unavailable: true };
+/**
+ * `waiting` means open attempts remain, so the step should run again later: after `retryAfterMs` when every open
+ * attempt is waiting for its sources to be checked again, otherwise soon. `terminal` means nothing will change until a
+ * new wake.
+ */
+export type PlanProgress = { kind: 'waiting' | 'terminal'; specialists: string[]; retryAfterMs?: number };
 export type SpecialistAssignment = {
   attemptId: string;
   planId: string;
@@ -146,7 +166,6 @@ const nonRetryableSpecialistFailures = new Set([
 ]);
 
 const reasons = {
-  blockedPrerequisite: 'A task this one depends on did not complete.',
   agentAccess: 'The person who started this plan can no longer use this saved agent.',
   agentInactive: 'This saved agent has no active version.',
   attemptsExhausted: `This task did not finish after ${planTaskAttempts} attempts.`,
@@ -523,7 +542,11 @@ export function createPlanRuntime(
    * One scheduling pass under the plan lock: settle what workers reported, stop at the budget or a lost starter,
    * release work whose prerequisites completed, and claim ready work up to the worker limit.
    */
+  // Advancing only reads sources, so remote source checks run between its retried transactions, not inside them.
   async function advance(workspaceId: string, planId: string, observations: readonly SavedTaskObservation[] = []) {
+    return deferRemoteSourceChecks(() => advanceOnce(workspaceId, planId, observations));
+  }
+  async function advanceOnce(workspaceId: string, planId: string, observations: readonly SavedTaskObservation[]) {
     return system(workspaceId, async tx => {
       await tx.client.query(
         `SELECT c.id FROM ${relation(tx, 'tf_conversations')} c JOIN ${relation(tx, 'tf_agent_plans')} p ON p.conversation_id=c.id WHERE p.id=$1 FOR UPDATE OF c`,
@@ -586,6 +609,22 @@ export function createPlanRuntime(
         }
         const observed = reported.get(attempt.id);
         if (!observed || !attempt.agentTaskId) continue;
+        if ('unavailable' in observed) {
+          if ((await sourcesUnavailable(tx, attempt.id)) && lifecycle === 'active') {
+            await pausePlanWork(tx, plan.id, [...nodes.values()]);
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET source_check_after=NULL, sources_unavailable_since=NULL WHERE plan_id=$1 AND settled_at IS NULL`,
+              [plan.id],
+            );
+            lifecycle = 'paused';
+            lifecycleChanges.push({ op: 'lifecycle', to: 'paused', reason: 'sources-unavailable' });
+          }
+          continue;
+        }
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET source_check_after=NULL, sources_unavailable_since=NULL WHERE id=$1 AND sources_unavailable_since IS NOT NULL`,
+          [attempt.id],
+        );
         if ('failure' in observed) {
           await settle(tx, attempt.id, 'failed', {
             failure: observed.failure,
@@ -660,15 +699,20 @@ export function createPlanRuntime(
       const actor = lifecycle === 'active' ? await starter(tx, plan) : null;
       if (actor)
         for (const check of plan.planning?.prerequisites ?? []) {
-          if (check.status !== 'verified') continue;
+          if (check.status !== 'verified' || check.optional) continue;
           try {
             await requirePlanEvidence(tx, actor, plan, check.evidence);
           } catch (error) {
             if (!(error instanceof AccessDenied) && !(error instanceof PlanGraphError)) throw error;
+            // Rebuilt on every pass, so a block from a source that can't be checked right now lifts once it can.
+            const block =
+              error instanceof SourceAuthorizationUnavailable
+                ? `Recheck ${check.title}: its evidence can't be checked right now.`
+                : `Recheck ${check.title}: its evidence is no longer available.`;
             for (const key of check.tasks) {
               const node = nodes.get(key);
               if (node) {
-                node.prerequisiteBlock = `Recheck ${check.title}: its evidence is no longer available.`;
+                node.prerequisiteBlock = block;
                 if (node.state === 'ready' || node.state === 'pending' || node.state === 'blocked')
                   setState(key, 'blocked', node.prerequisiteBlock);
               }
@@ -679,12 +723,7 @@ export function createPlanRuntime(
         lifecycle = 'paused';
         lifecycleChanges.push({ op: 'lifecycle', to: 'paused', reason: 'starter-access' });
       }
-      for (const change of advancePlan([...nodes.values()]))
-        setState(
-          change.key,
-          change.to,
-          change.to === 'blocked' ? (nodes.get(change.key)?.prerequisiteBlock ?? reasons.blockedPrerequisite) : null,
-        );
+      for (const change of advancePlan([...nodes.values()])) setState(change.key, change.to, change.reason);
 
       const open = await loadAttempts(tx, plan.id, true);
       const all = await loadAttempts(tx, plan.id, false);
@@ -804,6 +843,17 @@ export function createPlanRuntime(
         lifecycle = outcome;
         lifecycleChanges.push({ op: 'lifecycle', to: outcome });
       }
+      // A planning plan is driven by the turns that own it. Once they have all ended, say a reply failed for good,
+      // and no worker is left, nothing would ever continue it, so it waits for the starter to resume it.
+      if (
+        lifecycle === 'active' &&
+        plan.planning &&
+        (await loadAttempts(tx, plan.id, true)).length === 0 &&
+        (await ownerEnded(tx, plan))
+      ) {
+        lifecycle = 'paused';
+        lifecycleChanges.push(ownerEndedPause);
+      }
       const version = plan.version + 1;
       const changes = [...(await persist(tx, plan.id, version, before, finalNodes)), ...lifecycleChanges];
       if (changes.length) {
@@ -829,12 +879,62 @@ export function createPlanRuntime(
       ) {
         await wakePlanWait(tx, plan);
       }
+      const backedOff = remaining.map(attempt => attempt.checkAfterMs);
       const progress: PlanProgress = {
         kind: lifecycle === 'active' && remaining.length > 0 ? 'waiting' : 'terminal',
         specialists,
+        ...(lifecycle === 'active' && backedOff.length && backedOff.every(wait => wait !== null)
+          ? { retryAfterMs: Math.max(sourceCheckBackoff.minimumSeconds * 1000, Math.min(...backedOff)) }
+          : {}),
       };
       return { progress, starts: lifecycle === 'active' ? starts : [] };
     });
+  }
+
+  /**
+   * Records that an open saved-agent attempt's sources couldn't be checked and sets when to try again, waiting as long
+   * as they have been unavailable within `sourceCheckBackoff`. Returns whether they have been unavailable long enough
+   * to pause the plan.
+   */
+  async function sourcesUnavailable(tx: AgentTransaction, attemptId: string) {
+    const row = z
+      .object({ exhausted: z.boolean() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET sources_unavailable_since=COALESCE(sources_unavailable_since, clock_timestamp()),
+            source_check_after=clock_timestamp() + LEAST(GREATEST(clock_timestamp() - COALESCE(sources_unavailable_since, clock_timestamp()),
+              make_interval(secs => $2)), make_interval(secs => $3))
+          WHERE id=$1 AND settled_at IS NULL
+          RETURNING clock_timestamp() - sources_unavailable_since >= make_interval(secs => $4) AS exhausted`,
+            [
+              attemptId,
+              sourceCheckBackoff.minimumSeconds,
+              sourceCheckBackoff.maximumSeconds,
+              sourceCheckBackoff.pauseSeconds,
+            ],
+          )
+        ).rows[0],
+      );
+    return row?.exhausted ?? false;
+  }
+
+  /** Whether the plan has at least one owning turn and every one of them has finished, failed or been stopped. */
+  async function ownerEnded(tx: AgentTransaction, plan: { id: string; chatId: string }) {
+    const row = z.object({ owners: z.number().int(), live: z.number().int() }).parse(
+      (
+        await tx.client.query(
+          `SELECT count(*)::integer AS owners,
+          count(*) FILTER (WHERE t.status IN ('queued','processing','waiting','reconciling'))::integer AS live
+        FROM ${relation(tx, 'tf_conversation_turns')} t
+        WHERE t.conversation_id=$1 AND (t.plan_id=$2 OR t.id=(SELECT source_turn_id FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$2)
+          OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_plan_attempts')} a WHERE a.plan_id=$2 AND a.turn_id=t.id))`,
+          [plan.chatId, plan.id],
+        )
+      ).rows[0],
+    );
+    return row.owners > 0 && row.live === 0;
   }
 
   /** Builds a worker's brief from its task and the results of the work it depends on. */
@@ -929,7 +1029,11 @@ export function createPlanRuntime(
     before: readonly PlanNode[],
     after: PlanNode[],
   ) {
-    for (const change of advancePlan(after)) after.find(node => node.key === change.key)!.state = change.to;
+    for (const change of advancePlan(after))
+      Object.assign(
+        after.find(node => node.key === change.key)!,
+        { state: change.to, reason: change.reason },
+      );
     const version = plan.version + 1;
     const changes = await persist(tx, plan.id, version, new Map(before.map(node => [node.key, node])), after);
     const lifecycle =
@@ -997,7 +1101,8 @@ export function createPlanRuntime(
         )
           throw new PlanGraphError('invalid-transition', command.task);
         for (const check of plan.planning.prerequisites)
-          if (check.tasks.includes(task.key)) await requirePlanEvidence(tx, actor, plan, check.evidence);
+          if (check.tasks.includes(task.key) && !check.optional)
+            await requirePlanEvidence(tx, actor, plan, check.evidence);
         const attempts = await loadAttempts(tx, plan.id, false);
         if (
           attempts.some(attempt => attempt.open && attempt.coordinator) ||
@@ -1105,20 +1210,36 @@ export function createPlanRuntime(
         return recorded.save({ planId: plan.id, attemptId: command.attemptId, task: task.key, version });
       });
     },
-    /** Active plans in a workspace, oldest change first, for recovery after a lost wake. */
+    /**
+     * Active plans in a workspace, for recovery after a lost wake. `quiet` plans have no open attempt, so only a change
+     * to the plan, which bumps `version` and wakes it directly, or a change outside it can let them progress.
+     * `liveOwners` counts a planning plan's unfinished owner turns; when it drops to zero the next step pauses the plan.
+     */
     async due(workspaceId: string, after?: string) {
       return runtime.transaction(uuidSchema.parse(workspaceId), planCompatibility, async tx =>
         z
-          .array(z.object({ id: uuidSchema }))
+          .array(
+            z.object({
+              id: uuidSchema,
+              version: z.number().int().nonnegative(),
+              quiet: z.boolean(),
+              liveOwners: z.number().int().nonnegative(),
+            }),
+          )
           .parse(
             (
               await tx.client.query(
-                `SELECT id FROM ${relation(tx, 'tf_agent_plans')} WHERE lifecycle='active' AND ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT 100`,
+                `SELECT p.id,p.version,NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_plan_attempts')} a WHERE a.plan_id=p.id AND a.settled_at IS NULL
+                  AND COALESCE(a.source_check_after <= clock_timestamp(), true)) AS quiet,
+                CASE WHEN p.planning IS NULL THEN 0 ELSE (SELECT count(*)::integer FROM ${relation(tx, 'tf_conversation_turns')} t
+                  WHERE t.conversation_id=p.conversation_id AND t.status IN ('queued','processing','waiting','reconciling')
+                    AND (t.plan_id=p.id OR t.id=p.source_turn_id
+                      OR EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_plan_attempts')} a WHERE a.plan_id=p.id AND a.turn_id=t.id))) END AS "liveOwners"
+                FROM ${relation(tx, 'tf_agent_plans')} p WHERE p.lifecycle='active' AND ($1::uuid IS NULL OR p.id>$1) ORDER BY p.id LIMIT 100`,
                 [after ?? null],
               )
             ).rows,
-          )
-          .map(row => row.id),
+          ),
       );
     },
     advance,
@@ -1133,24 +1254,36 @@ export function createPlanRuntime(
     ): Promise<PlanProgress> {
       const watched = await runtime.transaction(uuidSchema.parse(workspaceId), planCompatibility, async tx => ({
         plan: await loadPlan(tx, planId, false),
-        attempts: (await loadAttempts(tx, uuidSchema.parse(planId), true)).filter(attempt => attempt.agentTaskId),
+        // A task whose sources were unavailable is not reread before its next check time.
+        attempts: (await loadAttempts(tx, uuidSchema.parse(planId), true)).filter(
+          attempt => attempt.agentTaskId && attempt.checkAfterMs === null,
+        ),
       }));
       if (!watched.plan) return { kind: 'terminal', specialists: [] };
       const observations: SavedTaskObservation[] = [];
-      for (const attempt of watched.attempts) {
-        if (!tasks) break;
-        try {
-          const read = await tasks.readResult(workspaceId, watched.plan.starterUserId, attempt.agentTaskId!);
-          observations.push({
-            attemptId: attempt.id,
-            status: read.status,
-            ...(read.result === undefined ? {} : { result: read.result }),
-          });
-        } catch (error) {
-          if (error instanceof AccessDenied) observations.push({ attemptId: attempt.id, failure: 'access-revoked' });
-          else throw error;
+      // The reads share one remote-check budget, so once a source is unavailable the rest are not checked this step.
+      await withRemoteSourceCheckBudget(async () => {
+        for (const attempt of watched.attempts) {
+          if (!tasks) break;
+          try {
+            const read = await deferRemoteSourceChecks(() =>
+              tasks.readResult(workspaceId, watched.plan!.starterUserId, attempt.agentTaskId!),
+            );
+            observations.push({
+              attemptId: attempt.id,
+              status: read.status,
+              ...(read.result === undefined ? {} : { result: read.result }),
+            });
+          } catch (error) {
+            // A source that can't be checked right now revokes nothing; the attempt waits to be read again.
+            if (error instanceof SourceAuthorizationUnavailable)
+              observations.push({ attemptId: attempt.id, unavailable: true });
+            else if (error instanceof AccessDenied)
+              observations.push({ attemptId: attempt.id, failure: 'access-revoked' });
+            else throw error;
+          }
         }
-      }
+      });
       const advanced = await advance(workspaceId, planId, observations);
       for (const attemptId of advanced.starts) {
         if (!tasks) break;

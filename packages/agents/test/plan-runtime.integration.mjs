@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
-import { createAgentPlans } from '../src/plans.ts';
+import { createAgentPlans, planCompatibility } from '../src/plans.ts';
 import { createPlanRuntime } from '../src/plan-runtime.ts';
 import { createAgentTasks } from '../src/tasks.ts';
 import { savedTaskAgent } from './task-fixture.mjs';
@@ -30,7 +31,7 @@ const work = (key, extra = {}) => ({
   ...extra,
 });
 
-async function setup(t) {
+async function setup(t, migrations = () => true) {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -39,7 +40,7 @@ async function setup(t) {
   });
   await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
-  const w = await db.create(await workspaceTableMigrations());
+  const w = await db.create((await workspaceTableMigrations()).filter(migrations));
   runtime = createWorkspaceRuntime({
     replicaCount: 1,
     reservedConnections: 2,
@@ -93,6 +94,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     starter,
     starterMember,
     plans,
+    chat,
     create,
     attempts,
     lifecycle,
@@ -276,9 +278,10 @@ test('recovery closes a failed plan only after independent work finishes', { tim
     { kind: 'completed', result: 'Records checked.', sources: [] },
     { toolCalls: 1, activeMilliseconds: 10 },
   );
-  assert.ok(
-    (await scheduler.due(w.id)).includes(plan.id),
-    'recovery finds an existing active plan with no remaining work',
+  assert.equal(
+    (await scheduler.due(w.id)).find(due => due.id === plan.id)?.quiet,
+    true,
+    'recovery finds an existing active plan with no remaining work, and sees it has no open attempt',
   );
   assert.deepEqual(await scheduler.step(w.id, plan.id), { kind: 'terminal', specialists: [] });
   const view = await read(plan.id);
@@ -374,6 +377,82 @@ test(
     assert.deepEqual(task, { agent_id: agent.agentId, membership_id: starterMember });
     assert.deepEqual(await scheduler.step(w.id, plan.id, wake), { kind: 'waiting', specialists: [] });
     assert.equal(woken.length, 1, 'a running saved task is observed, not started again');
+
+    const tasks = createAgentTasks(runtime);
+    let uncheckedReads = 0;
+    const unchecked = createPlanRuntime(runtime, {
+      ...tasks,
+      readResult: async () => {
+        uncheckedReads++;
+        throw new SourceAuthorizationUnavailable();
+      },
+    });
+    assert.deepEqual(await unchecked.step(w.id, plan.id, wake), {
+      kind: 'waiting',
+      specialists: [],
+      retryAfterMs: 30000,
+    });
+    assert.deepEqual(states(await read(plan.id)), { kept: 'running' });
+    assert.deepEqual(
+      (await attempts(plan.id)).map(({ status, failure }) => ({ status, failure })),
+      [{ status: attempt.status, failure: null }],
+      'a source that cannot be checked right now does not revoke the attempt',
+    );
+    const recheck = async () =>
+      (
+        await db.platform.query(
+          `SELECT extract(epoch FROM source_check_after - clock_timestamp())::float8 AS wait,
+            sources_unavailable_since IS NOT NULL AS unavailable FROM ${table('tf_agent_plan_attempts')} WHERE id=$1`,
+          [attempt.id],
+        )
+      ).rows[0];
+    const backdate = (since, after = '1 second') =>
+      db.platform.query(
+        `UPDATE ${table('tf_agent_plan_attempts')} SET sources_unavailable_since=clock_timestamp()-$2::interval,
+          source_check_after=clock_timestamp()-$3::interval WHERE id=$1`,
+        [attempt.id, since, after],
+      );
+    assert.equal((await recheck()).unavailable, true);
+    const quiet = async () => (await scheduler.due(w.id)).find(item => item.id === plan.id).quiet;
+    assert.equal(await quiet(), true, 'recovery does not wake a plan only waiting to recheck its sources');
+    const again = await unchecked.step(w.id, plan.id, wake);
+    assert.equal(uncheckedReads, 1, 'the task is not reread before its next check time');
+    assert.ok(again.retryAfterMs > 25000 && again.retryAfterMs <= 30000, String(again.retryAfterMs));
+
+    await backdate('10 minutes');
+    assert.equal(await quiet(), false, 'a plan whose check time has come is woken as before');
+    const longer = await unchecked.step(w.id, plan.id, wake);
+    assert.equal(uncheckedReads, 2);
+    assert.ok(
+      longer.retryAfterMs > 590000 && longer.retryAfterMs < 620000,
+      `the wait grows with how long the sources have been unavailable: ${longer.retryAfterMs}`,
+    );
+    await backdate('45 minutes');
+    await unchecked.step(w.id, plan.id, wake);
+    assert.ok(Math.abs((await recheck()).wait - 1800) < 5, 'the wait is capped at 30 minutes');
+
+    await backdate('10 minutes');
+    assert.deepEqual(await scheduler.step(w.id, plan.id, wake), { kind: 'waiting', specialists: [] });
+    assert.deepEqual(await recheck(), { wait: null, unavailable: false }, 'a successful read clears the backoff');
+
+    await unchecked.step(w.id, plan.id, wake);
+    await backdate('2 hours');
+    assert.equal((await unchecked.step(w.id, plan.id, wake)).kind, 'terminal');
+    const paused = await read(plan.id);
+    assert.deepEqual([paused.lifecycle, paused.pause], ['paused', 'sources-unavailable']);
+    assert.deepEqual(states(paused), { kept: 'running' });
+    assert.deepEqual(
+      (await attempts(plan.id)).map(({ status, failure }) => ({ status, failure })),
+      [{ status: attempt.status, failure: null }],
+      'pausing for unavailable sources revokes nothing',
+    );
+    assert.deepEqual(await recheck(), { wait: null, unavailable: false });
+    await plans.control(w.id, starter, plan.id, {
+      requestId: randomUUID(),
+      action: 'resume',
+      expectedVersion: paused.version,
+    });
+    assert.deepEqual(await scheduler.step(w.id, plan.id, wake), { kind: 'waiting', specialists: [] });
 
     await db.platform.query(`DELETE FROM ${table('tf_member_teams')} WHERE team_id=$1`, [agent.teamId]);
     assert.equal((await scheduler.step(w.id, plan.id, wake)).kind, 'terminal');
@@ -605,4 +684,22 @@ test('stop pauses or prevents a saved task whose start races the stop', { timeou
   );
   assert.equal((await attempts(late.id))[0].status, 'cancelled');
   assert.deepEqual(woken, []);
+});
+
+test('plans need the source-check migration; an older workspace lists none and reports incompatible storage', async t => {
+  const sourceChecks = ({ name }) => name.endsWith('_plan_source_checks.sql');
+  const all = await workspaceTableMigrations();
+  assert.equal(planCompatibility.minimum, all.findIndex(sourceChecks) + 1, 'the minimum is that migration');
+  const { w, starter, plans, runtime, db, chat } = await setup(t, migration => !sourceChecks(migration));
+  assert.deepEqual(await plans.list(w.id, starter, await chat()), [], 'its chats list no plans, as if plans were off');
+  await assert.rejects(plans.list(w.id, starter, randomUUID()), AccessDenied);
+  const incompatible = error => error.code === 'incompatible_version';
+  const scheduler = createPlanRuntime(runtime, createAgentTasks(runtime));
+  await assert.rejects(scheduler.due(w.id), incompatible);
+  await assert.rejects(scheduler.step(w.id, randomUUID()), incompatible);
+  await assert.rejects(plans.read(w.id, starter, randomUUID()), incompatible);
+  assert.equal(
+    (await db.platform.query(`SELECT count(*)::integer AS n FROM "${w.names.schema}".tf_common_migrations`)).rows[0].n,
+    all.length - 1,
+  );
 });

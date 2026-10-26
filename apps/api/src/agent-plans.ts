@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, uuidSchema } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
 import { createAgentPlans } from '@tulipfarm/agents/plans';
 import {
   AgentPlanError,
@@ -55,6 +55,9 @@ export function registerAgentPlans(
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      // A source that cannot be checked right now, say while GitHub is rate limited, is not a removed plan.
+      if (error instanceof SourceAuthorizationUnavailable)
+        return reply.code(503).send({ error: 'plan-source-unavailable' });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'plan-not-found' });
       if (error instanceof StorageUnavailableError)
         return reply

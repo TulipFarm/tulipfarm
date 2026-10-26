@@ -24,9 +24,10 @@ import { recordUsage } from '@tulipfarm/extensions';
 import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
 import { errorAttributes, log, retryError } from '@tulipfarm/observability';
 import { CreditsExhausted, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
-import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { conversationFamilyPaused, conversationModel, roleModel } from './conversation-model.ts';
+import { createPlanRecoveryBackoff } from './plan-recovery-backoff.ts';
 
 /** Failure codes a specialist may record. Anything else is reported as `specialist-failed`, so no provider text reaches the plan. */
 const failureCodes = new Set([
@@ -88,6 +89,7 @@ export function createPlanComposition(options: {
   const agentTasks = createAgentTasks(runtime);
   const plans = createPlanRuntime(runtime, agentTasks);
   const env = options.env ?? process.env;
+  const backoff = createPlanRecoveryBackoff();
 
   async function runSpecialist(assignment: SpecialistAssignment & { workspaceId: string }, usage: { calls: number }) {
     // A step that names a family runs on it and never falls back to another; others use the plan role's model.
@@ -454,9 +456,16 @@ export function createPlanComposition(options: {
         try {
           // Image holds of a specialist whose worker died settle here, without waiting for a chat reply.
           if (!after) await runtime.transaction(workspaceId, commonCompatibility, tx => recoverImageHolds(tx));
-          const page = await plans.due(workspaceId, after);
-          for (const planId of page) await options.wakePlan(workspaceId, planId);
-          return page.length === 100 ? (page.at(-1) ?? null) : null;
+          let page;
+          try {
+            page = await plans.due(workspaceId, after);
+          } catch (error) {
+            // A workspace without the plan migrations yet has no plan to recover; later sweeps find it once migrated.
+            if (error instanceof StorageUnavailableError && error.code === 'incompatible_version') return null;
+            throw error;
+          }
+          for (const plan of page) if (backoff.due(plan)) await options.wakePlan(workspaceId, plan.id);
+          return page.length === 100 ? (page.at(-1)?.id ?? null) : null;
         } catch (error) {
           throw retryError('plan-recovery-unavailable', error);
         }

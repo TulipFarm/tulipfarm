@@ -1112,7 +1112,14 @@ test('error type keeps only short code messages', () => {
 });
 
 test('error codes accept reviewed values, not arbitrary short strings', () => {
-  for (const value of ['access-denied', 'read-forbidden', 'FST_ERR_VALIDATION'])
+  for (const value of [
+    'access-denied',
+    'read-forbidden',
+    'FST_ERR_VALIDATION',
+    'plan-not-found',
+    'plan-source-unavailable',
+    'plan-operation-unavailable',
+  ])
     assert.equal(telemetryErrorCode(value), value);
   for (const value of ['private-user-text', 'user@example.com', 'a'.repeat(1024), 401, { code: 'access-denied' }])
     assert.equal(telemetryErrorCode(value), undefined);

@@ -115,6 +115,48 @@ test('name-only discovery preserves ordered catalog admission and rereads changi
   assert.deepEqual(discoverToolNames(access), []);
 });
 
+test('chat is offered Slack tools only when this deployment enables Slack actions', async t => {
+  const slackTools = names => names.filter(name => name.startsWith('slack.'));
+  assert.deepEqual(slackTools(discoverToolNames({ kind: 'chat', slack: false })), []);
+  assert.deepEqual(slackTools(discoverToolNames({ kind: 'chat', slack: true })).sort(), [
+    'slack.message.send',
+    'slack.reaction.add',
+    'slack.resolve',
+    'slack.thread.reply',
+  ]);
+  const previous = process.env.SLACK_OUTBOUND_ENABLED;
+  t.after(() => {
+    if (previous === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
+    else process.env.SLACK_OUTBOUND_ENABLED = previous;
+  });
+  for (const value of [undefined, 'false']) {
+    if (value === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
+    else process.env.SLACK_OUTBOUND_ENABLED = value;
+    assert.deepEqual(slackTools(discoverToolNames({ kind: 'chat' })), []);
+    assert.equal(
+      discoverTools({ kind: 'chat' }).some(tool => tool.name.startsWith('slack.')),
+      false,
+    );
+  }
+  process.env.SLACK_OUTBOUND_ENABLED = 'true';
+  assert.ok(discoverToolNames({ kind: 'chat' }).includes('slack.resolve'));
+  delete process.env.SLACK_OUTBOUND_ENABLED;
+  const runtime = {
+    transaction: async () => assert.fail('a disabled Slack deployment must not read the workspace'),
+  };
+  const result = await createChatTools(runtime).invoke(
+    {
+      workspaceId: randomUUID(),
+      actor: { kind: 'human', userId: randomUUID(), membershipId: randomUUID() },
+      callId: randomUUID(),
+    },
+    { tool: 'slack.resolve', kind: 'channel', name: '#general' },
+  );
+  assert.equal(result.error, 'slack-disabled');
+  assert.match(result.instruction, /turned off on this TulipFarm deployment/);
+  assert.doesNotMatch(result.instruction, /Ask a workspace admin/);
+});
+
 test('every exposed tool has an operational description', () => {
   const mcp = {
     discovery: true,

@@ -3,6 +3,7 @@ import { observeFetch } from '@tulipfarm/observability';
 import { z } from 'zod';
 import {
   AccessDenied,
+  remoteSourceCheckDeadline,
   SourceAuthorizationUnavailable,
   requirePersonalGitHubSelection,
   sourceDependenciesSchema,
@@ -11,7 +12,7 @@ import {
   type SourceDependency,
 } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
-import type { AccountRuntime, createGitHubAccounts } from './accounts.ts';
+import type { AccountRuntime, createGitHubAccounts, GitHubCredential } from './accounts.ts';
 import {
   batchOriginSchema,
   batchSnapshotSchema,
@@ -133,22 +134,68 @@ export function createGitHubBatches(options: BatchOptions) {
       async (credential, tx) => {
         await check(tx, prepared.actor, prepared.row.snapshot);
         const view = await batchView(tx, await loadBatch(tx, prepared.actor, conversationId, id));
-        for (const operation of view.snapshot.actions) {
-          const current = receiptWrite(operation, view);
-          if (current) await requireWriteTarget(current, credential, fetcher);
-          else if (isProjectWrite(operation)) {
-            await checkDeletedProjectOwner(operation, credential, projectReader(credential, fetcher));
-            await checkProjectContent(operation, credential, projectReader(credential, fetcher));
-          }
-        }
+        await checkTargets(view, credential);
         return view;
       },
       prepared.row.snapshot.generation,
       (tx, actor) => requireGitHubOrigin(tx, actor, conversationId),
     );
   }
+  async function checkTargets(
+    view: Awaited<ReturnType<typeof batchView>>,
+    credential: GitHubCredential,
+    reader: typeof fetch = fetcher,
+  ) {
+    for (const operation of view.snapshot.actions) {
+      const current = receiptWrite(operation, view);
+      if (current) await requireWriteTarget(current, credential, reader);
+      else if (isProjectWrite(operation)) {
+        await checkDeletedProjectOwner(operation, credential, projectReader(credential, reader));
+        await checkProjectContent(operation, credential, projectReader(credential, reader));
+      }
+    }
+  }
+  /** `fetcher`, cut off at the caller's shared remote-check deadline; a request it cuts off is unavailable, not denied. */
+  function deadlineFetcher(deadline: number): typeof fetch {
+    return async (input, init) => {
+      const left = deadline - Date.now();
+      if (left <= 0) throw new SourceAuthorizationUnavailable();
+      const timeout = AbortSignal.timeout(left);
+      try {
+        return await fetcher(input, {
+          ...init,
+          signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
+        });
+      } catch (error) {
+        if (timeout.aborted) throw new SourceAuthorizationUnavailable();
+        throw error;
+      }
+    };
+  }
   return {
     read,
+    /**
+     * Checks a batch as `read` does, but holds no transaction while GitHub is called: the batch and its sources are
+     * checked first, the credential is read without a row lock, and its write targets are fetched after that
+     * transaction ends. A credential refresh commits in a transaction of its own. Needs a top-level runtime.
+     */
+    async verify(workspaceId: string, actor: HumanActor, conversationId: GitHubContext, id: string) {
+      const view = await access(workspaceId, actor, conversationId, async (tx, current) => {
+        const row = await loadBatch(tx, current, conversationId, id);
+        await check(tx, current, row.snapshot);
+        return batchView(tx, row);
+      });
+      const reader = deadlineFetcher(remoteSourceCheckDeadline());
+      await options.accounts.withReadCredential(
+        workspaceId,
+        actor,
+        view.snapshot.accountId,
+        credential => checkTargets(view, credential, reader),
+        view.snapshot.generation,
+        (tx, current) => requireGitHubOrigin(tx, current, conversationId),
+      );
+      return view;
+    },
     async status(workspaceId: string, userId: string, conversationId: GitHubContext, id: string) {
       return access(workspaceId, userId, conversationId, async (tx, actor) => {
         const row = await loadBatch(tx, actor, conversationId, id);

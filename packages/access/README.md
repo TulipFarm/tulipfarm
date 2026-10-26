@@ -15,4 +15,15 @@ Agent authorization consumes the agent partition's `0007_agents.sql` tables. It 
 
 Creation grants use a destination team UUID with `table.create`. Record grants use the resource UUID with `table.row.create`, `table.row.read`, `table.row.update`, or `table.row.delete`. Schema management uses `table.schema.manage`. Team ownership alone grants no permission.
 
+`deferRemoteSourceChecks(operation)` keeps provider calls out of transactions that hold these locks. Inside it, a
+source check written with `remoteSourceCheck(key, check)` records the check instead of running it, and the source
+runtime ends the transaction with `RemoteSourceChecksDeferred`. The checks then run with no transaction open, each key
+once, and the operation reruns: a failed check throws where it would have, and a passed check is confirmed with a
+cheap database read. Use it only for operations that are safe to repeat. After three rounds, checks run inline.
+All checks in one call, including checks nested in other checks, share one budget (`remoteSourceCheckLimits`: 10
+seconds and 32 checks). Providers time their requests with `remoteSourceCheckDeadline()`. A request that must not be
+cut short, such as a single-use token refresh, may start only before that deadline and then gets its full time. Once the budget is spent, or
+a source fails with `SourceAuthorizationUnavailable`, the remaining sources are reported unavailable without being
+checked. `withRemoteSourceCheckBudget(operation)` shares one budget across several calls.
+
 Confirmation must remain a separate authenticated human operation. This package supplies no confirmation, SQL, or credential tool.

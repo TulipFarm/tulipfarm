@@ -40,6 +40,7 @@ import { registerWorkflows } from './workflows.ts';
 import { registerWorkflowDispatch, workflowWake } from './workflow-dispatch.ts';
 import { createWorkflows, workflowCodeStepsEnabled } from '@tulipfarm/workflows';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
+import { resumeOwnerEndedPlans } from '@tulipfarm/agents/plans';
 import { registerSkills } from './skills.ts';
 import { registerSkillImports } from './skill-imports.ts';
 import { registerSkillImportDispatch } from './skill-import-dispatch.ts';
@@ -248,6 +249,7 @@ export function registerStorageComposition(
     service: createConversations(runtime, chatSkills, {
       pinTurn: async (tx, workspaceId, familyId) =>
         (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
+      retryTurn: resumeOwnerEndedPlans,
     }),
     requests: createConversationRequests(runtime),
     approvals: { read: approvalRequests.read, decide: confirmation.approvals.decide },
