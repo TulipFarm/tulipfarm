@@ -15,9 +15,9 @@ import {
 import {
   commonCompatibility,
   StorageUnavailableError,
+  transientStorageError,
   type createWorkspaceRuntime,
 } from '@tulipfarm/workspace-storage/runtime';
-import { z } from 'zod';
 import type { TenantRuntime } from '@tulipfarm/memory-core/ports/tenant-runtime';
 import type { KnowledgeAuthorization } from '@tulipfarm/memory-core/ports/knowledge-authorization';
 import type { ExternalSource } from '@tulipfarm/memory-core/documents/records';
@@ -34,30 +34,7 @@ export const knowledgeStorageErrors = {
       (error instanceof Error && 'code' in error && (error.code === '57014' || error.code === '55P03'))
     );
   },
-  transient(error: unknown) {
-    const code = z.object({ code: z.string() }).safeParse(error);
-    return error instanceof StorageUnavailableError
-      ? ['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential'].includes(error.code)
-      : code.success &&
-          [
-            '40001',
-            '40P01',
-            '55P03',
-            '57014',
-            '08000',
-            '08001',
-            '08003',
-            '08006',
-            '08007',
-            '57P01',
-            '57P02',
-            '57P03',
-            'ECONNRESET',
-            'ECONNREFUSED',
-            'ETIMEDOUT',
-            'EPIPE',
-          ].includes(code.data.code);
-  },
+  transient: transientStorageError,
 };
 
 export function knowledgeTenantRuntime(runtime: KnowledgeRuntime): TenantRuntime<KnowledgeTransaction> {

@@ -33,6 +33,14 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A brief database slowdown, such as a lock or connection timeout, no longer
+  fails a running reply as access denied. The worker keeps the reply and
+  retries its lease renewal, and logs each failed renewal. If renewal still
+  fails when the lease would expire, the reply fails as a retryable error.
+- Rejected tool requests in a reply are logged with the reason, tool and
+  attempt, so a reply that ends after three rejections can be diagnosed.
+- A chat whose first reply fails for good now gets a generated title instead
+  of keeping the start of the first message.
 - New chats use the configured default model; the default model setting was
   previously ignored for them.
 - A reply on a model that can't serve it, for example a deployment that

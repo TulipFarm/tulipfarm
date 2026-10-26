@@ -219,6 +219,7 @@ const spanAttributes = new Set([
   'chat.reply.db_seconds',
   'chat.reply.overhead_seconds',
   'chat.stop.reason',
+  'attempt',
   'provider',
   'status_class',
   'job',
@@ -290,6 +291,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   }
   if (!spanAttributes.has(key)) return false;
   if (key === 'output_started') return typeof value === 'boolean';
+  if (key === 'attempt') return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
   if (key === 'model_fallback') return (modelFallbackOutcomes as readonly unknown[]).includes(value);
   if (key === 'model_usage') return (modelUsageOutcomes as readonly unknown[]).includes(value);
   if (key === 'usage.unknown_reason') return (modelUsageUnknownReasons as readonly unknown[]).includes(value);

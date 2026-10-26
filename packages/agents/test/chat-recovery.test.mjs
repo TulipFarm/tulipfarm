@@ -164,3 +164,68 @@ test('a text tool request after the budget ends the reply gracefully with one wa
     [['warn', 'chat.tool-budget', 'tool-limit']],
   );
 });
+
+test('each rejected tool request is logged with its reason, tool and attempt before the reply fails', async t => {
+  const lines = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (String(line).includes('"chat.tool-rejected"')) lines.push(JSON.parse(line));
+    return write(line, ...rest);
+  });
+  const replies = [
+    nativeReply('anthropic', { calls: [use('rows.create', { tableId: 'not a table' })] }),
+    nativeReply('anthropic', { calls: [{ ...use('rows.create', {}), name: 'secret_customer_tool' }] }),
+    nativeReply('anthropic', {
+      calls: [
+        use('rows.create', { tableId, expectedAppliedRevision: 'a'.repeat(40), values: {} }),
+        use('rows.create', { tableId, expectedAppliedRevision: 'b'.repeat(40), values: {} }),
+      ],
+    }),
+  ];
+  t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+  await assert.rejects(
+    inferWithTools(route, [{ role: 'user', text: 'Add a ticket.' }], () => assert.fail('Rejected calls never run')),
+    /model-invalid-decision/,
+  );
+  t.mock.restoreAll();
+  assert.deepEqual(
+    lines.map(line => [line.level, line.category, line['error.type'], line.tool, line.attempt]),
+    [
+      ['warn', 'activity', 'invalid-arguments', 'rows_create', 1],
+      ['warn', 'activity', 'unknown-tool', 'unknown', 2],
+      ['warn', 'activity', 'write-batch', 'rows.create', 3],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(lines), /secret_customer_tool|not a table/);
+});
+
+test('aborting the reply stops its pending model request and rejects with the abort reason', async t => {
+  const controller = new AbortController();
+  const lost = Object.assign(new Error('lease renewal timed out'), { code: 'wait_timeout' });
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', (_url, options) => {
+    requests++;
+    // The provider never answers; only the abort ends the request.
+    return new Promise((_, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      setTimeout(() => controller.abort(lost), 5);
+    });
+  });
+  await assert.rejects(
+    inferWithTools(
+      route,
+      [{ role: 'user', text: 'Summarise the tickets.' }],
+      () => assert.fail('No tool runs'),
+      undefined,
+      false,
+      null,
+      {
+        signal: controller.signal,
+        fallback: { route: { ...route, model: 'fixture-fallback' }, label: 'fallback' },
+      },
+    ),
+    error => error === lost,
+  );
+  t.mock.restoreAll();
+  assert.equal(requests, 1);
+});

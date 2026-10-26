@@ -39,6 +39,7 @@ import {
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { ConversationModel } from './conversation-model.ts';
 import type { ConversationInventory } from './conversation-inventory.ts';
+import { keepReplyLease } from './reply-lease.ts';
 
 type Tx = ReplyTransaction;
 type Actor = Awaited<ReturnType<typeof turnRequester>>;
@@ -61,12 +62,12 @@ type Plan = { attemptId: string; remainingUnits: bigint; remainingMilliseconds: 
 
 /** Renews the reply's lease while model calls run. Each renewal is one short transaction. */
 const leaseRenewalMilliseconds = 30_000;
+/** The lease each renewal grants, as `renewConversationReplyLease` sets it by default. */
+const replyLeaseMilliseconds = 60_000;
 /** Room for a reply's next request to grow before it needs a top-up: tool results, the answer and the runtime reminder. */
 const holdSlackBytes = 128 * 1024;
 /** Tools that can change the workspace inventory the runtime reminder lists. Other tools never re-read it. */
 const inventoryTools = ['tables.', 'schema.', 'agents.', 'workflows.', 'skills.'];
-const databaseConflict = (error: unknown) =>
-  typeof error === 'object' && error !== null && 'code' in error && (error.code === '40P01' || error.code === '40001');
 
 const units = (providerPicoUsd: string) => creditUnitsForProviderCost(BigInt(providerPicoUsd));
 /** A call's worst-case provider cost, as its own reservation quoted it. */
@@ -153,7 +154,6 @@ export async function beginReplySession(input: {
   let lastStep = -1;
   let lastInputBytes = input.contextBytes;
   let holds = 0;
-  let lost: unknown;
   const settledCalls: Call[] = [];
   const ranTools = new Set<string>();
 
@@ -310,6 +310,7 @@ export async function beginReplySession(input: {
   const preread = input.inventory && input.inventoryRead ? await input.inventoryRead.catch(() => null) : null;
   // Listing the inventory takes the workspace write lock, so the start transaction takes it first only when it reads it.
   const readsInventory = input.inventory && preread === null;
+  const leaseStartedAt = Date.now();
   const started = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
     await lockAuthorization(tx, readsInventory ? 'write' : 'read');
     const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
@@ -354,30 +355,22 @@ export async function beginReplySession(input: {
     await settleHold(tx, hold);
   });
 
-  // Renewal is idempotent and only locks the reply's own rows, so a serialization or deadlock failure retries
-  // instead of ending the reply.
-  const renewOnce = () =>
-    runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx);
-      await renewConversationReplyLease(tx, fence);
-    });
-  const renewal = setInterval(() => {
-    void (async () => {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          return await renewOnce();
-        } catch (error) {
-          if (attempt < 3 && databaseConflict(error)) continue;
-          lost ??= error;
-          return;
-        }
-      }
-    })();
-  }, leaseRenewalMilliseconds);
-  renewal.unref();
+  const lease = keepReplyLease({
+    renew: deadlineAt =>
+      runtime.transaction(fence.workspaceId, { ...commonCompatibility, deadlineAt }, async tx => {
+        await lockAuthorization(tx);
+        await renewConversationReplyLease(tx, fence);
+      }),
+    leaseMilliseconds: replyLeaseMilliseconds,
+    intervalMilliseconds: leaseRenewalMilliseconds,
+    renewedAt: leaseStartedAt,
+  });
+  // A slow start transaction can leave the lease too close to expiry to start any model work.
+  if (lease.lost !== undefined) throw lease.lost;
 
   /** Funds a call the hold cannot: settles what the hold paid for and opens the next hold, in one transaction. */
   async function topUp(step: number, model: ConversationModel, needCost: bigint, bytes: number) {
+    const startedAt = Date.now();
     const result = await observeChatDetail('credit-top-up', () =>
       runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
         await lockAuthorization(tx);
@@ -387,6 +380,7 @@ export async function beginReplySession(input: {
         return { opened: await openHold(tx, step, model, needCost, bytes), flushed };
       }),
     );
+    lease.renewed(startedAt);
     committed(result.opened, result.flushed);
   }
 
@@ -399,7 +393,7 @@ export async function beginReplySession(input: {
     return reserved;
   };
   const reserve = async (attempt: Parameters<ToolModelMeter>[0], spent?: (credits: number) => void) => {
-    if (lost) throw lost instanceof AccessDenied ? lost : new AccessDenied();
+    if (lease.lost !== undefined) throw lease.lost;
     const model = [chat, input.fallback, input.completionCheck].find(
       candidate => candidate?.route.provider === attempt.provider && candidate.route.model === attempt.model,
     );
@@ -460,6 +454,10 @@ export async function beginReplySession(input: {
       attempt =>
         meterWith(attempt, spent),
     sources: contextSources,
+    /** Aborted, with the storage failure as its reason, once the reply's lease is lost. */
+    leaseSignal: lease.signal,
+    /** Settles like the reply, or rejects with the lease's failure as soon as the lease is lost. */
+    whileLeased: <T>(reply: Promise<T>) => lease.guard(reply),
     readWorkspaceInventory: input.inventory ? async () => inventory : undefined,
     catalog: withCatalog && requester ? async () => catalog : undefined,
     /** Records a tool that ran, so the next checkpoint saves its round and refreshes only what it could change. */
@@ -487,6 +485,7 @@ export async function beginReplySession(input: {
       if (!ranTools.size) return;
       const tools = [...ranTools];
       const step = lastStep + 1;
+      const startedAt = Date.now();
       const result = await observeChatDetail('checkpoint', () =>
         runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
           const refreshInventory =
@@ -507,6 +506,7 @@ export async function beginReplySession(input: {
           return { read, mcp, nextCatalogSources, authorized, recorded, flushed, opened };
         }),
       );
+      lease.renewed(startedAt);
       ranTools.clear();
       if (result.read) {
         inventory = result.read.inventory;
@@ -537,7 +537,7 @@ export async function beginReplySession(input: {
       modelSourcesKey = result.recorded;
     },
     close() {
-      clearInterval(renewal);
+      lease.close();
     },
   };
 }

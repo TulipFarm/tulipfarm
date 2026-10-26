@@ -298,7 +298,7 @@ export function meteredReply(
           : undefined,
     });
     try {
-      return await respondToConversation(
+      const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
         context,
         async (call, sources, activity) => {
@@ -402,6 +402,7 @@ export function meteredReply(
               projectInstructions: project?.instructions,
               sources: session.sources,
               checkpoint: session.checkpoint,
+              signal: session.leaseSignal,
               ...(session.catalog ? { catalog: session.catalog } : {}),
             }
           : {
@@ -427,10 +428,13 @@ export function meteredReply(
               projectInstructions: project?.instructions,
               sources: session.sources,
               checkpoint: session.checkpoint,
+              signal: session.leaseSignal,
             },
         retainedSources,
         sourceMessages,
       );
+      // A lost lease ends the reply with its storage failure at once, even while a model call is still pending.
+      return await session.whileLeased(reply);
     } finally {
       session.close();
       await observeChatDetail('publisher-close', () => publisher.close());

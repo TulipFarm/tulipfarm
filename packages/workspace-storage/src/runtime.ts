@@ -74,6 +74,44 @@ export class StorageUnavailableError extends Error {
   }
 }
 
+// Conflicts, lock and statement timeouts, dropped connections and server restarts clear up when retried.
+const transientCodes = new Set([
+  '40001',
+  '40P01',
+  '55P03',
+  '57014',
+  '08000',
+  '08001',
+  '08003',
+  '08006',
+  '08007',
+  '57P01',
+  '57P02',
+  '57P03',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+// pg reports a failed checkout or a dropped connection without a code.
+const transientMessages = new Set([
+  'timeout exceeded when trying to connect',
+  'Connection terminated unexpectedly',
+  'Connection terminated due to connection timeout',
+]);
+
+/** Whether a storage failure is transient, so the same work can succeed on a later attempt. */
+export function transientStorageError(error: unknown): boolean {
+  if (error instanceof StorageUnavailableError)
+    return ['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential'].includes(error.code);
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (
+    (typeof code === 'string' && transientCodes.has(code)) ||
+    (typeof message === 'string' && transientMessages.has(message))
+  );
+}
+
 class TransactionDeadline {
   readonly controller = new AbortController();
   readonly signal = this.controller.signal;
