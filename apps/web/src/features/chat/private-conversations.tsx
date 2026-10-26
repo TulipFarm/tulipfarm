@@ -534,6 +534,8 @@ function ConversationDetail({
   const [editing, setEditing] = useState<Pick<Chat, 'title' | 'titleRevision'> | null>(null);
   const [refreshed, setRefreshed] = useState(false);
   const [outgoing, setOutgoing] = useState<OutgoingMessage | null>(null);
+  // Once saved history has the message, the server copy replaces the optimistic one for good.
+  if (outgoing && data?.messages.some(message => message.id === outgoing.id)) setOutgoing(null);
   const posting = useRef(false);
   const sendNavigation = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -717,12 +719,13 @@ function ConversationDetail({
         </Popover>
       )
     : undefined;
-  const { pending, turn, thinking, narration, answerText, activity, status, stalledTurn, slowTurn } = useCurrentReply({
-    messages: data?.messages,
-    outgoing,
-    command: write.state.kind,
-    stream,
-  });
+  const { pending, draftSent, turn, thinking, narration, answerText, activity, status, stalledTurn, slowTurn } =
+    useCurrentReply({
+      messages: data?.messages,
+      outgoing,
+      command: write.state,
+      stream,
+    });
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
   const activityLabel =
     currentTool && !status
@@ -1261,7 +1264,7 @@ function ConversationDetail({
             <Composer
               compact={compact}
               inputRef={composerInput}
-              content={pending ? emptyRichDocument() : content}
+              content={draftSent ? emptyRichDocument() : content}
               onContentChange={setContent}
               onSend={send}
               canSend={!locked && canSend && models.usable}
@@ -1286,7 +1289,7 @@ function ConversationDetail({
               onFiles={uploads.add}
               integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
               attachments={
-                !pending && (staged || uploads.error || mentions.notice) ? (
+                !draftSent && (staged || uploads.error || mentions.notice) ? (
                   <div className="space-y-2">
                     {skills.staged && (
                       <StagedSkill skill={skills.staged} disabled={write.locked} onRemove={skills.remove} />
