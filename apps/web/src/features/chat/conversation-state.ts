@@ -3,7 +3,7 @@ import { TableRequestError } from '@/features/tables/request-state';
 import { useConversationChanges } from './queries';
 import type { ConversationApi, ConversationCommand } from './conversation-api';
 
-type CommandState =
+export type CommandState =
   | { kind: 'idle' }
   | { kind: 'sending'; command: ConversationCommand }
   | { kind: 'uncertain'; command: ConversationCommand }

@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { currentReply, useCurrentReply, type OutgoingMessage } from '../src/features/chat/current-reply.ts';
-import type { ConversationMessage } from '../src/features/chat/conversation-api.ts';
+import type { ConversationCommand, ConversationMessage } from '../src/features/chat/conversation-api.ts';
+import type { CommandState } from '../src/features/chat/conversation-state.ts';
 import type { ConversationStreamSnapshot } from '../src/features/chat/conversation-stream.ts';
 import type { StreamProgress } from '@tulipfarm/conversations/events';
 
@@ -41,7 +42,7 @@ const stream = (fields: Partial<ConversationStreamSnapshot> = {}): ConversationS
 const input = (fields: Partial<Input> = {}): Input => ({
   messages: [message()],
   outgoing: null,
-  command: 'idle',
+  command: { kind: 'idle' },
   stream: stream(),
   ...fields,
 });
@@ -70,22 +71,97 @@ function reply(fields: Partial<Input> = {}) {
   return result;
 }
 
+const send: ConversationCommand = {
+  kind: 'send',
+  chatId: 'chat',
+  commandId: 'command',
+  messageId: outgoing.id,
+  model: 'model',
+  parts: [],
+};
+const retry: ConversationCommand = {
+  kind: 'retry',
+  chatId: 'chat',
+  commandId: 'retry-command',
+  turnId: 'turn',
+  expectedGeneration: 2,
+};
+const sending: CommandState = { kind: 'sending', command: send };
+const accepted: CommandState = { kind: 'accepted', operation: 'send' };
+
 test('the screen interface keeps the outgoing message until acceptance appears in saved history', () => {
-  for (const command of ['sending', 'accepted'] as const) {
+  for (const command of [sending, accepted]) {
     const result = reply({ messages: [], outgoing, command });
     assert.equal(result.pending, outgoing);
     assert.equal(result.thinking, true);
     assert.equal(result.since, outgoing.at);
   }
   const saved = message({ id: outgoing.id });
-  assert.equal(reply({ messages: [saved], outgoing, command: 'sending' }).pending, outgoing);
-  const accepted = reply({ messages: [saved], outgoing, command: 'accepted' });
-  assert.equal(accepted.pending, null);
-  assert.equal(accepted.turn, saved.turn);
-  assert.equal(accepted.since, saved.createdAt);
-  for (const command of ['idle', 'uncertain', 'rejected'] as const)
+  for (const command of [sending, accepted]) {
+    const result = reply({ messages: [saved], outgoing, command });
+    assert.equal(result.pending, null);
+    assert.equal(result.turn, saved.turn);
+    assert.equal(result.since, saved.createdAt);
+  }
+  const failed: CommandState[] = [
+    { kind: 'idle' },
+    { kind: 'uncertain', command: send },
+    { kind: 'rejected', message: 'No', status: 400 },
+  ];
+  for (const command of failed) assert.equal(reply({ messages: [], outgoing, command }).pending, null);
+  assert.equal(reply({ messages: undefined, outgoing, command: accepted }).pending, outgoing);
+});
+
+test('the composer keeps a sent draft hidden when saved history arrives before the send settles', () => {
+  const saved = message({ id: outgoing.id });
+  // History refreshes first while list and credit refreshes still hold the command in sending.
+  const persisted = reply({ messages: [saved], outgoing, command: sending });
+  assert.equal(persisted.pending, null, 'the saved message replaces the optimistic bubble');
+  assert.equal(persisted.draftSent, true, 'the composer does not show the sent text or attachments again');
+  assert.equal(reply({ messages: [saved], outgoing: null, command: sending }).draftSent, true);
+  assert.equal(reply({ messages: [], outgoing, command: sending }).draftSent, true);
+  assert.equal(reply({ messages: [], outgoing, command: accepted }).draftSent, true);
+  assert.equal(reply({ messages: [saved], outgoing, command: accepted }).draftSent, false);
+  const failed: CommandState[] = [
+    { kind: 'uncertain', command: send },
+    { kind: 'rejected', message: 'No', status: 400 },
+    { kind: 'idle' },
+  ];
+  for (const command of failed)
+    assert.equal(reply({ messages: [], outgoing, command }).draftSent, false, 'a failed send restores the draft');
+  for (const command of [
+    { kind: 'sending', command: retry },
+    { kind: 'accepted', operation: 'retry' },
+  ] satisfies CommandState[])
+    assert.equal(reply({ messages: [saved], outgoing, command }).draftSent, false);
+});
+
+test('sending the same text again shows its own pending bubble', () => {
+  const earlier = message({ id: 'earlier-send', turn: { id: 'turn', generation: 2, status: 'completed' } });
+  const repeat = { ...outgoing, id: 'repeat-send' };
+  const command: CommandState = { kind: 'sending', command: { ...send, messageId: repeat.id } };
+  assert.deepEqual(earlier.parts, message({ id: repeat.id }).parts);
+  const result = reply({ messages: [earlier], outgoing: repeat, command });
+  assert.equal(result.pending, repeat);
+  assert.equal(result.thinking, true);
+  assert.equal(reply({ messages: [earlier], outgoing: repeat, command: accepted }).pending, repeat);
+  assert.equal(
+    reply({ messages: [earlier, message({ id: repeat.id })], outgoing: repeat, command: accepted }).pending,
+    null,
+  );
+});
+
+test('continuing a failed turn does not show the last sent message again', () => {
+  const saved = message({ id: outgoing.id, turn: { id: 'turn', generation: 2, status: 'failed' } });
+  for (const command of [
+    { kind: 'sending', command: retry },
+    { kind: 'accepted', operation: 'retry' },
+  ] satisfies CommandState[]) {
+    assert.equal(reply({ messages: [saved], outgoing, command }).pending, null);
     assert.equal(reply({ messages: [], outgoing, command }).pending, null);
-  assert.equal(reply({ messages: undefined, outgoing, command: 'accepted' }).pending, outgoing);
+  }
+  const other = { ...send, messageId: 'other' };
+  assert.equal(reply({ messages: [], outgoing, command: { kind: 'sending', command: other } }).pending, null);
 });
 
 test('saved history selects the last queued or processing turn and removes streamed text on completion', () => {

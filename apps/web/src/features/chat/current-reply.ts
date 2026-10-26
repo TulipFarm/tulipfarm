@@ -3,7 +3,7 @@ import type { ChatDocument } from '@tulipfarm/conversations/rich-content';
 import type { StreamProgress } from '@tulipfarm/conversations/events';
 import type { SpinnerActivity } from '@tulipfarm/sprout/spinner';
 import type { ConversationMessage, SkillReference } from './conversation-api';
-import type { useConversationCommand } from './conversation-state';
+import type { CommandState } from './conversation-state';
 import type { ConversationStreamSnapshot } from './conversation-stream';
 import type { FileReference } from './draft-files';
 
@@ -17,17 +17,17 @@ export type OutgoingMessage = {
 type ReplyInput = {
   messages: ConversationMessage[] | undefined;
   outgoing: OutgoingMessage | null;
-  command: ReturnType<typeof useConversationCommand>['state']['kind'];
+  command: CommandState;
   stream: ConversationStreamSnapshot;
 };
 
 /** Saved turns decide which stream generation belongs to the current reply. */
 export function currentReply({ messages, outgoing, command, stream }: ReplyInput) {
-  const pending =
-    outgoing &&
-    (command === 'sending' || (command === 'accepted' && !messages?.some(message => message.id === outgoing.id)))
-      ? outgoing
-      : null;
+  // Only the send that created this message shows it; retries and other commands reuse saved turns.
+  const sending =
+    (command.kind === 'sending' && command.command.kind === 'send' && command.command.messageId === outgoing?.id) ||
+    (command.kind === 'accepted' && command.operation === 'send');
+  const pending = outgoing && sending && !messages?.some(message => message.id === outgoing.id) ? outgoing : null;
   const replying = messages
     ?.filter(message => message.turn && ['queued', 'processing'].includes(message.turn.status))
     .at(-1);
@@ -60,6 +60,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
       : null;
   return {
     pending,
+    /** The composer hides its submitted draft until the send settles, even after saved history shows the message. */
+    draftSent: !!pending || (command.kind === 'sending' && command.command.kind === 'send'),
     turn,
     thinking: (!!pending || !!replying) && !delivered,
     since: replying?.createdAt ?? pending?.at,
