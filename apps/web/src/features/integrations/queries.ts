@@ -4,6 +4,7 @@ import {
   parseCalendarRead,
   type CalendarEvent,
 } from '@tulipfarm/google-workspace/calendar-events';
+import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import { readUpcomingCalendar } from './calendar-read';
 import { useIsFetching } from '@tanstack/react-query';
 import { useFeatureRead, useFeatureChanges, featureKey } from '@/lib/query';
@@ -373,7 +374,8 @@ export function useGoogleIntegration(workspaceId: string, enabled = true) {
 type GoogleIntegration = Awaited<ReturnType<typeof loadGoogleIntegration>>;
 function calendarBinding(integration: GoogleIntegration | null | undefined) {
   const status = integration?.status;
-  return status?.status === 'connected'
+  // Without calendar permission every read is refused, so the card stays hidden instead of requesting.
+  return status?.status === 'connected' && googleAppScopes.calendar.every(scope => status.scopes.includes(scope))
     ? {
         integrationId: status.integrationId,
         accountId: status.accountId,
@@ -463,7 +465,7 @@ export function useUpcomingMeetings(workspaceId: string): UpcomingMeetingsState 
       }),
     [runtime, scope],
   );
-  // Render nothing until Google is known to be connected, so a disconnected workspace never flashes the section.
+  // Render nothing until Google is known to be connected with calendar access, so the section never flashes.
   if (!binding) return { kind: 'hidden' };
   if (integration.state.kind === 'error' || integration.error) return { kind: 'error', retry };
   if (read.state.kind === 'loading') return { kind: 'loading' };
