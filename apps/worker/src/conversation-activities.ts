@@ -238,7 +238,7 @@ export function meteredReply(
         : []),
       ...(routeCapabilities(validatedRoute).imageInput ? messages : withoutImages(messages)),
     ]);
-    const publisher = createReplyTextPublisher(runtime, fence);
+    const publisher = observeChatDetailSync('publisher-open', () => createReplyTextPublisher(runtime, fence));
     // Previews reach every project member before the saved answer's audience check, so project chats show only the saved answer.
     const answerText = project
       ? undefined
@@ -247,7 +247,10 @@ export function meteredReply(
     // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
     const budUser = externalContext || project ? null : requester;
     const budAvatar =
-      !!budUser && (await isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }));
+      !!budUser &&
+      (await observeChatDetail('feature-flag', () =>
+        isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }),
+      ));
     const avatar = budAvatar
       ? {
           update: ({
@@ -259,7 +262,7 @@ export function meteredReply(
           }) => publisher.avatar(step, avatar),
         }
       : undefined;
-    const subagentPool = createSubagentPool();
+    const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
