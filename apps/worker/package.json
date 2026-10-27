@@ -56,7 +56,7 @@
     "@tulipfarm/workspace-storage": "workspace:*",
     "@tulipfarm/workspaces": "workspace:*",
     "pg": "8.23.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1141.0",
@@ -64,6 +64,6 @@
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",
     "@types/pg": "8.23.1",
-    "undici": "8.7.0"
+    "undici": "8.12.2"
   }
 }

@@ -26,7 +26,7 @@ const nonblank = (max: number) =>
   z
     .string()
     .min(1)
-    .max(max)
+    .refine(value => value.length <= max)
     .refine(value => value.trim().length > 0, 'Text must not be blank');
 export const agentAuthoringSourceSchema = z.strictObject({
   version: z.number().int().nonnegative(),
@@ -35,7 +35,10 @@ export const agentAuthoringSourceSchema = z.strictObject({
 export const improveAgentInstructionsSchema = z.strictObject({
   requestId: uuidSchema,
   source: agentAuthoringSourceSchema,
-  agentName: z.string().max(agentAuthoringLimits.agentName).optional(),
+  agentName: z
+    .string()
+    .refine(value => value.length <= agentAuthoringLimits.agentName)
+    .optional(),
   instructions: nonblank(agentAuthoringLimits.instructions),
 });
 export const agentPreviewMessageSchema = z.strictObject({

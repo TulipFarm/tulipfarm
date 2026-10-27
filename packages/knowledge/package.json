@@ -62,7 +62,7 @@
     "@tulipfarm/workspace-storage": "workspace:*",
     "js-tiktoken": "1.0.21",
     "pg": "8.23.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@firecrawl/anydoc": "0.2.4",

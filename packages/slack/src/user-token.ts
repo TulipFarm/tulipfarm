@@ -3,7 +3,12 @@ import { observeFetch } from '@tulipfarm/observability';
 import { slackId } from './contracts.ts';
 import { SlackTokenExchangeError } from './link-diagnostics.ts';
 
-const identitySchema = z.object({ ok: z.literal(true), team_id: slackId, user_id: slackId, bot_id: z.undefined() });
+const identitySchema = z.object({
+  ok: z.literal(true),
+  team_id: slackId,
+  user_id: slackId,
+  bot_id: z.never().optional(),
+});
 
 export async function readSlackJson(response: Response) {
   if (!response.ok || !response.body) throw new Error('slack-provider-unavailable');

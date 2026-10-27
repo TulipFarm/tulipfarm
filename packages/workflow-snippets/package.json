@@ -35,7 +35,7 @@
     "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
   },
   "dependencies": {
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

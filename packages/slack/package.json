@@ -22,16 +22,16 @@
     "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
-    "@tulipfarm/integrations": "workspace:*",
-    "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/slack-presentation": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
-    "pg": "8.23.0",
     "jose": "6.2.12",
-    "zod": "4.3.6"
+    "pg": "8.23.0",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/extensions": "workspace:*",

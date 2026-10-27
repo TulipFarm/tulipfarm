@@ -121,7 +121,7 @@
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/provider-mcp": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@octokit/graphql-schema": "15.26.1",

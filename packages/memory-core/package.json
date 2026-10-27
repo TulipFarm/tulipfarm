@@ -88,7 +88,7 @@
     "js-tiktoken": "1.0.21",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

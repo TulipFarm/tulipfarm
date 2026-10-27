@@ -12,7 +12,7 @@
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workflow-snippets": "workspace:*",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",
