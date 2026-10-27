@@ -386,6 +386,16 @@ export const settings: readonly Setting[] = [
       'Requests one client address may make per minute before the API answers 429. Raise it only for a load test.',
   },
   {
+    name: 'API_USER_RATE_LIMIT_MULTIPLIER',
+    group: 'Runtime',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: '1',
+    description:
+      'Multiplies the per-user limits on writes such as creating chats and sending messages. Raise it only for a load test.',
+  },
+  {
     name: 'API_PROXY_MODE',
     group: 'Runtime',
     services: ['api'],

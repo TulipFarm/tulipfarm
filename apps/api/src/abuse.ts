@@ -145,6 +145,12 @@ export function registerAbuseHooks(
     FastifyRequest,
     { workflow: string; workspace: string; source: string; reachedHandler: boolean }
   >();
+  const userLimitMultiplier = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1_000)
+    .parse(process.env.API_USER_RATE_LIMIT_MULTIPLIER ?? 1);
   async function enforce(reply: FastifyReply, policy: Policy, identity: string, mode?: LimitMode, failOpen = false) {
     refused.set(reply.request, policy.name);
     try {
@@ -209,7 +215,8 @@ export function registerAbuseHooks(
     const policy = mutations.get(request.routeOptions.schema?.operationId ?? '');
     if (!policy) return;
     const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-    if (session && !(await enforce(reply, policy, session.user.id))) return reply;
+    if (session && !(await enforce(reply, { ...policy, max: policy.max * userLimitMultiplier }, session.user.id)))
+      return reply;
   });
   app.addHook('onSend', async (request, reply, payload) => {
     const delivery = deliveries.get(request);
