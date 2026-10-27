@@ -74,16 +74,19 @@ export function GitHubChatResponse({
   chatId,
   children,
   task = false,
+  streaming = false,
 }: {
   workspaceId: string;
   chatId: string;
   children: string;
   task?: boolean;
+  streaming?: boolean;
 }) {
   const prefix = `/v1/workspaces/${workspaceId}/github/${task ? 'tasks' : 'chats'}/${chatId}/downloads/`;
   const workspaceSlug = useParams({ strict: false }).workspaceSlug;
   return (
     <MessageResponse
+      streaming={streaming}
       renderLink={(href, label) => {
         if (href === githubReconnectHref && workspaceSlug)
           return (
