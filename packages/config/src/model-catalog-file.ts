@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { modelApiSupported, modelCapabilitiesSchema, modelProviderSchema } from './model-capabilities.ts';
+import { featureFlagNames, featureFlags } from './feature-flags.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
 // The model catalog file: every model a deployment serves, how each is reached, what it costs, and which one is the
@@ -109,6 +110,11 @@ const routeSchema = z
   })
   .describe('One provider that serves the model');
 
+const workspaceFlags = featureFlagNames.filter(flag => featureFlags[flag].scope === 'workspace') as [
+  (typeof featureFlagNames)[number],
+  ...(typeof featureFlagNames)[number][],
+];
+
 const modelSchema = z
   .strictObject({
     id: modelFamilyIdSchema.describe(
@@ -135,6 +141,29 @@ const modelSchema = z
       .default(true)
       .describe(
         'Shown in the model picker. False keeps the model for its roles only, such as a cheap model that titles chats.',
+      ),
+    speed: z
+      .number()
+      .positive()
+      .nullable()
+      .default(null)
+      .describe(
+        'Output tokens per second, such as the Artificial Analysis median output speed. The model picker rates it against the other models; null shows no rating.',
+      ),
+    quality: z
+      .number()
+      .positive()
+      .nullable()
+      .default(null)
+      .describe(
+        'Benchmark score where higher is better, such as the Artificial Analysis Intelligence Index. Use one benchmark for every model; the model picker rates it against the other models. Null shows no rating.',
+      ),
+    featureFlag: z
+      .enum(workspaceFlags)
+      .nullable()
+      .default(null)
+      .describe(
+        'Workspace feature flag that offers this model. Where it is off, the model is hidden from the picker and workspace settings and work on it is refused. A flagged model cannot be the default or hold roles.',
       ),
     roles: z
       .array(z.enum(modelCatalogRoles))
@@ -332,6 +361,10 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
       issues.push({ path: at('paused'), message: 'The default model cannot be paused' });
     if (model.default && !model.selectable)
       issues.push({ path: at('selectable'), message: 'The default model must be selectable' });
+    if (model.featureFlag && model.default)
+      issues.push({ path: at('featureFlag'), message: 'The default model cannot be behind a feature flag' });
+    if (model.featureFlag && model.roles.length)
+      issues.push({ path: at('featureFlag'), message: 'A model behind a feature flag cannot hold roles' });
     if (
       model.roles.includes('public-guide') &&
       (!types.includes('azure') || (model.capabilities?.api ?? 'chat-completions') !== 'chat-completions')

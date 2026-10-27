@@ -281,7 +281,7 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
   const declared = catalog.models.find(model => model.default)!;
   let defaultModel = served.find(model => model.id === declared.id);
   if (!defaultModel) {
-    defaultModel = served.find(model => model.selectable && !model.paused);
+    defaultModel = served.find(model => model.selectable && !model.paused && !model.featureFlag);
     if (!defaultModel) throw fail(`the default model "${declared.id}" is not served and no other model can replace it`);
     warnings.push(`The default model ${declared.id} is not served; ${defaultModel.id} is the default.`);
   }

@@ -128,6 +128,17 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   (or their workspace fallback target) but cannot be chosen for new work. A
   `"selectable": false` model is hidden from the model picker and cannot be
   chosen, but serves its roles and the chats already on it.
+- **Speed and quality.** Optional `speed` (output tokens per second) and
+  `quality` (a benchmark score) drive the model picker's speed and quality
+  meters, each rated against the other listed models. The shipped catalog uses
+  Artificial Analysis median output speed and Intelligence Index, checked
+  2026-10-27. Use one source for every model; a model without a number shows no
+  rating.
+- **Feature flags.** A model with `"featureFlag"` (a workspace-scoped flag, such
+  as `openai-models` or `anthropic-models`) is offered only in workspaces where
+  that flag is on. Elsewhere it is hidden from the picker and workspace model
+  settings, and chats and agents already on it are refused like a model the
+  workspace turned off. A flagged model cannot be the default or hold roles.
 - **Roles.** Each role is on at most one model. Without a `title` model, the
   chat's own model titles the chat. Without a `table-search` or `recommendation`
   model, that feature is off. `compaction`, `review`, `plan`, `heartbeat` and

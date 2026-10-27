@@ -59,6 +59,14 @@ test('exactly one model is the default, and it is not paused', () => {
   assert.deepEqual(problems(catalog([model(), model({ id: 'claude-haiku', default: false, selectable: false })])), []);
 });
 
+test('a model behind a workspace feature flag is neither the default nor a role holder', () => {
+  const flagged = overrides => model({ id: 'gpt-sol', default: false, featureFlag: 'openai-models', ...overrides });
+  assert.deepEqual(problems(catalog([model(), flagged()])), []);
+  rejects(catalog([model({ featureFlag: 'anthropic-models' })]), /^models\.0\.featureFlag: The default model/);
+  rejects(catalog([model(), flagged({ roles: ['title'] })]), /^models\.1\.featureFlag: .*cannot hold roles/);
+  rejects(catalog([model(), flagged({ featureFlag: 'not-a-flag' })]), /^models\.1\.featureFlag:/);
+});
+
 test('ids are unique and each role is on one model', () => {
   rejects(catalog([model(), model({ default: false })]), /^models\.1\.id: Duplicate model id/);
   rejects(catalog([model({ roles: ['title', 'title'] })]), /^models\.0\.roles\.1: Duplicate role/);

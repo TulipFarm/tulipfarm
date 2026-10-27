@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { loadModelCatalog, readModelCatalog, type ServedModelCatalog } from '@tulipfarm/config';
+import { isFeatureEnabled } from '@tulipfarm/observability';
+import { workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentTransaction } from './store.ts';
 import { modelAvailabilitySchema } from './model-policy-contracts.ts';
 
@@ -15,7 +17,8 @@ export async function modelAvailability(tx: AgentTransaction) {
     );
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
-  return [...catalog.models, ...catalog.imageModels].map(
+  const flaggedOff = await flaggedOffModels(tx);
+  return [...catalog.models.filter(model => !flaggedOff.has(model.id)), ...catalog.imageModels].map(
     family =>
       rows.find(row => row.familyId === family.id) ?? {
         familyId: family.id,
@@ -24,6 +27,23 @@ export async function modelAvailability(tx: AgentTransaction) {
         lastDisabledRevision: 0,
       },
   );
+}
+
+/**
+ * Catalog models whose `featureFlag` is off for the transaction's workspace. They are left out of the workspace's
+ * model availability, so they are hidden, cannot be turned on and no work runs on them.
+ */
+export async function flaggedOffModels(tx: Pick<AgentTransaction, 'schema'>): Promise<Set<string>> {
+  const flagged = readModelCatalog().catalog.models.filter(model => model.featureFlag);
+  if (!flagged.length) return new Set();
+  const workspace = { id: workspaceIdFromSchema(tx.schema) };
+  const flags = [...new Set(flagged.map(model => model.featureFlag!))];
+  const on = new Set(
+    (
+      await Promise.all(flags.map(async flag => ((await isFeatureEnabled(flag, null, workspace)) ? flag : null)))
+    ).filter(Boolean),
+  );
+  return new Set(flagged.filter(model => !on.has(model.featureFlag!)).map(model => model.id));
 }
 
 export async function modelFamilyEnabled(tx: AgentTransaction, familyId: string) {

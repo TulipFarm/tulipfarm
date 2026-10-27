@@ -403,6 +403,8 @@ function selectorModel(model: ComposerModel): ModelSelectorModel {
     icon: model.brand ? undefined : <model.logo size={16} aria-hidden="true" />,
     description: model.disabled ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}` : undefined,
     disabled: model.disabled,
+    speed: model.speed,
+    quality: model.quality,
     cost: model.cost,
   };
 }
