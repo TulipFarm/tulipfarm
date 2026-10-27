@@ -95,6 +95,8 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
         generation: 1,
         failure: false,
         gate: null,
+        statusGate: null,
+        statusFailure: false,
         readCount: 0,
         requests: [],
         paths: [],
@@ -116,7 +118,9 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
         else if (path.endsWith('/model-catalog')) json = chatCatalog;
         else if (path.endsWith('/github/accounts')) json = { configured: true, accounts: [] };
         else if (path.endsWith('/google-workspace/availability')) json = { configured: true };
-        else if (path.endsWith('/google-workspace'))
+        else if (path.endsWith('/google-workspace')) {
+          await state.statusGate?.promise;
+          if (state.statusFailure) return route.fulfill({ status: 503, json: { error: 'unavailable' } });
           json = state.connected
             ? {
                 status: 'connected',
@@ -127,7 +131,7 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
                 scopes: ['https://www.googleapis.com/auth/calendar'],
               }
             : { status: 'disconnected' };
-        else if (path.endsWith('/operations/read')) {
+        } else if (path.endsWith('/operations/read')) {
           state.readCount++;
           state.requests.push(request.postDataJSON());
           await state.gate?.promise;
@@ -254,6 +258,29 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
         assert.equal(f.state.readCount, 0);
         assert.equal(await f.page.getByRole('region', { name: 'Upcoming meetings' }).count(), 0);
       } finally {
+        await f.close();
+      }
+    });
+    await t.test('nothing shows before the calendar is known to be connected', async () => {
+      const f = await fixture();
+      try {
+        f.state.statusGate = Promise.withResolvers();
+        const status = f.page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/google-workspace'));
+        await f.page.goto(`${origin}/${workspace.slug}`);
+        await status;
+        await f.page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
+        assert.equal(await f.page.getByRole('region', { name: 'Upcoming meetings' }).count(), 0);
+        f.state.statusFailure = true;
+        const failed = f.page.waitForResponse(response =>
+          new URL(response.url()).pathname.endsWith('/google-workspace'),
+        );
+        f.state.statusGate.resolve();
+        assert.equal((await failed).status(), 503);
+        await f.page.clock.runFor(1000);
+        assert.equal(await f.page.getByRole('region', { name: 'Upcoming meetings' }).count(), 0);
+        assert.equal(f.state.readCount, 0);
+      } finally {
+        f.state.statusGate.resolve();
         await f.close();
       }
     });
