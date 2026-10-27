@@ -53,6 +53,7 @@ import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { newestTools, reconcileLiveTools, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, type OutgoingMessage } from './current-reply';
+import { useSmoothText } from './smooth-text';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import {
@@ -1115,6 +1116,7 @@ function ConversationDetail({
                               workspaceId={workspace.id}
                               chatId={chatId}
                               text={answerText}
+                              streaming
                               rowViews={
                                 history.messages.at(-1)
                                   ? rowViewsForMessage(history.messages, history.messages.at(-1)!)
@@ -1432,17 +1434,20 @@ function AssistantText({
   chatId,
   text,
   rowViews = [],
+  streaming = false,
 }: {
   workspaceId: string;
   chatId: string;
   text: string;
   rowViews?: RowView[];
+  streaming?: boolean;
 }) {
+  const shown = useSmoothText(text, streaming);
   return (
     <MessageBubble variant="ghost">
       <RowViewResponse references={rowViews}>
-        <GitHubChatResponse workspaceId={workspaceId} chatId={chatId}>
-          {text}
+        <GitHubChatResponse workspaceId={workspaceId} chatId={chatId} streaming={streaming}>
+          {shown}
         </GitHubChatResponse>
       </RowViewResponse>
     </MessageBubble>
