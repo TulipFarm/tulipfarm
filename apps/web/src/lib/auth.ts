@@ -117,14 +117,25 @@ function settledSession() {
   });
 }
 
+const sessionRetryDelays = [1_000, 3_000];
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function checkSession() {
   try {
     // Mounting starts the store's refresh manager; its mount fetch joins the refetch below.
     guardHold ??= sessionStore.listen(() => {});
     // Join a request already in flight; a refetch would cancel it after it reached the API.
     if (!sessionStore.get().isRefetching) await sessionStore.get().refetch();
-    const { data, error } = await settledSession();
-    if (error) throw new Error('Could not check your session. Please try again.');
+    let { data, error } = await settledSession();
+    for (const delay of sessionRetryDelays) {
+      if (!error || error.status === 401) break;
+      await wait(delay);
+      if (!sessionStore.get().isRefetching) await sessionStore.get().refetch();
+      ({ data, error } = await settledSession());
+    }
+    // A dropped connection or server error says nothing about the session. Better Auth keeps
+    // the last good session in that case, so keep using it; only a 401 clears it.
+    if (error && error.status !== 401 && !data) throw new Error('Could not check your session. Please try again.');
     checkedIdentity = sessionIdentity(data);
     return data;
   } finally {

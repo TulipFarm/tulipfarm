@@ -1,3 +1,4 @@
+import type { loadOwnMembership } from './governance';
 import type { getWorkspace, listWorkspaces } from './workspaces';
 
 type Authority = { userId: string; sessionId: string; slug: string };
@@ -5,6 +6,7 @@ type Read = {
   pathname: string;
   workspace: Awaited<ReturnType<typeof getWorkspace>>;
   workspaces: Awaited<ReturnType<typeof listWorkspaces>>;
+  membership: Awaited<ReturnType<typeof loadOwnMembership>> | null;
 };
 type Snapshot =
   | { kind: 'empty'; revision: number }

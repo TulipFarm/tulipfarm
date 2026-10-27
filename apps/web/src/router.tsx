@@ -638,7 +638,8 @@ export const workspaceRoute = createRoute({
         const workspace = workspaceRead.value;
         const workspaces = listRead.value;
         const membership = await membershipRequest;
-        if (!abortController.signal.aborted) access.admit({ pathname: location.pathname, workspace, workspaces });
+        if (!abortController.signal.aborted)
+          access.admit({ pathname: location.pathname, workspace, workspaces, membership });
         return {
           user: session.user,
           sessionId: session.session.id,
@@ -665,20 +666,20 @@ export const workspaceRoute = createRoute({
           (error instanceof DOMException && error.name === 'TimeoutError') ||
           (error instanceof WorkspaceRequestError && error.status >= 500);
         const previous = access.retained(location.pathname);
-        if (
-          temporary &&
-          !abortController.signal.aborted &&
-          cause === 'stay' &&
-          (location.pathname === `/${params.workspaceSlug}/integrations` ||
-            location.pathname.startsWith(`/${params.workspaceSlug}/integrations/`)) &&
-          previous
-        ) {
-          const membership = await loadOwnMembership(previous.workspace.id, abortController.signal).catch(denied);
+        if (temporary && !abortController.signal.aborted && cause === 'stay' && previous) {
+          // Integration controls change workspace connections, so those pages confirm the
+          // membership again before showing them. Elsewhere the last admitted read is enough.
+          const onIntegrations =
+            location.pathname === `/${params.workspaceSlug}/integrations` ||
+            location.pathname.startsWith(`/${params.workspaceSlug}/integrations/`);
+          const membership = onIntegrations
+            ? await loadOwnMembership(previous.workspace.id, abortController.signal).catch(denied)
+            : previous.membership;
           return {
             user: session.user,
             sessionId: session.session.id,
             accessRevision: access.revision,
-            membershipId: membership.membershipId,
+            membershipId: membership?.membershipId ?? null,
             membership,
             workspace: previous.workspace,
             workspaces: previous.workspaces,
