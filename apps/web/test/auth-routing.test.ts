@@ -18,11 +18,16 @@ let session: { session: { id: string }; user: { id: string; name: string } } | n
 let workspaces = [acme];
 let workspaceStatus = 200;
 let sessionStatus = 200;
+let droppedSessionChecks = 0;
 const requests: string[] = [];
 
 globalThis.fetch = async input => {
   const url = new URL(String(input));
   requests.push(url.pathname);
+  if (url.pathname === '/v1/auth/get-session' && droppedSessionChecks > 0) {
+    droppedSessionChecks--;
+    throw new TypeError('Failed to fetch');
+  }
   if (url.pathname === '/v1/auth/get-session') return Response.json(session, { status: sessionStatus });
   if (url.pathname.startsWith('/v1/workspaces')) {
     if (workspaceStatus !== 200)
@@ -58,6 +63,7 @@ beforeEach(() => {
   workspaces = [acme];
   workspaceStatus = 200;
   sessionStatus = 200;
+  droppedSessionChecks = 0;
   requests.length = 0;
   storage.clear();
   Object.defineProperty(globalThis, 'window', {
@@ -280,6 +286,22 @@ test('workspace and session failures are errors rather than new-user onboarding'
   assert.equal((await load('/')).state.matches.at(-1)?.status, 'error');
   sessionStatus = 503;
   assert.equal((await load('/')).state.matches.at(-1)?.status, 'error');
+});
+
+test('a dropped session check retries and keeps the signed-in session', async () => {
+  await load('/acme');
+  droppedSessionChecks = 1;
+  requests.length = 0;
+  const router = await load('/acme/settings');
+  assert.equal(router.state.matches.at(-1)?.status, 'success');
+  assert.deepEqual(
+    requests.filter(path => path === '/v1/auth/get-session'),
+    ['/v1/auth/get-session', '/v1/auth/get-session'],
+  );
+  droppedSessionChecks = 3;
+  assert.equal((await load('/acme/settings')).state.matches.at(-1)?.status, 'success');
+  sessionStatus = 401;
+  assert.equal((await destination('/acme/settings')).pathname, '/login');
 });
 
 test('expired workspace access returns to login and missing memberships return not found', async () => {

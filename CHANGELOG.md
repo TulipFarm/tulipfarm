@@ -33,6 +33,12 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A dropped connection while the app sits idle no longer replaces it with
+  "Could not open TulipFarm". The session check retries twice and keeps the
+  last signed-in session unless the API answers 401. A workspace refresh that
+  can't reach the API keeps the loaded page on screen with a "Reconnecting"
+  banner, which retries every 30 seconds, when the window returns, and when
+  the browser comes back online.
 - A brief database slowdown, such as a lock or connection timeout, no longer
   fails a running reply as access denied. The worker keeps the reply and
   retries its lease renewal, and logs each failed renewal. If renewal still

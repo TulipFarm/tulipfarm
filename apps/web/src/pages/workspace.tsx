@@ -83,6 +83,7 @@ import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
+import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
 
 export type WorkspacePath =
   | '/$workspaceSlug/settings/soul'
@@ -631,7 +632,13 @@ export function WorkspaceShell() {
 }
 
 function WorkspaceShellContent() {
-  const { user, workspace } = workspaceRoute.useRouteContext();
+  const { user, workspace, workspaceStale } = workspaceRoute.useRouteContext();
+  // Integration pages explain the stale state themselves and pause their controls.
+  const onIntegrations = useLocation({
+    select: location =>
+      location.pathname === `/${workspace.slug}/integrations` ||
+      location.pathname.startsWith(`/${workspace.slug}/integrations/`),
+  });
   useEffect(() => {
     setAnalyticsWorkspace({ id: workspace.id, slug: workspace.slug, name: workspace.name });
     return () => setAnalyticsWorkspace(undefined);
@@ -673,6 +680,7 @@ function WorkspaceShellContent() {
         >
           <WorkspaceNavigation onSearch={() => setSearchOpen(true)} />
           <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+            {workspaceStale && <ReconnectBanner showMessage={!onIntegrations} />}
             {workspace.status === 'ready' && (
               <ReauthorizationBanner key={workspace.id} workspaceId={workspace.id} slug={workspace.slug} />
             )}
