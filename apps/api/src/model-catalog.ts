@@ -23,6 +23,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { modelAvailability } from '@tulipfarm/agents/model-policy';
+import { flaggedOffModels } from '@tulipfarm/agents/model-availability';
 import { creditPricing } from '@tulipfarm/extensions';
 
 export type ModelCatalogEligibility = (input: {
@@ -82,9 +83,11 @@ function projectCatalog(
   resolve: ModelFamilyResolution,
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
+  hidden: ReadonlySet<string> = new Set(),
 ): ModelCatalog {
-  // Models that are not selectable serve their roles and existing chats, but are never offered.
-  const selectable = catalog.models.filter(model => model.selectable);
+  // Models that are not selectable serve their roles and existing chats, but are never offered. Hidden models are
+  // behind a workspace feature flag that is off.
+  const selectable = catalog.models.filter(model => model.selectable && !hidden.has(model.id));
   const resolutions = new Map(
     selectable.map(family => {
       const input = { workspaceId, modelFamilyId: family.id };
@@ -117,6 +120,8 @@ function projectCatalog(
         provider: resolution?.route.provider ?? family.route.type,
         inputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.input * creditsPerUsd : null,
         outputCreditsPerMillionTokens: rate ? rate.usdPerMillionTokens.output * creditsPerUsd : null,
+        speed: family.speed,
+        quality: family.quality,
         imageInput: resolveModelCapabilities(family.route.type, family.capabilities).imageInput,
         imageModelId: family.imageModel,
       };
@@ -241,6 +246,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             snapshot.modelFamilyResolution,
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
+            await flaggedOffModels(transaction),
           );
         });
       },

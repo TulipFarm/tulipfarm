@@ -84,6 +84,8 @@ test('MODEL_CATALOG_FILE replaces the shipped catalog in the workspace model cat
       unavailableReason: null,
       inputCreditsPerMillionTokens: 50,
       outputCreditsPerMillionTokens: 150,
+      speed: null,
+      quality: null,
       imageInput: false,
       imageModelId: null,
       fallbackFor: ['claude-haiku'],

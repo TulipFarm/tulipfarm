@@ -125,6 +125,52 @@
             "description": "Shown in the model picker. False keeps the model for its roles only, such as a cheap model that titles chats.",
             "type": "boolean"
           },
+          "speed": {
+            "default": null,
+            "description": "Output tokens per second, such as the Artificial Analysis median output speed. The model picker rates it against the other models; null shows no rating.",
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality": {
+            "default": null,
+            "description": "Benchmark score where higher is better, such as the Artificial Analysis Intelligence Index. Use one benchmark for every model; the model picker rates it against the other models. Null shows no rating.",
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "featureFlag": {
+            "default": null,
+            "description": "Workspace feature flag that offers this model. Where it is off, the model is hidden from the picker and workspace settings and work on it is refused. A flagged model cannot be the default or hold roles.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "images",
+                  "slack-app-sender",
+                  "default-connection-knowledge",
+                  "social-publishing",
+                  "openai-models",
+                  "anthropic-models"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "roles": {
             "default": [],
             "description": "Background features this model runs: title, compaction, review, plan, heartbeat, public-guide, table-search, recommendation, fallback, completion-check, document-vision. Each role on at most one model.",

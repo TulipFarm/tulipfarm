@@ -143,6 +143,16 @@ One version identifies all apps and images of a release.
 
 ### Added
 
+- Model catalog entries take optional `speed` (output tokens per second) and
+  `quality` (a benchmark score), and the model picker shows them as speed and
+  quality meters. The shipped catalog fills them from Artificial Analysis.
+- A model catalog entry can set `"featureFlag"` to a workspace-scoped feature
+  flag. Where the flag is off, the model is hidden from the model picker and
+  workspace model settings, and chats and agents on it are refused like a model
+  the workspace turned off. New flags `openai-models`
+  (`FEATURE_FLAG_OPENAI_MODELS`) and `anthropic-models`
+  (`FEATURE_FLAG_ANTHROPIC_MODELS`) gate such models; both are on in
+  development and off in production unless enabled.
 - The model catalog role `fallback` (off unless a model has it) retries a chat
   model call once on that model when the chat model fails before any output
   with a failure a different model can fix. The reply notes and bills the model

@@ -76,6 +76,20 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_SOCIAL_PUBLISHING',
   },
+  'openai-models': {
+    description:
+      'Model catalog entries with "featureFlag": "openai-models", such as GPT models on the OpenAI API. Off hides them from the picker and workspace settings and refuses work on them.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_OPENAI_MODELS',
+  },
+  'anthropic-models': {
+    description:
+      'Model catalog entries with "featureFlag": "anthropic-models", such as Claude models on the Anthropic API. Off hides them from the picker and workspace settings and refuses work on them.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_ANTHROPIC_MODELS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

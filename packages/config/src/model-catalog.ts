@@ -28,6 +28,18 @@ const family = z.strictObject({
     .describe(
       'Date-effective base-context output rate, before aggregate rounding; null when unknown or the family is unmetered',
     ),
+  speed: z
+    .number()
+    .positive()
+    .nullable()
+    .default(null)
+    .describe('Output tokens per second from the catalog, for the picker speed rating; null when unknown'),
+  quality: z
+    .number()
+    .positive()
+    .nullable()
+    .default(null)
+    .describe('Benchmark score from the catalog, for the picker quality rating; null when unknown'),
   imageInput: z
     .boolean()
     .default(false)

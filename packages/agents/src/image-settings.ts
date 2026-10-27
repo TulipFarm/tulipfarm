@@ -45,10 +45,14 @@ async function stored(tx: AgentTransaction, lock = false) {
 
 /** Recognition and image model choices, each usable when served, not paused (image models) and enabled here. */
 async function choices(tx: AgentTransaction, catalog: ServedModelCatalog) {
-  const enabled = new Set((await modelAvailability(tx)).filter(row => row.enabled).map(row => row.familyId));
+  const availability = await modelAvailability(tx);
+  const listed = new Set(availability.map(row => row.familyId));
+  const enabled = new Set(availability.filter(row => row.enabled).map(row => row.familyId));
   return {
     recognitionFamilies: catalog.models
-      .filter(model => resolveModelCapabilities(model.route.type, model.capabilities).imageInput)
+      .filter(
+        model => listed.has(model.id) && resolveModelCapabilities(model.route.type, model.capabilities).imageInput,
+      )
       .map(model => ({ id: model.id, name: model.name, enabled: enabled.has(model.id) })),
     imageModels: catalog.imageModels.map(image => ({
       id: image.id,

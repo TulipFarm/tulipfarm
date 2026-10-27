@@ -16,6 +16,8 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     label: family.displayName,
     logo: modelLogo(family.vendor),
     brand: modelBrand(family.vendor),
+    speed: family.speed ?? undefined,
+    quality: family.quality ?? undefined,
     cost: familyCost(family),
     disabled: !family.available,
     ...(!family.available

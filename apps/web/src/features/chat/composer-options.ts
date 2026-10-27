@@ -24,7 +24,15 @@ export type Mode = {
 };
 export type Agent = { id: string; label: string; description: string; icon: Icon };
 /** `cost` is a raw number where higher costs more; the model picker rates it against the other models. */
-export type Model = { id: string; label: string; logo: Icon; brand: ModelBrand | null; cost?: number | undefined };
+export type Model = {
+  id: string;
+  label: string;
+  logo: Icon;
+  brand: ModelBrand | null;
+  speed?: number | undefined;
+  quality?: number | undefined;
+  cost?: number | undefined;
+};
 
 export type Persona = { kind: 'mode'; mode: Mode } | { kind: 'agent'; agent: Agent };
 
@@ -71,6 +79,8 @@ const model = (family: ModelCatalogFamily): Model => ({
   label: family.displayName,
   logo: modelLogo(family.vendor),
   brand: modelBrand(family.vendor),
+  speed: family.speed ?? undefined,
+  quality: family.quality ?? undefined,
   cost: familyCost(family),
 });
 
