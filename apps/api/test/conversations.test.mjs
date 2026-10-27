@@ -50,6 +50,43 @@ test('private chat mutation budgets apply to verified users before persistence',
   ]);
 });
 
+test('API_USER_RATE_LIMIT_MULTIPLIER scales the per-user chat budgets', async t => {
+  const previous = process.env.API_USER_RATE_LIMIT_MULTIPLIER;
+  t.after(() => {
+    if (previous === undefined) delete process.env.API_USER_RATE_LIMIT_MULTIPLIER;
+    else process.env.API_USER_RATE_LIMIT_MULTIPLIER = previous;
+  });
+  const auth = { api: { getSession: async () => ({ user: { id: 'verified-user' } }) } };
+  const budgets = [];
+  process.env.API_USER_RATE_LIMIT_MULTIPLIER = '50';
+  const app = Fastify();
+  registerAbuseHooks(
+    app,
+    async policy => {
+      budgets.push([policy.name, policy.max]);
+      return 30;
+    },
+    auth,
+  );
+  registerConversations(app, { auth, service: {} });
+  t.after(() => app.close());
+  const base = `/workspaces/${randomUUID()}/conversations/${randomUUID()}`;
+  const headers = { origin: 'http://localhost:5173' };
+  await app.inject({ method: 'PUT', url: base, payload: { commandId: randomUUID() }, headers });
+  await app.inject({
+    method: 'PUT',
+    url: `${base}/messages/${randomUUID()}`,
+    payload: { commandId: randomUUID(), parts: [{ kind: 'text', text: 'load' }] },
+    headers,
+  });
+  assert.deepEqual(budgets, [
+    ['conversation-create', 1000],
+    ['conversation-send', 3000],
+  ]);
+  process.env.API_USER_RATE_LIMIT_MULTIPLIER = '0';
+  assert.throws(() => registerAbuseHooks(Fastify(), async () => null, auth));
+});
+
 test('a message without a model replies on the model catalog default', async t => {
   t.after(useModelCatalog(['claude-sonnet', 'claude-haiku'], 'claude-haiku'));
   const app = Fastify();
