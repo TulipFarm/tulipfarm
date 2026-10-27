@@ -8,11 +8,12 @@ import {
   createBackgroundJob,
   errorAttributes,
   log,
+  observeTemporalSlots,
   registerFlagSubjectResolver,
   startTelemetry,
 } from '@tulipfarm/observability';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
-import { workerTelemetry } from './telemetry.ts';
+import { temporalSlotReadings, workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import * as activities from './activities.ts';
@@ -375,6 +376,7 @@ async function run() {
     ];
     await taskDispatch?.startRecovery();
     await planDispatch?.startRecovery();
+    const stopSlotMetrics = observeTemporalSlots(() => temporalSlotReadings(workers));
     const outcomes = await Promise.allSettled(
       workers.map(current =>
         current.run().finally(() => {
@@ -382,6 +384,7 @@ async function run() {
         }),
       ),
     );
+    stopSlotMetrics();
     const failure = outcomes.find(outcome => outcome.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
   } finally {

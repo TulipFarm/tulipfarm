@@ -163,6 +163,21 @@ test('global throttle covers changing paths and spoofed headers, but leaves live
   assert.equal((await app.inject({ url: '/ok', remoteAddress: '192.0.2.100' })).statusCode, 200);
 });
 
+test('API_RATE_LIMIT_PER_MINUTE sets the per-address budget', async t => {
+  const previous = process.env.API_RATE_LIMIT_PER_MINUTE;
+  t.after(() => {
+    if (previous === undefined) delete process.env.API_RATE_LIMIT_PER_MINUTE;
+    else process.env.API_RATE_LIMIT_PER_MINUTE = previous;
+  });
+  process.env.API_RATE_LIMIT_PER_MINUTE = '3';
+  const app = fixture();
+  t.after(() => app.close());
+  for (let index = 0; index < 3; index++) assert.equal((await app.inject('/ok')).statusCode, 200);
+  assert.equal((await app.inject('/ok')).statusCode, 429);
+  process.env.API_RATE_LIMIT_PER_MINUTE = '0';
+  assert.throws(() => fixture());
+});
+
 test('IPv6 address rotation within one subnet shares the general limit', async t => {
   const app = fixture();
   t.after(() => app.close());
