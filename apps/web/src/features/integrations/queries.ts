@@ -395,7 +395,6 @@ type UpcomingMeetingsState =
   | { kind: 'ready'; events: CalendarEvent[]; refreshing: boolean; failed: boolean; retry: () => void };
 export function useUpcomingMeetings(workspaceId: string): UpcomingMeetingsState {
   const integration = useGoogleIntegration(workspaceId);
-  const status = integration.data?.status;
   const binding = calendarBinding(integration.data);
   const [now, setNow] = useState(Date.now);
   const read = useFeatureRead({
@@ -464,9 +463,10 @@ export function useUpcomingMeetings(workspaceId: string): UpcomingMeetingsState 
       }),
     [runtime, scope],
   );
-  if (integration.state.kind === 'unavailable' || (status && status.status !== 'connected')) return { kind: 'hidden' };
+  // Render nothing until Google is known to be connected, so a disconnected workspace never flashes the section.
+  if (!binding) return { kind: 'hidden' };
   if (integration.state.kind === 'error' || integration.error) return { kind: 'error', retry };
-  if (!binding || read.state.kind === 'loading') return { kind: 'loading' };
+  if (read.state.kind === 'loading') return { kind: 'loading' };
   if (read.state.kind === 'unavailable') return { kind: 'hidden' };
   if (read.state.kind === 'error') return { kind: 'error', retry };
   const data = read.state.data;
