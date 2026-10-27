@@ -100,22 +100,22 @@
     "@rsql/ast": "1.6.0",
     "@rsql/emitter": "1.6.0",
     "@rsql/parser": "1.6.0",
-    "@tulipfarm/files": "workspace:*",
-    "csv-parse": "7.0.3",
-    "exceljs": "4.4.0",
-    "yauzl": "3.4.0",
-    "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/files": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
+    "csv-parse": "7.0.3",
+    "exceljs": "4.4.0",
     "pg": "8.23.0",
-    "zod": "4.3.6"
+    "yauzl": "3.4.0",
+    "zod": "4.6.6"
   },
   "devDependencies": {
-    "@types/yauzl": "3.4.0",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",
     "@types/pg": "8.23.1",
+    "@types/yauzl": "3.4.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1"
   }

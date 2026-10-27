@@ -23,7 +23,7 @@
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "ajv": "8.20.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

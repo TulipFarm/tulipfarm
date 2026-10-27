@@ -146,7 +146,7 @@
     "@tulipfarm/workspace-mcp": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "pg": "8.23.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

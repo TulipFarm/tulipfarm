@@ -728,7 +728,7 @@ const responsesResponseSchema = z.object({
 const googlePromptFeedbackSchema = z.object({ promptFeedback: z.object({ blockReason: z.string().optional() }) });
 const googleResponseSchema = z.object({
   candidates: z
-    .array(z.object({ finishReason: z.string(), content: z.unknown() }))
+    .array(z.object({ finishReason: z.string(), content: z.unknown().optional() }))
     .max(1)
     .optional(),
 });

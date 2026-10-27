@@ -9,17 +9,17 @@
   "dependencies": {
     "@tulipfarm/agents": "workspace:*",
     "@tulipfarm/api": "workspace:*",
-    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/github": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "@tulipfarm/workspaces": "workspace:*",
     "pg": "8.23.0",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

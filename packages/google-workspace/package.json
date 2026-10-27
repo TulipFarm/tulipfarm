@@ -67,11 +67,11 @@
     "test:integration": "node --test test/*.integration.mjs"
   },
   "dependencies": {
-    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

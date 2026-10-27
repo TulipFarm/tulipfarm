@@ -63,7 +63,7 @@
     "reicon-react": "1.2.5",
     "three": "0.186.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",

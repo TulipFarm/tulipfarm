@@ -83,7 +83,7 @@
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
-    "zod": "4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tulipfarm/typescript-config": "workspace:*",

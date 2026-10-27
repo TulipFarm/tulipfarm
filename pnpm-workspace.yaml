@@ -13,7 +13,8 @@ saveExact: true
 
 overrides:
   source-map-js@>=1.0.0 <1.2.2: 1.2.2
-  '@modelcontextprotocol/sdk@>=1.12.0 <1.31.0': 1.31.0
+  '@modelcontextprotocol/sdk@>=1.12.0 <1.32.0': 1.32.0
+  '@azure/identity@4.13.3>@azure/msal-node': 7.1.0
   'pptxgenjs@4.0.1>image-size': 2.0.3
   'pptx-preview>echarts': 6.1.0
   '@opentelemetry/propagator-jaeger@<2.9.0': 2.9.0
