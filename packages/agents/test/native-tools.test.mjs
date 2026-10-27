@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { nativeChatTools, nativeToolName } from '../src/native-tools.ts';
 import { createMcpCatalog } from '../src/mcp-catalog.ts';
-import { chatCallSchema, toolDescription } from '../src/tools.ts';
+import { chatCallSchema, discoverTools, toolDescription } from '../src/tools.ts';
 import { mcpName } from './native-fixture.mjs';
 
 const entry = {
@@ -189,4 +190,42 @@ test('ordinary row work offers inspection and one bounded batch create without d
 test('discovery ranks an exact tool name ahead of description-only matches', () => {
   const catalog = nativeChatTools(undefined, false, new Set());
   assert.equal(catalog.search('rows.create')[0], 'rows_create');
+});
+
+test('repeated catalogs reuse tool schemas without sharing mutations or going stale', () => {
+  const first = nativeChatTools(undefined, false, new Set());
+  const snapshot = JSON.stringify(first.tools);
+  first.tools[0].parameters.properties.injected = true;
+  first.tools[0].name = 'changed';
+  const second = nativeChatTools(undefined, false, new Set());
+  assert.equal(JSON.stringify(second.tools), snapshot);
+  assert.deepEqual(
+    discoverTools({ kind: 'chat' }).map(tool => tool.inputSchema),
+    discoverTools({ kind: 'chat' }).map(tool => tool.inputSchema),
+  );
+});
+
+test('the catalog follows MCP content and loaded tools between calls', () => {
+  const none = nativeChatTools(undefined, false, new Set());
+  const withMcp = nativeChatTools(createMcpCatalog([entry]).model(), false, new Set());
+  const changed = nativeChatTools(
+    createMcpCatalog([{ ...entry, description: 'Another description.' }]).model(),
+    false,
+    new Set(),
+  );
+  assert.ok(withMcp.tools.length > none.tools.length);
+  assert.notEqual(JSON.stringify(withMcp.tools), JSON.stringify(changed.tools));
+  const loaded = new Set();
+  const before = nativeChatTools(undefined, false, loaded).tools.length;
+  loaded.add('rows_create');
+  assert.notEqual(nativeChatTools(undefined, false, loaded).tools.length, before);
+});
+
+test('reply setup steps use their own chat detail spans', () => {
+  const worker = readFileSync(new URL('../../../apps/worker/src/conversation-activities.ts', import.meta.url), 'utf8');
+  const phases = readFileSync(new URL('../../observability/src/index.ts', import.meta.url), 'utf8');
+  for (const phase of ['publisher-open', 'feature-flag', 'subagent-pool']) {
+    assert.ok(worker.includes(`'${phase}'`), phase);
+    assert.ok(phases.includes(`| '${phase}'`), phase);
+  }
 });
