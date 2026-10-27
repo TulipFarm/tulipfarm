@@ -2259,7 +2259,15 @@ export async function inferWithTools(
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
   const loaded = new Set<string>();
-  const catalogKey = (mcp: McpModelCatalog | undefined) => JSON.stringify([mcp ?? null, [...loaded].sort()]);
+  const mcpJson = new WeakMap<object, string>();
+  const catalogKey = (mcp: McpModelCatalog | undefined) => {
+    let json = mcp ? mcpJson.get(mcp) : 'null';
+    if (json === undefined) {
+      json = JSON.stringify(mcp);
+      mcpJson.set(mcp!, json);
+    }
+    return `${json}|${JSON.stringify([...loaded].sort())}`;
+  };
   let reminder: ChatTextTurn | undefined;
   const limits = tools?.context;
   const capBytes = limits ? resultCapBytes(limits.window) : 0;

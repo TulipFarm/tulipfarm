@@ -523,13 +523,21 @@ function admittedToolSchemas(access: ToolAccess) {
 export function discoverToolNames(access: ToolAccess) {
   return admittedToolSchemas(access).map(schema => schema.shape.tool.value);
 }
+const inputSchemas = new Map<string, Record<string, unknown>>();
+function toolInputSchema(schema: (typeof frameworkCallSchema.options)[number]) {
+  const name = schema.shape.tool.value;
+  let json = inputSchemas.get(name);
+  if (!json) {
+    json = z.toJSONSchema(googleAgentToolCallOptions.get(name) ?? modelVisible(schema), { io: 'input' });
+    inputSchemas.set(name, json);
+  }
+  return json;
+}
 export function discoverTools(access: ToolAccess) {
   return admittedToolSchemas(access).map(schema => ({
     name: schema.shape.tool.value,
     description: descriptions[schema.shape.tool.value],
-    inputSchema: z.toJSONSchema(googleAgentToolCallOptions.get(schema.shape.tool.value) ?? modelVisible(schema), {
-      io: 'input',
-    }),
+    inputSchema: toolInputSchema(schema),
     external: isExternalTool(schema.shape.tool.value),
   }));
 }
