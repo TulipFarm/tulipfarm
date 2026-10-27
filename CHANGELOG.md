@@ -33,6 +33,9 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- The Upcoming meetings card no longer asks Google for calendar events when the
+  connected Google account hasn't granted Calendar access. Before, every page
+  load, window return and minute-long refresh sent a request that failed.
 - A dropped connection while the app sits idle no longer replaces it with
   "Could not open TulipFarm". The session check retries twice and keeps the
   last signed-in session unless the API answers 401. A workspace refresh that

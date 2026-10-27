@@ -92,6 +92,7 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
       const state = {
         items: [event(0), event(1), event(2), event(3)],
         connected: true,
+        scopes: ['https://www.googleapis.com/auth/calendar'],
         generation: 1,
         failure: false,
         gate: null,
@@ -128,7 +129,7 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
                 accountId: 'account',
                 generation: state.generation,
                 email: 'ada@example.com',
-                scopes: ['https://www.googleapis.com/auth/calendar'],
+                scopes: state.scopes,
               }
             : { status: 'disconnected' };
         } else if (path.endsWith('/operations/read')) {
@@ -255,6 +256,27 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
         f.state.connected = false;
         await f.page.goto(`${origin}/${workspace.slug}`);
         await f.page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
+        assert.equal(f.state.readCount, 0);
+        assert.equal(await f.page.getByRole('region', { name: 'Upcoming meetings' }).count(), 0);
+      } finally {
+        await f.close();
+      }
+    });
+    await t.test('Google connected without calendar access never reads the calendar', async () => {
+      const f = await fixture();
+      try {
+        f.state.scopes = ['https://www.googleapis.com/auth/drive'];
+        const status = f.page.waitForResponse(response =>
+          new URL(response.url()).pathname.endsWith('/google-workspace'),
+        );
+        await f.page.goto(`${origin}/${workspace.slug}`);
+        await f.page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
+        await status;
+        await delay(300);
+        await f.page.clock.setSystemTime(now + 120_000);
+        await f.page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await f.page.clock.runFor(61_000);
+        await delay(300);
         assert.equal(f.state.readCount, 0);
         assert.equal(await f.page.getByRole('region', { name: 'Upcoming meetings' }).count(), 0);
       } finally {
