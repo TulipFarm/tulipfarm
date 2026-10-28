@@ -4025,7 +4025,7 @@ packages:
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
 
   '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.12.0/tulipfarm-sprout-0.12.0.tgz':
-    resolution: {tarball: https://github.com/TulipFarm/sprout/releases/download/v0.12.0/tulipfarm-sprout-0.12.0.tgz}
+    resolution: {integrity: sha512-enDJ34rMoiGxxCWeUkvXLjqzqpP8gODi9sgUgsckWqyXLmwNFAPrMBwB9V6AL/LcExg78og8LmMFisCvkOh+eQ==, tarball: https://github.com/TulipFarm/sprout/releases/download/v0.12.0/tulipfarm-sprout-0.12.0.tgz}
     version: 0.12.0
     peerDependencies:
       nuqs: ^2.0.0
