@@ -60,6 +60,12 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 export const tableProposalDigest = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const range = commonCompatibility;
 type Origin = { conversationId: string; turnId: string; sources: readonly SourceDependency[] };
+type InstallationOrigin = {
+  conversationId: null;
+  turnId: null;
+  installationId: string;
+  sources: readonly SourceDependency[];
+};
 export type TableProposalOptions = {
   runtime: TableRuntime;
   requireSources(tx: TableTransaction, actor: HumanActor, sources: readonly SourceDependency[]): Promise<void>;
@@ -136,15 +142,15 @@ function operations(options: TableProposalOptions) {
       `${tx.schema}:${z.uuid().parse(id)}`,
     ]);
   }
-  async function load(tx: TableTransaction, actor: HumanActor, conversationId: string, id: string) {
-    await owned(tx, actor, conversationId);
+  async function load(tx: TableTransaction, actor: HumanActor, conversationId: string | null, id: string) {
+    if (conversationId !== null) await owned(tx, actor, conversationId);
     await lock(tx, id);
     const row = storedSchema
       .optional()
       .parse(
         (
           await tx.client.query(
-            `SELECT *,expires_at<=clock_timestamp() AS expired FROM ${table(tx, 'tf_table_proposals')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND user_id=$4`,
+            `SELECT *,expires_at<=clock_timestamp() AS expired FROM ${table(tx, 'tf_table_proposals')} WHERE id=$1 AND conversation_id IS NOT DISTINCT FROM $2::uuid AND membership_id=$3 AND user_id=$4`,
             [id, conversationId, actor.membershipId, actor.userId],
           )
         ).rows[0],
@@ -389,7 +395,7 @@ function operations(options: TableProposalOptions) {
   async function preview(
     tx: TableTransaction,
     actor: HumanActor,
-    origin: Origin,
+    origin: { conversationId: string | null; turnId: string | null; sources: readonly SourceDependency[] },
     plan: ProposalPlan,
     proposalId: string,
   ) {
@@ -467,8 +473,16 @@ function operations(options: TableProposalOptions) {
       )
         throw new TableProposalError('invalid-import');
       const reference = plan.reference;
+      if (origin.conversationId === null || origin.turnId === null) throw new AccessDenied();
       await requireImportReference(tx, actor, origin.conversationId, plan);
-      const snapshot = importSnapshotSchema.parse(await options.imports.readSnapshot(tx, actor, origin, reference));
+      const snapshot = importSnapshotSchema.parse(
+        await options.imports.readSnapshot(
+          tx,
+          actor,
+          { ...origin, conversationId: origin.conversationId, turnId: origin.turnId },
+          reference,
+        ),
+      );
       if (
         snapshot.contentDigest !== reference.contentDigest ||
         (reference.kind === 'integration' && !snapshot.sources.length)
@@ -561,6 +575,7 @@ function operations(options: TableProposalOptions) {
         if (plan.input.kind === 'schema') await requireFixedTableTitle(tx, plan.after, plan.before);
         await options.requireSources(tx, actor, await effectiveProposalSources(tx, manifest, plan.importSources));
         if (plan.input.kind === 'import') {
+          if (manifest.conversationId === null) throw new AccessDenied();
           await requireImportReference(tx, actor, manifest.conversationId, plan.input);
           if (canonicalJson(await destinationAudience(tx, plan.input.tableId)) !== canonicalJson(plan.audience))
             throw new TableProposalError('proposal-stale');
@@ -658,33 +673,56 @@ function operations(options: TableProposalOptions) {
       if (files === 'require-added') await requireAddedFiles(tx, actor, plan.input, stored);
     }
   };
-  async function propose(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
+  async function propose(
+    workspaceId: string,
+    actor: HumanActor,
+    id: string,
+    origin: Origin | InstallationOrigin,
+    value: unknown,
+  ) {
     const input = proposeTableSchema.parse(value);
     const sources = sourceDependenciesSchema.parse(origin.sources);
     const outcome = await transaction(workspaceId, actor, async (tx, requester) => {
-      await requireNoMcpDerived(tx, [
-        { kind: 'private-conversation', conversationId: origin.conversationId },
-        ...sources,
-      ]);
-      await owned(tx, requester, origin.conversationId);
+      await requireNoMcpDerived(
+        tx,
+        origin.conversationId === null
+          ? sources
+          : [{ kind: 'private-conversation', conversationId: origin.conversationId }, ...sources],
+      );
       await lock(tx, id);
-      if (
-        !(
-          await tx.client.query(
-            `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id=t.source_message_id WHERE t.id=$1 AND t.conversation_id=$2 AND m.author_kind='human' AND m.membership_id=$3 AND t.status NOT IN ('cancelled','blocked')`,
-            [z.uuid().parse(origin.turnId), origin.conversationId, requester.membershipId],
-          )
-        ).rowCount
-      )
-        throw new AccessDenied();
+      if (origin.conversationId === null) {
+        if (input.plans.some(plan => !['schema', 'records'].includes(plan.kind))) throw new AccessDenied();
+        if (
+          !(
+            await tx.client.query(
+              `SELECT 1 FROM ${table(tx, 'tf_system_package_installations')} WHERE id=$1 AND membership_id=$2 AND user_id=$3`,
+              [origin.installationId, requester.membershipId, requester.userId],
+            )
+          ).rowCount
+        )
+          throw new AccessDenied();
+      } else {
+        await owned(tx, requester, origin.conversationId);
+        if (
+          !(
+            await tx.client.query(
+              `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id=t.source_message_id WHERE t.id=$1 AND t.conversation_id=$2 AND m.author_kind='human' AND m.membership_id=$3 AND t.status NOT IN ('cancelled','blocked')`,
+              [z.uuid().parse(origin.turnId), origin.conversationId, requester.membershipId],
+            )
+          ).rowCount
+        )
+          throw new AccessDenied();
+      }
       const inputDigest = tableProposalDigest({
         input,
         sources,
         conversationId: origin.conversationId,
         turnId: origin.turnId,
+        ...('installationId' in origin ? { installationId: origin.installationId } : {}),
         requester,
       });
-      const blocked = await blockedReport(tx, requester, origin.conversationId, id);
+      const blocked =
+        origin.conversationId === null ? null : await blockedReport(tx, requester, origin.conversationId, id);
       if (blocked) {
         if (blocked.input_digest !== inputDigest) throw new TableProposalError('proposal-conflict');
         return blocked.report;
@@ -725,6 +763,7 @@ function operations(options: TableProposalOptions) {
           previews.push(item);
         } catch (error) {
           if (!(error instanceof TableProposalValidationError)) throw error;
+          if (origin.conversationId === null) throw error;
           const report = blockedTableProposalSchema.parse(error.validation);
           const dependencies = sourceDependenciesSchema.parse([
             ...sources,
@@ -759,6 +798,7 @@ function operations(options: TableProposalOptions) {
         requester,
         conversationId: origin.conversationId,
         turnId: origin.turnId,
+        ...('installationId' in origin ? { installationId: origin.installationId } : {}),
         sources,
         expiresAt,
         plans: previews.map(item => item.reviewed),
@@ -769,7 +809,7 @@ function operations(options: TableProposalOptions) {
           .rows[0]?.relation,
       );
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_table_proposals')}(id,conversation_id,turn_id,membership_id,user_id,input_digest,digest,manifest,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        `INSERT INTO ${table(tx, 'tf_table_proposals')}(id,conversation_id,turn_id,membership_id,user_id,input_digest,digest,manifest,expires_at${'installationId' in origin ? ',installation_id' : ''}) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9${'installationId' in origin ? ',$10' : ''})`,
         [
           id,
           origin.conversationId,
@@ -780,6 +820,7 @@ function operations(options: TableProposalOptions) {
           digest,
           manifest,
           expiresAt,
+          ...('installationId' in origin ? [origin.installationId] : []),
         ],
       );
       for (const item of previews) {
@@ -948,7 +989,7 @@ function operations(options: TableProposalOptions) {
     async human(
       workspaceId: string,
       userId: string,
-      chatId: string,
+      chatId: string | null,
       id: string,
       value: unknown,
       kind: 'decision' | 'control',
@@ -1008,7 +1049,7 @@ export function createTableProposalDecisions(
   const service = operations(options);
   const act =
     (kind: 'decision' | 'control') =>
-    (workspaceId: string, userId: string, chatId: string, id: string, input: unknown) =>
+    (workspaceId: string, userId: string, chatId: string | null, id: string, input: unknown) =>
       service.human(workspaceId, userId, chatId, id, input, kind, async (_tx, manifest, value) => {
         await withMaintenanceTransaction({
           connectionString: await options.resolveConfirmationCredential(workspaceId),

@@ -33,8 +33,12 @@ import { GoogleFileCanvas } from '@/features/google/file-canvas';
 import { ActivityResultDetails } from './activity-result-card';
 import { GitHubBatches } from './github-batches';
 import { SlackActionCanvas } from '@/features/agents/slack-action';
+import { PackageInstallationCanvas } from '@/features/packages/package-canvas';
+import { PackagePlanOutline } from '@/features/packages/progress';
 
 const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
+  'package-plan': Tasks,
+  'package-installation': Tasks,
   'activity-result': Tasks,
   'github-batch': Code,
   'slack-action': Tasks,
@@ -145,6 +149,23 @@ export function CanvasItemView({
     );
   const content = item.content;
   switch (content.kind) {
+    case 'package-plan':
+      return (
+        <CanvasSection title={item.title}>
+          <PackagePlanOutline document={content.document} order={content.order} />
+          <p className="text-sm text-muted-foreground">
+            Choose workspace inputs and install in chat. Nothing has been installed yet.
+          </p>
+        </CanvasSection>
+      );
+    case 'package-installation':
+      return (
+        <PackageInstallationCanvas
+          workspaceId={content.workspaceId}
+          chatId={content.chatId}
+          installationId={content.installationId}
+        />
+      );
     case 'activity-result':
       return <ActivityResultDetails items={content.items} />;
     case 'github-batch':

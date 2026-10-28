@@ -1202,6 +1202,7 @@ export const backgroundJobs = [
   'agent-setup-discovery',
   'conversation-discovery',
   'table-dispatch',
+  'system-package-dispatch',
   'workflow-dispatch',
   'provider-dispatch',
   'knowledge-dispatch',

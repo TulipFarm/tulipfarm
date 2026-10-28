@@ -3,6 +3,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./system-package-contracts": {
+      "types": "./dist/system-package-contracts.d.ts",
+      "default": "./dist/system-package-contracts.js"
+    },
+    "./system-packages": {
+      "types": "./dist/system-packages.d.ts",
+      "default": "./dist/system-packages.js"
+    },
     "./setup-contracts": {
       "types": "./dist/setup-contracts.d.ts",
       "default": "./dist/setup-contracts.js"
@@ -277,6 +285,8 @@
     }
   },
   "scripts": {
+    "generate:system-package-schema": "node scripts/generate-system-package-schema.mjs",
+    "generate:system-package-examples": "node scripts/generate-system-package-examples.mjs",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",

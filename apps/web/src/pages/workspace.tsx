@@ -96,6 +96,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/agents'
   | '/$workspaceSlug/projects'
   | '/$workspaceSlug/skills'
+  | '/$workspaceSlug/packages'
   | '/$workspaceSlug/agent-tasks'
   | '/$workspaceSlug/files'
   | '/$workspaceSlug/knowledge'
@@ -147,6 +148,7 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
       { label: 'Agents', to: '/$workspaceSlug/agents', icon: Users, recent: 'agents' },
       { label: 'Skills', to: '/$workspaceSlug/skills', icon: BookOpen },
       { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: BranchDown, recent: 'workflows' },
+      { label: 'Packages', to: '/$workspaceSlug/packages', icon: Files },
     ],
   },
   {

@@ -96,6 +96,8 @@ const GoogleFilePage = lazyRouteComponent(() => import('@/pages/google-file'), '
 const ProjectDetailPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectDetailPage');
 const ProjectSettingsPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectSettingsPage');
 const SkillsPage = lazyRouteComponent(() => import('@/pages/skills'), 'SkillsPage');
+const SystemPackagesPage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagesPage');
+const SystemPackagePage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagePage');
 const ImportSkillPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'ImportSkillPage');
 const SkillImportPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'SkillImportPage');
 const SkillDetailPage = lazyRouteComponent(() => import('@/pages/skills'), 'SkillDetailPage');
@@ -743,6 +745,7 @@ export const workspaceChatsRoute = createRoute({
 export const workspaceChatRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'chat/$chatId',
+  validateSearch: z.object({ package: z.literal('leave-management').optional().catch(undefined) }),
   beforeLoad: ({ params }) => {
     if (!z.uuid().safeParse(params.chatId).success) throw notFound();
   },
@@ -839,6 +842,19 @@ const workspaceSkillsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'skills',
   component: SkillsPage,
+});
+const systemPackagesRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'packages',
+  component: SystemPackagesPage,
+});
+export const systemPackageRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'packages/$installationId',
+  beforeLoad: ({ params }) => {
+    if (!z.uuid().safeParse(params.installationId).success) throw notFound();
+  },
+  component: SystemPackagePage,
 });
 const newSkillRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1031,6 +1047,8 @@ export const router = createRouter({
       projectDetailRoute,
       projectSettingsRoute,
       workspaceSkillsRoute,
+      systemPackagesRoute,
+      systemPackageRoute,
       newSkillRoute,
       importSkillRoute,
       skillImportRoute,

@@ -119,17 +119,26 @@ export const reviewedPlanSchema = z.strictObject({
   audience: audienceSchema.nullable(),
   importSources: sourceDependenciesSchema,
 });
-export const proposalManifestSchema = z.strictObject({
-  version: z.literal(1),
-  id: z.uuid(),
-  workspaceId: z.uuid(),
-  requester: humanActorSchema,
-  conversationId: z.uuid(),
-  turnId: z.uuid(),
-  sources: sourceDependenciesSchema,
-  expiresAt: z.iso.datetime(),
-  plans: z.array(reviewedPlanSchema).min(1).max(20),
-});
+export const proposalManifestSchema = z
+  .strictObject({
+    version: z.literal(1),
+    id: z.uuid(),
+    workspaceId: z.uuid(),
+    requester: humanActorSchema,
+    conversationId: z.uuid().nullable(),
+    turnId: z.uuid().nullable(),
+    installationId: z.uuid().optional(),
+    sources: sourceDependenciesSchema,
+    expiresAt: z.iso.datetime(),
+    plans: z.array(reviewedPlanSchema).min(1).max(20),
+  })
+  .refine(
+    value =>
+      value.installationId
+        ? value.conversationId === null && value.turnId === null
+        : value.conversationId !== null && value.turnId !== null,
+    'A table proposal has either a real conversation origin or an installation origin',
+  );
 export const proposalDecisionSchema = z.strictObject({
   commandId: z.uuid(),
   digest: digestSchema,
@@ -182,8 +191,9 @@ export const redactedManifestSchema = z.strictObject({
   id: z.uuid(),
   workspaceId: z.uuid(),
   requester: humanActorSchema,
-  conversationId: z.uuid(),
-  turnId: z.uuid(),
+  conversationId: z.uuid().nullable(),
+  turnId: z.uuid().nullable(),
+  installationId: z.uuid().optional(),
   createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   plans: z.array(

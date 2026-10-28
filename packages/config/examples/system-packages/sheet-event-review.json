@@ -1,0 +1,77 @@
+{
+  "$schema": "https://tulipfarm.ai/schemas/system-package.v1.json",
+  "formatVersion": 1,
+  "package": {
+    "name": "sheet-event-review",
+    "version": "1.0.0",
+    "title": "Sheet event review",
+    "description": "Binds an existing authorized Sheets source. Replace the example spreadsheet ID in this package with the exact intended source before validation; never include credentials. The workflow is saved, not enabled.",
+    "license": "MIT"
+  },
+  "requires": {
+    "platform": "tulipfarm-system-package-v1",
+    "capabilities": ["integration-bindings", "workflows"]
+  },
+  "inputs": [
+    {
+      "key": "sheet-connection",
+      "kind": "integration",
+      "title": "Existing authorized Sheets connection"
+    }
+  ],
+  "resources": [
+    {
+      "key": "sheet-source",
+      "kind": "integration",
+      "binding": {
+        "kind": "input",
+        "inputKind": "integration",
+        "key": "sheet-connection"
+      },
+      "source": {
+        "provider": "sheets",
+        "spreadsheetId": "example_spreadsheet",
+        "range": "Requests!A:D",
+        "keyColumn": 0
+      },
+      "capabilities": ["events.read"]
+    },
+    {
+      "key": "sheet-review",
+      "kind": "workflow",
+      "name": "Review new sheet entries",
+      "trigger": {
+        "kind": "provider",
+        "integration": {
+          "kind": "resource",
+          "resourceKind": "integration",
+          "key": "sheet-source"
+        },
+        "event": "created",
+        "minutes": 5
+      },
+      "steps": [
+        {
+          "id": "review",
+          "kind": "human",
+          "prompt": "Review this new sheet entry. No external write is approved.",
+          "timeoutSeconds": 3600
+        }
+      ],
+      "sponsor": null,
+      "sharing": [],
+      "requestedState": "saved"
+    }
+  ],
+  "assets": [],
+  "outputs": [
+    {
+      "key": "review",
+      "resource": {
+        "kind": "resource",
+        "resourceKind": "workflow",
+        "key": "sheet-review"
+      }
+    }
+  ]
+}
