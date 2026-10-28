@@ -28,7 +28,7 @@ test('chat transaction timings measure actual BEGIN, settings, COMMIT and reset 
   const client = {
     query: async sql => {
       queries.push(sql);
-      advance(sql === 'COMMIT' ? 300 : 100);
+      advance(sql === 'COMMIT' ? 3000 : 1000);
       return { rows: [] };
     },
   };
@@ -44,10 +44,10 @@ test('chat transaction timings measure actual BEGIN, settings, COMMIT and reset 
   assert.deepEqual(
     records.map(r => [r.operation, r.duration_ms]),
     [
-      ['chat.detail.storage-begin', 100],
-      ['chat.detail.storage-settings', 100],
-      ['chat.detail.storage-commit', 300],
-      ['chat.detail.storage-reset', 100],
+      ['chat.detail.storage-begin', 1000],
+      ['chat.detail.storage-settings', 1000],
+      ['chat.detail.storage-commit', 3000],
+      ['chat.detail.storage-reset', 1000],
     ],
   );
   assert.equal(queries[0], 'BEGIN ISOLATION LEVEL READ COMMITTED');
@@ -72,11 +72,9 @@ test('failed commit is measured, rollback preserves the original exception', asy
     error => error === failure,
   );
   assert.deepEqual(
-    records.slice(-2).map(r => [r.operation, r.outcome, r.duration_ms]),
-    [
-      ['chat.detail.storage-commit', 'error', 100],
-      ['chat.detail.storage-rollback', 'success', 100],
-    ],
+    records.map(r => [r.operation, r.outcome, r.duration_ms]),
+    [['chat.detail.storage-commit', 'error', 100]],
+    'fast successful phases are not logged',
   );
   assert.doesNotMatch(JSON.stringify(records), /PRIVATE DATABASE MESSAGE|SELECT|ROLLBACK/);
 });
@@ -89,7 +87,7 @@ test('credit lock timings isolate the locking queries without changing accountin
   const client = {
     query: async (sql, values) => {
       queries.push({ sql, values });
-      if (sql.includes('FOR UPDATE')) advance(250);
+      if (sql.includes('FOR UPDATE')) advance(2500);
       else if (!sql.includes('pg_advisory_xact_lock')) advance(50);
       if (sql.includes('SELECT available')) return { rows: [{ available: '5000000000000' }], rowCount: 1 };
       if (sql.includes('SELECT flow_id'))
@@ -129,9 +127,9 @@ test('credit lock timings isolate the locking queries without changing accountin
   assert.deepEqual(
     records.map(r => [r.operation, r.duration_ms]),
     [
-      ['chat.detail.credit-account-lock', 250],
-      ['chat.detail.credit-account-lock', 250],
-      ['chat.detail.credit-usage-lock', 250],
+      ['chat.detail.credit-account-lock', 2500],
+      ['chat.detail.credit-account-lock', 2500],
+      ['chat.detail.credit-usage-lock', 2500],
     ],
   );
   assert.equal(queries.filter(q => q.sql.startsWith('INSERT')).length, 1);
@@ -146,7 +144,7 @@ test('denied credit admission still fails without writing a usage row', async t 
   let inserted = false;
   const client = {
     query: async sql => {
-      advance(100);
+      advance(1000);
       if (sql.startsWith('INSERT')) inserted = true;
       if (sql.includes('SELECT available')) return { rows: [{ available: '0' }], rowCount: 1 };
       return { rows: [], rowCount: 0 };

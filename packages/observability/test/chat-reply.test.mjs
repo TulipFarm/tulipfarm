@@ -333,7 +333,7 @@ test('send measurements record the request wait and save phases without a reply 
   const result = await withChatSendMeasurements(1600, async () => {
     await observeChatDetail('storage-admission', spend(5));
     await observeChatDetail('actor', spend(3));
-    await observeChatDetail('send-write', spend(7));
+    await observeChatDetail('send-write', spend(1200));
     return 'sent';
   });
   assert.equal(result, 'sent');
@@ -341,10 +341,9 @@ test('send measurements record the request wait and save phases without a reply 
     details.map(line => [line.operation, line['chat.purpose'], line.duration_ms]),
     [
       ['chat.detail.send-request', 'send', 1600],
-      ['chat.detail.storage-admission', 'send', 5],
-      ['chat.detail.actor', 'send', 3],
-      ['chat.detail.send-write', 'send', 7],
+      ['chat.detail.send-write', 'send', 1200],
     ],
+    'only phases of at least a second are logged',
   );
   const { points, summaries } = await collect();
   assert.deepEqual(points, []);
