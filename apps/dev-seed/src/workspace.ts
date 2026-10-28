@@ -3,6 +3,10 @@ import { createWorkspace } from '@tulipfarm/workspaces/store';
 import { createWorkspaceMaintenance } from '@tulipfarm/workspaces/lifecycle';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { workspaceSlugError } from '@tulipfarm/workspaces/contracts';
+import { commonCompatibility } from '@tulipfarm/workspaces/storage';
+import { activeGeneration, readRecord, workspaceMembersTable } from '@tulipfarm/tables/store';
+import { createTableService } from '@tulipfarm/tables/service';
+import { manualWorkspaceMemberValues } from '@tulipfarm/tables/workspace-members';
 import { apiOrigin, webOrigin } from './env.ts';
 import type { SeedContext } from './context.ts';
 import type { ManifestUser, ManifestWorkspace } from './manifest.ts';
@@ -111,6 +115,35 @@ function invitationToken(url: string) {
   return token;
 }
 
+// Email invitations must name the Workspace Members record the person will be linked to.
+async function ensureWorkspaceMemberRecord(
+  context: SeedContext,
+  workspace: ManifestWorkspace,
+  owner: ManifestUser,
+  user: ManifestUser,
+) {
+  const recordId = stableId('workspace-member', workspace.id, user.email);
+  const generation = await context.runtime.transaction(workspace.id, commonCompatibility, async tx => {
+    const registration = await workspaceMembersTable(tx);
+    if (!registration) throw new Error(`${workspace.slug} has no Workspace Members table`);
+    const active = await activeGeneration(tx, registration.coreDefinition.id);
+    return { active, existing: await readRecord(tx, active, recordId) };
+  });
+  if (!generation.existing)
+    await createTableService(
+      context.runtime,
+      { readableFiles: async () => new Set<string>() },
+      commonCompatibility,
+    ).mutate(workspace.id, owner.id, {
+      kind: 'create',
+      tableId: generation.active.table_id,
+      revision: generation.active.revision,
+      recordId,
+      values: manualWorkspaceMemberValues({ name: user.name, contactEmail: user.email }),
+    });
+  return recordId;
+}
+
 // Members join through the real invitation path so audit rows, redemptions, and identity checks match production.
 export async function ensureMember(
   context: SeedContext,
@@ -127,6 +160,7 @@ export async function ensureMember(
       kind: 'email',
       email: user.email,
       requestId: stableId('invite', workspace.id, user.email),
+      workspaceMemberId: await ensureWorkspaceMemberRecord(context, workspace, owner, user),
     });
     if (created.outcome !== 'already-member') {
       const link = await context.governance.copyInvitation(workspace.id, owner.id, created.invitation.id);
