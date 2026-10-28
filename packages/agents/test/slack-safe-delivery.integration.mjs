@@ -442,7 +442,10 @@ test('GENERAL default answers use complete current audiences and retain private 
     assert.equal(failed.status, 'blocked');
     assert.equal(posts.at(-1).channel, 'CGENERAL');
     assert.equal(posts.at(-1).thread_ts, '2.000001');
-    assert.match(posts.at(-1).text, /couldn't finish an answer.*reason: reply-failed/);
+    assert.match(posts.at(-1).text, /couldn't finish an answer.*Press Retry/);
+    const retryButton = posts.at(-1).blocks.find(block => block.type === 'actions').elements[0];
+    assert.equal(retryButton.action_id, 'slack_reply_retry');
+    assert.deepEqual(Object.keys(JSON.parse(retryButton.value)).sort(), ['eventId', 'workspaceId']);
     assert.ok(!posts.at(-1).text.includes('fixture failure'));
     // An unmentioned follow-up that fails stays silent, like an admission rejection.
     const quiet = posts.length;
