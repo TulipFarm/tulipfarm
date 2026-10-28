@@ -46,7 +46,11 @@ import {
   type Attributes,
   type BatchObservableCallback,
   type Context,
+  type Histogram,
+  type MeterProvider,
   type Span,
+  type Tracer,
+  type TracerProvider,
 } from '@opentelemetry/api';
 import { logs, SeverityNumber } from '@opentelemetry/api-logs';
 import { NodeSDK } from '@opentelemetry/sdk-node';
@@ -1895,11 +1899,42 @@ export function observeChatTool<T>(call: () => Promise<T>): Promise<T> {
   return inChatReplyCategory('tools', call);
 }
 
+type ChatInstruments = { detail: Histogram; dbTransactions: Histogram; dbDuration: Histogram };
+
+// Keyed by provider so instruments created before the SDK starts, or by a replaced provider, are not reused.
+const chatInstrumentCache = new WeakMap<MeterProvider, ChatInstruments>();
+const chatTracerCache = new WeakMap<TracerProvider, Tracer>();
+
+function chatInstruments(): ChatInstruments {
+  const provider = metrics.getMeterProvider();
+  let instruments = chatInstrumentCache.get(provider);
+  if (!instruments) {
+    const meter = provider.getMeter(scope);
+    instruments = {
+      detail: meter.createHistogram('cloud_chat_detail_duration', { unit: 's' }),
+      dbTransactions: meter.createHistogram('cloud_chat_db_transactions'),
+      dbDuration: meter.createHistogram('cloud_chat_db_duration', { unit: 's' }),
+    };
+    chatInstrumentCache.set(provider, instruments);
+  }
+  return instruments;
+}
+
+function chatTracer(): Tracer {
+  const provider = trace.getTracerProvider();
+  let tracer = chatTracerCache.get(provider);
+  if (!tracer) {
+    tracer = provider.getTracer(scope);
+    chatTracerCache.set(provider, tracer);
+  }
+  return tracer;
+}
+
 function recordChatDatabase(database: ChatDatabase) {
   if (!database.transactions) return;
-  const meter = metrics.getMeter(scope);
-  meter.createHistogram('cloud_chat_db_transactions').record(database.transactions, dimensions);
-  meter.createHistogram('cloud_chat_db_duration', { unit: 's' }).record(database.milliseconds / 1000, dimensions);
+  const instruments = chatInstruments();
+  instruments.dbTransactions.record(database.transactions, dimensions);
+  instruments.dbDuration.record(database.milliseconds / 1000, dimensions);
   log('info', 'activity', 'call_completed', {
     operation: 'chat.database',
     'db.transactions': database.transactions,
@@ -1929,10 +1964,7 @@ function chatDetailAttributes(state: ChatMeasurement): Attributes {
 
 function finishChatDetail(phase: ChatDetailPhase, state: ChatMeasurement, start: number, outcome: string) {
   const seconds = (performance.now() - start) / 1000;
-  metrics
-    .getMeter(scope)
-    .createHistogram('cloud_chat_detail_duration', { unit: 's' })
-    .record(seconds, { ...dimensions, phase, purpose: state.purpose, outcome });
+  chatInstruments().detail.record(seconds, { ...dimensions, phase, purpose: state.purpose, outcome });
   log('info', 'activity', 'call_completed', {
     operation: `chat.detail.${phase}`,
     ...chatDetailAttributes(state),
@@ -1941,65 +1973,73 @@ function finishChatDetail(phase: ChatDetailPhase, state: ChatMeasurement, start:
   });
 }
 
+// The sampler ignores attributes, so they are only built for spans that will be recorded.
+function startChatDetailSpan(phase: ChatDetailPhase, state: ChatMeasurement): Span {
+  const name = `chat.detail.${phase}`;
+  const span = chatTracer().startSpan(name);
+  if (span.isRecording())
+    span.setAttributes({ operation: name, ...chatDetailAttributes(state), 'build.commit': buildCommit });
+  return span;
+}
+
+async function runChatDetail<T>(
+  phase: ChatDetailPhase,
+  state: ChatMeasurement,
+  span: Span,
+  call: () => Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  let outcome = 'success';
+  try {
+    return await inChatReplyCategory(chatReplyCategory(phase), call);
+  } catch (error) {
+    outcome = 'error';
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    throw error;
+  } finally {
+    span.setAttribute('outcome', outcome);
+    finishChatDetail(phase, state, start, outcome);
+    span.end();
+  }
+}
+
+function runChatDetailSync<T>(phase: ChatDetailPhase, state: ChatMeasurement, span: Span, call: () => T): T {
+  const start = performance.now();
+  const category = chatReplyCategory(phase);
+  if (category) {
+    tickChatReply(state.reply);
+    state.reply.active[category]++;
+  }
+  let outcome = 'success';
+  try {
+    return call();
+  } catch (error) {
+    outcome = 'error';
+    span.setStatus({ code: SpanStatusCode.ERROR });
+    throw error;
+  } finally {
+    if (category) {
+      tickChatReply(state.reply);
+      state.reply.active[category]--;
+    }
+    span.setAttribute('outcome', outcome);
+    finishChatDetail(phase, state, start, outcome);
+    span.end();
+  }
+}
+
 export async function observeChatDetail<T>(phase: ChatDetailPhase, call: () => Promise<T>): Promise<T> {
   const state = chatMeasurement.getStore();
   if (!state) return call();
-  return trace.getTracer(scope).startActiveSpan(
-    `chat.detail.${phase}`,
-    {
-      attributes: { operation: `chat.detail.${phase}`, ...chatDetailAttributes(state), 'build.commit': buildCommit },
-    },
-    async span => {
-      const start = performance.now();
-      let outcome = 'success';
-      try {
-        return await inChatReplyCategory(chatReplyCategory(phase), call);
-      } catch (error) {
-        outcome = 'error';
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
-      } finally {
-        span.setAttribute('outcome', outcome);
-        finishChatDetail(phase, state, start, outcome);
-        span.end();
-      }
-    },
-  );
+  const span = startChatDetailSpan(phase, state);
+  return context.with(trace.setSpan(context.active(), span), runChatDetail<T>, undefined, phase, state, span, call);
 }
 
 export function observeChatDetailSync<T>(phase: ChatDetailPhase, call: () => T): T {
   const state = chatMeasurement.getStore();
   if (!state) return call();
-  return trace.getTracer(scope).startActiveSpan(
-    `chat.detail.${phase}`,
-    {
-      attributes: { operation: `chat.detail.${phase}`, ...chatDetailAttributes(state), 'build.commit': buildCommit },
-    },
-    span => {
-      const start = performance.now();
-      const category = chatReplyCategory(phase);
-      if (category) {
-        tickChatReply(state.reply);
-        state.reply.active[category]++;
-      }
-      let outcome = 'success';
-      try {
-        return call();
-      } catch (error) {
-        outcome = 'error';
-        span.setStatus({ code: SpanStatusCode.ERROR });
-        throw error;
-      } finally {
-        if (category) {
-          tickChatReply(state.reply);
-          state.reply.active[category]--;
-        }
-        span.setAttribute('outcome', outcome);
-        finishChatDetail(phase, state, start, outcome);
-        span.end();
-      }
-    },
-  );
+  const span = startChatDetailSpan(phase, state);
+  return context.with(trace.setSpan(context.active(), span), runChatDetailSync<T>, undefined, phase, state, span, call);
 }
 
 export function withChatModelRequest<T>(purpose: ChatModelPurpose, call: () => Promise<T>): Promise<T> {
