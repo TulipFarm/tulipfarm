@@ -304,7 +304,7 @@ function reasoningOff(capabilities: ModelCapabilities) {
 function azureTools(capabilities: ModelCapabilities, description: string, parameters: object) {
   return {
     tools: [
-      { type: 'function', function: { name: 'select_action', description, parameters: azureSchema(parameters) } },
+      { type: 'function', function: { name: 'select_action', description, parameters: azureToolSchema(parameters) } },
     ],
     tool_choice:
       capabilities.toolChoice === 'auto' ? 'auto' : { type: 'function', function: { name: 'select_action' } },
@@ -313,17 +313,33 @@ function azureTools(capabilities: ModelCapabilities, description: string, parame
   };
 }
 
+const azureSchemas = new WeakMap<object, unknown>();
+/** Tool schemas are reused across every request in a run, so each one is converted once. */
+function azureToolSchema(parameters: object) {
+  let converted = azureSchemas.get(parameters);
+  if (converted === undefined) {
+    converted = azureSchema(parameters);
+    azureSchemas.set(parameters, converted);
+  }
+  return converted;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function azureSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(azureSchema);
-  const object = z.record(z.string(), z.unknown()).safeParse(value);
-  if (!object.success) return value;
+  if (!isPlainRecord(value)) return value;
   return Object.fromEntries(
-    Object.entries(object.data).map(([key, item]) => {
+    Object.entries(value).map(([key, item]) => {
       if (key === 'const') return ['enum', [item]];
-      if (['enum', 'examples', 'default'].includes(key)) return [key, item];
-      if (['properties', 'patternProperties', '$defs', 'definitions'].includes(key)) {
-        const entries = z.record(z.string(), z.unknown()).parse(item);
-        return [key, Object.fromEntries(Object.entries(entries).map(([name, schema]) => [name, azureSchema(schema)]))];
+      if (key === 'enum' || key === 'examples' || key === 'default') return [key, item];
+      if (key === 'properties' || key === 'patternProperties' || key === '$defs' || key === 'definitions') {
+        if (!isPlainRecord(item)) throw new TypeError(`JSON Schema ${key} must be an object`);
+        return [key, Object.fromEntries(Object.entries(item).map(([name, schema]) => [name, azureSchema(schema)]))];
       }
       return [key, azureSchema(item)];
     }),
@@ -1646,7 +1662,7 @@ function nativeWire(
                   function: {
                     name: tool.name,
                     description: tool.description,
-                    parameters: azureSchema(tool.parameters),
+                    parameters: azureToolSchema(tool.parameters),
                   },
                 })),
                 tool_choice: 'auto',
