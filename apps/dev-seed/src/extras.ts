@@ -9,6 +9,7 @@ import { createLocalKnowledge } from '@tulipfarm/knowledge';
 import { createWorkspaceTableAuthoring } from '@tulipfarm/workspaces/table-authoring';
 import { createWorkflows } from '@tulipfarm/workflows';
 import type { SeedContext } from './context.ts';
+import { ensureDefaultKnowledge } from './default-knowledge.ts';
 import { recordEntity } from './manifest.ts';
 import { number, primaryTeam, unavailable, type Generator, type Target } from './options.ts';
 import { stableId, topics } from './random.ts';
@@ -358,6 +359,14 @@ export const extraGenerators: Generator[] = [
     requires: ['workspace'],
     options: { count: 'notes (default 3)' },
     run: (context, target, options) => ensureKnowledge(context, target, number(options.count, 3)),
+  },
+  {
+    name: 'default-knowledge',
+    description:
+      "Seed the owner's automatic Knowledge in every state (synced, syncing, failed, paused, queued) without provider calls.",
+    requires: ['workspace'],
+    options: {},
+    run: (context, target) => ensureDefaultKnowledge(context, target),
   },
   {
     name: 'integrations',

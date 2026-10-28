@@ -962,6 +962,11 @@ const workspaceGrantsRoute = createRoute({
   path: 'grants',
   component: GrantsPage,
 });
+export const knowledgeRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'knowledge',
+  component: lazyRouteComponent(() => import('./pages/knowledge')),
+});
 export const integrationsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'integrations',
@@ -1038,6 +1043,7 @@ export const router = createRouter({
       workspaceMembersRoute,
       workspaceTeamsRoute,
       workspaceGrantsRoute,
+      knowledgeRoute,
       integrationsRoute,
       integrationDetailRoute,
       tablesRoute,

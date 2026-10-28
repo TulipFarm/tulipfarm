@@ -214,7 +214,7 @@ export const scenarios: Scenario[] = [
   {
     name: 'rich',
     description:
-      'Every generator: varied roles and teams, four tables, long chats, project chats, skills, agents and tasks, workflows and runs, knowledge, integrations.',
+      'Every generator: varied roles and teams, four tables, long chats, project chats, skills, agents and tasks, workflows and runs, knowledge, automatic Knowledge, integrations.',
     async run(context, options) {
       const target = await basic(context, options, 'seed-rich', 'rich', 'Seed Rich');
       const { workspace, owner: user } = target;
@@ -240,7 +240,7 @@ export const scenarios: Scenario[] = [
       await ensureChats(context, workspace, user, { count: 4, turns: 6, key: 'long' });
       const mia = context.manifest.users[people.member.email]!;
       await ensureChats(context, workspace, mia, { count: 2, turns: 2, key: 'member' });
-      for (const name of ['workflow', 'knowledge', 'integrations', 'files'])
+      for (const name of ['workflow', 'knowledge', 'default-knowledge', 'integrations', 'files'])
         await runGenerator(context, target, name, {});
       await runGenerator(context, target, 'tasks', { count: '3' });
       const second = await ensureWorkspace(context, user, {

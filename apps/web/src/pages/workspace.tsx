@@ -22,6 +22,7 @@ import { UserAdd } from 'reicon-react/icons/UserAdd';
 import { UserCircle } from 'reicon-react/icons/UserCircle';
 import { Inbox } from 'reicon-react/icons/Inbox';
 import { Plug } from 'reicon-react/icons/Plug';
+import { Book } from 'reicon-react/icons/Book';
 import { Logout } from 'reicon-react/icons/Logout';
 import { Monitor } from 'reicon-react/icons/Monitor';
 import { Moon } from 'reicon-react/icons/Moon';
@@ -96,6 +97,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/skills'
   | '/$workspaceSlug/agent-tasks'
   | '/$workspaceSlug/files'
+  | '/$workspaceSlug/knowledge'
   | '/$workspaceSlug/workflows'
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
@@ -151,6 +153,7 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
     pages: [
       { label: 'Tables', to: '/$workspaceSlug/tables', icon: Database, recent: 'tables' },
       { label: 'Files', to: '/$workspaceSlug/files', icon: Files, recent: 'files' },
+      { label: 'Knowledge', to: '/$workspaceSlug/knowledge', icon: Book },
       { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: Plug },
     ],
   },
