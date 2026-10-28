@@ -36,6 +36,8 @@ import {
   slackAdmissionReason,
 } from './slack-rejections.ts';
 import { requireDraftSources } from './draft-sources.ts';
+
+export { slackReplyRetryAction } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import type { ExternalConversationContext } from '@tulipfarm/conversations/runtime';
 import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts';
@@ -571,5 +573,67 @@ export function createSlackDefault(
     await announceBlocked(workspaceId, eventId, result);
     return 'blocked';
   }
-  return { due, process, actionSources };
+  /**
+   * Admits a failed reply's request again when its requester presses Retry on the failure notice. The original message
+   * is held again as a new event, so the retry passes every admission check a new mention would.
+   */
+  async function retry(
+    workspaceId: string,
+    eventId: string,
+    clicker: { appId: string; teamId: string; slackUserId: string },
+  ): Promise<'retrying' | 'already-retried'> {
+    return transaction(workspaceId, async tx => {
+      const original = z
+        .object({
+          installation_id: z.uuid(),
+          generation: z.number().int(),
+          event_time: z.coerce.number().int(),
+          payload: messageSchema,
+          root_id: z.uuid(),
+          user_id: z.string(),
+          membership_id: z.uuid(),
+        })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT e.installation_id,e.generation,e.event_time,e.payload,v.root_id,p.user_id,p.membership_id
+      FROM ${table(tx, 'tf_slack_default_turns')} t JOIN ${table(tx, 'tf_slack_events')} e ON e.id=t.event_id
+      JOIN ${table(tx, 'tf_slack_channel_invocations')} v ON v.event_id=e.id
+      JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=e.installation_id AND s.generation=e.generation
+      JOIN ${table(tx, 'tf_slack_identities')} p ON p.installation_id=e.installation_id AND p.generation=e.generation AND p.slack_user_id=e.payload->>'user'
+      WHERE t.event_id=$1 AND t.state='blocked' AND s.app_id=$2 AND s.team_id=$3 AND s.state='active' AND p.state='authorized' AND p.slack_user_id=$4`,
+              [eventId, clicker.appId, clicker.teamId, clicker.slackUserId],
+            )
+          ).rows[0],
+        );
+      if (!original || (await resolveHuman(tx, original.user_id)).membershipId !== original.membership_id)
+        throw new AccessDenied();
+      const retried = randomUUID();
+      const inserted = await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_slack_events')} (id,installation_id,generation,event_id,semantic_key,event_time,payload,disposition)
+        VALUES ($1,$2,$3,$4,$4,$5,$6,'held') ON CONFLICT DO NOTHING RETURNING id`,
+        [
+          retried,
+          original.installation_id,
+          original.generation,
+          `retry:${eventId}`,
+          original.event_time,
+          original.payload,
+        ],
+      );
+      if (!inserted.rowCount) return 'already-retried';
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_slack_channel_invocations')} (event_id,root_id) VALUES ($1,$2)`,
+        [retried, original.root_id],
+      );
+      log('info', 'activity', 'call_completed', {
+        operation: 'slack.default.retry',
+        outcome: 'retrying',
+        'slack.event_id': eventId,
+      });
+      return 'retrying';
+    });
+  }
+  return { due, process, actionSources, retry };
 }

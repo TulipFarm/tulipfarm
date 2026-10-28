@@ -6,10 +6,26 @@ import { slackDecisionSchema, slackActionViewSchema, slackConfigurationSchema } 
 import { createSlackActions, createSlackActionDecision } from '@tulipfarm/agents/slack-actions';
 import { slackActionSettings } from '@tulipfarm/agents/slack-environment';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
-import { createSlackDefault } from '@tulipfarm/agents/slack-default';
+import { createSlackDefault, slackReplyRetryAction } from '@tulipfarm/agents/slack-default';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
+
+// Tells only the person who pressed a button what happened; the thread itself stays unchanged.
+async function respondEphemeral(responseUrl: string | undefined, text: string) {
+  if (!responseUrl || new URL(responseUrl).origin !== 'https://hooks.slack.com') return;
+  try {
+    await fetch(responseUrl, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(5000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response_type: 'ephemeral', replace_original: false, text }),
+    });
+  } catch {
+    // The retry is already recorded; a missed confirmation only hides the status from the person who pressed it.
+  }
+}
 
 export function registerSlackActions(
   app: FastifyInstance,
@@ -151,10 +167,11 @@ export function registerSlackActions(
               api_app_id: z.literal(config.appId),
               team: z.object({ id: z.string() }),
               user: z.object({ id: z.string() }),
+              response_url: z.url().optional(),
               actions: z
                 .array(
                   z.object({
-                    action_id: z.enum(['slack_action_approve', 'slack_action_reject']),
+                    action_id: z.enum(['slack_action_approve', 'slack_action_reject', slackReplyRetryAction]),
                     value: z.string().max(512),
                   }),
                 )
@@ -163,6 +180,25 @@ export function registerSlackActions(
             .parse(JSON.parse(form.get('payload') ?? ''));
           const action = payload.actions[0];
           if (!action) throw new SyntaxError();
+          if (action.action_id === slackReplyRetryAction) {
+            const value = z.strictObject({ workspaceId: z.uuid(), eventId: z.uuid() }).parse(JSON.parse(action.value));
+            let text: string;
+            try {
+              text =
+                (await defaults.retry(value.workspaceId, value.eventId, {
+                  appId: config.appId,
+                  teamId: payload.team.id,
+                  slackUserId: payload.user.id,
+                })) === 'retrying'
+                  ? 'Retrying your request now.'
+                  : 'This request was already retried.';
+            } catch (error) {
+              if (!(error instanceof AccessDenied)) throw error;
+              text = 'Only the person who asked can retry this request.';
+            }
+            await respondEphemeral(payload.response_url, text);
+            return {};
+          }
           const value = z
             .strictObject({ workspaceId: z.uuid(), actionId: z.uuid(), digest: slackDecisionSchema.shape.digest })
             .parse(JSON.parse(action.value));

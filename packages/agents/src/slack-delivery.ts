@@ -18,7 +18,7 @@ import {
 } from '@tulipfarm/slack';
 import { matchesSlackSnapshot, sameSlackPublicationText } from '@tulipfarm/slack';
 import { requireDraftSources } from './draft-sources.ts';
-import { SlackAdmissionDenied } from './slack-rejections.ts';
+import { SlackAdmissionDenied, slackReplyFailureNotices } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
 export const slackRootSchema = z.object({
@@ -238,7 +238,10 @@ export function createSlackDelivery(
       const publication = publications.find(
         item => item.message_ts === message.ts && sameSlackPublicationText(item.text, message.text),
       );
-      if (!publication) throw new SlackAdmissionDenied('publication-unverified');
+      if (!publication) {
+        if (slackReplyFailureNotices.some(notice => sameSlackPublicationText(notice, message.text))) continue;
+        throw new SlackAdmissionDenied('publication-unverified');
+      }
       try {
         await sources(tx, workspaceId, actor, publication.event_id, new Set(visited));
       } catch (error) {
