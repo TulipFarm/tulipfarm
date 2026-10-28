@@ -172,7 +172,8 @@ const catalog = useFeatureRead({
 ```
 
 Only the model catalog may call this opt-in hook. The runtime deduplicates
-restoration before readers start. It restores the original `dataUpdatedAt` and
+restoration before readers start. It restores the original `dataUpdatedAt`, marks
+the restored catalog stale so each page load re-reads it once in the background, and
 persists successful values only after validation with the existing
 `@tulipfarm/config/model-catalog` schema. The envelope includes version, user,
 workspace, membership, and original data timestamp. Snapshots expire after 24

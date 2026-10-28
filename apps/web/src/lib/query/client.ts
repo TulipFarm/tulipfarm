@@ -217,6 +217,9 @@ export function createFeatureClient(
           (!existing.error && existing.fetchStatus === 'idle' && existing.dataUpdatedAt < snapshot.updatedAt)
         ) {
           client.setQueryData(fullKey, snapshot.data, { updatedAt: snapshot.updatedAt });
+          // Show the stored catalog at once, but re-read it once per page load: a feature flag or operator
+          // change since it was stored must not wait for the catalog's freshness window.
+          void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
         }
       });
       catalogs.set(hash, { scope, current, ready });

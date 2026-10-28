@@ -20,7 +20,7 @@ const hooks = registerHooks({
 const { createFeatureClient } = await import('../src/lib/query/client.ts');
 const { featureReadOptions } = await import('../src/lib/query/options.ts');
 const { featureKey } = await import('../src/lib/query/scope.ts');
-const { readState, retryDelay, retryRead } = await import('../src/lib/query/policy.ts');
+const { freshness, readState, retryDelay, retryRead } = await import('../src/lib/query/policy.ts');
 const { createCatalogPersistence, parseCatalogSnapshot, catalogMaxAge } =
   await import('../src/lib/query/catalog-persistence.ts');
 const { replyBackoff } = await import('../src/lib/query/polling.ts');
@@ -691,6 +691,52 @@ test('catalog snapshots validate schema, scope, version, original age, and fresh
   assert.equal(await store.restore(scope, () => true), null);
   const unavailable = createCatalogPersistence(undefined);
   assert.equal(await unavailable.restore(scope, () => true), null);
+});
+
+test('a restored catalog shows at once and is re-read once per page load despite its freshness window', async () => {
+  const factory = new IDBFactory();
+  const stored = { families: [], imageModels: [] };
+  await createCatalogPersistence(factory).save(scope, stored, Date.now() - 60_000, () => true);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
+  Object.defineProperty(globalThis, 'indexedDB', { value: factory, configurable: true });
+  const runtime = createFeatureClient(identity);
+  if (previous) Object.defineProperty(globalThis, 'indexedDB', previous);
+  else delete (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+  runtime.start();
+  runtime.client.mount();
+  const key = ['model-catalog'];
+  let calls = 0;
+  let resolveRead!: (value: unknown) => void;
+  const observer = new QueryObserver(runtime.client, {
+    ...featureReadOptions(runtime, scope, {
+      key,
+      staleTime: freshness.catalog,
+      load: () => {
+        calls++;
+        return new Promise(resolve => (resolveRead = resolve));
+      },
+    }),
+    retry: false,
+  });
+  let unsubscribe = () => {};
+  try {
+    await runtime.prepareCatalog(scope, key, () => true);
+    assert.deepEqual(runtime.client.getQueryData(featureKey(scope, key)), stored);
+    unsubscribe = observer.subscribe(() => {});
+    await flush();
+    assert.equal(calls, 1);
+    assert.deepEqual(observer.getCurrentResult().data, stored);
+    resolveRead({ families: [{ id: 'current' }] });
+    await flush();
+    assert.deepEqual(observer.getCurrentResult().data, { families: [{ id: 'current' }] });
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    await flush();
+    assert.equal(calls, 1);
+  } finally {
+    unsubscribe();
+    runtime.stop();
+  }
 });
 
 test('pending IndexedDB opens cannot resurrect snapshots after authority loss', async () => {
