@@ -492,9 +492,8 @@ version 10 keep their kinds, and below version 7 commits are never indexed.
 
 Every authorization of a personal account creates one owner-only all-repositories
 source with every content kind and full history, unless the owner already has one
-for that account. Indexing starts at once. Unlike other providers, GitHub ignores
-the `default-connection-knowledge` flag and the automatic Knowledge gate never
-holds its sources. Automatic sources include `code`: every file at the default-branch
+for that account. Indexing starts at once. Like every provider, GitHub follows the
+`default-connection-knowledge` flag, which is on by default. Automatic sources include `code`: every file at the default-branch
 head, with no count cap, and `commits`: the full default-branch history.
 Issues, pull requests and discussions keep their full history. Migration
 `common/0006_github_knowledge_opt_out.sql` removes the earlier rolling 90-day window

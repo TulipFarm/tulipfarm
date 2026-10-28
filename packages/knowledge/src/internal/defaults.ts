@@ -97,8 +97,8 @@ async function disabledOwners(
   return disabled;
 }
 
-/** GitHub Knowledge is on for everyone: its automatic sources and intents are never held by the feature flag. */
-export const ungatedDefaultKnowledgeProducts: readonly DefaultKnowledgeProduct[] = ['github'];
+/** Products whose automatic sources ignore the feature flag. Empty: every product follows `default-connection-knowledge`. */
+export const ungatedDefaultKnowledgeProducts: readonly DefaultKnowledgeProduct[] = [];
 
 /**
  * Lists automatic sources whose owner cannot use the feature now. Engines exclude them before their dispatch limit and recheck at claim time.
