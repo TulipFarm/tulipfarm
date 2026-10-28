@@ -181,7 +181,11 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   `imageModel` pairs it with one image model; without a pair, work on it uses
   the workspace's chosen image model, then the catalog default. A pair that is
   unavailable falls back the same way. Without any served image model, image
-  generation is off.
+  generation is off. An image model's `"featureFlag"` (such as
+  `openai-image-models`) offers it only in workspaces where that flag is on;
+  elsewhere it is hidden from image settings and generates no image. Unlike a
+  model, a flagged image model can be the default: workspaces with the flag off
+  then have no image generation.
 - **Completion checks.** The optional `completion-check` role checks whether a
   tool-using chat reply is a sufficient stopping point. Without it, checks keep
   using the active chat model (including a chat fallback). Assign the role to

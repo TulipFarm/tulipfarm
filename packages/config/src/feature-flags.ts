@@ -90,6 +90,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_ANTHROPIC_MODELS',
   },
+  'openai-image-models': {
+    description:
+      'Image model catalog entries with "featureFlag": "openai-image-models", such as GPT Image on the OpenAI API. Off hides them from workspace image settings and generates no image with them.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_OPENAI_IMAGE_MODELS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

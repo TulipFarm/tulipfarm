@@ -153,6 +153,8 @@ test('image input limits need image input', () => {
 
 test('image models have unique ids, served routes and at most one unpaused default', () => {
   const images = (...entries) => catalog([model()], { imageModels: entries });
+  assert.deepEqual(problems(images(imageModel({ default: true, featureFlag: 'openai-image-models' }))), []);
+  rejects(images(imageModel({ featureFlag: 'not-a-flag' })), /^imageModels\.0\.featureFlag:/);
   assert.deepEqual(
     problems(
       images(

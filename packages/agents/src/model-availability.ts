@@ -18,23 +18,26 @@ export async function modelAvailability(tx: AgentTransaction) {
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
   const flaggedOff = await flaggedOffModels(tx);
-  return [...catalog.models.filter(model => !flaggedOff.has(model.id)), ...catalog.imageModels].map(
-    family =>
-      rows.find(row => row.familyId === family.id) ?? {
-        familyId: family.id,
-        enabled: true,
-        revision: 0,
-        lastDisabledRevision: 0,
-      },
-  );
+  return [...catalog.models, ...catalog.imageModels]
+    .filter(family => !flaggedOff.has(family.id))
+    .map(
+      family =>
+        rows.find(row => row.familyId === family.id) ?? {
+          familyId: family.id,
+          enabled: true,
+          revision: 0,
+          lastDisabledRevision: 0,
+        },
+    );
 }
 
 /**
- * Catalog models whose `featureFlag` is off for the transaction's workspace. They are left out of the workspace's
- * model availability, so they are hidden, cannot be turned on and no work runs on them.
+ * Catalog models and image models whose `featureFlag` is off for the transaction's workspace. They are left out of the
+ * workspace's model availability, so they are hidden, cannot be turned on and no work runs on them.
  */
 export async function flaggedOffModels(tx: Pick<AgentTransaction, 'schema'>): Promise<Set<string>> {
-  const flagged = readModelCatalog().catalog.models.filter(model => model.featureFlag);
+  const { catalog } = readModelCatalog();
+  const flagged = [...catalog.models, ...catalog.imageModels].filter(model => model.featureFlag);
   if (!flagged.length) return new Set();
   const workspace = { id: workspaceIdFromSchema(tx.schema) };
   const flags = [...new Set(flagged.map(model => model.featureFlag!))];
