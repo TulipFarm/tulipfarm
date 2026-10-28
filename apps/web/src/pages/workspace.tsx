@@ -22,6 +22,7 @@ import { UserAdd } from 'reicon-react/icons/UserAdd';
 import { UserCircle } from 'reicon-react/icons/UserCircle';
 import { Inbox } from 'reicon-react/icons/Inbox';
 import { Plug } from 'reicon-react/icons/Plug';
+import { Book } from 'reicon-react/icons/Book';
 import { Logout } from 'reicon-react/icons/Logout';
 import { Monitor } from 'reicon-react/icons/Monitor';
 import { Moon } from 'reicon-react/icons/Moon';
@@ -35,6 +36,7 @@ import { WorkspaceSetup } from './workspace-setup';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { rememberWorkspace } from '@/lib/last-workspace';
+import { workspacePageScroller } from '@/lib/page-scroller';
 import { saveLastWorkspace } from '@/lib/workspaces';
 import { requestSignal } from '@/lib/http';
 import { readTheme, saveTheme, type Theme } from '@/lib/theme';
@@ -96,6 +98,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/skills'
   | '/$workspaceSlug/agent-tasks'
   | '/$workspaceSlug/files'
+  | '/$workspaceSlug/knowledge'
   | '/$workspaceSlug/workflows'
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
@@ -151,6 +154,7 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
     pages: [
       { label: 'Tables', to: '/$workspaceSlug/tables', icon: Database, recent: 'tables' },
       { label: 'Files', to: '/$workspaceSlug/files', icon: Files, recent: 'files' },
+      { label: 'Knowledge', to: '/$workspaceSlug/knowledge', icon: Book },
       { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: Plug },
     ],
   },
@@ -713,7 +717,13 @@ function WorkspaceShellContent() {
                   </Suspense>
                 ) : (
                   <BudProvider key={workspace.id} headerActions={actionsElement}>
-                    <Outlet />
+                    {/* Pages scroll here; full-height pages such as chat fill it and scroll their own panes. */}
+                    <div
+                      data-scroll-restoration-id={workspacePageScroller}
+                      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                    >
+                      <Outlet />
+                    </div>
                   </BudProvider>
                 )}
               </ChatHeaderContext>

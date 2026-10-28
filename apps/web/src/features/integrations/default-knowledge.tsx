@@ -28,7 +28,7 @@ import { CommandFeedback, useCommand } from './slack-knowledge-shared';
 import { KnowledgeMeter, searchablePercent } from './knowledge-meter';
 
 type Disclosure = { name: string; scope: string; coverage: string; excluded: string; scopes: string; sources: string };
-const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
+export const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
   'google-drive': {
     name: 'Google Drive',
     scopes: 'drives and shared files',
@@ -104,7 +104,7 @@ function failureOf(intent: DefaultKnowledgeIntent) {
   if (intent.ingestion.state === 'failed') return { failure: intent.ingestion.failure ?? 'provider', importing: true };
   return null;
 }
-function problem(intent: DefaultKnowledgeIntent, name: string, scopes: string): Problem | null {
+export function problem(intent: DefaultKnowledgeIntent, name: string, scopes: string): Problem | null {
   const found = failureOf(intent);
   if (!found) return null;
   const { failure, importing } = found;
@@ -260,7 +260,7 @@ function statusBadge(intent: DefaultKnowledgeIntent, issue: Problem | null) {
   return <Badge variant="success">Sync complete</Badge>;
 }
 
-const indexing = (intent: DefaultKnowledgeIntent) =>
+export const indexing = (intent: DefaultKnowledgeIntent) =>
   intent.state === 'active' &&
   (intent.syncState === 'queued' ||
     intent.syncState === 'discovering' ||

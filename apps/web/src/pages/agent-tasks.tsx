@@ -109,114 +109,107 @@ export function AgentTasksPage() {
   const { after, search } = pages;
   const read = useTasks(api, after, search);
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader title="My agent tasks" description="Private work, history, and row-change reviews." />
-        <SearchField
-          id="task-search"
-          label="Find a task request"
-          placeholder="Search tasks"
-          maxLength={120}
-          value={search}
-          onChange={pages.setSearch}
-        />
-        <TaskRead state={read.state} refresh={read.refresh}>
-          {data => (
-            <>
-              {data.tasks.length ? (
-                <DataList aria-label="Tasks" columns="three" headings={['Task', 'Status', 'Started']}>
-                  {data.tasks.map(task => (
-                    <DataListRow key={task.id}>
-                      <DataListCell>
-                        <TaskIdentity workspaceId={workspace.id} slug={workspace.slug} task={task} />
-                      </DataListCell>
-                      <DataListCell>
-                        <div className="space-y-1">
-                          <Badge
-                            variant={
-                              task.status === 'completed'
-                                ? 'success'
-                                : task.status === 'pending'
-                                  ? 'secondary'
-                                  : 'warning'
-                            }
-                          >
-                            <Status
-                              state={taskStatusStates[task.status]}
-                              size="sm"
-                              tooltip={false}
-                              aria-hidden="true"
-                            />
-                            {taskStatusLabel(task)}
-                          </Badge>
-                          {task.status === 'paused' && (
-                            <p className="text-sm text-muted-foreground">{taskNextStep(task)}</p>
-                          )}
-                        </div>
-                      </DataListCell>
-                      <DataListSecondary>
-                        <time dateTime={task.createdAt}>{taskTime(task.createdAt)}</time>
-                      </DataListSecondary>
-                    </DataListRow>
-                  ))}
-                </DataList>
-              ) : search ? (
-                <StatePanel
-                  kind="empty"
-                  icon={Checklist}
-                  title="No matching task requests"
-                  description="Try another phrase or clear the search. Only requests you can still access are included."
+    <PageContent>
+      <PageHeader title="My agent tasks" description="Private work, history, and row-change reviews." />
+      <SearchField
+        id="task-search"
+        label="Find a task request"
+        placeholder="Search tasks"
+        maxLength={120}
+        value={search}
+        onChange={pages.setSearch}
+      />
+      <TaskRead state={read.state} refresh={read.refresh}>
+        {data => (
+          <>
+            {data.tasks.length ? (
+              <DataList aria-label="Tasks" columns="three" headings={['Task', 'Status', 'Started']}>
+                {data.tasks.map(task => (
+                  <DataListRow key={task.id}>
+                    <DataListCell>
+                      <TaskIdentity workspaceId={workspace.id} slug={workspace.slug} task={task} />
+                    </DataListCell>
+                    <DataListCell>
+                      <div className="space-y-1">
+                        <Badge
+                          variant={
+                            task.status === 'completed'
+                              ? 'success'
+                              : task.status === 'pending'
+                                ? 'secondary'
+                                : 'warning'
+                          }
+                        >
+                          <Status state={taskStatusStates[task.status]} size="sm" tooltip={false} aria-hidden="true" />
+                          {taskStatusLabel(task)}
+                        </Badge>
+                        {task.status === 'paused' && (
+                          <p className="text-sm text-muted-foreground">{taskNextStep(task)}</p>
+                        )}
+                      </div>
+                    </DataListCell>
+                    <DataListSecondary>
+                      <time dateTime={task.createdAt}>{taskTime(task.createdAt)}</time>
+                    </DataListSecondary>
+                  </DataListRow>
+                ))}
+              </DataList>
+            ) : search ? (
+              <StatePanel
+                kind="empty"
+                icon={Checklist}
+                title="No matching task requests"
+                description="Try another phrase or clear the search. Only requests you can still access are included."
+              >
+                <Button variant="outline" onClick={() => pages.setSearch('')}>
+                  Clear search
+                </Button>
+              </StatePanel>
+            ) : (
+              <StatePanel
+                kind="empty"
+                icon={Checklist}
+                title="No agent tasks yet"
+                description="Hand a piece of work to an activated agent and follow it here. You review every proposed row change before it runs."
+                sample={<AgentTasksSample />}
+              >
+                <Button
+                  nativeButton={false}
+                  render={<Link to="/$workspaceSlug/agents" params={{ workspaceSlug: workspace.slug }} />}
                 >
-                  <Button variant="outline" onClick={() => pages.setSearch('')}>
-                    Clear search
-                  </Button>
-                </StatePanel>
-              ) : (
-                <StatePanel
-                  kind="empty"
-                  icon={Checklist}
-                  title="No agent tasks yet"
-                  description="Hand a piece of work to an activated agent and follow it here. You review every proposed row change before it runs."
-                  sample={<AgentTasksSample />}
-                >
-                  <Button
-                    nativeButton={false}
-                    render={<Link to="/$workspaceSlug/agents" params={{ workspaceSlug: workspace.slug }} />}
-                  >
-                    Choose an agent
-                  </Button>
-                </StatePanel>
-              )}
-              {(after || data.nextCursor) && (
-                <nav aria-label="Task pages" className="flex flex-wrap items-center gap-2">
-                  {after && (
-                    <>
-                      <Button variant="outline" onClick={pages.first}>
-                        First task page
-                      </Button>
-                      <Button variant="outline" onClick={pages.previous}>
-                        Previous task page
-                      </Button>
-                    </>
-                  )}
-                  <span className="text-sm text-muted-foreground">Page {pages.page}</span>
-                  {data.nextCursor && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        if (data.nextCursor) pages.next(data.nextCursor);
-                      }}
-                    >
-                      Next task page
+                  Choose an agent
+                </Button>
+              </StatePanel>
+            )}
+            {(after || data.nextCursor) && (
+              <nav aria-label="Task pages" className="flex flex-wrap items-center gap-2">
+                {after && (
+                  <>
+                    <Button variant="outline" onClick={pages.first}>
+                      First task page
                     </Button>
-                  )}
-                </nav>
-              )}
-            </>
-          )}
-        </TaskRead>
-      </PageContent>
-    </div>
+                    <Button variant="outline" onClick={pages.previous}>
+                      Previous task page
+                    </Button>
+                  </>
+                )}
+                <span className="text-sm text-muted-foreground">Page {pages.page}</span>
+                {data.nextCursor && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (data.nextCursor) pages.next(data.nextCursor);
+                    }}
+                  >
+                    Next task page
+                  </Button>
+                )}
+              </nav>
+            )}
+          </>
+        )}
+      </TaskRead>
+    </PageContent>
   );
 }
 
@@ -249,140 +242,138 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
   const [pausing, setPausing] = useState(false);
   const [pauseError, setPauseError] = useState(false);
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <nav className="flex flex-wrap items-center justify-between gap-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            nativeButton={false}
-            render={<Link to="/$workspaceSlug/agent-tasks" params={{ workspaceSlug: workspace.slug }} />}
-          >
-            <ChevronLeftIcon data-icon="inline-start" aria-hidden="true" />
-            Back to my tasks
+    <PageContent>
+      <nav className="flex flex-wrap items-center justify-between gap-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug/agent-tasks" params={{ workspaceSlug: workspace.slug }} />}
+        >
+          <ChevronLeftIcon data-icon="inline-start" aria-hidden="true" />
+          Back to my tasks
+        </Button>
+      </nav>
+      {read.delayed && (
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" className="text-sm text-muted-foreground">
+            Automatic checks stopped. Work continues on the server.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void read.refresh()}>
+            Check again
           </Button>
-        </nav>
-        {read.delayed && (
-          <div className="flex flex-wrap items-center gap-3">
-            <p role="status" className="text-sm text-muted-foreground">
-              Automatic checks stopped. Work continues on the server.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => void read.refresh()}>
-              Check again
-            </Button>
-          </div>
-        )}
-        {read.state.kind !== 'ready' && read.state.kind !== 'loading' && (
-          <GitHubTaskSourceCard
-            workspaceId={workspace.id}
-            chatId={taskId}
-            slug={workspace.slug}
-            disabled={false}
-            picked={() => void read.refresh()}
-          />
-        )}
-        <TaskRead state={read.state} refresh={read.refresh}>
-          {task => (
-            <>
-              <TaskHeading workspaceId={workspace.id} task={task} />
-              <McpPrivateContext
-                workspaceId={workspace.id}
-                origin={{ kind: 'task', id: taskId, agentId: task.agentId }}
-              />
-              {task.status !== 'completed' && (
-                <div>
-                  <Button
-                    variant="outline"
-                    disabled={pausing || task.status === 'paused'}
-                    onClick={() => {
-                      if (pausing) return;
-                      setPausing(true);
-                      setPauseError(false);
-                      void fetch(`${apiOrigin}/v1/workspaces/${workspace.id}/agent-tasks/${taskId}/pause`, {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ expectedGeneration: task.generation }),
-                        signal: AbortSignal.timeout(30000),
+        </div>
+      )}
+      {read.state.kind !== 'ready' && read.state.kind !== 'loading' && (
+        <GitHubTaskSourceCard
+          workspaceId={workspace.id}
+          chatId={taskId}
+          slug={workspace.slug}
+          disabled={false}
+          picked={() => void read.refresh()}
+        />
+      )}
+      <TaskRead state={read.state} refresh={read.refresh}>
+        {task => (
+          <>
+            <TaskHeading workspaceId={workspace.id} task={task} />
+            <McpPrivateContext
+              workspaceId={workspace.id}
+              origin={{ kind: 'task', id: taskId, agentId: task.agentId }}
+            />
+            {task.status !== 'completed' && (
+              <div>
+                <Button
+                  variant="outline"
+                  disabled={pausing || task.status === 'paused'}
+                  onClick={() => {
+                    if (pausing) return;
+                    setPausing(true);
+                    setPauseError(false);
+                    void fetch(`${apiOrigin}/v1/workspaces/${workspace.id}/agent-tasks/${taskId}/pause`, {
+                      method: 'POST',
+                      credentials: 'include',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ expectedGeneration: task.generation }),
+                      signal: AbortSignal.timeout(30000),
+                    })
+                      .then(async response => {
+                        if (!response.ok) throw new Error('unconfirmed');
+                        await read.refresh();
                       })
-                        .then(async response => {
-                          if (!response.ok) throw new Error('unconfirmed');
-                          await read.refresh();
-                        })
-                        .catch(() => setPauseError(true))
-                        .finally(() => setPausing(false));
-                    }}
-                  >
-                    {pausing ? 'Pausing task…' : 'Pause task'}
-                  </Button>
-                  {pauseError && <p role="alert">Pause is unconfirmed. Check task status before continuing.</p>}
-                </div>
-              )}
-              <GitHubTaskSourceCard
-                workspaceId={workspace.id}
-                chatId={taskId}
-                slug={workspace.slug}
-                requested={task.skills.some(skill => skill.id === 'github-investigation')}
-                disabled={!['paused', 'waiting-clarification', 'failed'].includes(task.status)}
-                picked={() => void read.refresh()}
-              />
-              <GitHubBatches
-                workspaceId={workspace.id}
-                chatId={taskId}
-                task
-                revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
-              />
-              <TaskHistory
-                key={`history/${taskId}`}
-                api={api}
-                taskId={taskId}
-                workspaceId={workspace.id}
-                task={task}
-                refreshTask={read.refresh}
-              />
-              <ActivityResultCard id={`task-activity:${taskId}`} items={task.activity} title="Task actions" />
-              <TaskProposals
-                key={`proposals/${taskId}`}
-                api={api}
-                taskId={taskId}
-                generation={task.generation}
-                running={pending(task)}
-              />
-              <TaskSlackActions workspaceId={workspace.id} taskId={taskId} refresh={read.refresh} />
-              <Disclosure title="Usage and technical details">
-                <section aria-label="Task accounting" className="space-y-3">
-                  <dl className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <dt>Credits used</dt>
-                      <dd>{taskCredits(task.cost.chargedCreditUnits)}</dd>
-                    </div>
-                    <div>
-                      <dt>Credits reserved</dt>
-                      <dd>{taskCredits(task.cost.heldCreditUnits)}</dd>
-                    </div>
-                    <div>
-                      <dt>Tool calls</dt>
-                      <dd>
-                        {task.toolCalls} of {task.limits.toolCalls}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Active time</dt>
-                      <dd>
-                        {Number(task.activeMilliseconds) / 1000} seconds of {task.limits.activeMilliseconds / 60000}{' '}
-                        minutes
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="break-all text-sm text-muted-foreground">Task ID: {task.id}</p>
-                  <p className="break-all text-sm text-muted-foreground">Pinned definition {task.definitionRevision}</p>
-                </section>
-              </Disclosure>
-            </>
-          )}
-        </TaskRead>
-      </PageContent>
-    </div>
+                      .catch(() => setPauseError(true))
+                      .finally(() => setPausing(false));
+                  }}
+                >
+                  {pausing ? 'Pausing task…' : 'Pause task'}
+                </Button>
+                {pauseError && <p role="alert">Pause is unconfirmed. Check task status before continuing.</p>}
+              </div>
+            )}
+            <GitHubTaskSourceCard
+              workspaceId={workspace.id}
+              chatId={taskId}
+              slug={workspace.slug}
+              requested={task.skills.some(skill => skill.id === 'github-investigation')}
+              disabled={!['paused', 'waiting-clarification', 'failed'].includes(task.status)}
+              picked={() => void read.refresh()}
+            />
+            <GitHubBatches
+              workspaceId={workspace.id}
+              chatId={taskId}
+              task
+              revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
+            />
+            <TaskHistory
+              key={`history/${taskId}`}
+              api={api}
+              taskId={taskId}
+              workspaceId={workspace.id}
+              task={task}
+              refreshTask={read.refresh}
+            />
+            <ActivityResultCard id={`task-activity:${taskId}`} items={task.activity} title="Task actions" />
+            <TaskProposals
+              key={`proposals/${taskId}`}
+              api={api}
+              taskId={taskId}
+              generation={task.generation}
+              running={pending(task)}
+            />
+            <TaskSlackActions workspaceId={workspace.id} taskId={taskId} refresh={read.refresh} />
+            <Disclosure title="Usage and technical details">
+              <section aria-label="Task accounting" className="space-y-3">
+                <dl className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt>Credits used</dt>
+                    <dd>{taskCredits(task.cost.chargedCreditUnits)}</dd>
+                  </div>
+                  <div>
+                    <dt>Credits reserved</dt>
+                    <dd>{taskCredits(task.cost.heldCreditUnits)}</dd>
+                  </div>
+                  <div>
+                    <dt>Tool calls</dt>
+                    <dd>
+                      {task.toolCalls} of {task.limits.toolCalls}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Active time</dt>
+                    <dd>
+                      {Number(task.activeMilliseconds) / 1000} seconds of {task.limits.activeMilliseconds / 60000}{' '}
+                      minutes
+                    </dd>
+                  </div>
+                </dl>
+                <p className="break-all text-sm text-muted-foreground">Task ID: {task.id}</p>
+                <p className="break-all text-sm text-muted-foreground">Pinned definition {task.definitionRevision}</p>
+              </section>
+            </Disclosure>
+          </>
+        )}
+      </TaskRead>
+    </PageContent>
   );
 }
 

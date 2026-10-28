@@ -50,141 +50,139 @@ export function AgentsPage() {
   const read = useAgents(api, after, search);
   const canCreate = read.state.kind === 'ready';
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title="Agents"
-          description="Private instructions you can share with people and teams."
-          actions={
-            canCreate && (
-              <div className="flex flex-wrap gap-2">
+    <PageContent>
+      <PageHeader
+        title="Agents"
+        description="Private instructions you can share with people and teams."
+        actions={
+          canCreate && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
+              >
+                Configure manually
+              </Button>
+              <Button
+                nativeButton={false}
+                render={
+                  <Link
+                    to="/$workspaceSlug"
+                    params={{ workspaceSlug: workspace.slug }}
+                    search={{ intent: 'create-agent' }}
+                  />
+                }
+              >
+                Create in chat
+              </Button>
+            </div>
+          )
+        }
+      />
+      <SearchField
+        id="agent-search"
+        label="Find agents"
+        placeholder="Search agents"
+        maxLength={120}
+        value={search}
+        onChange={setSearch}
+      />
+      <AgentRead state={read.state} refresh={read.refresh}>
+        {({ page }) => (
+          <div className="space-y-4">
+            {search && page.agents.length > 0 && page.count !== undefined && (
+              <p className="text-sm text-muted-foreground">{page.count} matching agents</p>
+            )}
+            {!page.agents.length ? (
+              search ? (
+                <StatePanel
+                  kind="empty"
+                  icon={Users}
+                  title="No matching agents"
+                  description="Try a different name or clear your search."
+                >
+                  <Button variant="outline" onClick={() => setSearch('')}>
+                    Clear search
+                  </Button>
+                </StatePanel>
+              ) : (
+                <StatePanel
+                  kind="empty"
+                  icon={Users}
+                  title="No agents yet"
+                  description="Describe the agent's job in chat, or configure it manually above. Review its tools and access before activation."
+                  sample={<AgentsSample />}
+                >
+                  <Button
+                    nativeButton={false}
+                    render={
+                      <Link
+                        to="/$workspaceSlug"
+                        params={{ workspaceSlug: workspace.slug }}
+                        search={{ intent: 'create-agent' }}
+                      />
+                    }
+                  >
+                    <Add size={16} aria-hidden="true" />
+                    Create in chat
+                  </Button>
+                </StatePanel>
+              )
+            ) : (
+              <DataList aria-label="Agents" columns="three" headings={['Name', 'Instructions', 'Status']}>
+                {page.agents.map(agent => (
+                  <DataListRow key={agent.id}>
+                    <DataListCell>
+                      <AgentAvatar agentId={agent.id} name={agent.name} />
+                      <DataListLink
+                        render={
+                          <Link
+                            to="/$workspaceSlug/agents/$agentId"
+                            params={{ workspaceSlug: workspace.slug, agentId: agent.id }}
+                          />
+                        }
+                      >
+                        {agent.name}
+                      </DataListLink>
+                    </DataListCell>
+                    <AgentSummary api={api} id={agent.id} />
+                  </DataListRow>
+                ))}
+              </DataList>
+            )}
+            {(after || page.nextCursor) && (
+              <nav aria-label="Agent pages" className="flex flex-wrap items-center gap-2 pb-24">
                 <Button
                   variant="outline"
-                  nativeButton={false}
-                  render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
+                  disabled={!after || read.state.kind !== 'ready' || read.state.refreshing}
+                  onClick={pages.first}
                 >
-                  Configure manually
+                  First page
                 </Button>
                 <Button
-                  nativeButton={false}
-                  render={
-                    <Link
-                      to="/$workspaceSlug"
-                      params={{ workspaceSlug: workspace.slug }}
-                      search={{ intent: 'create-agent' }}
-                    />
-                  }
+                  variant="outline"
+                  disabled={!after || read.state.kind !== 'ready' || read.state.refreshing}
+                  onClick={pages.previous}
                 >
-                  Create in chat
+                  Previous page
                 </Button>
-              </div>
-            )
-          }
-        />
-        <SearchField
-          id="agent-search"
-          label="Find agents"
-          placeholder="Search agents"
-          maxLength={120}
-          value={search}
-          onChange={setSearch}
-        />
-        <AgentRead state={read.state} refresh={read.refresh}>
-          {({ page }) => (
-            <div className="space-y-4">
-              {search && page.agents.length > 0 && page.count !== undefined && (
-                <p className="text-sm text-muted-foreground">{page.count} matching agents</p>
-              )}
-              {!page.agents.length ? (
-                search ? (
-                  <StatePanel
-                    kind="empty"
-                    icon={Users}
-                    title="No matching agents"
-                    description="Try a different name or clear your search."
-                  >
-                    <Button variant="outline" onClick={() => setSearch('')}>
-                      Clear search
-                    </Button>
-                  </StatePanel>
-                ) : (
-                  <StatePanel
-                    kind="empty"
-                    icon={Users}
-                    title="No agents yet"
-                    description="Describe the agent's job in chat, or configure it manually above. Review its tools and access before activation."
-                    sample={<AgentsSample />}
-                  >
-                    <Button
-                      nativeButton={false}
-                      render={
-                        <Link
-                          to="/$workspaceSlug"
-                          params={{ workspaceSlug: workspace.slug }}
-                          search={{ intent: 'create-agent' }}
-                        />
-                      }
-                    >
-                      <Add size={16} aria-hidden="true" />
-                      Create in chat
-                    </Button>
-                  </StatePanel>
-                )
-              ) : (
-                <DataList aria-label="Agents" columns="three" headings={['Name', 'Instructions', 'Status']}>
-                  {page.agents.map(agent => (
-                    <DataListRow key={agent.id}>
-                      <DataListCell>
-                        <AgentAvatar agentId={agent.id} name={agent.name} />
-                        <DataListLink
-                          render={
-                            <Link
-                              to="/$workspaceSlug/agents/$agentId"
-                              params={{ workspaceSlug: workspace.slug, agentId: agent.id }}
-                            />
-                          }
-                        >
-                          {agent.name}
-                        </DataListLink>
-                      </DataListCell>
-                      <AgentSummary api={api} id={agent.id} />
-                    </DataListRow>
-                  ))}
-                </DataList>
-              )}
-              {(after || page.nextCursor) && (
-                <nav aria-label="Agent pages" className="flex flex-wrap items-center gap-2 pb-24">
-                  <Button
-                    variant="outline"
-                    disabled={!after || read.state.kind !== 'ready' || read.state.refreshing}
-                    onClick={pages.first}
-                  >
-                    First page
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={!after || read.state.kind !== 'ready' || read.state.refreshing}
-                    onClick={pages.previous}
-                  >
-                    Previous page
-                  </Button>
-                  <span className="text-sm text-muted-foreground">Page {pages.page}</span>
-                  <Button
-                    variant="outline"
-                    disabled={!page.nextCursor || read.state.kind !== 'ready' || read.state.refreshing}
-                    onClick={() => {
-                      if (page.nextCursor) pages.next(page.nextCursor);
-                    }}
-                  >
-                    Next page
-                  </Button>
-                </nav>
-              )}
-            </div>
-          )}
-        </AgentRead>
-      </PageContent>
-    </div>
+                <span className="text-sm text-muted-foreground">Page {pages.page}</span>
+                <Button
+                  variant="outline"
+                  disabled={!page.nextCursor || read.state.kind !== 'ready' || read.state.refreshing}
+                  onClick={() => {
+                    if (page.nextCursor) pages.next(page.nextCursor);
+                  }}
+                >
+                  Next page
+                </Button>
+              </nav>
+            )}
+          </div>
+        )}
+      </AgentRead>
+    </PageContent>
   );
 }
 
@@ -310,55 +308,53 @@ function NewAgentBuilder({
   );
   return (
     <KeepsEditsContext value={samePage}>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <PageContent>
-          <PageHeader
-            title={resuming ? 'Continue agent setup' : 'New agent'}
-            description="Give it a role. Choose its access. Review before it starts."
-            back={{
-              label: 'Back to agents',
-              link: <Link to="/$workspaceSlug/agents" params={{ workspaceSlug: workspace.slug }} />,
-            }}
-            actions={
-              <Button
-                variant="outline"
-                nativeButton={false}
-                render={
-                  <Link
-                    to="/$workspaceSlug"
-                    params={{ workspaceSlug: workspace.slug }}
-                    search={{ intent: 'create-agent' }}
-                  />
-                }
-              >
-                Create in chat
-              </Button>
-            }
-          />
-          {import.meta.env.DEV && workspace.slug === 'agent-builder-mock' && (
-            <p role="note" className="rounded-lg border bg-muted p-3 text-sm">
-              Local design demo. Models, prices, channels, and replies are illustrative. No live model calls, Slack
-              messages, or scheduled jobs.
-            </p>
-          )}
-          <AgentRead state={read.state} refresh={read.refresh}>
+      <PageContent>
+        <PageHeader
+          title={resuming ? 'Continue agent setup' : 'New agent'}
+          description="Give it a role. Choose its access. Review before it starts."
+          back={{
+            label: 'Back to agents',
+            link: <Link to="/$workspaceSlug/agents" params={{ workspaceSlug: workspace.slug }} />,
+          }}
+          actions={
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={
+                <Link
+                  to="/$workspaceSlug"
+                  params={{ workspaceSlug: workspace.slug }}
+                  search={{ intent: 'create-agent' }}
+                />
+              }
+            >
+              Create in chat
+            </Button>
+          }
+        />
+        {import.meta.env.DEV && workspace.slug === 'agent-builder-mock' && (
+          <p role="note" className="rounded-lg border bg-muted p-3 text-sm">
+            Local design demo. Models, prices, channels, and replies are illustrative. No live model calls, Slack
+            messages, or scheduled jobs.
+          </p>
+        )}
+        <AgentRead state={read.state} refresh={read.refresh}>
+          {() => null}
+        </AgentRead>
+        {loadingDraft && (
+          <AgentRead state={initial.state} refresh={initial.refresh}>
             {() => null}
           </AgentRead>
-          {loadingDraft && (
-            <AgentRead state={initial.state} refresh={initial.refresh}>
-              {() => null}
-            </AgentRead>
-          )}
-          {!membershipId && (
-            <StatePanel
-              kind="unavailable"
-              title="Workspace membership unavailable"
-              description="Refresh this page to check your current membership before creating an agent."
-            />
-          )}
-          {builder}
-        </PageContent>
-      </div>
+        )}
+        {!membershipId && (
+          <StatePanel
+            kind="unavailable"
+            title="Workspace membership unavailable"
+            description="Refresh this page to check your current membership before creating an agent."
+          />
+        )}
+        {builder}
+      </PageContent>
     </KeepsEditsContext>
   );
 }
@@ -452,279 +448,275 @@ function AgentPage({
   );
   return (
     <KeepsEditsContext value={samePage}>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <PageContent>
-          <PageHeader
-            back={{
-              label: 'Back to agents',
-              link: <Link to="/$workspaceSlug/agents" params={{ workspaceSlug: slug }} />,
-            }}
-            title={
-              creating && !receipt ? 'New agent' : ready && snapshot?.detail ? snapshot.detail.name : 'Saved agent'
-            }
-            description={
-              creating && !receipt && !deleted
-                ? 'Describe the job and choose what this agent may use.'
-                : detail && !deleted
-                  ? 'Start tasks with this agent. Managers set up how it runs and who can use it.'
-                  : undefined
-            }
-            actions={status && <Badge variant={statusVariant[status.kind]}>{status.label}</Badge>}
+      <PageContent>
+        <PageHeader
+          back={{
+            label: 'Back to agents',
+            link: <Link to="/$workspaceSlug/agents" params={{ workspaceSlug: slug }} />,
+          }}
+          title={creating && !receipt ? 'New agent' : ready && snapshot?.detail ? snapshot.detail.name : 'Saved agent'}
+          description={
+            creating && !receipt && !deleted
+              ? 'Describe the job and choose what this agent may use.'
+              : detail && !deleted
+                ? 'Start tasks with this agent. Managers set up how it runs and who can use it.'
+                : undefined
+          }
+          actions={status && <Badge variant={statusVariant[status.kind]}>{status.label}</Badge>}
+        />
+        {deleted ? (
+          <StatePanel
+            kind="success"
+            title="Agent deleted"
+            description="Its activations are revoked. Return to agents to see your remaining accessible definitions."
           />
-          {deleted ? (
-            <StatePanel
-              kind="success"
-              title="Agent deleted"
-              description="Its activations are revoked. Return to agents to see your remaining accessible definitions."
-            />
-          ) : receipt ? (
-            <section aria-label="Agent creation receipt" className="space-y-4">
-              <h2 tabIndex={-1} ref={node => node?.focus()} className="text-lg font-medium">
-                Agent saved.
-              </h2>
-              <p>
-                This agent is private to you. Next, turn on execution and activate its instructions. Then add a trigger
-                or run it now with a private task.
-              </p>
-              <p className="break-all text-sm">Saved revision {receipt.savedRevision}</p>
-              <Button
-                variant="outline"
-                nativeButton={false}
-                render={<Link to="/$workspaceSlug/agents/$agentId" params={{ workspaceSlug: slug, agentId: id }} />}
-              >
-                Open saved agent
-              </Button>
-            </section>
-          ) : (
-            <>
-              <AgentRead state={read.state} refresh={read.refresh}>
-                {() => null}
-              </AgentRead>
-              {snapshot && creating && (
-                <AgentEditor
-                  api={api}
-                  workspaceId={workspaceId}
-                  slug={slug}
-                  id={id}
-                  context={snapshot.context}
-                  detail={null}
-                  concealed={concealed}
-                  refresh={refresh}
-                  onAccepted={setReceipt}
-                />
-              )}
-              {snapshot && detail && (
-                <div hidden={!ready}>
-                  <Tabs
-                    value={active}
-                    onValueChange={value => {
-                      const next = tabs.find(item => item.value === value);
-                      if (next) void onTab(next.value);
-                    }}
-                  >
-                    <div className="max-w-full overflow-x-auto pb-1">
-                      <TabsList variant="line" aria-label="Agent sections">
-                        {tabs.map(item => (
-                          <TabsTrigger key={item.value} value={item.value}>
-                            {item.label}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </div>
-                    {can('manage') && (
-                      <AgentPolicy
+        ) : receipt ? (
+          <section aria-label="Agent creation receipt" className="space-y-4">
+            <h2 tabIndex={-1} ref={node => node?.focus()} className="text-lg font-medium">
+              Agent saved.
+            </h2>
+            <p>
+              This agent is private to you. Next, turn on execution and activate its instructions. Then add a trigger or
+              run it now with a private task.
+            </p>
+            <p className="break-all text-sm">Saved revision {receipt.savedRevision}</p>
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={<Link to="/$workspaceSlug/agents/$agentId" params={{ workspaceSlug: slug, agentId: id }} />}
+            >
+              Open saved agent
+            </Button>
+          </section>
+        ) : (
+          <>
+            <AgentRead state={read.state} refresh={read.refresh}>
+              {() => null}
+            </AgentRead>
+            {snapshot && creating && (
+              <AgentEditor
+                api={api}
+                workspaceId={workspaceId}
+                slug={slug}
+                id={id}
+                context={snapshot.context}
+                detail={null}
+                concealed={concealed}
+                refresh={refresh}
+                onAccepted={setReceipt}
+              />
+            )}
+            {snapshot && detail && (
+              <div hidden={!ready}>
+                <Tabs
+                  value={active}
+                  onValueChange={value => {
+                    const next = tabs.find(item => item.value === value);
+                    if (next) void onTab(next.value);
+                  }}
+                >
+                  <div className="max-w-full overflow-x-auto pb-1">
+                    <TabsList variant="line" aria-label="Agent sections">
+                      {tabs.map(item => (
+                        <TabsTrigger key={item.value} value={item.value}>
+                          {item.label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </div>
+                  {can('manage') && (
+                    <AgentPolicy
+                      api={api}
+                      id={id}
+                      workspaceId={workspaceId}
+                      slug={slug}
+                      teams={snapshot.context.teams}
+                      concealed={!ready}
+                      refresh={refresh}
+                    >
+                      {parts => (
+                        <>
+                          {parts.notice}
+                          {panel('access', parts.access)}
+                          {panel(
+                            'execution',
+                            <>
+                              {parts.execution}
+                              <AgentActivations
+                                api={api}
+                                detail={detail}
+                                workspaceId={workspaceId}
+                                concealed={!ready}
+                                refresh={refresh}
+                              />
+                            </>,
+                          )}
+                        </>
+                      )}
+                    </AgentPolicy>
+                  )}
+                  {panel(
+                    'overview',
+                    <>
+                      {can('edit') && <ContinueAgentSetup api={api} id={id} slug={slug} />}
+                      {ready && (
+                        <AgentSetup
+                          detail={detail}
+                          execution={execution}
+                          workspaceId={workspaceId}
+                          slug={slug}
+                          open={open}
+                        />
+                      )}
+                      <TaskStart
+                        workspaceId={workspaceId}
+                        slug={slug}
+                        detail={detail}
+                        concealed={!ready || !can('invoke')}
+                        setup={{ kind: 'jump', label: 'See setup steps', target: 'agent-setup' }}
+                      />
+                      <section aria-labelledby="agent-triggers-title" className="grid gap-3">
+                        <div className="grid gap-1">
+                          <h2 id="agent-triggers-title" className="text-sm font-medium text-foreground">
+                            Triggers
+                          </h2>
+                          <p className="text-sm text-muted-foreground">Choose how this agent starts work.</p>
+                        </div>
+                        <ul className="grid gap-3">
+                          <li className="grid gap-1 rounded-lg border p-3">
+                            <p className="text-sm font-medium text-foreground">Manual run</p>
+                            <p className="text-sm text-muted-foreground">
+                              {can('invoke')
+                                ? 'Start a private task above to run this agent with your prompt.'
+                                : 'An agent manager must grant you run access before you can start a private task.'}
+                            </p>
+                          </li>
+                          <li className="grid gap-1 rounded-lg border p-3">
+                            <p className="text-sm font-medium text-foreground">Slack message</p>
+                            <p className="text-sm text-muted-foreground">
+                              {detail.definition.responseRule === 'every-message'
+                                ? 'Starts for every new message in attached Slack channels.'
+                                : 'Starts when someone tags the agent in an attached Slack channel.'}
+                            </p>
+                            {can('edit') && (
+                              <div>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  onClick={() => open('instructions', 'agent-slack-response')}
+                                >
+                                  Edit Slack trigger
+                                </Button>
+                              </div>
+                            )}
+                          </li>
+                          {can('manage') && (
+                            <li className="grid gap-2 rounded-lg border p-3">
+                              <div className="grid gap-1">
+                                <p className="text-sm font-medium text-foreground">Scheduled run</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Run a saved prompt or inspect a table on a repeating interval.
+                                </p>
+                              </div>
+                              <div>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => open('schedules', 'agent-schedules')}
+                                >
+                                  Add schedule
+                                </Button>
+                              </div>
+                            </li>
+                          )}
+                        </ul>
+                      </section>
+                      <section aria-labelledby="agent-about-title" className="grid gap-2">
+                        <h2 id="agent-about-title" className="text-sm font-medium text-foreground">
+                          About this agent
+                        </h2>
+                        <p className="whitespace-pre-wrap break-words text-base">{detail.definition.instructions}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Actions:{' '}
+                          {detail.definition.tools.map(tool => toolLabels[tool]).join(', ') || 'None configured'}.
+                        </p>
+                      </section>
+                      <Disclosure title="Single-step request">
+                        <AgentChat api={api} detail={detail} concealed={!ready || !can('invoke')} />
+                      </Disclosure>
+                    </>,
+                  )}
+                  {panel(
+                    'instructions',
+                    <AgentEditor
+                      api={api}
+                      workspaceId={workspaceId}
+                      slug={slug}
+                      id={id}
+                      context={snapshot.context}
+                      detail={detail}
+                      concealed={concealed}
+                      refresh={refresh}
+                    />,
+                  )}
+                  {can('invoke') &&
+                    panel(
+                      'slack',
+                      <>
+                        {ready && <AgentSlackChannel workspaceId={workspaceId} agentId={id} />}
+                        {can('manage') && (
+                          <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+                            Channels this agent may post to are set in Execution.
+                            <Button
+                              variant="link"
+                              size="sm"
+                              onClick={() => open('execution', 'agent-slack-destinations')}
+                            >
+                              Go to Slack destinations
+                            </Button>
+                          </p>
+                        )}
+                      </>,
+                    )}
+                  {can('manage') &&
+                    panel(
+                      'schedules',
+                      <AgentSchedules
                         api={api}
-                        id={id}
+                        detail={detail}
                         workspaceId={workspaceId}
                         slug={slug}
                         teams={snapshot.context.teams}
                         concealed={!ready}
                         refresh={refresh}
-                      >
-                        {parts => (
-                          <>
-                            {parts.notice}
-                            {panel('access', parts.access)}
-                            {panel(
-                              'execution',
-                              <>
-                                {parts.execution}
-                                <AgentActivations
-                                  api={api}
-                                  detail={detail}
-                                  workspaceId={workspaceId}
-                                  concealed={!ready}
-                                  refresh={refresh}
-                                />
-                              </>,
-                            )}
-                          </>
-                        )}
-                      </AgentPolicy>
-                    )}
-                    {panel(
-                      'overview',
-                      <>
-                        {can('edit') && <ContinueAgentSetup api={api} id={id} slug={slug} />}
-                        {ready && (
-                          <AgentSetup
-                            detail={detail}
-                            execution={execution}
-                            workspaceId={workspaceId}
-                            slug={slug}
-                            open={open}
-                          />
-                        )}
-                        <TaskStart
-                          workspaceId={workspaceId}
-                          slug={slug}
-                          detail={detail}
-                          concealed={!ready || !can('invoke')}
-                          setup={{ kind: 'jump', label: 'See setup steps', target: 'agent-setup' }}
-                        />
-                        <section aria-labelledby="agent-triggers-title" className="grid gap-3">
-                          <div className="grid gap-1">
-                            <h2 id="agent-triggers-title" className="text-sm font-medium text-foreground">
-                              Triggers
-                            </h2>
-                            <p className="text-sm text-muted-foreground">Choose how this agent starts work.</p>
-                          </div>
-                          <ul className="grid gap-3">
-                            <li className="grid gap-1 rounded-lg border p-3">
-                              <p className="text-sm font-medium text-foreground">Manual run</p>
-                              <p className="text-sm text-muted-foreground">
-                                {can('invoke')
-                                  ? 'Start a private task above to run this agent with your prompt.'
-                                  : 'An agent manager must grant you run access before you can start a private task.'}
-                              </p>
-                            </li>
-                            <li className="grid gap-1 rounded-lg border p-3">
-                              <p className="text-sm font-medium text-foreground">Slack message</p>
-                              <p className="text-sm text-muted-foreground">
-                                {detail.definition.responseRule === 'every-message'
-                                  ? 'Starts for every new message in attached Slack channels.'
-                                  : 'Starts when someone tags the agent in an attached Slack channel.'}
-                              </p>
-                              {can('edit') && (
-                                <div>
-                                  <Button
-                                    variant="link"
-                                    size="sm"
-                                    onClick={() => open('instructions', 'agent-slack-response')}
-                                  >
-                                    Edit Slack trigger
-                                  </Button>
-                                </div>
-                              )}
-                            </li>
-                            {can('manage') && (
-                              <li className="grid gap-2 rounded-lg border p-3">
-                                <div className="grid gap-1">
-                                  <p className="text-sm font-medium text-foreground">Scheduled run</p>
-                                  <p className="text-sm text-muted-foreground">
-                                    Run a saved prompt or inspect a table on a repeating interval.
-                                  </p>
-                                </div>
-                                <div>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => open('schedules', 'agent-schedules')}
-                                  >
-                                    Add schedule
-                                  </Button>
-                                </div>
-                              </li>
-                            )}
-                          </ul>
-                        </section>
-                        <section aria-labelledby="agent-about-title" className="grid gap-2">
-                          <h2 id="agent-about-title" className="text-sm font-medium text-foreground">
-                            About this agent
-                          </h2>
-                          <p className="whitespace-pre-wrap break-words text-base">{detail.definition.instructions}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Actions:{' '}
-                            {detail.definition.tools.map(tool => toolLabels[tool]).join(', ') || 'None configured'}.
-                          </p>
-                        </section>
-                        <Disclosure title="Single-step request">
-                          <AgentChat api={api} detail={detail} concealed={!ready || !can('invoke')} />
-                        </Disclosure>
-                      </>,
-                    )}
-                    {panel(
-                      'instructions',
-                      <AgentEditor
-                        api={api}
-                        workspaceId={workspaceId}
-                        slug={slug}
-                        id={id}
-                        context={snapshot.context}
-                        detail={detail}
-                        concealed={concealed}
-                        refresh={refresh}
                       />,
                     )}
-                    {can('invoke') &&
-                      panel(
-                        'slack',
-                        <>
-                          {ready && <AgentSlackChannel workspaceId={workspaceId} agentId={id} />}
-                          {can('manage') && (
-                            <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
-                              Channels this agent may post to are set in Execution.
-                              <Button
-                                variant="link"
-                                size="sm"
-                                onClick={() => open('execution', 'agent-slack-destinations')}
-                              >
-                                Go to Slack destinations
-                              </Button>
-                            </p>
-                          )}
-                        </>,
-                      )}
-                    {can('manage') &&
-                      panel(
-                        'schedules',
-                        <AgentSchedules
-                          api={api}
-                          detail={detail}
-                          workspaceId={workspaceId}
-                          slug={slug}
-                          teams={snapshot.context.teams}
-                          concealed={!ready}
-                          refresh={refresh}
-                        />,
-                      )}
-                    {panel(
-                      'settings',
-                      <>
-                        <Disclosure title="Revision details">
-                          <dl className="space-y-2 break-all text-sm">
-                            <dt>Saved revision</dt>
-                            <dd>{detail.savedRevision}</dd>
-                            <dt>Definition revision</dt>
-                            <dd>{detail.definitionRevision}</dd>
-                          </dl>
-                        </Disclosure>
-                        <AgentDelete
-                          api={api}
-                          id={id}
-                          concealed={!ready || !can('delete')}
-                          onDeleted={() => setDeleted(true)}
-                          refresh={refresh}
-                        />
-                      </>,
-                    )}
-                  </Tabs>
-                </div>
-              )}
-            </>
-          )}
-        </PageContent>
-      </div>
+                  {panel(
+                    'settings',
+                    <>
+                      <Disclosure title="Revision details">
+                        <dl className="space-y-2 break-all text-sm">
+                          <dt>Saved revision</dt>
+                          <dd>{detail.savedRevision}</dd>
+                          <dt>Definition revision</dt>
+                          <dd>{detail.definitionRevision}</dd>
+                        </dl>
+                      </Disclosure>
+                      <AgentDelete
+                        api={api}
+                        id={id}
+                        concealed={!ready || !can('delete')}
+                        onDeleted={() => setDeleted(true)}
+                        refresh={refresh}
+                      />
+                    </>,
+                  )}
+                </Tabs>
+              </div>
+            )}
+          </>
+        )}
+      </PageContent>
     </KeepsEditsContext>
   );
 }
