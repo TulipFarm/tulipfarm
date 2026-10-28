@@ -66,6 +66,11 @@ export async function recordSlackRejection(
     [eventId],
   );
   if (!inserted.rowCount) return undefined;
+  return mentionTarget(tx, eventId);
+}
+
+/** Returns where to post a notice in the requester's thread, only when the event explicitly mentioned the bot. */
+export async function mentionTarget(tx: AuthorizationTransaction, eventId: string): Promise<NoticeTarget | undefined> {
   const row = z
     .object({
       payload: messageSchema,
@@ -95,6 +100,37 @@ export async function recordSlackRejection(
   };
 }
 
+async function postNotice(input: {
+  workspaceId: string;
+  target: NoticeTarget;
+  text: string;
+  cipher: ReturnType<typeof slackCredentialCipher>;
+  fetcher?: typeof fetch | undefined;
+}) {
+  const { target } = input;
+  try {
+    const result = await postBotMessage({
+      token: input.cipher.decrypt(
+        {
+          workspaceId: input.workspaceId,
+          installationId: target.installationId,
+          generation: target.generation,
+          kind: 'bot',
+        },
+        target.credential,
+      ),
+      channel: target.channel,
+      rootTs: target.threadTs,
+      text: input.text,
+      ...(input.fetcher ? { fetcher: input.fetcher } : {}),
+    });
+    return result.kind === 'sent';
+  } catch {
+    // The caller already recorded the outcome; a failed notice is reported in its log line.
+    return false;
+  }
+}
+
 /** Logs the rejection with its event id and reason code, and posts the notice when the bot was mentioned. */
 export async function announceSlackRejection(input: {
   surface: 'default' | 'channel';
@@ -106,33 +142,42 @@ export async function announceSlackRejection(input: {
   fetcher?: typeof fetch | undefined;
 }) {
   let outcome: 'rejected' | 'rejected_notified' | 'rejected_notice_failed' = 'rejected';
-  if (input.target) {
-    const { target } = input;
-    let sent = false;
-    try {
-      const result = await postBotMessage({
-        token: input.cipher.decrypt(
-          {
-            workspaceId: input.workspaceId,
-            installationId: target.installationId,
-            generation: target.generation,
-            kind: 'bot',
-          },
-          target.credential,
-        ),
-        channel: target.channel,
-        rootTs: target.threadTs,
-        text: slackRejectionNotice(input.reason),
-        ...(input.fetcher ? { fetcher: input.fetcher } : {}),
-      });
-      sent = result.kind === 'sent';
-    } catch {
-      /* The rejection is already recorded; the failed notice is reported below. */
-    }
-    outcome = sent ? 'rejected_notified' : 'rejected_notice_failed';
-  }
+  if (input.target)
+    outcome = (await postNotice({ ...input, target: input.target, text: slackRejectionNotice(input.reason) }))
+      ? 'rejected_notified'
+      : 'rejected_notice_failed';
   log(outcome === 'rejected_notice_failed' ? 'error' : 'warn', 'activity', 'call_failed', {
     operation: `slack.${input.surface}.admission`,
+    outcome,
+    'error.type': input.reason,
+    'slack.event_id': input.eventId,
+  });
+  return outcome;
+}
+
+// The notice states only that the reply failed, never why the model or tools failed or what they read.
+export const slackReplyFailureNotice =
+  "I couldn't finish an answer to this. Mention me again to retry. (reason: reply-failed)";
+
+/**
+ * Logs a blocked default reply with its real reason. When the reply failed after admission and the request mentioned the
+ * bot, it also posts a short notice in the requester's thread, so a failed answer is never silent.
+ */
+export async function announceSlackReplyFailure(input: {
+  workspaceId: string;
+  eventId: string;
+  reason: string;
+  target: NoticeTarget | undefined;
+  cipher: ReturnType<typeof slackCredentialCipher>;
+  fetcher?: typeof fetch | undefined;
+}) {
+  let outcome: 'blocked' | 'blocked_notified' | 'blocked_notice_failed' = 'blocked';
+  if (input.target)
+    outcome = (await postNotice({ ...input, target: input.target, text: slackReplyFailureNotice }))
+      ? 'blocked_notified'
+      : 'blocked_notice_failed';
+  log(outcome === 'blocked_notice_failed' ? 'error' : 'warn', 'activity', 'call_failed', {
+    operation: 'slack.default.reply',
     outcome,
     'error.type': input.reason,
     'slack.event_id': input.eventId,

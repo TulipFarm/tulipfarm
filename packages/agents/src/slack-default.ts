@@ -29,6 +29,8 @@ import { createSlackChannelAgents } from './slack-channels.ts';
 import { slackRootSchema, slackSource } from './slack-delivery.ts';
 import {
   announceSlackRejection,
+  announceSlackReplyFailure,
+  mentionTarget,
   recordSlackRejection,
   SlackAdmissionDenied,
   slackAdmissionReason,
@@ -89,6 +91,18 @@ export function createSlackDefault(
       await lockAuthorization(tx, 'write');
       return operation(tx);
     });
+  // Only a failed model or tool run is announced; access and delivery blocks stay silent so they reveal nothing.
+  type Blocked = { reason: string; target?: Awaited<ReturnType<typeof mentionTarget>> };
+  const announceBlocked = async (workspaceId: string, eventId: string, blocked: Blocked) => {
+    await announceSlackReplyFailure({
+      workspaceId,
+      eventId,
+      reason: blocked.reason,
+      target: blocked.target,
+      cipher: options.cipher,
+      fetcher: options.fetcher,
+    });
+  };
   async function load(tx: AuthorizationTransaction, eventId: string) {
     return turnSchema.parse(
       (
@@ -404,14 +418,18 @@ export function createSlackDefault(
   async function process(work: { workspaceId: string; eventId: string }) {
     const { workspaceId, eventId } = work;
     if (!(await slackCredentialsReady(runtime, work))) return 'idle';
+    let stopped: Blocked | undefined;
     const selected = await transaction(workspaceId, async tx => {
       const row = await load(tx, eventId);
       if (!['pending', 'retry'].includes(row.state) || !row.due) return null;
       if (row.model_started && ['failed', 'cancelled', 'blocked'].includes(row.status)) {
-        blockedReply(`conversation-${row.status}`);
         await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
           eventId,
         ]);
+        stopped = {
+          reason: `conversation-${row.status}`,
+          target: row.status === 'failed' ? await mentionTarget(tx, eventId) : undefined,
+        };
         return null;
       }
       await tx.client.query(
@@ -420,6 +438,7 @@ export function createSlackDefault(
       );
       return row;
     });
+    if (stopped) await announceBlocked(workspaceId, eventId, stopped);
     if (!selected) return 'idle';
     const replyWork = {
       workspaceId,
@@ -446,13 +465,15 @@ export function createSlackDefault(
       try {
         await executor.process(replyWork);
       } catch (error) {
-        blockedReply(errorType(error));
-        await transaction(workspaceId, tx =>
-          tx.client.query(
+        const denied = error instanceof AccessDenied;
+        const target = await transaction(workspaceId, async tx => {
+          const updated = await tx.client.query(
             `UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1 AND state='pending'`,
             [eventId],
-          ),
-        );
+          );
+          return updated.rowCount && !denied ? mentionTarget(tx, eventId) : undefined;
+        });
+        await announceBlocked(workspaceId, eventId, { reason: denied ? 'access-denied' : errorType(error), target });
         return 'blocked';
       }
     }
@@ -474,9 +495,19 @@ export function createSlackDefault(
       ),
     );
     if (!claimed.rowCount) return 'idle';
-    return transaction(workspaceId, async tx => {
+    const result = await transaction(workspaceId, async (tx): Promise<string | Blocked> => {
       const row = await load(tx, eventId);
       if (row.state !== 'sending' || row.attempt_id !== attempt) return 'idle';
+      // A failed conversation has no result to deliver, so its real reason is reported instead of a delivery block.
+      if (row.status !== 'completed') {
+        await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
+          eventId,
+        ]);
+        return {
+          reason: `conversation-${row.status}`,
+          target: row.status === 'failed' ? await mentionTarget(tx, eventId) : undefined,
+        };
+      }
       let destination;
       try {
         const actor = await resolveHuman(tx, row.user_id);
@@ -494,14 +525,8 @@ export function createSlackDefault(
         blockedReply(error instanceof AccessDenied ? 'access-denied' : errorType(error));
         destination = { kind: 'Undeliverable' as const };
       }
-      if (destination.kind === 'Undeliverable' || row.status !== 'completed' || !row.text) {
-        blockedReply(
-          destination.kind === 'Undeliverable'
-            ? 'undeliverable'
-            : row.status !== 'completed'
-              ? `conversation-${row.status}`
-              : 'empty-answer',
-        );
+      if (destination.kind === 'Undeliverable' || !row.text) {
+        blockedReply(destination.kind === 'Undeliverable' ? 'undeliverable' : 'empty-answer');
         await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
           eventId,
         ]);
@@ -542,6 +567,9 @@ export function createSlackDefault(
       }
       return outcome.kind;
     });
+    if (typeof result === 'string') return result;
+    await announceBlocked(workspaceId, eventId, result);
+    return 'blocked';
   }
   return { due, process, actionSources };
 }

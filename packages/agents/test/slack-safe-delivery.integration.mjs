@@ -27,7 +27,8 @@ test('GENERAL default answers use complete current audiences and retain private 
     sequence = 0,
     revoke = false,
     general = true,
-    loop = false;
+    loop = false,
+    failModel = false;
   let temporal, connection, clientConnection, worker, running, composition, api;
   const originalEnv = { ...process.env };
   const server = createServer(async (req, res) => {
@@ -75,6 +76,12 @@ test('GENERAL default answers use complete current audiences and retain private 
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks));
+    if (req.url === '/model' && failModel) {
+      res
+        .writeHead(400)
+        .end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'fixture failure' } }));
+      return;
+    }
     if (req.url === '/model') {
       modelInputs.push(input);
       if (revoke)
@@ -370,7 +377,7 @@ test('GENERAL default answers use complete current audiences and retain private 
         ).rows[0]?.state;
         if (!['pending', 'retry', 'sending'].includes(state)) status = state;
       }
-      if (status === 'blocked' && !revoke)
+      if (status === 'blocked' && !revoke && !failModel)
         assert.fail(
           JSON.stringify(
             (await f.db.platform.query(`SELECT status,error_code FROM ${f.table('tf_conversation_turns')}`)).rows,
@@ -428,6 +435,21 @@ test('GENERAL default answers use complete current audiences and retain private 
     assert.equal((await invoke('<@UBOT> Attached default', { channel: 'COTHER' })).status, 'sent');
     assert.equal(posts.at(-1).channel, 'COTHER');
     assert.ok(tokens.includes('Bearer xoxp-bob'));
+    // A mentioned request whose model run fails gets a short notice in its thread instead of silence.
+    failModel = true;
+    const failed = await invoke('<@UBOT> Fails', { root: '2.000001' });
+    failModel = false;
+    assert.equal(failed.status, 'blocked');
+    assert.equal(posts.at(-1).channel, 'CGENERAL');
+    assert.equal(posts.at(-1).thread_ts, '2.000001');
+    assert.match(posts.at(-1).text, /couldn't finish an answer.*reason: reply-failed/);
+    assert.ok(!posts.at(-1).text.includes('fixture failure'));
+    // An unmentioned follow-up that fails stays silent, like an admission rejection.
+    const quiet = posts.length;
+    failModel = true;
+    assert.equal((await invoke('Fails quietly', { root: '2.000001' })).status, 'blocked');
+    failModel = false;
+    assert.equal(posts.length, quiet);
     const before = posts.length;
     revoke = true;
     assert.equal((await invoke('<@UBOT> Revoke in flight')).status, 'blocked');
