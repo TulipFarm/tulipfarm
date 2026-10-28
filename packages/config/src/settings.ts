@@ -654,6 +654,24 @@ export const settings: readonly Setting[] = [
       'Of those, the most scheduled jobs may hold, so requests do not wait behind them. Defaults to one fewer than the transaction limit.',
   },
   {
+    name: 'WORKSPACE_STORAGE_RESERVED_BACKGROUND_TRANSACTIONS',
+    group: 'Workspace storage',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Of those, how many a waiting scheduled job gets ahead of queued requests, so jobs are not starved. Defaults to 1, or 0 when the transaction limit is 1; at most the background limit.',
+  },
+  {
+    name: 'WORKSPACE_STORAGE_MAX_QUEUE',
+    group: 'Workspace storage',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    default: '100',
+    description: 'Workspace transactions each runtime replica queues before rejecting more.',
+  },
+  {
     name: 'WORKSPACE_STORAGE_IDLE_TIMEOUT_MS',
     group: 'Workspace storage',
     services: apps,

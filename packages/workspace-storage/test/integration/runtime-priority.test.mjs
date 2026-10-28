@@ -125,6 +125,72 @@ test('a freed pool connection goes to a waiting request before a waiting job', {
   assert.equal(runtime.stats().connections, 1);
 });
 
+for (const [reserved, expected] of [
+  [0, ['request', 'job']],
+  [1, ['job', 'request']],
+]) {
+  test(`with ${reserved} reserved job slots, a freed slot goes ${expected[0]} first`, { timeout: 15000 }, async t => {
+    const { runtime, run, hold } = await setup(t, {
+      connectionsPerPool: 2,
+      maxConcurrentTransactions: 2,
+      maxQueue: 2,
+      reservedBackgroundTransactions: reserved,
+    });
+    const requests = [hold(false), hold(false)];
+    await Promise.all(requests.map(request => request.entered));
+    const order = [];
+    const queued = [run(false, async () => order.push('request')), run(true, async () => order.push('job'))];
+    await eventually(() => runtime.stats().queuedTransactions === 2, 'request and job queue');
+    requests[0].release();
+    await eventually(() => order.length === 1, 'one queued transaction runs');
+    requests[1].release();
+    await Promise.all(queued);
+    assert.deepEqual(order, expected);
+  });
+}
+
+test(
+  'a freed pool connection goes to a waiting job while jobs hold none of the reserve',
+  { timeout: 15000 },
+  async t => {
+    const { runtime, run, hold } = await setup(t, {
+      connectionsPerPool: 2,
+      maxConcurrentTransactions: 4,
+      reservedBackgroundTransactions: 1,
+    });
+    const requests = [hold(false), hold(false)];
+    await Promise.all(requests.map(request => request.entered));
+    const order = [];
+    const request = run(false, async () => order.push('request'));
+    await eventually(() => runtime.stats().activeTransactions === 3, 'request waits for a connection');
+    const job = run(true, async () => order.push('job'));
+    await eventually(() => runtime.stats().activeTransactions === 4, 'job waits for a connection');
+    requests[0].release();
+    await eventually(() => order.length === 1, 'one waiter gets the connection');
+    requests[1].release();
+    await Promise.all([request, job]);
+    assert.deepEqual(order, ['job', 'request']);
+  },
+);
+
+test('reserved job slots cannot exceed the job limit', async () => {
+  assert.throws(
+    () =>
+      createWorkspaceRuntime({
+        maxPools: 1,
+        connectionsPerPool: 1,
+        maxConcurrentTransactions: 2,
+        maxBackgroundTransactions: 1,
+        reservedBackgroundTransactions: 2,
+        replicaCount: 1,
+        reservedConnections: 0,
+        databaseConnectionBudget: 10,
+        resolveCredential: async () => assert.fail('no connection expected'),
+      }),
+    /Reserved background transactions exceed/,
+  );
+});
+
 test('connection gate waits time out and give their place back', { timeout: 15000 }, async t => {
   const { runtime, run, hold } = await setup(t, { connectionTimeoutMs: 50 });
   const first = hold(false);
