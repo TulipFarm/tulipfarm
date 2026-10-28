@@ -87,6 +87,7 @@ async function main() {
       'HUNTSMAN_ENDPOINT',
       'HUNTSMAN_TOKEN',
       'SEARXNG_ENDPOINT',
+      'SEARXNG_TOKEN',
     ]
       .filter(name => process.env[name] !== undefined)
       .map(name => [name, process.env[name]!]),

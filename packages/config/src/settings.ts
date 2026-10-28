@@ -485,8 +485,18 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of a [SearXNG](https://docs.searxng.org/) instance with JSON output enabled, for the agent `web.search` tool: `GET /search?format=json`. Unset disables web search. Health probes `GET /healthz`, which searches nothing. Keep it private; it sends no credentials.',
+      'Origin (no path or credentials) of a [SearXNG](https://docs.searxng.org/) instance with JSON output enabled, for the agent `web.search` tool: `GET /search?format=json`. Unset disables web search. Health probes `GET /healthz`, which searches nothing. Keep it private, or put it behind a proxy that checks SEARXNG_TOKEN.',
     selfHost: { section: 'public-web', example: 'http://searxng:8080' },
+  },
+  {
+    name: 'SEARXNG_TOKEN',
+    group: 'Public origins',
+    services: ['api', 'worker', 'database'],
+    requirement: 'optional',
+    secret: true,
+    description:
+      'Bearer token sent with web searches, for a proxy in front of SearXNG that requires one. SearXNG itself takes no token. Unset sends none. Accepts SEARXNG_TOKEN_FILE.',
+    selfHost: { section: 'public-web', commented: true },
   },
   {
     name: 'SEARXNG_SECRET',

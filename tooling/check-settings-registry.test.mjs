@@ -68,6 +68,7 @@ const computedReads = {
       'HUNTSMAN_ENDPOINT',
       'HUNTSMAN_TOKEN',
       'SEARXNG_ENDPOINT',
+      'SEARXNG_TOKEN',
     ],
   },
   // Environment secret store (#14): reads operator-provisioned release secrets by name, which are not app settings.

@@ -31,8 +31,8 @@ One version identifies all apps and images of a release.
 - **Breaking:** agent page reads use [Huntsman](https://github.com/TulipFarm/huntsman)
   and web search uses SearXNG, replacing Firecrawl. Set `HUNTSMAN_ENDPOINT`
   (and `HUNTSMAN_TOKEN` if your Huntsman requires one) for `web.fetch` and links
-  shared in chat, and `SEARXNG_ENDPOINT` for `web.search`; each is off while
-  unset. `FIRECRAWL_ENDPOINT`, `FIRECRAWL_API_KEY` and `FIRECRAWL_API_KEY_FILE`
+  shared in chat, and `SEARXNG_ENDPOINT` (and `SEARXNG_TOKEN` if a proxy in front
+  of SearXNG requires one) for `web.search`; each is off while unset. `FIRECRAWL_ENDPOINT`, `FIRECRAWL_API_KEY` and `FIRECRAWL_API_KEY_FILE`
   are removed, and startup fails while any is set. The self-hosted stack runs
   both services under `COMPOSE_PROFILES=public-web`.
 - Bundles, runs and receipts stored by earlier releases still verify, and an

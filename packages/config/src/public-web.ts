@@ -38,7 +38,7 @@ function origin(name: string, value: string) {
  */
 export function publicWebConfiguration(env: NodeJS.ProcessEnv = process.env) {
   rejectRemovedSettings(env);
-  loadSecretFiles(env, ['HUNTSMAN_TOKEN']);
+  loadSecretFiles(env, ['HUNTSMAN_TOKEN', 'SEARXNG_TOKEN']);
   const pages = env.HUNTSMAN_ENDPOINT
     ? {
         endpoint: origin('HUNTSMAN_ENDPOINT', env.HUNTSMAN_ENDPOINT),
@@ -47,7 +47,11 @@ export function publicWebConfiguration(env: NodeJS.ProcessEnv = process.env) {
       }
     : undefined;
   const search = env.SEARXNG_ENDPOINT
-    ? { endpoint: origin('SEARXNG_ENDPOINT', env.SEARXNG_ENDPOINT), headers: {}, healthPath: '/healthz' }
+    ? {
+        endpoint: origin('SEARXNG_ENDPOINT', env.SEARXNG_ENDPOINT),
+        headers: env.SEARXNG_TOKEN ? { authorization: `Bearer ${env.SEARXNG_TOKEN}` } : {},
+        healthPath: '/healthz',
+      }
     : undefined;
   return pages || search ? { pages, search } : undefined;
 }

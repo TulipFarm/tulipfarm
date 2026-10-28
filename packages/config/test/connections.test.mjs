@@ -56,7 +56,7 @@ test('connection secrets accept files, reject conflicts, and belong to the secre
     HUNTSMAN_TOKEN_FILE: file,
   });
   assert.deepEqual(web.pages.headers, { authorization: 'Bearer test-file-key' });
-  for (const name of ['TEMPORAL_API_KEY', 'HUNTSMAN_TOKEN']) {
+  for (const name of ['TEMPORAL_API_KEY', 'HUNTSMAN_TOKEN', 'SEARXNG_TOKEN']) {
     assert.ok(secretSettingNames.includes(name));
     const config = name === 'TEMPORAL_API_KEY' ? temporalConnectionOptions : publicWebConfiguration;
     assert.throws(() => config({ [name]: 'direct-key', [`${name}_FILE`]: file }), /different values/);
@@ -64,7 +64,7 @@ test('connection secrets accept files, reject conflicts, and belong to the secre
   }
 });
 
-test('public web enables page reads and search separately, sending the token only to Huntsman', () => {
+test('public web enables page reads and search separately, each with its own token', () => {
   assert.equal(publicWebConfiguration({}), undefined);
   assert.equal(publicWebConfiguration({ HUNTSMAN_ENDPOINT: '', SEARXNG_ENDPOINT: '', HUNTSMAN_TOKEN: '' }), undefined);
   const pages = publicWebConfiguration({ HUNTSMAN_ENDPOINT: 'http://huntsman:3000' });
@@ -84,6 +84,11 @@ test('public web enables page reads and search separately, sending the token onl
   });
   assert.deepEqual(both.pages.headers, { authorization: 'Bearer test-key' });
   assert.deepEqual(both.search.headers, {});
+  const proxied = publicWebConfiguration({
+    SEARXNG_ENDPOINT: 'https://search.example.com',
+    SEARXNG_TOKEN: 'search-key',
+  });
+  assert.deepEqual(proxied.search.headers, { authorization: 'Bearer search-key' });
   for (const name of ['HUNTSMAN_ENDPOINT', 'SEARXNG_ENDPOINT'])
     for (const endpoint of [
       ' ',

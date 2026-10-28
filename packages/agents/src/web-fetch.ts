@@ -285,7 +285,7 @@ async function scrape(url: string, signal: AbortSignal): Promise<unknown> {
   return boundedJson(response, 8 * 1024 * 1024);
 }
 
-/** SearXNG `GET /search` with JSON output. */
+/** SearXNG `GET /search` with JSON output, or a proxy in front of it that takes SEARXNG_TOKEN. */
 async function search(query: string, window: 'day' | 'week' | 'any', signal: AbortSignal): Promise<unknown> {
   const config = publicWebConfiguration()?.search;
   if (!config) throw new Error('web-unavailable');
@@ -293,7 +293,11 @@ async function search(query: string, window: 'day' | 'week' | 'any', signal: Abo
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'json');
   if (window !== 'any') url.searchParams.set('time_range', window);
-  const response = await fetch(url, { redirect: 'error', signal, headers: { accept: 'application/json' } });
+  const response = await fetch(url, {
+    redirect: 'error',
+    signal,
+    headers: { accept: 'application/json', ...config.headers },
+  });
   return boundedJson(response, 1024 * 1024);
 }
 

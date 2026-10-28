@@ -68,6 +68,8 @@ x-public-web: &public-web
   HUNTSMAN_TOKEN: ${HUNTSMAN_TOKEN:-}
   HUNTSMAN_TOKEN_FILE: ${HUNTSMAN_TOKEN_FILE:-}
   SEARXNG_ENDPOINT: ${SEARXNG_ENDPOINT:-}
+  SEARXNG_TOKEN: ${SEARXNG_TOKEN:-}
+  SEARXNG_TOKEN_FILE: ${SEARXNG_TOKEN_FILE:-}
   # Removed settings, still passed through so that an upgraded .env that sets them stops startup with what replaces them.
   FIRECRAWL_ENDPOINT: ${FIRECRAWL_ENDPOINT:-}
   FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
