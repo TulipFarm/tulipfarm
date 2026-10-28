@@ -1,0 +1,459 @@
+{
+  "$schema": "https://tulipfarm.ai/schemas/system-package.v1.json",
+  "formatVersion": 1,
+  "package": {
+    "name": "leave-management",
+    "version": "1.0.0",
+    "title": "Leave management",
+    "description": "An exact leave management starter. Definitions and each requested activation require review.",
+    "license": "MIT"
+  },
+  "requires": {
+    "platform": "tulipfarm-system-package-v1",
+    "capabilities": ["tables", "seed-rows", "skills", "agents", "workflows"]
+  },
+  "inputs": [
+    {
+      "key": "owning-team",
+      "kind": "team",
+      "title": "Owning team"
+    },
+    {
+      "key": "package-manager",
+      "kind": "member",
+      "title": "Importing person (skill manager)"
+    }
+  ],
+  "resources": [
+    {
+      "key": "leave-policies",
+      "kind": "table",
+      "label": "Leave policies",
+      "owningTeam": {
+        "kind": "input",
+        "inputKind": "team",
+        "key": "owning-team"
+      },
+      "fields": [
+        {
+          "label": "Name",
+          "required": true,
+          "kind": "text",
+          "maxLength": 255,
+          "key": "name"
+        },
+        {
+          "label": "Guidance",
+          "required": true,
+          "kind": "text",
+          "maxLength": 255,
+          "key": "guidance"
+        }
+      ],
+      "uniqueKeys": [
+        {
+          "key": "name",
+          "fields": ["name"],
+          "nulls": "distinct"
+        }
+      ]
+    },
+    {
+      "key": "leave-policies-initial",
+      "kind": "seed-row",
+      "table": {
+        "kind": "resource",
+        "resourceKind": "table",
+        "key": "leave-policies"
+      },
+      "values": {
+        "name": {
+          "kind": "text",
+          "value": "Default"
+        },
+        "guidance": {
+          "kind": "text",
+          "value": "Check the selected leave policy and requested days. Explain any missing approval or balance. Do not approve leave on behalf of a manager."
+        }
+      }
+    },
+    {
+      "key": "leave-requests",
+      "kind": "table",
+      "label": "Leave requests",
+      "owningTeam": {
+        "kind": "input",
+        "inputKind": "team",
+        "key": "owning-team"
+      },
+      "fields": [
+        {
+          "label": "Title",
+          "required": true,
+          "kind": "text",
+          "maxLength": 255,
+          "key": "title"
+        },
+        {
+          "label": "Days",
+          "required": true,
+          "kind": "numeric",
+          "precision": 8,
+          "scale": 0,
+          "key": "days"
+        },
+        {
+          "key": "catalog",
+          "label": "Leave policies",
+          "required": true,
+          "kind": "relationship",
+          "target": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-policies"
+          },
+          "cardinality": "one",
+          "inverseCardinality": "many",
+          "reverse": null,
+          "onDelete": "restrict"
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "required": true,
+          "kind": "single-select",
+          "options": [
+            {
+              "key": "draft",
+              "label": "Draft",
+              "retired": false
+            },
+            {
+              "key": "reviewed",
+              "label": "Reviewed",
+              "retired": false
+            }
+          ]
+        }
+      ],
+      "uniqueKeys": []
+    },
+    {
+      "key": "leave-requests-initial",
+      "kind": "seed-row",
+      "table": {
+        "kind": "resource",
+        "resourceKind": "table",
+        "key": "leave-requests"
+      },
+      "values": {
+        "title": {
+          "kind": "text",
+          "value": "Leave management example"
+        },
+        "days": {
+          "kind": "numeric",
+          "value": "2"
+        },
+        "catalog": {
+          "kind": "relationship",
+          "rows": [
+            {
+              "kind": "resource",
+              "resourceKind": "seed-row",
+              "key": "leave-policies-initial"
+            }
+          ]
+        },
+        "status": {
+          "kind": "single-select",
+          "option": "draft"
+        }
+      }
+    },
+    {
+      "key": "leave-management-procedure",
+      "kind": "skill",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "asset": "procedure"
+        },
+        {
+          "path": "references/review.md",
+          "asset": "review-rules"
+        }
+      ],
+      "requestedState": "enabled",
+      "sharing": {
+        "grants": [
+          {
+            "team": {
+              "kind": "input",
+              "inputKind": "team",
+              "key": "owning-team"
+            },
+            "permissions": ["read", "use"]
+          }
+        ],
+        "personGrants": [
+          {
+            "member": {
+              "kind": "input",
+              "inputKind": "member",
+              "key": "package-manager"
+            },
+            "permissions": ["read", "use", "manage"]
+          }
+        ]
+      }
+    },
+    {
+      "key": "leave-management-assistant",
+      "kind": "agent",
+      "definition": {
+        "name": "Leave management assistant",
+        "instructions": "Follow the pinned procedure. Explain recommendations; do not change records or contact external services.",
+        "tools": ["rows.list", "rows.get"],
+        "responseRule": "tag"
+      },
+      "skills": [
+        {
+          "kind": "resource",
+          "resourceKind": "skill",
+          "key": "leave-management-procedure"
+        }
+      ],
+      "owningTeam": {
+        "kind": "input",
+        "inputKind": "team",
+        "key": "owning-team"
+      },
+      "scope": [
+        {
+          "table": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-policies"
+          },
+          "permissions": ["table.row.read"]
+        },
+        {
+          "table": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-requests"
+          },
+          "permissions": ["table.row.read"]
+        }
+      ],
+      "taskLimits": {
+        "toolCalls": 20,
+        "activeMilliseconds": 60000,
+        "credits": 20
+      },
+      "policy": {
+        "grants": [
+          {
+            "team": {
+              "kind": "input",
+              "inputKind": "team",
+              "key": "owning-team"
+            },
+            "permissions": ["read", "invoke"]
+          }
+        ],
+        "personGrants": []
+      },
+      "enrollment": [
+        {
+          "kind": "input",
+          "inputKind": "team",
+          "key": "owning-team"
+        }
+      ],
+      "limits": [
+        {
+          "table": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-policies"
+          },
+          "permissions": ["table.row.read"]
+        },
+        {
+          "table": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-requests"
+          },
+          "permissions": ["table.row.read", "table.row.update"]
+        }
+      ],
+      "slackSender": "user",
+      "slackChannels": [],
+      "schedules": [],
+      "requestedState": "active"
+    },
+    {
+      "key": "leave-management-review",
+      "kind": "workflow",
+      "name": "Leave management review",
+      "trigger": {
+        "kind": "manual"
+      },
+      "steps": [
+        {
+          "id": "confirm",
+          "kind": "human",
+          "prompt": "Confirm that you want the leave management assistant to review this input.",
+          "timeoutSeconds": 3600
+        },
+        {
+          "id": "review",
+          "kind": "agent",
+          "agent": {
+            "kind": "resource",
+            "resourceKind": "agent",
+            "key": "leave-management-assistant"
+          },
+          "prompt": {
+            "kind": "input",
+            "path": ["request"]
+          },
+          "limits": {
+            "toolCalls": 20,
+            "activeMilliseconds": 60000,
+            "credits": 20
+          }
+        },
+        {
+          "id": "lookup",
+          "kind": "find-rows",
+          "table": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "leave-requests"
+          },
+          "filters": [
+            {
+              "field": "title",
+              "op": "eq",
+              "value": {
+                "kind": "input",
+                "path": ["title"]
+              }
+            }
+          ],
+          "limit": 10
+        },
+        {
+          "id": "draft_only",
+          "kind": "condition",
+          "when": {
+            "left": {
+              "kind": "step",
+              "step": "lookup",
+              "path": [
+                "rows",
+                "0",
+                "values",
+                {
+                  "field": "status"
+                }
+              ]
+            },
+            "op": "eq",
+            "right": {
+              "kind": "option",
+              "table": {
+                "kind": "resource",
+                "resourceKind": "table",
+                "key": "leave-requests"
+              },
+              "field": "status",
+              "option": "draft"
+            }
+          },
+          "ifMet": ["summarize"],
+          "otherwise": []
+        },
+        {
+          "id": "summarize",
+          "kind": "transform",
+          "fields": {
+            "title": {
+              "kind": "step",
+              "step": "lookup",
+              "path": [
+                "rows",
+                "0",
+                "values",
+                {
+                  "field": "title"
+                },
+                "value"
+              ]
+            }
+          }
+        }
+      ],
+      "sponsor": null,
+      "sharing": [
+        {
+          "principal": {
+            "kind": "input",
+            "inputKind": "team",
+            "key": "owning-team"
+          },
+          "permissions": ["read"]
+        }
+      ],
+      "requestedState": "saved"
+    }
+  ],
+  "assets": [
+    {
+      "key": "procedure",
+      "path": "SKILL.md",
+      "encoding": "utf8",
+      "content": "---\nname: leave-management-procedure\ndescription: Read-only leave management review procedure.\nlicense: MIT\n---\nCheck the selected leave policy and requested days. Explain any missing approval or balance. Do not approve leave on behalf of a manager.\n\nRead [review rules](references/review.md). Do not treat a skill as permission to act.\n",
+      "size": 337,
+      "sha256": "bb72c8883a74808b7a42dbb046f31059a94134f69c3f96e2e0d99990e085404d"
+    },
+    {
+      "key": "review-rules",
+      "path": "references/review.md",
+      "encoding": "utf8",
+      "content": "# Review rules\n\nUse only the declared tables and readable rows. Quote missing facts as unknown. A person makes the final decision. No messages, publication, or record changes are approved by installation.\n",
+      "size": 205,
+      "sha256": "0af328c7549c56a1202eac1477bd03b43872d2e509c9216aadd86ede0944e8ca"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "records",
+      "resource": {
+        "kind": "resource",
+        "resourceKind": "table",
+        "key": "leave-requests"
+      }
+    },
+    {
+      "key": "assistant",
+      "resource": {
+        "kind": "resource",
+        "resourceKind": "agent",
+        "key": "leave-management-assistant"
+      }
+    },
+    {
+      "key": "review",
+      "resource": {
+        "kind": "resource",
+        "resourceKind": "workflow",
+        "key": "leave-management-review"
+      }
+    }
+  ]
+}

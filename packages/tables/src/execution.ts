@@ -74,7 +74,7 @@ export type ExecutionAccess = {
     tx: TableTransaction,
     actor: HumanActor,
     sources: readonly SourceDependency[],
-    conversationId: string,
+    conversationId: string | null,
   ): Promise<void>;
   requireFiles?: FileAccess;
   requireImportReference?: (
@@ -148,6 +148,7 @@ async function admit(tx: TableTransaction, manifest: ProposalManifest, plan: Rev
   await planAuthority(tx, manifest.requester, plan.input, plan.before, []);
   if (plan.input.kind === 'schema') await requireFixedTableTitle(tx, plan.after, plan.before);
   if (plan.input.kind === 'import') {
+    if (manifest.conversationId === null) throw new AccessDenied();
     if (!access.requireImportReference) throw new AccessDenied();
     await access.requireImportReference(tx, manifest.requester, manifest.conversationId, plan.input.reference);
     if (canonicalJson(await destinationAudience(tx, plan.input.tableId)) !== canonicalJson(plan.audience))

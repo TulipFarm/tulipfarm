@@ -163,6 +163,26 @@ export async function canAccessAsset(
 ): Promise<boolean> {
   actor = actorSchema.parse(actor);
   assetId = uuidSchema.parse(assetId);
+  if (['table.row.create', 'table.row.update', 'table.row.delete'].includes(permission)) {
+    const installed = (
+      await transaction.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
+        table(transaction, 'tf_system_package_installations'),
+      ])
+    ).rows[0]?.installed;
+    if (
+      installed &&
+      (
+        await transaction.client.query(
+          `SELECT 1 FROM ${table(transaction, 'tf_system_package_installations')} i,
+        LATERAL jsonb_array_elements(i.nodes) node
+       WHERE node->>'kind'='table' AND node->>'resourceId'=$1
+         AND node->>'state'<>'completed' LIMIT 1`,
+          [assetId],
+        )
+      ).rowCount
+    )
+      return false;
+  }
   if (
     (permission === 'integration.use' || permission === 'integration.manage') &&
     !(await canAccessAsset(transaction, actor, assetId, 'integration.read'))

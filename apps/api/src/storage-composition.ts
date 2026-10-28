@@ -83,6 +83,8 @@ import { registerWorkspaceMcp } from './workspace-mcp.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentSetupOptions } from '@tulipfarm/agents/setup';
 import { registerAgentAuthoringAssistance } from './agent-authoring-assistance.ts';
+import { registerSystemPackages } from './system-packages.ts';
+import { configuredSkillRuntimeProbe } from '@tulipfarm/workflow-snippets/client';
 
 export function registerStorageComposition(
   app: FastifyInstance,
@@ -168,6 +170,22 @@ export function registerStorageComposition(
     if (process.env[key]) throw new Error('API must not receive authoring or maintenance credentials');
   }
   const confirmation = createWorkspaceTableConfirmation(runtime);
+  registerSystemPackages(app, {
+    runtime,
+    identity: dependencies.pool,
+    auth: dependencies.auth,
+    pool: dependencies.pool,
+    objects: chatObjects ?? undefined,
+    resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+    modelFamilyEligibility,
+    agentSetup,
+    workflows: {
+      keyring: integrationCredentialKeyring(),
+      codeSteps: workflowCodeStepsEnabled(),
+      agentSteps: true,
+    },
+    skillRuntimeAvailable: configuredSkillRuntimeProbe(),
+  });
   const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
   const github = githubAccounts(runtime);

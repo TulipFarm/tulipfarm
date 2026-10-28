@@ -106,7 +106,7 @@ export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft) {
     .update(canonicalJson({ agentId, version: expectedVersion + 1, ...reviewed }))
     .digest('hex');
 }
-function scheduleId(commandId: string, selectedId: string) {
+export function agentSetupScheduleId(commandId: string, selectedId: string) {
   const hash = createHash('sha256').update(`${commandId}:${selectedId}`).digest('hex');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
@@ -423,7 +423,7 @@ export function createAgentSetup(
       await requireTaskInvocation(tx, actor, command.agent_id);
       await createAgentSchedules(bound).save(workspaceId, actor.userId, command.agent_id, {
         ...selected,
-        id: scheduleId(command.id, selected.id),
+        id: agentSetupScheduleId(command.id, selected.id),
         activationId: activated.activationId,
         historyAudience: [],
       });

@@ -1,0 +1,257 @@
+{
+  "$schema": "https://tulipfarm.ai/schemas/system-package.v1.json",
+  "formatVersion": 1,
+  "package": {
+    "name": "linked-records",
+    "version": "1.0.0",
+    "title": "Linked records",
+    "description": "Two mutually linked table schemas, reverse fields, a bundled attachment, sharing, and a saved row workflow. No workflow runs during installation.",
+    "license": "MIT"
+  },
+  "requires": {
+    "platform": "tulipfarm-system-package-v1",
+    "capabilities": ["tables", "files", "seed-rows", "workflows"]
+  },
+  "inputs": [
+    {
+      "key": "owning-team",
+      "kind": "team",
+      "title": "Owning team"
+    }
+  ],
+  "resources": [
+    {
+      "key": "projects",
+      "kind": "table",
+      "label": "Package projects",
+      "owningTeam": {
+        "kind": "input",
+        "inputKind": "team",
+        "key": "owning-team"
+      },
+      "fields": [
+        {
+          "label": "Title",
+          "required": true,
+          "kind": "text",
+          "maxLength": 255,
+          "key": "title"
+        },
+        {
+          "key": "related",
+          "label": "Related record",
+          "required": false,
+          "kind": "relationship",
+          "target": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "documents"
+          },
+          "cardinality": "one",
+          "inverseCardinality": "many",
+          "reverse": {
+            "key": "referenced-by",
+            "label": "Referenced by"
+          },
+          "onDelete": "restrict"
+        }
+      ],
+      "uniqueKeys": [
+        {
+          "key": "title",
+          "fields": ["title"],
+          "nulls": "distinct"
+        }
+      ],
+      "sharing": {
+        "grants": [
+          {
+            "team": {
+              "kind": "input",
+              "inputKind": "team",
+              "key": "owning-team"
+            },
+            "permissions": ["table.row.read"]
+          }
+        ],
+        "personGrants": []
+      }
+    },
+    {
+      "key": "documents",
+      "kind": "table",
+      "label": "Package documents",
+      "owningTeam": {
+        "kind": "input",
+        "inputKind": "team",
+        "key": "owning-team"
+      },
+      "fields": [
+        {
+          "label": "Title",
+          "required": true,
+          "kind": "text",
+          "maxLength": 255,
+          "key": "title"
+        },
+        {
+          "key": "related",
+          "label": "Related record",
+          "required": false,
+          "kind": "relationship",
+          "target": {
+            "kind": "resource",
+            "resourceKind": "table",
+            "key": "projects"
+          },
+          "cardinality": "one",
+          "inverseCardinality": "many",
+          "reverse": {
+            "key": "referenced-by",
+            "label": "Referenced by"
+          },
+          "onDelete": "restrict"
+        },
+        {
+          "label": "Attachment",
+          "required": false,
+          "kind": "file",
+          "cardinality": "many",
+          "access": "independent",
+          "key": "attachment"
+        }
+      ],
+      "uniqueKeys": [
+        {
+          "key": "title",
+          "fields": ["title"],
+          "nulls": "distinct"
+        }
+      ],
+      "sharing": {
+        "grants": [
+          {
+            "team": {
+              "kind": "input",
+              "inputKind": "team",
+              "key": "owning-team"
+            },
+            "permissions": ["table.row.read"]
+          }
+        ],
+        "personGrants": []
+      }
+    },
+    {
+      "key": "guide",
+      "kind": "file",
+      "asset": "guide-bytes",
+      "name": "guide.txt",
+      "mimeType": "text/plain"
+    },
+    {
+      "key": "first-document",
+      "kind": "seed-row",
+      "table": {
+        "kind": "resource",
+        "resourceKind": "table",
+        "key": "documents"
+      },
+      "values": {
+        "title": {
+          "kind": "text",
+          "value": "Example guide"
+        },
+        "attachment": {
+          "kind": "file",
+          "files": [
+            {
+              "kind": "resource",
+              "resourceKind": "file",
+              "key": "guide"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "changed-document",
+      "kind": "workflow",
+      "name": "Document title change",
+      "trigger": {
+        "kind": "row",
+        "table": {
+          "kind": "resource",
+          "resourceKind": "table",
+          "key": "documents"
+        },
+        "event": "updated",
+        "fields": ["title"],
+        "filter": {
+          "match": "is-not-empty",
+          "field": "title"
+        }
+      },
+      "steps": [
+        {
+          "id": "change",
+          "kind": "transform",
+          "fields": {
+            "title": {
+              "kind": "input",
+              "path": [
+                "values",
+                {
+                  "field": "title"
+                },
+                "value"
+              ]
+            },
+            "previous_title": {
+              "kind": "input",
+              "path": [
+                "previousValues",
+                {
+                  "field": "title"
+                },
+                "value"
+              ]
+            }
+          }
+        }
+      ],
+      "sponsor": null,
+      "sharing": [
+        {
+          "principal": {
+            "kind": "input",
+            "inputKind": "team",
+            "key": "owning-team"
+          },
+          "permissions": ["read"]
+        }
+      ],
+      "requestedState": "saved"
+    }
+  ],
+  "assets": [
+    {
+      "key": "guide-bytes",
+      "path": "attachments/guide.txt",
+      "encoding": "base64",
+      "content": "VGhpcyBhdHRhY2htZW50IHdhcyBpbXBvcnRlZCB3aXRoIHRoZSBsaW5rZWQtcmVjb3JkcyBwYWNrYWdlLgo=",
+      "size": 62,
+      "sha256": "8e40cbfc038e8ce6ff09a661f1e5f4ac6650674a25fd666d017fdf5afa81e3e6"
+    }
+  ],
+  "outputs": [
+    {
+      "key": "documents",
+      "resource": {
+        "kind": "resource",
+        "resourceKind": "table",
+        "key": "documents"
+      }
+    }
+  ]
+}

@@ -10,6 +10,7 @@
     "test:canvas": "node --test test/canvas.browser.mjs",
     "test:pptx-charts": "node --test test/pptx-charts.browser.mjs",
     "test:plans": "node --test test/plan-canvas.browser.mjs",
+    "test:packages": "node --test test/system-packages.browser.mjs",
     "test:conversations": "node test/conversations.browser.mjs",
     "test:interactions": "node test/interactions.browser.mjs",
     "test:models": "node --test test/models.browser.mjs",

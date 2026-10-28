@@ -513,33 +513,35 @@ export function PlanCanvas({
   );
   return (
     <CanvasSection>
-      <PlanOutline
-        title={view.title}
-        brief={view.brief}
-        status={status}
-        tone={tone}
-        progress={planProgress(view.counts)}
-        notice={
-          <>
-            <PlanNotice view={view} />
-            {checks}
-          </>
-        }
-        tasks={planOutline(view, workspaceSlug)}
-        stale={
-          state.error && (
-            <Alert>
-              <AlertTitle>Showing the last loaded plan</AlertTitle>
-              <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
-              <div className="mt-2">
-                <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
-                  {state.refreshing ? 'Checking…' : 'Check again'}
-                </Button>
-              </div>
-            </Alert>
-          )
-        }
-      />
+      <PlanNotice view={view} />
+      {state.error && (
+        <Alert>
+          <AlertTitle>Showing the last loaded plan</AlertTitle>
+          <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
+          <div className="mt-2">
+            <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
+              {state.refreshing ? 'Checking…' : 'Check again'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+      <TaskTree title={view.title} tasks={planTree(view)} summary={planProgress(view.counts)} />
+      <Collapsible>
+        <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
+          Plan details and verification
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <PlanOutline
+            title={view.title}
+            brief={view.brief}
+            status={status}
+            tone={tone}
+            progress={planProgress(view.counts)}
+            notice={checks}
+            tasks={planOutline(view, workspaceSlug)}
+          />
+        </CollapsibleContent>
+      </Collapsible>
     </CanvasSection>
   );
 }

@@ -23,8 +23,11 @@ import type { GoogleMutation } from '@/features/google/action-state';
 import type { ResultActivity } from './result-activity';
 import type { FileReference } from './draft-files';
 import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
+import type { SystemPackage } from '@tulipfarm/agents/system-package-contracts';
 
 export type CanvasContent =
+  | { kind: 'package-plan'; document: SystemPackage; order?: string[] | undefined }
+  | { kind: 'package-installation'; workspaceId: string; chatId: string; installationId: string }
   | { kind: 'activity-result'; items: ResultActivity[] }
   | { kind: 'github-batch'; workspaceId: string; chatId: string; batchId: string; task: boolean }
   | { kind: 'slack-action'; workspaceId: string; actionId: string }

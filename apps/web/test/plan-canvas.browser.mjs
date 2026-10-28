@@ -171,7 +171,7 @@ function fixtures() {
 }
 
 test(
-  'plans open as a read-only outline, starters control them in chat, and viewers only read',
+  'plans always show a task tree with read-only details; starters control them in chat and viewers only read',
   { timeout: 180000 },
   async () => {
     const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
@@ -284,6 +284,11 @@ test(
       await reference.getByRole('button', { name: 'Open plan' }).click();
       await canvas.getByRole('heading', { name: 'Build a waitlist' }).waitFor();
       await canvas.getByText('A task needs your input').waitFor();
+      await canvas.locator('[data-slot="task-tree"]').waitFor();
+      const details = canvas.getByRole('button', { name: 'Plan details and verification' });
+      assert.equal(await details.getAttribute('aria-expanded'), 'false');
+      await details.click();
+      const outline = canvas.locator('[data-slot="plan-outline"]');
       assert.equal(
         await canvas
           .locator('input, textarea, select, [role=checkbox], [contenteditable=true], [draggable=true]')
@@ -292,25 +297,25 @@ test(
         'the outline has nothing to edit',
       );
 
-      const form = canvas.getByRole('button', { name: /Build the signup form/ });
+      const form = outline.getByRole('button', { name: /Build the signup form/ });
       assert.equal(await form.getAttribute('aria-expanded'), 'false');
       await form.click();
       assert.equal(await form.getAttribute('aria-expanded'), 'true');
-      await canvas.getByText('Invalid email addresses show a clear message').waitFor();
-      await canvas.getByRole('link', { name: /Write the waitlist page copy/ }).waitFor();
-      await canvas.getByRole('button', { name: /Read the signups back/ }).click();
+      await outline.getByText('Invalid email addresses show a clear message').waitFor();
+      await outline.getByRole('link', { name: /Write the waitlist page copy/ }).waitFor();
+      await outline.getByRole('button', { name: /Read the signups back/ }).click();
       assert.match(
-        await canvas.locator('a', { hasText: 'Answer in task' }).getAttribute('href'),
+        await outline.locator('a', { hasText: 'Answer in task' }).getAttribute('href'),
         new RegExp(`/${workspace.slug}/agent-tasks/${uuid(800)}$`),
       );
-      await canvas.getByRole('button', { name: /Hook the form up/ }).click();
-      await canvas.getByRole('link', { name: 'Frontend' }).waitFor();
-      const frontend = canvas.getByRole('button', { name: /^Frontend/ });
+      await outline.getByRole('button', { name: /Hook the form up/ }).click();
+      await outline.getByRole('link', { name: 'Frontend' }).waitFor();
+      const frontend = outline.getByRole('button', { name: /^Frontend/ });
       await frontend.click();
       assert.equal(await frontend.getAttribute('aria-expanded'), 'false');
       await canvas.locator('[data-slot="plan-outline-panel"][data-ending-style]').waitFor({ state: 'detached' });
       assert.equal(
-        await canvas
+        await outline
           .getByText('Write the waitlist page copy and layout')
           .evaluateAll(elements => elements.some(element => element.checkVisibility())),
         false,
@@ -450,6 +455,7 @@ test(
       await reference.getByRole('button', { name: 'Open plan' }).click();
       const sheet = page.getByRole('dialog', { name: 'Canvas' });
       await canvas.getByRole('heading', { name: 'Build a waitlist' }).waitFor();
+      await canvas.getByRole('button', { name: 'Plan details and verification' }).click();
       await sheet.getByRole('button', { name: /Build the signup form/ }).click();
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),

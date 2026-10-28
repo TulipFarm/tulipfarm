@@ -84,6 +84,7 @@ import { ChatModelStatus, useChatModels } from './chat-models';
 import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
+import { ChatPackages, useChatPackages } from '@/features/packages/chat-packages';
 import { InteractionCard } from './interaction-card';
 import { AuthoringDraftCard } from './authoring-draft-card';
 import { Welcome } from './welcome';
@@ -404,6 +405,7 @@ function ConversationDetail({
   const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
+  const packages = useChatPackages(workspace.id, chatId, !draft);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const data = useMemo(
     () => (savedData ? { ...savedData, messages: reconcileLiveTools(savedData.messages, stream.tools) } : null),
@@ -734,7 +736,7 @@ function ConversationDetail({
       : thinking
         ? activity.label
         : null;
-  const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0;
+  const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
   const firstId = data?.messages.at(0)?.id;
   useLayoutEffect(() => {
@@ -929,6 +931,14 @@ function ConversationDetail({
           >
             {history => (
               <>
+                {!draft && (
+                  <ChatPackages
+                    packages={packages}
+                    chatId={chatId}
+                    disabled={history.chat.isClosed || projectArchived}
+                    foreground={visible && !compact}
+                  />
+                )}
                 {history.nextBefore && (
                   <div className="flex justify-center">
                     <Button
