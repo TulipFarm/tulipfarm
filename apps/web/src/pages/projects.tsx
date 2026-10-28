@@ -200,40 +200,38 @@ export function ProjectsPage() {
     </Button>
   );
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title="Projects"
-          description="Shared spaces for a team's chats, files, and instructions. Only project members can open a project."
-          actions={create}
-        />
-        <CreateProjectDialog api={api} open={creating} onOpenChange={setCreating} />
-        <ProjectRead state={read.state} refresh={read.refresh} label="projects">
-          {projects => {
-            if (!projects.length)
-              return (
-                <StatePanel
-                  kind="empty"
-                  icon={Folder}
-                  title="No projects yet"
-                  description="Create a project for work that several people share, like a product launch. Add the people, files, and instructions every chat in it should use."
-                  sample={<ProjectsSample />}
-                >
-                  {create}
-                </StatePanel>
-              );
+    <PageContent>
+      <PageHeader
+        title="Projects"
+        description="Shared spaces for a team's chats, files, and instructions. Only project members can open a project."
+        actions={create}
+      />
+      <CreateProjectDialog api={api} open={creating} onOpenChange={setCreating} />
+      <ProjectRead state={read.state} refresh={read.refresh} label="projects">
+        {projects => {
+          if (!projects.length)
             return (
-              <ProjectCatalog
-                projects={projects}
-                query={search.q ?? ''}
-                archived={search.archived === true}
-                filter={filter}
-              />
+              <StatePanel
+                kind="empty"
+                icon={Folder}
+                title="No projects yet"
+                description="Create a project for work that several people share, like a product launch. Add the people, files, and instructions every chat in it should use."
+                sample={<ProjectsSample />}
+              >
+                {create}
+              </StatePanel>
             );
-          }}
-        </ProjectRead>
-      </PageContent>
-    </div>
+          return (
+            <ProjectCatalog
+              projects={projects}
+              query={search.q ?? ''}
+              archived={search.archived === true}
+              filter={filter}
+            />
+          );
+        }}
+      </ProjectRead>
+    </PageContent>
   );
 }
 
@@ -465,28 +463,26 @@ function ProjectPage({
   const api = useProjectApi(workspace.id);
   const read = useProject(api, projectId);
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        {read.state.kind !== 'ready' && (
-          <PageHeader
-            back={{
-              label: 'Back to projects',
-              link: (
-                <Link
-                  to="/$workspaceSlug/projects"
-                  params={{ workspaceSlug: workspace.slug }}
-                  search={listSearch(workspace.slug)}
-                />
-              ),
-            }}
-            title={title}
-          />
-        )}
-        <ProjectRead state={read.state} refresh={read.refresh} label="project">
-          {detail => <Fragment key={projectId}>{children(api, detail, read.refresh)}</Fragment>}
-        </ProjectRead>
-      </PageContent>
-    </div>
+    <PageContent>
+      {read.state.kind !== 'ready' && (
+        <PageHeader
+          back={{
+            label: 'Back to projects',
+            link: (
+              <Link
+                to="/$workspaceSlug/projects"
+                params={{ workspaceSlug: workspace.slug }}
+                search={listSearch(workspace.slug)}
+              />
+            ),
+          }}
+          title={title}
+        />
+      )}
+      <ProjectRead state={read.state} refresh={read.refresh} label="project">
+        {detail => <Fragment key={projectId}>{children(api, detail, read.refresh)}</Fragment>}
+      </ProjectRead>
+    </PageContent>
   );
 }
 

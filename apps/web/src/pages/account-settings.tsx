@@ -28,44 +28,42 @@ type Save = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 
 export function AccountSettingsPage() {
   const { user, workspace } = workspaceRoute.useRouteContext();
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          titleId="account-heading"
-          focusable
-          title="Account"
-          description="Manage your profile, appearance, and this workspace's personal memory."
-        />
-        <SettingsGroup title="Profile" titleId="profile-heading">
-          <ProfilePicture key={`picture:${user.id}`} />
-          <ProfileName key={`name:${user.id}`} />
-          <SettingsRow label="Email" description="Used to sign in.">
-            <span className="break-all text-sm">{user.email}</span>
+    <PageContent>
+      <PageHeader
+        titleId="account-heading"
+        focusable
+        title="Account"
+        description="Manage your profile, appearance, and this workspace's personal memory."
+      />
+      <SettingsGroup title="Profile" titleId="profile-heading">
+        <ProfilePicture key={`picture:${user.id}`} />
+        <ProfileName key={`name:${user.id}`} />
+        <SettingsRow label="Email" description="Used to sign in.">
+          <span className="break-all text-sm">{user.email}</span>
+        </SettingsRow>
+        <SignInMethods />
+        <PublicAuthQueryProvider>
+          <PasswordSettings key={`password:${user.id}`} />
+        </PublicAuthQueryProvider>
+      </SettingsGroup>
+      <SettingsGroup title="Preferences" titleId="preferences-heading">
+        <ThemePreference />
+        {analytics.configured() && (
+          <SettingsRow label="Analytics" description="Review or change optional analytics for this browser.">
+            <Button variant="outline" onClick={() => window.dispatchEvent(new Event(preferencesEvent))}>
+              Analytics preferences
+            </Button>
           </SettingsRow>
-          <SignInMethods />
-          <PublicAuthQueryProvider>
-            <PasswordSettings key={`password:${user.id}`} />
-          </PublicAuthQueryProvider>
-        </SettingsGroup>
-        <SettingsGroup title="Preferences" titleId="preferences-heading">
-          <ThemePreference />
-          {analytics.configured() && (
-            <SettingsRow label="Analytics" description="Review or change optional analytics for this browser.">
-              <Button variant="outline" onClick={() => window.dispatchEvent(new Event(preferencesEvent))}>
-                Analytics preferences
-              </Button>
-            </SettingsRow>
-          )}
-        </SettingsGroup>
-        <div className="pb-20">
-          <PersonalMemoryEditor
-            key={`memory:${workspace.id}:${user.id}`}
-            workspaceId={workspace.id}
-            workspaceName={workspace.name}
-          />
-        </div>
-      </PageContent>
-    </div>
+        )}
+      </SettingsGroup>
+      <div className="pb-20">
+        <PersonalMemoryEditor
+          key={`memory:${workspace.id}:${user.id}`}
+          workspaceId={workspace.id}
+          workspaceName={workspace.name}
+        />
+      </div>
+    </PageContent>
   );
 }
 

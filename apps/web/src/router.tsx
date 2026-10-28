@@ -36,6 +36,7 @@ import { readWorkspaceList, WorkspaceListQueryBridge } from '@/features/workspac
 import { reconcileMembership } from '@/features/governance/queries';
 import { invitationTokenSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { RecoveryNotice, WorkspaceRecoveryPage } from '@/pages/workspace-recovery';
+import { workspacePageScroller } from '@/lib/page-scroller';
 import { accountCallbackResultSchema } from '@tulipfarm/atlassian/callback-contracts';
 import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback-contracts';
 import { workflowPageSearch } from '@/features/workflows/page-search';
@@ -987,6 +988,7 @@ export const integrationDetailRoute = createRoute({
 });
 export const router = createRouter({
   scrollRestoration: true,
+  scrollToTopSelectors: ['window', `[data-scroll-restoration-id="${workspacePageScroller}"]`],
   getScrollRestorationKey: location =>
     /\/files\/?$/.test(location.pathname)
       ? location.pathname + location.searchStr

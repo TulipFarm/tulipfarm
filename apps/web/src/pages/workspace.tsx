@@ -36,6 +36,7 @@ import { WorkspaceSetup } from './workspace-setup';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { rememberWorkspace } from '@/lib/last-workspace';
+import { workspacePageScroller } from '@/lib/page-scroller';
 import { saveLastWorkspace } from '@/lib/workspaces';
 import { requestSignal } from '@/lib/http';
 import { readTheme, saveTheme, type Theme } from '@/lib/theme';
@@ -716,7 +717,13 @@ function WorkspaceShellContent() {
                   </Suspense>
                 ) : (
                   <BudProvider key={workspace.id} headerActions={actionsElement}>
-                    <Outlet />
+                    {/* Pages scroll here; full-height pages such as chat fill it and scroll their own panes. */}
+                    <div
+                      data-scroll-restoration-id={workspacePageScroller}
+                      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                    >
+                      <Outlet />
+                    </div>
                   </BudProvider>
                 )}
               </ChatHeaderContext>

@@ -66,30 +66,28 @@ export function IntegrationDetailPage() {
 
 function Missing({ slug }: { slug: string }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title="Integration not found"
-          parent={{
-            label: 'Integrations',
-            link: <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />,
-          }}
-        />
-        <StatePanel
-          kind="empty"
-          icon={Plug}
-          title="This integration doesn’t exist"
-          description="It may have been renamed or removed. Pick it again from the list."
+    <PageContent>
+      <PageHeader
+        title="Integration not found"
+        parent={{
+          label: 'Integrations',
+          link: <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />,
+        }}
+      />
+      <StatePanel
+        kind="empty"
+        icon={Plug}
+        title="This integration doesn’t exist"
+        description="It may have been renamed or removed. Pick it again from the list."
+      >
+        <Button
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />}
         >
-          <Button
-            nativeButton={false}
-            render={<Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} />}
-          >
-            All integrations
-          </Button>
-        </StatePanel>
-      </PageContent>
-    </div>
+          All integrations
+        </Button>
+      </StatePanel>
+    </PageContent>
   );
 }
 
@@ -161,139 +159,137 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
     ) : null;
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title={app.name}
-          parent={{
-            label: 'Integrations',
-            link: (
-              <Link
-                to="/$workspaceSlug/integrations"
-                params={{ workspaceSlug: slug }}
-                search={{ returnChat: search.returnChat }}
-              />
-            ),
-          }}
-        />
-        <WorkspaceRefreshNotice />
-        <fieldset disabled={workspaceStale} className="min-w-0">
-          <div className="max-w-5xl space-y-6">
-            <section aria-label={`${app.name} summary`} className="flex flex-wrap items-start gap-4">
-              <BrandIcon brand={app.brand} size="xl" />
-              <div className="min-w-0 flex-1 basis-56 space-y-1.5">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <p className="text-2xl font-semibold tracking-tight">{app.name}</p>
-                  <span className="flex h-6 items-center">
-                    <StatusBadge status={status} soon={app.provider === 'soon'} />
-                  </span>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  By {makerOf(app)} · {app.category}
-                </p>
-                <p className="max-w-prose pt-1">{app.blurb}</p>
+    <PageContent>
+      <PageHeader
+        title={app.name}
+        parent={{
+          label: 'Integrations',
+          link: (
+            <Link
+              to="/$workspaceSlug/integrations"
+              params={{ workspaceSlug: slug }}
+              search={{ returnChat: search.returnChat }}
+            />
+          ),
+        }}
+      />
+      <WorkspaceRefreshNotice />
+      <fieldset disabled={workspaceStale} className="min-w-0">
+        <div className="max-w-5xl space-y-6">
+          <section aria-label={`${app.name} summary`} className="flex flex-wrap items-start gap-4">
+            <BrandIcon brand={app.brand} size="xl" />
+            <div className="min-w-0 flex-1 basis-56 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <p className="text-2xl font-semibold tracking-tight">{app.name}</p>
+                <span className="flex h-6 items-center">
+                  <StatusBadge status={status} soon={app.provider === 'soon'} />
+                </span>
               </div>
-              {primary && <div className="w-full sm:w-auto sm:shrink-0 sm:pt-1">{primary}</div>}
-            </section>
-            {failure || status?.kind === 'error' ? (
-              <div className="space-y-3">
-                {failure && (
-                  <Alert variant="destructive">
-                    <AlertDescription>Could not start {app.name}. Try again.</AlertDescription>
-                  </Alert>
-                )}
-                {status?.kind === 'error' && (
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <span>{status.detail}</span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={refreshing}
-                          aria-busy={refreshing}
-                          onClick={() => void refresh()}
-                        >
-                          {refreshing ? 'Checking…' : 'Check again'}
-                        </Button>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </div>
-            ) : null}
-            <Tabs value={tab} onValueChange={value => setTab(value as IntegrationTab)}>
-              <div className="max-w-full overflow-x-auto pb-1">
-                <TabsList variant="line" aria-label={`${app.name} sections`}>
-                  {tabs.map(name => (
-                    <TabsTrigger key={name} value={name}>
-                      {tabLabels[name]}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </div>
-              <TabsContent value="overview">
+              <p className="text-sm text-muted-foreground">
+                By {makerOf(app)} · {app.category}
+              </p>
+              <p className="max-w-prose pt-1">{app.blurb}</p>
+            </div>
+            {primary && <div className="w-full sm:w-auto sm:shrink-0 sm:pt-1">{primary}</div>}
+          </section>
+          {failure || status?.kind === 'error' ? (
+            <div className="space-y-3">
+              {failure && (
+                <Alert variant="destructive">
+                  <AlertDescription>Could not start {app.name}. Try again.</AlertDescription>
+                </Alert>
+              )}
+              {status?.kind === 'error' && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span>{status.detail}</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={refreshing}
+                        aria-busy={refreshing}
+                        onClick={() => void refresh()}
+                      >
+                        {refreshing ? 'Checking…' : 'Check again'}
+                      </Button>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          ) : null}
+          <Tabs value={tab} onValueChange={value => setTab(value as IntegrationTab)}>
+            <div className="max-w-full overflow-x-auto pb-1">
+              <TabsList variant="line" aria-label={`${app.name} sections`}>
+                {tabs.map(name => (
+                  <TabsTrigger key={name} value={name}>
+                    {tabLabels[name]}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
+            <TabsContent value="overview">
+              <Pane>
+                <Overview
+                  app={app}
+                  status={status}
+                  workspaceId={workspaceId}
+                  busy={busy}
+                  hint={hint}
+                  onGrant={target => void start(target)}
+                  onTab={setTab}
+                  tabs={tabs}
+                />
+              </Pane>
+            </TabsContent>
+            {tabs.includes('accounts') && (
+              <TabsContent value="accounts">
                 <Pane>
-                  <Overview
-                    app={app}
-                    status={status}
-                    workspaceId={workspaceId}
-                    busy={busy}
-                    hint={hint}
-                    onGrant={target => void start(target)}
-                    onTab={setTab}
-                    tabs={tabs}
-                  />
+                  {accessLost ? (
+                    <AccessLost />
+                  ) : (
+                    <Accounts
+                      app={app}
+                      status={status}
+                      workspaceId={workspaceId}
+                      onChanged={() => void refresh()}
+                      primary={primary}
+                    />
+                  )}
                 </Pane>
               </TabsContent>
-              {tabs.includes('accounts') && (
-                <TabsContent value="accounts">
-                  <Pane>
-                    {accessLost ? (
-                      <AccessLost />
-                    ) : (
-                      <Accounts
-                        app={app}
-                        status={status}
-                        workspaceId={workspaceId}
-                        onChanged={() => void refresh()}
-                        primary={primary}
-                      />
-                    )}
-                  </Pane>
-                </TabsContent>
-              )}
-              {tabs.includes('knowledge') && (
-                <TabsContent value="knowledge">
-                  <Pane>
-                    {accessLost ? <AccessLost /> : <KnowledgeTab app={app} status={status} workspaceId={workspaceId} />}
-                  </Pane>
-                </TabsContent>
-              )}
-              {tabs.includes('settings') && (
-                <TabsContent value="settings">
-                  <Pane>
-                    <SettingsTab app={app} status={status} workspaceId={workspaceId} onChanged={() => void refresh()} />
-                  </Pane>
-                </TabsContent>
-              )}
-              <TabsContent value="advanced">
+            )}
+            {tabs.includes('knowledge') && (
+              <TabsContent value="knowledge">
                 <Pane>
-                  <Advanced
-                    app={app}
-                    status={status}
-                    admin={admin}
-                    slug={slug}
-                    refreshing={refreshing}
-                    onRefresh={() => void refresh()}
-                  />
+                  {accessLost ? <AccessLost /> : <KnowledgeTab app={app} status={status} workspaceId={workspaceId} />}
                 </Pane>
               </TabsContent>
-            </Tabs>
-          </div>
-        </fieldset>
-      </PageContent>
-    </div>
+            )}
+            {tabs.includes('settings') && (
+              <TabsContent value="settings">
+                <Pane>
+                  <SettingsTab app={app} status={status} workspaceId={workspaceId} onChanged={() => void refresh()} />
+                </Pane>
+              </TabsContent>
+            )}
+            <TabsContent value="advanced">
+              <Pane>
+                <Advanced
+                  app={app}
+                  status={status}
+                  admin={admin}
+                  slug={slug}
+                  refreshing={refreshing}
+                  onRefresh={() => void refresh()}
+                />
+              </Pane>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </fieldset>
+    </PageContent>
   );
 }
 

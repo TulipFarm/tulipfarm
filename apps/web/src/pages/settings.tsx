@@ -125,345 +125,343 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
     command.state.kind === 'saved' && !('status' in command.state.receipt) && !('icon' in command.state.receipt);
   const iconSaved = command.state.kind === 'saved' && 'icon' in command.state.receipt;
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <UnsavedChanges dirty={!exit && dirty && !command.unresolved} />
-        <PageHeader
-          titleId="governance-heading"
-          focusable
-          title="General"
-          description="Manage your workspace identity and membership."
-        />
-        <ModelRead state={read.state} refresh={read.refresh} label="workspace settings">
-          {({ settings, membership }) => (
-            <>
-              <SettingsGroup title="Workspace identity" titleId="identity-heading">
-                {!admin && (
-                  <p className="px-4 py-3 text-sm text-muted-foreground">
-                    Only workspace admins can rename or close this workspace.
-                  </p>
-                )}
-                {!admin && (
-                  <SettingsRow label="Workspace icon">
-                    <EntityAvatar
-                      seed={settings.workspaceId}
-                      name={settings.name}
-                      image={settings.icon}
-                      size="lg"
-                      shape="square"
-                    />
-                  </SettingsRow>
-                )}
-                {admin && draft && (
-                  <SettingsRow
-                    label="Workspace icon"
-                    description="Shown in the sidebar and workspace menu. PNG, JPEG, or WebP, up to 2 MB. It is resized to 128 px. Without one, a colored initial is shown."
-                  >
-                    <AvatarImagePicker
-                      seed={settings.workspaceId}
-                      name={settings.name}
-                      image={draft.base.icon}
-                      shape="square"
-                      disabled={blocked || conflict}
-                      onChange={icon =>
-                        void command.submit({
-                          kind: 'icon',
-                          requestId: crypto.randomUUID(),
-                          expectedRevision: draft.base.revision,
-                          icon,
-                        })
-                      }
-                    />
-                  </SettingsRow>
-                )}
-                {command.state.kind === 'sending' && command.state.command.kind === 'icon' && (
-                  <p role="status" className="px-4 py-3 text-sm text-muted-foreground">
-                    Saving icon…
-                  </p>
-                )}
-                {iconSaved && (
-                  <p role="status" className="px-4 py-3 text-sm text-muted-foreground">
-                    Workspace icon saved.
-                  </p>
-                )}
-                {!admin && (
-                  <SettingsRow label="Workspace name">
-                    <p className="break-words text-sm">{settings.name}</p>
-                  </SettingsRow>
-                )}
-                {admin && draft && (
-                  <form
-                    onSubmit={event => {
-                      event.preventDefault();
-                      if (!admin || blocked || conflict || !validName || !dirty) return;
-                      void command.submit({
-                        kind: 'rename',
-                        requestId: crypto.randomUUID(),
-                        expectedRevision: draft.base.revision,
-                        name: draft.name.trim(),
-                      });
-                    }}
-                  >
-                    <SettingsRow
-                      label="Workspace name"
-                      htmlFor="workspace-name"
-                      description={
-                        <span id="workspace-name-help">
-                          {validName
-                            ? 'Use a name of up to 80 characters. Renaming does not change the workspace URL.'
-                            : 'Enter a name of 1 to 80 characters.'}
-                        </span>
-                      }
-                    >
-                      <div className="w-full sm:w-64">
-                        <Input
-                          id="workspace-name"
-                          value={draft.name}
-                          maxLength={80}
-                          required
-                          readOnly={command.unresolved}
-                          aria-invalid={!validName}
-                          aria-describedby="workspace-name-help"
-                          onChange={event => {
-                            setDraft({ ...draft, name: event.target.value });
-                            if (!conflict) command.reset();
-                          }}
-                        />
-                      </div>
-                    </SettingsRow>
-                    {admin && (dirty || nameSaved) && (
-                      <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3">
-                        {nameSaved && (
-                          <p role="status" className="mr-auto text-sm text-muted-foreground">
-                            Workspace name saved.
-                          </p>
-                        )}
-                        {dirty && (
-                          <p className="mr-auto break-words text-sm text-muted-foreground">
-                            Current saved name: {settings.name}
-                          </p>
-                        )}
-                        <Button
-                          type="submit"
-                          disabled={blocked || conflict || !validName || !dirty}
-                          aria-busy={command.state.kind === 'sending'}
-                        >
-                          {command.state.kind === 'sending' && command.state.command.kind === 'rename'
-                            ? 'Saving name…'
-                            : 'Save name'}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          type="button"
-                          disabled={blocked || !dirty}
-                          onClick={() => {
-                            setDraft({ base: settings, name: settings.name });
-                            command.reset();
-                          }}
-                        >
-                          Reset name
-                        </Button>
-                      </div>
-                    )}
-                  </form>
-                )}
-                {conflict && admin && (
-                  <div className="space-y-3 px-4 py-3">
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        Workspace settings changed. Your draft is retained. Reload the latest settings, review the saved
-                        name, then save deliberately.
-                      </AlertDescription>
-                    </Alert>
-                    <Button
-                      variant="outline"
-                      disabled={blocked}
-                      onClick={async () => {
-                        const latest = await read.reloadSettings();
-                        if (latest) {
-                          setDraft(previous => previous && { ...previous, base: latest });
-                          command.reset();
-                        }
-                      }}
-                    >
-                      Reload latest settings
-                    </Button>
-                  </div>
-                )}
-                <SettingsRow label="Workspace URL" description="Permanent address. This cannot be edited.">
-                  <code className="break-all text-sm select-all">{`${window.location.origin}/${settings.slug}`}</code>
-                </SettingsRow>
-                <SettingsRow label="Workspace ID" description="Use this identifier when contacting support.">
-                  <code className="break-all text-sm select-all">{settings.workspaceId}</code>
-                </SettingsRow>
-              </SettingsGroup>
-              <SettingsGroup title="Your membership" titleId="membership-heading">
-                <SettingsRow label="Role" description="Your role in this workspace.">
-                  <Badge variant="secondary">{membership.role}</Badge>
-                </SettingsRow>
-                <SettingsRow
-                  label="Leave workspace"
-                  description={
-                    membership.capabilities.canLeave
-                      ? 'Leaving removes your membership and team access. Your account and other workspaces remain available.'
-                      : 'You are the last admin. Invite a member and promote them to admin before leaving.'
-                  }
-                >
-                  <TeamConfirmation
-                    label="Leave workspace"
-                    title="Leave this workspace?"
-                    description="You will lose workspace access and all team memberships. Only an admin can invite you back. Your account and other workspaces remain available."
-                    busy={blocked || !membership.capabilities.canLeave || dirty}
-                    run={async () => {
-                      if (leaving.current) return 'rejected';
-                      leaving.current = true;
-                      setLeave({ kind: 'sending' });
-                      try {
-                        await changeGovernance(workspaceId, '/leave', 'POST');
-                        changes.removed(workspaceId);
-                        setExit(true);
-                        return 'saved';
-                      } catch (error) {
-                        setLeave({ kind: 'error', message: governanceError(error) });
-                        await read.refresh();
-                        return error instanceof GovernanceRequestError && error.status < 500 ? 'rejected' : 'uncertain';
-                      } finally {
-                        leaving.current = false;
-                      }
-                    }}
+    <PageContent>
+      <UnsavedChanges dirty={!exit && dirty && !command.unresolved} />
+      <PageHeader
+        titleId="governance-heading"
+        focusable
+        title="General"
+        description="Manage your workspace identity and membership."
+      />
+      <ModelRead state={read.state} refresh={read.refresh} label="workspace settings">
+        {({ settings, membership }) => (
+          <>
+            <SettingsGroup title="Workspace identity" titleId="identity-heading">
+              {!admin && (
+                <p className="px-4 py-3 text-sm text-muted-foreground">
+                  Only workspace admins can rename or close this workspace.
+                </p>
+              )}
+              {!admin && (
+                <SettingsRow label="Workspace icon">
+                  <EntityAvatar
+                    seed={settings.workspaceId}
+                    name={settings.name}
+                    image={settings.icon}
+                    size="lg"
+                    shape="square"
                   />
                 </SettingsRow>
-                {leave.kind === 'error' && (
-                  <div className="px-4 py-3">
-                    <Alert variant="destructive">
-                      <AlertDescription>{leave.message}</AlertDescription>
-                    </Alert>
-                  </div>
-                )}
-                <SettingsRow label="Members" description="Invite people and manage roles.">
+              )}
+              {admin && draft && (
+                <SettingsRow
+                  label="Workspace icon"
+                  description="Shown in the sidebar and workspace menu. PNG, JPEG, or WebP, up to 2 MB. It is resized to 128 px. Without one, a colored initial is shown."
+                >
+                  <AvatarImagePicker
+                    seed={settings.workspaceId}
+                    name={settings.name}
+                    image={draft.base.icon}
+                    shape="square"
+                    disabled={blocked || conflict}
+                    onChange={icon =>
+                      void command.submit({
+                        kind: 'icon',
+                        requestId: crypto.randomUUID(),
+                        expectedRevision: draft.base.revision,
+                        icon,
+                      })
+                    }
+                  />
+                </SettingsRow>
+              )}
+              {command.state.kind === 'sending' && command.state.command.kind === 'icon' && (
+                <p role="status" className="px-4 py-3 text-sm text-muted-foreground">
+                  Saving icon…
+                </p>
+              )}
+              {iconSaved && (
+                <p role="status" className="px-4 py-3 text-sm text-muted-foreground">
+                  Workspace icon saved.
+                </p>
+              )}
+              {!admin && (
+                <SettingsRow label="Workspace name">
+                  <p className="break-words text-sm">{settings.name}</p>
+                </SettingsRow>
+              )}
+              {admin && draft && (
+                <form
+                  onSubmit={event => {
+                    event.preventDefault();
+                    if (!admin || blocked || conflict || !validName || !dirty) return;
+                    void command.submit({
+                      kind: 'rename',
+                      requestId: crypto.randomUUID(),
+                      expectedRevision: draft.base.revision,
+                      name: draft.name.trim(),
+                    });
+                  }}
+                >
+                  <SettingsRow
+                    label="Workspace name"
+                    htmlFor="workspace-name"
+                    description={
+                      <span id="workspace-name-help">
+                        {validName
+                          ? 'Use a name of up to 80 characters. Renaming does not change the workspace URL.'
+                          : 'Enter a name of 1 to 80 characters.'}
+                      </span>
+                    }
+                  >
+                    <div className="w-full sm:w-64">
+                      <Input
+                        id="workspace-name"
+                        value={draft.name}
+                        maxLength={80}
+                        required
+                        readOnly={command.unresolved}
+                        aria-invalid={!validName}
+                        aria-describedby="workspace-name-help"
+                        onChange={event => {
+                          setDraft({ ...draft, name: event.target.value });
+                          if (!conflict) command.reset();
+                        }}
+                      />
+                    </div>
+                  </SettingsRow>
+                  {admin && (dirty || nameSaved) && (
+                    <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3">
+                      {nameSaved && (
+                        <p role="status" className="mr-auto text-sm text-muted-foreground">
+                          Workspace name saved.
+                        </p>
+                      )}
+                      {dirty && (
+                        <p className="mr-auto break-words text-sm text-muted-foreground">
+                          Current saved name: {settings.name}
+                        </p>
+                      )}
+                      <Button
+                        type="submit"
+                        disabled={blocked || conflict || !validName || !dirty}
+                        aria-busy={command.state.kind === 'sending'}
+                      >
+                        {command.state.kind === 'sending' && command.state.command.kind === 'rename'
+                          ? 'Saving name…'
+                          : 'Save name'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        type="button"
+                        disabled={blocked || !dirty}
+                        onClick={() => {
+                          setDraft({ base: settings, name: settings.name });
+                          command.reset();
+                        }}
+                      >
+                        Reset name
+                      </Button>
+                    </div>
+                  )}
+                </form>
+              )}
+              {conflict && admin && (
+                <div className="space-y-3 px-4 py-3">
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      Workspace settings changed. Your draft is retained. Reload the latest settings, review the saved
+                      name, then save deliberately.
+                    </AlertDescription>
+                  </Alert>
+                  <Button
+                    variant="outline"
+                    disabled={blocked}
+                    onClick={async () => {
+                      const latest = await read.reloadSettings();
+                      if (latest) {
+                        setDraft(previous => previous && { ...previous, base: latest });
+                        command.reset();
+                      }
+                    }}
+                  >
+                    Reload latest settings
+                  </Button>
+                </div>
+              )}
+              <SettingsRow label="Workspace URL" description="Permanent address. This cannot be edited.">
+                <code className="break-all text-sm select-all">{`${window.location.origin}/${settings.slug}`}</code>
+              </SettingsRow>
+              <SettingsRow label="Workspace ID" description="Use this identifier when contacting support.">
+                <code className="break-all text-sm select-all">{settings.workspaceId}</code>
+              </SettingsRow>
+            </SettingsGroup>
+            <SettingsGroup title="Your membership" titleId="membership-heading">
+              <SettingsRow label="Role" description="Your role in this workspace.">
+                <Badge variant="secondary">{membership.role}</Badge>
+              </SettingsRow>
+              <SettingsRow
+                label="Leave workspace"
+                description={
+                  membership.capabilities.canLeave
+                    ? 'Leaving removes your membership and team access. Your account and other workspaces remain available.'
+                    : 'You are the last admin. Invite a member and promote them to admin before leaving.'
+                }
+              >
+                <TeamConfirmation
+                  label="Leave workspace"
+                  title="Leave this workspace?"
+                  description="You will lose workspace access and all team memberships. Only an admin can invite you back. Your account and other workspaces remain available."
+                  busy={blocked || !membership.capabilities.canLeave || dirty}
+                  run={async () => {
+                    if (leaving.current) return 'rejected';
+                    leaving.current = true;
+                    setLeave({ kind: 'sending' });
+                    try {
+                      await changeGovernance(workspaceId, '/leave', 'POST');
+                      changes.removed(workspaceId);
+                      setExit(true);
+                      return 'saved';
+                    } catch (error) {
+                      setLeave({ kind: 'error', message: governanceError(error) });
+                      await read.refresh();
+                      return error instanceof GovernanceRequestError && error.status < 500 ? 'rejected' : 'uncertain';
+                    } finally {
+                      leaving.current = false;
+                    }
+                  }}
+                />
+              </SettingsRow>
+              {leave.kind === 'error' && (
+                <div className="px-4 py-3">
+                  <Alert variant="destructive">
+                    <AlertDescription>{leave.message}</AlertDescription>
+                  </Alert>
+                </div>
+              )}
+              <SettingsRow label="Members" description="Invite people and manage roles.">
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={<Link to="/$workspaceSlug/members" params={{ workspaceSlug: slug }} />}
+                >
+                  Manage members
+                </Button>
+              </SettingsRow>
+            </SettingsGroup>
+            {admin && soulExplorer && (
+              <SettingsGroup title="Soul repository" titleId="soul-heading">
+                <SettingsRow
+                  label="Saved files"
+                  description="Browse the current saved Soul files. Read-only; existing content access rules still apply."
+                >
                   <Button
                     variant="outline"
                     nativeButton={false}
-                    render={<Link to="/$workspaceSlug/members" params={{ workspaceSlug: slug }} />}
+                    render={<Link to="/$workspaceSlug/settings/soul" params={{ workspaceSlug: slug }} />}
                   >
-                    Manage members
+                    Open Soul
                   </Button>
                 </SettingsRow>
               </SettingsGroup>
-              {admin && soulExplorer && (
-                <SettingsGroup title="Soul repository" titleId="soul-heading">
-                  <SettingsRow
-                    label="Saved files"
-                    description="Browse the current saved Soul files. Read-only; existing content access rules still apply."
-                  >
-                    <Button
-                      variant="outline"
-                      nativeButton={false}
-                      render={<Link to="/$workspaceSlug/settings/soul" params={{ workspaceSlug: slug }} />}
-                    >
-                      Open Soul
-                    </Button>
-                  </SettingsRow>
-                </SettingsGroup>
-              )}
-              {admin && <KnowledgeSettings workspaceId={workspaceId} />}
-              {admin && (
-                <SettingsGroup title="Close workspace" titleId="delete-heading">
-                  <SettingsRow
-                    label="Close this workspace"
-                    description="Access ends for everyone. Rows, files, and backups stay stored. Closing does not erase them."
-                  >
-                    <Button
-                      variant="destructive"
-                      disabled={blocked || dirty || conflict}
-                      onClick={() => {
-                        setConfirmation('');
-                        setAcknowledged(false);
-                        setDeleteOpen(true);
-                      }}
-                    >
-                      Close workspace
-                    </Button>
-                  </SettingsRow>
-                </SettingsGroup>
-              )}
-            </>
-          )}
-        </ModelRead>
-        {command.state.kind === 'sending' && command.state.command.kind === 'delete' && (
-          <p role="status">Closing workspace…</p>
-        )}
-        <CommandFeedback
-          state={command.state}
-          check={command.check}
-          retry={input => void command.submit(input)}
-          writable={admin && !stale}
-        />
-        <Dialog
-          open={deleteOpen}
-          onOpenChange={open => {
-            if (!command.busy) setDeleteOpen(open);
-          }}
-        >
-          <DialogContent size="form" finalFocus={() => document.getElementById('delete-heading')}>
-            <DialogHeader>
-              <DialogTitle>Close this workspace for everyone?</DialogTitle>
-              <DialogDescription>
-                Everyone loses access to this workspace. Closing does not erase stored data.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 overflow-y-auto">
-              <ul className="list-disc space-y-2 pl-5 text-base">
-                <li>Rows, files, and backups are retained.</li>
-                <li>Your account and other workspaces remain available.</li>
-                <li>Restoration and an erasure deadline are not promised.</li>
-              </ul>
-              <form
-                className="space-y-4"
-                onSubmit={event => {
-                  event.preventDefault();
-                  if (!current || !admin || blocked || confirmation !== current.settings.name || !acknowledged) return;
-                  void command.submit({
-                    kind: 'delete',
-                    requestId: crypto.randomUUID(),
-                    expectedRevision: current.settings.revision,
-                    confirmationName: confirmation,
-                    acknowledgeRetainedData: true,
-                  });
-                  setDeleteOpen(false);
-                }}
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="delete-confirmation">Type the exact workspace name</Label>
-                  <p className="break-words text-sm text-muted-foreground">{current?.settings.name}</p>
-                  <Input
-                    id="delete-confirmation"
-                    autoComplete="off"
-                    value={confirmation}
-                    onChange={event => setConfirmation(event.target.value)}
-                  />
-                </div>
-                <div className="flex items-start gap-3">
-                  <Checkbox id="retained-data" checked={acknowledged} onCheckedChange={setAcknowledged} />
-                  <Label htmlFor="retained-data">I understand that workspace data is retained, not erased.</Label>
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <Button variant="ghost" type="button" onClick={() => setDeleteOpen(false)}>
-                    Cancel
-                  </Button>
+            )}
+            {admin && <KnowledgeSettings workspaceId={workspaceId} />}
+            {admin && (
+              <SettingsGroup title="Close workspace" titleId="delete-heading">
+                <SettingsRow
+                  label="Close this workspace"
+                  description="Access ends for everyone. Rows, files, and backups stay stored. Closing does not erase them."
+                >
                   <Button
                     variant="destructive"
-                    type="submit"
-                    disabled={blocked || !admin || !acknowledged || confirmation !== current?.settings.name}
+                    disabled={blocked || dirty || conflict}
+                    onClick={() => {
+                      setConfirmation('');
+                      setAcknowledged(false);
+                      setDeleteOpen(true);
+                    }}
                   >
-                    Close workspace for everyone
+                    Close workspace
                   </Button>
-                </div>
-              </form>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </PageContent>
-    </div>
+                </SettingsRow>
+              </SettingsGroup>
+            )}
+          </>
+        )}
+      </ModelRead>
+      {command.state.kind === 'sending' && command.state.command.kind === 'delete' && (
+        <p role="status">Closing workspace…</p>
+      )}
+      <CommandFeedback
+        state={command.state}
+        check={command.check}
+        retry={input => void command.submit(input)}
+        writable={admin && !stale}
+      />
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={open => {
+          if (!command.busy) setDeleteOpen(open);
+        }}
+      >
+        <DialogContent size="form" finalFocus={() => document.getElementById('delete-heading')}>
+          <DialogHeader>
+            <DialogTitle>Close this workspace for everyone?</DialogTitle>
+            <DialogDescription>
+              Everyone loses access to this workspace. Closing does not erase stored data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 overflow-y-auto">
+            <ul className="list-disc space-y-2 pl-5 text-base">
+              <li>Rows, files, and backups are retained.</li>
+              <li>Your account and other workspaces remain available.</li>
+              <li>Restoration and an erasure deadline are not promised.</li>
+            </ul>
+            <form
+              className="space-y-4"
+              onSubmit={event => {
+                event.preventDefault();
+                if (!current || !admin || blocked || confirmation !== current.settings.name || !acknowledged) return;
+                void command.submit({
+                  kind: 'delete',
+                  requestId: crypto.randomUUID(),
+                  expectedRevision: current.settings.revision,
+                  confirmationName: confirmation,
+                  acknowledgeRetainedData: true,
+                });
+                setDeleteOpen(false);
+              }}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="delete-confirmation">Type the exact workspace name</Label>
+                <p className="break-words text-sm text-muted-foreground">{current?.settings.name}</p>
+                <Input
+                  id="delete-confirmation"
+                  autoComplete="off"
+                  value={confirmation}
+                  onChange={event => setConfirmation(event.target.value)}
+                />
+              </div>
+              <div className="flex items-start gap-3">
+                <Checkbox id="retained-data" checked={acknowledged} onCheckedChange={setAcknowledged} />
+                <Label htmlFor="retained-data">I understand that workspace data is retained, not erased.</Label>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="ghost" type="button" onClick={() => setDeleteOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  type="submit"
+                  disabled={blocked || !admin || !acknowledged || confirmation !== current?.settings.name}
+                >
+                  Close workspace for everyone
+                </Button>
+              </div>
+            </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </PageContent>
   );
 }

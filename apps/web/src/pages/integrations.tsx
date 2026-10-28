@@ -128,117 +128,115 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
     );
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title="Integrations"
-          description="Connect the apps your agents work in. Open an app to manage accounts, Knowledge, and settings."
-          back={
-            returnChat
-              ? {
-                  label: 'Back to chat',
-                  link: <Link to="/$workspaceSlug/chat/$chatId" params={{ workspaceSlug: slug, chatId: returnChat }} />,
-                }
-              : undefined
-          }
-        />
-        <WorkspaceRefreshNotice />
-        <fieldset disabled={workspaceStale} className="min-w-0">
-          <div className="max-w-4xl space-y-8">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <SearchField label="Search apps" value={query} onChange={setQuery} placeholder="Search apps" />
-              <div className="shrink-0 overflow-x-auto">
-                <ToggleGroup
-                  aria-label="Show apps"
-                  variant="outline"
-                  size="sm"
-                  spacing={0}
-                  value={[filter]}
-                  onValueChange={value => {
-                    const next = value[0] as Filter | undefined;
-                    if (!next) return;
-                    setFilter(next);
-                    setQuery('');
-                  }}
-                >
-                  <ToggleGroupItem value="all">
-                    All <Count value={available.length} />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="connected">
-                    Connected <Count value={loading ? null : connected.length} />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="attention">
-                    Needs attention <Count value={loading ? null : attention.length} />
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </div>
+    <PageContent>
+      <PageHeader
+        title="Integrations"
+        description="Connect the apps your agents work in. Open an app to manage accounts, Knowledge, and settings."
+        back={
+          returnChat
+            ? {
+                label: 'Back to chat',
+                link: <Link to="/$workspaceSlug/chat/$chatId" params={{ workspaceSlug: slug, chatId: returnChat }} />,
+              }
+            : undefined
+        }
+      />
+      <WorkspaceRefreshNotice />
+      <fieldset disabled={workspaceStale} className="min-w-0">
+        <div className="max-w-4xl space-y-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SearchField label="Search apps" value={query} onChange={setQuery} placeholder="Search apps" />
+            <div className="shrink-0 overflow-x-auto">
+              <ToggleGroup
+                aria-label="Show apps"
+                variant="outline"
+                size="sm"
+                spacing={0}
+                value={[filter]}
+                onValueChange={value => {
+                  const next = value[0] as Filter | undefined;
+                  if (!next) return;
+                  setFilter(next);
+                  setQuery('');
+                }}
+              >
+                <ToggleGroupItem value="all">
+                  All <Count value={available.length} />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="connected">
+                  Connected <Count value={loading ? null : connected.length} />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="attention">
+                  Needs attention <Count value={loading ? null : attention.length} />
+                </ToggleGroupItem>
+              </ToggleGroup>
             </div>
-            {errors.length > 0 && (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <ul className="space-y-1">
-                      {errors.map(([provider, status]) => (
-                        <li key={provider}>
-                          Couldn’t check{' '}
-                          {available
-                            .filter(app => app.provider === provider)
-                            .map(app => app.name)
-                            .join(', ')}
-                          . {status.kind === 'error' && status.detail}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>
-                      {refreshing ? 'Checking…' : 'Check again'}
-                    </Button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-            {sections.map(section => (
-              <section key={section.title} aria-labelledby={`section-${section.title}`} className="space-y-2">
-                <h2 id={`section-${section.title}`} className="text-sm font-medium text-muted-foreground">
-                  {section.title}
-                </h2>
-                {section.apps.length ? (
-                  <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-                    {section.apps.map(app => (
-                      <li key={app.id}>
-                        <Row app={app} status={statusOf(statuses, app)} slug={slug} />
+          </div>
+          {errors.length > 0 && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <ul className="space-y-1">
+                    {errors.map(([provider, status]) => (
+                      <li key={provider}>
+                        Couldn’t check{' '}
+                        {available
+                          .filter(app => app.provider === provider)
+                          .map(app => app.name)
+                          .join(', ')}
+                        . {status.kind === 'error' && status.detail}
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  empty(section.title)
-                )}
-              </section>
-            ))}
-            {filter === 'all' && !query.trim() && (
-              <section aria-labelledby="section-soon" className="space-y-3">
-                <h2 id="section-soon" className="text-sm font-medium text-muted-foreground">
-                  Coming soon
-                </h2>
-                <ul className="flex flex-wrap gap-2">
-                  {upcoming.map(app => (
-                    <li
-                      key={app.id}
-                      className="flex h-7 items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-muted-foreground"
-                    >
-                      <BrandIcon brand={app.brand} size="glyph" />
-                      {app.name}
+                  <Button variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>
+                    {refreshing ? 'Checking…' : 'Check again'}
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+          {sections.map(section => (
+            <section key={section.title} aria-labelledby={`section-${section.title}`} className="space-y-2">
+              <h2 id={`section-${section.title}`} className="text-sm font-medium text-muted-foreground">
+                {section.title}
+              </h2>
+              {section.apps.length ? (
+                <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                  {section.apps.map(app => (
+                    <li key={app.id}>
+                      <Row app={app} status={statusOf(statuses, app)} slug={slug} />
                     </li>
                   ))}
                 </ul>
-              </section>
-            )}
-          </div>
-          <div className="pt-10">
-            <WorkspaceMcpIntegrations workspaceId={workspaceId} />
-          </div>
-        </fieldset>
-      </PageContent>
-    </div>
+              ) : (
+                empty(section.title)
+              )}
+            </section>
+          ))}
+          {filter === 'all' && !query.trim() && (
+            <section aria-labelledby="section-soon" className="space-y-3">
+              <h2 id="section-soon" className="text-sm font-medium text-muted-foreground">
+                Coming soon
+              </h2>
+              <ul className="flex flex-wrap gap-2">
+                {upcoming.map(app => (
+                  <li
+                    key={app.id}
+                    className="flex h-7 items-center gap-2 rounded-lg border border-border px-2.5 text-sm text-muted-foreground"
+                  >
+                    <BrandIcon brand={app.brand} size="glyph" />
+                    {app.name}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+        <div className="pt-10">
+          <WorkspaceMcpIntegrations workspaceId={workspaceId} />
+        </div>
+      </fieldset>
+    </PageContent>
   );
 }
 

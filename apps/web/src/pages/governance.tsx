@@ -171,189 +171,187 @@ export function GovernanceContent({
     }
   };
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          titleId="governance-heading"
-          focusable
-          title={section === 'members' ? 'Members' : section === 'teams' ? 'Teams' : 'Table access'}
-          description={
-            section === 'members'
-              ? 'People who belong to this workspace and their roles.'
-              : section === 'teams'
-                ? 'Group members so you can grant access once per team.'
-                : 'Choose what each team can do with each table.'
-          }
-          actions={
-            section === 'members' ? (
-              <InviteMembersDialog
-                workspaceId={workspaceId}
-                authorized={state.kind === 'admin'}
-                onAccessLost={onInvitationAccessLost}
-                invitations={invitations}
-                open={inviteOpen}
-                onOpenChange={setInviteOpen}
-                onViewInvitations={() => {
-                  setInviteOpen(false);
-                  setTab('invitations');
-                }}
-                members={state.kind === 'admin' ? state.data.directory : []}
-                initialInput={inviteMock ? 'jessica@example.test\njustin@example.test\njenny@example.test' : ''}
-              />
-            ) : undefined
-          }
-        />
-        {state.kind === 'loading' && (
-          <div role="status" className="flex flex-col gap-4">
-            <span className="sr-only">Loading workspace access…</span>
-            <Skeleton shape="title" />
-            <Skeleton shape="panel" />
-          </div>
-        )}
-        {state.kind === 'error' && (
-          <StatePanel kind="error" title="Could not load workspace access" description={state.message}>
-            <Button variant="outline" disabled={refreshing} onClick={() => void refresh()}>
-              Retry loading
-            </Button>
-          </StatePanel>
-        )}
-        {state.kind === 'unavailable' && (
-          <StatePanel kind="unavailable" title="Administration unavailable" description={state.message}>
-            <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-              Back to TulipFarm
-            </Button>
-          </StatePanel>
-        )}
-        {(state.kind === 'admin' || state.kind === 'member') && (
-          <>
-            {message && (
-              <Alert variant="destructive">
-                <AlertDescription>{message}</AlertDescription>
-              </Alert>
-            )}
-            {(stale || commandMessage) && (
-              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                <p>
-                  {stale
-                    ? 'Loaded access may be out of date. Reload before making another change.'
-                    : 'Reload to check current access. This does not repeat your change.'}
-                </p>
-                {recovery}
-              </div>
-            )}
-            {notice && <p role="status">{notice}</p>}
-            {busy && (
-              <p role="status" className="flex items-center gap-2">
-                <Spinner aria-hidden="true" />
-                Saving access change…
+    <PageContent>
+      <PageHeader
+        titleId="governance-heading"
+        focusable
+        title={section === 'members' ? 'Members' : section === 'teams' ? 'Teams' : 'Table access'}
+        description={
+          section === 'members'
+            ? 'People who belong to this workspace and their roles.'
+            : section === 'teams'
+              ? 'Group members so you can grant access once per team.'
+              : 'Choose what each team can do with each table.'
+        }
+        actions={
+          section === 'members' ? (
+            <InviteMembersDialog
+              workspaceId={workspaceId}
+              authorized={state.kind === 'admin'}
+              onAccessLost={onInvitationAccessLost}
+              invitations={invitations}
+              open={inviteOpen}
+              onOpenChange={setInviteOpen}
+              onViewInvitations={() => {
+                setInviteOpen(false);
+                setTab('invitations');
+              }}
+              members={state.kind === 'admin' ? state.data.directory : []}
+              initialInput={inviteMock ? 'jessica@example.test\njustin@example.test\njenny@example.test' : ''}
+            />
+          ) : undefined
+        }
+      />
+      {state.kind === 'loading' && (
+        <div role="status" className="flex flex-col gap-4">
+          <span className="sr-only">Loading workspace access…</span>
+          <Skeleton shape="title" />
+          <Skeleton shape="panel" />
+        </div>
+      )}
+      {state.kind === 'error' && (
+        <StatePanel kind="error" title="Could not load workspace access" description={state.message}>
+          <Button variant="outline" disabled={refreshing} onClick={() => void refresh()}>
+            Retry loading
+          </Button>
+        </StatePanel>
+      )}
+      {state.kind === 'unavailable' && (
+        <StatePanel kind="unavailable" title="Administration unavailable" description={state.message}>
+          <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
+            Back to TulipFarm
+          </Button>
+        </StatePanel>
+      )}
+      {(state.kind === 'admin' || state.kind === 'member') && (
+        <>
+          {message && (
+            <Alert variant="destructive">
+              <AlertDescription>{message}</AlertDescription>
+            </Alert>
+          )}
+          {(stale || commandMessage) && (
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+              <p>
+                {stale
+                  ? 'Loaded access may be out of date. Reload before making another change.'
+                  : 'Reload to check current access. This does not repeat your change.'}
               </p>
-            )}
-            {state.kind === 'member' && section === 'members' && (
-              <SettingsGroup title="My membership" titleId="my-membership-heading">
-                <SettingsRow label="Role" description={`Your role is ${state.access.role}.`} />
-                <SettingsRow
-                  label="Leave workspace"
-                  description={
-                    state.access.capabilities.canLeave ? (
-                      'Leaving removes your membership and team access in this workspace. Your account and other workspaces remain available.'
-                    ) : (
-                      <span role="status">Hand off your last team manager or workspace admin role before leaving.</span>
-                    )
-                  }
-                >
-                  <TeamConfirmation
-                    label="Leave workspace"
-                    title="Leave this workspace?"
-                    description="You will lose workspace access and all team memberships. Your account and other workspaces remain available."
-                    busy={busy || refreshing || stale || !state.access.capabilities.canLeave}
-                    recovery={recovery}
-                    run={() => change('/leave', 'POST')}
-                  />
-                </SettingsRow>
-              </SettingsGroup>
-            )}
-            {state.kind === 'member' && section === 'members' && (
-              <SettingsGroup title="Workspace directory">
-                {state.data.directory.map(member => (
-                  <SettingsRow key={member.id} label={member.name} description={member.email} />
-                ))}
-              </SettingsGroup>
-            )}
-            {state.kind === 'member' && section === 'grants' && (
-              <StatePanel
-                kind="unavailable"
-                title="Table administration requires an admin"
-                description="A workspace admin manages table grants."
+              {recovery}
+            </div>
+          )}
+          {notice && <p role="status">{notice}</p>}
+          {busy && (
+            <p role="status" className="flex items-center gap-2">
+              <Spinner aria-hidden="true" />
+              Saving access change…
+            </p>
+          )}
+          {state.kind === 'member' && section === 'members' && (
+            <SettingsGroup title="My membership" titleId="my-membership-heading">
+              <SettingsRow label="Role" description={`Your role is ${state.access.role}.`} />
+              <SettingsRow
+                label="Leave workspace"
+                description={
+                  state.access.capabilities.canLeave ? (
+                    'Leaving removes your membership and team access in this workspace. Your account and other workspaces remain available.'
+                  ) : (
+                    <span role="status">Hand off your last team manager or workspace admin role before leaving.</span>
+                  )
+                }
               >
-                <Button
-                  variant="outline"
-                  nativeButton={false}
-                  render={<Link to="/$workspaceSlug/teams" params={{ workspaceSlug }} />}
+                <TeamConfirmation
+                  label="Leave workspace"
+                  title="Leave this workspace?"
+                  description="You will lose workspace access and all team memberships. Your account and other workspaces remain available."
+                  busy={busy || refreshing || stale || !state.access.capabilities.canLeave}
+                  recovery={recovery}
+                  run={() => change('/leave', 'POST')}
+                />
+              </SettingsRow>
+            </SettingsGroup>
+          )}
+          {state.kind === 'member' && section === 'members' && (
+            <SettingsGroup title="Workspace directory">
+              {state.data.directory.map(member => (
+                <SettingsRow key={member.id} label={member.name} description={member.email} />
+              ))}
+            </SettingsGroup>
+          )}
+          {state.kind === 'member' && section === 'grants' && (
+            <StatePanel
+              kind="unavailable"
+              title="Table administration requires an admin"
+              description="A workspace admin manages table grants."
+            >
+              <Button
+                variant="outline"
+                nativeButton={false}
+                render={<Link to="/$workspaceSlug/teams" params={{ workspaceSlug }} />}
+              >
+                View your teams
+              </Button>
+            </StatePanel>
+          )}
+          {state.kind === 'admin' && (
+            <>
+              {section === 'members' && (
+                <Tabs
+                  value={tab}
+                  onValueChange={value => {
+                    if (typeof value === 'string') setTab(value);
+                  }}
                 >
-                  View your teams
-                </Button>
-              </StatePanel>
-            )}
-            {state.kind === 'admin' && (
-              <>
-                {section === 'members' && (
-                  <Tabs
-                    value={tab}
-                    onValueChange={value => {
-                      if (typeof value === 'string') setTab(value);
-                    }}
-                  >
-                    <TabsList aria-label="Members settings">
-                      <TabsTrigger value="members">Members ({state.data.members.length})</TabsTrigger>
-                      <TabsTrigger value="invitations">Invitations</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="members" keepMounted>
-                      <MemberAdministration
-                        data={state.data}
-                        busy={busy || refreshing || stale}
-                        change={change}
-                        recovery={recovery}
-                      />
-                    </TabsContent>
-                    <TabsContent value="invitations" keepMounted>
-                      <InvitationList
-                        workspaceId={workspaceId}
-                        invitations={invitations}
-                        onAccessLost={onInvitationAccessLost}
-                        invite={
-                          state.kind === 'admin' && (
-                            <Button onClick={() => setInviteOpen(true)}>
-                              <Add size={16} aria-hidden="true" />
-                              Invite members
-                            </Button>
-                          )
-                        }
-                      />
-                    </TabsContent>
-                  </Tabs>
-                )}
-                {section === 'grants' && (
-                  <TableAdministration
-                    data={state.data}
-                    workspaceId={workspaceId}
-                    busy={busy || refreshing || stale}
-                    change={change}
-                  />
-                )}
-              </>
-            )}
-          </>
-        )}
-        {section === 'teams' && (
-          <TeamAdministration
-            data={state.kind === 'admin' || state.kind === 'member' ? state.data : null}
-            busy={busy || refreshing || stale}
-            change={change}
-            recovery={recovery}
-          />
-        )}
-      </PageContent>
-    </div>
+                  <TabsList aria-label="Members settings">
+                    <TabsTrigger value="members">Members ({state.data.members.length})</TabsTrigger>
+                    <TabsTrigger value="invitations">Invitations</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="members" keepMounted>
+                    <MemberAdministration
+                      data={state.data}
+                      busy={busy || refreshing || stale}
+                      change={change}
+                      recovery={recovery}
+                    />
+                  </TabsContent>
+                  <TabsContent value="invitations" keepMounted>
+                    <InvitationList
+                      workspaceId={workspaceId}
+                      invitations={invitations}
+                      onAccessLost={onInvitationAccessLost}
+                      invite={
+                        state.kind === 'admin' && (
+                          <Button onClick={() => setInviteOpen(true)}>
+                            <Add size={16} aria-hidden="true" />
+                            Invite members
+                          </Button>
+                        )
+                      }
+                    />
+                  </TabsContent>
+                </Tabs>
+              )}
+              {section === 'grants' && (
+                <TableAdministration
+                  data={state.data}
+                  workspaceId={workspaceId}
+                  busy={busy || refreshing || stale}
+                  change={change}
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
+      {section === 'teams' && (
+        <TeamAdministration
+          data={state.kind === 'admin' || state.kind === 'member' ? state.data : null}
+          busy={busy || refreshing || stale}
+          change={change}
+          recovery={recovery}
+        />
+      )}
+    </PageContent>
   );
 }
 

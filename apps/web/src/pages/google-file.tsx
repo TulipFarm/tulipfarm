@@ -534,9 +534,5 @@ function Opened({
 }
 
 function Page({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <PageContent>{children}</PageContent>
-    </div>
-  );
+  return <PageContent>{children}</PageContent>;
 }

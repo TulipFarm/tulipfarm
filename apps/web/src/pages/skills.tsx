@@ -104,178 +104,172 @@ export function SkillsPage() {
   };
   const archived = view === 'archived';
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          titleRef={heading}
-          focusable
-          title="Skills"
-          description="Reusable procedures. Skills never grant tools or permissions."
-          actions={<Button onClick={() => setImportOpen(true)}>Import skill</Button>}
+    <PageContent>
+      <PageHeader
+        titleRef={heading}
+        focusable
+        title="Skills"
+        description="Reusable procedures. Skills never grant tools or permissions."
+        actions={<Button onClick={() => setImportOpen(true)}>Import skill</Button>}
+      />
+      <div>
+        <Button
+          variant="link"
+          nativeButton={false}
+          render={
+            <Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} search={{ intent: 'create-skill' }} />
+          }
+        >
+          Ask chat to make a skill
+        </Button>
+      </div>
+      {importOpen && <ImportSkillForm />}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchField
+          id="skill-search"
+          label="Find skills"
+          placeholder="Search skills"
+          maxLength={120}
+          value={search}
+          onChange={pages.setSearch}
         />
-        <div>
+        <div className="flex gap-1">
           <Button
-            variant="link"
-            nativeButton={false}
-            render={
-              <Link
-                to="/$workspaceSlug"
-                params={{ workspaceSlug: workspace.slug }}
-                search={{ intent: 'create-skill' }}
-              />
-            }
+            ref={activeToggle}
+            variant={archived ? 'ghost' : 'secondary'}
+            aria-label="Active skills"
+            aria-pressed={!archived}
+            onClick={() => show('visible')}
           >
-            Ask chat to make a skill
+            Active
+          </Button>
+          <Button
+            variant={archived ? 'secondary' : 'ghost'}
+            aria-label="Archived skills"
+            aria-pressed={archived}
+            onClick={() => show('archived')}
+          >
+            Archived
           </Button>
         </div>
-        {importOpen && <ImportSkillForm />}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <SearchField
-            id="skill-search"
-            label="Find skills"
-            placeholder="Search skills"
-            maxLength={120}
-            value={search}
-            onChange={pages.setSearch}
-          />
-          <div className="flex gap-1">
-            <Button
-              ref={activeToggle}
-              variant={archived ? 'ghost' : 'secondary'}
-              aria-label="Active skills"
-              aria-pressed={!archived}
-              onClick={() => show('visible')}
-            >
-              Active
-            </Button>
-            <Button
-              variant={archived ? 'secondary' : 'ghost'}
-              aria-label="Archived skills"
-              aria-pressed={archived}
-              onClick={() => show('archived')}
-            >
-              Archived
-            </Button>
-          </div>
-        </div>
-        <SkillRead state={read.state} refresh={read.refresh}>
-          {data => (
-            <>
-              <section className="min-w-0 space-y-3">
-                <h2 className="text-sm font-medium">{archived ? 'Archived skills' : 'Workspace skills'}</h2>
-                {data.workspace.length ? (
-                  <DataList
-                    aria-label={archived ? 'Archived skills' : 'Workspace skills'}
-                    columns="three"
-                    headings={['Name', 'Source', 'Status']}
-                  >
-                    {data.workspace.map(skill => (
-                      <DataListRow key={skill.id}>
-                        <DataListCell>
-                          <DataListLink
-                            render={
-                              <Link
-                                to="/$workspaceSlug/skills/$skillId"
-                                params={{ workspaceSlug: workspace.slug, skillId: skill.id }}
-                              />
-                            }
-                          >
-                            {skill.name}
-                          </DataListLink>
-                          {skill.description && (
-                            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{skill.description}</p>
-                          )}
-                        </DataListCell>
-                        <DataListSecondary>{skill.source}</DataListSecondary>
-                        <DataListCell>
-                          {
-                            {
-                              enabled: 'Enabled',
-                              disabled: 'Disabled',
-                              'needs-review': 'Needs review',
-                              archived: 'Archived',
-                            }[skill.status]
+      </div>
+      <SkillRead state={read.state} refresh={read.refresh}>
+        {data => (
+          <>
+            <section className="min-w-0 space-y-3">
+              <h2 className="text-sm font-medium">{archived ? 'Archived skills' : 'Workspace skills'}</h2>
+              {data.workspace.length ? (
+                <DataList
+                  aria-label={archived ? 'Archived skills' : 'Workspace skills'}
+                  columns="three"
+                  headings={['Name', 'Source', 'Status']}
+                >
+                  {data.workspace.map(skill => (
+                    <DataListRow key={skill.id}>
+                      <DataListCell>
+                        <DataListLink
+                          render={
+                            <Link
+                              to="/$workspaceSlug/skills/$skillId"
+                              params={{ workspaceSlug: workspace.slug, skillId: skill.id }}
+                            />
                           }
-                        </DataListCell>
-                      </DataListRow>
-                    ))}
-                  </DataList>
-                ) : search ? (
-                  <StatePanel
-                    kind="empty"
-                    heading="h3"
-                    icon={BookOpen}
-                    title={archived ? 'No matching archived skills' : 'No matching workspace skills'}
-                    description="Try another name or clear your search."
+                        >
+                          {skill.name}
+                        </DataListLink>
+                        {skill.description && (
+                          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{skill.description}</p>
+                        )}
+                      </DataListCell>
+                      <DataListSecondary>{skill.source}</DataListSecondary>
+                      <DataListCell>
+                        {
+                          {
+                            enabled: 'Enabled',
+                            disabled: 'Disabled',
+                            'needs-review': 'Needs review',
+                            archived: 'Archived',
+                          }[skill.status]
+                        }
+                      </DataListCell>
+                    </DataListRow>
+                  ))}
+                </DataList>
+              ) : search ? (
+                <StatePanel
+                  kind="empty"
+                  heading="h3"
+                  icon={BookOpen}
+                  title={archived ? 'No matching archived skills' : 'No matching workspace skills'}
+                  description="Try another name or clear your search."
+                >
+                  <Button variant="outline" onClick={() => pages.setSearch('')}>
+                    Clear search
+                  </Button>
+                </StatePanel>
+              ) : archived ? (
+                <StatePanel
+                  kind="empty"
+                  heading="h3"
+                  icon={BookOpen}
+                  title="No archived skills"
+                  description="Skills you archive appear here. Open one to restore or delete it."
+                >
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      show('visible');
+                      activeToggle.current?.focus();
+                    }}
                   >
-                    <Button variant="outline" onClick={() => pages.setSearch('')}>
-                      Clear search
-                    </Button>
-                  </StatePanel>
-                ) : archived ? (
-                  <StatePanel
-                    kind="empty"
-                    heading="h3"
-                    icon={BookOpen}
-                    title="No archived skills"
-                    description="Skills you archive appear here. Open one to restore or delete it."
-                  >
+                    Show active skills
+                  </Button>
+                </StatePanel>
+              ) : (
+                <StatePanel
+                  kind="empty"
+                  heading="h3"
+                  icon={BookOpen}
+                  title="No workspace skills yet"
+                  description="Import a skill, or ask chat to make one for a task you repeat. Review it once to save and enable it privately."
+                  sample={<SkillsSample />}
+                >
+                  <Button onClick={() => setImportOpen(true)}>
+                    <Add size={16} aria-hidden="true" />
+                    Import skill
+                  </Button>
+                </StatePanel>
+              )}
+              {(after || data.nextCursor) && (
+                <nav aria-label="Skill pages" className="flex flex-wrap items-center gap-2">
+                  {after && (
+                    <>
+                      <Button variant="outline" onClick={pages.first}>
+                        First page
+                      </Button>
+                      <Button variant="outline" onClick={pages.previous}>
+                        Previous page
+                      </Button>
+                    </>
+                  )}
+                  <span className="text-sm text-muted-foreground">Page {pages.page}</span>
+                  {data.nextCursor && (
                     <Button
                       variant="outline"
                       onClick={() => {
-                        show('visible');
-                        activeToggle.current?.focus();
+                        if (data.nextCursor) pages.next(data.nextCursor);
                       }}
                     >
-                      Show active skills
+                      Next page
                     </Button>
-                  </StatePanel>
-                ) : (
-                  <StatePanel
-                    kind="empty"
-                    heading="h3"
-                    icon={BookOpen}
-                    title="No workspace skills yet"
-                    description="Import a skill, or ask chat to make one for a task you repeat. Review it once to save and enable it privately."
-                    sample={<SkillsSample />}
-                  >
-                    <Button onClick={() => setImportOpen(true)}>
-                      <Add size={16} aria-hidden="true" />
-                      Import skill
-                    </Button>
-                  </StatePanel>
-                )}
-                {(after || data.nextCursor) && (
-                  <nav aria-label="Skill pages" className="flex flex-wrap items-center gap-2">
-                    {after && (
-                      <>
-                        <Button variant="outline" onClick={pages.first}>
-                          First page
-                        </Button>
-                        <Button variant="outline" onClick={pages.previous}>
-                          Previous page
-                        </Button>
-                      </>
-                    )}
-                    <span className="text-sm text-muted-foreground">Page {pages.page}</span>
-                    {data.nextCursor && (
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          if (data.nextCursor) pages.next(data.nextCursor);
-                        }}
-                      >
-                        Next page
-                      </Button>
-                    )}
-                  </nav>
-                )}
-              </section>
-            </>
-          )}
-        </SkillRead>
-      </PageContent>
-    </div>
+                  )}
+                </nav>
+              )}
+            </section>
+          </>
+        )}
+      </SkillRead>
+    </PageContent>
   );
 }
 
@@ -300,31 +294,29 @@ function SkillPage({ id }: { id: string }) {
     });
   };
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          back={{
-            label: 'Back to skills',
-            link: <Link to="/$workspaceSlug/skills" params={{ workspaceSlug: workspace.slug }} />,
-          }}
-          title="Workspace skill"
-        />
-        {deleted ? (
-          <p role="status">Skill deleted.</p>
-        ) : (
-          <SkillRead state={read.state} refresh={read.refresh}>
-            {detail => (
-              <>
-                <SkillContent api={api} id={id} detail={detail} refresh={read.refresh} deleted={leave} />
-                {detail.management && (
-                  <SkillSharing api={api} id={id} workspaceId={workspace.id} refresh={read.refresh} />
-                )}
-              </>
-            )}
-          </SkillRead>
-        )}
-      </PageContent>
-    </div>
+    <PageContent>
+      <PageHeader
+        back={{
+          label: 'Back to skills',
+          link: <Link to="/$workspaceSlug/skills" params={{ workspaceSlug: workspace.slug }} />,
+        }}
+        title="Workspace skill"
+      />
+      {deleted ? (
+        <p role="status">Skill deleted.</p>
+      ) : (
+        <SkillRead state={read.state} refresh={read.refresh}>
+          {detail => (
+            <>
+              <SkillContent api={api} id={id} detail={detail} refresh={read.refresh} deleted={leave} />
+              {detail.management && (
+                <SkillSharing api={api} id={id} workspaceId={workspace.id} refresh={read.refresh} />
+              )}
+            </>
+          )}
+        </SkillRead>
+      )}
+    </PageContent>
   );
 }
 function SkillContent({

@@ -82,88 +82,101 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const tab = selected === 'images' && !images ? 'access' : selected;
   const navigate = useNavigate({ from: workspaceModelsRoute.fullPath });
   return (
-    <div className="min-h-0 flex-1 overflow-auto">
-      <PageContent>
-        <PageHeader
-          title="Models"
-          description="Choose which models this workspace can use. Agents inherit these rules."
-        />
-        <ModelRead state={read.state} refresh={read.refresh} label="workspace models">
-          {({ families, membership }) => (
-            <>
-              {read.state.kind === 'ready' && read.state.error && (
-                <p role="status" className="text-sm text-muted-foreground">
-                  Displayed models may be out of date. Reload to check current availability.
-                </p>
-              )}
-              {membership.role !== 'admin' && (
-                <p className="text-sm text-muted-foreground">
-                  You have read-only access. Only workspace admins can change these settings.
-                </p>
-              )}
-              {!families.length && (
-                <StatePanel
-                  kind="empty"
-                  icon={Cpu}
-                  title="No models configured yet"
-                  description="Once your operator configures model providers, each model family appears here. Admins then choose which teams can use it and pick a fallback if it becomes unavailable."
-                  sample={<ModelsSample />}
-                >
-                  <ModelSetupLink size="sm" />
-                </StatePanel>
-              )}
-            </>
-          )}
-        </ModelRead>
-        <Tabs
-          value={tab}
-          onValueChange={value =>
-            void navigate({ search: { tab: value === 'access' ? undefined : value }, replace: true })
-          }
-        >
-          <div className="max-w-full overflow-x-auto pb-1">
-            <TabsList variant="line" aria-label="Model settings">
-              <TabsTrigger value="access">Access</TabsTrigger>
-              <TabsTrigger value="compaction">Compaction</TabsTrigger>
-              {images && <TabsTrigger value="images">Images</TabsTrigger>}
-            </TabsList>
+    <PageContent>
+      <PageHeader
+        title="Models"
+        description="Choose which models this workspace can use. Agents inherit these rules."
+      />
+      <ModelRead state={read.state} refresh={read.refresh} label="workspace models">
+        {({ families, membership }) => (
+          <>
+            {read.state.kind === 'ready' && read.state.error && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Displayed models may be out of date. Reload to check current availability.
+              </p>
+            )}
+            {membership.role !== 'admin' && (
+              <p className="text-sm text-muted-foreground">
+                You have read-only access. Only workspace admins can change these settings.
+              </p>
+            )}
+            {!families.length && (
+              <StatePanel
+                kind="empty"
+                icon={Cpu}
+                title="No models configured yet"
+                description="Once your operator configures model providers, each model family appears here. Admins then choose which teams can use it and pick a fallback if it becomes unavailable."
+                sample={<ModelsSample />}
+              >
+                <ModelSetupLink size="sm" />
+              </StatePanel>
+            )}
+          </>
+        )}
+      </ModelRead>
+      <Tabs
+        value={tab}
+        onValueChange={value =>
+          void navigate({ search: { tab: value === 'access' ? undefined : value }, replace: true })
+        }
+      >
+        <div className="max-w-full overflow-x-auto pb-1">
+          <TabsList variant="line" aria-label="Model settings">
+            <TabsTrigger value="access">Access</TabsTrigger>
+            <TabsTrigger value="compaction">Compaction</TabsTrigger>
+            {images && <TabsTrigger value="images">Images</TabsTrigger>}
+          </TabsList>
+        </div>
+        <TabsContent value="access" keepMounted>
+          <div className="pt-2">
+            <ModelAvailability
+              userId={userId}
+              workspaceId={workspaceId}
+              families={snapshot?.families ?? []}
+              imageModels={images ? (snapshot?.imageModels ?? []) : []}
+              admin={admin}
+              concealed={concealed}
+              writable={writable}
+              accessVersion={accessVersion}
+              refreshAccess={read.refresh}
+              renderRow={(family, row) =>
+                snapshot && (
+                  <FallbackRule
+                    api={api}
+                    userId={userId}
+                    workspaceId={workspaceId}
+                    source={family}
+                    families={snapshot.families}
+                    admin={admin}
+                    concealed={concealed}
+                    writable={writable}
+                    accessVersion={accessVersion}
+                    refreshAccess={read.refresh}
+                    row={row}
+                  />
+                )
+              }
+            />
           </div>
-          <TabsContent value="access" keepMounted>
+        </TabsContent>
+        <TabsContent value="compaction" keepMounted>
+          {snapshot && !concealed && (
             <div className="pt-2">
-              <ModelAvailability
-                userId={userId}
+              <CompactionPolicySection
+                key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
                 workspaceId={workspaceId}
-                families={snapshot?.families ?? []}
-                imageModels={images ? (snapshot?.imageModels ?? []) : []}
                 admin={admin}
-                concealed={concealed}
                 writable={writable}
                 accessVersion={accessVersion}
-                refreshAccess={read.refresh}
-                renderRow={(family, row) =>
-                  snapshot && (
-                    <FallbackRule
-                      api={api}
-                      userId={userId}
-                      workspaceId={workspaceId}
-                      source={family}
-                      families={snapshot.families}
-                      admin={admin}
-                      concealed={concealed}
-                      writable={writable}
-                      accessVersion={accessVersion}
-                      refreshAccess={read.refresh}
-                      row={row}
-                    />
-                  )
-                }
               />
             </div>
-          </TabsContent>
-          <TabsContent value="compaction" keepMounted>
+          )}
+        </TabsContent>
+        {images && (
+          <TabsContent value="images" keepMounted>
             {snapshot && !concealed && (
               <div className="pt-2">
-                <CompactionPolicySection
+                <ImageSettingsSection
                   key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
                   workspaceId={workspaceId}
                   admin={admin}
@@ -173,23 +186,8 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
               </div>
             )}
           </TabsContent>
-          {images && (
-            <TabsContent value="images" keepMounted>
-              {snapshot && !concealed && (
-                <div className="pt-2">
-                  <ImageSettingsSection
-                    key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
-                    workspaceId={workspaceId}
-                    admin={admin}
-                    writable={writable}
-                    accessVersion={accessVersion}
-                  />
-                </div>
-              )}
-            </TabsContent>
-          )}
-        </Tabs>
-      </PageContent>
-    </div>
+        )}
+      </Tabs>
+    </PageContent>
   );
 }
