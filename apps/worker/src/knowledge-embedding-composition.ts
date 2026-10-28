@@ -31,6 +31,8 @@ export async function createKnowledgeEmbeddingWorker(dependencies: {
   gate?: NonNullable<EmbeddingOptions['gate']>;
   googleService?: NonNullable<Parameters<typeof createWorkerGoogleKnowledge>[0]['googleService']>;
   providerFetch?: typeof fetch;
+  /** False builds only the embedding service, for a process that does not run knowledge task queues. */
+  serve?: boolean;
 }) {
   const env = dependencies.env ?? process.env;
   const config = parseKnowledgeEmbeddingsConfig(env);
@@ -74,6 +76,7 @@ export async function createKnowledgeEmbeddingWorker(dependencies: {
       ...(dependencies.provider ? { provider: dependencies.provider } : {}),
       capacity: createKnowledgeEmbeddingCapacity(pool).acquire,
     });
+    if (dependencies.serve === false) return { worker: undefined, close, service };
     const createWorker = dependencies.createWorker ?? Worker.create.bind(Worker);
     const worker = await createWorker({
       ...workerTelemetry(dependencies.telemetry),

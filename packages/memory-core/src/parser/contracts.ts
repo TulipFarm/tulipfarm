@@ -11,6 +11,7 @@ export const parserLimits = Object.freeze({
   expandedBytes: 64 * 1024 * 1024,
   archiveEntries: 10_000,
   concurrency: 2,
+  niceness: 19,
   targetTokens: 800,
   overlapTokens: 100,
 });

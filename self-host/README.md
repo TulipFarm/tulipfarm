@@ -62,6 +62,17 @@ the model is told web access is off. Before turning the flag on, run
 `pnpm db workspace-rollout` so every workspace has common migration
 `0014_conversation_links.sql`; a workspace without it reads no links.
 
+## Separate knowledge worker
+
+By default one worker process runs every task queue. A large knowledge sync
+parses many documents and can use all of that process's CPU, which delays chats,
+scheduled jobs and the health check. To keep them apart, run the same worker
+image twice: one with `TULIPFARM_WORKER_ROLE=core` and one with
+`TULIPFARM_WORKER_ROLE=knowledge`. Both need the worker's environment. The
+knowledge role needs isolated workspace storage, and its telemetry uses the
+service name `tulipfarm-knowledge-worker`. Unset or `all` keeps one process.
+Document parsers always run at the lowest CPU priority.
+
 ## Health
 
 The API health route is **`/v1/health`**, not `/health`. It returns 200 only when

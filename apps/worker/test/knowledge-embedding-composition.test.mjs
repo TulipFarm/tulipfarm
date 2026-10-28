@@ -55,3 +55,25 @@ test('enabled embedding worker uses a separate task queue and caller-owned regis
   assert.equal(options.maxConcurrentActivityTaskExecutions, 2);
   await composed.close();
 });
+
+test('an embedding service without serve builds no worker', async () => {
+  const forbidden = () => {
+    throw new Error('Composition must not perform work');
+  };
+  const composed = await createKnowledgeEmbeddingWorker({
+    env: {
+      KNOWLEDGE_EMBEDDINGS_ENABLED: 'true',
+      AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
+      AZURE_FOUNDRY_API_KEY: 'fixture-only',
+    },
+    runtime: { transaction: forbidden },
+    connection: {},
+    pool: { query: forbidden, connect: forbidden, end: forbidden },
+    provider: forbidden,
+    createWorker: forbidden,
+    serve: false,
+  });
+  assert.equal(composed.worker, undefined);
+  assert.equal(typeof composed.service, 'object');
+  await composed.close();
+});

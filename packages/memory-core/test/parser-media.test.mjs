@@ -227,3 +227,23 @@ test('media mode defers ready images once a batch would pass the byte budget', a
   );
   assert.equal(media.length, 3);
 });
+
+test('the parser sandbox runs at the lowest CPU priority', { skip: process.platform === 'win32' }, async () => {
+  const { getPriority } = await import('node:os');
+  const controller = new AbortController();
+  let priority;
+  const run = extractKnowledgeDocument(
+    { bytes: Buffer.from('text'), filename: 'note.txt', mediaType: 'text/plain' },
+    {
+      worker: new URL('./fixtures/idle-parser.mjs', import.meta.url),
+      signal: controller.signal,
+      onSpawn: pid =>
+        setTimeout(() => {
+          priority = getPriority(pid);
+          controller.abort();
+        }, 500),
+    },
+  );
+  await assert.rejects(run, error => error instanceof KnowledgeParseError && error.reason === 'cancelled');
+  assert.equal(priority, 19);
+});
