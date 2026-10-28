@@ -58,6 +58,21 @@ test('listed families resolve to their pricing deployment and nothing else', () 
   }, TypeError);
 });
 
+test('the environment is reused until a variable it reads changes', () => {
+  const environment = modelEnvironment(azure);
+  assert.equal(modelEnvironment({ ...azure, UNRELATED: 'x' }), environment);
+  assert.ok(Object.isFrozen(environment));
+  assert.ok(Object.isFrozen(environment.restrictions.allowedProviders));
+  const luna = environment.resolve('gpt-luna');
+  const rotated = modelEnvironment({ ...azure, AZURE_FOUNDRY_API_KEY: 'rotated-credential' });
+  assert.notEqual(rotated, environment);
+  assert.equal(rotated.inference(luna).auth.value, 'rotated-credential');
+  assert.equal(environment.inference(luna).auth.value, credential);
+  const moved = modelEnvironment({ ...azure, AZURE_FOUNDRY_ENDPOINT: 'https://other.services.ai.azure.com/' });
+  assert.equal(moved.inference(luna).endpoint, 'https://other.services.ai.azure.com/');
+  assert.equal(modelEnvironment({ ...azure, MODEL_CATALOG: catalogOf(['gpt-sol']) }).resolve('gpt-luna'), null);
+});
+
 test('continuity binds the catalog default, budget and dated identities', () => {
   const environment = modelEnvironment(azure);
   const continuity = environment.continuity(createMemoryRouteHealth);
