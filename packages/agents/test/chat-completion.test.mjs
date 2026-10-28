@@ -159,17 +159,26 @@ test('an exhausted work budget does not request more work after a rejected plan'
   assert.equal(replies.length, 0);
 });
 
-test('malformed completion checks fail closed instead of accepting actor text', async t => {
+test('a malformed completion check delivers the answer instead of failing the turn', async t => {
+  const outcomes = checkOutcomes(t);
   const replies = [nativeReply('azure', { text: promise }), selectReply('azure', { status: 'completed' })];
   t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
-  await assert.rejects(
-    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
-    /model-invalid-decision/,
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    messages,
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    resumed,
   );
+  assert.equal(result.text, promise);
   assert.equal(replies.length, 0);
+  assert.deepEqual(outcomes, ['error']);
 });
 
-test('completion check failures are metered and clear the provisional answer', async t => {
+test('completion check provider failures are metered and keep the answer', async t => {
+  const outcomes = checkOutcomes(t);
   const previews = [],
     usage = [];
   let requests = 0;
@@ -178,20 +187,36 @@ test('completion check failures are metered and clear the provisional answer', a
       ? Response.json(nativeReply('azure', { text: promise }))
       : Response.json({ error: { code: 'insufficient_quota' } }, { status: 429 }),
   );
-  await assert.rejects(
-    inferWithTools(
-      nativeRoutes.azure,
-      messages,
-      () => assert.fail(),
-      async () => async value => usage.push(value),
-      false,
-      null,
-      { ...resumed, answerText: update => previews.push(update) },
-    ),
-    /model-quota/,
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    messages,
+    () => assert.fail(),
+    async () => async value => usage.push(value),
+    false,
+    null,
+    { ...resumed, answerText: update => previews.push(update) },
   );
+  assert.equal(result.text, promise);
   assert.equal(usage.length, 2);
-  assert.equal(previews.at(-1).text, '');
+  assert.ok(!previews.some(update => update.text === ''));
+  assert.deepEqual(outcomes, ['error']);
+});
+
+test('an aborted completion check still fails the turn', async t => {
+  const controller = new AbortController();
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    if (++requests === 1) return Response.json(nativeReply('azure', { text: promise }));
+    controller.abort(new Error('turn-cancelled'));
+    throw controller.signal.reason;
+  });
+  await assert.rejects(
+    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, {
+      ...resumed,
+      signal: controller.signal,
+    }),
+    /turn-cancelled/,
+  );
 });
 
 test('completion checks cannot bypass source authorization or credit admission', async t => {
@@ -242,7 +267,7 @@ test('completion checks use the prepared context once, not the unbounded pre-com
   assert.ok(!check.includes('original-history-must-stay-compacted'));
   const evidence = JSON.parse(requests[1].messages.at(-1).content);
   assert.ok(!('context' in evidence), 'the runtime reminder is not repeated in the check');
-  assert.equal(requests[1].max_completion_tokens, 384);
+  assert.equal(requests[1].max_completion_tokens, 4096);
   assert.equal(requests[0].max_completion_tokens, 4096);
 });
 
@@ -502,7 +527,7 @@ test('completion checks keep the active chat model by default and disable reason
     ['gpt-6-sol', 'gpt-6-sol'],
   );
   assert.equal(requests[1].reasoning_effort, 'none');
-  assert.equal(requests[1].max_completion_tokens, 384);
+  assert.equal(requests[1].max_completion_tokens, requests[0].max_completion_tokens);
 });
 
 test('a completion check without its own role follows the active fallback model', async t => {
@@ -525,16 +550,22 @@ test('a completion check without its own role follows the active fallback model'
   assert.deepEqual(models, [nativeRoutes.azure.model, nativeRoutes.anthropic.model, nativeRoutes.anthropic.model]);
 });
 
-test('completion output cut off by the provider fails closed', async t => {
+test('completion output cut off by the provider delivers the finished answer', async t => {
   const outcomes = checkOutcomes(t);
   const truncated = selectReply('azure', verdict());
   truncated.choices[0].finish_reason = 'length';
   const replies = [nativeReply('azure', { text: 'Finished.' }), truncated];
   t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
-  await assert.rejects(
-    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
-    /model-output-limit/,
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    messages,
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    resumed,
   );
+  assert.equal(result.text, 'Finished.');
   assert.deepEqual(outcomes, ['error']);
 });
 
@@ -577,14 +608,20 @@ for (const value of [
   { status: 'completed', reason: 'OK', extra: true },
   null,
 ])
-  test(`invalid completion output fails closed: ${JSON.stringify(value)?.slice(0, 60)}`, async t => {
+  test(`invalid completion output delivers the answer: ${JSON.stringify(value)?.slice(0, 60)}`, async t => {
     const outcomes = checkOutcomes(t);
     const replies = [nativeReply('azure', { text: 'Finished.' }), selectReply('azure', value)];
     t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
-    await assert.rejects(
-      inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
-      /model-invalid-decision/,
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      messages,
+      () => assert.fail(),
+      undefined,
+      false,
+      null,
+      resumed,
     );
+    assert.equal(result.text, 'Finished.');
     assert.deepEqual(outcomes, ['error']);
   });
 

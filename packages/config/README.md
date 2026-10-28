@@ -187,8 +187,10 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   using the active chat model (including a chat fallback). Assign the role to
   a model in your catalog to choose another provider-neutral route; no new
   environment variable is needed. Calls keep source authorization, credit
-  admission and usage billing for that model. Check output is capped at 384
-  tokens, or the model's smaller limit. Reasoning is disabled only where the
+  admission and usage billing for that model. Check output uses the route's
+  full output cap, because reasoning models spend tokens before deciding. If
+  the check's model call fails, the finished answer is delivered and the
+  failure is counted as an `error` check outcome. Reasoning is disabled only where the
   existing `reasoningOffForTools` capability permits it; qualify a model's
   decisions and output budget before assigning it this role.
 - **Fallback.** The `fallback` role is off unless a model has it. Then a chat

@@ -2662,8 +2662,8 @@ export async function inferWithTools(
       report('finishing');
       try {
         checked = await withChatModelRequest('completion', () => {
+          // Reasoning models spend output tokens before deciding, so the check keeps the route's full output budget.
           const route = inferenceRouteSchema.parse(tools?.completionCheck ?? config);
-          const target = { ...route, maxOutputTokens: Math.min(384, route.maxOutputTokens) };
           // The check's request stays within its model's window, with a tenth spare for the estimate's error.
           const window = tools?.completionCheckWindow ?? limits?.window;
           const fixed = scaled(Buffer.byteLength(completionCheckPrompt) + completionCheckSchemaBytes);
@@ -2672,7 +2672,7 @@ export async function inferWithTools(
               ? undefined
               : Math.max(
                   4096,
-                  Math.floor(((Math.floor(window * 0.9) - target.maxOutputTokens - fixed) * 4) / tokenScale),
+                  Math.floor(((Math.floor(window * 0.9) - route.maxOutputTokens - fixed) * 4) / tokenScale),
                 );
           const evidence = observeChatDetailSync('completion-context', () =>
             completionCheckEvidence(
@@ -2689,14 +2689,14 @@ export async function inferWithTools(
           return send(
             observeChatDetailSync('serialize', () =>
               chatRequest(
-                target,
+                route,
                 [{ role: 'user', text: evidence }],
                 completionCheckPrompt,
                 z.toJSONSchema(completionCheckSchema),
               ),
             ),
             body => {
-              const selected = decision(target, body);
+              const selected = decision(route, body);
               const parsed =
                 selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
               if (!parsed?.success)
@@ -2706,11 +2706,13 @@ export async function inferWithTools(
               return { value: parsed.data.decision, failed: false };
             },
             undefined,
-            target,
+            route,
           );
         });
       } catch (error) {
         recordChatCompletionCheck('error');
+        // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
+        if (error instanceof ModelCallError && !signal?.aborted) return accept();
         preview('');
         throw error;
       }
