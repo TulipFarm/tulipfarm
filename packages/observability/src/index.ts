@@ -953,6 +953,22 @@ export function createKnowledgeSyncMetrics() {
   };
 }
 
+type GlobalMeterProvider = ReturnType<typeof metrics.getMeterProvider>;
+type LogRecordCounter = ReturnType<ReturnType<GlobalMeterProvider['getMeter']>['createCounter']>;
+
+// Keyed by provider so a counter created before the SDK starts, or by a replaced provider, is not reused.
+const logRecordCounters = new WeakMap<GlobalMeterProvider, LogRecordCounter>();
+
+function logRecordCounter(): LogRecordCounter {
+  const provider = metrics.getMeterProvider();
+  let counter = logRecordCounters.get(provider);
+  if (!counter) {
+    counter = provider.getMeter(scope).createCounter('cloud_log_records');
+    logRecordCounters.set(provider, counter);
+  }
+  return counter;
+}
+
 export function log(level: Level, category: Category, event: Event, attributes: Attributes = {}) {
   const safe = Object.fromEntries(Object.entries(attributes).filter(([key, value]) => safeAttribute(key, value, true)));
   const active = trace.getSpan(context.active())?.spanContext();
@@ -969,10 +985,7 @@ export function log(level: Level, category: Category, event: Event, attributes: 
     attributes: fields,
     context: context.active(),
   });
-  metrics
-    .getMeter(scope)
-    .createCounter('cloud_log_records')
-    .add(1, { ...dimensions, category, level });
+  logRecordCounter().add(1, { ...dimensions, category, level });
 }
 
 function callMetrics(

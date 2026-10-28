@@ -7,6 +7,7 @@ import {
   InMemoryMetricExporter,
   PeriodicExportingMetricReader,
   AggregationTemporality,
+  MeterProvider,
 } from '@opentelemetry/sdk-metrics';
 import { InMemoryLogRecordExporter, SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import {
@@ -1070,6 +1071,38 @@ test('call_failed keeps Zod issue paths and codes but drops other attributes', t
   assert.deepEqual(record['error.issues'], ['decision:invalid_type']);
   assert.equal(record.input, undefined);
   assert.equal(record['error.reason'], undefined);
+});
+
+test('log records are counted by the meter provider that is current when they are written', async t => {
+  t.mock.method(process.stdout, 'write', () => true);
+  const install = () => {
+    const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+    const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60000 });
+    metrics.disable();
+    assert.ok(metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] })));
+    return async () => {
+      await reader.forceFlush();
+      const count = exporter
+        .getMetrics()
+        .flatMap(resource => resource.scopeMetrics.flatMap(scope => scope.metrics))
+        .filter(metric => metric.descriptor.name === 'cloud_log_records')
+        .flatMap(metric => metric.dataPoints)
+        .reduce((sum, point) => sum + point.value, 0);
+      exporter.reset();
+      return count;
+    };
+  };
+  t.after(() => metrics.disable());
+  metrics.disable();
+  log('info', 'activity', 'call_completed', { operation: 'before-provider' });
+  const first = install();
+  log('info', 'activity', 'call_completed', { operation: 'first' });
+  assert.equal(await first(), 1);
+  const second = install();
+  log('info', 'activity', 'call_completed', { operation: 'second' });
+  log('info', 'activity', 'call_completed', { operation: 'second' });
+  assert.equal(await second(), 2);
+  assert.equal(await first(), 1);
 });
 
 test('integration metric failures preserve results and errors and still end spans', async t => {

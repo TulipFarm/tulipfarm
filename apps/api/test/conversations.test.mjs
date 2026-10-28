@@ -300,12 +300,16 @@ test('a send records the time before its handler and passes its arrival to the s
     }
     return write.call(process.stdout, line, ...rest);
   });
+  // Authentication takes a simulated second, so the send-request phase is slow enough to be logged.
+  const now = performance.now.bind(performance);
+  let authenticationMs = 0;
+  t.mock.method(performance, 'now', () => now() + authenticationMs);
   let arrival;
   registerConversations(app, {
     auth: {
       api: {
         getSession: async () => {
-          await new Promise(resolve => setTimeout(resolve, 30));
+          authenticationMs = 1000;
           return { user: { id: 'sender' } };
         },
       },
@@ -332,5 +336,5 @@ test('a send records the time before its handler and passes its arrival to the s
   const request = details.find(line => line.operation === 'chat.detail.send-request');
   assert.ok(request, 'send-request phase recorded');
   assert.equal(request['chat.purpose'], 'send');
-  assert.ok(request.duration_ms >= 25, `send-request ${request.duration_ms}ms covers authentication`);
+  assert.ok(request.duration_ms >= 1000, `send-request ${request.duration_ms}ms covers authentication`);
 });

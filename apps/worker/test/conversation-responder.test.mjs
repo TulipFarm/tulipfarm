@@ -151,6 +151,10 @@ test('source authorization is measured before credit admission and dispatch, inc
     }
     return write(chunk, ...args);
   });
+  // Authorization takes a simulated second, so the successful phase is slow enough to be logged.
+  const now = performance.now.bind(performance);
+  let authorizationMs = 0;
+  t.mock.method(performance, 'now', () => now() + authorizationMs);
   for (const denied of [false, true]) {
     let release;
     const gate = new Promise(resolve => {
@@ -190,6 +194,7 @@ test('source authorization is measured before credit admission and dispatch, inc
     assert.equal(admitted, 0);
     assert.equal(fetched, 0);
     assert.equal(records.slice(start).filter(record => record.operation === 'chat.detail.authorize').length, 0);
+    authorizationMs += 1000;
     release();
     if (denied) {
       await assert.rejects(pending, error => error === failure);
