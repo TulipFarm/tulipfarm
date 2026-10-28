@@ -18,6 +18,9 @@ test(
   async t => {
     const { read } = await setup(t);
     const phases = [];
+    // Each phase only logs once it takes at least a second.
+    let clock = 0;
+    t.mock.method(performance, 'now', () => (clock += 1000));
     t.mock.method(process.stdout, 'write', line => {
       const record = JSON.parse(line);
       if (record.operation?.startsWith('chat.detail.')) phases.push(record.operation);

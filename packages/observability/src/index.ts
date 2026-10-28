@@ -1963,9 +1963,13 @@ function chatDetailAttributes(state: ChatMeasurement): Attributes {
   };
 }
 
+const chatDetailLogMs = 1000;
+
 function finishChatDetail(phase: ChatDetailPhase, state: ChatMeasurement, start: number, outcome: string) {
   const seconds = (performance.now() - start) / 1000;
   chatInstruments().detail.record(seconds, { ...dimensions, phase, purpose: state.purpose, outcome });
+  // A reply runs many phases; the histogram and span cover routine ones, so only slow or failed phases are logged.
+  if (outcome === 'success' && seconds * 1000 < chatDetailLogMs) return;
   log('info', 'activity', 'call_completed', {
     operation: `chat.detail.${phase}`,
     ...chatDetailAttributes(state),
