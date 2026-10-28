@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { errorType, log } from '@tulipfarm/observability';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
@@ -17,7 +18,7 @@ import {
 } from '@tulipfarm/slack';
 import { matchesSlackSnapshot, sameSlackPublicationText } from '@tulipfarm/slack';
 import { requireDraftSources } from './draft-sources.ts';
-import { SlackAdmissionDenied } from './slack-rejections.ts';
+import { SlackAdmissionDenied, slackReplyFailureNotices } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
 export const slackRootSchema = z.object({
@@ -40,6 +41,8 @@ export type SlackDelivery =
   | { kind: 'PrivateOnly' }
   | { kind: 'Undeliverable' };
 type Provider = ReturnType<typeof createChannelProvider>;
+type Observation = Awaited<ReturnType<Provider['observe']>>;
+type ChannelSource = Parameters<Provider['observe']>[3];
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 
 // A knowledge citation pins the revision that was current when the answer was written. Re-indexing a document
@@ -78,6 +81,37 @@ export function createSlackDelivery(
     publicOnly: boolean,
   ) => Promise<void>,
 ) {
+  // Each prior turn in a thread re-checks the same thread and the turns before it, so without reuse one reply repeats
+  // the same Slack reads exponentially while it holds the workspace lock. Within one transaction an observation and a
+  // passed check stay valid, so both are reused; a failure is never cached.
+  const checks = new WeakMap<
+    AuthorizationTransaction,
+    { observed: Map<string, Promise<Observation>>; verified: Set<string> }
+  >();
+  function checksFor(tx: AuthorizationTransaction) {
+    let entry = checks.get(tx);
+    if (!entry) checks.set(tx, (entry = { observed: new Map(), verified: new Set() }));
+    return entry;
+  }
+  function observe(tx: AuthorizationTransaction, workspaceId: string, actor: HumanActor, source: ChannelSource) {
+    const { observed } = checksFor(tx);
+    const key = JSON.stringify([
+      workspaceId,
+      actor.membershipId,
+      actor.userId,
+      source.installationId,
+      source.generation,
+      source.channel,
+      source.rootTs,
+    ]);
+    let result = observed.get(key);
+    if (!result) {
+      result = provider.observe(tx, workspaceId, actor, source);
+      observed.set(key, result);
+      result.catch(() => observed.delete(key));
+    }
+    return result;
+  }
   async function sources(
     tx: AuthorizationTransaction,
     workspaceId: string,
@@ -85,6 +119,20 @@ export function createSlackDelivery(
     eventId: string,
     visited = new Set<string>(),
     publicOnly = false,
+  ): Promise<void> {
+    const { verified } = checksFor(tx);
+    const key = JSON.stringify([workspaceId, actor.membershipId, actor.userId, eventId, publicOnly]);
+    if (verified.has(key)) return;
+    await verifySources(tx, workspaceId, actor, eventId, visited, publicOnly);
+    verified.add(key);
+  }
+  async function verifySources(
+    tx: AuthorizationTransaction,
+    workspaceId: string,
+    actor: HumanActor,
+    eventId: string,
+    visited: Set<string>,
+    publicOnly: boolean,
   ): Promise<void> {
     if (visited.has(eventId)) throw new AccessDenied();
     visited.add(eventId);
@@ -141,7 +189,7 @@ export function createSlackDelivery(
   ) {
     if (!sameSlackMessage(await currentSlackMessage(tx, eventId), request))
       throw new SlackAdmissionDenied('request-changed');
-    const observed = await provider.observe(tx, workspaceId, actor, slackSource(root));
+    const observed = await observe(tx, workspaceId, actor, slackSource(root));
     const current = new Map(observed.messages.map(message => [message.ts, message]));
     if (snapshot.some(message => !matchesSlackSnapshot(current.get(message.ts), message)))
       throw new SlackAdmissionDenied('thread-changed');
@@ -166,7 +214,7 @@ export function createSlackDelivery(
     )
       throw new SlackAdmissionDenied('message-edited');
     if (request.channel.startsWith('D')) {
-      const privateContext = await provider.observe(tx, workspaceId, actor, {
+      const privateContext = await observe(tx, workspaceId, actor, {
         ...slackSource(root),
         channel: request.channel,
         rootTs: request.thread_ts ?? request.ts,
@@ -190,7 +238,10 @@ export function createSlackDelivery(
       const publication = publications.find(
         item => item.message_ts === message.ts && sameSlackPublicationText(item.text, message.text),
       );
-      if (!publication) throw new SlackAdmissionDenied('publication-unverified');
+      if (!publication) {
+        if (slackReplyFailureNotices.some(notice => sameSlackPublicationText(notice, message.text))) continue;
+        throw new SlackAdmissionDenied('publication-unverified');
+      }
       try {
         await sources(tx, workspaceId, actor, publication.event_id, new Set(visited));
       } catch (error) {
@@ -216,7 +267,19 @@ export function createSlackDelivery(
   ): Promise<SlackDelivery> {
     try {
       await sources(tx, workspaceId, actor, eventId);
-    } catch {
+    } catch (error) {
+      // Log only a fixed reason code or the error class, never the Slack content behind it.
+      log('warn', 'activity', 'call_failed', {
+        operation: 'slack.delivery.decide',
+        outcome: 'undeliverable',
+        'error.type':
+          error instanceof SlackAdmissionDenied
+            ? error.reason
+            : error instanceof AccessDenied
+              ? 'access-denied'
+              : errorType(error),
+        'slack.event_id': eventId,
+      });
       return { kind: 'Undeliverable' };
     }
     if (!shared || !enabled) return { kind: 'PrivateOnly' };

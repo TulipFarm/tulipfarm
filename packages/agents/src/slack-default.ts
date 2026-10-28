@@ -29,11 +29,15 @@ import { createSlackChannelAgents } from './slack-channels.ts';
 import { slackRootSchema, slackSource } from './slack-delivery.ts';
 import {
   announceSlackRejection,
+  announceSlackReplyFailure,
+  mentionTarget,
   recordSlackRejection,
   SlackAdmissionDenied,
   slackAdmissionReason,
 } from './slack-rejections.ts';
 import { requireDraftSources } from './draft-sources.ts';
+
+export { slackReplyRetryAction } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import type { ExternalConversationContext } from '@tulipfarm/conversations/runtime';
 import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts';
@@ -89,6 +93,18 @@ export function createSlackDefault(
       await lockAuthorization(tx, 'write');
       return operation(tx);
     });
+  // Only a failed model or tool run is announced; access and delivery blocks stay silent so they reveal nothing.
+  type Blocked = { reason: string; target?: Awaited<ReturnType<typeof mentionTarget>> };
+  const announceBlocked = async (workspaceId: string, eventId: string, blocked: Blocked) => {
+    await announceSlackReplyFailure({
+      workspaceId,
+      eventId,
+      reason: blocked.reason,
+      target: blocked.target,
+      cipher: options.cipher,
+      fetcher: options.fetcher,
+    });
+  };
   async function load(tx: AuthorizationTransaction, eventId: string) {
     return turnSchema.parse(
       (
@@ -404,14 +420,18 @@ export function createSlackDefault(
   async function process(work: { workspaceId: string; eventId: string }) {
     const { workspaceId, eventId } = work;
     if (!(await slackCredentialsReady(runtime, work))) return 'idle';
+    let stopped: Blocked | undefined;
     const selected = await transaction(workspaceId, async tx => {
       const row = await load(tx, eventId);
       if (!['pending', 'retry'].includes(row.state) || !row.due) return null;
       if (row.model_started && ['failed', 'cancelled', 'blocked'].includes(row.status)) {
-        blockedReply(`conversation-${row.status}`);
         await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
           eventId,
         ]);
+        stopped = {
+          reason: `conversation-${row.status}`,
+          target: row.status === 'failed' ? await mentionTarget(tx, eventId) : undefined,
+        };
         return null;
       }
       await tx.client.query(
@@ -420,6 +440,7 @@ export function createSlackDefault(
       );
       return row;
     });
+    if (stopped) await announceBlocked(workspaceId, eventId, stopped);
     if (!selected) return 'idle';
     const replyWork = {
       workspaceId,
@@ -446,13 +467,15 @@ export function createSlackDefault(
       try {
         await executor.process(replyWork);
       } catch (error) {
-        blockedReply(errorType(error));
-        await transaction(workspaceId, tx =>
-          tx.client.query(
+        const denied = error instanceof AccessDenied;
+        const target = await transaction(workspaceId, async tx => {
+          const updated = await tx.client.query(
             `UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1 AND state='pending'`,
             [eventId],
-          ),
-        );
+          );
+          return updated.rowCount && !denied ? mentionTarget(tx, eventId) : undefined;
+        });
+        await announceBlocked(workspaceId, eventId, { reason: denied ? 'access-denied' : errorType(error), target });
         return 'blocked';
       }
     }
@@ -474,9 +497,19 @@ export function createSlackDefault(
       ),
     );
     if (!claimed.rowCount) return 'idle';
-    return transaction(workspaceId, async tx => {
+    const result = await transaction(workspaceId, async (tx): Promise<string | Blocked> => {
       const row = await load(tx, eventId);
       if (row.state !== 'sending' || row.attempt_id !== attempt) return 'idle';
+      // A failed conversation has no result to deliver, so its real reason is reported instead of a delivery block.
+      if (row.status !== 'completed') {
+        await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
+          eventId,
+        ]);
+        return {
+          reason: `conversation-${row.status}`,
+          target: row.status === 'failed' ? await mentionTarget(tx, eventId) : undefined,
+        };
+      }
       let destination;
       try {
         const actor = await resolveHuman(tx, row.user_id);
@@ -494,14 +527,8 @@ export function createSlackDefault(
         blockedReply(error instanceof AccessDenied ? 'access-denied' : errorType(error));
         destination = { kind: 'Undeliverable' as const };
       }
-      if (destination.kind === 'Undeliverable' || row.status !== 'completed' || !row.text) {
-        blockedReply(
-          destination.kind === 'Undeliverable'
-            ? 'undeliverable'
-            : row.status !== 'completed'
-              ? `conversation-${row.status}`
-              : 'empty-answer',
-        );
+      if (destination.kind === 'Undeliverable' || !row.text) {
+        blockedReply(destination.kind === 'Undeliverable' ? 'undeliverable' : 'empty-answer');
         await tx.client.query(`UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='blocked' WHERE event_id=$1`, [
           eventId,
         ]);
@@ -542,6 +569,71 @@ export function createSlackDefault(
       }
       return outcome.kind;
     });
+    if (typeof result === 'string') return result;
+    await announceBlocked(workspaceId, eventId, result);
+    return 'blocked';
   }
-  return { due, process, actionSources };
+  /**
+   * Admits a failed reply's request again when its requester presses Retry on the failure notice. The original message
+   * is held again as a new event, so the retry passes every admission check a new mention would.
+   */
+  async function retry(
+    workspaceId: string,
+    eventId: string,
+    clicker: { appId: string; teamId: string; slackUserId: string },
+  ): Promise<'retrying' | 'already-retried'> {
+    return transaction(workspaceId, async tx => {
+      const original = z
+        .object({
+          installation_id: z.uuid(),
+          generation: z.number().int(),
+          event_time: z.coerce.number().int(),
+          payload: messageSchema,
+          root_id: z.uuid(),
+          user_id: z.string(),
+          membership_id: z.uuid(),
+        })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT e.installation_id,e.generation,e.event_time,e.payload,v.root_id,p.user_id,p.membership_id
+      FROM ${table(tx, 'tf_slack_default_turns')} t JOIN ${table(tx, 'tf_slack_events')} e ON e.id=t.event_id
+      JOIN ${table(tx, 'tf_slack_channel_invocations')} v ON v.event_id=e.id
+      JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=e.installation_id AND s.generation=e.generation
+      JOIN ${table(tx, 'tf_slack_identities')} p ON p.installation_id=e.installation_id AND p.generation=e.generation AND p.slack_user_id=e.payload->>'user'
+      WHERE t.event_id=$1 AND t.state='blocked' AND s.app_id=$2 AND s.team_id=$3 AND s.state='active' AND p.state='authorized' AND p.slack_user_id=$4`,
+              [eventId, clicker.appId, clicker.teamId, clicker.slackUserId],
+            )
+          ).rows[0],
+        );
+      if (!original || (await resolveHuman(tx, original.user_id)).membershipId !== original.membership_id)
+        throw new AccessDenied();
+      const retried = randomUUID();
+      const inserted = await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_slack_events')} (id,installation_id,generation,event_id,semantic_key,event_time,payload,disposition)
+        VALUES ($1,$2,$3,$4,$4,$5,$6,'held') ON CONFLICT DO NOTHING RETURNING id`,
+        [
+          retried,
+          original.installation_id,
+          original.generation,
+          `retry:${eventId}`,
+          original.event_time,
+          original.payload,
+        ],
+      );
+      if (!inserted.rowCount) return 'already-retried';
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_slack_channel_invocations')} (event_id,root_id) VALUES ($1,$2)`,
+        [retried, original.root_id],
+      );
+      log('info', 'activity', 'call_completed', {
+        operation: 'slack.default.retry',
+        outcome: 'retrying',
+        'slack.event_id': eventId,
+      });
+      return 'retrying';
+    });
+  }
+  return { due, process, actionSources, retry };
 }
