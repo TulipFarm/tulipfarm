@@ -175,6 +175,17 @@ class TransactionDeadline {
   }
 }
 
+const workspaceAccessSchema = z.object({ allowed: z.boolean() });
+const compatibilitySchema = z
+  .object({
+    minimum: z.number().int().nonnegative(),
+    maximum: z.number().int().nonnegative(),
+    deadlineAt: z.number().int().optional(),
+  })
+  .refine(({ minimum, maximum }) => maximum >= minimum);
+const identitySchema = z.object({ session_user: z.string(), current_user: z.string() });
+const versionSchema = z.object({ version: z.number().int() });
+
 export async function fenceWorkspaceAccess(client: SqlClient, workspaceId: string, exclusive = false) {
   const installed = await client.query(
     "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app' AND p.proname = 'workspace_access'",
@@ -184,7 +195,7 @@ export async function fenceWorkspaceAccess(client: SqlClient, workspaceId: strin
     workspaceId,
     exclusive,
   ]);
-  if (!z.object({ allowed: z.boolean() }).parse(result.rows[0]).allowed) throw new StorageUnavailableError('disabled');
+  if (!workspaceAccessSchema.parse(result.rows[0]).allowed) throw new StorageUnavailableError('disabled');
 }
 
 export function createWorkspaceRuntime(
@@ -481,14 +492,7 @@ export function createWorkspaceRuntime(
     }) => Promise<T>,
   ) {
     const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
-    const versions = z
-      .object({
-        minimum: z.number().int().nonnegative(),
-        maximum: z.number().int().nonnegative(),
-        deadlineAt: z.number().int().optional(),
-      })
-      .refine(({ minimum, maximum }) => maximum >= minimum)
-      .parse(compatibility);
+    const versions = compatibilitySchema.parse(compatibility);
     const deadline = new TransactionDeadline(versions.deadlineAt);
     const background = isBackground();
     let admitted = false;
@@ -528,32 +532,28 @@ export function createWorkspaceRuntime(
             inTransaction(
               client,
               async connection => {
-                const identity = z
-                  .object({ session_user: z.string(), current_user: z.string() })
-                  .parse(
-                    (
-                      await observeChatDetail('storage-identity', () =>
-                        connection.query('SELECT session_user, current_user'),
-                      )
-                    ).rows[0],
-                  );
+                const identity = identitySchema.parse(
+                  (
+                    await observeChatDetail('storage-identity', () =>
+                      connection.query('SELECT session_user, current_user'),
+                    )
+                  ).rows[0],
+                );
                 const names = workspaceNames(workspaceId);
                 if (identity.session_user !== names.runtime || identity.current_user !== names.runtime)
                   throw new Error('Runtime login identity mismatch');
                 await observeChatDetail('storage-fence', () =>
                   fenceWorkspaceAccess(connection, workspaceId, compatibility.access === 'exclusive'),
                 );
-                const version = z
-                  .object({ version: z.number().int() })
-                  .parse(
-                    (
-                      await observeChatDetail('storage-version', () =>
-                        connection.query(
-                          `SELECT count(*)::integer AS version FROM ${qualified(names.schema, commonTables.migrations)}`,
-                        ),
-                      )
-                    ).rows[0],
-                  ).version;
+                const version = versionSchema.parse(
+                  (
+                    await observeChatDetail('storage-version', () =>
+                      connection.query(
+                        `SELECT count(*)::integer AS version FROM ${qualified(names.schema, commonTables.migrations)}`,
+                      ),
+                    )
+                  ).rows[0],
+                ).version;
                 if (version < versions.minimum || version > versions.maximum)
                   throw new StorageUnavailableError('incompatible_version');
                 deadline.check();

@@ -45,6 +45,9 @@ export function calculateModelCost(input: {
   });
 }
 
+const isoDateSchema = z.iso.date();
+const tokenCategories = modelTokenUsageSchema.keyof().options;
+
 export function calculateUsageCost(input: {
   modelId: string;
   pricingRevision: string;
@@ -55,7 +58,7 @@ export function calculateUsageCost(input: {
   date: string;
 }) {
   const usage = modelUsageSchema.parse(input.usage);
-  const date = z.iso.date().parse(input.date);
+  const date = isoDateSchema.parse(input.date);
   if (usage.kind === 'unknown') return { kind: 'unknown' as const, reason: usage.reason };
   const { tokens } = usage;
   const prompt =
@@ -78,7 +81,7 @@ export function calculateUsageCost(input: {
   if (!selected || applicable[1]?.promptTokensAbove === selected.promptTokensAbove)
     throw new Error('Ambiguous or missing price');
   let cost = 0n;
-  for (const category of modelTokenUsageSchema.keyof().options) {
+  for (const category of tokenCategories) {
     const count = tokens[category];
     if (count === 0) continue;
     const rate = selected.usdPerMillionTokens[category];

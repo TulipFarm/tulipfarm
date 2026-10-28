@@ -16,6 +16,9 @@ import { z } from 'zod';
 import { sourceDependencySchema } from './results.ts';
 import { turnRequester } from './turn-requester.ts';
 
+const sourceDependenciesSchema = z.array(sourceDependencySchema);
+const slackRootSchema = z.object({ installation_id: z.uuid() }).optional();
+
 export async function requireResultSources(
   tx: AuthorizationTransaction,
   actor: HumanActor,
@@ -23,7 +26,7 @@ export async function requireResultSources(
   sources: unknown,
 ) {
   await currentMember(tx, actor);
-  for (const source of z.array(sourceDependencySchema).parse(sources)) {
+  for (const source of sourceDependenciesSchema.parse(sources)) {
     switch (source.kind) {
       case 'private-conversation':
         if (source.conversationId !== conversationId) throw new AccessDenied();
@@ -97,16 +100,13 @@ export async function requireSlackTurn(
   turnId: string,
 ) {
   const table = (name: string) => qualified(tx.schema, name);
-  const root = z
-    .object({ installation_id: z.uuid() })
-    .optional()
-    .parse(
-      (
-        await tx.client.query(`SELECT installation_id FROM ${table('tf_slack_dm_roots')} WHERE conversation_id=$1`, [
-          conversationId,
-        ])
-      ).rows[0],
-    );
+  const root = slackRootSchema.parse(
+    (
+      await tx.client.query(`SELECT installation_id FROM ${table('tf_slack_dm_roots')} WHERE conversation_id=$1`, [
+        conversationId,
+      ])
+    ).rows[0],
+  );
   if (!root) return false;
   await tx.client.query(`SELECT id FROM ${table('tf_slack_installations')} WHERE id=$1 FOR UPDATE`, [
     root.installation_id,
@@ -141,19 +141,19 @@ export async function requireSlackTurn(
 }
 
 export async function requireGitHubSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
-  for (const source of z.array(sourceDependencySchema).parse(sources)) {
+  for (const source of sourceDependenciesSchema.parse(sources)) {
     if (source.kind === 'github-personal') await requirePersonalGitHubSource(tx, actor, source);
     if (source.kind === 'github-source' && source.investigation) await requireProtectedSource(tx, actor, source);
   }
 }
 
 export async function requireGoogleSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
-  for (const source of z.array(sourceDependencySchema).parse(sources))
+  for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'google-integration') await requireProtectedSource(tx, actor, source);
 }
 
 export async function requireKnowledgeSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
-  for (const source of z.array(sourceDependencySchema).parse(sources))
+  for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'knowledge-document') await requireProtectedSource(tx, actor, source);
 }
 
@@ -173,7 +173,7 @@ export async function requireWorkflowSources(tx: AuthorizationTransaction, actor
  */
 export async function requireRetainedToolSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
   let opaque = false;
-  for (const source of z.array(sourceDependencySchema).parse(sources))
+  for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'personal-memory') opaque ||= source.membershipId !== actor.membershipId;
     else if (source.kind === 'unknown' || source.kind === 'unavailable' || source.kind === 'shared-slack-turn')
       opaque = true;
@@ -183,14 +183,14 @@ export async function requireRetainedToolSources(tx: AuthorizationTransaction, a
 
 /** Files read for a turn stay readable by its requester through delivery. */
 export async function requireFileSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
-  for (const source of z.array(sourceDependencySchema).parse(sources))
+  for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'tulipfarm-file' || source.kind === 'google-file')
       await requireProtectedSource(tx, actor, source);
 }
 
 /** An answer that used a Google Drive file stays usable only while the sender's integration is the one that read it. */
 export async function requireGoogleFileSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
-  for (const source of z.array(sourceDependencySchema).parse(sources))
+  for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'google-file') await requireProtectedSource(tx, actor, source);
 }
 

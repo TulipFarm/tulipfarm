@@ -19,6 +19,13 @@ const referenceSchema = z.union([
   z.strictObject({ kind: z.literal('file'), fileId: uuidSchema, read: fileReadReceiptSchema.optional() }),
   taskGoogleFileSourceSchema,
 ]);
+const referencesSchema = z.array(referenceSchema).max(1000);
+const installedSchema = z.object({ installed: z.boolean() });
+const allowedSchema = z.object({ allowed: z.boolean() });
+const skillReferencesSchema = z.array(z.object({ id: z.string(), revision: z.string() }));
+const webPagesSchema = z.array(z.object({ url: z.string() }));
+const tableIdsSchema = z.array(z.object({ id: uuidSchema }));
+const unboundedReferencesSchema = z.array(referenceSchema);
 type McpSource = z.infer<typeof mcpSourceDependencySchema>;
 const context = new AsyncLocalStorage<readonly McpSource[]>();
 const table = (tx: AuthorizationTransaction, name: string) =>
@@ -49,7 +56,7 @@ async function sourceClosure(
   sources: unknown,
   full: boolean,
 ): Promise<SourceDependency[]> {
-  const pending = z.array(referenceSchema).max(1000).parse(sources);
+  const pending = referencesSchema.parse(sources);
   const visited = new Set<string>();
   const edges = new Map<string, string[]>();
   let parent: string | undefined;
@@ -59,15 +66,14 @@ async function sourceClosure(
     if (!installed.has(name))
       installed.set(
         name,
-        z
-          .object({ installed: z.boolean() })
-          .parse((await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0])
-          .installed,
+        installedSchema.parse(
+          (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0],
+        ).installed,
       );
     return installed.get(name);
   }
   function append(value: unknown) {
-    const children = z.array(referenceSchema).max(1000).parse(value);
+    const children = referencesSchema.parse(value);
     if (parent) edges.set(parent, [...(edges.get(parent) ?? []), ...children.map(child => JSON.stringify(child))]);
     pending.push(...children);
   }
@@ -154,7 +160,7 @@ async function sourceClosure(
         if (!definitions.rowCount) throw new AccessDenied();
         for (const row of definitions.rows) {
           append(row.definition.sources ?? []);
-          const skills = z.array(z.object({ id: z.string(), revision: z.string() })).parse(row.definition.skills ?? []);
+          const skills = skillReferencesSchema.parse(row.definition.skills ?? []);
           append(
             skills
               .filter(skill => uuidSchema.safeParse(skill.id).success)
@@ -201,7 +207,7 @@ async function sourceClosure(
         if (!definitions.rowCount) throw new AccessDenied();
         for (const definition of definitions.rows)
           append([{ kind: 'agent-definition', agentId: task.agent_id, revision: definition.soul_revision }]);
-        const skills = z.array(z.object({ id: z.string(), revision: z.string() })).parse(task.skills);
+        const skills = skillReferencesSchema.parse(task.skills);
         append(
           skills
             .filter(skill => uuidSchema.safeParse(skill.id).success)
@@ -232,15 +238,12 @@ async function sourceClosure(
             if (receipt.result?.kind === 'public-web')
               // Web results list the pages they read, not source dependencies; each page is a public-web dependency.
               append(
-                z
-                  .array(z.object({ url: z.string() }))
-                  .parse(receipt.result.sources ?? [])
-                  .map(page => ({ kind: 'public-web', url: page.url })),
+                webPagesSchema.parse(receipt.result.sources ?? []).map(page => ({ kind: 'public-web', url: page.url })),
               );
             else if (receipt.result?.sources) append(receipt.result.sources);
             if (full && receipt.call.tableId) append([{ kind: 'table', tableId: receipt.call.tableId }]);
             if (full && receipt.call.tool === 'tables.list' && receipt.result?.tables) {
-              const tables = z.array(z.object({ id: uuidSchema })).parse(receipt.result.tables);
+              const tables = tableIdsSchema.parse(receipt.result.tables);
               append(tables.map(item => ({ kind: 'table', tableId: item.id })));
             }
           }
@@ -298,15 +301,13 @@ async function sourceClosure(
           }
         }
         if (await has('tf_conversation_results')) {
-          const readable = z
-            .object({ allowed: z.boolean() })
-            .parse(
-              (
-                await tx.client.query("SELECT has_table_privilege(current_user,$1,'SELECT') AS allowed", [
-                  table(tx, 'tf_conversation_results'),
-                ])
-              ).rows[0],
-            ).allowed;
+          const readable = allowedSchema.parse(
+            (
+              await tx.client.query("SELECT has_table_privilege(current_user,$1,'SELECT') AS allowed", [
+                table(tx, 'tf_conversation_results'),
+              ])
+            ).rows[0],
+          ).allowed;
           if (!readable) throw new AccessDenied();
           const results = await tx.client.query(
             `SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE conversation_id=$1 LIMIT 1001`,
@@ -374,21 +375,13 @@ export function denyMcpEgress() {
 
 export async function requireNoMcpDerived(tx: AuthorizationTransaction, sources: unknown = [], actor?: Actor) {
   denyMcpEgress();
-  if (
-    z
-      .array(referenceSchema)
-      .parse(sources)
-      .some(source => source.kind === 'private-task')
-  )
-    throw new AccessDenied();
+  if (unboundedReferencesSchema.parse(sources).some(source => source.kind === 'private-task')) throw new AccessDenied();
   if ((await mcpSourceClosure(tx, sources)).length) throw new AccessDenied();
   if (actor?.kind === 'agent') {
-    const installed = z
-      .object({ installed: z.boolean() })
-      .parse(
-        (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
-          .rows[0],
-      ).installed;
+    const installed = installedSchema.parse(
+      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
+        .rows[0],
+    ).installed;
     if (!installed) return;
     const tasks = await tx.client.query(
       `SELECT r.task_id,max(m.sequence) AS sequence FROM ${table(tx, 'tf_agent_task_runs')} r JOIN ${table(tx, 'tf_agent_task_messages')} m ON m.task_id=r.task_id WHERE r.run_id=$1 GROUP BY r.task_id`,

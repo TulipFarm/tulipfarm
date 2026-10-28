@@ -168,6 +168,16 @@ async function staged<T>(stage: ReplyStage, action: () => Promise<T>): Promise<T
   }
 }
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+const rootConversationSchema = z
+  .object({
+    owner_user_id: z.string(),
+    owner_membership_id: uuidSchema,
+    next_message_sequence: z.number().int(),
+    title_manual: z.boolean(),
+    title_revision: z.number().int(),
+    project_id: uuidSchema.nullable(),
+  })
+  .optional();
 const turnSchema = z.object({
   id: uuidSchema,
   source_message_id: uuidSchema,
@@ -569,24 +579,14 @@ export function createConversationExecutor(
     sourceCheck: 'conversation' | 'approved-batch' = 'conversation',
   ) {
     const { conversationId, turnId } = work;
-    const chat = z
-      .object({
-        owner_user_id: z.string(),
-        owner_membership_id: uuidSchema,
-        next_message_sequence: z.number().int(),
-        title_manual: z.boolean(),
-        title_revision: z.number().int(),
-        project_id: uuidSchema.nullable(),
-      })
-      .optional()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT owner_user_id, owner_membership_id, next_message_sequence, title_manual, title_revision, project_id AS project_id FROM ${table(tx, 'tf_conversations')} WHERE id = $1 AND kind = 'private' FOR UPDATE`,
-            [conversationId],
-          )
-        ).rows[0],
-      );
+    const chat = rootConversationSchema.parse(
+      (
+        await tx.client.query(
+          `SELECT owner_user_id, owner_membership_id, next_message_sequence, title_manual, title_revision, project_id AS project_id FROM ${table(tx, 'tf_conversations')} WHERE id = $1 AND kind = 'private' FOR UPDATE`,
+          [conversationId],
+        )
+      ).rows[0],
+    );
     if (!chat) return null;
     if (!chat.project_id)
       try {

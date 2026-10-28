@@ -21,16 +21,16 @@ const activityJson = (() => {
   const { $schema: _dialect, ...schema } = z.toJSONSchema(activitySchema, { io: 'input' });
   return schema;
 })();
+const propertiesSchema = z.record(z.string(), z.unknown());
+const requiredSchema = z.array(z.string());
+const activityFieldsSchema = z.object({ activity: activitySchema }).loose();
 const mcpInputSchema = z.strictObject({ activity: activitySchema, arguments: z.record(z.string(), z.json()) });
 
 /** Replaces the `tool` discriminator with the user-visible `activity` argument. The root stays `type: object`. */
 function withActivity(schema: Record<string, unknown>): Record<string, unknown> {
   const { $schema: _dialect, properties, required, ...rest } = schema;
-  const { tool: _tool, ...fields } = z.record(z.string(), z.unknown()).parse(properties ?? {});
-  const names = z
-    .array(z.string())
-    .parse(required ?? [])
-    .filter(name => name !== 'tool');
+  const { tool: _tool, ...fields } = propertiesSchema.parse(properties ?? {});
+  const names = requiredSchema.parse(required ?? []).filter(name => name !== 'tool');
   return {
     ...rest,
     type: 'object',
@@ -82,7 +82,7 @@ function nativeTools(
     const name = nativeToolName(tool);
     tools.push({ name, description: entry.description, parameters: withActivity(entry.inputSchema) });
     resolvers.set(name, input => {
-      const fields = z.object({ activity: activitySchema }).loose().safeParse(input);
+      const fields = activityFieldsSchema.safeParse(input);
       if (!fields.success) return { ok: false, error: issues(fields.error) };
       const { activity, ...rest } = fields.data;
       const call = callSchema.safeParse({ ...rest, tool });
