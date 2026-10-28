@@ -52,7 +52,7 @@
     "@tulipfarm/workspace-mcp-transport": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "@tulipfarm/workspaces": "workspace:*",
-    "better-auth": "1.7.6",
+    "better-auth": "1.7.7",
     "fastify": "5.12.5",
     "pg": "8.23.0",
     "zod": "4.6.6"
