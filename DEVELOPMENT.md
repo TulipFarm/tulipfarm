@@ -40,7 +40,7 @@ them before `pnpm dev:setup` to write them to the API and worker env files. A
 Huntsman that requires a token also takes `HUNTSMAN_TOKEN`. To run both locally:
 
 ```sh
-docker run -d --name huntsman -p 127.0.0.1:8080:8080 ghcr.io/tulipfarm/huntsman:0.1.2
+docker run -d --name huntsman -p 127.0.0.1:8080:8080 ghcr.io/tulipfarm/huntsman:0.2.0
 docker run -d --name searxng -p 127.0.0.1:8888:8080 -e SEARXNG_SECRET="$(openssl rand -hex 32)" \
   -v "$PWD/self-host/searxng/settings.yml:/etc/searxng/settings.yml:ro" searxng/searxng:2026.10.27-b5ed73fcb
 export HUNTSMAN_ENDPOINT=http://127.0.0.1:8080 SEARXNG_ENDPOINT=http://127.0.0.1:8888
