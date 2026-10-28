@@ -1,8 +1,13 @@
 import { createGitHubAccounts, type AccountRuntime } from '@tulipfarm/github';
 import { githubRuntimeConfiguration } from '@tulipfarm/github/configuration';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
+import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 
-export function githubAccounts(runtime: AccountRuntime | undefined, env: NodeJS.ProcessEnv = process.env) {
+export function githubAccounts(
+  runtime: AccountRuntime | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  defaultKnowledge?: DefaultKnowledgeHook,
+) {
   const { oauth: configuration } = githubRuntimeConfiguration(env);
   const webOrigin = env.WEB_ORIGIN ?? (env.NODE_ENV === 'production' ? undefined : 'http://localhost:5173');
   if (configuration && (!webOrigin || new URL(configuration.redirectUri).origin !== new URL(webOrigin).origin))
@@ -14,5 +19,11 @@ export function githubAccounts(runtime: AccountRuntime | undefined, env: NodeJS.
   }
   const slug = env.GITHUB_APP_SLUG;
   const installUrl = slug ? `https://github.com/apps/${encodeURIComponent(slug)}/installations/new` : null;
-  return createGitHubAccounts({ runtime, configuration, keyring, installUrl });
+  return createGitHubAccounts({
+    runtime,
+    configuration,
+    keyring,
+    installUrl,
+    ...(defaultKnowledge ? { defaultKnowledge } : {}),
+  });
 }

@@ -368,14 +368,8 @@ test(
         }
       };
       const select = async () => {
-        const region = page.getByRole('region', { name: 'Select GitHub repositories', exact: true });
-        await region
-          .or(page.getByRole('button', { name: 'Add repositories', exact: true }))
-          .first()
-          .waitFor();
-        if (!(await region.isVisible()))
-          await page.getByRole('button', { name: 'Add repositories', exact: true }).click();
-        await region.waitFor();
+        await page.getByRole('button', { name: 'Add repositories', exact: true }).click();
+        await page.getByRole('region', { name: 'Select GitHub repositories', exact: true }).waitFor();
       };
       const choose = async () => {
         await select();
@@ -500,13 +494,12 @@ test(
           }),
       );
 
-      await t.test('repositories must be chosen first, and choosing all lets new repositories follow', () =>
+      await t.test('all repositories and all content are selected by default and new repositories follow', () =>
         fixture(async f => {
           await f.open();
-          await f.page.getByText('Choose which repositories to index', { exact: false }).waitFor();
+          await f.page.getByText('indexes every repository it can read', { exact: false }).waitFor();
           await f.select();
-          assert.equal(await f.page.getByRole('radio', { name: /^Only repositories I choose/ }).isChecked(), true);
-          await f.page.getByRole('radio', { name: /^All repositories/ }).click();
+          assert.equal(await f.page.getByRole('radio', { name: /^All repositories/ }).isChecked(), true);
           await f.page
             .getByText('3 repositories will be indexed now. New repositories are added on each sync.')
             .waitFor();
