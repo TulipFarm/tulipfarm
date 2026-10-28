@@ -29,7 +29,9 @@ All are read when the app is built (`import.meta.env`), not at runtime.
 `useFlag(flag)` (`src/lib/feature-flags.ts`) reads `GET /v1/feature-flags?workspace=<slug>`, which
 the API evaluates for the signed-in user with `featureFlagSnapshot` from `@tulipfarm/observability`
 (the flag provider extension, then `FEATURE_FLAG_*` and `FEATURE_FLAGS_OFF`, then the default).
-Until the API answers, or if it fails, a flag uses its declared default for the build: on in
+It reads once per page load for each workspace, never on focus or session changes, so a flag
+changed in the provider shows after the next reload. The stored model catalog is also re-read once
+per page load, so models behind a flag appear on that reload too. Until the API answers, or if it fails, a flag uses its declared default for the build: on in
 development builds, off in production builds.
 
 ## Web extensions
