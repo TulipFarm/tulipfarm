@@ -211,11 +211,13 @@ function execute(
     const memoryLimit = process.platform === 'linux' ? `ulimit -d ${parserLimits.dataKiB} && ` : '';
     let child: ChildProcessWithoutNullStreams;
     try {
+      // Lowest CPU priority, set before exec so every parser thread inherits it: parsing must not starve the
+      // worker's event loop, which holds workspace database connections and answers health checks.
       child = spawn(
         '/bin/sh',
         [
           '-c',
-          `ulimit -c 0 && ulimit -f 0 && ulimit -t 25 && ${memoryLimit}exec "$@"`,
+          `ulimit -c 0 && ulimit -f 0 && ulimit -t 25 && ${memoryLimit}exec nice -n ${parserLimits.niceness} "$@"`,
           'knowledge-parser',
           process.execPath,
           '--max-old-space-size=256',

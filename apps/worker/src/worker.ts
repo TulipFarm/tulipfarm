@@ -55,10 +55,14 @@ import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
+import { workerRole, workerTelemetryService } from './worker-role.ts';
 
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier) });
-const telemetry = startTelemetry(readBuildInfo('worker', new URL('../version.json', import.meta.url)));
+const role = workerRole();
+const telemetry = startTelemetry(readBuildInfo('worker', new URL('../version.json', import.meta.url)), {
+  serviceName: workerTelemetryService(role),
+});
 
 async function run() {
   const github = githubRuntimeConfiguration();
@@ -98,27 +102,32 @@ async function run() {
   let memberProfiles: ReturnType<typeof createMemberProfileComposition> | undefined;
   let socialPublisher: ReturnType<typeof createSocialPublisherComposition> | undefined;
   try {
-    email = emailEnabled ? await createEmailDeliveryComposition() : undefined;
+    email = emailEnabled && role !== 'knowledge' ? await createEmailDeliveryComposition() : undefined;
     resources = isolatedStorageEnabled() ? createTableAuthoringComposition() : undefined;
-    if (resources) {
-      registerFlagSubjectResolver(resources.flagContext);
+    if (role === 'knowledge' && !resources) throw new Error('The knowledge worker requires isolated workspace storage');
+    if (resources) registerFlagSubjectResolver(resources.flagContext);
+    // Core: chats, tasks, plans, Slack, email, scheduled sweeps and the health-check workflow.
+    const coreResources = role === 'knowledge' ? undefined : resources;
+    // Knowledge: source sync, document parsing and embeddings.
+    const knowledgeResources = role === 'core' ? undefined : resources;
+    if (coreResources) {
       memberProfiles = createMemberProfileComposition({
-        runtime: resources.runtime,
-        source: resources.memberProfiles,
-        discover: resources.readyTaskWorkspaces,
+        runtime: coreResources.runtime,
+        source: coreResources.memberProfiles,
+        discover: coreResources.readyTaskWorkspaces,
       });
       socialPublisher = createSocialPublisherComposition({
-        runtime: resources.runtime,
-        discover: resources.readyTaskWorkspaces,
+        runtime: coreResources.runtime,
+        discover: coreResources.readyTaskWorkspaces,
       });
       const cleanup = (importCleanup = chatObjects
-        ? createObjectCleanupSweep(resources.runtime, chatObjects)
+        ? createObjectCleanupSweep(coreResources.runtime, chatObjects)
         : undefined);
-      const translations = createTableSearchSweep(resources.runtime, resources.readyTaskWorkspaces);
+      const translations = createTableSearchSweep(coreResources.runtime, coreResources.readyTaskWorkspaces);
       const cleanupJob = cleanup ? createBackgroundJob('object-cleanup', 60) : undefined;
       const searchJob = createBackgroundJob('table-search', 60);
       const namesJob = createBackgroundJob('table-names', 60);
-      const nameResources = resources;
+      const nameResources = coreResources;
       let namesCursor: string | null = null;
       const nameSweep = async () => {
         const workspaces = await nameResources.readyTaskWorkspaces(namesCursor);
@@ -161,34 +170,36 @@ async function run() {
     )
       throw new Error('Slack requires isolated workspace storage');
     // Retained knowledge citations are rechecked in every agent, Slack and task transaction.
-    const guarded = resources ? withKnowledgeSourceAuthorization(resources.runtime) : undefined;
-    modelBundles = resources ? createModelBundleRegistry() : undefined;
-    tasks = resources ? createTaskComposition(resources.runtime, undefined, undefined, modelBundles?.store) : undefined;
+    const guarded = coreResources ? withKnowledgeSourceAuthorization(coreResources.runtime) : undefined;
+    modelBundles = coreResources ? createModelBundleRegistry() : undefined;
+    tasks = coreResources
+      ? createTaskComposition(coreResources.runtime, undefined, undefined, modelBundles?.store)
+      : undefined;
     await tasks?.registerModelBundle();
     const taskFailure = (workspaceId: string, taskId: string) =>
       Runtime.instance().logger.error('Task dispatch will retry', { workspaceId, taskId });
-    taskDispatch = resources ? createTaskDispatcher(taskFailure) : undefined;
+    taskDispatch = coreResources ? createTaskDispatcher(taskFailure) : undefined;
     const taskRecovery =
-      resources && taskDispatch
+      coreResources && taskDispatch
         ? createTaskRecovery({
-            runtime: resources.runtime,
-            discover: resources.readyTaskWorkspaces,
+            runtime: coreResources.runtime,
+            discover: coreResources.readyTaskWorkspaces,
             wake: taskDispatch.wake,
             failure: taskFailure,
           })
         : undefined;
-    const agentTasks = resources ? createAgentTasks(resources.runtime) : undefined;
+    const agentTasks = coreResources ? createAgentTasks(coreResources.runtime) : undefined;
     const planFailure = (workspaceId: string, planId: string) =>
       Runtime.instance().logger.error('Plan dispatch will retry', { workspaceId, planId });
-    planDispatch = resources ? createPlanDispatcher(planFailure) : undefined;
+    planDispatch = coreResources ? createPlanDispatcher(planFailure) : undefined;
     const plans =
-      resources && guarded && planDispatch
+      coreResources && guarded && planDispatch
         ? createPlanComposition({
             runtime: guarded,
-            discover: resources.readyTaskWorkspaces,
+            discover: coreResources.readyTaskWorkspaces,
             wakePlan: planDispatch.wake,
             wakeTask: (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
-            knowledge: createKnowledgeTools({ runtime: resources.runtime }),
+            knowledge: createKnowledgeTools({ runtime: coreResources.runtime }),
             files: chatObjects ? createFiles(guarded, chatObjects) : undefined,
           })
         : undefined;
@@ -207,13 +218,13 @@ async function run() {
       guarded && chatObjects
         ? createSkillActivities(guarded, chatObjects, () => skillClient?.available?.() ?? false)
         : undefined;
-    const conversations = resources
+    const conversations = coreResources
       ? createConversationActivities(
-          resources.runtime,
+          coreResources.runtime,
           undefined,
           chatObjects ? { attachments: chatObjects, snapshots: chatObjects } : undefined,
           undefined,
-          chatObjects ? createFiles(resources.runtime, chatObjects) : undefined,
+          chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
           undefined,
           undefined,
           chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined,
@@ -221,12 +232,12 @@ async function run() {
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
         )
       : undefined;
-    const gmail = resources ? createGoogleHeartbeatActivities(resources.runtime) : undefined;
+    const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
     const snippets = configuredSnippetClient();
     const workflowSlack = guarded ? slackActionsFromEnvironment()?.(guarded) : undefined;
-    const workflows = resources
+    const workflows = coreResources
       ? {
-          advanceWorkflow: createWorkflows(resources.runtime, {
+          advanceWorkflow: createWorkflows(coreResources.runtime, {
             ...(workflowSlack ? { slackActions: workflowSlack } : {}),
             ...(snippets ? { snippets } : {}),
             ...(agentTasks
@@ -240,39 +251,42 @@ async function run() {
           }).activity,
         }
       : undefined;
-    recommendations = resources
-      ? createRecommendationComposition(resources.runtime, (event, workspaceId, membershipId) =>
+    recommendations = coreResources
+      ? createRecommendationComposition(coreResources.runtime, (event, workspaceId, membershipId) =>
           Runtime.instance().logger.info('Recommendation background work', { event, workspaceId, membershipId }),
         )
       : undefined;
-    const worker = await Worker.create({
-      connection,
-      namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
-      taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
-      workflowsPath: fileURLToPath(new URL(`./workflows${extname(import.meta.filename)}`, import.meta.url)),
-      activities: {
-        ...activities,
-        ...resources?.activities,
-        ...agents?.activities,
-        ...tasks?.activities,
-        ...taskRecovery,
-        ...plans?.activities,
-        ...email?.activities,
-        ...conversations,
-        ...(resources
-          ? createConversationMaintenanceActivities(resources.runtime, {
-              embeddings: () => knowledgeEmbeddings?.service,
-            })
-          : {}),
-        ...workflows,
-        ...slack?.activities,
-        ...gmail,
-        ...skillImports,
-      },
-      ...workerTelemetry(telemetry),
-      shutdownGraceTime: '5 seconds',
-    });
-    const knowledgeWorker = resources
+    const worker =
+      role === 'knowledge'
+        ? undefined
+        : await Worker.create({
+            connection,
+            namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+            taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+            workflowsPath: fileURLToPath(new URL(`./workflows${extname(import.meta.filename)}`, import.meta.url)),
+            activities: {
+              ...activities,
+              ...coreResources?.activities,
+              ...agents?.activities,
+              ...tasks?.activities,
+              ...taskRecovery,
+              ...plans?.activities,
+              ...email?.activities,
+              ...conversations,
+              ...(coreResources
+                ? createConversationMaintenanceActivities(coreResources.runtime, {
+                    embeddings: () => knowledgeEmbeddings?.service,
+                  })
+                : {}),
+              ...workflows,
+              ...slack?.activities,
+              ...gmail,
+              ...skillImports,
+            },
+            ...workerTelemetry(telemetry),
+            shutdownGraceTime: '5 seconds',
+          });
+    const knowledgeWorker = knowledgeResources
       ? await Worker.create({
           ...workerTelemetry(telemetry),
           connection,
@@ -282,9 +296,9 @@ async function run() {
             new URL(`./knowledge-workflows${extname(import.meta.filename)}`, import.meta.url),
           ),
           activities: createKnowledgeActivities(
-            resources.runtime,
+            knowledgeResources.runtime,
             chatObjects ?? undefined,
-            knowledgeMediaRecognition(resources.runtime),
+            knowledgeMediaRecognition(knowledgeResources.runtime),
           ),
           maxConcurrentActivityTaskExecutions: 2,
           shutdownGraceTime: '40 seconds',
@@ -304,43 +318,43 @@ async function run() {
           shutdownGraceTime: '55 seconds',
         })
       : undefined;
-    const googleKnowledge = resources
+    const googleKnowledge = knowledgeResources
       ? await createGoogleKnowledgeWorker({
-          runtime: resources.runtime,
+          runtime: knowledgeResources.runtime,
           connection,
           telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
-          ...knowledgeMediaRecognition(resources.runtime),
+          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
+          ...knowledgeMediaRecognition(knowledgeResources.runtime),
         })
       : undefined;
-    const slackKnowledge = resources
+    const slackKnowledge = knowledgeResources
       ? await createSlackKnowledgeWorker({
-          runtime: resources.runtime,
+          runtime: knowledgeResources.runtime,
           connection,
           telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
+          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
         })
       : undefined;
-    const githubKnowledge = resources
+    const githubKnowledge = knowledgeResources
       ? await createGitHubKnowledgeWorker({
-          runtime: resources.runtime,
+          runtime: knowledgeResources.runtime,
           connection,
           telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
+          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
         })
       : undefined;
-    const atlassianKnowledge = resources
+    const atlassianKnowledge = knowledgeResources
       ? await createAtlassianKnowledgeWorker({
-          runtime: resources.runtime,
+          runtime: knowledgeResources.runtime,
           connection,
           telemetry,
-          gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
+          gate: createDefaultKnowledgeGate({ runtime: knowledgeResources.runtime }),
         })
       : undefined;
     const defaultKnowledge =
-      resources && googleKnowledge && slackKnowledge && githubKnowledge && atlassianKnowledge
+      knowledgeResources && googleKnowledge && slackKnowledge && githubKnowledge && atlassianKnowledge
         ? await createDefaultKnowledgeWorker({
-            runtime: resources.runtime,
+            runtime: knowledgeResources.runtime,
             connection,
             telemetry,
             engines: {
@@ -351,11 +365,13 @@ async function run() {
             },
           })
         : undefined;
+    // Core still needs the embedding service for chat maintenance, without serving the embeddings queue.
     knowledgeEmbeddings = resources
       ? await createKnowledgeEmbeddingWorker({
           runtime: resources.runtime,
           connection,
           telemetry,
+          serve: role !== 'core',
           gate: createDefaultKnowledgeGate({ runtime: resources.runtime }),
           ...(googleKnowledge ? { google: googleKnowledge.service } : {}),
           ...(slackKnowledge ? { slack: slackKnowledge.service } : {}),
@@ -364,7 +380,7 @@ async function run() {
         })
       : undefined;
     const workers = [
-      worker,
+      ...(worker ? [worker] : []),
       ...(knowledgeWorker ? [knowledgeWorker] : []),
       ...(recommendationWorker ? [recommendationWorker] : []),
       ...(googleKnowledge ? [googleKnowledge.worker] : []),
@@ -372,7 +388,7 @@ async function run() {
       ...(githubKnowledge ? [githubKnowledge.worker] : []),
       ...(atlassianKnowledge ? [atlassianKnowledge.worker] : []),
       ...(defaultKnowledge ? [defaultKnowledge.worker] : []),
-      ...(knowledgeEmbeddings ? [knowledgeEmbeddings.worker] : []),
+      ...(knowledgeEmbeddings?.worker ? [knowledgeEmbeddings.worker] : []),
     ];
     await taskDispatch?.startRecovery();
     await planDispatch?.startRecovery();

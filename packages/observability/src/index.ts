@@ -540,9 +540,17 @@ function telemetryEnvironment(env: NodeJS.ProcessEnv) {
 let dimensions: Attributes = {};
 let buildCommit = 'development';
 
-export function telemetryIdentity(build: BuildInfo, production = process.env.NODE_ENV === 'production') {
+const serviceNamePattern = /^tulipfarm-[a-z][a-z0-9-]{0,47}$/;
+
+export function telemetryIdentity(
+  build: BuildInfo,
+  production = process.env.NODE_ENV === 'production',
+  serviceName?: string,
+) {
   const identity = (production ? productionBuildSchema : buildInfoSchema).parse(build);
-  const service = `tulipfarm-${identity.app}`;
+  if (serviceName !== undefined && !serviceNamePattern.test(serviceName))
+    throw new Error('Telemetry service name must be tulipfarm-<lowercase label>');
+  const service = serviceName ?? `tulipfarm-${identity.app}`;
   buildCommit = identity.commit;
   dimensions = {
     application: scope,
@@ -559,9 +567,10 @@ export function telemetryIdentity(build: BuildInfo, production = process.env.NOD
   });
 }
 
-export function startTelemetry(build: BuildInfo) {
-  const resource = telemetryIdentity(build);
-  const service = `tulipfarm-${build.app}`;
+/** `serviceName` overrides `tulipfarm-<app>` when one image runs as several services. */
+export function startTelemetry(build: BuildInfo, options: { serviceName?: string | undefined } = {}) {
+  const resource = telemetryIdentity(build, undefined, options.serviceName);
+  const service = options.serviceName ?? `tulipfarm-${build.app}`;
   let config: TelemetryConfig | undefined;
   try {
     config = telemetryConfig(process.env);

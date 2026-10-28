@@ -1359,3 +1359,13 @@ test('observeTool logs one rich failure record and marks thrown errors as logged
   assert.deepEqual(records[1]['error.issues'], ['values.0:invalid_type']);
   assert.doesNotMatch(lines.join(''), /PRIVATE|private user text/);
 });
+
+test('a service name override replaces tulipfarm-<app> and must stay a bounded tulipfarm label', () => {
+  const build = { app: 'worker', version: '2026.10.2.7', commit: 'b'.repeat(40) };
+  assert.equal(telemetryIdentity(build, true).attributes['service.name'], 'tulipfarm-worker');
+  assert.equal(
+    telemetryIdentity(build, true, 'tulipfarm-knowledge-worker').attributes['service.name'],
+    'tulipfarm-knowledge-worker',
+  );
+  assert.throws(() => telemetryIdentity(build, true, 'knowledge'), /service name/);
+});

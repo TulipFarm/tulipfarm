@@ -881,6 +881,16 @@ export const settings: readonly Setting[] = [
     description: 'Task queue for the ordinary worker.',
   },
   {
+    name: 'TULIPFARM_WORKER_ROLE',
+    group: 'Temporal',
+    services: ['worker'],
+    requirement: 'optional',
+    secret: false,
+    default: 'all',
+    description:
+      '`all` runs every task queue in one worker. `core` and `knowledge` split them so knowledge sync cannot starve chats, scheduled jobs and the health check; run one worker with each.',
+  },
+  {
     name: 'TEMPORAL_STORAGE_TASK_QUEUE',
     group: 'Temporal',
     services: ['api', 'storage-worker'],
