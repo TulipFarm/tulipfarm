@@ -28,6 +28,8 @@ export function workspaceRuntime(pool: Pool) {
     connectionsPerPool: optionalNumber('WORKSPACE_STORAGE_CONNECTIONS_PER_POOL'),
     maxConcurrentTransactions: optionalNumber('WORKSPACE_STORAGE_MAX_TRANSACTIONS'),
     maxBackgroundTransactions: optionalNumber('WORKSPACE_STORAGE_MAX_BACKGROUND_TRANSACTIONS'),
+    reservedBackgroundTransactions: optionalNumber('WORKSPACE_STORAGE_RESERVED_BACKGROUND_TRANSACTIONS'),
+    maxQueue: optionalNumber('WORKSPACE_STORAGE_MAX_QUEUE'),
     idleTimeoutMs: optionalNumber('WORKSPACE_STORAGE_IDLE_TIMEOUT_MS'),
     replicaCount: Number(process.env.WORKSPACE_RUNTIME_REPLICAS ?? 4),
     reservedConnections: 40,

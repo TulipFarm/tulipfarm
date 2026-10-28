@@ -38,6 +38,8 @@ const configSchema = z.object({
   maxConcurrentTransactions: z.number().int().min(1).default(8),
   // Most admission slots scheduled jobs may hold (default: all but one), so a request is admitted at once.
   maxBackgroundTransactions: z.number().int().min(1).optional(),
+  // Slots a waiting job gets ahead of queued requests (default: 1 when at least 2 slots), so jobs never starve.
+  reservedBackgroundTransactions: z.number().int().nonnegative().optional(),
   maxQueue: z.number().int().nonnegative().default(100),
   waitTimeoutMs: z.number().int().min(1).default(5_000),
   connectionTimeoutMs: z.number().int().min(1).default(5_000),
@@ -55,6 +57,7 @@ type Entry = {
   idleSince: number;
   retiring: boolean;
   connections: number;
+  backgroundConnections: number;
   waiters: (() => void)[];
   backgroundWaiters: (() => void)[];
 };
@@ -202,6 +205,12 @@ export function createWorkspaceRuntime(
     config.maxConcurrentTransactions,
     config.maxBackgroundTransactions ?? Math.max(1, config.maxConcurrentTransactions - 1),
   );
+  if (config.reservedBackgroundTransactions !== undefined && config.reservedBackgroundTransactions > maxBackground)
+    throw new Error('Reserved background transactions exceed the background transaction limit');
+  const reserve =
+    config.reservedBackgroundTransactions ?? Math.min(maxBackground, config.maxConcurrentTransactions >= 2 ? 1 : 0);
+  // Jobs never get preference for a pool's last connection.
+  const connectionReserve = Math.min(reserve, config.connectionsPerPool - 1);
   const entries = new Map<string, Entry>();
   const generations = new Map<string, number>();
   const queue: Waiter[] = [];
@@ -250,8 +259,12 @@ export function createWorkspaceRuntime(
   function admit(deadline: TransactionDeadline, background: boolean): Promise<void> {
     deadline.check();
     if (closed) return Promise.reject(new StorageUnavailableError('closed'));
-    // Requests skip ahead of queued jobs; a job admits only while nothing waits ahead of it.
-    if (admissible(background) && (background ? !queue.length && !backgroundQueue.length : !queue.length)) {
+    // Requests skip ahead of queued jobs; a job admits only while no job waits ahead of it and either no request
+    // waits or fewer than the reserved jobs are active.
+    if (
+      admissible(background) &&
+      (background ? !backgroundQueue.length && (!queue.length || activeBackground < reserve) : !queue.length)
+    ) {
       take(background);
       return Promise.resolve();
     }
@@ -292,7 +305,14 @@ export function createWorkspaceRuntime(
     active--;
     if (background) activeBackground--;
     while (active < config.maxConcurrentTransactions) {
-      const waiting = queue.length ? queue : backgroundQueue.length && admissible(true) ? backgroundQueue : undefined;
+      const reserved = backgroundQueue.length > 0 && activeBackground < reserve && admissible(true);
+      const waiting = reserved
+        ? backgroundQueue
+        : queue.length
+          ? queue
+          : backgroundQueue.length && admissible(true)
+            ? backgroundQueue
+            : undefined;
       const waiter = waiting?.shift();
       if (!waiter) break;
       take(waiting === backgroundQueue);
@@ -304,6 +324,7 @@ export function createWorkspaceRuntime(
   function acquireConnection(entry: Entry, deadline: TransactionDeadline, background: boolean) {
     if (entry.connections < config.connectionsPerPool && !entry.waiters.length && !entry.backgroundWaiters.length) {
       entry.connections++;
+      if (background) entry.backgroundConnections++;
       return Promise.resolve();
     }
     const waiting = background ? entry.backgroundWaiters : entry.waiters;
@@ -322,15 +343,23 @@ export function createWorkspaceRuntime(
           }, config.connectionTimeoutMs);
           waiting.push(grant);
         }),
-      () => releaseConnection(entry),
+      () => releaseConnection(entry, background),
     );
   }
 
-  // pg queues checkouts first come, first served; this gate hands a freed connection to a waiting request before a job.
-  function releaseConnection(entry: Entry) {
-    const next = entry.waiters.shift() ?? entry.backgroundWaiters.shift();
-    if (next) next();
-    else entry.connections--;
+  // pg queues checkouts first come, first served; this gate hands a freed connection to a waiting request before a job,
+  // unless the pool's jobs hold fewer connections than their reserve. A handed-over connection stays counted.
+  function releaseConnection(entry: Entry, background: boolean) {
+    if (background) entry.backgroundConnections--;
+    const toBackground =
+      entry.backgroundWaiters.length > 0 && (!entry.waiters.length || entry.backgroundConnections < connectionReserve);
+    const next = toBackground ? entry.backgroundWaiters.shift() : entry.waiters.shift();
+    if (!next) {
+      entry.connections--;
+      return;
+    }
+    if (toBackground) entry.backgroundConnections++;
+    next();
   }
 
   async function credentialFor(workspaceId: string, deadline: TransactionDeadline) {
@@ -415,6 +444,7 @@ export function createWorkspaceRuntime(
       idleSince: Date.now(),
       retiring: false,
       connections: 0,
+      backgroundConnections: 0,
       waiters: [],
       backgroundWaiters: [],
     };
@@ -549,7 +579,7 @@ export function createWorkspaceRuntime(
     } finally {
       try {
         if (entry) {
-          if (pooled) releaseConnection(entry);
+          if (pooled) releaseConnection(entry, background);
           releaseClaim(entry);
           if (!entry.claims && entry.retiring) {
             const removal = remove(entry);
