@@ -163,7 +163,8 @@
                   "default-connection-knowledge",
                   "social-publishing",
                   "openai-models",
-                  "anthropic-models"
+                  "anthropic-models",
+                  "openai-image-models"
                 ]
               },
               {
@@ -477,6 +478,27 @@
             "default": false,
             "description": "Listed, but no new image is generated with it",
             "type": "boolean"
+          },
+          "featureFlag": {
+            "default": null,
+            "description": "Workspace feature flag that offers this image model. Where it is off, the model is hidden from workspace image settings and generates no image; a flagged default leaves those workspaces without image generation.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "images",
+                  "slack-app-sender",
+                  "default-connection-knowledge",
+                  "social-publishing",
+                  "openai-models",
+                  "anthropic-models",
+                  "openai-image-models"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "edits": {
             "default": false,

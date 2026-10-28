@@ -54,11 +54,13 @@ async function choices(tx: AgentTransaction, catalog: ServedModelCatalog) {
         model => listed.has(model.id) && resolveModelCapabilities(model.route.type, model.capabilities).imageInput,
       )
       .map(model => ({ id: model.id, name: model.name, enabled: enabled.has(model.id) })),
-    imageModels: catalog.imageModels.map(image => ({
-      id: image.id,
-      name: image.name,
-      enabled: !image.paused && enabled.has(image.id),
-    })),
+    imageModels: catalog.imageModels
+      .filter(image => listed.has(image.id))
+      .map(image => ({
+        id: image.id,
+        name: image.name,
+        enabled: !image.paused && enabled.has(image.id),
+      })),
   };
 }
 

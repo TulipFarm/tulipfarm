@@ -240,6 +240,13 @@ const imageModelSchema = z
       .default(false)
       .describe('Generates images for models without an imageModel, unless a workspace chose another. At most one.'),
     paused: z.boolean().default(false).describe('Listed, but no new image is generated with it'),
+    featureFlag: z
+      .enum(workspaceFlags)
+      .nullable()
+      .default(null)
+      .describe(
+        'Workspace feature flag that offers this image model. Where it is off, the model is hidden from workspace image settings and generates no image; a flagged default leaves those workspaces without image generation.',
+      ),
     edits: z.boolean().default(false).describe('Can edit or combine source images'),
     maxSources: z.number().int().min(1).max(16).default(1).describe('Most source images one edit may use'),
     aspects: z

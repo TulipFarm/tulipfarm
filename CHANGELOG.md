@@ -153,6 +153,12 @@ One version identifies all apps and images of a release.
   (`FEATURE_FLAG_OPENAI_MODELS`) and `anthropic-models`
   (`FEATURE_FLAG_ANTHROPIC_MODELS`) gate such models; both are on in
   development and off in production unless enabled.
+- An image model catalog entry can set `"featureFlag"` too. Where the flag is
+  off, the image model is hidden from workspace image settings and generates
+  no image; a flagged default image model leaves those workspaces without
+  image generation. New flag `openai-image-models`
+  (`FEATURE_FLAG_OPENAI_IMAGE_MODELS`) gates GPT Image models on the OpenAI
+  API; it is on in development and off in production unless enabled.
 - The model catalog role `fallback` (off unless a model has it) retries a chat
   model call once on that model when the chat model fails before any output
   with a failure a different model can fix. The reply notes and bills the model

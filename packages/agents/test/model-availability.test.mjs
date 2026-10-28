@@ -22,6 +22,18 @@ const catalog = JSON.stringify({
       featureFlag: 'openai-models',
     }),
   ],
+  imageModels: [
+    {
+      id: 'gpt-image',
+      name: 'GPT Image',
+      vendor: 'openai',
+      routes: [{ provider: 'openai', model: 'gpt-image-1', api: 'openai-images' }],
+      default: true,
+      featureFlag: 'openai-image-models',
+      aspects: { square: '1024x1024', portrait: '1024x1536', landscape: '1536x1024' },
+      pricing: 'unmetered',
+    },
+  ],
 });
 const tx = {
   schema: 'ws_11111111111141118111111111111111',
@@ -47,7 +59,7 @@ test('a model whose workspace flag is off is left out of availability and refuse
   assert.deepEqual([...(await flaggedOffModels(tx))], ['gpt-sol']);
   assert.deepEqual(
     (await modelAvailability(tx)).map(row => row.familyId),
-    ['claude-sonnet', 'claude-opus'],
+    ['claude-sonnet', 'claude-opus', 'gpt-image'],
   );
   assert.equal(await modelFamilyEnabled(tx, 'gpt-sol'), false);
   assert.equal(await modelFamilyEnabled(tx, 'claude-opus'), true);
@@ -61,4 +73,25 @@ test('models behind flags that are on stay available', async t => {
   });
   assert.deepEqual([...(await flaggedOffModels(tx))], []);
   assert.equal(await modelFamilyEnabled(tx, 'gpt-sol'), true);
+});
+
+test('an image model whose workspace flag is off is left out of availability', async t => {
+  withEnv(t, {
+    MODEL_CATALOG: catalog,
+    FEATURE_FLAG_OPENAI_MODELS: 'true',
+    FEATURE_FLAG_ANTHROPIC_MODELS: 'true',
+    FEATURE_FLAG_OPENAI_IMAGE_MODELS: 'false',
+  });
+  assert.deepEqual([...(await flaggedOffModels(tx))], ['gpt-image']);
+  assert.equal(await modelFamilyEnabled(tx, 'gpt-image'), false);
+});
+
+test('an image model whose workspace flag is on is available', async t => {
+  withEnv(t, {
+    MODEL_CATALOG: catalog,
+    FEATURE_FLAG_OPENAI_MODELS: 'true',
+    FEATURE_FLAG_ANTHROPIC_MODELS: 'true',
+    FEATURE_FLAG_OPENAI_IMAGE_MODELS: 'true',
+  });
+  assert.equal(await modelFamilyEnabled(tx, 'gpt-image'), true);
 });
