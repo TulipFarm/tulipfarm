@@ -565,13 +565,6 @@ export function GitHubKnowledgeSources({
       ? accounts.state.data.accounts.filter(account => account.state === 'active' && account.identity)
       : [];
   const accountsChecked = accounts.state.kind === 'ready' && !accounts.state.error;
-  const needsFirstSource = sources.state.kind === 'ready' && !sources.state.error && !visibleSources.length;
-  const offered = useRef(false);
-  useEffect(() => {
-    if (offered.current || !needsFirstSource || !active.length) return;
-    offered.current = true;
-    setSelecting(true);
-  }, [needsFirstSource, active.length]);
   const close = () => {
     setSelecting(false);
     heading.current?.focus();
@@ -599,9 +592,9 @@ export function GitHubKnowledgeSources({
             </div>
             {!selecting && (
               <p className="max-w-prose text-sm text-muted-foreground">
-                Choose which repositories to index, with all content and full history. A source set to all repositories
-                adds new ones automatically. Use Edit settings on a source to leave out repositories, content types or
-                file paths.
+                Connecting a GitHub account indexes every repository it can read, with all content and full history. New
+                repositories are added automatically. Use Edit settings on a source to leave out repositories, content
+                types or file paths.
               </p>
             )}
             {accountsChecked && !active.length && (
@@ -654,7 +647,7 @@ export function GitHubKnowledgeSources({
                       <p className="text-sm font-medium text-foreground">No repositories imported yet</p>
                       <p className="text-sm text-muted-foreground">
                         {active.length
-                          ? 'Nothing is indexed until you choose repositories. Add a source, pick the repositories and choose who can see the content.'
+                          ? 'Indexing starts automatically for connected accounts. You can also add a source now and choose who can see the content.'
                           : 'Connect a GitHub account to index its repositories.'}
                       </p>
                       <Button

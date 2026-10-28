@@ -117,12 +117,15 @@ test('a provider failure is logged and falls back', async t => {
 test('a snapshot evaluates every registered flag for one subject', async t => {
   assert.deepEqual(
     await featureFlagSnapshot(user, undefined, { NODE_ENV: 'production', [env]: 'true' }),
-    Object.fromEntries(Object.keys(featureFlags).map(name => [name, name === flag])),
+    Object.fromEntries(
+      Object.keys(featureFlags).map(name => [name, name === flag || featureFlags[name].default === true]),
+    ),
   );
   await withProvider(t, name => (name === 'bud-avatar' ? true : undefined));
   const snapshot = await featureFlagSnapshot(user, { id: 'w1' }, { NODE_ENV: 'production' });
   assert.equal(snapshot['bud-avatar'], true);
   assert.equal(snapshot[flag], false);
+  assert.equal(snapshot['default-connection-knowledge'], true);
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
 });
 
