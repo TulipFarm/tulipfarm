@@ -212,7 +212,7 @@ test('public web receipts persist pending URLs, results and failures without MCP
 
 test(
   'live blog read passes through the conversation executor and reloads its original source receipt',
-  { skip: !process.env.FIRECRAWL_ENDPOINT },
+  { skip: !process.env.HUNTSMAN_ENDPOINT },
   async () => {
     const f = await conversationFixture();
     const chatId = randomUUID();
@@ -251,7 +251,7 @@ test(
         const history = await createConversations(restarted).history(f.workspace.id, f.workspace.userId, chatId);
         assert.deepEqual(history.messages[0].tools[0].web.urls, [url]);
         assert.equal(history.messages[0].tools[0].web.status, 'success');
-        assert.doesNotMatch(JSON.stringify(history.messages[0].tools), /firecrawl|web-api|3003/i);
+        assert.doesNotMatch(JSON.stringify(history.messages[0].tools), /huntsman|searxng|:3000|:8080/i);
       } finally {
         await restarted.close();
       }

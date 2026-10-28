@@ -34,8 +34,9 @@ unavailable). `error`, `result_error` and `blocked` also count in
 `cloud_tool_failures` and log `call_failed` with a bounded `error.code`; for
 `result_error`, `error.type` repeats that code.
 
-`web-fetch.ts` reads the public web. `fetchPublicText` and `searchPublicWeb` go
-through Firecrawl. `fetchPublicFile(url, signal)` fetches one link directly for
+`web-fetch.ts` reads the public web. `fetchPublicText` reads a page through
+Huntsman (`POST /v1/scrape`) and `searchPublicWeb` searches through SearXNG
+(`GET /search?format=json`, with `time_range` for the day and week windows). `fetchPublicFile(url, signal)` fetches one link directly for
 reading as a file: it checks every hop's IPv4 addresses are public, connects
 through an undici `Agent` whose `connect.lookup` returns only those addresses,
 follows at most 5 redirects, sends no credentials, and streams under 10 MiB within
@@ -44,7 +45,7 @@ follows at most 5 redirects, sends no credentials, and streams under 10 MiB with
 setting can reach private addresses. In chat with the `images` flag on,
 `web.fetch` probes with `fetchPublicFile` first: a file is read like an attached
 file under the 20,000-token tool budget and not stored, and its images follow the
-tool results for families that read images. A page falls through to Firecrawl
+tool results for families that read images. A page falls through to Huntsman
 unchanged.
 
 The worker's `meteredReply(runtime, options)` takes named `MeteredReplyOptions`.

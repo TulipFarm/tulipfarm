@@ -48,7 +48,7 @@ const catalog = JSON.stringify({
 });
 const recognisedText = 'INVOICE 4417 TOTAL 93.10';
 const isRecognition = body => JSON.stringify(body.system ?? '').includes('You read one image');
-const firecrawl = 'https://firecrawl.example.com';
+const huntsman = 'https://huntsman.example.com';
 
 function memoryBytes() {
   const objects = new Map();
@@ -69,12 +69,14 @@ async function setup(t, { answer, images = true } = {}) {
     'MODEL_CATALOG',
     'MODEL_CATALOG_FILE',
     'FEATURE_FLAG_IMAGES',
-    'FIRECRAWL_ENDPOINT',
+    'HUNTSMAN_ENDPOINT',
+    'SEARXNG_ENDPOINT',
   ];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog;
-  process.env.FIRECRAWL_ENDPOINT = firecrawl;
+  process.env.HUNTSMAN_ENDPOINT = huntsman;
+  delete process.env.SEARXNG_ENDPOINT;
   if (!images) process.env.FEATURE_FLAG_IMAGES = 'false';
   delete process.env.MODEL_CATALOG_FILE;
   t.after(async () => {
@@ -87,12 +89,14 @@ async function setup(t, { answer, images = true } = {}) {
   const recognitions = [];
   const scrapes = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    if (String(url) === `${firecrawl}/v2/scrape`) {
+    if (String(url) === `${huntsman}/v1/scrape`) {
       const body = JSON.parse(options.body);
       scrapes.push(body.url);
       return Response.json({
         success: true,
-        data: { markdown: `Markdown of ${body.url}`, metadata: { title: 'Scraped', statusCode: 200 } },
+        id: 'job',
+        data: { markdown: `Markdown of ${body.url}`, links: [], metadata: { title: 'Scraped', statusCode: 200 } },
+        cached: false,
       });
     }
     assert.equal(url, 'https://api.anthropic.com/v1/messages');
@@ -305,7 +309,7 @@ test('links past the fifth are named not read, and a later turn reads the kept c
 test('with web access off the links are named as not read because web access is off', async t => {
   const web = await localWeb(t, {});
   const f = await setup(t);
-  delete process.env.FIRECRAWL_ENDPOINT;
+  delete process.env.HUNTSMAN_ENDPOINT;
   const chatId = await f.chat();
   const [request] = await f.say(chatId, 'Read https://files.example.com/chart.png');
   assert.match(requestText(request), /not read because web access is off/);
@@ -337,12 +341,12 @@ test('web.fetch on an image link shows the image after the tool results to a fam
     last.content.filter(block => block.type === 'image').map(block => block.source.data),
     [base64(chart)],
   );
-  assert.deepEqual(f.scrapes, [], 'a file is never sent to Firecrawl');
+  assert.deepEqual(f.scrapes, [], 'a file is never sent to Huntsman');
   assert.deepEqual(web.requests, ['files.example.com/fig']);
   assert.equal(f.attachmentBytes.objects.size, 0, 'a web.fetch file is not kept');
 });
 
-test('web.fetch on a PDF link returns its text, and on a page falls through to Firecrawl', async t => {
+test('web.fetch on a PDF link returns its text, and on a page falls through to Huntsman', async t => {
   await localWeb(t, {
     'files.example.com/notes.pdf': send(200, await mediaPdf(['text']), { 'content-type': 'application/pdf' }),
     'blog.example.com/post': send(200, '<html><body>post</body></html>', { 'content-type': 'text/html' }),
@@ -389,7 +393,7 @@ test('web.fetch on a large quote-heavy JSON file returns its start marked partia
   assert.doesNotMatch(result, /row-3999/);
 });
 
-test('with the images flag off links are not fetched and web.fetch only uses Firecrawl', async t => {
+test('with the images flag off links are not fetched and web.fetch only uses Huntsman', async t => {
   const chart = await png(8, 8);
   const web = await localWeb(t, { 'files.example.com/chart.png': send(200, chart, { 'content-type': 'image/png' }) });
   const f = await setup(t, {
@@ -401,7 +405,7 @@ test('with the images flag off links are not fetched and web.fetch only uses Fir
   });
   const chatId = await f.chat();
   const requests = await f.say(chatId, 'Look at https://files.example.com/chart.png');
-  assert.deepEqual(web.requests, [], 'nothing is fetched outside Firecrawl');
+  assert.deepEqual(web.requests, [], 'nothing is fetched outside Huntsman');
   assert.deepEqual(f.scrapes, ['https://files.example.com/chart.png']);
   for (const request of requests) {
     assert.deepEqual(imageBlocks(request), []);

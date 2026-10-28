@@ -65,8 +65,9 @@ const computedReads = {
       'TEMPORAL_NAMESPACE',
       'TEMPORAL_TLS',
       'TEMPORAL_API_KEY',
-      'FIRECRAWL_ENDPOINT',
-      'FIRECRAWL_API_KEY',
+      'HUNTSMAN_ENDPOINT',
+      'HUNTSMAN_TOKEN',
+      'SEARXNG_ENDPOINT',
     ],
   },
   // Environment secret store (#14): reads operator-provisioned release secrets by name, which are not app settings.
@@ -136,6 +137,8 @@ const computedReads = {
     ),
   },
   'packages/config/src/knowledge-embeddings.ts': { sites: 1, names: [] },
+  // Checks that no removed Firecrawl setting is set; those names are deliberately undeclared.
+  'packages/config/src/public-web.ts': { sites: 1, names: [] },
   // Reads each registered flag's override variable.
   'packages/config/src/feature-flags.ts': { sites: 1, names: Object.values(featureFlags).map(flag => flag.env) },
   'packages/email/src/sender.ts': { sites: 1, names: ['SMTP_REQUIRE_TLS', 'SMTP_SECURE'] },

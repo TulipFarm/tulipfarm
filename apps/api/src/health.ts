@@ -59,10 +59,10 @@ export function registerHealth(
   });
 
   app.get('/health', { schema: healthSchema }, async (_request, reply) => {
-    const publicWebEndpoint = process.env.FIRECRAWL_ENDPOINT;
+    const publicWeb = publicWebConfiguration();
     // Empty skips the probe, for Temporal deployments without a reachable UI.
     const temporalUiUrl = process.env.TEMPORAL_UI_URL ?? 'http://127.0.0.1:8233';
-    const [postgres, temporal, workers, temporalUi, publicWeb] = await Promise.all([
+    const [postgres, temporal, workers, temporalUi, publicWebHealth] = await Promise.all([
       check('postgres', () => pool.query('SELECT 1')),
       check('temporal', () =>
         connection.withDeadline(Date.now() + 2000, () => connection.workflowService.describeNamespace({ namespace })),
@@ -84,18 +84,22 @@ export function registerHealth(
             if (!response.ok) throw new Error(`Temporal UI returned ${response.status}`);
           })
         : undefined,
-      publicWebEndpoint
-        ? check('publicWeb', async () => {
-            const config = publicWebConfiguration();
-            if (!config) throw new Error('Public web configuration unavailable');
-            const response = await fetch(new URL(config.healthPath, config.endpoint), {
-              headers: config.headers,
-              redirect: 'error',
-              signal: AbortSignal.timeout(2000),
-            });
-            await response.body?.cancel();
-            if (!response.ok) throw new Error(`Public web gateway returned ${response.status}`);
-          })
+      publicWeb
+        ? check('publicWeb', () =>
+            Promise.all(
+              [publicWeb.pages, publicWeb.search]
+                .filter(service => service !== undefined)
+                .map(async service => {
+                  const response = await fetch(new URL(service.healthPath, service.endpoint), {
+                    headers: service.headers,
+                    redirect: 'error',
+                    signal: AbortSignal.timeout(2000),
+                  });
+                  await response.body?.cancel();
+                  if (!response.ok) throw new Error(`Public web service returned ${response.status}`);
+                }),
+            ),
+          )
         : undefined,
     ]);
 
@@ -105,7 +109,7 @@ export function registerHealth(
       temporal,
       workers,
       ...(temporalUi ? { temporalUi } : {}),
-      ...(publicWeb ? { publicWeb } : {}),
+      ...(publicWebHealth ? { publicWeb: publicWebHealth } : {}),
     };
     const storage = isolatedStorageEnabled()
       ? await check('storageMaintenance', () =>

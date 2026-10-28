@@ -132,7 +132,7 @@ class LinkFailure extends Error {
  */
 export async function fetchPublicFile(input: string, signal: AbortSignal): Promise<PublicFile> {
   denyMcpEgress();
-  if (!publicWebConfiguration()) return { kind: 'failed', url: input, reason: 'web-off' };
+  if (!publicWebConfiguration()?.pages) return { kind: 'failed', url: input, reason: 'web-off' };
   const deadline = AbortSignal.timeout(publicFileLimits.deadlineMs);
   const bounded = AbortSignal.any([signal, deadline]);
   let current = input;
@@ -242,31 +242,27 @@ const scrapeResponse = z.object({
   data: z.object({ markdown: z.string().min(1), metadata }),
 });
 const searchResponse = z.object({
-  success: z.literal(true),
-  data: z.object({
-    web: z
-      .array(z.object({ url: z.string(), title: z.string().default(''), description: z.string().default('') }))
-      .default([]),
-  }),
+  results: z
+    .array(
+      z.object({
+        url: z.string(),
+        title: z.string().nullish(),
+        content: z.string().nullish(),
+        publishedDate: z.string().nullish(),
+      }),
+    )
+    .default([]),
 });
 type WebResult = z.infer<typeof publicWebResultSchema>;
 
-async function request(path: string, body: object, signal: AbortSignal): Promise<unknown> {
-  const config = publicWebConfiguration();
-  if (!config) throw new Error('web-unavailable');
-  const response = await fetch(new URL(path, config.endpoint), {
-    method: 'POST',
-    redirect: 'error',
-    signal,
-    headers: { 'content-type': 'application/json', ...config.headers },
-    body: JSON.stringify(body),
-  });
+/** Reads a JSON body of at most `limit` bytes. */
+async function boundedJson(response: Response, limit: number): Promise<unknown> {
   if (!response.ok || !response.body) throw new Error('web-unavailable');
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   for await (const chunk of response.body) {
     bytes += chunk.length;
-    if (bytes > 1024 * 1024) {
+    if (bytes > limit) {
       await response.body.cancel().catch(() => {});
       throw new Error('web-response-too-large');
     }
@@ -275,17 +271,36 @@ async function request(path: string, body: object, signal: AbortSignal): Promise
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+/** Huntsman `POST /v1/scrape`. Its document also lists the page's links, so a long page can exceed a megabyte. */
+async function scrape(url: string, signal: AbortSignal): Promise<unknown> {
+  const pages = publicWebConfiguration()?.pages;
+  if (!pages) throw new Error('web-unavailable');
+  const response = await fetch(new URL('/v1/scrape', pages.endpoint), {
+    method: 'POST',
+    redirect: 'error',
+    signal,
+    headers: { 'content-type': 'application/json', ...pages.headers },
+    body: JSON.stringify({ url, formats: ['markdown'], onlyMainContent: true, timeout: 20000, maxAge: 0 }),
+  });
+  return boundedJson(response, 8 * 1024 * 1024);
+}
+
+/** SearXNG `GET /search` with JSON output. */
+async function search(query: string, window: 'day' | 'week' | 'any', signal: AbortSignal): Promise<unknown> {
+  const config = publicWebConfiguration()?.search;
+  if (!config) throw new Error('web-unavailable');
+  const url = new URL('/search', config.endpoint);
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'json');
+  if (window !== 'any') url.searchParams.set('time_range', window);
+  const response = await fetch(url, { redirect: 'error', signal, headers: { accept: 'application/json' } });
+  return boundedJson(response, 1024 * 1024);
+}
+
 async function readPage(url: string, signal: AbortSignal): Promise<z.infer<typeof webPageSchema>> {
   try {
-    if (!process.env.FIRECRAWL_ENDPOINT) throw new Error('web-unavailable');
     await requirePublicUrl(url, signal);
-    const response = scrapeResponse.parse(
-      await request(
-        '/v2/scrape',
-        { url, formats: ['markdown'], onlyMainContent: true, parsers: [], timeout: 20000, maxAge: 0 },
-        signal,
-      ),
-    );
+    const response = scrapeResponse.parse(await scrape(url, signal));
     if ((response.data.metadata.statusCode ?? 200) >= 400) throw new Error('web-unavailable');
     return {
       status: 'read',
@@ -336,24 +351,19 @@ export async function searchPublicWeb(input: {
   let window = input.window;
   let widened = false;
   let sources: WebResult['sources'] = [];
-  const search = async () => {
-    const parsed = searchResponse.parse(
-      await request(
-        '/v2/search',
-        { query: input.query, limit: input.limit, ...(window === 'any' ? {} : { tbs: window === 'day' ? 'd' : 'w' }) },
-        signal,
-      ),
-    );
+  const read = async () => {
+    const parsed = searchResponse.parse(await search(input.query, window, signal));
     const sources: WebResult['sources'] = [];
-    for (const item of parsed.data.web.slice(0, input.limit)) {
+    for (const item of parsed.results) {
+      if (sources.length >= input.limit) break;
       try {
         const url = await requirePublicUrl(item.url, signal);
         if (!sources.some(source => source.url === url))
           sources.push({
             url,
-            title: boundedText(item.title, 500),
-            description: boundedText(item.description, 2000),
-            publishedAt: null,
+            title: boundedText(item.title ?? '', 500),
+            description: boundedText(item.content ?? '', 2000),
+            publishedAt: boundedText(item.publishedDate ?? '', 100) || null,
           });
       } catch {
         /* Search results can contain unsupported destinations. */
@@ -362,11 +372,11 @@ export async function searchPublicWeb(input: {
     return sources;
   };
   try {
-    sources = await search();
+    sources = await read();
     if (sources.length < Math.min(3, input.limit) && window === 'day') {
       window = 'week';
       widened = true;
-      const wider = await search();
+      const wider = await read();
       sources = [...sources, ...wider.filter(item => !sources.some(source => source.url === item.url))].slice(
         0,
         input.limit,

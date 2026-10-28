@@ -52,11 +52,13 @@ async function localWeb(t, routes, dns = () => ['93.184.216.34']) {
         },
       }),
   );
-  const previous = process.env.FIRECRAWL_ENDPOINT;
-  process.env.FIRECRAWL_ENDPOINT = 'https://firecrawl.example.com';
+  const previous = { HUNTSMAN_ENDPOINT: process.env.HUNTSMAN_ENDPOINT, SEARXNG_ENDPOINT: process.env.SEARXNG_ENDPOINT };
+  process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.example.com';
+  delete process.env.SEARXNG_ENDPOINT;
   t.after(() => {
-    if (previous === undefined) delete process.env.FIRECRAWL_ENDPOINT;
-    else process.env.FIRECRAWL_ENDPOINT = previous;
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
   });
   return { requests, resolved, connected };
 }
@@ -240,7 +242,9 @@ test('non-public links and web access off are refused without a request', async 
   const signal = AbortSignal.timeout(5000);
   for (const url of ['http://example.com/a', 'https://127.0.0.1/a', 'https://example.com:8443/a', 'https://x.local/a'])
     assert.equal((await fetchPublicFile(url, signal)).reason, 'not-public');
-  delete process.env.FIRECRAWL_ENDPOINT;
+  delete process.env.HUNTSMAN_ENDPOINT;
+  // Search alone does not enable page or file reads.
+  process.env.SEARXNG_ENDPOINT = 'https://search.example.com';
   assert.deepEqual(await fetchPublicFile('https://example.com/a', signal), {
     kind: 'failed',
     url: 'https://example.com/a',

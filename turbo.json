@@ -8,9 +8,10 @@
       "passThroughEnv": [
         "HOST",
         "PORT",
-        "FIRECRAWL_ENDPOINT",
-        "FIRECRAWL_API_KEY",
-        "FIRECRAWL_API_KEY_FILE",
+        "HUNTSMAN_ENDPOINT",
+        "HUNTSMAN_TOKEN",
+        "HUNTSMAN_TOKEN_FILE",
+        "SEARXNG_ENDPOINT",
         "API_PROXY_MODE",
         "TULIPFARM_EXTENSIONS",
         "DATABASE_URL",

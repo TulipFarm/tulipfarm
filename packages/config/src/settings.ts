@@ -70,10 +70,9 @@ export const selfHostSections = {
     'For Temporal Cloud, also set TEMPORAL_TLS=true and TEMPORAL_API_KEY (or TEMPORAL_API_KEY_FILE).',
   ],
   'public-web': [
-    'Public web search and page reads for agents. Off unless set. Use a Firecrawl-compatible API',
-    '(POST /v2/search, POST /v2/scrape). Set FIRECRAWL_API_KEY for authenticated APIs such as Firecrawl Cloud.',
-    'Health uses GET /v2/team/credit-usage with a key, otherwise GET /health; neither spends scrape credits.',
-    'The service must not be able to reach your internal network.',
+    'Public web page reads (Huntsman) and search (SearXNG) for agents. Each is off unless its endpoint is set.',
+    'COMPOSE_PROFILES=public-web runs both in this stack; these endpoints point at them.',
+    'Neither service may be able to reach your internal network.',
   ],
   telemetry: [
     'OpenTelemetry export to your own backend over OTLP/HTTP. Off unless CLOUD_TELEMETRY_ENABLED=true.',
@@ -313,8 +312,8 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Compose profiles to start. `temporal` runs the bundled Temporal server, UI, schema and namespace jobs; omit it when TEMPORAL_ADDRESS points at your own Temporal.',
-    selfHost: { section: 'temporal', example: 'temporal' },
+      'Compose profiles to start. `temporal` runs the bundled Temporal server, UI, schema and namespace jobs; omit it when TEMPORAL_ADDRESS points at your own Temporal. `public-web` runs Huntsman and SearXNG for agent web reads and search.',
+    selfHost: { section: 'temporal', example: 'temporal,public-web' },
   },
   {
     name: 'TEMPORAL_UI_PORT',
@@ -460,23 +459,44 @@ export const settings: readonly Setting[] = [
     description: 'Comma-separated origins allowed to call the public guide API.',
   },
   {
-    name: 'FIRECRAWL_ENDPOINT',
+    name: 'HUNTSMAN_ENDPOINT',
     group: 'Public origins',
     services: ['api', 'worker', 'database'],
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of a Firecrawl-compatible API used by agent `web.search` and `web.fetch` tools: `POST /v2/search`, `POST /v2/scrape`. Unset disables public web retrieval. Health uses authenticated `GET /v2/team/credit-usage` when FIRECRAWL_API_KEY is set, otherwise `GET /health`. Neither probe scrapes pages. The endpoint must not be able to reach your internal network.',
-    selfHost: { section: 'public-web', example: 'http://firecrawl.internal:3002', commented: true },
+      'Origin (no path or credentials) of a [Huntsman](https://github.com/TulipFarm/huntsman) scraper for the agent `web.fetch` tool and links shared in chat: `POST /v1/scrape`. Unset disables page reads. Health probes `GET /health`, which scrapes nothing. Huntsman must not be able to reach your internal network.',
+    selfHost: { section: 'public-web', example: 'http://huntsman:8080' },
   },
   {
-    name: 'FIRECRAWL_API_KEY',
+    name: 'HUNTSMAN_TOKEN',
     group: 'Public origins',
     services: ['api', 'worker', 'database'],
     requirement: 'optional',
     secret: true,
     description:
-      'Bearer token for the public web API. Unset preserves keyless self-hosted behavior. Accepts FIRECRAWL_API_KEY_FILE.',
+      'Bearer token for Huntsman. Set the same value on Huntsman to require it. Unset sends no token. Accepts HUNTSMAN_TOKEN_FILE.',
+    selfHost: { section: 'public-web', commented: true },
+  },
+  {
+    name: 'SEARXNG_ENDPOINT',
+    group: 'Public origins',
+    services: ['api', 'worker', 'database'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Origin (no path or credentials) of a [SearXNG](https://docs.searxng.org/) instance with JSON output enabled, for the agent `web.search` tool: `GET /search?format=json`. Unset disables web search. Health probes `GET /healthz`, which searches nothing. Keep it private; it sends no credentials.',
+    selfHost: { section: 'public-web', example: 'http://searxng:8080' },
+  },
+  {
+    name: 'SEARXNG_SECRET',
+    group: 'Self-hosted stack',
+    services: ['compose'],
+    usedBy: 'searxng',
+    requirement: 'optional',
+    secret: true,
+    description:
+      'SearXNG `server.secret_key`. Unset generates a new random key each time the bundled SearXNG starts, which is enough for its private JSON API.',
     selfHost: { section: 'public-web', commented: true },
   },
 

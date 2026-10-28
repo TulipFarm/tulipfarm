@@ -100,14 +100,14 @@ function memoryBytes() {
  */
 async function setup(t, { scopes = ['chat:write', 'files:read'], images = true, family = 'claude-sonnet' } = {}) {
   const saved = Object.fromEntries(
-    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES', 'FIRECRAWL_ENDPOINT'].map(
+    ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES', 'HUNTSMAN_ENDPOINT'].map(
       key => [key, process.env[key]],
     ),
   );
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog;
   process.env.FEATURE_FLAG_IMAGES = String(images);
-  process.env.FIRECRAWL_ENDPOINT = 'https://firecrawl.example.com';
+  process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.example.com';
   delete process.env.MODEL_CATALOG_FILE;
   const f = await promptFixture();
   t.after(async () => {

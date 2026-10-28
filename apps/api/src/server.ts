@@ -12,6 +12,9 @@ const { logUnconfiguredIntegrations } = await import('./integration-status.ts');
 // Fails startup on an invalid model catalog or provider environment.
 const { loadModelCatalog } = await import('@tulipfarm/config');
 const { publicGuideWarnings } = await import('./public-guide-model.ts');
+// Fails startup on removed Firecrawl settings or an invalid public web endpoint.
+const { publicWebConfiguration } = await import('@tulipfarm/config/public-web');
+publicWebConfiguration();
 for (const msg of [...loadModelCatalog().warnings, ...publicGuideWarnings()])
   console.warn(JSON.stringify({ level: 'warn', msg }));
 
