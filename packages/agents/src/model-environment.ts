@@ -6,6 +6,7 @@ import {
   servedModelBundle,
   serverRouteLocation,
   type ResolvedModel,
+  type ServedModelCatalog,
 } from '@tulipfarm/config';
 import { inferDecision, inferenceRouteSchema, routeCapabilities, type InferenceRoute } from './inference.ts';
 import type { ModelContinuity } from './continuity.ts';
@@ -14,15 +15,32 @@ import type { ModelBundleStore } from './model-bundles.ts';
 
 const runBudgetPicoUsd = '10000000000000';
 
+type Environment = ReturnType<typeof buildModelEnvironment>;
+const environments = new WeakMap<ServedModelCatalog, Map<string, Environment>>();
+
 /**
  * The served models of the model catalog (see `loadModelCatalog`) as a server bundle, with the inference route of each:
  * the model's first route whose provider key is set. Throws when the catalog or its environment is invalid.
+ *
+ * Built once per served catalog and set of credentials, and frozen, since callers resolve models on every request.
  */
-export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
+export function modelEnvironment(env: NodeJS.ProcessEnv = process.env): Environment {
   const catalog = loadModelCatalog(env);
+  const credentials = catalog.models.map(model => env[model.route.apiKeyEnv]?.trim());
+  const key = JSON.stringify(credentials);
+  const cache = environments.get(catalog) ?? new Map<string, Environment>();
+  environments.set(catalog, cache);
+  const cached = cache.get(key);
+  if (cached) return cached;
+  const environment = buildModelEnvironment(catalog, credentials);
+  cache.set(key, environment);
+  return environment;
+}
+
+function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonly (string | undefined)[]) {
   const { bundle, entries } = servedModelBundle(catalog);
-  const configured = entries.map(({ model, route }) => {
-    const credential = env[model.route.apiKeyEnv]?.trim();
+  const configured = entries.map(({ model, route }, index) => {
+    const credential = credentials[index];
     const common = {
       endpoint: model.route.endpoint,
       model: model.route.model,
@@ -39,8 +57,8 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
     return { familyId: model.id, route, inference: Object.freeze(inference.data) };
   });
   const restrictions = Object.freeze({
-    allowedProviders: [...new Set(configured.map(item => item.route.provider))],
-    allowedLocations: [serverRouteLocation],
+    allowedProviders: Object.freeze([...new Set(configured.map(item => item.route.provider))]),
+    allowedLocations: Object.freeze([serverRouteLocation]),
   });
   const defaultFamily = catalog.defaultModel.id;
   const paused = (familyId: string) => catalog.model(familyId)?.paused ?? false;
@@ -59,7 +77,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
       route.provider === 'azure' ? route.auth : route.apiKey,
     ]);
   };
-  return {
+  return Object.freeze({
     catalog,
     bundle,
     restrictions,
@@ -113,6 +131,6 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env) {
         },
       };
     },
-  };
+  });
 }
 export type ModelEnvironment = ReturnType<typeof modelEnvironment>;
