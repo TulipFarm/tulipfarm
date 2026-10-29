@@ -1,14 +1,41 @@
-import { getEncoding } from 'js-tiktoken';
+import { Tiktoken } from 'js-tiktoken/lite';
+import cl100k from 'js-tiktoken/ranks/cl100k_base';
 import { knowledgeLimits } from '../document-contracts.js';
 import { KnowledgeParseError, parserLimits } from './contracts.js';
 import type { KnowledgeChunk } from './contracts.js';
 
-const tokenizer = getEncoding('cl100k_base');
+const tokenizer = new Tiktoken(cl100k);
+const pieces = new RegExp(cl100k.pat_str, 'gu');
+const pieceTokens = new Map<string, number>();
+const pieceCacheLimit = 100_000;
 /** Names the text normalization and chunking below; part of every parser profile. */
 export const normalization = 'nfc-lf-v1-cl100k_base-800-100';
 
 export function countTokens(text: string): number {
-  return tokenizer.encode(text, [], []).length;
+  return countTokensUpTo(text, Infinity);
+}
+
+/**
+ * Counts tokens the way `encode` does: the text splits into pieces and each piece encodes on its own.
+ * Stops once the count passes `limit`, so callers that only test a limit skip the rest of the text.
+ */
+function countTokensUpTo(text: string, limit: number): number {
+  let total = 0;
+  for (const [piece] of text.matchAll(pieces)) {
+    let tokens = pieceTokens.get(piece);
+    if (tokens === undefined) {
+      tokens = tokenizer.encode(piece, [], []).length;
+      if (pieceTokens.size >= pieceCacheLimit) pieceTokens.clear();
+      pieceTokens.set(piece, tokens);
+    }
+    total += tokens;
+    if (total > limit) return total;
+  }
+  return total;
+}
+
+function fitsTokens(text: string, limit: number): boolean {
+  return countTokensUpTo(text, limit) <= limit;
 }
 
 export function normalizeMarkdown(text: string): string {
@@ -31,7 +58,7 @@ interface Section {
 }
 
 export function chunkMarkdown(markdown: string): { chunks: KnowledgeChunk[]; tokens: number } {
-  if (countTokens(markdown) > knowledgeLimits.tokens) throw new KnowledgeParseError('resource-limited');
+  if (!fitsTokens(markdown, knowledgeLimits.tokens)) throw new KnowledgeParseError('resource-limited');
   const sections: Section[] = [];
   const headings: { level: number; text: string }[] = [];
   let current: Section = { heading: '', prefix: '', lines: [] };
@@ -85,7 +112,7 @@ export function chunkMarkdown(markdown: string): { chunks: KnowledgeChunk[]; tok
   };
 
   for (const section of sections) {
-    if (section.heading.length > 2048 || countTokens(section.prefix) > parserLimits.targetTokens - 32) {
+    if (section.heading.length > 2048 || !fitsTokens(section.prefix, parserLimits.targetTokens - 32)) {
       throw new KnowledgeParseError('resource-limited');
     }
     let prose: string[] = [];
@@ -157,7 +184,7 @@ function joinPrefix(prefix: string, text: string): string {
 
 function tableFits(prefix: string, table: string): boolean {
   const text = joinPrefix(prefix, table);
-  return countTokens(text) <= parserLimits.targetTokens && Buffer.byteLength(text) <= knowledgeLimits.chunkBytes;
+  return fitsTokens(text, parserLimits.targetTokens) && Buffer.byteLength(text) <= knowledgeLimits.chunkBytes;
 }
 
 function splitTableRow(row: string, header: string, prefix: string, emit: (text: string) => void): void {
@@ -183,7 +210,7 @@ function splitTableRow(row: string, header: string, prefix: string, emit: (text:
     if (contextTokens + tokens > parserLimits.overlapTokens) continue;
     context[index] = cell;
     const text = joinPrefix(prefix, render(context));
-    if (countTokens(text) > parserLimits.targetTokens - 32 || Buffer.byteLength(text) > knowledgeLimits.chunkBytes)
+    if (!fitsTokens(text, parserLimits.targetTokens - 32) || Buffer.byteLength(text) > knowledgeLimits.chunkBytes)
       context[index] = '';
     else contextTokens += tokens;
   }
@@ -235,7 +262,7 @@ function splitProse(text: string, prefix: string, emit: (text: string) => void):
   let start = 0;
   while (start < text.length) {
     const remaining = text.slice(start);
-    let end = fittingPrefix(remaining, part => countTokens(joinPrefix(prefix, part)) <= parserLimits.targetTokens);
+    let end = fittingPrefix(remaining, part => fitsTokens(joinPrefix(prefix, part), parserLimits.targetTokens));
     if (end <= 0) throw new KnowledgeParseError('resource-limited');
     if (end < remaining.length) {
       const boundary = Math.max(
@@ -273,10 +300,10 @@ function fittingSuffix(text: string, limit: number): number {
   let high = text.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if (countTokens(text.slice(middle).trim()) <= limit) high = middle;
+    if (fitsTokens(text.slice(middle).trim(), limit)) high = middle;
     else low = middle + 1;
   }
   if (/[\uDC00-\uDFFF]/.test(text[low] ?? '')) low += 1;
-  while (low < text.length && countTokens(text.slice(low).trim()) > limit) low += 1;
+  while (low < text.length && !fitsTokens(text.slice(low).trim(), limit)) low += 1;
   return low;
 }
