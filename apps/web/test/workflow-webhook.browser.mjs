@@ -157,7 +157,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         });
 
       await page.goto(`${origin}/webhook-proof/workflows`);
-      await page.getByRole('button', { name: 'Order intake', exact: true }).click();
+      await page.getByRole('link', { name: 'Order intake', exact: true }).click();
       await keyStatus.getByText('Not configured', { exact: true }).waitFor();
       await endpointStatus.getByText('Not receiving requests. Create a key to start accepting calls.').waitFor();
       workflow = await saveWorkflow(
@@ -451,7 +451,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         });
       });
       await page.goto(`${origin}/webhook-log-proof/workflows`);
-      await page.getByRole('button', { name: 'Order intake', exact: true }).click();
+      await page.getByRole('link', { name: 'Order intake', exact: true }).click();
       await log.getByText('Loading deliveries…').waitFor();
       emptyShownWhileLoading = (await log.getByText('No deliveries yet').count()) > 0;
       await log.getByRole('alert').getByText('Deliveries could not load').waitFor({ timeout: 20000 });
@@ -480,7 +480,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const accepted = await call(`Bearer ${key}`, sent);
       assert.equal(accepted.status, 200);
       const { runId } = await accepted.json();
-      await page.getByRole('button', { name: 'Definition and activation' }).click();
+      await page.getByRole('tab', { name: 'Definition', exact: true }).click();
       await log.getByRole('button', { name: 'Check deliveries' }).click();
       const rejected = rows.filter({ hasText: 'Key or signature not accepted' });
       await rejected.waitFor();
@@ -492,7 +492,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal(await page.locator(`#workflow-run-${runId}`).isVisible(), true);
       await pinned.getByText('Definition used by this run', { exact: true }).waitFor();
 
-      await page.getByRole('button', { name: 'Definition and activation' }).click();
+      await page.getByRole('tab', { name: 'Definition', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).waitFor();
       await log.getByText('Activate the webhook revision to send a test event.').waitFor();

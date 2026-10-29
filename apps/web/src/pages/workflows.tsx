@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
+import { PlugIcon, RefreshCwIcon } from 'lucide-react';
 import { z } from 'zod';
 import {
   statusSchema,
@@ -9,7 +10,6 @@ import {
   type Definition,
   type DisabledReason,
 } from '@tulipfarm/workflows/contracts';
-import { DataList, DataListCell, DataListRow, DataListSecondary } from '@/components/data-list';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -28,6 +28,9 @@ import {
   AlertDialogCancel,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
+import { Status, type StatusState } from '@tulipfarm/sprout/status';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { Disclosure } from '@/components/disclosure';
 import { workspaceRoute, workspaceWorkflowsRoute } from '@/router';
 import { apiOrigin } from '@/lib/auth';
@@ -51,6 +54,14 @@ import { WebhookSetup, type IssuedWebhookKey } from '@/features/workflows/webhoo
 import { WebhookDeliveries } from '@/features/workflows/webhook-deliveries';
 import { RowEventQueue } from '@/features/workflows/row-event-queue';
 import { WorkflowSharing, AcceptWorkflowSponsorship, recordSourceDenied } from '@/features/workflows/sharing';
+import {
+  StatusLine,
+  TriggerIcon,
+  WorkflowRow,
+  liveTrigger,
+  triggerLine,
+  type WorkflowState,
+} from '@/features/workflows/workflow-summary';
 import { WorkflowProviders } from './workflow-providers';
 
 type Workflow = z.infer<typeof workflowSchema>;
@@ -183,10 +194,11 @@ function WorkflowPage({
     setDenied(false);
   };
   useEffect(() => {
-    if (!focusTarget || blocked) return;
-    jumpTo(focusTarget);
+    const target = focusTarget && document.getElementById(focusTarget);
+    if (!target || blocked) return;
+    jumpTo((focusTarget === 'workflow-views' && target.querySelector('[aria-pressed="true"]')) || target);
     setFocusTarget(null);
-  }, [focusTarget, blocked]);
+  }, [focusTarget, blocked, view, selected, runDiagram]);
   useEffect(() => {
     if (
       read.state.kind === 'unavailable' ||
@@ -286,6 +298,9 @@ function WorkflowPage({
   };
   const shelfWorkflows = shelf === 'archived' ? archivedWorkflows : workflows;
   const matches = (workflow: Workflow) => workflow.definition.name.toLowerCase().includes(search.trim().toLowerCase());
+  const shownWorkflows = shelfWorkflows?.filter(matches);
+  const detail = view !== 'list' ? selected : null;
+  const listHref = `/${encodeURIComponent(workspaceSlug)}/workflows`;
   const unavailable = denied || read.state.kind === 'unavailable';
   const webhook = selected ? webhookStatus(selected) : null;
   return (
@@ -318,12 +333,52 @@ function WorkflowPage({
         </AlertDialogContent>
       </AlertDialog>
       <PageHeader
-        title="Workflows"
-        description="See how repeatable work runs. Create and edit workflows in chat."
+        title={detail ? detail.definition.name : 'Workflows'}
+        description={detail ? undefined : 'See how repeatable work runs. Create and edit workflows in chat.'}
+        parent={
+          detail
+            ? {
+                label: 'Workflows',
+                link: (
+                  <a
+                    href={listHref}
+                    aria-disabled={blocked || undefined}
+                    onClick={event => {
+                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)
+                        return;
+                      event.preventDefault();
+                      if (!blocked) setView('list');
+                    }}
+                  />
+                ),
+              }
+            : undefined
+        }
         actions={
-          <Button disabled={blocked || unavailable} onClick={create}>
-            New workflow
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Refresh workflows"
+              title="Refresh workflows"
+              disabled={unavailable || read.state.kind !== 'ready'}
+              onClick={() => void (shelf === 'archived' ? archivedRead.refresh() : refresh())}
+            >
+              <RefreshCwIcon aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              aria-pressed={providerSetup}
+              disabled={unavailable || read.state.kind !== 'ready'}
+              onClick={() => setProviderSetup(value => !value)}
+            >
+              <PlugIcon data-icon="inline-start" aria-hidden="true" />
+              <span className="max-sm:sr-only">Integration setup</span>
+            </Button>
+            <Button disabled={blocked || unavailable} onClick={create}>
+              New workflow
+            </Button>
+          </>
         }
       />
       {read.state.kind === 'loading' && (
@@ -345,35 +400,12 @@ function WorkflowPage({
         </StatePanel>
       )}
       {!unavailable && read.state.kind === 'ready' && (
-        <>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => void (shelf === 'archived' ? archivedRead.refresh() : refresh())}>
-              Refresh workflows
-            </Button>
-            <Button variant="ghost" onClick={() => setProviderSetup(value => !value)}>
-              {providerSetup ? 'Close integration setup' : 'Integration setup'}
-            </Button>
-          </div>
-          {read.state.error && <p role="alert">Refresh failed. These are your last checked workflows.</p>}
-          <nav id="workflow-views" aria-label="Workflow views" className="flex flex-wrap gap-2">
-            <Button
-              variant={view === 'list' ? 'secondary' : 'ghost'}
-              disabled={blocked}
-              onClick={() => setView('list')}
-            >
-              All workflows
-            </Button>
-            {selected && (
-              <>
-                <Button variant={view === 'definition' ? 'secondary' : 'ghost'} onClick={() => setView('definition')}>
-                  Definition and activation
-                </Button>
-                <Button variant={view === 'runs' ? 'secondary' : 'ghost'} onClick={() => setView('runs')}>
-                  Runs
-                </Button>
-              </>
-            )}
-          </nav>
+        <div className="max-w-5xl space-y-6">
+          {read.state.error && (
+            <Alert variant="destructive" role="alert">
+              <AlertDescription>Refresh failed. These are your last checked workflows.</AlertDescription>
+            </Alert>
+          )}
           {providerSetup && (
             <WorkflowProviders
               workspaceId={workspaceId}
@@ -384,61 +416,79 @@ function WorkflowPage({
               onDenied={deny}
             />
           )}
-          {view === 'list' && (
-            <section aria-label="Workflow selection" className="space-y-3">
-              <div role="group" aria-label="Workflow filter" className="flex flex-wrap gap-2">
-                <Button
-                  variant={shelf === 'current' ? 'secondary' : 'ghost'}
-                  aria-pressed={shelf === 'current'}
-                  onClick={() => showShelf('current')}
-                >
-                  Current workflows
-                </Button>
-                <Button
-                  variant={shelf === 'archived' ? 'secondary' : 'ghost'}
-                  aria-pressed={shelf === 'archived'}
-                  onClick={() => showShelf('archived')}
-                >
-                  Archived workflows
-                </Button>
-              </div>
-              {(!!shelfWorkflows?.length || !!search) && (
-                <SearchField
-                  id="workflow-search"
-                  label="Find workflows"
-                  placeholder={shelf === 'archived' ? 'Search archived workflows' : 'Search current workflows'}
-                  value={search}
-                  onChange={setSearch}
-                />
+          {(error || message || (pending && !busy)) && (
+            <div className="space-y-2">
+              {error && (
+                <Alert variant="destructive" role="alert">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
-              {!!shelfWorkflows?.length && (
-                <DataList
+              {message && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {message}
+                </p>
+              )}
+              {pending && !busy && (
+                <div id="workflow-retry">
+                  <Button variant="outline" onClick={() => void execute(pending)}>
+                    Retry exact request
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {!detail && (
+            <section aria-label="Workflow selection" className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                {(!!shelfWorkflows?.length || !!search) && (
+                  <div className="sm:w-80">
+                    <SearchField
+                      id="workflow-search"
+                      label="Find workflows"
+                      placeholder={shelf === 'archived' ? 'Search archived workflows' : 'Search current workflows'}
+                      value={search}
+                      onChange={setSearch}
+                    />
+                  </div>
+                )}
+                <div id="workflow-views" className="shrink-0">
+                  <ToggleGroup
+                    aria-label="Workflow filter"
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                    value={[shelf]}
+                    onValueChange={value => {
+                      const next = value[0];
+                      if (next === 'current' || next === 'archived') showShelf(next);
+                    }}
+                  >
+                    <ToggleGroupItem value="current">
+                      Current <Count value={workflows?.length} />
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="archived">
+                      Archived <Count value={archivedWorkflows?.length} />
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              </div>
+              {!!shownWorkflows?.length && (
+                <ul
                   aria-label={shelf === 'archived' ? 'Archived workflows' : 'Workflows'}
-                  columns="three"
-                  headings={['Name', 'Trigger', shelf === 'archived' ? 'Archived' : 'Status']}
+                  className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card"
                 >
-                  {shelfWorkflows.filter(matches).map(workflow => (
-                    <DataListRow key={workflow.id}>
-                      <DataListCell>
-                        <Button variant="link" size="md" disabled={blocked} onClick={() => choose(workflow)}>
-                          {workflow.definition.name}
-                        </Button>
-                      </DataListCell>
-                      <DataListSecondary>{triggerSummary(workflow)}</DataListSecondary>
-                      <DataListCell>
-                        {workflow.archivedAt
-                          ? `Archived ${formatTime(workflow.archivedAt)}`
-                          : workflow.enabled
-                            ? workflow.activeRevision === workflow.revision
-                              ? 'Active'
-                              : 'Saved changes not active'
-                            : workflow.disabledReason
-                              ? `Disabled: ${disabledReasons[workflow.disabledReason].status}`
-                              : 'Disabled'}
-                      </DataListCell>
-                    </DataListRow>
+                  {shownWorkflows.map(workflow => (
+                    <li key={workflow.id}>
+                      <WorkflowRow
+                        workflow={workflow}
+                        state={workflowState(workflow)}
+                        href={`${listHref}?workflow=${encodeURIComponent(workflow.id)}`}
+                        disabled={blocked}
+                        onOpen={() => choose(workflow)}
+                      />
+                    </li>
                   ))}
-                </DataList>
+                </ul>
               )}
               {shelf === 'archived' && archivedRead.state.kind === 'loading' && (
                 <StatePanel
@@ -477,489 +527,559 @@ function WorkflowPage({
                   </Button>
                 </StatePanel>
               )}
-              {search && !!shelfWorkflows?.length && !shelfWorkflows.some(matches) && (
+              {search && !!shelfWorkflows?.length && !shownWorkflows?.length && (
                 <StatePanel
                   kind="empty"
                   title="No matching workflows"
                   description="Try another name or clear your search."
-                />
-              )}
-              {search && (
-                <Button variant="ghost" onClick={() => setSearch('')}>
-                  Clear search
-                </Button>
-              )}
-            </section>
-          )}
-          {selected && view === 'definition' && (
-            <section aria-label="Workflow definition" className="space-y-4">
-              {selected.activeRevision && selected.activeRevision !== selected.revision && (
-                <div role="group" aria-label="Displayed revision" className="flex gap-2">
-                  <Button
-                    variant={revision === 'saved' ? 'secondary' : 'ghost'}
-                    aria-pressed={revision === 'saved'}
-                    onClick={() => setRevision('saved')}
-                  >
-                    Saved revision
-                  </Button>
-                  <Button
-                    variant={revision === 'active' ? 'secondary' : 'ghost'}
-                    aria-pressed={revision === 'active'}
-                    onClick={() => setRevision('active')}
-                  >
-                    Active revision
-                  </Button>
-                </div>
-              )}
-              <WorkflowDefinition workspaceId={workspaceId} workflowId={selected.id} revision={revision} />
-              <p className="text-sm text-muted-foreground">
-                {selected.archivedAt
-                  ? `Archived ${formatTime(selected.archivedAt)}.`
-                  : selected.enabled
-                    ? `Active.${selected.nextRunAt ? ` Next scheduled run ${formatTime(selected.nextRunAt)}.` : ''}`
-                    : disabledExplanation(selected)}
-              </p>
-              {selected.capabilities.manage && !selected.archivedAt && (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={blocked}
-                      onClick={() =>
-                        void execute({
-                          path: `${base}/${selected.id}/activation`,
-                          method: 'POST',
-                          body: {
-                            commandId: crypto.randomUUID(),
-                            expectedGeneration: selected.generation,
-                            revision: selected.revision,
-                            enabled: !selected.enabled || selected.activeRevision !== selected.revision,
-                          },
-                        })
-                      }
-                    >
-                      {selected.enabled && selected.activeRevision === selected.revision
-                        ? 'Disable workflow'
-                        : 'Activate saved revision'}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      pendingLabel="Archiving workflow..."
-                      state={
-                        blocked
-                          ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
-                          : { kind: 'ready' }
-                      }
-                      onClick={() => setConfirmArchive(true)}
-                    >
-                      Archive workflow
-                    </Button>
-                  </div>
-                  <WorkflowSharing
-                    key={selected.id}
-                    workspaceId={workspaceId}
-                    id={selected.id}
-                    workflow={selected}
-                    changed={refresh}
-                  />
-                </>
-              )}
-              {!selected.archivedAt && (
-                <AcceptWorkflowSponsorship workspaceId={workspaceId} workflow={selected} changed={refresh} />
-              )}
-              {selected.enabled && selected.activeTrigger?.kind === 'record' && (
-                <section aria-label="Upcoming record dates" className="space-y-1">
-                  <h3 className="text-sm font-medium">Upcoming record dates</h3>
-                  {selected.upcomingRecords === null ? (
-                    <Alert>
-                      <AlertDescription>
-                        Upcoming record dates are hidden because you cannot read this table.
-                      </AlertDescription>
-                    </Alert>
-                  ) : selected.upcomingRecords.length ? (
-                    <ul className="space-y-1 text-sm">
-                      {selected.upcomingRecords.slice(0, 10).map(item => (
-                        <li key={`${item.recordId}/${item.dueAt}`}>
-                          Record {item.recordId.slice(0, 8)} / {formatTime(item.dueAt)}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-sm">No upcoming record dates. Future dates appear after the next sweep.</p>
-                  )}
-                </section>
-              )}
-              {selected.capabilities.manage && !selected.archivedAt && webhook?.visible && (
-                <WebhookSetup
-                  key={selected.id}
-                  hidden={false}
-                  workflow={selected}
-                  url={`${apiOrigin}/v1${base}/${selected.id}/webhook`}
-                  blocked={blocked}
-                  issued={webhookKey}
-                  onRotate={(mode, secret) =>
-                    void execute({
-                      path: `${base}/${selected.id}/webhook-key`,
-                      method: 'PUT',
-                      body: {
-                        commandId: crypto.randomUUID(),
-                        expectedGeneration: selected.generation,
-                        mode,
-                        ...(secret ? { secret } : {}),
-                      },
-                    })
-                  }
-                  onRevokePrevious={() =>
-                    void execute({
-                      path: `${base}/${selected.id}/webhook-key/revoke-previous`,
-                      method: 'POST',
-                      body: { commandId: crypto.randomUUID(), expectedGeneration: selected.generation },
-                    })
-                  }
-                  onCopied={() => setMessage('Webhook key copied. Save it in your sender before leaving.')}
-                  onCopyFailed={() => setError('Clipboard access failed. Select and copy the key.')}
                 >
-                  <WebhookDeliveries
-                    workspaceId={workspaceId}
-                    workflow={selected}
-                    testRun={testRun?.workflowId === selected.id ? testRun.runId : null}
-                    onDenied={deny}
-                    onOpenRun={openRun}
-                    test={
-                      blocked
-                        ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
-                        : !(selected.enabled && selected.activeTrigger?.kind === 'webhook')
-                          ? { kind: 'blocked', reason: 'Activate the webhook revision to send a test event.' }
-                          : { kind: 'ready' }
-                    }
-                    onTest={() =>
-                      void execute({
-                        path: `${base}/${selected.id}/webhook-test`,
-                        method: 'POST',
-                        body: { requestId: crypto.randomUUID() },
-                      })
-                    }
-                  />
-                </WebhookSetup>
+                  <Button variant="outline" onClick={() => setSearch('')}>
+                    Clear search
+                  </Button>
+                </StatePanel>
               )}
             </section>
           )}
-          {selected && view === 'runs' && (
+          {selected && detail && (
             <div className="space-y-6">
-              <div>
-                <Button variant="outline" onClick={() => void historyRead.refresh()}>
-                  Check run history
-                </Button>
-                {(historyRead.state.kind === 'error' ||
-                  (historyRead.state.kind === 'ready' && historyRead.state.error)) && (
-                  <p role="alert">Run history could not refresh. Your previous history and input remain available.</p>
-                )}
-              </div>
-              {runDiagram && (
-                <section id="workflow-run-diagram" tabIndex={-1} aria-label="Selected run diagram">
-                  <WorkflowRun key={runDiagram} workspaceId={workspaceId} workflowId={selected.id} runId={runDiagram} />
-                  <Button variant="ghost" onClick={() => setRunDiagram(null)}>
-                    Close run diagram
-                  </Button>
-                </section>
-              )}
-              {(selected.activeTrigger?.kind === 'row' ||
-                (!!selected.rowQueue &&
-                  selected.rowQueue.pending + selected.rowQueue.blocked + selected.rowQueue.cancelled > 0)) && (
-                <RowEventQueue key={selected.id} workspaceId={workspaceId} workflow={selected} onRefresh={refresh} />
-              )}
-              {selected.archivedAt ? (
-                <p className="text-sm text-muted-foreground">
-                  Archived {formatTime(selected.archivedAt)}. Its run history is read-only.
-                </p>
-              ) : (
-                <fieldset disabled={!selected.capabilities.invoke} className="min-w-0">
-                  <section aria-label="Run workflow" className="max-w-3xl space-y-3">
-                    <h2 className="text-lg font-medium">Run manually</h2>
-                    {!selected.capabilities.invoke && (
-                      <p className="text-sm">Ask a manager for run permission to start runs or respond to steps.</p>
-                    )}
-                    <Label htmlFor="run-input">{inputJson ? 'Input JSON' : 'Request to review'}</Label>
-                    <Textarea
-                      id="run-input"
-                      value={input}
-                      disabled={blocked}
-                      onChange={event => setInput(event.target.value)}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="ghost"
-                        disabled={blocked}
-                        onClick={() => {
-                          setInput(inputJson ? input : JSON.stringify({ request: input }, null, 2));
-                          setInputJson(!inputJson);
-                        }}
-                      >
-                        {inputJson ? 'Use plain text' : 'Advanced JSON input'}
-                      </Button>
-                      <Button
-                        disabled={blocked || !selected.enabled}
-                        onClick={() => {
-                          try {
-                            void execute({
-                              path: `${base}/${selected.id}/runs`,
-                              method: 'POST',
-                              body: {
-                                requestId: crypto.randomUUID(),
-                                input: inputJson ? JSON.parse(input) : { request: input },
-                              },
-                            });
-                          } catch {
-                            setError('Enter valid JSON input.');
-                          }
-                        }}
-                      >
-                        Run workflow
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Runs continue after you leave. A response resumes the run right away.
-                    </p>
-                  </section>
-                </fieldset>
-              )}
-              <section aria-label="Run history" className="space-y-4">
-                <h2 id="workflow-run-history" tabIndex={-1} className="text-sm font-medium">
-                  Run history
-                </h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Label htmlFor="workflow-run-status">Show</Label>
-                  <Select
-                    value={runStatus ?? ''}
-                    onValueChange={value => filterRuns(value ? statusSchema.parse(value) : null)}
-                  >
-                    <SelectTrigger id="workflow-run-status" size="sm">
-                      <SelectValue>{runStatus ? runStatusLabel[runStatus] : 'All runs'}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">All runs</SelectItem>
-                      {statusSchema.options.map(status => (
-                        <SelectItem key={status} value={status}>
-                          {runStatusLabel[status]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {historyRead.state.kind === 'ready' && historyRead.state.refreshing && (
-                    <p role="status">{runStatus ? 'Loading filtered run history...' : 'Refreshing run history...'}</p>
-                  )}
-                </div>
-                {runs === null ? (
-                  <p role="status">Run history has not loaded.</p>
-                ) : !runs.length && runStatus ? (
-                  <div className="space-y-2">
-                    <p>No runs in your history for this workflow match {runStatusLabel[runStatus]}.</p>
-                    <Button variant="outline" onClick={() => filterRuns(null)}>
-                      Clear filter
-                    </Button>
-                  </div>
-                ) : !runs.length ? (
-                  <p>
-                    {selected.archivedAt
-                      ? 'No runs in your history for this workflow.'
-                      : 'No runs yet. Activate the saved revision, and run it above.'}
+              <section aria-label="Workflow summary" className="flex items-start gap-4">
+                <TriggerIcon trigger={liveTrigger(selected)} size="lg" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <p className="text-xl font-semibold tracking-tight break-words sm:text-2xl">
+                    {selected.definition.name}
                   </p>
-                ) : (
-                  runs.map(run => (
-                    <article
-                      key={run.id}
-                      id={`workflow-run-${run.id}`}
-                      tabIndex={-1}
-                      className="space-y-3 rounded-lg border p-4"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 role="status" className="font-medium">
-                          {runStatusLabel[run.status]}
-                        </h3>
-                        <Button variant="outline" size="sm" onClick={() => openRun(run.id)}>
-                          View run diagram
-                        </Button>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                    <StatusLine state={workflowState(selected)} />
+                    <span>{triggerLine(liveTrigger(selected))}</span>
+                    <span>
+                      {selected.definition.steps.length} {selected.definition.steps.length === 1 ? 'step' : 'steps'}
+                    </span>
+                  </div>
+                </div>
+              </section>
+              <Tabs value={view} onValueChange={value => setView(value === 'runs' ? 'runs' : 'definition')}>
+                <div className="max-w-full overflow-x-auto pb-1">
+                  <TabsList variant="line" aria-label="Workflow views">
+                    <TabsTrigger value="definition">Definition</TabsTrigger>
+                    <TabsTrigger value="runs">Runs</TabsTrigger>
+                  </TabsList>
+                </div>
+                <TabsContent value="definition">
+                  <section aria-label="Workflow definition" className="space-y-6 pt-6">
+                    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <h2 className="font-medium">Activation</h2>
+                        <p className="text-sm text-muted-foreground">
+                          {selected.archivedAt
+                            ? `Archived ${formatTime(selected.archivedAt)}.`
+                            : selected.enabled
+                              ? `Active.${selected.nextRunAt ? ` Next scheduled run ${formatTime(selected.nextRunAt)}.` : ''}`
+                              : disabledExplanation(selected)}
+                        </p>
                       </div>
-                      <p className="text-xs">
-                        {runSourceLabel[run.source]} /{' '}
-                        <time dateTime={run.createdAt}>Created {formatTime(run.createdAt)}</time>
-                        {run.scheduledFor && (
-                          <>
-                            {' '}
-                            / <time dateTime={run.scheduledFor}>Scheduled for {formatTime(run.scheduledFor)}</time>
-                          </>
-                        )}
-                        {run.startedAt && (
-                          <>
-                            {' '}
-                            / <time dateTime={run.startedAt}>Started {formatTime(run.startedAt)}</time>
-                          </>
-                        )}
-                        {run.finishedAt && (
-                          <>
-                            {' '}
-                            / <time dateTime={run.finishedAt}>Finished {formatTime(run.finishedAt)}</time>
-                          </>
-                        )}
-                        {run.startedAt && run.finishedAt && (
-                          <> / Duration {formatDuration(run.startedAt, run.finishedAt)}</>
-                        )}
-                      </p>
-                      {runNote(run) && <p className="text-sm">{runNote(run)}</p>}
-                      {run.error && run.status !== 'skipped' && <p role="alert">{run.error}</p>}
-                      {run.steps
-                        .filter(step => step.status === 'waiting')
-                        .map(step => (
-                          <div key={step.stepId} className="space-y-2">
-                            <AgentStepStatus output={step.output} />
-                            {step.prompt && (
-                              <>
-                                <p>{step.prompt}</p>
-                                <HumanResponse
-                                  disabled={
-                                    blocked ||
-                                    !selected.capabilities.invoke ||
-                                    run.status !== 'waiting' ||
-                                    !!selected.archivedAt
-                                  }
-                                  submit={output =>
-                                    void execute({
-                                      path: `${base}/${selected.id}/runs/${run.id}/input`,
-                                      method: 'POST',
-                                      body: { stepId: step.stepId, responseId: crypto.randomUUID(), output },
-                                    })
-                                  }
-                                />
-                              </>
-                            )}
-                            {step.dueAt && <p className="text-sm">Waiting until {formatTime(step.dueAt)}</p>}
-                          </div>
-                        ))}
-                      <Disclosure title={`${run.steps.length} workflow steps`}>
-                        <ol className="space-y-3">
-                          {run.steps.map(step => (
-                            <li key={step.stepId}>
-                              <p>
-                                {step.stepId.replaceAll('_', ' ')} /{' '}
-                                {step.status === 'completed' ? 'Completed' : 'Waiting'}
-                              </p>
-                              {stepNote(step.output) && <p>{stepNote(step.output)}</p>}
-                              <pre className="max-h-64 overflow-auto text-xs">
-                                {JSON.stringify(step.output, null, 2)}
-                              </pre>
-                            </li>
-                          ))}
-                        </ol>
-                        <Button
-                          role="link"
-                          variant="link"
-                          size="sm"
-                          nativeButton={false}
-                          render={
-                            <Link
-                              to="/$workspaceSlug/workflows"
-                              params={{ workspaceSlug }}
-                              search={{ workflow: selected.id, view: 'runs', run: run.id }}
-                              replace
-                              onClick={() => openRun(run.id)}
-                            />
-                          }
-                        >
-                          Run {run.id}
-                        </Button>
-                      </Disclosure>
-                      {['queued', 'running', 'waiting'].includes(run.status) && !selected.archivedAt && (
-                        <Button
+                      {selected.capabilities.manage && !selected.archivedAt && (
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            disabled={blocked}
+                            onClick={() =>
+                              void execute({
+                                path: `${base}/${selected.id}/activation`,
+                                method: 'POST',
+                                body: {
+                                  commandId: crypto.randomUUID(),
+                                  expectedGeneration: selected.generation,
+                                  revision: selected.revision,
+                                  enabled: !selected.enabled || selected.activeRevision !== selected.revision,
+                                },
+                              })
+                            }
+                          >
+                            {selected.enabled && selected.activeRevision === selected.revision
+                              ? 'Disable workflow'
+                              : 'Activate saved revision'}
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            pendingLabel="Archiving workflow..."
+                            state={
+                              blocked
+                                ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                                : { kind: 'ready' }
+                            }
+                            onClick={() => setConfirmArchive(true)}
+                          >
+                            Archive workflow
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      {selected.activeRevision && selected.activeRevision !== selected.revision && (
+                        <ToggleGroup
+                          aria-label="Displayed revision"
                           variant="outline"
-                          disabled={blocked || !selected.capabilities.invoke}
-                          onClick={() =>
+                          size="sm"
+                          spacing={0}
+                          value={[revision]}
+                          onValueChange={value => {
+                            if (value[0] === 'saved' || value[0] === 'active') setRevision(value[0]);
+                          }}
+                        >
+                          <ToggleGroupItem value="saved">Saved revision</ToggleGroupItem>
+                          <ToggleGroupItem value="active">Active revision</ToggleGroupItem>
+                        </ToggleGroup>
+                      )}
+                      <WorkflowDefinition workspaceId={workspaceId} workflowId={selected.id} revision={revision} />
+                    </div>
+                    {selected.capabilities.manage && !selected.archivedAt && (
+                      <WorkflowSharing
+                        key={selected.id}
+                        workspaceId={workspaceId}
+                        id={selected.id}
+                        workflow={selected}
+                        changed={refresh}
+                      />
+                    )}
+                    {!selected.archivedAt && (
+                      <AcceptWorkflowSponsorship workspaceId={workspaceId} workflow={selected} changed={refresh} />
+                    )}
+                    {selected.enabled && selected.activeTrigger?.kind === 'record' && (
+                      <section aria-label="Upcoming record dates" className="space-y-1">
+                        <h3 className="text-sm font-medium">Upcoming record dates</h3>
+                        {selected.upcomingRecords === null ? (
+                          <Alert>
+                            <AlertDescription>
+                              Upcoming record dates are hidden because you cannot read this table.
+                            </AlertDescription>
+                          </Alert>
+                        ) : selected.upcomingRecords.length ? (
+                          <ul className="space-y-1 text-sm">
+                            {selected.upcomingRecords.slice(0, 10).map(item => (
+                              <li key={`${item.recordId}/${item.dueAt}`}>
+                                Record {item.recordId.slice(0, 8)} / {formatTime(item.dueAt)}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm">No upcoming record dates. Future dates appear after the next sweep.</p>
+                        )}
+                      </section>
+                    )}
+                    {selected.capabilities.manage && !selected.archivedAt && webhook?.visible && (
+                      <WebhookSetup
+                        key={selected.id}
+                        hidden={false}
+                        workflow={selected}
+                        url={`${apiOrigin}/v1${base}/${selected.id}/webhook`}
+                        blocked={blocked}
+                        issued={webhookKey}
+                        onRotate={(mode, secret) =>
+                          void execute({
+                            path: `${base}/${selected.id}/webhook-key`,
+                            method: 'PUT',
+                            body: {
+                              commandId: crypto.randomUUID(),
+                              expectedGeneration: selected.generation,
+                              mode,
+                              ...(secret ? { secret } : {}),
+                            },
+                          })
+                        }
+                        onRevokePrevious={() =>
+                          void execute({
+                            path: `${base}/${selected.id}/webhook-key/revoke-previous`,
+                            method: 'POST',
+                            body: { commandId: crypto.randomUUID(), expectedGeneration: selected.generation },
+                          })
+                        }
+                        onCopied={() => setMessage('Webhook key copied. Save it in your sender before leaving.')}
+                        onCopyFailed={() => setError('Clipboard access failed. Select and copy the key.')}
+                      >
+                        <WebhookDeliveries
+                          workspaceId={workspaceId}
+                          workflow={selected}
+                          testRun={testRun?.workflowId === selected.id ? testRun.runId : null}
+                          onDenied={deny}
+                          onOpenRun={openRun}
+                          test={
+                            blocked
+                              ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                              : !(selected.enabled && selected.activeTrigger?.kind === 'webhook')
+                                ? { kind: 'blocked', reason: 'Activate the webhook revision to send a test event.' }
+                                : { kind: 'ready' }
+                          }
+                          onTest={() =>
                             void execute({
-                              path: `${base}/${selected.id}/runs/${run.id}/cancel`,
+                              path: `${base}/${selected.id}/webhook-test`,
                               method: 'POST',
-                              body: {},
+                              body: { requestId: crypto.randomUUID() },
                             })
                           }
+                        />
+                      </WebhookSetup>
+                    )}
+                  </section>
+                </TabsContent>
+                <TabsContent value="runs">
+                  <div className="space-y-6 pt-6">
+                    {runDiagram && (
+                      <section
+                        id="workflow-run-diagram"
+                        tabIndex={-1}
+                        aria-label="Selected run diagram"
+                        className="space-y-3 rounded-xl border border-border bg-card p-4"
+                      >
+                        <WorkflowRun
+                          key={runDiagram}
+                          workspaceId={workspaceId}
+                          workflowId={selected.id}
+                          runId={runDiagram}
+                        />
+                        <Button variant="outline" size="sm" onClick={() => setRunDiagram(null)}>
+                          Close run diagram
+                        </Button>
+                      </section>
+                    )}
+                    {(selected.activeTrigger?.kind === 'row' ||
+                      (!!selected.rowQueue &&
+                        selected.rowQueue.pending + selected.rowQueue.blocked + selected.rowQueue.cancelled > 0)) && (
+                      <RowEventQueue
+                        key={selected.id}
+                        workspaceId={workspaceId}
+                        workflow={selected}
+                        onRefresh={refresh}
+                      />
+                    )}
+                    {selected.archivedAt ? (
+                      <p className="text-sm text-muted-foreground">
+                        Archived {formatTime(selected.archivedAt)}. Its run history is read-only.
+                      </p>
+                    ) : (
+                      <fieldset disabled={!selected.capabilities.invoke} className="min-w-0">
+                        <section
+                          aria-label="Run workflow"
+                          className="space-y-3 rounded-xl border border-border bg-card p-4"
                         >
-                          Cancel run
+                          <h2 className="font-medium">Run manually</h2>
+                          {!selected.capabilities.invoke && (
+                            <p className="text-sm">
+                              Ask a manager for run permission to start runs or respond to steps.
+                            </p>
+                          )}
+                          <Label htmlFor="run-input">{inputJson ? 'Input JSON' : 'Request to review'}</Label>
+                          <Textarea
+                            id="run-input"
+                            value={input}
+                            disabled={blocked}
+                            onChange={event => setInput(event.target.value)}
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              disabled={blocked}
+                              onClick={() => {
+                                setInput(inputJson ? input : JSON.stringify({ request: input }, null, 2));
+                                setInputJson(!inputJson);
+                              }}
+                            >
+                              {inputJson ? 'Use plain text' : 'Advanced JSON input'}
+                            </Button>
+                            <Button
+                              disabled={blocked || !selected.enabled}
+                              onClick={() => {
+                                try {
+                                  void execute({
+                                    path: `${base}/${selected.id}/runs`,
+                                    method: 'POST',
+                                    body: {
+                                      requestId: crypto.randomUUID(),
+                                      input: inputJson ? JSON.parse(input) : { request: input },
+                                    },
+                                  });
+                                } catch {
+                                  setError('Enter valid JSON input.');
+                                }
+                              }}
+                            >
+                              Run workflow
+                            </Button>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Runs continue after you leave. A response resumes the run right away.
+                          </p>
+                        </section>
+                      </fieldset>
+                    )}
+                    <section aria-label="Run history" className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 id="workflow-run-history" tabIndex={-1} className="me-auto font-medium">
+                          Run history
+                        </h2>
+                        <p role="status" className="text-xs text-muted-foreground">
+                          {historyRead.state.kind === 'ready' && historyRead.state.refreshing
+                            ? runStatus
+                              ? 'Loading filtered run history...'
+                              : 'Refreshing run history...'
+                            : ''}
+                        </p>
+                        <Label htmlFor="workflow-run-status">Show</Label>
+                        <Select
+                          value={runStatus ?? ''}
+                          onValueChange={value => filterRuns(value ? statusSchema.parse(value) : null)}
+                        >
+                          <SelectTrigger id="workflow-run-status" size="sm">
+                            <SelectValue>{runStatus ? runStatusLabel[runStatus] : 'All runs'}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">All runs</SelectItem>
+                            {statusSchema.options.map(status => (
+                              <SelectItem key={status} value={status}>
+                                {runStatusLabel[status]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="sm" onClick={() => void historyRead.refresh()}>
+                          <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
+                          Check run history
+                        </Button>
+                      </div>
+                      {(historyRead.state.kind === 'error' ||
+                        (historyRead.state.kind === 'ready' && historyRead.state.error)) && (
+                        <Alert variant="destructive" role="alert">
+                          <AlertDescription>
+                            Run history could not refresh. Your previous history and input remain available.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {runs === null ? (
+                        <p role="status" className="text-sm text-muted-foreground">
+                          Run history has not loaded.
+                        </p>
+                      ) : !runs.length && runStatus ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border p-4 text-sm">
+                          <p>No runs in your history for this workflow match {runStatusLabel[runStatus]}.</p>
+                          <Button variant="outline" size="sm" onClick={() => filterRuns(null)}>
+                            Clear filter
+                          </Button>
+                        </div>
+                      ) : !runs.length ? (
+                        <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+                          {selected.archivedAt
+                            ? 'No runs in your history for this workflow.'
+                            : 'No runs yet. Activate the saved revision, and run it above.'}
+                        </p>
+                      ) : (
+                        runs.map(run => (
+                          <article
+                            key={run.id}
+                            id={`workflow-run-${run.id}`}
+                            tabIndex={-1}
+                            className="space-y-3 rounded-xl border border-border bg-card p-4"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                              <div className="min-w-0 space-y-0.5">
+                                <h3 role="status" className="flex items-center gap-1.5 font-medium">
+                                  <Status state={runMark[run.status]} size="sm" aria-hidden="true" tooltip={false} />
+                                  {runStatusLabel[run.status]}
+                                </h3>
+                                <p className="ps-4.5 text-xs text-muted-foreground">
+                                  {runSourceLabel[run.source]} /{' '}
+                                  <time dateTime={run.createdAt}>Created {formatTime(run.createdAt)}</time>
+                                  {run.scheduledFor && (
+                                    <>
+                                      {' '}
+                                      /{' '}
+                                      <time dateTime={run.scheduledFor}>
+                                        Scheduled for {formatTime(run.scheduledFor)}
+                                      </time>
+                                    </>
+                                  )}
+                                  {run.startedAt && (
+                                    <>
+                                      {' '}
+                                      / <time dateTime={run.startedAt}>Started {formatTime(run.startedAt)}</time>
+                                    </>
+                                  )}
+                                  {run.finishedAt && (
+                                    <>
+                                      {' '}
+                                      / <time dateTime={run.finishedAt}>Finished {formatTime(run.finishedAt)}</time>
+                                    </>
+                                  )}
+                                  {run.startedAt && run.finishedAt && (
+                                    <> / Duration {formatDuration(run.startedAt, run.finishedAt)}</>
+                                  )}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {['queued', 'running', 'waiting'].includes(run.status) && !selected.archivedAt && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={blocked || !selected.capabilities.invoke}
+                                    onClick={() =>
+                                      void execute({
+                                        path: `${base}/${selected.id}/runs/${run.id}/cancel`,
+                                        method: 'POST',
+                                        body: {},
+                                      })
+                                    }
+                                  >
+                                    Cancel run
+                                  </Button>
+                                )}
+                                <Button variant="outline" size="sm" onClick={() => openRun(run.id)}>
+                                  View run diagram
+                                </Button>
+                              </div>
+                            </div>
+                            {runNote(run) && <p className="text-sm">{runNote(run)}</p>}
+                            {run.error && run.status !== 'skipped' && (
+                              <p role="alert" className="text-sm text-destructive">
+                                {run.error}
+                              </p>
+                            )}
+                            {run.steps
+                              .filter(step => step.status === 'waiting')
+                              .map(step => (
+                                <div key={step.stepId} className="space-y-3 rounded-lg bg-muted/50 p-3">
+                                  <AgentStepStatus output={step.output} />
+                                  {step.prompt && (
+                                    <>
+                                      <p className="font-medium">{step.prompt}</p>
+                                      <HumanResponse
+                                        disabled={
+                                          blocked ||
+                                          !selected.capabilities.invoke ||
+                                          run.status !== 'waiting' ||
+                                          !!selected.archivedAt
+                                        }
+                                        submit={output =>
+                                          void execute({
+                                            path: `${base}/${selected.id}/runs/${run.id}/input`,
+                                            method: 'POST',
+                                            body: { stepId: step.stepId, responseId: crypto.randomUUID(), output },
+                                          })
+                                        }
+                                      />
+                                    </>
+                                  )}
+                                  {step.dueAt && (
+                                    <p className="text-sm text-muted-foreground">
+                                      Waiting until {formatTime(step.dueAt)}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            <Disclosure title={`${run.steps.length} workflow steps`}>
+                              <ol className="space-y-3">
+                                {run.steps.map(step => (
+                                  <li key={step.stepId}>
+                                    <p>
+                                      {step.stepId.replaceAll('_', ' ')} /{' '}
+                                      {step.status === 'completed' ? 'Completed' : 'Waiting'}
+                                    </p>
+                                    {stepNote(step.output) && <p>{stepNote(step.output)}</p>}
+                                    <pre className="max-h-64 overflow-auto text-xs">
+                                      {JSON.stringify(step.output, null, 2)}
+                                    </pre>
+                                  </li>
+                                ))}
+                              </ol>
+                              <Button
+                                role="link"
+                                variant="link"
+                                size="sm"
+                                nativeButton={false}
+                                render={
+                                  <Link
+                                    to="/$workspaceSlug/workflows"
+                                    params={{ workspaceSlug }}
+                                    search={{ workflow: selected.id, view: 'runs', run: run.id }}
+                                    replace
+                                    onClick={() => openRun(run.id)}
+                                  />
+                                }
+                              >
+                                Run {run.id}
+                              </Button>
+                            </Disclosure>
+                          </article>
+                        ))
+                      )}
+                      {olderRuns && (
+                        <Button
+                          variant="outline"
+                          disabled={historyRead.older === 'loading'}
+                          aria-busy={historyRead.older === 'loading'}
+                          onClick={() => {
+                            if (historyRead.older === 'failed') void historyRead.retryOlder();
+                            else {
+                              loadMoreStart.current =
+                                historyRead.state.kind === 'ready' ? historyRead.state.data.runs.length : 0;
+                              setRunPages(pages => pages + 1);
+                            }
+                          }}
+                        >
+                          {historyRead.older === 'loading'
+                            ? 'Loading older runs...'
+                            : historyRead.older === 'failed'
+                              ? 'Retry loading older runs'
+                              : 'Load older runs'}
                         </Button>
                       )}
-                    </article>
-                  ))
-                )}
-                {olderRuns && (
-                  <Button
-                    variant="outline"
-                    disabled={historyRead.older === 'loading'}
-                    aria-busy={historyRead.older === 'loading'}
-                    onClick={() => {
-                      if (historyRead.older === 'failed') void historyRead.retryOlder();
-                      else {
-                        loadMoreStart.current =
-                          historyRead.state.kind === 'ready' ? historyRead.state.data.runs.length : 0;
-                        setRunPages(pages => pages + 1);
-                      }
-                    }}
-                  >
-                    {historyRead.older === 'loading'
-                      ? 'Loading older runs...'
-                      : historyRead.older === 'failed'
-                        ? 'Retry loading older runs'
-                        : 'Load older runs'}
-                  </Button>
-                )}
-              </section>
-              {runs?.flatMap(run =>
-                run.steps
-                  .filter(
-                    step =>
-                      step.output &&
-                      typeof step.output === 'object' &&
-                      'provider' in step.output &&
-                      step.output.provider === 'slack' &&
-                      'actionId' in step.output,
-                  )
-                  .map(step => (
-                    <section
-                      key={`${run.id}:${step.stepId}`}
-                      aria-label={`Slack action for run ${run.id}`}
-                      className="space-y-2 rounded-lg border p-4"
-                    >
-                      <h3 className="font-medium">{step.stepId.replaceAll('_', ' ')} / Slack action</h3>
-                      <WorkflowSlackAction
-                        workspaceId={workspaceId}
-                        output={step.output}
-                        refresh={async () => {
-                          await historyRead.refresh();
-                        }}
-                      />
                     </section>
-                  )),
-              )}
-              <p className="text-sm text-muted-foreground">
-                History includes your private manual runs and unattended runs explicitly shared with you. Definition
-                managers cannot see other requesters' histories. Unfinished runs appear first, followed by finished
-                runs, newest first, 50 at a time. Choose Skipped to review occurrences that did not start.
-              </p>
-              {historyRead.delayed && (
-                <div className="space-y-2">
-                  <p role="status">Automatic progress checks stopped. Workflow runs continue on the server.</p>
-                  <Button variant="outline" onClick={() => void historyRead.refresh()}>
-                    Check run status
-                  </Button>
-                </div>
-              )}
+                    {runs?.flatMap(run =>
+                      run.steps
+                        .filter(
+                          step =>
+                            step.output &&
+                            typeof step.output === 'object' &&
+                            'provider' in step.output &&
+                            step.output.provider === 'slack' &&
+                            'actionId' in step.output,
+                        )
+                        .map(step => (
+                          <section
+                            key={`${run.id}:${step.stepId}`}
+                            aria-label={`Slack action for run ${run.id}`}
+                            className="space-y-2 rounded-xl border border-border bg-card p-4"
+                          >
+                            <h3 className="font-medium">{step.stepId.replaceAll('_', ' ')} / Slack action</h3>
+                            <WorkflowSlackAction
+                              workspaceId={workspaceId}
+                              output={step.output}
+                              refresh={async () => {
+                                await historyRead.refresh();
+                              }}
+                            />
+                          </section>
+                        )),
+                    )}
+                    <p className="max-w-prose text-xs text-muted-foreground">
+                      History includes your private manual runs and unattended runs explicitly shared with you.
+                      Definition managers cannot see other requesters' histories. Unfinished runs appear first, followed
+                      by finished runs, newest first, 50 at a time. Choose Skipped to review occurrences that did not
+                      start.
+                    </p>
+                    {historyRead.delayed && (
+                      <div className="space-y-2">
+                        <p role="status" className="text-sm">
+                          Automatic progress checks stopped. Workflow runs continue on the server.
+                        </p>
+                        <Button variant="outline" onClick={() => void historyRead.refresh()}>
+                          Check run status
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
             </div>
           )}
-          {error && <p role="alert">{error}</p>}
-          {message && <p role="status">{message}</p>}
-          {pending && !busy && (
-            <div id="workflow-retry">
-              <Button variant="outline" onClick={() => void execute(pending)}>
-                Retry exact request
-              </Button>
-            </div>
-          )}
-        </>
+        </div>
       )}
     </PageContent>
   );
@@ -1044,12 +1164,29 @@ function disabledExplanation(workflow: Workflow) {
   const reason = disabledReasons[workflow.disabledReason];
   return `Disabled automatically because ${reason.explanation(workflow)}. ${workflow.capabilities.manage ? reason.recovery : 'Ask a workflow manager to restore access or update its trigger.'}`;
 }
-function triggerSummary(workflow: Workflow) {
-  const trigger = workflow.enabled
-    ? (workflow.activeTrigger ?? workflow.definition.trigger)
-    : workflow.definition.trigger;
-  return `${trigger.kind} trigger${workflow.enabled && workflow.activeRevision !== workflow.revision ? ' (active revision)' : ''}${workflow.enabled && workflow.nextRunAt ? ` / next run ${formatTime(workflow.nextRunAt)}` : ''}`;
+function workflowState(workflow: Workflow): WorkflowState {
+  if (workflow.archivedAt) return { mark: 'stopped', label: 'Archived', detail: formatTime(workflow.archivedAt) };
+  if (workflow.enabled && workflow.activeRevision !== workflow.revision)
+    return { mark: 'warning', label: 'Saved changes not active', detail: nextRun(workflow) };
+  if (workflow.enabled) return { mark: 'success', label: 'Active', detail: nextRun(workflow) };
+  if (workflow.disabledReason)
+    return { mark: 'error', label: `Disabled: ${disabledReasons[workflow.disabledReason].status}` };
+  return { mark: 'stopped', label: 'Disabled' };
 }
+const nextRun = (workflow: Workflow) => (workflow.nextRunAt ? `Next run ${formatTime(workflow.nextRunAt)}` : undefined);
+function Count({ value }: { value: number | undefined }) {
+  return <span className="min-w-4 text-muted-foreground tabular-nums">{value ?? ''}</span>;
+}
+const runMark: Record<RunStatus, StatusState> = {
+  queued: 'pending',
+  running: 'running',
+  waiting: 'paused',
+  completed: 'success',
+  failed: 'error',
+  cancelled: 'stopped',
+  blocked: 'error',
+  skipped: 'skipped',
+};
 function HumanResponse({ disabled, submit }: { disabled: boolean; submit: (output: unknown) => void }) {
   const [text, setText] = useState(''),
     [advanced, setAdvanced] = useState(false),

@@ -138,7 +138,7 @@ try {
     if (await page.getByRole('dialog').count()) await page.keyboard.press('Escape');
     await page.goto(`${origin}/${workspace.slug}/workflows`);
     await page.getByText('Review request', { exact: true }).first().click();
-    await page.getByRole('button', { name: 'Runs', exact: true }).click();
+    await page.getByRole('tab', { name: 'Runs', exact: true }).click();
     const history = page.getByRole('region', { name: 'Run history', exact: true });
     // Cloud 4a3eb8e3 (#1021) moved live run progress to the run diagram; run history lists steps in a closed disclosure with
     // "step / status" lines (pages/workflows.tsx:183,190).

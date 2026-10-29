@@ -222,7 +222,7 @@ test(
         release = resolve;
       });
       await page.goto(`${origin}/picker/workflows`);
-      await page.getByRole('button', { name: 'Output picker proof', exact: true }).click();
+      await page.getByRole('link', { name: 'Output picker proof', exact: true }).click();
       await page.getByRole('status', { name: 'Loading workflow diagram', exact: true }).waitFor();
       assert.equal(await page.getByRole('region', { name: 'Output picker proof workflow', exact: true }).count(), 0);
       state.definitionStatus = 503;

@@ -255,10 +255,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.due(w.id);
       await page.goto(`${origin}/record-proof/workflows`);
       await page
-        .getByRole('table', { name: 'Workflows' })
+        .getByRole('region', { name: 'Workflow selection' })
         .getByText('Disabled: record field unavailable', { exact: true })
         .waitFor();
-      await page.getByRole('button', { name: 'Renewal reminder', exact: true }).click();
+      await page.getByRole('link', { name: 'Renewal reminder', exact: true }).click();
       await page
         .getByText(
           'Disabled automatically because the table, watched fields, or filter its trigger uses is no longer available. Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',

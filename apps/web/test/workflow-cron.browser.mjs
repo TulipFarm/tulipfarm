@@ -11,7 +11,13 @@ import { workspaceTableMigrations } from '../../../packages/workspaces/src/table
 import { createWorkspaceRuntime } from '../../../packages/workspace-storage/src/runtime.ts';
 import { registerWorkflows } from '../../api/src/workflows.ts';
 import { protectBusinessRequests } from '../../api/src/business.ts';
-import { reviewDefinition, saveWorkflow, openWorkflow, assertConfiguration } from './workflow-definition.fixture.mjs';
+import {
+  reviewDefinition,
+  saveWorkflow,
+  openWorkflow,
+  assertConfiguration,
+  showWorkflowList,
+} from './workflow-definition.fixture.mjs';
 
 const requireApi = createRequire(new URL('../../api/package.json', import.meta.url));
 const Fastify = requireApi('fastify'),
@@ -177,9 +183,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.deepEqual([next.getUTCDay(), next.getUTCHours(), next.getUTCMinutes()], [1, 8, 30]);
       assert.ok(next.getTime() > Date.now() && next.getTime() - Date.now() <= 7 * 86400000, cron.nextRunAt);
       await page.getByText(`Next scheduled run ${formatted(cron.nextRunAt)}.`, { exact: false }).waitFor();
-      await page.getByRole('button', { name: 'All workflows', exact: true }).click();
-      await page.getByText(`cron trigger / next run ${formatted(cron.nextRunAt)}`).waitFor();
-      await page.getByText(`interval trigger (active revision) / next run ${formatted(interval.nextRunAt)}`).waitFor();
+      await showWorkflowList(page);
+      await page.getByText('Every Monday at 08:30 in UTC', { exact: true }).waitFor();
+      await page.getByText(`Next run ${formatted(cron.nextRunAt)}`, { exact: true }).waitFor();
+      await page.getByText(`Next run ${formatted(interval.nextRunAt)}`, { exact: true }).waitFor();
 
       for (const [trigger, status, code] of [
         [{ kind: 'interval', minutes: 0 }, 400, null],
@@ -234,9 +241,9 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.ok(Math.abs(alignedNext - Date.parse(lateDue) - 45 * 60000) < 5000, new Date(alignedNext).toISOString());
       const overlapDue = await elapse(interval.id, '1 minute');
       await service.due(w.id);
-      await page.getByRole('button', { name: 'All workflows', exact: true }).click();
-      await page.getByRole('button', { name: 'Hourly sync', exact: true }).click();
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await showWorkflowList(page);
+      await page.getByRole('link', { name: 'Hourly sync', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByRole('button', { name: 'Check run history' }).click();
       const history = page.getByRole('region', { name: 'Run history' });
       await history.getByText(`Scheduled for ${stamped(lateDue)}.`).waitFor();

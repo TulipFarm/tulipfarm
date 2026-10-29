@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { showWorkflowList } from './workflow-definition.fixture.mjs';
 
 const port = 5463,
   origin = `http://127.0.0.1:${port}`;
@@ -532,7 +533,7 @@ test('workflow saved and active diagrams stay exact, refresh independently, and 
   };
   const { page, errors, close } = await open(`/acme/workflows?workflow=${workflow.id}`, state);
   try {
-    await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
     assert.equal(await page.getByLabel('Name', { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Workflow definition JSON').count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Save revision', exact: true }).count(), 0);
@@ -564,30 +565,30 @@ test('workflow read recovery, access loss and archive keep their existing screen
     await page.getByRole('heading', { name: 'Workflows could not load' }).waitFor();
     state.workflowReadError = undefined;
     await page.getByRole('button', { name: 'Retry loading', exact: true }).click();
-    await page.getByRole('button', { name: 'Customer review', exact: true }).click();
-    await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Customer review', exact: true }).click();
+    await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
     state.workflowReadError = 503;
     await page.getByRole('button', { name: 'Refresh workflows', exact: true }).click();
     await page.getByText('Refresh failed. These are your last checked workflows.', { exact: true }).waitFor();
-    await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
     state.workflowReadError = 403;
     await page.getByRole('button', { name: 'Refresh workflows', exact: true }).click();
     await page.getByRole('heading', { name: 'Workflow access unavailable' }).waitFor();
     assert.equal(await page.getByLabel('Name', { exact: true }).count(), 0);
     state.workflowReadError = undefined;
     await page.getByRole('button', { name: 'Retry loading', exact: true }).click();
-    await page.getByRole('button', { name: 'All workflows', exact: true }).click();
-    await page.getByRole('button', { name: 'Customer review', exact: true }).click();
+    await showWorkflowList(page);
+    await page.getByRole('link', { name: 'Customer review', exact: true }).click();
     await page.getByRole('button', { name: 'Archive workflow', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive workflow', exact: true }).click();
     await page.getByRole('heading', { name: 'No workflows yet', exact: true }).waitFor();
     await page.waitForFunction(() => document.activeElement === document.querySelector('#workflow-views button'));
-    await page.getByRole('button', { name: 'Archived workflows', exact: true }).click();
-    await page.getByRole('button', { name: 'Customer review', exact: true }).click();
+    await page.getByRole('button', { name: /^Archived( \d+)?$/ }).click();
+    await page.getByRole('link', { name: 'Customer review', exact: true }).click();
     await page.getByText(/Its run history is read-only/).waitFor();
     await page.getByRole('region', { name: 'Run history' }).waitFor();
-    await page.getByRole('button', { name: 'Definition and activation', exact: true }).click();
-    await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
+    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
     assert.equal(await page.getByRole('button', { name: 'Edit in chat', exact: true }).count(), 0);
     assert.deepEqual(errors, []);
   } finally {
@@ -604,23 +605,23 @@ test('a workflow run link reopens the workflow run history at that run, and unkn
   await page.locator(`#workflow-run-${runId}`).getByText('0 workflow steps', { exact: true }).click();
   const runLink = page.getByRole('link', { name: `Run ${runId}`, exact: true });
   assert.equal(await runLink.getAttribute('href'), `/acme/workflows?workflow=${workflow.id}&view=runs&run=${runId}`);
-  await page.getByRole('button', { name: 'Definition and activation', exact: true }).click();
+  await page.getByRole('tab', { name: 'Definition', exact: true }).click();
   await page.waitForURL(url => url.searchParams.get('workflow') === workflow.id && !url.searchParams.has('view'));
-  await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Runs', exact: true }).click();
+  await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
+  await page.getByRole('tab', { name: 'Runs', exact: true }).click();
   await page.waitForURL(url => url.searchParams.get('view') === 'runs');
   assert.equal(await page.getByRole('alertdialog').count(), 0, 'read-only view changes need no leave prompt');
-  await page.getByRole('button', { name: 'Definition and activation', exact: true }).click();
-  await page.getByRole('heading', { name: 'Customer review', exact: true }).waitFor();
+  await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+  await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
   await evidence(page, 'workflow-definition', async () => {});
   assert.deepEqual(errors, []);
   await close();
 
   const history = await open(`/acme/workflows?workflow=${workflow.id}`);
-  const shows = value => history.page.getByRole('heading', { name: value, exact: true }).waitFor();
+  const shows = value => history.page.getByRole('heading', { name: value, exact: true }).first().waitFor();
   await shows('Customer review');
-  await history.page.getByRole('link', { name: 'Workflows', exact: true }).click();
-  await history.page.getByRole('button', { name: 'Invoice check', exact: true }).click();
+  await history.page.getByRole('link', { name: 'Workflows', exact: true }).first().click();
+  await history.page.getByRole('link', { name: 'Invoice check', exact: true }).click();
   await history.page.waitForURL(url => url.searchParams.get('workflow') === invoices.id);
   await shows('Invoice check');
   await history.page.goBack();

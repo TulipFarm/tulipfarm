@@ -53,7 +53,7 @@ const stepTitles: Record<Step['kind'], string> = {
   'create-row': 'Create a row',
   'update-row': 'Update a row',
 };
-const triggerTitles: Record<Trigger['kind'], string> = {
+export const triggerTitles: Record<Trigger['kind'], string> = {
   manual: 'Started by a person',
   webhook: 'Webhook received',
   event: 'Event received',

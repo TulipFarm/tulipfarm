@@ -14,7 +14,7 @@ import { createWorkflows } from '../../../packages/workflows/src/service.ts';
 import { registerWorkflows } from '../../api/src/workflows.ts';
 import { protectBusinessRequests } from '../../api/src/business.ts';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
-import { reviewDefinition, saveWorkflow, openWorkflow } from './workflow-definition.fixture.mjs';
+import { reviewDefinition, saveWorkflow, openWorkflow, showWorkflowList } from './workflow-definition.fixture.mjs';
 
 const requireApi = createRequire(new URL('../../api/package.json', import.meta.url));
 const Fastify = requireApi('fastify'),
@@ -153,7 +153,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal((await service.list(w.id, other.userId))[0].capabilities.invoke, true);
       await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByLabel('Request to review', { exact: true }).fill('Private creator input');
       await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
       await page.locator('article').getByText('Queued', { exact: true }).waitFor();
@@ -173,7 +173,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.advance({ workspaceId: w.id, runId: ownRun.id });
       await page.getByRole('button', { name: 'Check run history', exact: true }).click();
       await page.locator('article').getByText('Completed', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Definition and activation', exact: true }).click();
+      await page.getByRole('tab', { name: 'Definition', exact: true }).click();
       const scheduled = await saveWorkflow(
         service,
         author,
@@ -218,7 +218,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor({ state: 'hidden' });
       assert.equal(await page.getByRole('button', { name: 'Activate saved revision', exact: true }).count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Disable workflow', exact: true }).count(), 0);
-      await page.getByRole('heading', { name: current.definition.name, exact: true }).waitFor();
+      await page.getByRole('heading', { name: current.definition.name, exact: true }).first().waitFor();
       assert.equal(await page.getByRole('region', { name: 'Workflow sharing', exact: true }).count(), 0);
       await db.platform.query(
         `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
@@ -232,7 +232,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           { exact: true },
         )
         .waitFor();
-      await page.getByRole('button', { name: 'All workflows', exact: true }).click();
+      await showWorkflowList(page);
       await page.getByText('Disabled: sponsor lost access', { exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } finally {

@@ -29,8 +29,16 @@ export async function saveWorkflow(service, workspace, definition, previous) {
   return workflow;
 }
 
+export async function showWorkflowList(page) {
+  const breadcrumb = page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Workflows', exact: true });
+  if (await breadcrumb.count()) await breadcrumb.click();
+  await page.getByRole('region', { name: 'Workflow selection', exact: true }).waitFor();
+}
+
 export async function openWorkflow(page, workflow) {
-  await page.getByRole('button', { name: 'All workflows', exact: true }).click();
+  await showWorkflowList(page);
   await Promise.all([
     page.waitForResponse(
       response =>
@@ -47,7 +55,7 @@ export async function openWorkflow(page, workflow) {
         new URL(response.url()).pathname.endsWith(`/workflows/${workflow.id}`) &&
         new URL(response.url()).searchParams.get('revision') === 'saved',
     ),
-    page.getByRole('button', { name: workflow.definition.name, exact: true }).click(),
+    page.getByRole('link', { name: workflow.definition.name, exact: true }).click(),
   ]);
   assert.equal(response.status(), 200);
   assert.equal((await response.json()).revision, workflow.revision);
