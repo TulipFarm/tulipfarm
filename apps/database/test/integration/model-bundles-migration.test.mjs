@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { escapeIdentifier } from 'pg';
 import { provisionTableRegistry } from '@tulipfarm/workspaces/table-registry';
+import { fileURLToPath } from 'node:url';
+import { installExtensions } from '../../src/extensions.ts';
 import { connect } from '../../src/postgres.ts';
 import { migrate } from '../../src/migrations.ts';
 
@@ -93,6 +95,43 @@ test(
       await admin.query(`DROP ROLE IF EXISTS ${escapeIdentifier(role)}`);
       await admin.end();
       await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'bundle routines keep working when tulipfarm owns the database and runs every migration',
+  { timeout: 60000 },
+  async t => {
+    assert.ok(
+      process.env.TEST_ADMIN_DATABASE_URL,
+      'Set TEST_ADMIN_DATABASE_URL to a disposable local PostgreSQL server',
+    );
+    const admin = await connect(process.env.TEST_ADMIN_DATABASE_URL);
+    if (!(await admin.query("SELECT 1 FROM pg_roles WHERE rolname = 'tulipfarm'")).rowCount) {
+      await admin.end();
+      return t.skip('The local tulipfarm role is not present');
+    }
+    const name = `model_bundles_owner_${randomUUID().replaceAll('-', '')}`;
+    let client;
+    try {
+      await admin.query(`CREATE DATABASE ${escapeIdentifier(name)} OWNER tulipfarm`);
+      const url = new URL(process.env.TEST_ADMIN_DATABASE_URL);
+      url.pathname = `/${name}`;
+      client = await connect(url.href);
+      await installExtensions(client, false);
+      await client.query('SET ROLE tulipfarm');
+      await migrate(client, fileURLToPath(new URL('../../migrations/', import.meta.url)));
+
+      await client.query('SELECT app.register_model_bundle($1, $2::jsonb)', [bundleId, payload]);
+      assert.deepEqual(
+        (await client.query('SELECT app.model_bundle($1) AS payload', [bundleId])).rows[0].payload,
+        JSON.parse(payload),
+      );
+    } finally {
+      await client?.end();
+      await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(name)} WITH (FORCE)`);
+      await admin.end();
     }
   },
 );
