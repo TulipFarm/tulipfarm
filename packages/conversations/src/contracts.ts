@@ -11,6 +11,7 @@ import { googleFileBindingSchema, googleFileIdSchema } from '@tulipfarm/google-w
 import { chatDocumentReferences, chatDocumentSchema, chatDocumentText } from './rich-content.ts';
 import { rowChangeSchema, rowViewSchema } from './row-view.ts';
 import { subagentCardSchema, subagentResultSchema } from './events.ts';
+import { layoutSchema } from './layout-contracts.ts';
 
 const unicodeText = z
   .string()
@@ -270,6 +271,8 @@ export const displayPartSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('skill-use'), ...skillReference }),
   compactCommandPartSchema,
   compactionPartSchema,
+  /** An assistant reply drawn as an A2UI layout. `text` is its plain-text form. */
+  z.strictObject({ kind: z.literal('layout'), text: z.string(), layout: layoutSchema }),
 ]);
 export const imageReceiptSchema = z.array(
   z.object({

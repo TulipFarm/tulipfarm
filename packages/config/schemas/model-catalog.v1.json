@@ -164,7 +164,8 @@
                   "social-publishing",
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models"
+                  "openai-image-models",
+                  "generative-ui"
                 ]
               },
               {
@@ -492,7 +493,8 @@
                   "social-publishing",
                   "openai-models",
                   "anthropic-models",
-                  "openai-image-models"
+                  "openai-image-models",
+                  "generative-ui"
                 ]
               },
               {

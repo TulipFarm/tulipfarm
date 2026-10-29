@@ -236,7 +236,7 @@ export async function messageWording(tx: AuthorizationTransaction, conversationI
   const rows = z.array(z.object({ id: uuidSchema, text: z.string() })).parse(
     (
       await tx.client.query(
-        `SELECT m.id, COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind='text'), '') AS text
+        `SELECT m.id, COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text','layout')), '') AS text
     FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_parts')} p ON p.message_id=m.id
     WHERE m.conversation_id=$1 AND m.id=ANY($2::uuid[]) AND m.author_kind='human' GROUP BY m.id, m.sequence ORDER BY m.sequence`,
         [conversationId, ids],
@@ -626,7 +626,7 @@ export async function readConversationMessage(
         await tx.client.query(
           `SELECT m.id,
     CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, m.sequence,
-    COALESCE((SELECT string_agg(p.text, '' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id AND p.kind='text'), '') AS text,
+    COALESCE((SELECT string_agg(p.text, '' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id AND p.kind IN ('text','layout')), '') AS text,
     (SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r WHERE r.message_id=m.id) AS sources,
     EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.response_message_id=m.id OR t.source_message_id=m.id) AS "turnResponse"
     FROM ${table(tx, 'tf_conversation_messages')} m WHERE m.conversation_id=$1 AND m.id=$2`,

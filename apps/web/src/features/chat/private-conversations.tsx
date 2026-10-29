@@ -46,8 +46,10 @@ import {
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { Label } from '@tulipfarm/sprout/label';
 import { Message, MessageBubble, MessageContent, MessageFooter } from '@tulipfarm/sprout/message';
+import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { GitHubChatResponse } from './github-download';
 import { MessageActions } from '@tulipfarm/sprout/message-actions';
+import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
@@ -435,6 +437,17 @@ function ConversationDetail({
   const text = validContent ? chatDocumentText(validContent) : '';
   const composerInput = useRef<RichTextEditorHandle>(null);
   const canvas = useCanvas();
+  const { setOpen: setNavigationOpen } = useSidebar();
+  const canvasWasOpen = useRef(canvas.open);
+  const navigationCollapsedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const opening = canvas.open && !canvasWasOpen.current;
+    canvasWasOpen.current = canvas.open;
+    // The first time Canvas opens in a chat, the navigation makes room for it; the user can reopen it.
+    if (!opening || compact || !visible || navigationCollapsedFor.current === chatId) return;
+    navigationCollapsedFor.current = chatId;
+    setNavigationOpen(false);
+  }, [canvas.open, chatId, compact, visible, setNavigationOpen]);
   const appliedComposer = useRef<string | null>(null);
   const appliedPrefill = useRef<NewChatPrefill['source'] | null>(null);
   const [skillHandoffError, setSkillHandoffError] = useState('');
@@ -971,13 +984,14 @@ function ConversationDetail({
                 ) : (
                   <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
                     {[
-                      ...history.messages.map(message => (
+                      ...history.messages.map((message, index) => (
                         <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
                           <ConversationEntry
                             api={api}
                             chatId={chatId}
                             slug={workspaceSlug}
                             message={message}
+                            latest={index === history.messages.length - 1}
                             rowViews={rowViewsForMessage(history.messages, message)}
                             disabled={locked}
                             retryHandoff={compactionId => {
@@ -1495,6 +1509,7 @@ function ConversationEntry({
   chatId,
   slug,
   message,
+  latest,
   rowViews,
   disabled,
   retryHandoff,
@@ -1504,13 +1519,16 @@ function ConversationEntry({
   chatId: string;
   slug: string;
   message: ConversationMessage;
+  latest: boolean;
   rowViews: RowView[];
   disabled: boolean;
   retryHandoff: (compactionId: string) => void;
   control: (kind: 'retry' | 'cancel') => void;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
-  const text = message.parts.flatMap(part => (part.kind === 'text' ? [part.text] : [])).join('\n\n');
+  const text = message.parts
+    .flatMap(part => (part.kind === 'text' || part.kind === 'layout' ? [part.text] : []))
+    .join('\n\n');
   const richPart = message.parts.find(part => part.kind === 'text' && part.content);
   const inlineReferences = new Set(
     richPart?.kind === 'text' && richPart.content
@@ -1581,6 +1599,17 @@ function ConversationEntry({
                     part={part}
                     disabled={disabled}
                     onRetryHandoff={retryHandoff}
+                  />
+                );
+              case 'layout':
+                return (
+                  <LayoutReply
+                    key={index}
+                    chatId={chatId}
+                    messageId={message.id}
+                    latest={latest}
+                    text={part.text}
+                    value={part.layout}
                   />
                 );
               case 'text':

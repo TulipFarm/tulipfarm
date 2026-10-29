@@ -11,7 +11,7 @@ export function createPostgresTranscriptSource(
     requesterMessages: values =>
       client.query(
         `SELECT m.id,m.created_at::text AS "createdAt",t.accepted_sequence AS "acceptedSequence",string_agg(p.text,E'\n' ORDER BY p.ordinal) AS text
-      FROM ${table('conversation_messages')} m JOIN ${table('conversation_parts')} p ON p.message_id=m.id AND p.kind='text'
+      FROM ${table('conversation_messages')} m JOIN ${table('conversation_parts')} p ON p.message_id=m.id AND p.kind IN ('text','layout')
       JOIN ${table('conversation_turns')} t ON t.source_message_id=m.id
       WHERE m.conversation_id=$1 AND m.author_kind='human' AND m.membership_id=$2 AND t.accepted_sequence<=$3
         AND t.accepted_sequence>COALESCE((SELECT max(covered_through) FROM ${table('conversation_maintenance')}

@@ -33,12 +33,15 @@ import { GoogleFileCanvas } from '@/features/google/file-canvas';
 import { ActivityResultDetails } from './activity-result-card';
 import { GitHubBatches } from './github-batches';
 import { SlackActionCanvas } from '@/features/agents/slack-action';
+import { Sparkle } from 'reicon-react/icons/Sparkle';
+import { LayoutCanvas } from './layout-reply';
 import { PackageInstallationCanvas } from '@/features/packages/package-canvas';
 import { PackagePlanOutline } from '@/features/packages/progress';
 
 const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   'package-plan': Tasks,
   'package-installation': Tasks,
+  layout: Sparkle,
   'activity-result': Tasks,
   'github-batch': Code,
   'slack-action': Tasks,
@@ -74,6 +77,7 @@ export function ChatWithCanvas({
     <ChatSplit
       open={enabled && canvas.open}
       onOpenChange={canvas.setOpen}
+      canvasSize={65}
       chat={children}
       canvas={
         <CanvasPanel
@@ -166,6 +170,8 @@ export function CanvasItemView({
           installationId={content.installationId}
         />
       );
+    case 'layout':
+      return <LayoutCanvas layout={content.layout} messageId={content.messageId} chatId={content.chatId} />;
     case 'activity-result':
       return <ActivityResultDetails items={content.items} />;
     case 'github-batch':

@@ -110,7 +110,7 @@ export function createSlackDefault(
       (
         await tx.client.query(
           `SELECT t.*,t.next_attempt_at<=clock_timestamp() AS due,row_to_json(r) AS root,i.user_id,b.identity_id,b.dm_channel,b.dm_root,s.bot_credential,v.sources,c.status,c.generation,
-      (SELECT string_agg(p.text,'' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=c.response_message_id AND p.kind='text') AS text
+      (SELECT string_agg(p.text,'' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=c.response_message_id AND p.kind IN ('text','layout')) AS text
       FROM ${table(tx, 'tf_slack_default_turns')} t JOIN ${table(tx, 'tf_slack_agent_branches')} b ON b.id=t.branch_id JOIN ${table(tx, 'tf_slack_channel_roots')} r ON r.id=b.root_id
       JOIN ${table(tx, 'tf_slack_identities')} i ON i.id=b.identity_id JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=r.installation_id
       JOIN ${table(tx, 'tf_conversation_turns')} c ON c.id=t.turn_id LEFT JOIN ${table(tx, 'tf_conversation_results')} v ON v.turn_id=t.turn_id WHERE t.event_id=$1`,

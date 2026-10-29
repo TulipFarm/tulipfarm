@@ -69,6 +69,8 @@ import {
 } from './calendar-text-check.ts';
 import type { WorkspaceInventory } from './workspace-inventory.ts';
 import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
+import { generativeUiPrompt, parseReplyRender, replyRenderTool, replyRenderToolName } from './reply-render.ts';
+import type { ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
 import { isWorkTool } from './non-work-tools.ts';
 import {
   cappedOutput,
@@ -1231,6 +1233,8 @@ export type ToolModelMeter = (attempt: {
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   avatar?: { update: (update: { step: number; avatar: AvatarSnapshot }) => void };
+  /** The model answers with a `reply_render` layout (the generative-ui flag). */
+  layout?: boolean;
   readWorkspaceInventory?: (() => Promise<WorkspaceInventory | undefined>) | undefined;
   /** Runtime-owned, ephemeral read for each model step; never retained in loop history. */
   readPersonalMemory?: (() => Promise<PersonalMemoryContext | undefined>) | undefined;
@@ -1312,6 +1316,7 @@ type ToolRejection =
   | 'bud-batch'
   | 'bud-limit'
   | 'bud-invalid'
+  | 'render-batch'
   | 'unknown-tool'
   | 'invalid-arguments'
   | 'write-batch'
@@ -1721,6 +1726,7 @@ const formatOnly =
   'Nothing in that response ran or was prepared. This is a response format error only. It is not a decision on any proposal or action from earlier tools in this turn, and their results still stand as reported. Do not repeat tools that already completed.';
 const notRun =
   'Not run because another call in the same response was invalid. Request it again if it is still necessary.';
+const layoutFailedReply = 'The answer could not be laid out. Ask again to see it.';
 const toolLimitReply = 'The tool limit was reached. Review the completed actions before asking me to continue.';
 const toolLoopReply =
   'I stopped because repeated tool requests were not making progress. Writes with existing receipts were not repeated. Review the completed actions and any unfinished work before continuing.';
@@ -1986,6 +1992,14 @@ async function sendChatRequest<T>(
   });
 }
 
+// Some models answer with a Markdown document despite the prompt; keep its first line.
+const firstTitleLine = (text: string) =>
+  (text.split('\n').find(line => line.trim()) ?? '')
+    .trim()
+    .replace(/^#+\s*/u, '')
+    .replace(/^["'“”*_]+|["'“”*_.]+$/gu, '')
+    .trim();
+
 /**
  * Titles a new chat from the requester's message alone, after its reply was delivered.
  * Returns undefined when the model gives no usable title; transport, timeout and credit failures throw.
@@ -2004,10 +2018,8 @@ export async function inferChatTitle(
       chatRequest(config, [{ role: 'user', text: request }], titleSystemPrompt),
       body => {
         const text = textResponseSchema.safeParse(body);
-        const parsed =
-          text.success && text.data.trim()
-            ? chatTitleSchema.safeParse(initialTitle([{ kind: 'text', text: text.data }]))
-            : null;
+        const title = text.success ? firstTitleLine(text.data) : '';
+        const parsed = title ? chatTitleSchema.safeParse(initialTitle([{ kind: 'text', text: title }])) : null;
         return {
           value: parsed?.success ? parsed.data : undefined,
           failed: !parsed?.success || nativeStep(config, body).kind === 'failure',
@@ -2138,7 +2150,13 @@ export async function inferWithTools(
   timeZone: string | null = null,
   tools?: ToolInferenceContext,
   sourceMessages: readonly ChatTurn[] = messages,
-): Promise<{ text: string; avatar?: AvatarSnapshot; fallback?: string }> {
+): Promise<{
+  text: string;
+  avatar?: AvatarSnapshot;
+  fallback?: string;
+  layout?: ReplyRenderInput;
+  layoutFailed?: true;
+}> {
   // After a fallback answers a step, the rest of the turn uses its route.
   let config = inferenceRouteSchema.parse(route);
   let answeredBy: string | undefined;
@@ -2160,6 +2178,10 @@ export async function inferWithTools(
   let budgetSpent = false;
   let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
   let expressionCalls = 0;
+  let layoutFailures = 0;
+  let layoutAsked = false;
+  // A canvas report is sent back once for a visual redesign; a second text-heavy one is kept.
+  let designAsked = false;
   let toolRounds = 0;
   let decisionAt = { step: 0, round: 1 };
   const report = (status: ReplyStatus, tool?: string) => {
@@ -2170,10 +2192,15 @@ export async function inferWithTools(
     }
   };
   // Only a checked answer is final. Other endings are not on screen until the turn saves.
-  const finish = async (text: string, checked = false) => {
+  const finish = async (
+    text: string,
+    checked = false,
+    layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
+  ) => {
     report(checked ? 'done' : 'finishing');
     return {
       text,
+      ...layout,
       ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
@@ -2330,9 +2357,11 @@ export async function inferWithTools(
           ...active.tools,
           ...(rereadOffered ? [toolResultReadTool] : []),
           ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
+          ...(tools?.layout ? [replyRenderTool] : []),
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions),
+    ...(tools?.layout ? [generativeUiPrompt] : []),
     ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
   /**
@@ -2654,7 +2683,76 @@ export async function inferWithTools(
       });
       continue;
     }
-    if (!selected.calls.length) {
+    let rendered: { input: ReplyRenderInput; text: string } | undefined;
+    if (tools?.layout && selected.calls.some(call => call.name === replyRenderToolName)) {
+      const only = selected.calls.length === 1 && selected.calls[0];
+      const failed = (output: string) => ({
+        kind: 'results' as const,
+        results: selected.calls.map(call => ({
+          id: call.id,
+          name: call.name,
+          output: call === only || call.name === replyRenderToolName ? output : notRun,
+          error: true,
+          providerId: call.providerId,
+        })),
+      });
+      if (!only) {
+        reject(
+          failed(`Not run. Finish other tools first, then call ${replyRenderToolName} alone.`).results,
+          'render-batch',
+          [replyRenderToolName],
+        );
+        items.splice(-1, 0, { kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
+        continue;
+      }
+      const parsed = parseReplyRender(only.input, { design: !designAsked });
+      if (!parsed.ok && !designAsked && parseReplyRender(only.input).ok) {
+        designAsked = true;
+        log('info', 'activity', 'call_failed', { operation: 'chat.layout-redesign', 'error.type': 'layout-design' });
+        items.push(
+          { kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw },
+          failed(parsed.error),
+        );
+        continue;
+      }
+      if (!parsed.ok) {
+        log('warn', 'activity', 'call_failed', {
+          operation: 'chat.layout-invalid',
+          'error.type': 'layout-invalid',
+          attempt: layoutFailures + 1,
+        });
+        // After two retries the reply is saved as its summary, with a notice that the layout could not be shown.
+        if (layoutFailures++ >= 2) {
+          const summary = z.object({ summary: z.string().trim().min(1) }).safeParse(only.input);
+          return finish(summary.success ? summary.data.summary : selected.text.trim() || layoutFailedReply, true, {
+            layoutFailed: true,
+          });
+        }
+        items.push(
+          { kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw },
+          failed(parsed.error),
+        );
+        continue;
+      }
+      rendered = parsed;
+    }
+    // A plain-text answer is sent back once with a request for the layout; a second one is kept as text.
+    if (tools?.layout && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {
+      layoutAsked = true;
+      items.push(
+        { kind: 'model', text: selected.text, calls: [], raw: selected.raw },
+        {
+          kind: 'turn',
+          turn: {
+            role: 'user',
+            text: `Give that answer by calling ${replyRenderToolName}, as the answer format requires.`,
+          },
+        },
+      );
+      continue;
+    }
+    if (!selected.calls.length || rendered) {
+      const candidate = rendered?.text ?? selected.text;
       const preview = (text: string) => {
         try {
           tools?.answerText?.({ step: answerStep, text });
@@ -2667,8 +2765,11 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
-        return finish(selected.text, true);
+        return rendered
+          ? finish(rendered.input.summary, true, { layout: rendered.input })
+          : finish(selected.text, true);
       };
+      if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch.
       if (!workToolUsed && !corrections && !completionCorrections && !finalizing) {
         recordChatCompletionCheck('skipped_no_tools');
@@ -2693,14 +2794,14 @@ export async function inferWithTools(
           const evidence = observeChatDetailSync('completion-context', () =>
             completionCheckEvidence(
               items,
-              selected.text,
+              candidate,
               finalizing ? 0 : Math.max(0, chatToolCallLimit - calls),
               maxBytes,
             ),
           );
           recordChatRequestSizes({
             'completion-evidence': Buffer.byteLength(evidence),
-            candidate: Buffer.byteLength(selected.text),
+            candidate: Buffer.byteLength(candidate),
           });
           return send(
             observeChatDetailSync('serialize', () =>
@@ -2738,7 +2839,7 @@ export async function inferWithTools(
       if (finalizing) return finish(stoppingReply);
       if (completionCorrections++ >= 2) throw new Error('model-incomplete-response');
       items.push(
-        { kind: 'turn', turn: { role: 'assistant', text: selected.text } },
+        { kind: 'turn', turn: { role: 'assistant', text: candidate } },
         {
           kind: 'turn',
           turn: {

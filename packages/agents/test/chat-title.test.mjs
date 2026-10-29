@@ -114,3 +114,16 @@ test('a refused credit reservation stops the title before the provider is called
     { message: 'credits-exhausted' },
   );
 });
+
+test('a title written as a Markdown document keeps its first line without heading marks, quotes or a period', async t => {
+  let title;
+  t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('anthropic', { text: title })));
+  for (const [text, expected] of [
+    ['## Executive Summary\nMore detail follows.', 'Executive Summary'],
+    ['\n\n  "Cache choice."  \nWhy Valkey', 'Cache choice'],
+    ['**_Quarterly plan_**', 'Quarterly plan'],
+  ]) {
+    title = text;
+    assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Hello'), expected);
+  }
+});

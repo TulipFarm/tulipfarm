@@ -132,6 +132,7 @@ import {
   type TurnFilePart,
   type TurnFiles,
 } from './turn-files.ts';
+import { layoutFromReply, layoutText, textLayout, type Layout, type ReplyRenderInput } from './layout-contracts.ts';
 import { linkNotice, linkReadsInstalled, messageLinkReads, messageLinks, readMessageLinks } from './links.ts';
 
 export type ConversationRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -278,6 +279,20 @@ const historySchema = z.array(
     acceptedSequence: z.number().int(),
   }),
 );
+
+/** The first common migration with layout parts. */
+export const layoutCompatibility = Object.freeze({ minimum: 20 });
+type AnswerLayout = { input: ReplyRenderInput } | { failed: string } | undefined;
+
+/** The reply's layout, or `null` for a text reply. Text replaced after the model answered stays text. */
+function replyLayout(answer: AnswerLayout, text: string, messageId: string): Layout | null {
+  if (!answer) return null;
+  if ('failed' in answer)
+    return text === answer.failed ? textLayout(text, messageId, { notice: 'layout-failed' }) : null;
+  if (text !== answer.input.summary) return null;
+  const checked = layoutFromReply(answer.input, messageId);
+  return checked.ok ? checked.layout : textLayout(text, messageId, { notice: 'layout-failed' });
+}
 
 function replyParts(text: string) {
   const parts: string[] = [];
@@ -1336,7 +1351,7 @@ export function createConversationExecutor(
           JOIN ${table(tx, 'tf_conversation_approval_requests')} r ON r.turn_id = t.id AND r.conversation_id = $1
           JOIN ${table(tx, 'tf_conversation_parts')} p ON p.conversation_id = $1 AND p.approval_id = r.id
       ) SELECT m.id, CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, e.accepted_sequence AS "acceptedSequence",
-        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind = 'text'), '') AS text
+        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text
         FROM exchanges e JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = e.message_id AND m.conversation_id = $1
         LEFT JOIN ${table(tx, 'tf_conversation_parts')} p ON p.message_id = m.id
         GROUP BY m.id, e.accepted_sequence ORDER BY e.accepted_sequence DESC, m.sequence DESC LIMIT ${compaction ? 2000 : 39}`,
@@ -1655,6 +1670,7 @@ export function createConversationExecutor(
     const interactiveChat = source.interactiveChat;
     const inheritedSources = source.inherited;
     let text = 'Attachment received.';
+    let answerLayout: AnswerLayout;
     let fallback: string | undefined;
     let sources: SourceDependency[] = [{ kind: 'unknown' }];
     let replied = false;
@@ -2371,6 +2387,7 @@ export function createConversationExecutor(
         ),
       );
       text = answer.text || 'The model returned an empty reply.';
+      answerLayout = answer.layout ? { input: answer.layout } : answer.layoutFailed ? { failed: text } : undefined;
       fallback = answer.fallback;
       sources = answer.sources;
       replied = true;
@@ -2434,8 +2451,10 @@ export function createConversationExecutor(
           }
           if (next?.kind === 'complete' && next.text) text = next.text;
         }
-        const result = replyParts(text);
         const messageId = randomUUID();
+        const built = replyLayout(answerLayout, text, messageId);
+        const layout = built && tx.commonVersion >= layoutCompatibility.minimum ? built : null;
+        const result = layout ? [] : replyParts(built ? layoutText(built) : text);
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind) VALUES ($1,$2,$3,'assistant')`,
           [messageId, fence.conversationId, chat.next_message_sequence],
@@ -2450,6 +2469,11 @@ export function createConversationExecutor(
             [fence.conversationId, messageId, ordinal++, text],
           );
         }
+        if (layout)
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, layout) VALUES ($1,$2,$3,'layout',$4,$5)`,
+            [fence.conversationId, messageId, ordinal++, layoutText(layout), JSON.stringify(layout)],
+          );
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
           [
