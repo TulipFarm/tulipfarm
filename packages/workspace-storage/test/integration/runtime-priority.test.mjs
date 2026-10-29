@@ -6,12 +6,12 @@ import { fixture } from './fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createBackgroundJob } from '@tulipfarm/observability';
 
-const gate = () => Promise.withResolvers();
-
 async function setup(t, settings = {}) {
   const db = await fixture();
-  t.after(() => db.close());
-  const workspace = await db.create();
+  const workspace = await db.create().catch(async error => {
+    await db.close();
+    throw error;
+  });
   let generation = 1;
   const resolveCredential = async () => ({
     workspaceId: workspace.id,
@@ -35,7 +35,21 @@ async function setup(t, settings = {}) {
     background: () => backgroundNext,
     ...settings,
   });
-  t.after(() => runtime.close());
+  // Open gates first: close waits for every active transaction, so a failed test would otherwise hang in teardown.
+  const releases = [];
+  t.after(async () => {
+    for (const release of releases) release();
+    try {
+      await runtime.close();
+    } finally {
+      await db.close();
+    }
+  });
+  const gate = () => {
+    const resolvers = Promise.withResolvers();
+    releases.push(resolvers.resolve);
+    return resolvers;
+  };
   const run = (background, operation) => {
     backgroundNext = background;
     return runtime.transaction(workspace.id, commonCompatibility, operation);
@@ -43,14 +57,13 @@ async function setup(t, settings = {}) {
   const hold = background => {
     const entered = gate();
     const release = gate();
-    t.after(() => release.resolve());
     const done = run(background, async () => {
       entered.resolve();
       await release.promise;
     });
     return { entered: entered.promise, release: release.resolve, done };
   };
-  return { db, workspace, runtime, run, hold, rotate: () => generation++ };
+  return { db, workspace, runtime, run, hold, gate, rotate: () => generation++ };
 }
 
 async function eventually(check, message) {
@@ -130,7 +143,7 @@ for (const [reserved, expected] of [
   [1, ['job', 'request']],
 ]) {
   test(`with ${reserved} reserved job slots, a freed slot goes ${expected[0]} first`, { timeout: 15000 }, async t => {
-    const { runtime, run, hold } = await setup(t, {
+    const { runtime, run, hold, gate } = await setup(t, {
       connectionsPerPool: 2,
       maxConcurrentTransactions: 2,
       maxQueue: 2,
@@ -139,11 +152,19 @@ for (const [reserved, expected] of [
     const requests = [hold(false), hold(false)];
     await Promise.all(requests.map(request => request.entered));
     const order = [];
-    const queued = [run(false, async () => order.push('request')), run(true, async () => order.push('job'))];
+    // Queued work stays open, so the first one cannot hand its slot to the second before the order is read.
+    const finish = gate();
+    const queue = name => async () => {
+      order.push(name);
+      await finish.promise;
+    };
+    const queued = [run(false, queue('request')), run(true, queue('job'))];
     await eventually(() => runtime.stats().queuedTransactions === 2, 'request and job queue');
     requests[0].release();
     await eventually(() => order.length === 1, 'one queued transaction runs');
     requests[1].release();
+    await eventually(() => order.length === 2, 'the other queued transaction runs');
+    finish.resolve();
     await Promise.all(queued);
     assert.deepEqual(order, expected);
   });
@@ -153,7 +174,7 @@ test(
   'a freed pool connection goes to a waiting job while jobs hold none of the reserve',
   { timeout: 15000 },
   async t => {
-    const { runtime, run, hold } = await setup(t, {
+    const { runtime, run, hold, gate } = await setup(t, {
       connectionsPerPool: 2,
       maxConcurrentTransactions: 4,
       reservedBackgroundTransactions: 1,
@@ -161,13 +182,20 @@ test(
     const requests = [hold(false), hold(false)];
     await Promise.all(requests.map(request => request.entered));
     const order = [];
-    const request = run(false, async () => order.push('request'));
+    const finish = gate();
+    const queue = name => async () => {
+      order.push(name);
+      await finish.promise;
+    };
+    const request = run(false, queue('request'));
     await eventually(() => runtime.stats().activeTransactions === 3, 'request waits for a connection');
-    const job = run(true, async () => order.push('job'));
+    const job = run(true, queue('job'));
     await eventually(() => runtime.stats().activeTransactions === 4, 'job waits for a connection');
     requests[0].release();
     await eventually(() => order.length === 1, 'one waiter gets the connection');
     requests[1].release();
+    await eventually(() => order.length === 2, 'the other waiter gets a connection');
+    finish.resolve();
     await Promise.all([request, job]);
     assert.deepEqual(order, ['job', 'request']);
   },
