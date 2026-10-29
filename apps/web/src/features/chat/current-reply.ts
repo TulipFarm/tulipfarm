@@ -39,9 +39,11 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const progress = progressUpdate && progressUpdate.generation === turn?.generation ? progressUpdate : undefined;
   const running = tools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
   // A step ending in tool calls narrates work; only the final step's text is the answer.
-  const narration =
+  const stepText =
     previewText && (running || (progress && preview && preview.identity.step < progress.step)) ? previewText : '';
-  const answerText = narration ? '' : previewText;
+  // A saved tool row shows the same text in the activity list, so the live note steps aside.
+  const narration = tools.some(tool => tool.narration?.includes(stepText.trim())) ? '' : stepText;
+  const answerText = stepText ? '' : previewText;
   // A final answer on screen ends the progress UI even while the turn still saves or names the chat.
   const delivered = progress?.status === 'done' && !!answerText;
   const activity = thinkingOf(running, tools.length > 0, progress);

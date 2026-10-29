@@ -100,6 +100,7 @@ const messageSchema = z.object({
         status: z.enum(['running', 'completed', 'blocked', 'failed']),
         activityStatus: activityStatusSchema.optional(),
         activity: z.string().nullable().optional(),
+        narration: z.string().nullable().optional(),
         presentation: toolPresentationSchema.optional(),
         web: publicWebReceiptSchema.nullable().optional(),
         knowledge: knowledgeActivitySchema.nullable().optional(),

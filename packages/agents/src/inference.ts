@@ -2141,10 +2141,13 @@ export async function inferWithContent(
   return result;
 }
 
+/** The saved step text must fit the `narration` column of `tf_conversation_tool_calls`. */
+const narrationLimit = 2000;
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
-  execute: (call: FrameworkCall, activity: string) => Promise<unknown>,
+  execute: (call: FrameworkCall, activity: string, narration?: string) => Promise<unknown>,
   meter?: ToolModelMeter,
   _generateTitle = false,
   timeZone: string | null = null,
@@ -2174,6 +2177,8 @@ export async function inferWithTools(
   let completionCorrections = 0;
   // Receipts from an earlier attempt of this same turn count as work in this reply.
   let workToolUsed = calls > 0 || Boolean(tools?.priorToolCalls?.length);
+  // Text from steps that ran no work tool waits here and is saved with the next work tool call.
+  let carried = '';
   let requestStep = 0;
   let budgetSpent = false;
   let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
@@ -2854,6 +2859,7 @@ export async function inferWithTools(
     for (const call of selected.calls) if (loaded.has(call.name)) lastUsed.set(call.name, step);
     if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
+    carried = [carried, selected.text.trim()].filter(Boolean).join('\n\n').slice(-narrationLimit);
     const result = (call: NativeCall, output: string, error: boolean): ToolResult => ({
       id: call.id,
       name: call.name,
@@ -3073,10 +3079,15 @@ export async function inferWithTools(
     calls += valid.length;
     const work = valid.filter(({ native }) => isWorkTool(native.name));
     if (work[0]) report('tool', toolDisplayName(work[0].call.tool));
+    const narrated = work[0];
+    const narration = narrated && carried ? carried : undefined;
+    if (narration) carried = '';
     const outputs: ToolResult[] = [];
     const images: ToolResultImages[] = [];
     if (valid.length === 1 && only) {
-      const { value, shown } = toolResultImages(await execute(only.call, only.activity));
+      const { value, shown } = toolResultImages(
+        await execute(only.call, only.activity, only === narrated ? narration : undefined),
+      );
       const waiting = mcpExecutionResultSchema.safeParse(value);
       if (waiting.success && waiting.data.kind === 'waiting') throw new Error('mcp-wait-not-persisted');
       outputs.push(result(only.native, toolOutput(only.call, value), false));
@@ -3088,7 +3099,9 @@ export async function inferWithTools(
         for (const [index, entry] of pending) {
           if (stopped) return;
           try {
-            const { value, shown } = toolResultImages(await execute(entry.call, entry.activity));
+            const { value, shown } = toolResultImages(
+              await execute(entry.call, entry.activity, entry === narrated ? narration : undefined),
+            );
             outputs[index] = result(entry.native, toolOutput(entry.call, value), false);
             if (shown) images[index] = shown;
           } catch (error) {

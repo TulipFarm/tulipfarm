@@ -110,5 +110,6 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }
       : {}),
+    ...(tool.narration ? { details: <p className="text-sm text-muted-foreground">{tool.narration}</p> } : {}),
   };
 }
