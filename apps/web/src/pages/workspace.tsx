@@ -78,6 +78,7 @@ import { SearchPalette, useSearchShortcut } from '@/features/search/search-palet
 import { overrides } from '@/extensions';
 import { PageChromeContext } from '@tulipfarm/sprout/page-header';
 import { ChatHeaderContext } from '@/features/chat/header-context';
+import { InviteMembersPrompt } from '@/features/governance/invite-members-prompt';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
@@ -638,7 +639,7 @@ export function WorkspaceShell() {
 }
 
 function WorkspaceShellContent() {
-  const { user, workspace, workspaceStale } = workspaceRoute.useRouteContext();
+  const { user, workspace, workspaceStale, membershipId } = workspaceRoute.useRouteContext();
   // Integration pages explain the stale state themselves and pause their controls.
   const onIntegrations = useLocation({
     select: location =>
@@ -699,6 +700,14 @@ function WorkspaceShellContent() {
               </SidebarTrigger>
               <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
               <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
+              {membershipId && workspace.status === 'ready' && (
+                <InviteMembersPrompt
+                  key={workspace.id}
+                  userId={user.id}
+                  workspaceId={workspace.id}
+                  workspaceSlug={workspace.slug}
+                />
+              )}
               {/* Under 20rem the page title needs the room; the navigation sheet still names the workspace. */}
               {!onCalendar && (
                 <span

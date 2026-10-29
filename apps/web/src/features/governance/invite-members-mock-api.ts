@@ -33,7 +33,10 @@ function installInviteMembersMock() {
   const data: GovernanceSnapshot = {
     actorMembershipId: id,
     directory,
-    members: directory.map(member => ({ ...member, userId: member.id, role: 'member' })),
+    members:
+      scenario === 'solo'
+        ? [{ id, userId: 'invite-mock', name: 'Local demo', email: 'demo@example.test', role: 'admin' }]
+        : directory.map(member => ({ ...member, userId: member.id, role: 'member' })),
     teams: [],
     tables: [],
     grants: [],

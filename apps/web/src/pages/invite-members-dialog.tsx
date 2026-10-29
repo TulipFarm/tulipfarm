@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createdInvitationSchema, type GovernanceSnapshot } from '@tulipfarm/workspaces/governance-contracts';
 import { Button } from '@tulipfarm/sprout/button';
@@ -76,6 +76,7 @@ export function InviteMembersDialog({
   onViewInvitations,
   members,
   initialInput = '',
+  trigger,
 }: {
   workspaceId: string;
   authorized: boolean;
@@ -86,6 +87,7 @@ export function InviteMembersDialog({
   onViewInvitations: () => void;
   members: GovernanceSnapshot['directory'];
   initialInput?: string;
+  trigger?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const anchor = useComboboxAnchor();
@@ -271,7 +273,7 @@ export function InviteMembersDialog({
   const summary = busy ? '' : sentSummary(rows);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      {authorized && <DialogTrigger render={<Button />}>Invite members</DialogTrigger>}
+      {authorized && (trigger ?? <DialogTrigger render={<Button />}>Invite members</DialogTrigger>)}
       <DialogContent size="split" initialFocus={emailInput}>
         <div className="grid min-w-0 md:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-6 p-6 sm:p-8">
