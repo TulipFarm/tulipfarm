@@ -260,6 +260,25 @@ test('table context leaves a minimum content margin under large section headings
   assert.deepEqual(restored, cells);
 });
 
+test('token counts match the cl100k_base encoder', () => {
+  const samples = [
+    'Harvest apples on Tuesday.\n\n\n  Keep   every\torchard record. ',
+    "We'LL ship it's 12,345.67 units — 日本語 🌻🌻 café\u00a0x",
+    '<|endoftext|> stays plain text\r\n```js\nconst a = 1;\n```\n',
+    `| a | b |\n| --- | --- |\n${'| cell 🌻 | 42 |\n'.repeat(50)}`,
+  ];
+  for (const text of samples) {
+    const result = chunkMarkdown(text);
+    let total = 0;
+    for (const chunk of result.chunks) {
+      const expected = encoding.encode(chunk.text, [], []).length;
+      assert.equal(chunk.tokens, expected);
+      total += expected;
+    }
+    assert.equal(result.tokens, total);
+  }
+});
+
 test('code fences do not create headings and special-token strings are literal text', async () => {
   const result = await parse('# Policy\n\n```md\n# Not a heading\n```\n\n<|endoftext|>');
   assert.equal(result.chunks[0].heading, 'Policy');
