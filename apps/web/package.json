@@ -7,7 +7,7 @@
     "build": "vite build",
     "build:release": "TULIPFARM_RELEASE_BUILD=1 vite build",
     "test": "node --test --test-concurrency=1 test/*.test.ts test/build-info.test.mjs test/static-hosting.test.mjs test/authorization-attention.test.mjs",
-    "test:canvas": "node --test test/canvas.browser.mjs",
+    "test:canvas": "node --test test/canvas.browser.mjs test/canvas-reports.browser.mjs",
     "test:pptx-charts": "node --test test/pptx-charts.browser.mjs",
     "test:plans": "node --test test/plan-canvas.browser.mjs",
     "test:packages": "node --test test/system-packages.browser.mjs",

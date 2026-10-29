@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { A2uiSurface, sproutAdapters, type A2uiAction, type A2uiAdapterProps } from '@tulipfarm/sprout/a2ui';
+import { PanelRightIcon } from 'lucide-react';
+import { Button } from '@tulipfarm/sprout/button';
 import { MessageBubble } from '@tulipfarm/sprout/message';
 import { ResultCard, type ResultCardKind } from '@tulipfarm/sprout/result-card';
 import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
@@ -137,7 +139,7 @@ function LayoutSurface({
   );
 }
 
-/** An assistant reply drawn from its saved layout. A canvas reply shows its summary here and its layout in Canvas, which opens by itself while it is the chat's latest reply. */
+/** An assistant reply drawn from its saved layout. A canvas reply shows its summary and a button that opens its layout in Canvas, which opens by itself while it is the chat's latest reply. */
 export function LayoutReply({
   chatId,
   messageId,
@@ -168,6 +170,7 @@ export function LayoutReply({
         <p className="whitespace-pre-wrap break-words">{text}</p>
       </MessageBubble>
     );
+  const showing = Boolean(canvas?.open && canvas.activeId === `layout:${messageId}`);
   const notice = layout.notice === 'layout-failed' && (
     <p className="text-xs text-muted-foreground">This reply couldn’t be laid out, so it’s shown as text.</p>
   );
@@ -181,7 +184,20 @@ export function LayoutReply({
   return (
     <div data-layout="canvas" className="w-full min-w-0 space-y-3 px-3 py-2">
       <p className="whitespace-pre-wrap break-words">{layout.summary}</p>
-      {!canvas && <LayoutSurface layout={layout} chatId={chatId} size="compact" messageId={messageId} />}
+      {canvas ? (
+        <Button
+          variant="outline"
+          size="sm"
+          aria-label={`Open ${layout.title} in Canvas`}
+          aria-pressed={showing}
+          onClick={() => canvas.show(layoutCanvasItem(layout, messageId, chatId))}
+        >
+          <PanelRightIcon aria-hidden />
+          <span className="truncate">{layout.title}</span>
+        </Button>
+      ) : (
+        <LayoutSurface layout={layout} chatId={chatId} size="compact" messageId={messageId} />
+      )}
       {notice}
     </div>
   );
