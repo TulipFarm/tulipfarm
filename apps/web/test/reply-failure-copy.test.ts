@@ -71,7 +71,8 @@ test('a failed reply with completed tool calls offers Continue', () => {
 });
 
 test('a queued reply after a model failure says it is retrying instead of spinning silently', () => {
-  assert.equal(replyRetrying('queued', 'model-unavailable'), 'The model call failed. Retrying automatically…');
+  assert.equal(replyRetrying('queued', 'model-unavailable'), 'Taking long to respond, retrying…');
+  assert.equal(replyRetrying('queued', 'model-rate-limit'), 'Taking long to respond, retrying…');
   assert.match(replyRetrying('queued', 'transient-failure')!, /Retrying automatically/);
   assert.equal(replyRetrying('queued', null), null);
   assert.equal(replyRetrying('processing', 'model-unavailable'), null);

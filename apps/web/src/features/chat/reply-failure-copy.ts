@@ -62,8 +62,7 @@ export function retryLabel(code: string | null | undefined, resumes: boolean, co
 /** Shown while a reply whose model call failed waits for its automatic retry, so it is never a silent spinner. */
 export function replyRetrying(status: string, code: string | null | undefined): string | null {
   if (status !== 'queued' || !code) return null;
-  if (code.startsWith('model-') && !code.startsWith(modelFallbackPrefix))
-    return 'The model call failed. Retrying automatically…';
+  if (code.startsWith('model-') && !code.startsWith(modelFallbackPrefix)) return 'Taking long to respond, retrying…';
   if (code === 'transient-failure' || code === 'database-conflict')
     return 'The reply hit a temporary problem. Retrying automatically…';
   return null;
