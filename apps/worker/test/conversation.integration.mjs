@@ -83,7 +83,7 @@ test(
       // The reply was saved and completed before the title step ran, which retried once and then saved.
       assert.deepEqual(titleRuns, [
         { attempt: 1, final: false, title: privateText, messages: ['human', 'assistant'], status: 'completed' },
-        { attempt: 2, final: true, title: privateText, messages: ['human', 'assistant'], status: 'completed' },
+        { attempt: 2, final: false, title: privateText, messages: ['human', 'assistant'], status: 'completed' },
       ]);
       assert.equal((await store.read(w.id, w.userId, id)).title, 'Reversed greeting');
       worker.shutdown();
@@ -137,7 +137,7 @@ test(
             else {
               const { attempt, final, ...title } = input;
               assert.deepEqual(title, { ...work, titleRevision: 1 });
-              assert.equal(final, attempt === 2);
+              assert.ok(attempt <= 2 && !final, 'the title succeeded before its last scheduled attempt');
             }
           }
           for (const payload of event.activityTaskCompletedEventAttributes?.result?.payloads ?? [])

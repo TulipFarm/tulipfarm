@@ -13,20 +13,21 @@ const { generateConversationTitle } = proxyActivities<ReturnType<typeof createCo
   startToCloseTimeout: '30 seconds',
   retry: { maximumAttempts: 1 },
 });
-const titleAttempts = 2;
+// A busy title model usually recovers within minutes, so later tries wait longer instead of giving up after a second.
+const titleRetryDelays = ['1 second', '30 seconds', '2 minutes', '5 minutes'] as const;
 
 export async function conversationReply(work: ReplyWork) {
   if (!patched('title-after-reply')) return processConversationReply(work);
   const { outcome, title } = await deliverConversationReply(work);
-  if (title)
-    for (let attempt = 1; attempt <= titleAttempts; attempt++) {
-      const final = attempt === titleAttempts;
-      try {
-        if ((await generateConversationTitle({ ...work, ...title, attempt, final })) !== 'retry') break;
-      } catch {
-        if (final) break;
-      }
-      await sleep('1 second');
+  if (title) {
+    const delays = patched('title-retry-later') ? titleRetryDelays : titleRetryDelays.slice(0, 1);
+    for (let attempt = 1; ; attempt++) {
+      const delay = delays[attempt - 1];
+      const final = delay === undefined;
+      const result = await generateConversationTitle({ ...work, ...title, attempt, final }).catch(() => 'retry');
+      if (result !== 'retry' || final) break;
+      await sleep(delay);
     }
+  }
   return outcome;
 }
