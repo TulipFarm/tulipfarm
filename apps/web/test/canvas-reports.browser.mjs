@@ -9,7 +9,7 @@ import { createWorkspaceFixture } from './workspace.fixture.mjs';
 
 const port = Number(process.env.CANVAS_REPORTS_BROWSER_PORT ?? 5244);
 const origin = `http://127.0.0.1:${port}`;
-const id = '11111111-1111-4111-8111-111111111111';
+const id = '33333333-3333-4333-8333-333333333333';
 const { workspace, session } = createWorkspaceFixture({ slug: 'canvas-qa', name: 'Canvas QA' });
 const chat = {
   id,
@@ -37,7 +37,7 @@ const report = (n, title, summary, body) => {
     author: 'assistant',
     createdAt: workspace.createdAt,
     parts: [{ kind: 'layout', text: summary, layout }],
-    turn: { id: messageId(n - 1), status: 'completed', generation: 0 },
+    turn: null,
     tools: [],
   };
 };
