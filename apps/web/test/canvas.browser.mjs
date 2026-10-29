@@ -108,6 +108,10 @@ test(
       assert.equal(await canvas.count(), 0);
       await chip.click();
       await canvas.getByText('Northstar: call back on Monday.').waitFor();
+      await page
+        .getByRole('button', { name: 'Hide canvas', exact: true })
+        .getByText('Hide canvas', { exact: true })
+        .waitFor();
       assert.equal(await canvas.getByRole('tab', { name: 'follow-ups.txt' }).getAttribute('aria-selected'), 'true');
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
@@ -116,7 +120,9 @@ test(
 
       await canvas.getByRole('tab', { name: 'follow-ups.txt' }).press('Escape');
       await canvas.waitFor({ state: 'detached' });
-      await page.getByRole('button', { name: 'Show canvas, 1 open' }).click();
+      const showCanvas = page.getByRole('button', { name: 'Show canvas, 1 open' });
+      await showCanvas.getByText('Show canvas', { exact: true }).waitFor();
+      await showCanvas.click();
       await canvas.waitFor();
       await canvas.getByRole('button', { name: 'Close follow-ups.txt' }).click();
       await canvas.waitFor({ state: 'detached' });
