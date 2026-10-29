@@ -276,3 +276,45 @@ test('invite chips add members and invite them without sending real mail', { tim
     await server.close();
   }
 });
+
+test('a one-member workspace offers inviting from the header until dismissed', { timeout: 120000 }, async () => {
+  const origin = 'http://127.0.0.1:5767';
+  const server = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    server: { host: '127.0.0.1', port: 5767, strictPort: true },
+  });
+  let browser;
+  try {
+    await server.listen();
+    browser = await chromium.launch();
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    await page.route('**/v1/**', route => route.abort('failed'));
+    const header = page.locator('header[aria-label="Workspace header"]');
+    const nudge = header.getByRole('group', { name: 'Invite members' });
+
+    await page.goto(`${origin}/invite-mock/`);
+    await header.waitFor();
+    await page.waitForTimeout(1000);
+    assert.equal(await nudge.count(), 0, 'a workspace with other members gets no nudge');
+
+    await page.goto(`${origin}/invite-mock/?scenario=solo`);
+    await nudge.getByRole('button', { name: 'Invite members', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Send invitations', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+
+    await nudge.getByRole('button', { name: 'Dismiss invite members' }).click();
+    await nudge.waitFor({ state: 'detached' });
+    // The router drops the trailing slash the mock needs, so open the page again rather than reloading.
+    await page.goto(`${origin}/invite-mock/?scenario=solo`);
+    await header.waitFor();
+    await page.waitForTimeout(1000);
+    assert.equal(await nudge.count(), 0, 'a dismissed nudge stays hidden');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser?.close();
+    await server.close();
+  }
+});

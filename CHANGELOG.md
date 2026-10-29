@@ -150,6 +150,9 @@ One version identifies all apps and images of a release.
 
 ### Added
 
+- Admins of a workspace with only one member see an **Invite members** button
+  at the top right of the workspace header. It opens the invite dialog; closing
+  it with × hides it for good in that browser.
 - Model catalog entries take optional `speed` (output tokens per second) and
   `quality` (a benchmark score), and the model picker shows them as speed and
   quality meters. The shipped catalog fills them from Artificial Analysis.
