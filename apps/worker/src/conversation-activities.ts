@@ -417,6 +417,7 @@ export function meteredReply(
             }
           : {
               ...(avatar ? { avatar } : {}),
+              ...(generativeUi ? { layout: true } : {}),
               priorCalls,
               priorToolCalls,
               earlierMessages,
