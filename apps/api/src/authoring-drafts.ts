@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { createAuthoringDrafts } from '@tulipfarm/agents/drafts';
 import { draftDecisionSchema, draftOutcomeSchema, draftViewSchema } from '@tulipfarm/agents/draft-contracts';
 import { AgentError } from '@tulipfarm/agents/saved-contracts';
@@ -47,6 +47,7 @@ export function registerAuthoringDrafts(
     const user = authenticateRoutes(routes, dependencies.auth, { origin: authConfig().webOrigin });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (error instanceof SourceAuthorizationUnavailable) return reply.code(503).send({ error: 'draft-unavailable' });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'draft-unavailable' });
       if (error instanceof AgentError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof WorkspaceSkillError) return reply.code(409).send({ error: error.code });

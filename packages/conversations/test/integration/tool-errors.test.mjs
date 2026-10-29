@@ -238,7 +238,7 @@ test('an unverifiable source retries the reply and logs its classification', asy
       history.messages[0].tools.map(tool => tool.status),
       ['blocked'],
     );
-    assert.equal(history.messages[0].turn.errorCode, 'transient-failure');
+    assert.equal(history.messages[0].turn.errorCode, 'github-rate-limited');
     const failure = lines.map(line => JSON.parse(line)).find(record => record.operation === 'conversation.reply');
     assert.equal(failure['error.code'], 'github-rate-limited');
     assert.equal(failure['error.stage'], 'model');

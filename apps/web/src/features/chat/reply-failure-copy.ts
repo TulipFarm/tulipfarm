@@ -38,6 +38,7 @@ const stopReasons: Record<string, string> = {
   'reply-interrupted': `The reply stopped before it finished. ${kept}`,
   'database-conflict': `The reply stopped because another change was saving at the same time. ${kept}`,
   'attempts-exhausted': `The reply kept hitting a temporary problem and stopped. ${kept}`,
+  'github-rate-limited': `GitHub is limiting requests. Wait a minute, then retry. ${kept}`,
   'access-denied': `The reply stopped because access to something it needed was denied. ${kept}`,
   'project-context-too-large':
     'The project context is too large for this reply. Shorten the project context, then retry.',
