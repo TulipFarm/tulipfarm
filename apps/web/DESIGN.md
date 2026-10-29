@@ -231,7 +231,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.11.0 on 27 October 2026. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.13.0 on 29 October 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -468,7 +468,7 @@ the Canvas is a resizable panel (55/45 default, chat at least 40%, Canvas at lea
 the screen, with **Back to chat**. Its 44px header holds one closeable tab per
 user-opened result. Esc or the close control hides it; closing the last tab closes
 the view. `CanvasToggle` appears only when opened items remain, labels its action
-**View results** or **Hide results**, and shows the open item count.
+**Show canvas** or **Hide canvas**, and shows the open item count.
 
 ### New-chat home
 
