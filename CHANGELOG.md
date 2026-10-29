@@ -28,6 +28,13 @@ One version identifies all apps and images of a release.
   `TABLE_SEARCH_MODEL_FAMILY` and `RECOMMENDATION_MODEL_FAMILY` are removed.
   Startup fails while any is set, naming what replaces it in the catalog. The
   api and worker need at least one served model to start.
+- **Breaking:** agent page reads use [Huntsman](https://github.com/TulipFarm/huntsman)
+  and web search uses SearXNG, replacing Firecrawl. Set `HUNTSMAN_ENDPOINT`
+  (and `HUNTSMAN_TOKEN` if your Huntsman requires one) for `web.fetch` and links
+  shared in chat, and `SEARXNG_ENDPOINT` (and `SEARXNG_TOKEN` if a proxy in front
+  of SearXNG requires one) for `web.search`; each is off while unset. `FIRECRAWL_ENDPOINT`, `FIRECRAWL_API_KEY` and `FIRECRAWL_API_KEY_FILE`
+  are removed, and startup fails while any is set. The self-hosted stack runs
+  both services under `COMPOSE_PROFILES=public-web`.
 - Bundles, runs and receipts stored by earlier releases still verify, and an
   unchanged catalog keeps the earlier server bundle ids and price revision.
 

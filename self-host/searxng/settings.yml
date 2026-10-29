@@ -1,0 +1,17 @@
+# SearXNG for agent web.search. Private to the Compose network: the api and worker call
+# GET /search?format=json; nothing else reaches it. SEARXNG_SECRET sets server.secret_key.
+use_default_settings: true
+
+general:
+  instance_name: TulipFarm search
+  enable_metrics: false
+
+search:
+  safe_search: 1
+  formats: [json]
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: GET

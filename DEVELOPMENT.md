@@ -33,10 +33,20 @@ pnpm infra:up     # start and wait for health checks
 pnpm infra:down   # stop
 ```
 
-Agent web search and page reads are off unless `FIRECRAWL_ENDPOINT` points at a
-Firecrawl-compatible API. Export it before `pnpm dev:setup` to write it to
-the API and worker env files. Authenticated services also take
-`FIRECRAWL_API_KEY` or `FIRECRAWL_API_KEY_FILE`. Temporal Cloud takes
+Agent page reads are off unless `HUNTSMAN_ENDPOINT` points at a
+[Huntsman](https://github.com/TulipFarm/huntsman) scraper, and web search is off
+unless `SEARXNG_ENDPOINT` points at a SearXNG instance with JSON output. Export
+them before `pnpm dev:setup` to write them to the API and worker env files. A
+Huntsman that requires a token also takes `HUNTSMAN_TOKEN`. To run both locally:
+
+```sh
+docker run -d --name huntsman -p 127.0.0.1:8080:8080 ghcr.io/tulipfarm/huntsman:0.2.0
+docker run -d --name searxng -p 127.0.0.1:8888:8080 -e SEARXNG_SECRET="$(openssl rand -hex 32)" \
+  -v "$PWD/self-host/searxng/settings.yml:/etc/searxng/settings.yml:ro" searxng/searxng:2026.10.27-b5ed73fcb
+export HUNTSMAN_ENDPOINT=http://127.0.0.1:8080 SEARXNG_ENDPOINT=http://127.0.0.1:8888
+```
+
+Temporal Cloud takes
 `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TLS=true`, and
 `TEMPORAL_API_KEY` or `TEMPORAL_API_KEY_FILE`; setup copies the resolved values
 to the service env files. With these unset, local defaults are unchanged.

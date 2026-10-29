@@ -55,19 +55,13 @@ function memoryBytes() {
 
 async function setup(t, { reader = 'claude-sonnet', images = true } = {}) {
   const f = await conversationFixture();
-  const keys = [
-    'ANTHROPIC_API_KEY',
-    'MODEL_CATALOG',
-    'MODEL_CATALOG_FILE',
-    'FEATURE_FLAG_IMAGES',
-    'FIRECRAWL_ENDPOINT',
-  ];
+  const keys = ['ANTHROPIC_API_KEY', 'MODEL_CATALOG', 'MODEL_CATALOG_FILE', 'FEATURE_FLAG_IMAGES', 'HUNTSMAN_ENDPOINT'];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
   process.env.MODEL_CATALOG = catalog(reader);
   process.env.FEATURE_FLAG_IMAGES = String(images);
   // The public web is on; no test here scrapes a page.
-  process.env.FIRECRAWL_ENDPOINT = 'https://firecrawl.invalid';
+  process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.invalid';
   delete process.env.MODEL_CATALOG_FILE;
   t.after(async () => {
     for (const [key, value] of Object.entries(saved))

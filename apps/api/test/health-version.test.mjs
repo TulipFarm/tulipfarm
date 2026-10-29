@@ -22,17 +22,21 @@ test('root describes the API and links to docs and health', async t => {
 
 test('actual health handlers preserve identity across healthy, degraded, and liveness responses', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
-  const previousPublicWebEndpoint = process.env.FIRECRAWL_ENDPOINT;
-  process.env.FIRECRAWL_ENDPOINT = 'http://web-gateway:3003';
+  const names = ['HUNTSMAN_ENDPOINT', 'HUNTSMAN_TOKEN', 'HUNTSMAN_TOKEN_FILE', 'SEARXNG_ENDPOINT'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
-    if (previousPublicWebEndpoint === undefined) delete process.env.FIRECRAWL_ENDPOINT;
-    else process.env.FIRECRAWL_ENDPOINT = previousPublicWebEndpoint;
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
   });
+  for (const name of names) delete process.env[name];
+  process.env.HUNTSMAN_ENDPOINT = 'http://huntsman:3000';
+  process.env.SEARXNG_ENDPOINT = 'http://searxng:8080';
   const fetched = [];
   let publicWebUnavailable = false;
   t.mock.method(globalThis, 'fetch', async url => {
     fetched.push(String(url));
-    if (publicWebUnavailable && String(url) === 'http://web-gateway:3003/health')
+    if (publicWebUnavailable && String(url) === 'http://searxng:8080/healthz')
       throw new Error('public-web-unavailable');
     return new Response('healthy');
   });
@@ -69,7 +73,7 @@ test('actual health handlers preserve identity across healthy, degraded, and liv
     assert.equal(body.services.workers.status, failed ? 'unavailable' : 'ok');
     assert.equal(body.services.postgres.status, 'ok');
     assert.equal(body.services.publicWeb.status, 'ok');
-    assert.deepEqual(fetched, ['http://127.0.0.1:8233', 'http://web-gateway:3003/health']);
+    assert.deepEqual(fetched, ['http://127.0.0.1:8233', 'http://huntsman:3000/health', 'http://searxng:8080/healthz']);
     fetched.length = 0;
     assert.equal(response.headers['cache-control'], 'no-store');
     failed = true;
@@ -86,10 +90,12 @@ test('actual health handlers preserve identity across healthy, degraded, and liv
 test('health skips the Temporal UI and public-web probes when they are not configured', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
   const previous = {
-    FIRECRAWL_ENDPOINT: process.env.FIRECRAWL_ENDPOINT,
+    HUNTSMAN_ENDPOINT: process.env.HUNTSMAN_ENDPOINT,
+    SEARXNG_ENDPOINT: process.env.SEARXNG_ENDPOINT,
     TEMPORAL_UI_URL: process.env.TEMPORAL_UI_URL,
   };
-  delete process.env.FIRECRAWL_ENDPOINT;
+  delete process.env.HUNTSMAN_ENDPOINT;
+  delete process.env.SEARXNG_ENDPOINT;
   process.env.TEMPORAL_UI_URL = '';
   t.after(() => {
     for (const [name, value] of Object.entries(previous))
@@ -121,17 +127,25 @@ test('health skips the Temporal UI and public-web probes when they are not confi
   assert.deepEqual(fetched, []);
 });
 
-test('cloud web health authenticates without scraping and optional storage checks follow the capability', async t => {
+test('Huntsman health sends its token without scraping and optional storage checks follow the capability', async t => {
   t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
-  const names = ['FIRECRAWL_ENDPOINT', 'FIRECRAWL_API_KEY', 'TEMPORAL_UI_URL', 'WORKSPACE_STORAGE_CAPABILITY'];
+  const names = [
+    'HUNTSMAN_ENDPOINT',
+    'HUNTSMAN_TOKEN',
+    'HUNTSMAN_TOKEN_FILE',
+    'SEARXNG_ENDPOINT',
+    'TEMPORAL_UI_URL',
+    'WORKSPACE_STORAGE_CAPABILITY',
+  ];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
     for (const [name, value] of Object.entries(previous))
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  process.env.FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev';
-  process.env.FIRECRAWL_API_KEY = 'test-cloud-key';
+  for (const name of names) delete process.env[name];
+  process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.example.com';
+  process.env.HUNTSMAN_TOKEN = 'test-huntsman-token';
   process.env.TEMPORAL_UI_URL = '';
   delete process.env.WORKSPACE_STORAGE_CAPABILITY;
   let status = 200;
@@ -167,12 +181,13 @@ test('cloud web health authenticates without scraping and optional storage check
   assert.equal(healthy.json().services.temporalUi, undefined);
   assert.equal(healthy.json().services.storageMaintenance, undefined);
   assert.deepEqual(executions, ['healthCheck']);
-  assert.equal(fetched[0].url, 'https://api.firecrawl.dev/v2/team/credit-usage');
-  assert.deepEqual(fetched[0].options.headers, { authorization: 'Bearer test-cloud-key' });
+  assert.equal(fetched.length, 1);
+  assert.equal(fetched[0].url, 'https://huntsman.example.com/health');
+  assert.deepEqual(fetched[0].options.headers, { authorization: 'Bearer test-huntsman-token' });
   assert.equal(fetched[0].options.method ?? 'GET', 'GET');
   assert.equal(fetched[0].options.redirect, 'error');
   assert.equal(fetched[0].options.body, undefined);
-  assert.doesNotMatch(healthy.body, /test-cloud-key|remainingCredits/);
+  assert.doesNotMatch(healthy.body, /test-huntsman-token/);
   process.env.WORKSPACE_STORAGE_CAPABILITY = 'isolated-v1';
   const withStorage = await app.inject('/v1/health');
   assert.equal(withStorage.statusCode, 200);

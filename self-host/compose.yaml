@@ -63,6 +63,18 @@ x-flags: &flags
   FEATURE_FLAG_ANTHROPIC_MODELS: ${FEATURE_FLAG_ANTHROPIC_MODELS:-}
   FEATURE_FLAG_OPENAI_IMAGE_MODELS: ${FEATURE_FLAG_OPENAI_IMAGE_MODELS:-}
 
+x-public-web: &public-web
+  HUNTSMAN_ENDPOINT: ${HUNTSMAN_ENDPOINT:-}
+  HUNTSMAN_TOKEN: ${HUNTSMAN_TOKEN:-}
+  HUNTSMAN_TOKEN_FILE: ${HUNTSMAN_TOKEN_FILE:-}
+  SEARXNG_ENDPOINT: ${SEARXNG_ENDPOINT:-}
+  SEARXNG_TOKEN: ${SEARXNG_TOKEN:-}
+  SEARXNG_TOKEN_FILE: ${SEARXNG_TOKEN_FILE:-}
+  # Removed settings, still passed through so that an upgraded .env that sets them stops startup with what replaces them.
+  FIRECRAWL_ENDPOINT: ${FIRECRAWL_ENDPOINT:-}
+  FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+  FIRECRAWL_API_KEY_FILE: ${FIRECRAWL_API_KEY_FILE:-}
+
 x-telemetry: &telemetry
   CLOUD_TELEMETRY_ENABLED: ${CLOUD_TELEMETRY_ENABLED:-}
   CLOUD_TELEMETRY_OTLP_ENDPOINT: ${CLOUD_TELEMETRY_OTLP_ENDPOINT:-}
@@ -184,17 +196,43 @@ services:
     depends_on:
       temporal-namespace: { condition: service_completed_successfully }
 
+  # Page reads for agents. Huntsman refuses private and metadata addresses itself; it publishes no port.
+  huntsman:
+    profiles: [public-web]
+    image: ghcr.io/tulipfarm/huntsman:0.2.0@sha256:419ffd153c9d8b935d9ef43ddd60f9ddf4daaff929eebdfbafced608bb9d9161
+    restart: unless-stopped
+    environment:
+      HUNTSMAN_TOKEN: ${HUNTSMAN_TOKEN:-}
+    init: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 6g
+    pids_limit: 512
+    volumes:
+      - huntsman-data:/data
+
+  # Web search for agents, JSON only. Without SEARXNG_SECRET each start generates a new key.
+  searxng:
+    profiles: [public-web]
+    image: searxng/searxng:2026.10.27-b5ed73fcb@sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'export SEARXNG_SECRET="$${SEARXNG_SECRET:-$$(head -c 32 /dev/urandom | od -An -tx1 | tr -d '' \n'')}" && exec /usr/local/searxng/entrypoint.sh'
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+
   api:
     <<: *runtime
     build: { context: .., dockerfile: apps/api/Dockerfile, target: production, args: *release }
     command: [node, --env-file=/run/tulipfarm/api.env, dist/server.js]
     volumes: [generated:/run/tulipfarm:ro]
     environment:
-      <<: [*temporal-client, *models, *flags, *telemetry]
+      <<: [*temporal-client, *models, *flags, *telemetry, *public-web]
       TEMPORAL_UI_URL: ${TEMPORAL_UI_URL-http://temporal-ui:8080}
-      FIRECRAWL_ENDPOINT: ${FIRECRAWL_ENDPOINT:-}
-      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
-      FIRECRAWL_API_KEY_FILE: ${FIRECRAWL_API_KEY_FILE:-}
       BETTER_AUTH_URL: ${TULIPFARM_PUBLIC_URL:?Set TULIPFARM_PUBLIC_URL}
       WEB_ORIGIN: ${TULIPFARM_PUBLIC_URL}
       WEBSITE_ORIGIN: ${TULIPFARM_PUBLIC_URL}
@@ -214,10 +252,7 @@ services:
     command: [node, --env-file=/run/tulipfarm/worker.env, dist/worker.js]
     volumes: [generated:/run/tulipfarm:ro]
     environment:
-      <<: [*temporal-client, *models, *flags, *telemetry]
-      FIRECRAWL_ENDPOINT: ${FIRECRAWL_ENDPOINT:-}
-      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
-      FIRECRAWL_API_KEY_FILE: ${FIRECRAWL_API_KEY_FILE:-}
+      <<: [*temporal-client, *models, *flags, *telemetry, *public-web]
       BETTER_AUTH_URL: ${TULIPFARM_PUBLIC_URL:?Set TULIPFARM_PUBLIC_URL}
       ACS_CONNECTION_STRING: ${ACS_CONNECTION_STRING:-}
       ACS_SENDER_ADDRESS: ${ACS_SENDER_ADDRESS:-}
@@ -260,6 +295,7 @@ services:
 
 volumes:
   generated:
+  huntsman-data:
   postgres-data:
   object-storage-data:
   caddy-data:

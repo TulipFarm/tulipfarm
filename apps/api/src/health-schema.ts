@@ -78,7 +78,7 @@ export const healthSchema = {
   tags: ['Health'],
   summary: 'Check all backend services',
   description:
-    'Checks PostgreSQL, the Temporal namespace, the Temporal UI unless `TEMPORAL_UI_URL` is empty, the public-web endpoint when `FIRECRAWL_ENDPOINT` is set, and a real workflow with an Activity. Public web reads credit usage when an API key is configured, otherwise probes /health; it does not scrape pages. Storage maintenance is checked only with isolated-v1 workspace storage. Each request creates a short workflow. Use on demand, not as a high-frequency liveness probe. Worker availability means the configured queue completed work, not that every replica is healthy. A failed probe can take about six seconds.',
+    'Checks PostgreSQL, the Temporal namespace, the Temporal UI unless `TEMPORAL_UI_URL` is empty, public web when `HUNTSMAN_ENDPOINT` or `SEARXNG_ENDPOINT` is set, and a real workflow with an Activity. Public web probes Huntsman `GET /health` and SearXNG `GET /healthz`; it does not scrape or search. Storage maintenance is checked only with isolated-v1 workspace storage. Each request creates a short workflow. Use on demand, not as a high-frequency liveness probe. Worker availability means the configured queue completed work, not that every replica is healthy. A failed probe can take about six seconds.',
   response: {
     200: healthResponse('ok', 'All service checks succeeded'),
     503: healthResponse('degraded', 'At least one service check failed or timed out'),

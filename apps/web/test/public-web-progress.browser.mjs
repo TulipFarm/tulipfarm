@@ -26,17 +26,23 @@ const releaseIcon = Promise.withResolvers();
 const provider = createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
+  assert.equal(`${request.method} ${request.url}`, 'POST /v1/scrape');
   assert.equal(JSON.parse(Buffer.concat(chunks)).url, url);
   providerStarted.resolve();
   await releaseProvider.promise;
   response.setHeader('content-type', 'application/json');
   response.end(
-    JSON.stringify({ success: true, data: { markdown: 'Artifacts page content.', metadata: { title: 'Artifacts' } } }),
+    JSON.stringify({
+      success: true,
+      id: 'job',
+      data: { markdown: 'Artifacts page content.', links: [], metadata: { title: 'Artifacts' } },
+      cached: false,
+    }),
   );
 });
 await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
-const previousEndpoint = process.env.FIRECRAWL_ENDPOINT;
-process.env.FIRECRAWL_ENDPOINT = `http://127.0.0.1:${provider.address().port}/`;
+const previousEndpoint = process.env.HUNTSMAN_ENDPOINT;
+process.env.HUNTSMAN_ENDPOINT = `http://127.0.0.1:${provider.address().port}/`;
 const f = await conversationFixture();
 const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: new URL('..', import.meta.url),
@@ -337,7 +343,7 @@ try {
   server.kill('SIGTERM');
   provider.closeAllConnections();
   await new Promise(resolve => provider.close(resolve));
-  if (previousEndpoint === undefined) delete process.env.FIRECRAWL_ENDPOINT;
-  else process.env.FIRECRAWL_ENDPOINT = previousEndpoint;
+  if (previousEndpoint === undefined) delete process.env.HUNTSMAN_ENDPOINT;
+  else process.env.HUNTSMAN_ENDPOINT = previousEndpoint;
   await f.close();
 }

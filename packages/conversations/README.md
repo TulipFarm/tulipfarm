@@ -89,7 +89,7 @@ Under the same flag, the executor reads files shared as links ([`links.ts`](src/
 - A page (HTML) is not read. The model is told to call `web.fetch` if it needs the text.
 - A failure is a named notice: `sign-in-required`, `too-large`, `timed-out`, `not-public`, `unavailable` or `storage-full`. A failed fetch never fails the turn.
 
-With web access off (no `FIRECRAWL_ENDPOINT`), nothing is fetched or kept and the model is told the links were not read because web access is off. A `<chat-links>` block in front of the message tells the model which links were read as files and what happened to the others.
+With web access off (no `HUNTSMAN_ENDPOINT`), nothing is fetched or kept and the model is told the links were not read because web access is off. A `<chat-links>` block in front of the message tells the model which links were read as files and what happened to the others.
 
 Tasks read their Files and Google Drive inputs with `readFileText` and `readGoogleFileText`. Under the flag, the worker passes `recognisingExtract`, which is `readFile` without image input. Task inputs are then recognised, labelled and cached as in chat, charged to the task owner and limited to 4 recognitions at once per task. The rendered text must still fit the task's 16,000-character input.
 

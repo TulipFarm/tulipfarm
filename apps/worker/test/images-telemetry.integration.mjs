@@ -107,7 +107,7 @@ test(
       'MODEL_CATALOG',
       'MODEL_CATALOG_FILE',
       'FEATURE_FLAG_IMAGES',
-      'FIRECRAWL_ENDPOINT',
+      'HUNTSMAN_ENDPOINT',
     ];
     const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
     Object.assign(process.env, {
@@ -115,8 +115,8 @@ test(
       OPENAI_API_KEY: 'openai-test-key',
       MODEL_CATALOG: catalog,
       FEATURE_FLAG_IMAGES: 'true',
-      // Any web provider turns web access on; links are fetched directly, not through it.
-      FIRECRAWL_ENDPOINT: 'https://firecrawl.example.com',
+      // Huntsman turns link reads on; links are fetched directly, not through it.
+      HUNTSMAN_ENDPOINT: 'https://huntsman.example.com',
     });
     delete process.env.MODEL_CATALOG_FILE;
     t.after(async () => {

@@ -36,28 +36,42 @@ using a Compose override. Do not set a direct value and a different file value.
 
 ## Public web
 
-Agent web search and page reads are off unless `FIRECRAWL_ENDPOINT` is set. It
-takes the origin of a Firecrawl-compatible API that serves
-`POST /v2/search` and `POST /v2/scrape`. That service fetches URLs
-that agents choose, so it must not be able to reach your internal network: run it
-on an isolated network with egress to the public internet only.
+Agent page reads use [Huntsman](https://github.com/TulipFarm/huntsman) and web
+search uses [SearXNG](https://docs.searxng.org/). Each is off unless its endpoint
+is set: `HUNTSMAN_ENDPOINT` for `web.fetch` and links shared in chat,
+`SEARXNG_ENDPOINT` for `web.search`.
 
-For Firecrawl Cloud, set `FIRECRAWL_ENDPOINT=https://api.firecrawl.dev` and
-`FIRECRAWL_API_KEY` (or `FIRECRAWL_API_KEY_FILE`, mounted into api and worker).
-Requests send the key as a Bearer token, never in the body or URL. Health uses
-authenticated `GET /v2/team/credit-usage`, which reads usage without fetching pages
-or spending scrape credits. Keyless self-hosted services keep the `GET /health`
-probe. Both probes require 2xx and reject redirects.
+`COMPOSE_PROFILES=public-web` runs both in this stack, and `.env.example` points
+the endpoints at them (`http://huntsman:8080`, `http://searxng:8080`). Neither
+publishes a port. `searxng/settings.yml` enables JSON output and turns off the
+public-instance limiter. Without `SEARXNG_SECRET`, each start generates a new
+SearXNG secret key.
+
+To use your own services, leave `public-web` out of `COMPOSE_PROFILES` and set
+the endpoints to their origins. Huntsman serves `POST /v1/scrape`; set
+`HUNTSMAN_TOKEN` (or `HUNTSMAN_TOKEN_FILE`, mounted into api and worker) to the
+token your Huntsman requires, sent as a bearer token. SearXNG must enable the
+`json` format. Health probes Huntsman `GET /health` and SearXNG `GET /healthz`,
+which neither scrape nor search, require 2xx and reject redirects.
+
+Both services fetch from the public internet, so neither may reach your internal
+network. Huntsman refuses private, loopback, link-local and metadata addresses
+itself; on your own infrastructure, also give both egress to the public internet
+only.
+
+**Upgrading from Firecrawl.** `FIRECRAWL_ENDPOINT`, `FIRECRAWL_API_KEY` and
+`FIRECRAWL_API_KEY_FILE` are removed. The api and worker stop at startup while any
+is set, naming what replaces it.
 
 With the workspace `images` flag on, the worker also fetches files directly,
-without Firecrawl: files linked in a chat message and `web.fetch` links that
+without Huntsman: files linked in a chat message and `web.fetch` links that
 serve a file. It needs egress from the worker to the public internet on port 443. Each fetch resolves the host to IPv4 only, refuses any private, loopback,
 link-local or metadata address, connects only to the addresses it checked (so a
 name cannot rebind between the check and the connection), follows at most 5
 redirects with each hop checked again, sends no cookie, authorization or
-referrer, and stops at 10 MiB or 25 seconds. HTML goes to Firecrawl as before.
+referrer, and stops at 10 MiB or 25 seconds. HTML goes to Huntsman.
 A linked file is kept as an attachment of its message and counts against
-workspace file storage. Without `FIRECRAWL_ENDPOINT`, links are not fetched and
+workspace file storage. Without `HUNTSMAN_ENDPOINT`, links are not fetched and
 the model is told web access is off. Before turning the flag on, run
 `pnpm db workspace-rollout` so every workspace has common migration
 `0014_conversation_links.sql`; a workspace without it reads no links.
