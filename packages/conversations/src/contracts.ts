@@ -290,6 +290,8 @@ export const toolReceiptSchema = z.object({
   status: z.enum(['running', 'completed', 'blocked', 'failed']),
   activityStatus: activityStatusSchema.optional(),
   activity: z.string().nullable().default(null),
+  /** What the model wrote before this call; null when none was saved or it must stay hidden. */
+  narration: z.string().nullable().default(null),
   presentation: toolPresentationSchema.optional(),
   web: publicWebReceiptSchema.nullable().default(null),
   knowledge: knowledgeActivitySchema.nullable().optional(),

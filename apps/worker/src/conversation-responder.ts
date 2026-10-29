@@ -26,7 +26,7 @@ const toolResultSchema = z.strictObject({
 export async function respondToConversation(
   route: Parameters<typeof inferWithTools>[0],
   messages: Parameters<typeof inferWithTools>[1],
-  execute: (call: FrameworkCall, sources: SourceDependency[], activity: string) => Promise<unknown>,
+  execute: (call: FrameworkCall, sources: SourceDependency[], activity: string, narration?: string) => Promise<unknown>,
   meter?: Parameters<typeof inferWithTools>[3],
   authorizeSources?: (sources: SourceDependency[]) => Promise<void>,
   _generateTitle = false,
@@ -71,9 +71,9 @@ export async function respondToConversation(
   const answer = await inferWithTools(
     route,
     messages,
-    async (call, activity) => {
+    async (call, activity, narration) => {
       sources.push(...(tools?.sources() ?? []));
-      const output = await execute(call, mergeSources(sources), activity);
+      const output = await execute(call, mergeSources(sources), activity, narration);
       const captured = toolResultSchema.safeParse(output);
       if (captured.success) {
         const web = publicWebResultSchema.safeParse(captured.data.result);

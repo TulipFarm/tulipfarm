@@ -310,7 +310,7 @@ export function meteredReply(
       const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
         context,
-        async (call, sources, activity) => {
+        async (call, sources, activity, narration) => {
           session.toolRan(call.tool);
           await session.beforeTool();
           return executeTool(
@@ -381,6 +381,7 @@ export function meteredReply(
             sources,
             call,
             activity,
+            narration,
           );
         },
         session.meter,

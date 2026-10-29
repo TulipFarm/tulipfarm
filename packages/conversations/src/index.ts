@@ -669,10 +669,13 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       ).rowCount;
       for (const message of messages)
         if (message.turn) {
-          const googleSafeActivity = `, CASE WHEN EXISTS (
+          const googleRead = `EXISTS (
           SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=c.turn_id
           WHERE t.conversation_id=$2 AND c.tool='google.read' AND t.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1)
-         ) THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity`;
+         )`;
+          const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
+            tx.commonVersion >= 22 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
+          }`;
           const rows = (
             await tx.client.query(
               `SELECT c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
@@ -723,6 +726,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 workflows,
                 subagents,
                 activityStatus: await storedToolStatus(tx, row),
+                narration: hidden.size ? null : (row.narration ?? null),
                 presentation: hidden.size
                   ? toolPresentation(row.tool)
                   : await storedToolPresentation(tx, actor, row.tool, row.call, row.stored_activity, row.id),

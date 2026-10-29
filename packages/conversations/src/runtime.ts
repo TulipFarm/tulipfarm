@@ -269,6 +269,7 @@ export type ConversationReply = (input: {
     dependencies?: readonly SourceDependency[],
     call?: unknown,
     activity?: string,
+    narration?: string,
   ) => Promise<unknown>;
 }) => Promise<string | ConversationResult>;
 const historySchema = z.array(
@@ -1831,6 +1832,7 @@ export function createConversationExecutor(
         dependencies = [],
         call,
         activity,
+        narration,
       ) => {
         // Keep the claim alive through a full knowledge call and its final receipt.
         const leaseMs = name.startsWith('knowledge.') ? defaultCallTimeoutMs + 60_000 : 60_000;
@@ -1945,8 +1947,9 @@ export function createConversationExecutor(
           ]
             .slice(0, 120)
             .join('');
+          const stored = tx.commonVersion >= 22 ? narration : undefined;
           const saved = await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_tool_calls')} (id, conversation_id, turn_id, tool, status, sequence${label === undefined ? '' : ', activity'}) VALUES ($1,$2,$3,$4,$5,$6${label === undefined ? '' : ',$7'}) ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status WHERE ${table(tx, 'tf_conversation_tool_calls')}.status = 'running' RETURNING id`,
+            `INSERT INTO ${table(tx, 'tf_conversation_tool_calls')} (id, conversation_id, turn_id, tool, status, sequence${stored === undefined ? '' : ', narration'}${label === undefined ? '' : ', activity'}) VALUES ($1,$2,$3,$4,$5,$6${stored === undefined ? '' : ',$7'}${label === undefined ? '' : `,$${stored === undefined ? 7 : 8}`}) ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status WHERE ${table(tx, 'tf_conversation_tool_calls')}.status = 'running' RETURNING id`,
             [
               callId,
               fence.conversationId,
@@ -1954,6 +1957,7 @@ export function createConversationExecutor(
               name,
               status,
               sequence,
+              ...(stored === undefined ? [] : [stored]),
               ...(label === undefined ? [] : [label]),
             ],
           );
