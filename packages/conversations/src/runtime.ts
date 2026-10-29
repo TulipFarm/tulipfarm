@@ -1947,7 +1947,7 @@ export function createConversationExecutor(
           ]
             .slice(0, 120)
             .join('');
-          const stored = tx.commonVersion >= 22 ? narration : undefined;
+          const stored = tx.commonVersion >= 23 ? narration : undefined;
           const saved = await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_conversation_tool_calls')} (id, conversation_id, turn_id, tool, status, sequence${stored === undefined ? '' : ', narration'}${label === undefined ? '' : ', activity'}) VALUES ($1,$2,$3,$4,$5,$6${stored === undefined ? '' : ',$7'}${label === undefined ? '' : `,$${stored === undefined ? 7 : 8}`}) ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status WHERE ${table(tx, 'tf_conversation_tool_calls')}.status = 'running' RETURNING id`,
             [

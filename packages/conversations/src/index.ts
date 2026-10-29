@@ -674,7 +674,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           WHERE t.conversation_id=$2 AND c.tool='google.read' AND t.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1)
          )`;
           const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
-            tx.commonVersion >= 22 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
+            tx.commonVersion >= 23 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
           }`;
           const rows = (
             await tx.client.query(

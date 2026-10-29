@@ -19,7 +19,7 @@ reload shows nothing. The result is a flash of text that vanishes.
 Save the text on the tool row of its step and show it as a grey note in the
 activity list. Stop clearing it.
 
-1. `packages/workspace-storage/common/0022_tool_call_narration.sql`: add
+1. `packages/workspace-storage/common/0023_tool_call_narration.sql`: add
    nullable `narration text` to `tf_conversation_tool_calls`, length at most 2000.
 2. `packages/agents/src/inference.ts`: pass the step text with each tool call
    and carry the text of steps that call only non-work tools onto the next work
