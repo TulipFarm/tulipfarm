@@ -190,6 +190,7 @@ const turnSchema = z.object({
   lease_live: z.boolean(),
   retry_due: z.boolean(),
   planning_mode: z.boolean(),
+  error_code: z.string().nullable(),
 });
 
 export type ConversationToolContext = {
@@ -366,6 +367,9 @@ export const modelFailureEndsTurn = (failure: string) => {
   const parsed = modelFailureSchema.safeParse(failure);
   return parsed.success && terminalModelFailures.has(parsed.data);
 };
+// A busy provider usually frees up within minutes, so these failures get more attempts: about three minutes of backoff, not 30 seconds.
+const busyModelFailures = new Set(['model-rate-limit', 'model-overload']);
+const attemptLimit = (code: string | null | undefined) => (code && busyModelFailures.has(code) ? 10 : 5);
 
 // Renewed well inside the 60 second lease, so one slow renewal does not let it lapse.
 const filesLeaseRenewMs = 20_000;
@@ -670,7 +674,7 @@ export function createConversationExecutor(
     return turnSchema.optional().parse(
       (
         await tx.client.query(
-          `SELECT id, source_message_id, accepted_sequence, responder, status, attempt_epoch, attempts, generation, COALESCE((to_jsonb(t)->>'planning_mode')::boolean, false) AS planning_mode,
+          `SELECT id, source_message_id, accepted_sequence, responder, status, attempt_epoch, attempts, generation, error_code, COALESCE((to_jsonb(t)->>'planning_mode')::boolean, false) AS planning_mode,
       COALESCE(lease_until > clock_timestamp(), false) AS lease_live,
       COALESCE(retry_at <= clock_timestamp(), true) AS retry_due
       FROM ${table(tx, 'tf_conversation_turns')} t WHERE conversation_id = $1 AND status NOT IN ('completed', 'cancelled', 'blocked') ORDER BY accepted_sequence LIMIT 1 FOR UPDATE`,
@@ -740,7 +744,7 @@ export function createConversationExecutor(
         return null;
       }
       await interruptToolReceipts(tx, turn.id, 'failed');
-      if (turn.attempts >= 5) {
+      if (turn.attempts >= attemptLimit(turn.error_code)) {
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'failed', lease_until = NULL, retry_at = NULL, error_code = 'attempts-exhausted' WHERE id = $1`,
           [turn.id],
@@ -2515,7 +2519,7 @@ export function createConversationExecutor(
         denied ||
         planningFailure !== undefined ||
         (modelFailure !== undefined && terminalModelFailures.has(modelFailure)) ||
-        turn.attempts >= 5;
+        turn.attempts >= attemptLimit(modelFailure);
       await tx.client.query(
         `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, lease_until = NULL, error_code = $3, generation = generation + 1, retry_at = CASE WHEN $2 = 'queued' THEN clock_timestamp() + $4 * interval '1 second' ELSE NULL END WHERE id = $1`,
         [

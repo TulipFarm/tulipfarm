@@ -284,6 +284,43 @@ test('model failures another attempt cannot fix end the reply at once; transient
   }
 });
 
+test('a busy model provider gets more reply attempts than other transient failures', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const attemptsUntilFailed = async failure => {
+      const chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const sent = await f.store.send(w.id, w.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text: 'hey' }],
+      });
+      const executor = createConversationExecutor(f.runtime, async () => {
+        throw new Error(failure);
+      });
+      for (let generation = 0; ; generation++) {
+        const outcome = await executor.process({
+          workspaceId: w.id,
+          conversationId: chatId,
+          turnId: sent.turnId,
+          generation,
+        });
+        if (outcome !== 'retry') return { outcome, attempts: generation + 1 };
+        await f.db.platform.query(
+          `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+          [sent.turnId],
+        );
+      }
+    };
+    assert.deepEqual(await attemptsUntilFailed('model-rate-limit'), { outcome: 'failed', attempts: 10 });
+    assert.deepEqual(await attemptsUntilFailed('model-overload'), { outcome: 'failed', attempts: 10 });
+    assert.deepEqual(await attemptsUntilFailed('model-unavailable'), { outcome: 'failed', attempts: 5 });
+  } finally {
+    await f.close();
+  }
+});
+
 test('a reply answered by the fallback model records that model on the completed turn only', async () => {
   const f = await conversationFixture();
   try {
