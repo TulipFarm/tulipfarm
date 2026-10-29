@@ -376,6 +376,7 @@ function replyFailureCause(error: unknown): string | undefined {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   if (code === '40P01' || code === '40001') return 'database-conflict';
   if (error instanceof Error && error.message === 'conversation-context-overflow') return 'context-limit';
+  if (error instanceof SourceAuthorizationUnavailable && code === 'github-rate-limited') return code;
   return undefined;
 }
 export const modelFailureEndsTurn = (failure: string) => {
