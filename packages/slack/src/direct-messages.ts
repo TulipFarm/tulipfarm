@@ -352,7 +352,7 @@ export function createSlackDirectMessages(options: {
         await tx.client.query(
           `SELECT d.*,r.identity_id,r.installation_id,r.generation,r.channel,r.root_ts,i.user_id,i.membership_id,s.bot_credential,t.status,v.sources,
       d.next_attempt_at<=clock_timestamp() AS due,
-      (SELECT string_agg(p.text,'' ORDER BY p.ordinal) FROM ${table('tf_conversation_parts')} p WHERE p.message_id=t.response_message_id AND p.kind='text') AS text
+      (SELECT string_agg(p.text,'' ORDER BY p.ordinal) FROM ${table('tf_conversation_parts')} p WHERE p.message_id=t.response_message_id AND p.kind IN ('text','layout')) AS text
       FROM ${table('tf_slack_dm_events')} d JOIN ${table('tf_slack_dm_roots')} r ON r.conversation_id=d.conversation_id
       JOIN ${table('tf_slack_identities')} i ON i.id=r.identity_id JOIN ${table('tf_slack_installations')} s ON s.id=r.installation_id
       JOIN ${table('tf_conversation_turns')} t ON t.id=d.turn_id LEFT JOIN ${table('tf_conversation_results')} v ON v.turn_id=t.id AND v.message_id=t.response_message_id

@@ -262,6 +262,12 @@ export function meteredReply(
           }) => publisher.avatar(step, avatar),
         }
       : undefined;
+    // Slack replies stay Markdown. The flag only changes what the model is asked for; saved layouts always render.
+    const generativeUi =
+      !externalContext &&
+      (await observeChatDetail('feature-flag', () =>
+        isFeatureEnabled('generative-ui', null, { id: fence.workspaceId }),
+      ));
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
     const chatToolOptions = (
@@ -384,6 +390,7 @@ export function meteredReply(
         mcp && requester && !externalContext
           ? {
               ...(avatar ? { avatar } : {}),
+              ...(generativeUi ? { layout: true } : {}),
               priorCalls,
               priorToolCalls,
               earlierMessages,

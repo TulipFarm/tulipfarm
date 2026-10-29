@@ -143,6 +143,9 @@ try {
     'packages/workspace-storage/common/0017_slack_image_deliveries.sql',
     'packages/workspace-storage/common/0018_confirmation_conversation_activity.sql',
     'packages/workspace-storage/common/0019_plan_source_checks.sql',
+    'packages/workspace-storage/common/0020_system_packages.sql',
+    'packages/workspace-storage/common/0021_system_package_attempts.sql',
+    'packages/workspace-storage/common/0022_conversation_layouts.sql',
   ];
   emit({
     event: 'sources',
@@ -189,6 +192,9 @@ try {
       '0017_slack_image_deliveries.sql',
       '0018_confirmation_conversation_activity.sql',
       '0019_plan_source_checks.sql',
+      '0020_system_packages.sql',
+      '0021_system_package_attempts.sql',
+      '0022_conversation_layouts.sql',
     ],
   );
   const receipts = migrations.map(({ name, checksum }) => ({ name, checksum }));

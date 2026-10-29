@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { sourceDependencySchema, type SourceDependency } from '@tulipfarm/access';
 import { avatarSnapshotSchema } from './avatar.ts';
 import { modelFamilyIdSchema } from '@tulipfarm/config/model-identifier';
+import { replyRenderInputSchema } from './layout-contracts.ts';
 export {
   avatarStates,
   avatarStateSchema,
@@ -22,6 +23,10 @@ export const conversationResultSchema = z.strictObject({
   avatar: avatarSnapshotSchema.optional(),
   /** The configured fallback model family that answered after the chat model failed. */
   fallback: modelFamilyIdSchema.optional(),
+  /** The reply's `reply.render` layout, checked by the responder. `text` is then its summary. */
+  layout: replyRenderInputSchema.optional(),
+  /** The model's layouts failed their checks; the reply is saved as one Text with a notice. */
+  layoutFailed: z.literal(true).optional(),
 });
 export type ConversationResult = z.infer<typeof conversationResultSchema>;
 

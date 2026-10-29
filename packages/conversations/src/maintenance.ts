@@ -260,7 +260,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
             WHERE m.conversation_id=c.id AND m.author_kind='human' ORDER BY m.sequence DESC LIMIT 1
           ) sender ON true WHERE c.is_closed AND ($1::uuid IS NULL OR c.id>$1) AND ${eligible(tx)} AND ${idle(tx)}
           AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.conversation_id=c.id
-            AND ((p.kind='text' AND length(btrim(p.text))>0) OR p.kind IN ('request','response','approval','approval-resolution'))
+            AND ((p.kind IN ('text','layout') AND length(btrim(p.text))>0) OR p.kind IN ('request','response','approval','approval-resolution'))
             AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_internal_publications')} i WHERE i.message_id=p.message_id))
           ORDER BY c.id LIMIT ${batchSize} FOR UPDATE OF c`,
             [state.scan_after],

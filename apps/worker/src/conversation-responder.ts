@@ -106,6 +106,7 @@ export async function respondToConversation(
   const text = widenedWebSearch ? `${answer.text}\n\nSearch coverage was widened to the past seven days.` : answer.text;
   return {
     ...answer,
+    ...(answer.layout ? { layout: { ...answer.layout, summary: text } } : {}),
     text,
     sources: mergeSources([...sources, ...(tools?.sources() ?? [])]),
   };

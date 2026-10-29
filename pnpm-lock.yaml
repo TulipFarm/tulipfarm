@@ -823,6 +823,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
+      '@tulipfarm/sprout':
+        specifier: https://github.com/TulipFarm/sprout/releases/download/v0.13.0/tulipfarm-sprout-0.13.0.tgz
+        version: https://github.com/TulipFarm/sprout/releases/download/v0.13.0/tulipfarm-sprout-0.13.0.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.0(@tiptap/core@3.32.0(@tiptap/pm@3.32.0))(@tiptap/pm@3.32.0))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
       '@tulipfarm/workspace-storage':
         specifier: workspace:*
         version: link:../workspace-storage

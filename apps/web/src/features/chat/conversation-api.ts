@@ -62,6 +62,8 @@ const attachmentSchema = z.object({
 const skillReference = { skillId: z.string().min(1), revision: z.string().min(1), name: z.string().min(1) };
 const partSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string(), content: chatDocumentSchema.optional() }),
+  // Checked when drawn, so one bad layout falls back to its text instead of failing the history.
+  z.object({ kind: z.literal('layout'), text: z.string(), layout: z.unknown() }),
   z.object({ kind: z.literal('attachment'), attachmentId: z.uuid() }),
   z.object({ kind: z.literal('file'), fileId: z.uuid() }),
   z.object({ kind: z.literal('google-file'), fileId: z.string(), name: z.string(), mimeType: z.string() }),
