@@ -335,7 +335,14 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
           <CanvasMockControls />
         </Suspense>
       )}
-      {chatId && <PendingGoogleActions key={chatId} workspaceId={workspace.id} slug={workspaceSlug} chatId={chatId} />}
+      {chatId && (
+        <PendingGoogleActions
+          key={`google-actions:${chatId}`}
+          workspaceId={workspace.id}
+          slug={workspaceSlug}
+          chatId={chatId}
+        />
+      )}
       <CanvasProvider key={activeChatId}>
         <ApprovalDockProvider>
           <ChoiceDockProvider>

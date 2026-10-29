@@ -59,6 +59,9 @@ test(
       page.setDefaultNavigationTimeout(60000);
       const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
+      page.on('console', message => {
+        if (message.type() === 'error' && message.text().includes('same key')) errors.push(message.text());
+      });
       await context.route('**/v1/**', route => {
         const path = new URL(route.request().url()).pathname;
         let json;
