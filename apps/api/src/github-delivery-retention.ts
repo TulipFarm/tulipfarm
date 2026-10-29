@@ -1,9 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { githubDeliveryRetentionHours, pruneGitHubEventDeliveries } from '@tulipfarm/github/event-retention';
+import {
+  githubDeliveryRetentionHours,
+  pruneGitHubEventBodies,
+  pruneGitHubEventDeliveries,
+} from '@tulipfarm/github/event-retention';
 import { createBackgroundJob } from '@tulipfarm/observability';
 
 const intervalMs = 60_000;
+// Bodies live one minute, so they are swept far more often than deliveries.
+const bodyIntervalMs = 10_000;
 
 /**
  * Deletes processed GitHub webhook deliveries once they are older than GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS. It runs
@@ -29,9 +35,24 @@ export function registerGitHubDeliveryRetention(
       });
   }, intervalMs);
   timer.unref();
+  const bodyJob = createBackgroundJob('github-body-retention', bodyIntervalMs / 1000);
+  let bodyRunning: Promise<void> | undefined;
+  const bodyTimer = setInterval(() => {
+    bodyRunning ??= bodyJob
+      .run(() => pruneGitHubEventBodies(pool))
+      .then(() => undefined)
+      .catch(() => app.log.error('GitHub webhook body cleanup will retry'))
+      .finally(() => {
+        bodyRunning = undefined;
+      });
+  }, bodyIntervalMs);
+  bodyTimer.unref();
   app.addHook('onClose', async () => {
     clearInterval(timer);
+    clearInterval(bodyTimer);
     await running;
+    await bodyRunning;
+    bodyJob.close();
     job.close();
   });
 }

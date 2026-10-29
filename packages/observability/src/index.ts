@@ -1226,6 +1226,7 @@ export const backgroundJobs = [
   'knowledge-google-dispatch',
   'knowledge-slack-dispatch',
   'knowledge-github-dispatch',
+  'github-body-retention',
   'github-delivery-retention',
   'knowledge-atlassian-dispatch',
   'knowledge-defaults-dispatch',

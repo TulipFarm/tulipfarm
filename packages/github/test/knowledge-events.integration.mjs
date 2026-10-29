@@ -8,7 +8,7 @@ import { grantApplicationAccess } from '../../../apps/database/src/postgres.ts';
 import { readMigrations } from '../../../apps/database/src/migrations.ts';
 import { createGitHubKnowledgeEvents, GitHubKnowledgeEventConflict } from '../src/knowledge-events.ts';
 import { githubWebhookSignature, GitHubWebhookError } from '../src/event-signature.ts';
-import { pruneGitHubEventDeliveries } from '../src/event-retention.ts';
+import { pruneGitHubEventBodies, pruneGitHubEventDeliveries } from '../src/event-retention.ts';
 
 const secret = 'fixture-github-knowledge-signing-secret';
 const issue = (id = 7001, title = 'Confidential title') => ({
@@ -204,6 +204,74 @@ test(
         assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6 }), 200);
         assert.equal(await count('github_event_deliveries', "received_at < now()-interval '6 hours'"), 2);
       });
+
+      await t.test(
+        'the all-events route keeps every accepted body for one minute and the delivery after it',
+        async () => {
+          const events = make();
+          await db.platform.query('TRUNCATE app.github_event_payloads, app.github_event_deliveries CASCADE');
+          await db.platform.query('UPDATE app.github_event_policy SET maximum_pending=10000');
+          const keep = value => events.accept(value.raw, value.headers, { keepBody: true });
+          const bodies = async () =>
+            (await db.platform.query('SELECT delivery_id FROM app.github_event_bodies')).rows.map(
+              row => row.delivery_id,
+            );
+          const star = request(
+            { action: 'created', repository: { id: 7001 }, starred_at: 'now' },
+            randomUUID(),
+            'star',
+          );
+          const big = request(
+            { ref: 'refs/heads/feature', repository: { id: 7001, default_branch: 'main' }, filler: 'x'.repeat(100000) },
+            randomUUID(),
+            'push',
+          );
+          const changed = request(issue(7003));
+          const invalid = request({ repository: { name: 'x' } });
+          const outcomes = await Promise.all(Array.from({ length: 8 }, () => keep(star)));
+          assert.equal(outcomes.filter(receipt => !receipt.duplicate).length, 1);
+          await keep(big);
+          await keep(changed);
+          assert.equal((await keep(invalid)).status, 'rejected');
+          const plain = request({ zen: 'plain' }, randomUUID(), 'ping');
+          await send(events, plain);
+          assert.deepEqual(
+            (await bodies()).sort(),
+            [star, big, changed].map(item => item.headers['x-github-delivery']).sort(),
+          );
+          assert.equal(await count('github_event_payloads'), 1);
+
+          const age = id =>
+            db.platform.query(
+              "UPDATE app.github_event_deliveries SET received_at=received_at-interval '2 minutes' WHERE delivery_id=$1",
+              [id],
+            );
+          await age(star.headers['x-github-delivery']);
+          await age(big.headers['x-github-delivery']);
+          assert.equal(await pruneGitHubEventBodies(pool), 2);
+          assert.deepEqual(await bodies(), [changed.headers['x-github-delivery']]);
+          assert.equal(
+            await count('github_event_payloads'),
+            1,
+            'the Knowledge envelope is not on the one-minute clock',
+          );
+          assert.equal((await keep(star)).duplicate, true);
+          assert.equal(await count('github_event_bodies'), 1, 'a redelivery after the sweep stores no second body');
+
+          await db.platform.query("UPDATE app.github_event_deliveries SET received_at=received_at-interval '7 hours'");
+          await db.platform.query('DELETE FROM app.github_event_payloads');
+          await db.platform.query("UPDATE app.github_event_deliveries SET status='expired' WHERE status='pending'");
+          assert.equal(await pruneGitHubEventDeliveries(pool, { retentionHours: 6 }), 5);
+          assert.equal(await count('github_event_bodies'), 0);
+          const client = await pool.connect();
+          try {
+            await assert.rejects(client.query('DELETE FROM app.github_event_bodies'), { code: '42501' });
+            await assert.rejects(client.query('SELECT app.prune_github_event_bodies(0)'), { code: '22023' });
+          } finally {
+            client.release();
+          }
+        },
+      );
     } finally {
       await pool?.end();
       await db.close();

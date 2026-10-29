@@ -8,6 +8,7 @@ export function protectBusinessRequests(app: FastifyInstance) {
     if (request.routeOptions.schema?.operationId === 'receiveWorkflowWebhookV1') return;
     if (request.routeOptions.schema?.operationId === 'receiveSlackEventV1') return;
     if (request.routeOptions.schema?.operationId === 'receiveGitHubKnowledgeEventV1') return;
+    if (request.routeOptions.schema?.operationId === 'receiveGitHubEventV1') return;
     if (request.routeOptions.schema?.operationId === 'receiveSlackActionV1') return;
     if (request.routeOptions.schema?.operationId === 'proveSlackMemberIdentityV1') return;
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== origin) {
