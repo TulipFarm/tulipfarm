@@ -79,6 +79,28 @@ test('the webhook route maps receipts and failures to GitHub-visible statuses', 
   }
 });
 
+test('only the all-events route asks to keep the body', async () => {
+  const kept = [];
+  const app = Fastify();
+  registerGitHubKnowledgeEvents(app, {
+    accept: async (_raw, _headers, options) => {
+      kept.push(options.keepBody);
+      return { deliveryId: randomUUID(), status: 'ignored', reason: 'ping', duplicate: false };
+    },
+  });
+  try {
+    for (const url of ['/github/knowledge/events', '/github/events'])
+      assert.equal(
+        (await app.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload: '{}' }))
+          .statusCode,
+        202,
+      );
+    assert.deepEqual(kept, [false, true]);
+  } finally {
+    await app.close();
+  }
+});
+
 test('the dispatch sweep applies pending deliveries to every workspace, then closes them', async () => {
   const workspaces = [randomUUID(), randomUUID()];
   const changes = [];

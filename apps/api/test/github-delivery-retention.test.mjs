@@ -17,7 +17,8 @@ test('cleanup runs every minute with the configured retention and logs only dele
   const calls = [];
   const removed = [3, 0];
   const pool = {
-    query: async (_text, values) => {
+    query: async (text, values) => {
+      if (text.includes('prune_github_event_bodies')) return { rows: [{ removed: 0 }] };
       calls.push(values);
       return { rows: [{ removed: removed.shift() ?? 0 }] };
     },
@@ -39,6 +40,30 @@ test('cleanup runs every minute with the configured retention and logs only dele
     await settle();
     assert.equal(calls.length, 2);
     assert.equal(logged.length, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('bodies are swept every ten seconds', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const calls = [];
+  const pool = {
+    query: async (text, values) => {
+      if (text.includes('prune_github_event_bodies')) calls.push(values);
+      return { rows: [{ removed: 0 }] };
+    },
+  };
+  const app = Fastify();
+  registerGitHubDeliveryRetention(app, pool, {});
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  try {
+    t.mock.timers.tick(9_999);
+    await settle();
+    assert.equal(calls.length, 0);
+    t.mock.timers.tick(1);
+    await settle();
+    assert.deepEqual(calls, [[500]]);
   } finally {
     await app.close();
   }

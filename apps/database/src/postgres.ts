@@ -72,6 +72,7 @@ export async function grantApplicationAccess(
   const applicationRoutines = [
     'app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)',
     'app.prune_github_event_deliveries(integer,integer)',
+    'app.prune_github_event_bodies(integer)',
     ...modelBundleRoutines,
   ];
   if ((await client.query("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'tulipfarm'")).rowCount) {
@@ -118,6 +119,7 @@ export async function grantApplicationAccess(
     { table: 'github_event_routes', privileges: 'SELECT, INSERT, UPDATE (generation, active)' },
     { table: 'github_event_deliveries', privileges: 'SELECT, INSERT, UPDATE (status, reason)' },
     { table: 'github_event_payloads', privileges: 'SELECT, INSERT, DELETE' },
+    { table: 'github_event_bodies', privileges: 'SELECT, INSERT' },
     {
       table: 'github_event_dispatches',
       privileges: 'SELECT, INSERT, UPDATE (status, reason, lease_id, lease_until, completed_lease_id, next_attempt_at)',

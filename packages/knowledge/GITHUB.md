@@ -429,6 +429,11 @@ members sign in with, and `GITHUB_WEBHOOK_APP_ID` is its numeric ID. Configure i
 - Read-only repository permissions for metadata, contents, issues, pull requests
   and discussions, which those events need.
 
+`POST /v1/github/events` accepts the same signed deliveries for any event the App
+sends. It feeds Knowledge the same way, and also keeps each accepted body for one
+minute for workflow triggers. The delivery ID row stays for
+`GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS` so redeliveries are recognized.
+
 Each delivery's `X-Hub-Signature-256` is verified before anything is stored, and
 deliveries are deduplicated by `X-GitHub-Delivery`: a redelivery is acknowledged
 again, and a reused delivery ID with a different body is rejected with 409.

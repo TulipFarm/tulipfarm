@@ -156,30 +156,43 @@ export function createGitHubKnowledgeEvents(options: {
     reason: row.reason,
     duplicate,
   });
-  async function accept(raw: Buffer, headers: Parameters<typeof readGitHubAppDelivery>[2]) {
+  async function find(client: SqlClient, deliveryId: string) {
+    return receiptSchema
+      .optional()
+      .parse(
+        (
+          await client.query(
+            'SELECT delivery_id,body_digest,event_name,status,reason FROM app.github_event_deliveries WHERE app_id=$1 AND delivery_id=$2',
+            [appId, deliveryId],
+          )
+        ).rows[0],
+      );
+  }
+  /**
+   * `keepBody` also stores the full body of every accepted delivery, which a separate sweep deletes after a minute. Only
+   * deliveries that can become pending take the per-App lock, because only they read the pending count.
+   */
+  async function accept(
+    raw: Buffer,
+    headers: Parameters<typeof readGitHubAppDelivery>[2],
+    { keepBody = false }: { keepBody?: boolean } = {},
+  ) {
     const delivery = readGitHubAppDelivery(options.signingSecret, raw, headers, appId);
     const trigger = githubKnowledgeTrigger(delivery.event, delivery.body);
+    const duplicate = (existing: z.infer<typeof receiptSchema>) => {
+      if (existing.body_digest !== delivery.bodyDigest || existing.event_name !== delivery.event)
+        throw new GitHubKnowledgeEventConflict();
+      return receipt(existing, true);
+    };
     return transaction(async client => {
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`github-event-inbox:${appId}`]);
+      if (trigger.kind === 'changed')
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`github-event-inbox:${appId}`]);
       await client.query(
         'INSERT INTO app.github_event_policy(app_id,maximum_pending) VALUES ($1,$2) ON CONFLICT DO NOTHING',
         [appId, maximumPending],
       );
-      const existing = receiptSchema
-        .optional()
-        .parse(
-          (
-            await client.query(
-              'SELECT delivery_id,body_digest,event_name,status,reason FROM app.github_event_deliveries WHERE app_id=$1 AND delivery_id=$2',
-              [appId, delivery.deliveryId],
-            )
-          ).rows[0],
-        );
-      if (existing) {
-        if (existing.body_digest !== delivery.bodyDigest || existing.event_name !== delivery.event)
-          throw new GitHubKnowledgeEventConflict();
-        return receipt(existing, true);
-      }
+      const existing = await find(client, delivery.deliveryId);
+      if (existing) return duplicate(existing);
       let status: 'pending' | 'ignored' | 'rejected' = trigger.kind === 'changed' ? 'pending' : trigger.kind;
       let reason = trigger.kind === 'changed' ? null : trigger.reason;
       if (status === 'pending') {
@@ -197,21 +210,33 @@ export function createGitHubKnowledgeEvents(options: {
           reason = 'capacity-exceeded';
         }
       }
-      const saved = receiptSchema.parse(
-        (
-          await client.query(
-            `INSERT INTO app.github_event_deliveries (app_id,delivery_id,body_digest,event_name,status,reason,received_at,expires_at)
-            SELECT $1,$2,$3,$4,$5,$6,at,at+$7::integer*interval '1 hour' FROM (SELECT clock_timestamp() AS at) time
-            RETURNING delivery_id,body_digest,event_name,status,reason`,
-            [appId, delivery.deliveryId, delivery.bodyDigest, delivery.event, status, reason, pendingHours],
-          )
-        ).rows[0],
-      );
+      const inserted = (
+        await client.query(
+          `INSERT INTO app.github_event_deliveries (app_id,delivery_id,body_digest,event_name,status,reason,received_at,expires_at)
+          SELECT $1,$2,$3,$4,$5,$6,at,at+$7::integer*interval '1 hour' FROM (SELECT clock_timestamp() AS at) time
+          ON CONFLICT (app_id,delivery_id) DO NOTHING
+          RETURNING delivery_id,body_digest,event_name,status,reason`,
+          [appId, delivery.deliveryId, delivery.bodyDigest, delivery.event, status, reason, pendingHours],
+        )
+      ).rows[0];
+      if (!inserted) {
+        // A concurrent redelivery of the same ID won the insert.
+        const winner = await find(client, delivery.deliveryId);
+        if (!winner) throw new Error('github-delivery-vanished');
+        return duplicate(winner);
+      }
+      const saved = receiptSchema.parse(inserted);
       if (status === 'pending' && trigger.kind === 'changed')
         await client.query('INSERT INTO app.github_event_payloads(app_id,delivery_id,envelope) VALUES ($1,$2,$3)', [
           appId,
           delivery.deliveryId,
           changesSchema.parse({ repositories: trigger.repositories, all: trigger.all }),
+        ]);
+      if (keepBody && status !== 'rejected')
+        await client.query('INSERT INTO app.github_event_bodies(app_id,delivery_id,body) VALUES ($1,$2,$3::jsonb)', [
+          appId,
+          delivery.deliveryId,
+          JSON.stringify(delivery.body),
         ]);
       return receipt(saved, false);
     });

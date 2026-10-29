@@ -48,3 +48,22 @@ export async function pruneGitHubEventDeliveries(pool: Pool, options: { retentio
   }
   return deleted;
 }
+
+/** Deletes webhook delivery bodies older than one minute, in short batches. Returns how many were deleted. */
+export async function pruneGitHubEventBodies(pool: Pool, options: { maxBatches?: number } = {}) {
+  const batches = z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .parse(options.maxBatches ?? 20);
+  let deleted = 0;
+  for (let batch = 0; batch < batches; batch++) {
+    const { removed } = z
+      .object({ removed: z.number().int().min(0) })
+      .parse((await pool.query('SELECT app.prune_github_event_bodies($1::integer) AS removed', [batchSize])).rows[0]);
+    deleted += removed;
+    if (removed < batchSize) break;
+  }
+  return deleted;
+}
