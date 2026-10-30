@@ -76,7 +76,7 @@ test('a failing sweep backs off up to a minute and returns to every tick once it
   t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 0 });
   const app = Fastify();
   const errors = [];
-  t.mock.method(app.log, 'error', message => errors.push(message));
+  t.mock.method(app.log, 'error', (attributes, message) => errors.push(`${attributes['error.code']} ${message}`));
   const runs = [];
   let failing = true;
   backgroundSweeps(app, [
@@ -106,7 +106,7 @@ test('a failing sweep backs off up to a minute and returns to every tick once it
     [0, 4, 12, 28, 60, 120],
   );
   assert.equal(errors.length, runs.length);
-  assert.deepEqual(new Set(errors), new Set(['sweep failed']));
+  assert.deepEqual(new Set(errors), new Set(['wait_timeout sweep failed']));
   failing = false;
   await advance(30_000);
   assert.equal(runs.at(-1), 180_000);

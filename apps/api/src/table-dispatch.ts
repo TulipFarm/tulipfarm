@@ -7,6 +7,7 @@ import type { createTemporalClient } from './temporal.ts';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createAgentSchedules } from '@tulipfarm/agents/schedules';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
+import { errorAttributes } from '@tulipfarm/observability';
 
 export function registerTableDispatch(
   app: FastifyInstance,
@@ -59,8 +60,11 @@ export function registerTableDispatch(
               workflowIdReusePolicy: 'ALLOW_DUPLICATE',
             }),
           );
-      } catch {
-        app.log.error({ workspaceId: row.workspace_id }, 'Table proposal dispatch will retry');
+      } catch (error) {
+        app.log.error(
+          { workspaceId: row.workspace_id, ...errorAttributes(error) },
+          'Table proposal dispatch will retry',
+        );
       }
       try {
         const commands = await runtime.transaction(row.workspace_id, commonCompatibility, async transaction =>
@@ -91,8 +95,8 @@ export function registerTableDispatch(
             ),
           );
         }
-      } catch {
-        app.log.error({ workspaceId: row.workspace_id }, 'Agent dispatch will retry');
+      } catch (error) {
+        app.log.error({ workspaceId: row.workspace_id, ...errorAttributes(error) }, 'Agent dispatch will retry');
       }
       try {
         for (const ids of await schedules.due(row.workspace_id, dependencies.wakeTask)) {
@@ -106,8 +110,8 @@ export function registerTableDispatch(
             }),
           );
         }
-      } catch {
-        app.log.error({ workspaceId: row.workspace_id }, 'Schedule dispatch will retry');
+      } catch (error) {
+        app.log.error({ workspaceId: row.workspace_id, ...errorAttributes(error) }, 'Schedule dispatch will retry');
       }
       after = row.workspace_id;
     }

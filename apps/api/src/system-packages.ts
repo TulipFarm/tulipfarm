@@ -17,6 +17,7 @@ import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { errorAttributes } from '@tulipfarm/observability';
 
 export function registerSystemPackages(
   app: FastifyInstance,
@@ -157,11 +158,17 @@ export function registerSystemPackages(
                 !(error instanceof AccessDenied) &&
                 !(error instanceof SystemPackageError && error.code === 'installation-version-conflict')
               )
-                app.log.error({ workspaceId: workspace.workspace_id }, 'Package installation will retry');
+                app.log.error(
+                  { workspaceId: workspace.workspace_id, ...errorAttributes(error) },
+                  'Package installation will retry',
+                );
             }
           }
-        } catch {
-          app.log.error({ workspaceId: workspace.workspace_id }, 'Package installation discovery will retry');
+        } catch (error) {
+          app.log.error(
+            { workspaceId: workspace.workspace_id, ...errorAttributes(error) },
+            'Package installation discovery will retry',
+          );
         }
         after = workspace.workspace_id;
       }

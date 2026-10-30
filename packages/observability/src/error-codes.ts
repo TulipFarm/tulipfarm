@@ -379,6 +379,30 @@ export function safeErrorType(error: unknown): string {
   return types.has(name) ? name : 'Error';
 }
 
+const firstPartyFrame =
+  /(?:node_modules\/(@tulipfarm(?:-private)?\/[a-z0-9-]+)|\/(?:packages|apps)\/([a-z0-9-]+)|\/(app))\/(?:dist|src)\/([A-Za-z0-9_./-]{1,160}?\.[cm]?[jt]sx?):(\d{1,6})/;
+const errorOriginPattern = /^[@A-Za-z0-9/_.-]{1,240}:\d{1,6}$/;
+
+export function safeErrorOrigin(value: unknown): boolean {
+  return typeof value === 'string' && errorOriginPattern.test(value);
+}
+
+/**
+ * The first stack frame in TulipFarm's own code, as `<package>/<file>:<line>`. Only the code location is kept; the
+ * message line and any third-party or telemetry frames are skipped.
+ */
+function errorOrigin(stack: unknown): string | undefined {
+  if (typeof stack !== 'string') return undefined;
+  for (const line of stack.split('\n').slice(1, 40)) {
+    const match = firstPartyFrame.exec(line);
+    if (!match) continue;
+    const [, scoped, local, app, file, row] = match;
+    const origin = `${scoped ?? local ?? app}/${file}:${row}`;
+    if (!/observability\/(?:error-codes|index|temporal)\./.test(origin) && safeErrorOrigin(origin)) return origin;
+  }
+  return undefined;
+}
+
 /** Only reviewed diagnostics cross the telemetry boundary; never copy exception text. */
 export function errorAttributes(error: unknown): {
   [key: string]: string | number | undefined;
@@ -386,6 +410,7 @@ export function errorAttributes(error: unknown): {
   'error.code'?: string;
   'error.reason'?: string;
   'error.stage'?: string;
+  'error.origin'?: string;
 } {
   const result: ReturnType<typeof errorAttributes> = { 'error.type': 'unknown' };
   const seen = new Set<object>();
@@ -399,7 +424,11 @@ export function errorAttributes(error: unknown): {
       cause?: unknown;
       errors?: unknown;
       catalogDiagnostics?: unknown;
+      stack?: unknown;
     };
+    // A cause visited later is closer to the fault, so its origin replaces the wrapper's.
+    const origin = value instanceof Error ? errorOrigin(item.stack) : undefined;
+    if (origin) result['error.origin'] = origin;
     const stage = errorStage.get(value) ?? item.stage;
     const selectedStage = typeof stage === 'string' && stages.has(stage) ? stage : inheritedStage;
     if (selectedStage && !result['error.stage'] && !result['error.code']) result['error.stage'] = selectedStage;
