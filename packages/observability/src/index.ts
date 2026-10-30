@@ -859,7 +859,7 @@ const knowledgeImportReasons = new Set([
 
 export function recordKnowledgeImport(
   stage: 'item' | 'source',
-  outcome: 'ready' | 'error',
+  outcome: 'ready' | 'skipped' | 'error',
   reason?: string,
   diagnostics: {
     elapsedMs?: number;
@@ -877,7 +877,7 @@ export function recordKnowledgeImport(
     provider: 'github',
     stage,
     outcome,
-    ...(outcome === 'error' ? { error_code: errorCode } : {}),
+    ...(outcome === 'ready' ? {} : { error_code: errorCode }),
   };
   metrics.getMeter(scope).createCounter('cloud_knowledge_imports').add(1, labels);
   const details: Attributes = {};
@@ -886,8 +886,8 @@ export function recordKnowledgeImport(
     if (typeof value === 'number' && Number.isSafeInteger(value) && (key === 'exitCode' || value >= 0))
       details[`parser.${key}`] = value;
   }
-  if (outcome === 'error')
-    log('error', 'activity', 'call_failed', {
+  if (outcome !== 'ready')
+    log(outcome === 'error' ? 'error' : 'info', 'activity', outcome === 'error' ? 'call_failed' : 'call_completed', {
       operation: `knowledge.github.${stage}`,
       provider: 'github',
       outcome,

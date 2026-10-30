@@ -674,6 +674,7 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
       recordKnowledgeImport('source', 'error', 'PRIVATE PROVIDER FAILURE');
       recordKnowledgeImport('source', 'error', 'provider', { error: storageFailure });
       recordKnowledgeImport('item', 'ready');
+      recordKnowledgeImport('item', 'skipped', 'unsupported');
     });
     await reader.forceFlush();
     const finished = spans.getFinishedSpans();
@@ -719,22 +720,22 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     const importLogs = records
       .getFinishedLogRecords()
       .filter(record => record.attributes.operation?.startsWith('knowledge.github.'));
-    assert.equal(importLogs.length, 3);
-    assert.ok(
-      importLogs.every(
-        record => record.severityText === 'ERROR' && record.spanContext.traceId === http.spanContext().traceId,
-      ),
-    );
     assert.deepEqual(
-      importLogs.map(record => record.attributes['error.code']),
-      ['permission-expired', 'unclassified', 'wait_timeout'],
+      importLogs.map(record => [record.severityText, record.body, record.attributes['error.code']]),
+      [
+        ['ERROR', 'call_failed', 'permission-expired'],
+        ['ERROR', 'call_failed', 'unclassified'],
+        ['ERROR', 'call_failed', 'wait_timeout'],
+        ['INFO', 'call_completed', 'unsupported'],
+      ],
     );
+    assert.ok(importLogs.every(record => record.spanContext.traceId === http.spanContext().traceId));
     assert.equal(importLogs[0].attributes['parser.elapsedMs'], 123);
     assert.equal(importLogs[0].attributes['parser.rssBytes'], 100);
     assert.equal(importLogs[0].attributes['parser.outputBytes'], undefined);
     assert.deepEqual(
       data.find(metric => metric.descriptor.name === 'cloud_knowledge_imports').dataPoints.map(point => point.value),
-      [1, 1, 1, 1],
+      [1, 1, 1, 1, 1],
     );
     assert.equal(
       counter.dataPoints.reduce((sum, point) => sum + point.value, 0),

@@ -16,7 +16,7 @@ export type FeatureFlags<Name extends string = string> = {
 export type Telemetry = {
   recordImport(
     stage: 'item' | 'source',
-    outcome: 'ready' | 'error',
+    outcome: 'ready' | 'skipped' | 'error',
     reason?: string,
     diagnostics?: KnowledgeParseDiagnostics & { error?: unknown },
   ): void;

@@ -161,13 +161,12 @@ test('selection contract bounds repositories, kinds and ordering', () => {
     ['doc', 'code', 'code', 'code'],
     'the kind is a label only; every file is one or the other',
   );
-  assert.deepEqual(['logo.png', 'docs/manual.PDF', 'a.zip', 'a.ts', 'Makefile'].map(isGitHubBinaryPath), [
-    true,
-    true,
-    true,
-    false,
-    false,
-  ]);
+  assert.deepEqual(
+    ['logo.png', 'docs/manual.PDF', 'a.zip', 'deck.odp', 'notes.ODT', 'book.epub', 'a.ts', 'Makefile'].map(
+      isGitHubBinaryPath,
+    ),
+    [true, true, true, true, true, true, false, false],
+  );
   assert.ok(['.env', 'id_rsa', 'dist/app.min.js', 'pnpm-lock.yaml', 'a.map'].every(githubPathIndexable));
 });
 
