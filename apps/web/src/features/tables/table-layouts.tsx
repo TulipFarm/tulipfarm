@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Calendar } from 'reicon-react/icons/Calendar';
+import { ChartBar } from 'reicon-react/icons/ChartBar';
 import { Kanban } from 'reicon-react/icons/Kanban';
 import type { TableQueryResult, TableQueryRequest } from '@tulipfarm/tables/query';
 import { Board, type BoardColumn, type BoardItem } from '@tulipfarm/sprout/board';
 import { Button } from '@tulipfarm/sprout/button';
+import { CategoryChart, chartPalette } from '@tulipfarm/sprout/chart';
+import { TimelineChart } from '@tulipfarm/sprout/timeline';
 import { RecordList, type RecordListValue } from '@tulipfarm/sprout/record-list';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { TableApi, TableDataRow, TableDefinition } from './api';
+import { TableRead } from './feedback';
+import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
+import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import { useLinkedRows, useTableQueryResult } from './hooks';
 import {
   fileIdsOf,
@@ -22,8 +29,11 @@ import {
   boardField,
   boardFields,
   columnWhere,
+  optionFiltered,
+  toggleOptionWhere,
   optionTone,
   queryDefinition,
+  timelineFields,
   type TableView,
 } from './table-view';
 
@@ -129,6 +139,8 @@ type BoardProps = {
   workspace: TableWorkspace;
   menu?: ((record: TableDataRow) => ReactNode) | undefined;
   open?: ((record: TableDataRow) => void) | undefined;
+  /** Lets cards drag between columns, saving the new choice to the row. */
+  canMove?: boolean | undefined;
 };
 type Lane = { key: string; id: string | null; label: string };
 type LaneRead = { state: ReturnType<typeof useTableQueryResult>['state']; refresh: () => void };
@@ -182,8 +194,10 @@ export function BoardView({
   workspace,
   menu,
   open,
+  canMove,
 }: BoardProps) {
   const definition = queryDefinition(table.definition);
+  const move = useRecordMutation(api, () => {});
   const field = boardField(definition, fieldId);
   const counts = useTableQueryResult(api, table, boardCountRequest(view, field?.id ?? ''), !!field);
   const [reads, setReads] = useState<Record<string, LaneRead>>({});
@@ -266,9 +280,37 @@ export function BoardView({
       }),
     };
   });
+  // Workspace access changes through invitations and removals, never by editing the row.
+  const managed = table.systemKind === 'workspace-members' && singleSelect.id === workspaceMemberFields.access;
+  const movable = !!canMove && !managed && !move.locked;
+  // While a move saves, the card waits in its new column instead of jumping back.
+  const pending = move.state.kind === 'sending' && move.state.input.kind === 'update' ? move.state.input : null;
+  const laneKeyOf = (optionId: string | null) => `${singleSelect.id}:${optionId ?? none}`;
   const items: Card[] = lanes.flatMap(lane =>
-    ready(lane).map(record => ({ id: record.id, columnId: lane.key, title: titleText(record, title), record })),
+    ready(lane).map(record => {
+      const next = pending?.recordId === record.id ? pending.values[singleSelect.id] : undefined;
+      return {
+        id: record.id,
+        columnId: next === undefined ? lane.key : laneKeyOf(next?.kind === 'single-select' ? next.optionId : null),
+        title: titleText(record, title),
+        record,
+      };
+    }),
   );
+  const moveCard = (next: Card[]) => {
+    const card = next.find(item => items.some(old => old.id === item.id && old.columnId !== item.columnId));
+    const lane = card && lanes.find(item => item.key === card.columnId);
+    if (!card || !lane) return;
+    void move.submit({
+      kind: 'update',
+      requestId: crypto.randomUUID(),
+      tableId: table.id,
+      revision: table.revision,
+      recordId: card.record.id,
+      expectedToken: card.record.token,
+      values: { [singleSelect.id]: lane.id ? { kind: 'single-select', optionId: lane.id } : null },
+    });
+  };
   const laneOf = (column: BoardColumn) => lanes.find(lane => lane.key === column.id);
   return (
     <div className="space-y-3">
@@ -301,6 +343,9 @@ export function BoardView({
             ))}
           </SelectContent>
         </Select>
+        {canMove && managed && (
+          <span className="text-muted-foreground">Access changes through invitations, so cards stay in place.</span>
+        )}
         {counts.state.kind === 'error' && (
           <>
             <span role="alert" className="text-destructive">
@@ -312,6 +357,7 @@ export function BoardView({
           </>
         )}
       </div>
+      {move.state.kind !== 'sending' && <RecordMutationFeedback mutation={move} refresh={async () => move.check()} />}
       <Board
         label={`Board by ${singleSelect.label}`}
         columns={boardColumns}
@@ -331,11 +377,13 @@ export function BoardView({
           return (
             <>
               {shown.length > 0 && (
-                <span className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                <span className="table w-full text-xs text-muted-foreground">
                   {shown.map(item => (
-                    <span key={item.label} className="flex min-w-0 items-center gap-1">
-                      <span className="shrink-0">{item.label}</span>
-                      <span className="min-w-0 text-foreground">{item.value}</span>
+                    <span key={item.label} className="table-row">
+                      <span className="table-cell w-px pr-3 py-0.5 align-middle whitespace-nowrap">{item.label}</span>
+                      <span className="table-cell w-full max-w-0 py-0.5 align-middle text-foreground">
+                        {item.value}
+                      </span>
                     </span>
                   ))}
                 </span>
@@ -350,6 +398,226 @@ export function BoardView({
         }}
         itemActions={menu && (({ record }) => menu(record))}
         onItemOpen={open && (({ record }) => open(record))}
+        onItemsChange={movable ? moveCard : undefined}
+      />
+    </div>
+  );
+}
+
+/** A small field picker shared by Chart and Timeline, styled like the board's "Columns by". */
+function FieldPicker({
+  label,
+  value,
+  fields,
+  change,
+  none,
+}: {
+  label: string;
+  value: Fields[number] | undefined;
+  fields: { id: string; label: string }[];
+  change: (fieldId: string) => void;
+  none?: string;
+}) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <Select
+        value={value?.id ?? none ?? ''}
+        onValueChange={next => {
+          if (next) change(next);
+        }}
+      >
+        <SelectTrigger size="sm" aria-label={label}>
+          <SelectValue>{value?.label ?? none}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {none && <SelectItem value={none}>{none}</SelectItem>}
+          {fields.map(item => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </span>
+  );
+}
+
+/** Row counts for each option of a single-select field, across every row that matches the search. */
+export function ChartView({
+  api,
+  table,
+  view,
+  noun,
+  fieldId,
+  changeField,
+  filter,
+}: {
+  api: TableApi;
+  table: TableDefinition;
+  view: TableView;
+  noun: string;
+  fieldId: string | undefined;
+  changeField: (fieldId: string) => void;
+  /** Applies a filter while staying on the chart. */
+  filter: (where: string) => void;
+}) {
+  const definition = queryDefinition(table.definition);
+  const field = boardField(definition, fieldId);
+  const singleSelect = field?.kind === 'single-select' ? field : null;
+  const counts = useTableQueryResult(api, table, boardCountRequest(view, singleSelect?.id ?? ''), !!singleSelect);
+  if (!singleSelect)
+    return (
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        icon={ChartBar}
+        title="Chart needs a choice field"
+        description={`Charts count rows for each option of a single-choice field, such as Status. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
+      />
+    );
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <FieldPicker label="Bars by" value={singleSelect} fields={boardFields(definition)} change={changeField} />
+      </div>
+      <TableRead state={counts.state} refresh={counts.refresh}>
+        {data => {
+          if (data.mode !== 'summary') return null;
+          const count = (optionId: string | null) =>
+            data.groups
+              .filter(group => (group.keys[0] ?? null) === optionId)
+              .reduce((sum, group) => sum + Number(group.values[0] ?? 0), 0);
+          const bars = [
+            ...singleSelect.options
+              .filter(option => !option.retired || count(option.id) > 0)
+              .map(option => ({ id: option.id as string | null, label: option.label, count: count(option.id) })),
+            { id: null, label: `No ${singleSelect.label.toLowerCase()}`, count: count(null) },
+          ].filter(bar => bar.id !== null || bar.count > 0);
+          const title = `${noun[0]!.toUpperCase()}${noun.slice(1)} by ${singleSelect.label}`;
+          return (
+            <div className="space-y-4 rounded-lg border border-border p-4">
+              <CategoryChart
+                title={title}
+                horizontal
+                // The axis draws four intervals, so a multiple of four keeps every tick a whole count.
+                max={Math.max(4, Math.ceil(Math.max(...bars.map(bar => bar.count)) / 4) * 4)}
+                rows={bars.map(bar => ({ label: bar.label, count: bar.count }))}
+                category="label"
+                series={[{ key: 'count', label: noun[0]!.toUpperCase() + noun.slice(1), color: chartPalette[0]! }]}
+              />
+              <ul aria-label={title} className="flex flex-wrap gap-2">
+                {bars.map(bar => (
+                  <li key={bar.id ?? none}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-pressed={optionFiltered(definition, view.where, singleSelect.id, bar.id)}
+                      onClick={() => filter(toggleOptionWhere(definition, view.where, singleSelect.id, bar.id))}
+                    >
+                      {bar.label}
+                      <span className="tabular-nums text-muted-foreground">{bar.count.toLocaleString('en-US')}</span>
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        }}
+      </TableRead>
+    </div>
+  );
+}
+
+const dateOf = (record: TableDataRow, field: Fields[number] | undefined) => {
+  const value = field && (record.values[field.id] as { kind?: string; value?: unknown } | null | undefined);
+  if (!value || typeof value.value !== 'string') return null;
+  return value.kind === 'timestamp' ? Date.parse(value.value) : value.value;
+};
+
+const noEnd = 'No end date';
+
+/** The loaded rows on a time axis by a date field, with an optional end field for spans. */
+export function TimelineView({
+  label,
+  table,
+  records,
+  columns,
+  values,
+  actions,
+  open,
+  startId,
+  endId,
+  change,
+}: {
+  label: string;
+  table: TableDefinition;
+  records: TableDataRow[];
+  columns: Fields;
+  values: Values;
+  actions: (record: TableDataRow) => ReactNode;
+  open?: ((record: TableDataRow) => void) | undefined;
+  startId: string | undefined;
+  endId: string | undefined;
+  change: (next: { start?: string; end?: string | undefined }) => void;
+}) {
+  const dates = timelineFields(queryDefinition(table.definition)) as Fields;
+  const start = dates.find(field => field.id === startId) ?? dates[0];
+  const end = dates.find(field => field.id === endId && field !== start);
+  if (!start)
+    return (
+      <StatePanel
+        kind="empty"
+        heading="h3"
+        icon={Calendar}
+        title="Timeline needs a date field"
+        description={`Timelines place rows on a date, such as a start or due date. ${table.definition.label} has none yet. Add one in chat, or use Table or List.`}
+      />
+    );
+  const { title } = parts(columns);
+  const byId = new Map(records.map(record => [record.id, record]));
+  const rows = records.map(record => ({
+    id: record.id,
+    name: titleText(record, title),
+    start: dateOf(record, start),
+    end: dateOf(record, end),
+  }));
+  const undated = rows.filter(row => row.start === null).length;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <FieldPicker label="Starts" value={start} fields={dates} change={id => change({ start: id })} />
+        <FieldPicker
+          label="Ends"
+          value={end}
+          none={noEnd}
+          fields={dates.filter(field => field !== start)}
+          change={id => change({ end: id === noEnd ? undefined : id })}
+        />
+      </div>
+      <TimelineChart
+        title={label}
+        rows={rows}
+        category="name"
+        start="start"
+        end={end ? 'end' : undefined}
+        rowKey="id"
+        renderLabel={row => {
+          const record = byId.get(String(row.id));
+          return record && title ? <Value record={record} fieldId={title.id} values={values} /> : row.name;
+        }}
+        renderActions={row => {
+          const record = byId.get(String(row.id));
+          return record ? actions(record) : null;
+        }}
+        onRowOpen={
+          open &&
+          (row => {
+            const record = byId.get(String(row.id));
+            if (record) open(record);
+          })
+        }
+        undated={undated > 0 ? { count: undated, field: start.label } : undefined}
       />
     </div>
   );

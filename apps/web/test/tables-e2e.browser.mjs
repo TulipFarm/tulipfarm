@@ -60,10 +60,24 @@ export async function proveTableBrowser(input) {
     await page.getByRole('link', { name: 'Tables', exact: true }).click();
     await page.getByRole('heading', { name: 'Tables', exact: true, level: 1 }).waitFor();
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await page.locator(`a[href="/acceptance/tables/${input.tableId}"]`).click();
+    await page
+      .getByRole('list', { name: /^Tables, \d+ rows?$/ })
+      .getByRole('listitem', { name: 'Browser execution tickets', exact: true })
+      .click();
     await page.getByRole('heading', { name: 'Browser execution tickets', exact: true, level: 1 }).waitFor();
+    const headers = { cookie, origin };
+    const base = `/workspaces/${input.workspaceId}/tables/${input.tableId}`;
+    const state = (await app.inject({ url: base, headers })).json();
+    // Row actions are named after the row's values, so find the row by its current text.
     const rowAction = async (id, item) => {
-      await page.getByRole('button', { name: `Actions for row ${id.slice(0, 8)}`, exact: true }).click();
+      const rows = (await app.inject({ url: `${base}/rows?revision=${state.applied.revision}`, headers })).json();
+      const text = Object.values(rows.find(row => row.id === id).values).find(value => value?.kind === 'text').value;
+      await page
+        .getByRole('row')
+        .filter({ has: page.getByRole('cell', { name: text, exact: true }) })
+        .first()
+        .getByRole('button', { name: /^Actions for / })
+        .click();
       await page.getByRole('menuitem', { name: item, exact: true }).click();
     };
     const openPanel = async name => {
@@ -89,9 +103,6 @@ export async function proveTableBrowser(input) {
     await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
     await schemas.getByText('Migration completed', { exact: true }).first().waitFor();
     await closePanel();
-    const headers = { cookie, origin };
-    const base = `/workspaces/${input.workspaceId}/tables/${input.tableId}`;
-    const state = (await app.inject({ url: base, headers })).json();
     const records = (await app.inject({ url: `${base}/rows?revision=${state.applied.revision}`, headers })).json();
     const record = records.find(row => row.id === input.recordId);
     const transformed = records.find(row =>

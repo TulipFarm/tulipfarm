@@ -51,43 +51,41 @@ export function AgentsPage() {
   const canCreate = read.state.kind === 'ready';
   return (
     <PageContent>
-      <PageHeader
-        title="Agents"
-        description="Private instructions you can share with people and teams."
-        actions={
-          canCreate && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                nativeButton={false}
-                render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
-              >
-                Configure manually
-              </Button>
-              <Button
-                nativeButton={false}
-                render={
-                  <Link
-                    to="/$workspaceSlug"
-                    params={{ workspaceSlug: workspace.slug }}
-                    search={{ intent: 'create-agent' }}
-                  />
-                }
-              >
-                Create in chat
-              </Button>
-            </div>
-          )
-        }
-      />
-      <SearchField
-        id="agent-search"
-        label="Find agents"
-        placeholder="Search agents"
-        maxLength={120}
-        value={search}
-        onChange={setSearch}
-      />
+      <PageHeader title="Agents" description="Private instructions you can share with people and teams." />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchField
+          id="agent-search"
+          label="Find agents"
+          placeholder="Search agents"
+          maxLength={120}
+          value={search}
+          onChange={setSearch}
+        />
+        {canCreate && (
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={<Link to="/$workspaceSlug/agents/new" params={{ workspaceSlug: workspace.slug }} />}
+            >
+              Configure manually
+            </Button>
+            <Button
+              nativeButton={false}
+              render={
+                <Link
+                  to="/$workspaceSlug"
+                  params={{ workspaceSlug: workspace.slug }}
+                  search={{ intent: 'create-agent' }}
+                />
+              }
+            >
+              <Add size={16} aria-hidden="true" />
+              New agent
+            </Button>
+          </div>
+        )}
+      </div>
       <AgentRead state={read.state} refresh={read.refresh}>
         {({ page }) => (
           <div className="space-y-4">
@@ -125,7 +123,7 @@ export function AgentsPage() {
                     }
                   >
                     <Add size={16} aria-hidden="true" />
-                    Create in chat
+                    New agent
                   </Button>
                 </StatePanel>
               )

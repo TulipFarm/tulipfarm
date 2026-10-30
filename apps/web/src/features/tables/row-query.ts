@@ -15,10 +15,10 @@ export function utcTimestamp(local: string) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().replace('.000Z', 'Z');
 }
 
-export function rowTotal(total: string, filtered: boolean) {
+export function rowTotal(total: string, filtered: boolean, noun: readonly [string, string] = ['row', 'rows']) {
   const count = Number.parseInt(total, 10);
   const number = `${Number.isNaN(count) ? total : count.toLocaleString('en-US')}${total.endsWith('+') ? '+' : ''}`;
-  return `${number} ${filtered ? 'matching ' : ''}${total === '1' ? 'row' : 'rows'}`;
+  return `${number} ${filtered ? 'matching ' : ''}${total === '1' ? noun[0] : noun[1]}`;
 }
 
 /** Text typed into a URL-backed control. It writes 250ms after the last keystroke and follows outside URL changes. */

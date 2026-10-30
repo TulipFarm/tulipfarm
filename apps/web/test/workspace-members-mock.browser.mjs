@@ -52,13 +52,13 @@ test(
       });
       await page.goto(`${origin}/members-table-mock/tables/87654321-4321-4321-8321-000000000010`);
       const rows = page.getByRole('region', { name: 'Workspace members rows', exact: true });
-      await rows.getByRole('cell', { name: 'Mira Patel', exact: true }).waitFor();
+      await rows.getByText('Mira Patel', { exact: true }).waitFor();
       assert.equal(await rows.getByRole('row').count(), 6);
       const expected = [
         ['/v1/google-workspace/availability', { configured: false }],
         [`${root}/google-workspace`, { status: 'disconnected' }],
         [`${root}/slack/status`, { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] }],
-        [`${root}/github/accounts`, { configured: false, accounts: [] }],
+        [`${root}/github/accounts`, { configured: false, installUrl: null, accounts: [] }],
         [`${root}/atlassian/accounts`, { accounts: [], providers: [] }],
         [
           `${root}/bud`,
@@ -123,14 +123,14 @@ test(
       assert.equal(await jordan.getByRole('cell', { name: 'No access', exact: true }).count(), 1);
 
       const mira = rows.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Mira Patel', exact: true }) });
-      await mira.getByRole('button', { name: /^Edit row/ }).click();
+      await mira.getByRole('button', { name: 'Edit Mira Patel', exact: true }).click();
       dialog = page.getByRole('dialog', { name: 'Edit member', exact: true });
       assert.ok(await dialog.getByRole('textbox', { name: 'Name', exact: true }).isDisabled());
       assert.ok(await dialog.getByRole('textbox', { name: 'Account email', exact: true }).isDisabled());
       assert.ok(await dialog.getByRole('textbox', { name: 'Workday ID', exact: true }).isEnabled());
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
 
-      await mira.getByRole('button', { name: /^Actions for row/ }).click();
+      await mira.getByRole('button', { name: 'Actions for Mira Patel', exact: true }).click();
       await page.getByRole('menuitem', { name: 'History', exact: true }).click();
       const history = page.getByRole('region', { name: 'Row history', exact: true });
       await history.getByText('TulipFarm profile sync', { exact: true }).waitFor();
@@ -158,10 +158,10 @@ test(
       await page.screenshot({ path: '/tmp/workspace-members-linked-history.png' });
       await history.getByRole('button', { name: 'Restore reviewed values', exact: true }).click();
       await mira.getByRole('cell', { name: 'WD-001', exact: true }).waitFor();
-      assert.equal(await mira.getByRole('cell', { name: 'Mira Patel', exact: true }).count(), 1);
+      assert.equal(await mira.getByText('Mira Patel', { exact: true }).count(), 1);
       assert.equal(await mira.getByRole('cell', { name: 'Has access', exact: true }).count(), 1);
 
-      await page.getByRole('button', { name: 'Profile status', exact: true }).click();
+      await page.getByRole('button', { name: 'Profile sync status', exact: true }).click();
       dialog = page.getByRole('dialog', { name: 'Member profile status', exact: true });
       await dialog.getByText('1 pending · 1 need retry · 1 need setup', { exact: true }).waitFor();
       await dialog.getByRole('button', { name: 'Retry profile sync', exact: true }).click();
@@ -172,7 +172,7 @@ test(
       await repair.getByRole('button', { name: 'Save new row', exact: true }).click();
       await dialog.getByText(/0 need setup/).waitFor();
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-      await rows.getByRole('cell', { name: 'Robin Shah', exact: true }).waitFor();
+      await rows.getByText('Robin Shah', { exact: true }).waitFor();
       const memberRead = (await page.evaluate(() => window.memberMockReads))
         .filter(read => read.path === `${root}/tables/87654321-4321-4321-8321-000000000010/query`)
         .at(-1);
@@ -188,7 +188,7 @@ test(
         .getByRole('navigation', { name: 'Breadcrumb' })
         .getByRole('link', { name: 'Tables', exact: true })
         .click();
-      await page.getByRole('link', { name: 'Tickets', exact: true }).click();
+      await page.getByRole('listitem', { name: 'Tickets', exact: true }).click();
       const tickets = page.getByRole('region', { name: 'Tickets rows', exact: true });
       await tickets.getByRole('cell', { name: 'Review the October rota', exact: true }).waitFor();
       await page.getByRole('button', { name: 'Add filter', exact: true }).click();
@@ -206,7 +206,7 @@ test(
       assert.equal(await tickets.getByRole('row').count(), 2);
       assert.equal(new URL(page.url()).searchParams.get('where'), 'assignee=isme=true');
 
-      await tickets.getByRole('button', { name: /^Edit row/ }).click();
+      await tickets.getByRole('button', { name: /^Edit Review the October rota/ }).click();
       dialog = page.getByRole('dialog', { name: 'Edit row', exact: true });
       await dialog.getByRole('combobox', { name: 'Choose assignee', exact: true }).click();
       assert.equal(
@@ -220,13 +220,14 @@ test(
       await page.getByRole('button', { name: 'Clear filters', exact: true }).first().click();
       await tickets.getByRole('link', { name: 'Jordan Chen', exact: true }).waitFor();
       assert.equal(await tickets.getByRole('row').count(), 4);
+      await tickets.getByRole('cell', { name: 'Mira Patel, Sam Lee and 3 more', exact: true }).waitFor();
 
       await page
         .getByRole('navigation', { name: 'Breadcrumb' })
         .getByRole('link', { name: 'Tables', exact: true })
         .click();
-      await page.getByRole('link', { name: 'Workspace members', exact: true }).click();
-      await jordan.getByRole('button', { name: /^Actions for row/ }).click();
+      await page.getByRole('listitem', { name: 'Workspace members', exact: true }).click();
+      await jordan.getByRole('button', { name: 'Actions for Jordan Chen', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Profile and photo', exact: true }).click();
       dialog = page.getByRole('dialog', { name: 'Member profile', exact: true });
       const photo = dialog.getByRole('region', { name: 'Member photo', exact: true });
@@ -302,13 +303,13 @@ test(
         secondImage,
         'document reload retains this server session’s image',
       );
-      await jordan.getByRole('button', { name: /^Actions for row/ }).click();
+      await jordan.getByRole('button', { name: 'Actions for Jordan Chen', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Profile and photo', exact: true }).click();
       await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
       await photo.getByRole('button', { name: 'Upload image', exact: true }).waitFor();
       assert.equal(await photo.locator('img').count(), 0);
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-      await jordan.getByRole('button', { name: /^Actions for row/ }).click();
+      await jordan.getByRole('button', { name: 'Actions for Jordan Chen', exact: true }).click();
       await page.getByRole('menuitem', { name: 'History', exact: true }).click();
       await history.getByRole('button', { name: 'Review values before update', exact: true }).first().click();
       await historyRow('Photo').getByRole('cell').nth(3).locator('img').waitFor();
@@ -330,7 +331,7 @@ test(
         .getByRole('navigation', { name: 'Breadcrumb' })
         .getByRole('link', { name: 'Tables', exact: true })
         .click();
-      await page.getByRole('link', { name: 'Tickets', exact: true }).click();
+      await page.getByRole('listitem', { name: 'Tickets', exact: true }).click();
       await tickets.getByRole('link', { name: 'Jordan Chen', exact: true }).click();
       await page.getByRole('button', { name: 'Profile and photo', exact: true }).click();
       await photo.getByRole('button', { name: 'Change image', exact: true }).waitFor();
@@ -446,8 +447,8 @@ test(
       const mira = rows.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Mira Patel', exact: true }) });
       await mira.waitFor();
       assert.equal(await page.getByRole('button', { name: 'Add member', exact: true }).count(), 0);
-      assert.equal(await mira.getByRole('button', { name: /^Edit row/ }).count(), 0);
-      await mira.getByRole('button', { name: /^Actions for row/ }).click();
+      assert.equal(await mira.getByRole('button', { name: 'Edit Mira Patel', exact: true }).count(), 0);
+      await mira.getByRole('button', { name: 'Actions for Mira Patel', exact: true }).click();
       assert.equal(await page.getByRole('menuitem', { name: 'Edit row', exact: true }).count(), 0);
       await page.getByRole('menuitem', { name: 'History', exact: true }).click();
       const history = page.getByRole('region', { name: 'Row history', exact: true });
@@ -456,7 +457,7 @@ test(
       assert.equal(await history.getByRole('button', { name: 'Restore reviewed values', exact: true }).count(), 0);
       await history.getByRole('button', { name: 'Close history', exact: true }).click();
       await page.setViewportSize({ width: 375, height: 812 });
-      await mira.getByRole('button', { name: /^Actions for row/ }).click();
+      await mira.getByRole('button', { name: 'Actions for Mira Patel', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Profile and photo', exact: true }).click();
       const profile = page.getByRole('dialog', { name: 'Member profile', exact: true });
       await profile.getByText('Profile synced', { exact: true }).waitFor();

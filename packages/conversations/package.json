@@ -216,7 +216,7 @@
     "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
-    "@tulipfarm/sprout": "https://github.com/TulipFarm/sprout/releases/download/v0.13.0/tulipfarm-sprout-0.13.0.tgz",
+    "@tulipfarm/sprout": "https://github.com/TulipFarm/sprout/releases/download/v0.14.0/tulipfarm-sprout-0.14.0.tgz",
     "@tulipfarm/workspace-storage": "workspace:*",
     "docx": "9.9.0",
     "exceljs": "4.4.0",

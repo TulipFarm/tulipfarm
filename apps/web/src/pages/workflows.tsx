@@ -13,6 +13,7 @@ import {
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { Add } from 'reicon-react/icons/Add';
 import { Button, jumpTo } from '@tulipfarm/sprout/button';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Label } from '@tulipfarm/sprout/label';
@@ -294,6 +295,17 @@ function WorkflowPage({
       setBusy(false);
     }
   }
+  const refreshList = (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label="Refresh workflows"
+      title="Refresh workflows"
+      onClick={() => void (shelf === 'archived' ? archivedRead.refresh() : refresh())}
+    >
+      <RefreshCwIcon aria-hidden="true" />
+    </Button>
+  );
   const create = () =>
     void navigate({ to: '/$workspaceSlug', params: { workspaceSlug }, search: { intent: 'create-workflow' } });
   const showShelf = (next: 'current' | 'archived') => {
@@ -340,6 +352,7 @@ function WorkflowPage({
       <PageHeader
         title={detail ? detail.definition.name : 'Workflows'}
         description={detail ? undefined : 'See how repeatable work runs. Create and edit workflows in chat.'}
+        actions={detail ? refreshList : undefined}
         parent={
           detail
             ? {
@@ -358,23 +371,6 @@ function WorkflowPage({
                 ),
               }
             : undefined
-        }
-        actions={
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Refresh workflows"
-              title="Refresh workflows"
-              disabled={unavailable || read.state.kind !== 'ready'}
-              onClick={() => void (shelf === 'archived' ? archivedRead.refresh() : refresh())}
-            >
-              <RefreshCwIcon aria-hidden="true" />
-            </Button>
-            <Button disabled={blocked || unavailable} onClick={create}>
-              New workflow
-            </Button>
-          </>
         }
       />
       {read.state.kind === 'loading' && (
@@ -456,6 +452,13 @@ function WorkflowPage({
                       Archived <Count value={archivedWorkflows?.length} />
                     </ToggleGroupItem>
                   </ToggleGroup>
+                </div>
+                <div className="flex shrink-0 gap-2 sm:ml-auto">
+                  {refreshList}
+                  <Button disabled={blocked} onClick={create}>
+                    <Add size={16} aria-hidden="true" />
+                    New workflow
+                  </Button>
                 </div>
               </div>
               {!!shownWorkflows?.length && (

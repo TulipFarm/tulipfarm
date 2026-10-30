@@ -285,14 +285,15 @@ export const optionTone = (label: string): OptionTone => {
   return optionTones.find(([pattern]) => pattern.test(words))?.[1] ?? 'secondary';
 };
 
-export type Layout = 'table' | 'board' | 'list';
+export const layoutIds = ['table', 'board', 'list', 'chart', 'timeline'] as const;
+export type Layout = (typeof layoutIds)[number];
 export type SearchMode = 'text' | 'ai' | 'rsql';
 const layoutKey = (tableId: string) => `tulipfarm.tables.layout.${tableId}`;
 /** A link's layout wins; otherwise the last layout chosen for this table on this browser. */
 export function storedLayout(tableId: string): Layout | undefined {
   try {
     const value = window.localStorage.getItem(layoutKey(tableId));
-    return value === 'table' || value === 'board' || value === 'list' ? value : undefined;
+    return layoutIds.find(id => id === value);
   } catch {
     return undefined;
   }
@@ -300,6 +301,31 @@ export function storedLayout(tableId: string): Layout | undefined {
 export function storeLayout(tableId: string, layout: Layout) {
   try {
     window.localStorage.setItem(layoutKey(tableId), layout);
+  } catch {
+    /* Storage can be disabled by the browser. */
+  }
+}
+
+const openKey = (tableId: string) => `tulipfarm.tables.views.${tableId}`;
+export const defaultOpenLayouts: Layout[] = ['table', 'list', 'board'];
+export const openLayoutLimit = 3;
+/** Puts the current view first and keeps the most recent views up to the limit. */
+export const recentLayouts = (current: Layout, open: Layout[]): Layout[] =>
+  [current, ...open.filter(id => id !== current)].slice(0, openLayoutLimit);
+/** The views open as tabs for this table on this browser, most recently used first. */
+export function storedOpenLayouts(tableId: string): Layout[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(openKey(tableId)) ?? 'null');
+    if (!Array.isArray(value)) return defaultOpenLayouts;
+    const open = value.filter((id, index): id is Layout => layoutIds.includes(id) && value.indexOf(id) === index);
+    return open.length ? open.slice(0, openLayoutLimit) : defaultOpenLayouts;
+  } catch {
+    return defaultOpenLayouts;
+  }
+}
+export function storeOpenLayouts(tableId: string, open: Layout[]) {
+  try {
+    window.localStorage.setItem(openKey(tableId), JSON.stringify(open));
   } catch {
     /* Storage can be disabled by the browser. */
   }
@@ -337,6 +363,10 @@ export const boardField = (definition: Definition, id: string | undefined) => {
   const fields = boardFields(definition);
   return fields.find(field => field.id === id) ?? fields[0];
 };
+/** Timelines place rows on a date or timestamp field. */
+export const timelineFields = (definition: Definition) =>
+  definition.fields.filter(field => field.kind === 'date' || field.kind === 'timestamp');
+
 export function columnWhere(definition: Definition, where: string, fieldId: string, optionId: string | null): string {
   const rule = printRsql(definition, {
     kind: 'rule',
@@ -345,6 +375,33 @@ export function columnWhere(definition: Definition, where: string, fieldId: stri
     values: optionId ? [optionId] : [],
   });
   return where ? `(${where}) and ${rule}` : rule;
+}
+const optionRule = (fieldId: string, optionId: string | null): QueryRule => ({
+  kind: 'rule',
+  fieldId,
+  op: optionId ? 'eq' : 'empty',
+  values: optionId ? [optionId] : [],
+});
+const sameRule = (a: QueryRule, b: QueryRule) =>
+  a.fieldId === b.fieldId && a.op === b.op && a.values.join() === b.values.join();
+/** Whether the applied filter has this option of a choice field as one of its chips. */
+export function optionFiltered(definition: Definition, where: string, fieldId: string, optionId: string | null) {
+  const chips = filterChips(definition, where);
+  const rule = optionRule(fieldId, optionId);
+  return chips.kind === 'chips' && chips.rules.some(item => sameRule(item, rule));
+}
+/** Adds a chip for one option of a choice field, replacing the field's other option chip, or removes it when already applied. */
+export function toggleOptionWhere(definition: Definition, where: string, fieldId: string, optionId: string | null) {
+  const chips = filterChips(definition, where);
+  if (chips.kind === 'advanced') return columnWhere(definition, where, fieldId, optionId);
+  const rule = optionRule(fieldId, optionId);
+  if (chips.rules.some(item => sameRule(item, rule)))
+    return rulesWhere(
+      definition,
+      chips.rules.filter(item => !sameRule(item, rule)),
+    );
+  const others = chips.rules.filter(item => !(item.fieldId === fieldId && (item.op === 'eq' || item.op === 'empty')));
+  return rulesWhere(definition, [...others, rule]);
 }
 export const boardCountRequest = (view: TableView, fieldId: string): TableQueryRequest => ({
   rsql: view.where,

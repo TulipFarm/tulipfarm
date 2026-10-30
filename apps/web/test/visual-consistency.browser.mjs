@@ -179,9 +179,9 @@ try {
       ['workflows', 'Workflows', 'New workflow', 'workflows'],
       ['agents', 'Agents', 'No agents yet'],
       ['agents/new', 'New agent', 'Instructions'],
-      // Cloud 900060fb #681 (features/tables/tables.tsx:52) rewrote the tables description; 5e9daa6e #880 (pages/tables.tsx:34)
+      // The tables index has no description; its New table action sits beside the search. 5e9daa6e #880 (pages/tables.tsx:34)
       // made tables/new a chat handoff; 9bb986c8 #808 redirects skills/new to chat, so it has no page of its own.
-      ['tables', 'Tables', 'Read active fields and edit business rows. Schema changes are reviewed in chat.'],
+      ['tables', 'Tables', 'New table'],
       ['tables/new', 'Create a table', 'Build tables in chat'],
       ['skills', 'Skills', 'Workspace skills'],
       ['agent-tasks', 'My agent tasks', 'No agent tasks yet'],

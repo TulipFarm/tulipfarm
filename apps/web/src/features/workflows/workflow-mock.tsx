@@ -202,7 +202,7 @@ export default function WorkflowMock({ surface = 'page' }: { surface?: 'page' | 
         title="No workflows yet"
         description="Describe the work you want to repeat. Chat will prepare a workflow for your review."
       >
-        <Button onClick={edit}>Create in chat</Button>
+        <Button onClick={edit}>New workflow</Button>
       </StatePanel>
     ) : phase === 'denied' ? (
       <StatePanel

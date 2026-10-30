@@ -47,12 +47,16 @@ export function createMemberTablesMock(
   const custom = id(12),
     title = id(13),
     assignee = id(14),
-    reviewers = id(15);
+    reviewers = id(15),
+    started = id(16),
+    status = id(17),
+    statuses = [id(90), id(91), id(92)] as const;
   const memberDefinition = definitionSchema.parse({
     ...workspaceMembersDefinition(memberTableId, id(2)),
     fields: [
       ...workspaceMembersDefinition(memberTableId, id(2)).fields,
       { id: custom, label: 'Workday ID', kind: 'text', required: false, maxLength: 80 },
+      { id: started, label: 'Start date', kind: 'date', required: false },
     ],
   });
   const names = ['Mira Patel', 'Sam Lee', 'Maya Rao', 'Alex Morgan', 'Theo Park'];
@@ -62,6 +66,7 @@ export function createMemberTablesMock(
     values: valuesSchema.parse({
       ...manualWorkspaceMemberValues({ name, contactEmail: `${name.toLowerCase().replace(' ', '.')}@example.test` }),
       [custom]: { kind: 'text', value: `WD-${101 + index}` },
+      ...(index < 4 ? { [started]: { kind: 'date', value: `2026-0${3 + index * 2}-1${index}` } } : {}),
       ...(index < 2
         ? {
             [fields.accountEmail]: { kind: 'text', value: `${name.toLowerCase().replace(' ', '.')}@example.test` },
@@ -130,6 +135,17 @@ export function createMemberTablesMock(
     uniqueKeys: [],
     fields: [
       { id: title, label: 'Title', kind: 'text', required: true, maxLength: 255 },
+      {
+        id: status,
+        label: 'Status',
+        kind: 'single-select',
+        required: false,
+        options: ['To do', 'In progress', 'Done'].map((label, index) => ({
+          id: statuses[index],
+          label,
+          retired: false,
+        })),
+      },
       ...[
         [assignee, 'Assignee', 'one'],
         [reviewers, 'Reviewers', 'many'],
@@ -158,8 +174,13 @@ export function createMemberTablesMock(
             token: crypto.randomUUID(),
             values: valuesSchema.parse({
               [title]: { kind: 'text', value: name },
+              [status]: { kind: 'single-select', optionId: statuses[index] },
               [assignee]: { kind: 'relationship', tableId: memberTableId, recordIds: [index === 0 ? me : id(22)] },
-              [reviewers]: { kind: 'relationship', tableId: memberTableId, recordIds: [me, id(21)] },
+              [reviewers]: {
+                kind: 'relationship',
+                tableId: memberTableId,
+                recordIds: index === 2 ? [me, id(21), id(22), id(23), id(24)] : [me, id(21)],
+              },
             }),
           }),
         ),

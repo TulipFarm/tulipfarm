@@ -110,20 +110,7 @@ export function SkillsPage() {
         focusable
         title="Skills"
         description="Reusable procedures. Skills never grant tools or permissions."
-        actions={<Button onClick={() => setImportOpen(true)}>Import skill</Button>}
       />
-      <div>
-        <Button
-          variant="link"
-          nativeButton={false}
-          render={
-            <Link to="/$workspaceSlug" params={{ workspaceSlug: workspace.slug }} search={{ intent: 'create-skill' }} />
-          }
-        >
-          Ask chat to make a skill
-        </Button>
-      </div>
-      {importOpen && <ImportSkillForm />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchField
           id="skill-search"
@@ -133,26 +120,45 @@ export function SkillsPage() {
           value={search}
           onChange={pages.setSearch}
         />
-        <div className="flex gap-1">
-          <Button
-            ref={activeToggle}
-            variant={archived ? 'ghost' : 'secondary'}
-            aria-label="Active skills"
-            aria-pressed={!archived}
-            onClick={() => show('visible')}
-          >
-            Active
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            Import skill
           </Button>
           <Button
-            variant={archived ? 'secondary' : 'ghost'}
-            aria-label="Archived skills"
-            aria-pressed={archived}
-            onClick={() => show('archived')}
+            nativeButton={false}
+            render={
+              <Link
+                to="/$workspaceSlug"
+                params={{ workspaceSlug: workspace.slug }}
+                search={{ intent: 'create-skill' }}
+              />
+            }
           >
-            Archived
+            <Add size={16} aria-hidden="true" />
+            New skill
           </Button>
         </div>
       </div>
+      <div className="flex gap-1">
+        <Button
+          ref={activeToggle}
+          variant={archived ? 'ghost' : 'secondary'}
+          aria-label="Active skills"
+          aria-pressed={!archived}
+          onClick={() => show('visible')}
+        >
+          Active
+        </Button>
+        <Button
+          variant={archived ? 'secondary' : 'ghost'}
+          aria-label="Archived skills"
+          aria-pressed={archived}
+          onClick={() => show('archived')}
+        >
+          Archived
+        </Button>
+      </div>
+      {importOpen && <ImportSkillForm />}
       <SkillRead state={read.state} refresh={read.refresh}>
         {data => (
           <>
