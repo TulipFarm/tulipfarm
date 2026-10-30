@@ -271,6 +271,15 @@ const binaryExtensions: Record<string, string> = {
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ppt: 'application/vnd.ms-powerpoint',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  odg: 'application/vnd.oasis.opendocument.graphics',
+  odf: 'application/vnd.oasis.opendocument.formula',
+  epub: 'application/epub+zip',
+  key: 'application/vnd.apple.keynote',
+  pages: 'application/vnd.apple.pages',
+  numbers: 'application/vnd.apple.numbers',
 };
 const extension = (path: string) => /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase() ?? '';
 /** Known binary formats get one metadata placeholder instead of text parts; other files are sniffed when read. */
