@@ -454,14 +454,7 @@ try {
       await visit('/acme/integrations#jira');
       await panel('Your account');
       await page.getByRole('heading', { name: 'Jira and Confluence integration', exact: true }).waitFor();
-      await visit('/acme/integrations#gmail');
-      await panel('Settings');
-      await page.getByRole('link', { name: 'Start workflows from Gmail', exact: true }).click();
-      await page.getByRole('heading', { name: 'Advanced workflow inputs', exact: true }).waitFor();
-      await page.getByLabel('Gmail account email', { exact: true }).waitFor();
     }
-    await visit('/acme/workflows?provider=gmail#provider-setup');
-    await shot('workflow');
     await visit('/acme/agents/new');
     await shot('selector');
     if (!baseline) {

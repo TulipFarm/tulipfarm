@@ -50,7 +50,7 @@ export function useCalendarSources(
           status: occurrence.status,
           time: { kind: 'point', at: occurrence.at },
           busy: false,
-          href: `/${encodeURIComponent(slug)}/workflows?workflow=${workflow.id}${occurrence.runId ? `&view=runs&run=${occurrence.runId}` : ''}`,
+          href: `/${encodeURIComponent(slug)}/workflows/${workflow.id}${occurrence.runId ? `?view=runs&run=${occurrence.runId}` : ''}`,
           tags: [workflow.personal ? 'My workflow' : 'Following', 'Does not block time'],
         });
     }

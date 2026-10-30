@@ -11,7 +11,12 @@ import { workspaceTableMigrations } from '../../../packages/workspaces/src/table
 import { createWorkspaceRuntime } from '../../../packages/workspace-storage/src/runtime.ts';
 import { registerWorkflows } from '../../api/src/workflows.ts';
 import { protectBusinessRequests } from '../../api/src/business.ts';
-import { saveWorkflow, openWorkflow, assertConfiguration } from './workflow-definition.fixture.mjs';
+import {
+  saveWorkflow,
+  openWorkflow,
+  assertConfiguration,
+  showWorkflowSettings,
+} from './workflow-definition.fixture.mjs';
 
 const requireApi = createRequire(new URL('../../api/package.json', import.meta.url));
 const Fastify = requireApi('fastify'),
@@ -157,7 +162,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         });
 
       await page.goto(`${origin}/webhook-proof/workflows`);
-      await page.getByRole('button', { name: 'Order intake', exact: true }).click();
+      await page.getByRole('link', { name: 'Order intake', exact: true }).click();
+      await showWorkflowSettings(page);
       await keyStatus.getByText('Not configured', { exact: true }).waitFor();
       await endpointStatus.getByText('Not receiving requests. Create a key to start accepting calls.').waitFor();
       workflow = await saveWorkflow(
@@ -174,8 +180,9 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       let viewer = await openWorkflow(page, workflow);
       await assertConfiguration(viewer, 0, workflow.definition.trigger);
-      if (await page.getByRole('button', { name: 'Accept my sponsorship' }).count())
-        await page.getByRole('button', { name: 'Accept my sponsorship' }).click();
+      await showWorkflowSettings(page);
+      if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
+        await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTrigger.payload, {
@@ -245,8 +252,9 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       viewer = await openWorkflow(page, workflow);
       await assertConfiguration(viewer, 0, workflow.definition.trigger);
-      if (await page.getByRole('button', { name: 'Accept my sponsorship' }).count())
-        await page.getByRole('button', { name: 'Accept my sponsorship' }).click();
+      await showWorkflowSettings(page);
+      if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
+        await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTrigger.payload.dedupe, {
@@ -279,6 +287,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       workflow = await saveWorkflow(service, w, { ...workflow.definition, trigger: { kind: 'manual' } }, workflow);
       viewer = await openWorkflow(page, workflow);
       await assertConfiguration(viewer, 0, { kind: 'manual' });
+      await showWorkflowSettings(page);
       await setup
         .getByRole('note')
         .getByText(
@@ -293,6 +302,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       workflow = await saveWorkflow(service, w, { ...workflow.definition, trigger: { kind: 'webhook' } }, workflow);
       await openWorkflow(page, workflow);
+      await showWorkflowSettings(page);
       await keyStatus.getByText('Not configured', { exact: true }).waitFor();
       await endpointStatus
         .getByText(
@@ -300,8 +310,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         )
         .waitFor();
       // A webhook revision runs unattended, so its named sponsor accepts the new revision before activation.
-      await page.getByRole('button', { name: 'Accept my sponsorship' }).click();
-      await page.getByRole('button', { name: 'Accept my sponsorship' }).waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: 'Accept sponsorship' }).click();
+      await page.getByRole('button', { name: 'Accept sponsorship' }).waitFor({ state: 'detached' });
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       await endpointStatus.getByText('Not receiving requests. Create a key to start accepting calls.').waitFor();
@@ -451,7 +461,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         });
       });
       await page.goto(`${origin}/webhook-log-proof/workflows`);
-      await page.getByRole('button', { name: 'Order intake', exact: true }).click();
+      await page.getByRole('link', { name: 'Order intake', exact: true }).click();
+      await showWorkflowSettings(page);
       await log.getByText('Loading deliveries…').waitFor();
       emptyShownWhileLoading = (await log.getByText('No deliveries yet').count()) > 0;
       await log.getByRole('alert').getByText('Deliveries could not load').waitFor({ timeout: 20000 });
@@ -480,7 +491,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const accepted = await call(`Bearer ${key}`, sent);
       assert.equal(accepted.status, 200);
       const { runId } = await accepted.json();
-      await page.getByRole('button', { name: 'Definition and activation' }).click();
+      await showWorkflowSettings(page);
       await log.getByRole('button', { name: 'Check deliveries' }).click();
       const rejected = rows.filter({ hasText: 'Key or signature not accepted' });
       await rejected.waitFor();
@@ -492,7 +503,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal(await page.locator(`#workflow-run-${runId}`).isVisible(), true);
       await pinned.getByText('Definition used by this run', { exact: true }).waitFor();
 
-      await page.getByRole('button', { name: 'Definition and activation' }).click();
+      await showWorkflowSettings(page);
       await page.getByRole('button', { name: 'Disable workflow' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).waitFor();
       await log.getByText('Activate the webhook revision to send a test event.').waitFor();

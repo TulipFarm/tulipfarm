@@ -5,7 +5,7 @@ import { workflowLinkKey, type WorkflowLink } from './page-search';
 import { definitionProblems } from './definition-issues';
 
 type Workflow = z.infer<typeof workflowSchema>;
-type View = 'list' | 'definition' | 'runs';
+type View = 'list' | 'definition' | 'runs' | 'settings';
 const initial: Definition = {
   version: 1,
   name: 'Review a request',
@@ -107,7 +107,7 @@ export function useWorkflowEditingSession({
       }
       if (found.archivedAt) onArchivedLink();
       open(found);
-      if (restoring.view === 'runs') setView('runs');
+      if (restoring.view && !(found.archivedAt && restoring.view === 'settings')) setView(restoring.view);
       if (restoring.run) openRun(restoring.run);
       setRestoring(null);
     } else if (!archivedOpened) onArchiveLookup();
@@ -126,7 +126,7 @@ export function useWorkflowEditingSession({
     if (!link.workflow) setView('list');
     else if (link.workflow !== selected?.id) setRestoring(link);
     else if (link.run) openRun(link.run);
-    else setView(link.view === 'runs' || selected.archivedAt ? 'runs' : 'definition');
+    else setView(selected.archivedAt ? 'runs' : (link.view ?? 'definition'));
   }, [linkKey]);
   useEffect(() => {
     if (restoring) return;
@@ -134,7 +134,11 @@ export function useWorkflowEditingSession({
       selected && view !== 'list'
         ? {
             workflow: selected.id,
-            ...(view === 'runs' ? { view: 'runs', ...(linkedRun ? { run: linkedRun } : {}) } : {}),
+            ...(view === 'runs'
+              ? { view: 'runs', ...(linkedRun ? { run: linkedRun } : {}) }
+              : view === 'settings'
+                ? { view: 'settings' }
+                : {}),
           }
         : {};
     const key = workflowLinkKey(next);

@@ -139,7 +139,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       page.on('pageerror', error => errors.push(String(error)));
 
       await page.goto(`${origin}/condition-step-proof/workflows`);
-      await page.getByRole('button', { name: 'Big order check', exact: true }).click();
+      await page.getByRole('link', { name: 'Big order check', exact: true }).click();
       const editor = page.getByRole('region', { name: 'Workflow editor' });
       await editor.getByRole('heading', { name: '1. Check a condition' }).waitFor();
       await editor
@@ -202,7 +202,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         'a number compared with text fails instead of choosing a branch',
       );
 
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByRole('button', { name: 'Check run history' }).click();
       const history = page.getByRole('region', { name: 'Run history' });
       await history.locator(`#workflow-run-${met.runId}`).getByText('3 workflow steps').click();

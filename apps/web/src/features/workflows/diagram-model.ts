@@ -53,7 +53,7 @@ const stepTitles: Record<Step['kind'], string> = {
   'create-row': 'Create a row',
   'update-row': 'Update a row',
 };
-const triggerTitles: Record<Trigger['kind'], string> = {
+export const triggerTitles: Record<Trigger['kind'], string> = {
   manual: 'Started by a person',
   webhook: 'Webhook received',
   event: 'Event received',
@@ -296,7 +296,8 @@ export function workflowGraph(
       kind: step.kind,
       title: title(step),
       summary,
-      actor: step.kind === 'agent' ? actor : step.kind === 'human' ? `Response from ${actor}` : `Runs as ${actor}`,
+      // The trigger card already names who the workflow runs as; repeat it only when a step differs.
+      actor: step.kind === 'agent' ? actor : step.kind === 'human' ? `Response from ${actor}` : '',
       ordinal: index + 1,
       state: state(step.id),
       position: { x: 0, y: 0 },

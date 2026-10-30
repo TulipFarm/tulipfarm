@@ -79,184 +79,243 @@ export function WorkflowSharing({
       setBusy(false);
     }
   }
-  const choices = provider ? ['use', 'manage'] : ['read', 'invoke', 'manage'];
+  const levels = provider
+    ? [
+        { value: 'use', label: 'Can use', permissions: ['use'] },
+        { value: 'manage', label: 'Can manage', permissions: ['use', 'manage'] },
+      ]
+    : [
+        { value: 'read', label: 'Can view', permissions: ['read'] },
+        { value: 'invoke', label: 'Can run', permissions: ['read', 'invoke'] },
+        { value: 'manage', label: 'Can manage', permissions: ['read', 'invoke', 'manage'] },
+      ];
+  const levelOf = (permissions: string[]) =>
+    [...levels].reverse().find(level => permissions.includes(level.value))?.value ?? '';
+  const share = (key: string, value: string) => {
+    const [kind, target] = key.split(':');
+    void save(
+      'grants',
+      { principal: { kind, id: target }, permissions: levels.find(item => item.value === value)?.permissions ?? [] },
+      value ? 'Access saved.' : 'Access removed.',
+    );
+  };
   return (
-    <section aria-label={provider ? 'Provider sharing' : 'Workflow sharing'} className="space-y-3">
-      <h2 className="text-sm font-medium">{provider ? 'Provider sharing' : 'Definition sharing'}</h2>
-      <p className="text-sm text-muted-foreground">
-        {provider
-          ? 'Grant integration use or management to selected people or your teams. Credentials remain private.'
-          : 'New workflows are private. Sharing a definition never shares someone else’s manual run history.'}
-      </p>
+    <section aria-label={provider ? 'Provider sharing' : 'Workflow sharing'} className="space-y-6">
       {state.kind === 'loading' && (
-        <StatePanel
-          kind="loading"
-          title="Loading sharing"
-          description="Checking current grants and available recipients."
-        />
+        <StatePanel kind="loading" title="Loading access" description="Checking who can use this." />
       )}
       {state.kind === 'error' && (
-        <StatePanel kind="error" title="Sharing could not load" description="Check your access and retry.">
+        <StatePanel kind="error" title="Access could not load" description="Check your access and retry.">
           <Button variant="outline" onClick={() => void load()}>
-            Reload sharing
+            Reload access
           </Button>
         </StatePanel>
       )}
-      {state.kind === 'ready' && (
-        <>
-          <Label htmlFor={`share-${id}`}>Person or team</Label>
-          <Select
-            value={principal}
-            onValueChange={value => {
-              if (!value) return;
-              setPrincipal(value);
-              const [kind, target] = value.split(':');
-              setPermissions(
-                state.grants
-                  .filter(grant => (kind === 'person' ? grant.membershipId === target : grant.teamId === target))
-                  .map(grant => grant.permission),
-              );
-            }}
-          >
-            <SelectTrigger id={`share-${id}`}>
-              <SelectValue placeholder="Choose a person or team" />
-            </SelectTrigger>
-            <SelectContent>
-              {state.candidates.people.map(person => (
-                <SelectItem key={person.id} value={`person:${person.id}`}>
-                  {person.name}
-                </SelectItem>
-              ))}
-              {state.candidates.teams.map(team => (
-                <SelectItem key={team.id} value={`team:${team.id}`}>
-                  Team: {team.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <fieldset disabled={busy || !principal} className="space-y-2">
-            <legend>Permissions</legend>
-            {choices.map(permission => (
-              <Label key={permission}>
-                <Checkbox
-                  checked={permissions.includes(permission)}
-                  onCheckedChange={checked =>
-                    setPermissions(previous =>
-                      checked ? [...previous, permission] : previous.filter(item => item !== permission),
-                    )
-                  }
-                />
-                {permission === 'invoke'
-                  ? 'Run workflow'
-                  : permission === 'read'
-                    ? 'Read definition'
-                    : permission === 'use'
-                      ? 'Use integration'
-                      : 'Manage and share'}
-              </Label>
-            ))}
-          </fieldset>
-          <Button
-            disabled={busy || !principal}
-            aria-busy={busy}
-            onClick={() => {
-              const [kind, target] = principal.split(':');
-              void save(
-                'grants',
-                { principal: { kind, id: target }, permissions },
-                'Sharing saved. Run histories remain private.',
-              );
-            }}
-          >
-            Save sharing
-          </Button>
-          <ul className="space-y-1 break-words text-sm">
-            {state.grants.map(grant => (
-              <li key={`${grant.membershipId ?? grant.teamId}:${grant.permission}`}>
-                {state.candidates.people.find(person => person.id === grant.membershipId)?.name ??
-                  state.candidates.teams.find(team => team.id === grant.teamId)?.name ??
-                  'Unavailable recipient'}
-                : {grant.permission}
-              </li>
-            ))}
-          </ul>
-          {workflow && !['manual', 'event'].includes(workflow.definition.trigger.kind) && (
-            <section aria-label="Unattended execution" className="space-y-3 border-t pt-4">
-              <h2 className="text-sm font-medium">Sponsor and run history</h2>
-              <p className="text-sm">
-                Choose the member this workflow acts as when it runs unattended. Another person must accept their
-                sponsorship before activation. Changing this configuration pauses the workflow and gives no access to
-                earlier histories.
-              </p>
-              {workflow.sponsor && (
-                <p className="text-sm text-muted-foreground">Current unattended runs act as {workflow.sponsor.name}.</p>
+      {state.kind === 'ready' &&
+        (() => {
+          const personName = (person: { id: string; name: string }) =>
+            person.id === state.candidates.membershipId ? 'You' : person.name;
+          const holders = new Map<string, { name: string; permissions: string[] }>();
+          for (const grant of state.grants) {
+            const key = grant.membershipId ? `person:${grant.membershipId}` : `team:${grant.teamId}`;
+            const person = state.candidates.people.find(item => item.id === grant.membershipId);
+            const team = state.candidates.teams.find(item => item.id === grant.teamId);
+            const holder = holders.get(key) ?? {
+              name: person ? personName(person) : team ? `Team: ${team.name}` : 'Unavailable recipient',
+              permissions: [],
+            };
+            holder.permissions.push(grant.permission);
+            holders.set(key, holder);
+          }
+          return (
+            <>
+              <div className="space-y-3">
+                <div className="space-y-0.5">
+                  <h2 className="font-medium">Access</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {provider ? 'Credentials stay private.' : 'Each person’s run history stays private.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    items={[
+                      ...state.candidates.people.map(person => ({
+                        value: `person:${person.id}`,
+                        label: personName(person),
+                      })),
+                      ...state.candidates.teams.map(team => ({
+                        value: `team:${team.id}`,
+                        label: `Team: ${team.name}`,
+                      })),
+                    ]}
+                    value={principal}
+                    onValueChange={value => {
+                      if (!value) return;
+                      setPrincipal(value);
+                      setPermissions(
+                        levels.find(level => level.value === levelOf(holders.get(value)?.permissions ?? []))
+                          ?.permissions ?? levels[0]!.permissions,
+                      );
+                    }}
+                  >
+                    <SelectTrigger id={`share-${id}`} aria-label="Person or team">
+                      <SelectValue placeholder="Add a person or team" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {state.candidates.people.map(person => (
+                        <SelectItem key={person.id} value={`person:${person.id}`}>
+                          {personName(person)}
+                        </SelectItem>
+                      ))}
+                      {state.candidates.teams.map(team => (
+                        <SelectItem key={team.id} value={`team:${team.id}`}>
+                          Team: {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    items={levels}
+                    value={levelOf(permissions)}
+                    disabled={busy || !principal}
+                    onValueChange={value => {
+                      if (value) setPermissions(levels.find(level => level.value === value)?.permissions ?? []);
+                    }}
+                  >
+                    <SelectTrigger aria-label="Access level">
+                      <SelectValue placeholder="Access" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {levels.map(level => (
+                        <SelectItem key={level.value} value={level.value}>
+                          {level.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    disabled={busy || !principal || !permissions.length}
+                    aria-busy={busy}
+                    onClick={() => {
+                      share(principal, levelOf(permissions));
+                      setPrincipal('');
+                    }}
+                  >
+                    Share
+                  </Button>
+                </div>
+                {holders.size > 0 && (
+                  <ul
+                    aria-label="People with access"
+                    className="divide-y divide-border rounded-lg border border-border"
+                  >
+                    {[...holders].map(([key, holder]) => (
+                      <li key={key} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                        <span className="min-w-0 truncate">{holder.name}</span>
+                        <Select
+                          items={[...levels, { value: 'remove', label: 'Remove access' }]}
+                          value={levelOf(holder.permissions)}
+                          disabled={busy}
+                          onValueChange={value => {
+                            if (value) share(key, value === 'remove' ? '' : value);
+                          }}
+                        >
+                          <SelectTrigger size="sm" aria-label={`Access for ${holder.name}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {levels.map(level => (
+                              <SelectItem key={level.value} value={level.value}>
+                                {level.label}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value="remove">Remove access</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {workflow && !['manual', 'event'].includes(workflow.definition.trigger.kind) && (
+                <section aria-label="Scheduled runs" className="space-y-4 border-t border-border pt-6">
+                  <div className="space-y-0.5">
+                    <h2 className="font-medium">Scheduled runs</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Changes pause the workflow until the person it runs as accepts.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`sponsor-${id}`}>Runs as</Label>
+                    <Select
+                      items={state.candidates.people.map(person => ({ value: person.id, label: personName(person) }))}
+                      value={sponsor}
+                      onValueChange={value => {
+                        if (value) setSponsor(value);
+                      }}
+                    >
+                      <SelectTrigger id={`sponsor-${id}`}>
+                        <SelectValue placeholder="Choose a person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {state.candidates.people.map(person => (
+                          <SelectItem key={person.id} value={person.id}>
+                            {personName(person)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <fieldset disabled={busy} className="min-w-0 space-y-2">
+                    <legend className="mb-2 text-sm font-medium">Who sees scheduled runs</legend>
+                    {state.candidates.people.map(person => (
+                      <Label key={person.id}>
+                        <Checkbox
+                          checked={audience.includes(person.id)}
+                          onCheckedChange={checked =>
+                            setAudience(previous =>
+                              checked ? [...previous, person.id] : previous.filter(item => item !== person.id),
+                            )
+                          }
+                        />
+                        <span className="min-w-0 truncate">{personName(person)}</span>
+                      </Label>
+                    ))}
+                  </fieldset>
+                  <Button
+                    variant="outline"
+                    disabled={busy || !sponsor || !audience.length}
+                    aria-busy={busy}
+                    onClick={() =>
+                      void save(
+                        'sponsorship',
+                        { sponsorMembershipId: sponsor, historyAudience: audience },
+                        sponsor === state.candidates.membershipId
+                          ? 'Saved. Activate the saved revision to start scheduled runs.'
+                          : 'Saved. Waiting for them to accept.',
+                      )
+                    }
+                  >
+                    Save scheduled runs
+                  </Button>
+                </section>
               )}
-              <Label htmlFor={`sponsor-${id}`}>Execution sponsor</Label>
-              <Select
-                value={sponsor}
-                onValueChange={value => {
-                  if (value) setSponsor(value);
-                }}
-              >
-                <SelectTrigger id={`sponsor-${id}`}>
-                  <SelectValue placeholder="Choose a sponsor" />
-                </SelectTrigger>
-                <SelectContent>
-                  {state.candidates.people.map(person => (
-                    <SelectItem key={person.id} value={person.id}>
-                      {person.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <fieldset disabled={busy} className="min-w-0 space-y-2">
-                <legend>People who may read and respond to future scheduled histories</legend>
-                {state.candidates.people.map(person => (
-                  <Label key={person.id}>
-                    <Checkbox
-                      checked={audience.includes(person.id)}
-                      onCheckedChange={checked =>
-                        setAudience(previous =>
-                          checked ? [...previous, person.id] : previous.filter(item => item !== person.id),
-                        )
-                      }
-                    />
-                    <span className="min-w-0 break-all">{person.name}</span>
-                  </Label>
-                ))}
-              </fieldset>
-              <p className="text-sm text-muted-foreground">
-                Recipients need definition read access and, for provider workflows, integration use. Responding or
-                cancelling also requires workflow run permission.
-              </p>
-              <Button
-                disabled={busy || !sponsor || !audience.length}
-                aria-busy={busy}
-                onClick={() =>
-                  void save(
-                    'sponsorship',
-                    { sponsorMembershipId: sponsor, historyAudience: audience },
-                    sponsor === state.candidates.membershipId
-                      ? 'You sponsor this revision. Activate the saved revision to start unattended runs.'
-                      : 'Sponsor and audience saved. The named sponsor must accept before activation.',
-                  )
-                }
-              >
-                Save sponsor and audience
-              </Button>
-            </section>
-          )}
-        </>
-      )}
+            </>
+          );
+        })()}
       {error && (
-        <div role="alert">
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">
           <p>{error}</p>
-          <Button variant="outline" onClick={() => void load()}>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
             Reload access
           </Button>
         </div>
       )}
-      {message && <p role="status">{message}</p>}
+      {message && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {message}
+        </p>
+      )}
     </section>
   );
 }
@@ -264,26 +323,27 @@ export function WorkflowSharing({
 export function AcceptWorkflowSponsorship({
   workspaceId,
   workflow,
+  userId,
   changed,
 }: {
   workspaceId: string;
   workflow: Workflow;
+  userId: string;
   changed: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!workflow.sponsorMembershipId || workflow.sponsorshipAccepted) return null;
   return (
-    <section className="space-y-2">
-      <p>
-        Sponsorship is awaiting acceptance by the named sponsor. Future histories will be shared only with the selected
-        audience.
-      </p>
-      <p className="text-sm">
-        {workflow.historyAudience.length
-          ? `${workflow.historyAudience.length} selected history ${workflow.historyAudience.length === 1 ? 'recipient' : 'recipients'}.`
-          : 'Ask the manager for the selected audience.'}
-      </p>
+    <section aria-label="Sponsorship" className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <h2 className="font-medium">Waiting for sponsor</h2>
+        <p className="text-sm text-muted-foreground">
+          {workflow.sponsor?.userId === userId
+            ? 'You were chosen as the sponsor. Scheduled runs start after you accept.'
+            : `Scheduled runs start after ${workflow.sponsor?.name ?? 'the sponsor'} accepts.`}
+        </p>
+      </div>
       <Button
         variant="outline"
         disabled={busy}
@@ -300,16 +360,20 @@ export function AcceptWorkflowSponsorship({
             setError(
               denied(failure)
                 ? recordSourceDenied
-                : 'Sponsorship could not be accepted. Only the named sponsor with current run and source access can accept.',
+                : 'Only the named sponsor, with current run and source access, can accept.',
             );
           } finally {
             setBusy(false);
           }
         }}
       >
-        Accept my sponsorship
+        Accept sponsorship
       </Button>
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-destructive sm:basis-full">
+          {error}
+        </p>
+      )}
     </section>
   );
 }

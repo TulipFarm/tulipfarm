@@ -1,6 +1,5 @@
 import type { z } from 'zod';
 import type { providerSourceSchema } from '@tulipfarm/workflows/contracts';
-export { workflowProviderSearch } from './page-search.ts';
 
 type Source = z.infer<typeof providerSourceSchema>;
 export const workflowSources: { title: string; source: Source; help: string }[] = [

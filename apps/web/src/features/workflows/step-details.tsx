@@ -39,12 +39,14 @@ export function StepDetails({
             <dd>{workflowStepLabels[node.state]}</dd>
           </div>
         )}
-        {details.facts.map((fact, index) => (
-          <div key={`${index}:${fact.label}`}>
-            <dt className="mb-1 text-xs text-muted-foreground">{fact.label}</dt>
-            <dd className="wrap-anywhere text-foreground">{fact.value}</dd>
-          </div>
-        ))}
+        {details.facts
+          .filter(fact => fact.value !== node.summary)
+          .map((fact, index) => (
+            <div key={`${index}:${fact.label}`}>
+              <dt className="mb-1 text-xs text-muted-foreground">{fact.label}</dt>
+              <dd className="wrap-anywhere text-foreground">{fact.value}</dd>
+            </div>
+          ))}
       </dl>
       {details.gates.length > 0 && (
         <div className="space-y-2">

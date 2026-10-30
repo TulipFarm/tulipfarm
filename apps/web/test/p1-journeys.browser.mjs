@@ -353,8 +353,11 @@ try {
         { enabled: activationWrites[0].enabled, revision: activationWrites[0].revision },
         { enabled: true, revision: workflows[0].revision },
       );
-      await viewer.getByText('Saved and active revision', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page
+        .getByRole('region', { name: 'Workflow summary', exact: true })
+        .getByText('Active', { exact: true })
+        .waitFor();
+      await page.getByRole('button', { name: 'Start a run', exact: true }).click();
       await page.getByLabel('Request to review', { exact: true }).fill('Review expenses');
       await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
       await page.getByRole('button', { name: 'View run diagram', exact: true }).click();

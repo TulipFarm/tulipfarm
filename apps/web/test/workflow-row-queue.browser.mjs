@@ -164,8 +164,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           historyResponses.push(response.status());
       });
       await page.goto(`${origin}/row-queue-proof/workflows`);
-      await page.getByRole('button', { name: 'Every new order', exact: true }).click();
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('link', { name: 'Every new order', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       const queue = page.getByRole('region', { name: 'Row event queue' });
       await queue.getByText('No waiting row events', { exact: true }).waitFor();
       await runtime.transaction(w.id, { minimum: migrations.length, maximum: migrations.length }, async tx => {

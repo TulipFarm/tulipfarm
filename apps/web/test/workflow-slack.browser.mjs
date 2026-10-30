@@ -122,7 +122,7 @@ test(
       const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
       await page.goto(`${origin}/slack-proof/workflows`);
-      await page.getByRole('button', { name: 'Tickets to Slack', exact: true }).click();
+      await page.getByRole('link', { name: 'Tickets to Slack', exact: true }).click();
       await page.getByRole('heading', { name: '1. Send a Slack message', exact: true }).waitFor();
       await page.getByText('#tech · Slack workspace TTEST', { exact: true }).waitFor();
       await page.getByText(`Destination ID: ${f.destinationId}`, { exact: true }).waitFor();
@@ -136,7 +136,7 @@ test(
           { stdio: 'inherit' },
         );
       }
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByText('Waiting for your approval. Nothing has been sent.', { exact: true }).waitFor();
       assert.equal(f.effects.length, 0);
       await mkdir('reports/check/workflow-slack', { recursive: true });

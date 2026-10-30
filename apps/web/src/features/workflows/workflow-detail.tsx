@@ -65,12 +65,14 @@ export function WorkflowDefinition({
   revision = 'saved',
   surface = 'page',
   navigation,
+  header,
 }: {
   workspaceId: string;
   workflowId: string;
   revision?: string;
   surface?: 'page' | 'canvas';
   navigation?: ReactNode;
+  header?: boolean;
 }) {
   const read = useWorkflowDefinition(workspaceId, workflowId, revision);
   const navigate = useNavigate(),
@@ -101,6 +103,7 @@ export function WorkflowDefinition({
             ...(notice ? { notice } : {}),
           }}
           navigation={navigation}
+          header={header ?? true}
           onRefresh={() => void read.refresh()}
           onEdit={
             detail.canManage && !detail.archived

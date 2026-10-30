@@ -160,8 +160,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           .evaluateAll(articles => articles.map(article => article.id.slice('workflow-run-'.length)));
 
       await page.goto(`${origin}/history-proof/workflows`);
-      await page.getByRole('button', { name: 'Nightly copy', exact: true }).click();
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('link', { name: 'Nightly copy', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByRole('heading', { name: 'Run history' }).waitFor();
       await page.locator(`#workflow-run-${runIds[49]}`).waitFor();
       assert.deepEqual(await shown(), runIds.slice(0, 50), 'the first page shows the 50 newest runs');

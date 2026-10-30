@@ -247,34 +247,6 @@ try {
       continue;
     }
 
-    for (const [name, id, field] of [
-      ['Google Sheets', 'google-sheets', 'Spreadsheet ID'],
-      ['Slack', 'slack', 'Slack workspace ID'],
-      ['Notion', 'notion', 'Data source ID'],
-      ['Gmail', 'gmail', 'Gmail account email'],
-      ['Google Forms', 'google-forms', 'Google Form ID'],
-      ['Jira', 'jira', 'Jira cloud ID'],
-      ['HubSpot', 'hubspot', 'HubSpot portal ID'],
-    ]) {
-      await page.goto(`${origin}/acme/integrations#${id}`);
-      const sheet = page.getByRole('dialog', { name });
-      if (['notion', 'google-forms', 'hubspot'].includes(id))
-        await sheet.getByRole('link', { name: 'Set up', exact: true }).click();
-      else {
-        await sheet.getByRole('button', { name: 'Settings', exact: true }).click();
-        await sheet.getByRole('link', { name: `Start workflows from ${name}`, exact: true }).click();
-      }
-      await page.getByLabel(field, { exact: true }).waitFor();
-      assert.equal(await page.getByRole('checkbox').isChecked(), false, 'Discovery never grants consent');
-      assert.equal(
-        await page.getByRole('button', { name: 'Connect provider source', exact: true }).isDisabled(),
-        true,
-        'Connecting waits for a test and consent',
-      );
-      await page.getByRole('button', { name: 'Test integration', exact: true }).click();
-      await page.getByText('Confirm that you authorize access to this source.', { exact: true }).waitFor();
-      if (name === 'Gmail') await screenshot('gmail-setup');
-    }
     for (const [hash, name, panel] of [
       ['github-integrations', 'GitHub', 'Settings'],
       ['atlassian-heading', 'Jira', 'Your account'],
@@ -296,13 +268,6 @@ try {
       await page.getByRole('dialog').getByRole('region', { name: 'Settings', exact: true }).count(),
       0,
       'Workspace settings are admin-only',
-    );
-    await page.goto(`${origin}/acme/workflows?provider=gmail#provider-setup`);
-    await page.getByLabel('Bearer token for new source or rotation').waitFor();
-    assert.equal(
-      await page.getByRole('heading', { name: 'Provider access unavailable', exact: true }).count(),
-      0,
-      'ordinary members may connect their own private sources',
     );
     role = 'admin';
 

@@ -12,6 +12,7 @@ import { createWorkspaceRuntime, qualified } from '../../../packages/workspace-s
 import { createWorkflows } from '../../../packages/workflows/src/service.ts';
 import { registerWorkflows } from '../../api/src/workflows.ts';
 import { protectBusinessRequests } from '../../api/src/business.ts';
+import { showWorkflowList } from './workflow-definition.fixture.mjs';
 
 const requireApi = createRequire(new URL('../../api/package.json', import.meta.url));
 const Fastify = requireApi('fastify'),
@@ -141,18 +142,26 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       page.on('pageerror', error => errors.push(String(error)));
 
       await page.goto(`${origin}/archive-proof/workflows`);
-      await page.getByRole('button', { name: 'Old intake', exact: true }).click();
+      await page.getByRole('link', { name: 'Old intake', exact: true }).click();
+      await page.getByRole('tab', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'Archive workflow' }).click();
       const dialog = page.getByRole('alertdialog', { name: 'Archive Old intake?' });
-      await dialog.getByText('Run history and the audit trail are kept.', { exact: false }).waitFor();
+      await dialog.getByText('History is kept.', { exact: false }).waitFor();
       await dialog.getByRole('button', { name: 'Keep workflow' }).click();
       await dialog.waitFor({ state: 'detached' });
       assert.equal(archiveRequests, 0);
 
       await page.getByRole('button', { name: 'Archive workflow' }).click();
       await dialog.getByRole('button', { name: 'Archive workflow' }).click();
-      await page.getByRole('button', { name: 'Archiving workflow…' }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Archiving workflow…' }).isDisabled(), true);
+      // While the archive request is in flight the button is blocked with a reason, not relabelled.
+      await page.getByText('Finish or retry the current request first.', { exact: true }).waitFor();
+      assert.equal(
+        await page
+          .getByRole('region', { name: 'Danger zone', exact: true })
+          .getByRole('button', { name: 'Archive workflow', exact: true })
+          .isDisabled(),
+        true,
+      );
       release();
       await page
         .getByRole('alert')
@@ -160,31 +169,31 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         .waitFor();
       await page.getByRole('button', { name: 'Retry exact request' }).click();
       await page.getByRole('status').filter({ hasText: 'Workflow archived.' }).waitFor();
-      await page.getByRole('button', { name: 'Current intake', exact: true }).waitFor();
-      await page.waitForFunction(() => document.activeElement?.textContent === 'All workflows');
-      assert.equal(await page.getByRole('button', { name: 'Old intake', exact: true }).count(), 0);
+      await page.getByRole('link', { name: 'Current intake', exact: true }).waitFor();
+      await page.waitForFunction(() => !!document.activeElement?.closest('#workflow-views'));
+      assert.equal(await page.getByRole('link', { name: 'Old intake', exact: true }).count(), 0);
       assert.equal(archiveRequests, 2);
 
-      await page.getByRole('button', { name: 'Archived workflows' }).click();
-      assert.equal(await page.getByRole('button', { name: 'Archived workflows' }).getAttribute('aria-pressed'), 'true');
+      await page.getByRole('button', { name: /^Archived( \d+)?$/ }).click();
+      assert.equal(await page.getByRole('button', { name: /^Archived( \d+)?$/ }).getAttribute('aria-pressed'), 'true');
       await page.getByRole('heading', { name: 'Archived workflows could not load' }).waitFor();
       archivedReadsFail = false;
       await page.getByRole('button', { name: 'Retry loading archived workflows' }).click();
-      await page.getByRole('button', { name: 'Old intake', exact: true }).waitFor();
+      await page.getByRole('link', { name: 'Old intake', exact: true }).waitFor();
       assert.equal(await page.getByText('No archived workflows', { exact: true }).count(), 0);
-      assert.equal(await page.getByRole('button', { name: 'Current intake', exact: true }).count(), 0);
-      await page.getByRole('button', { name: 'Old intake', exact: true }).click();
+      assert.equal(await page.getByRole('link', { name: 'Current intake', exact: true }).count(), 0);
+      await page.getByRole('link', { name: 'Old intake', exact: true }).click();
       await page.getByRole('heading', { name: 'Run history' }).waitFor();
       await page.locator('article').getByText('Access denied', { exact: true }).waitFor();
       await page.getByRole('alert').filter({ hasText: 'workflow-archived' }).waitFor();
       await page.getByText('Its run history is read-only.', { exact: false }).waitFor();
       assert.equal(await page.getByRole('button', { name: 'Run workflow' }).count(), 0);
-      assert.equal(await page.getByRole('button', { name: 'Definition and activation' }).count(), 0);
+      assert.equal(await page.getByRole('tab', { name: 'Settings', exact: true }).count(), 0);
 
-      await page.getByRole('button', { name: 'All workflows' }).click();
-      await page.getByRole('button', { name: 'Current workflows' }).click();
-      await page.getByRole('button', { name: 'Current intake', exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Old intake', exact: true }).count(), 0);
+      await showWorkflowList(page);
+      await page.getByRole('button', { name: /^Current( \d+)?$/ }).click();
+      await page.getByRole('link', { name: 'Current intake', exact: true }).waitFor();
+      assert.equal(await page.getByRole('link', { name: 'Old intake', exact: true }).count(), 0);
 
       const table = name => qualified(w.names.schema, name);
       assert.deepEqual(

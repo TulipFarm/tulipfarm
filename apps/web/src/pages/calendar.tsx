@@ -385,9 +385,9 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                   title={action.title}
                   render={
                     <Link
-                      to="/$workspaceSlug/workflows"
-                      params={{ workspaceSlug: slug }}
-                      search={{ workflow: action.workflowId, view: 'runs', run: action.runId }}
+                      to="/$workspaceSlug/workflows/$workflowId"
+                      params={{ workspaceSlug: slug, workflowId: action.workflowId }}
+                      search={{ view: 'runs', run: action.runId }}
                     />
                   }
                 >
@@ -407,9 +407,9 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                     nativeButton={false}
                     render={
                       <Link
-                        to="/$workspaceSlug/workflows"
-                        params={{ workspaceSlug: slug }}
-                        search={{ workflow: action.workflowId, view: 'runs', run: action.runId }}
+                        to="/$workspaceSlug/workflows/$workflowId"
+                        params={{ workspaceSlug: slug, workflowId: action.workflowId }}
+                        search={{ view: 'runs', run: action.runId }}
                       />
                     }
                   >

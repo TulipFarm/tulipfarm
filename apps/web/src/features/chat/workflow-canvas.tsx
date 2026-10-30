@@ -40,13 +40,9 @@ export function WorkflowCanvas({ workspaceId, reference }: { workspaceId: string
       nativeButton={false}
       render={
         <Link
-          to="/$workspaceSlug/workflows"
-          params={{ workspaceSlug: workspace.slug }}
-          search={
-            reference.kind === 'run'
-              ? { workflow: reference.workflowId, run: reference.runId, view: 'runs' }
-              : { workflow: reference.workflowId }
-          }
+          to="/$workspaceSlug/workflows/$workflowId"
+          params={{ workspaceSlug: workspace.slug, workflowId: reference.workflowId }}
+          search={reference.kind === 'run' ? { run: reference.runId, view: 'runs' } : {}}
         />
       }
     >

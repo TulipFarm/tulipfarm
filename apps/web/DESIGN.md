@@ -423,6 +423,20 @@ over-limit items whose legend always lists all five states. A repository picker
 keeps one vertical scrolling body with its selected count and actions in a
 footer, associated with the owning form through the native `form` attribute.
 
+Workflows follow the same directory pattern. The list has a `SearchField`, an
+outline `ToggleGroup` (Current, Archived) with counts, and one bordered list. Each
+row is a link with a trigger tile (`TriggerIcon`), name, plain-language trigger
+line, and a fixed-width status column (Sprout `Status` mark, label, next run).
+Refresh and New workflow sit in the page header, and both the list and detail
+pages use the full content width. An open workflow lives at
+`/workflows/<id>` (legacy `?workflow=<id>` links redirect) and shows a
+breadcrumb, a hero (trigger tile, name, a status line, and one muted line for
+live revision, next run, and saved revision), an optional sponsorship notice,
+and line `Tabs`: Overview (the diagram only), Runs (history first; the run form
+opens only from **Start a run**), and Settings (access, scheduled runs, webhook
+setup, and archiving). Keep each group to a few elements, show people by name
+or "You", never raw IDs, and don't repeat a fact the summary already shows.
+
 For dialogs whose controls arrive asynchronously, set `initialFocus` to a stable
 title ref with `tabIndex={-1}`. Do not let loading order focus an unrelated
 disclosure, and do not suppress keyboard focus rings on controls. Preserve Tab,

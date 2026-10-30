@@ -178,7 +178,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       page.on('pageerror', error => errors.push(String(error)));
 
       await page.goto(`${origin}/table-steps-proof/workflows`);
-      await page.getByRole('button', { name: 'Add lead', exact: true }).click();
+      await page.getByRole('link', { name: 'Add lead', exact: true }).click();
       const editor = page.getByRole('region', { name: 'Workflow editor' });
       await editor.getByRole('heading', { name: '1. Add a table row' }).waitFor();
       await editor.getByText('Add mapped field', { exact: true }).first().waitFor();
@@ -204,7 +204,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const [run] = await service.history(w.id, w.userId, workflowId).then(page => page.runs);
       assert.equal(run.status, 'completed');
       const recordId = run.steps[0].output.recordId.slice(0, 8);
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await page.getByRole('button', { name: 'Check run history' }).click();
       const history = page.getByRole('region', { name: 'Run history' });
       await history.getByText('3 workflow steps').click();

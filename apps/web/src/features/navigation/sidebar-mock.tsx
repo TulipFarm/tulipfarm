@@ -36,7 +36,6 @@ function useMockLocation() {
     select: location => ({
       pathname: location.pathname,
       scenario: new URLSearchParams(location.searchStr).get('scenario') ?? 'ready',
-      workflow: new URLSearchParams(location.searchStr).get('workflow'),
     }),
   });
 }
@@ -76,13 +75,13 @@ export function SidebarMockNavItem({ page }: { page: Page }) {
     );
   const entries = (location.scenario === 'empty' ? [] : names).map((name, index) => {
     const id = idFor(index);
-    const href = page.label === 'Workflows' ? `${base}?workflow=${id}` : `${base}/${id}`;
+    const href = `${base}/${id}`;
     return {
       id,
       name:
         location.scenario === 'long' && index === 0 ? `${name}: a long item name that should stay on one line` : name,
       link: <Link to={href} preload={false} />,
-      active: page.label === 'Workflows' ? active && location.workflow === id : location.pathname === href,
+      active: location.pathname === href,
     };
   });
   return (
@@ -114,7 +113,7 @@ export function SidebarMockPage() {
     integrations: 'Integrations',
   };
   const label = labels[segment] ?? 'New chat';
-  const selected = location.workflow ?? location.pathname.split('/')[3];
+  const selected = location.pathname.split('/')[3];
   const index = [0, 1, 2].find(index => idFor(index) === selected);
   const name = index === undefined ? null : samples[label]?.[index];
   const backHref = `/sidebar-mock/${segment}`;

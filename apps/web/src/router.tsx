@@ -914,6 +914,11 @@ export const workspaceWorkflowsRoute = createRoute({
   validateSearch: search => workflowPageSearch.parse(search),
   component: lazyRouteComponent(() => import('./pages/workflows')),
 });
+// The workflows page reads this param itself, so opening a workflow keeps the page mounted.
+export const workspaceWorkflowRoute = createRoute({
+  getParentRoute: () => workspaceWorkflowsRoute,
+  path: '$workflowId',
+});
 const workspaceSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings',
@@ -1053,7 +1058,7 @@ export const router = createRouter({
       importSkillRoute,
       skillImportRoute,
       skillDetailRoute,
-      workspaceWorkflowsRoute,
+      workspaceWorkflowsRoute.addChildren([workspaceWorkflowRoute]),
       workspaceCalendarRoute,
       workspaceSettingsRoute,
       workspaceSoulRoute,

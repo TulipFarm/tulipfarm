@@ -29,8 +29,20 @@ export async function saveWorkflow(service, workspace, definition, previous) {
   return workflow;
 }
 
+export async function showWorkflowList(page) {
+  const breadcrumb = page
+    .getByRole('navigation', { name: 'Breadcrumb' })
+    .getByRole('link', { name: 'Workflows', exact: true });
+  if (await breadcrumb.count()) await breadcrumb.click();
+  await page.getByRole('region', { name: 'Workflow selection', exact: true }).waitFor();
+}
+
+export async function showWorkflowSettings(page) {
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+}
+
 export async function openWorkflow(page, workflow) {
-  await page.getByRole('button', { name: 'All workflows', exact: true }).click();
+  await showWorkflowList(page);
   await Promise.all([
     page.waitForResponse(
       response =>
@@ -47,12 +59,13 @@ export async function openWorkflow(page, workflow) {
         new URL(response.url()).pathname.endsWith(`/workflows/${workflow.id}`) &&
         new URL(response.url()).searchParams.get('revision') === 'saved',
     ),
-    page.getByRole('button', { name: workflow.definition.name, exact: true }).click(),
+    page.getByRole('link', { name: workflow.definition.name, exact: true }).click(),
   ]);
   assert.equal(response.status(), 200);
   assert.equal((await response.json()).revision, workflow.revision);
   const viewer = page.getByRole('region', { name: `${workflow.definition.name} workflow`, exact: true });
-  await viewer.getByRole('heading', { name: workflow.definition.name, exact: true }).waitFor();
+  await page.getByRole('heading', { level: 1, name: workflow.definition.name, exact: true }).waitFor();
+  await viewer.waitFor();
   await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
   assert.equal(await viewer.getByRole('button', { name: 'Diagram', exact: true }).getAttribute('aria-pressed'), 'true');
   const diagram = viewer.getByRole('figure', { name: 'Read-only workflow diagram', exact: true });

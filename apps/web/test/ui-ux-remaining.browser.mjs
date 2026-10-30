@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { assertConfiguration } from './workflow-definition.fixture.mjs';
+import { assertConfiguration, showWorkflowList } from './workflow-definition.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
 
 const baseline = process.env.UI_BASELINE === '1';
@@ -419,20 +419,20 @@ try {
     await shot('workflows');
     if (!baseline) {
       await page.getByLabel('Find workflows').fill('review 20');
-      await page.getByRole('button', { name: 'Customer review 20', exact: true }).click();
+      await page.getByRole('link', { name: 'Customer review 20', exact: true }).click();
       const viewer = page.getByRole('region', { name: 'Customer review 20 workflow', exact: true });
-      await viewer.getByText('Saved revision', { exact: true }).waitFor();
+      await viewer.getByRole('figure', { name: 'Read-only workflow diagram', exact: true }).waitFor();
       await assertConfiguration(viewer, 1, workflows[19].definition.steps[0]);
       assert.equal(await page.getByLabel('Name', { exact: true }).count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Save revision', exact: true }).count(), 0);
-      await page.getByRole('button', { name: 'Runs', exact: true }).click();
-      await page.getByRole('heading', { name: 'Run manually', exact: true }).waitFor();
-      await page.getByText('No runs yet. Activate the saved revision, and run it above.', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Definition and activation', exact: true }).click();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
+      await page.getByText('No runs yet. Activate the workflow, then choose Start a run.', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('heading', { name: 'Run manually', exact: true }).count(), 0);
+      await page.getByRole('tab', { name: 'Overview', exact: true }).click();
       await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
       await assertConfiguration(viewer, 1, workflows[19].definition.steps[0]);
       await shot('workflow-inspector');
-      await page.getByRole('button', { name: 'All workflows', exact: true }).click();
+      await showWorkflowList(page);
       assert.equal(await page.getByLabel('Find workflows').inputValue(), 'review 20');
       await page.getByRole('button', { name: 'New workflow', exact: true }).click();
       await page.waitForURL(url => /^\/acme\/?$/.test(url.pathname));

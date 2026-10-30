@@ -213,6 +213,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       ]);
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       const upcoming = page.getByRole('region', { name: 'Upcoming record dates' });
       await upcoming
         .getByText('No upcoming record dates. Future dates appear after the next sweep.', { exact: true })
@@ -226,8 +227,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         '09:00 in Berlin summer time three days before July 20, for the Active contract only',
       );
       await openWorkflow(page, await saved());
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       await upcoming.getByText(`Record ${contract.id.slice(0, 8)} / ${formatted(dueAt)}`, { exact: true }).waitFor();
-      await page.getByText(`Next scheduled run ${formatted(dueAt)}.`, { exact: false }).waitFor();
+      await page
+        .getByRole('region', { name: 'Workflow summary', exact: true })
+        .getByText(`Next run ${formatted(dueAt)}`, { exact: false })
+        .waitFor();
 
       await inTransaction(migration, async client => {
         await client.query(`SET LOCAL ROLE "${w.names.customOwner}"`);
@@ -255,10 +260,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.due(w.id);
       await page.goto(`${origin}/record-proof/workflows`);
       await page
-        .getByRole('table', { name: 'Workflows' })
+        .getByRole('region', { name: 'Workflow selection' })
         .getByText('Disabled: record field unavailable', { exact: true })
         .waitFor();
-      await page.getByRole('button', { name: 'Renewal reminder', exact: true }).click();
+      await page.getByRole('link', { name: 'Renewal reminder', exact: true }).click();
       await page
         .getByText(
           'Disabled automatically because the table, watched fields, or filter its trigger uses is no longer available. Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',
