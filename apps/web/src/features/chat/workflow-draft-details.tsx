@@ -3,6 +3,7 @@ import { ReviewRow, ReviewRows, ReviewSteps, ReviewValues, type ReviewStep } fro
 import type { DraftView, WorkflowProposal } from '@tulipfarm/agents/draft-contracts';
 import {
   comparisonWords,
+  describeGitHubTrigger,
   describeValue,
   filterPhrase,
   recordScheduleDescription,
@@ -166,6 +167,8 @@ function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource
       return `Workspace event “${trigger.name}”`;
     case 'provider':
       return `Connected provider records ${trigger.event}, checked every ${trigger.minutes} minutes`;
+    case 'github':
+      return `${describeGitHubTrigger(trigger)}, repository ID ${trigger.repositoryId}. Run input holds a short summary of the GitHub event`;
     case 'record':
       return recordSource
         ? `${recordScheduleDescription(trigger.field, `“${recordSource.field}”`)}, once for each row of “${recordSource.table}”. Run input holds the row ID and values`

@@ -85,6 +85,7 @@ import type { AgentSetupOptions } from '@tulipfarm/agents/setup';
 import { registerAgentAuthoringAssistance } from './agent-authoring-assistance.ts';
 import { registerSystemPackages } from './system-packages.ts';
 import { configuredSkillRuntimeProbe } from '@tulipfarm/workflow-snippets/client';
+import { createGitHubSubscriptions, createGitHubWorkflowFanOut } from '@tulipfarm/workflows/github-triggers';
 
 export function registerStorageComposition(
   app: FastifyInstance,
@@ -109,7 +110,15 @@ export function registerStorageComposition(
   const wake = workflowWake(app, temporal);
   const wakeTask = taskWake(app, temporal);
   const wakeTaskAction = taskActionWake(app, runtime, wakeTask, wake);
-  registerAuthoringDrafts(app, { runtime, auth: dependencies.auth, modelFamilyEligibility, wake, agentSetup });
+  const githubSubscriptions = createGitHubSubscriptions(dependencies.pool);
+  registerAuthoringDrafts(app, {
+    runtime,
+    auth: dependencies.auth,
+    modelFamilyEligibility,
+    wake,
+    agentSetup,
+    githubSubscriptions,
+  });
   registerAgentAuthoringAssistance(app, {
     runtime,
     auth: dependencies.auth,
@@ -123,6 +132,7 @@ export function registerStorageComposition(
     agentSteps: true,
     agentResultReadable: createAgentTasks(runtime).resultReadable,
     wake,
+    githubSubscriptions,
   });
   registerWorkflows(app, { auth: dependencies.auth, service: workflows, identity: dependencies.pool });
   registerWorkflowDispatch(app, { pool: dependencies.pool, service: workflows, temporal });
@@ -150,6 +160,7 @@ export function registerStorageComposition(
     pool: dependencies.pool,
     temporal,
     googleService,
+    githubWorkflowFanOut: createGitHubWorkflowFanOut(dependencies.pool, runtime),
     // Recognition runs in the worker; the API only needs to know a model can read images to queue re-parses.
     recognitionAvailable: recognitionAvailability(runtime),
     ...(files ? { files } : {}),

@@ -9,6 +9,8 @@ import {
 
 const errorSchema = { type: 'object', properties: { error: { type: 'string' } }, required: ['error'] };
 
+export type GitHubWorkflowFanOut = (delivery: { event: string; deliveryId: string; body: unknown }) => Promise<void>;
+
 /** The webhook intake is on only when a GitHub App ID and its webhook secret are both configured. */
 export function githubKnowledgeEventsFromEnvironment(
   pool: Pool | undefined,
@@ -23,7 +25,12 @@ export function githubKnowledgeEventsFromEnvironment(
   return createGitHubKnowledgeEvents({ pool, appId, signingSecret });
 }
 
-export function registerGitHubKnowledgeEvents(app: FastifyInstance, events: GitHubKnowledgeEvents | null) {
+/** `fanOut` hands each delivery accepted on `/github/events` to subscribed workflows after the 202 is sent. */
+export function registerGitHubKnowledgeEvents(
+  app: FastifyInstance,
+  events: GitHubKnowledgeEvents | null,
+  fanOut?: GitHubWorkflowFanOut,
+) {
   app.register(async routes => {
     routes.removeContentTypeParser('application/json');
     routes.addContentTypeParser(
@@ -63,8 +70,9 @@ export function registerGitHubKnowledgeEvents(app: FastifyInstance, events: GitH
         async (request, reply) => {
           if (!events) return reply.code(503).send({ error: 'github-webhooks-disabled' });
           if (!Buffer.isBuffer(request.body)) return reply.code(400).send({ error: 'invalid-request' });
+          let receipt: Awaited<ReturnType<GitHubKnowledgeEvents['accept']>>;
           try {
-            return reply.code(202).send(await events.accept(request.body, request.headers, { keepBody }));
+            receipt = await events.accept(request.body, request.headers, { keepBody });
           } catch (error) {
             if (error instanceof GitHubWebhookError)
               return reply
@@ -75,6 +83,22 @@ export function registerGitHubKnowledgeEvents(app: FastifyInstance, events: GitH
             request.log.error({ err: error }, 'GitHub webhook delivery was not recorded');
             return reply.code(503).send({ error: 'github-webhook-unavailable' });
           }
+          reply.code(202).send(receipt);
+          // GitHub waits at most 10 seconds for a reply, so workflows get the delivery only after it has its 202.
+          if (keepBody && fanOut)
+            try {
+              await fanOut({
+                event: String(request.headers['x-github-event']),
+                deliveryId: receipt.deliveryId,
+                body: JSON.parse(request.body.toString('utf8')),
+              });
+            } catch (error) {
+              request.log.error(
+                { err: error, deliveryId: receipt.deliveryId },
+                'GitHub event did not reach every workflow',
+              );
+            }
+          return reply;
         },
       );
     intake(

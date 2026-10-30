@@ -33,6 +33,10 @@ const when = (iso: string) =>
 
 export function runNote(run: Pick<z.infer<typeof runSchema>, 'source' | 'status' | 'input' | 'error'>) {
   if (run.source === 'row') return rowNote(run);
+  if (run.source === 'github')
+    return run.status === 'skipped' && run.error === 'github-repository-not-connected'
+      ? 'Skipped because the sponsor no longer has this GitHub repository in their GitHub Knowledge.'
+      : null;
   const input = run.source === 'schedule' || run.source === 'record' ? scheduledInput.safeParse(run.input) : null;
   if (!input?.success) return null;
   const { scheduledFor, missedThrough, missedCount = 1, missedCountCapped } = input.data;

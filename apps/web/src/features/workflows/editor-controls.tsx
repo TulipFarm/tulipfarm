@@ -24,6 +24,8 @@ import { workspaceRoute } from '@/router';
 import { fromZonedInput, zonedInput } from './zoned-time';
 import { cronDayChoices, ordinaryCron, validateCron } from './calendar-schedule';
 import { OutputPathControl } from './output-picker';
+import { describeGitHubTrigger } from './definition-description';
+import { GitHubInstallNote } from './github-install-note';
 
 export function stepTitle(step: Definition['steps'][number]) {
   switch (step.kind) {
@@ -348,6 +350,11 @@ export function WorkflowTrigger({
               App event
             </Button>
           </div>
+          {trigger.kind === 'github' && (
+            <p className="text-sm text-muted-foreground">
+              {describeGitHubTrigger(trigger)}. Change it in chat. <GitHubInstallNote workspaceId={workspaceId} />
+            </p>
+          )}
           {trigger.kind === 'event' && (
             <>
               <Label htmlFor="event">Event name</Label>

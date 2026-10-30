@@ -10,6 +10,7 @@ import type {
   workflowSchema,
   providerIntegrationSchema,
 } from '@tulipfarm/workflows/contracts';
+import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { AgentStorage } from './store.ts';
 import type { DraftOutcome, WorkflowProposal } from './draft-contracts.ts';
 
@@ -24,6 +25,7 @@ export type WorkflowDrafts = {
   list(actor: HumanActor): Promise<Workflow[]>;
   read(actor: HumanActor, id: string): Promise<DefinitionView>;
   providers(actor: HumanActor): Promise<z.infer<typeof providerIntegrationSchema>[]>;
+  githubRepositories(actor: HumanActor): Promise<{ repositoryId: string; fullName: string }[]>;
   problem(actor: HumanActor, definition: Definition): Promise<DraftProblem | null>;
   sourceProblem(actor: HumanActor, trigger: Trigger): Promise<DraftProblem | null>;
   recordSource(
@@ -38,6 +40,13 @@ export type WorkflowDrafts = {
   apply(actor: HumanActor, draftId: string, commandId: string, proposal: WorkflowProposal): Promise<DraftOutcome>;
 };
 const unattended = (trigger: Trigger) => !['manual', 'event'].includes(trigger.kind);
+const githubProblems: Record<string, DraftProblem> = {
+  'github-repository-not-connected': {
+    error: 'github-repository-not-connected',
+    instruction:
+      'This GitHub repository is not connected to your GitHub Knowledge. Ask the human to connect it in the GitHub Knowledge picker, then draft again. Never ask for GitHub tokens or secrets in chat.',
+  },
+};
 const recordProblems: Record<string, DraftProblem> = {
   'access-denied': {
     error: 'record-source-denied',
@@ -111,6 +120,7 @@ export function nextWorkflowRun(trigger: Trigger, now = new Date()): string | nu
     case 'webhook':
     case 'event':
     case 'provider':
+    case 'github':
     case 'record':
     case 'row':
       return null;
@@ -174,7 +184,7 @@ export function summarizeWorkflow(workflow: Workflow) {
 export function createWorkflowDrafts(
   storage: AgentStorage,
   workspaceId: string,
-  options: { wake?: (work: Work) => Promise<void> } = {},
+  options: { wake?: (work: Work) => Promise<void>; githubSubscriptions?: GitHubSubscriptions } = {},
 ): WorkflowDrafts {
   const codeSteps = workflowCodeStepsEnabled();
   const service = createWorkflows(storage, { codeSteps, agentSteps: true, ...options });
@@ -184,6 +194,7 @@ export function createWorkflowDrafts(
     (await service.providers.list(workspaceId, actor.userId)).filter(
       source => source.enabled && source.authorized && source.capabilities.use,
     );
+  const githubRepositories = (actor: HumanActor) => service.githubRepositories(workspaceId, actor.userId);
   async function find(actor: HumanActor, id: string) {
     return (await list(actor)).find(workflow => workflow.id === id) ?? null;
   }
@@ -226,6 +237,11 @@ export function createWorkflowDrafts(
         };
       }
     }
+    if (trigger.kind === 'github')
+      return labelled(githubProblems, async () => {
+        await service.checkGitHubRepository(workspaceId, actor.userId, trigger);
+        return null;
+      });
     const source =
       trigger.kind === 'record'
         ? await recordSource(actor, trigger)
@@ -334,6 +350,7 @@ export function createWorkflowDrafts(
     list,
     read,
     providers,
+    githubRepositories,
     problem,
     sourceProblem,
     recordSource,

@@ -27,6 +27,7 @@ export function nextOccurrence(trigger: Definition['trigger'], now: Date): strin
     case 'webhook':
     case 'event':
     case 'provider':
+    case 'github':
       return null;
     default: {
       const exhaustive: never = trigger;

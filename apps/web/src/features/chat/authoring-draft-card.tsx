@@ -18,6 +18,7 @@ import type {
 import { RowDraftCard, TechnicalDetail } from './row-draft-card';
 import { formatRun, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowCanvasButton } from './workflow-canvas';
+import { GitHubInstallNote } from '@/features/workflows/github-install-note';
 import { WorkflowSlackCheck } from '@/features/workflows/slack-step';
 import type { ConversationApi, ConversationCommand } from './conversation-api';
 import { AgentSetupDraftCard } from './agent-setup-draft-card';
@@ -301,6 +302,11 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
               ? `Next run ${formatRun(draft.workflowNextRunAt, workflow.input.definition.trigger)}.`
               : 'Review the trigger, actors, and steps in Canvas.'}
           </p>
+          {workflow.input.definition.trigger.kind === 'github' && (
+            <p className="text-sm">
+              <GitHubInstallNote workspaceId={workspace.id} />
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <WorkflowCanvasButton
               workspaceId={workspace.id}
@@ -474,7 +480,9 @@ function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, pr
           ? 'Workflow active. Upcoming record dates appear on the Workflows page within a minute.'
           : proposal.input.definition.trigger.kind === 'row'
             ? 'Workflow active. Runs start within about a minute of each matching row change.'
-            : 'Workflow active.';
+            : proposal.input.definition.trigger.kind === 'github'
+              ? 'Workflow active. Runs start when GitHub sends a matching event.'
+              : 'Workflow active.';
     case 'disabled':
       return 'Workflow disabled. It will not start new runs.';
     case 'sponsor-required':

@@ -34,7 +34,11 @@ import { createGitHubKnowledge, type GitHubCorpusProvider } from '@tulipfarm/kno
 import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { registerGitHubKnowledge, githubDocumentsResponseSchema } from './knowledge-github.ts';
 import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
-import { githubKnowledgeEventsFromEnvironment, registerGitHubKnowledgeEvents } from './knowledge-github-events.ts';
+import {
+  githubKnowledgeEventsFromEnvironment,
+  registerGitHubKnowledgeEvents,
+  type GitHubWorkflowFanOut,
+} from './knowledge-github-events.ts';
 import { registerGitHubDeliveryRetention } from './github-delivery-retention.ts';
 import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
 import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
@@ -67,6 +71,7 @@ export function registerKnowledgeComposition(
     githubCorpus?: GitHubCorpusProvider;
     atlassianCorpus?: AtlassianCorpusProvider;
     defaultKnowledge?: ReturnType<typeof defaultKnowledgeStarter>;
+    githubWorkflowFanOut?: GitHubWorkflowFanOut;
   },
 ) {
   const gate = createDefaultKnowledgeGate({ runtime: dependencies.runtime });
@@ -355,7 +360,7 @@ export function registerKnowledgeComposition(
     },
   });
   const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
-  registerGitHubKnowledgeEvents(app, githubEvents);
+  registerGitHubKnowledgeEvents(app, githubEvents, dependencies.githubWorkflowFanOut);
   if (dependencies.pool) registerGitHubDeliveryRetention(app, dependencies.pool, dependencies.env ?? process.env);
   registerDefaultKnowledge(app, {
     auth: dependencies.auth,
