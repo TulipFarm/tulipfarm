@@ -380,6 +380,8 @@ function replyFailureCause(error: unknown): string | undefined {
   if (error instanceof SourceAuthorizationUnavailable && code === 'github-rate-limited') return code;
   return undefined;
 }
+export const conversationToolNameAllowed = (name: string) => /^[a-z][a-zA-Z0-9.]{0,63}$/.test(name);
+
 export const modelFailureEndsTurn = (failure: string) => {
   const parsed = modelFailureSchema.safeParse(failure);
   return parsed.success && terminalModelFailures.has(parsed.data);
@@ -1847,7 +1849,7 @@ export function createConversationExecutor(
               name === 'web.search' ||
               name === 'files.create'));
         const currentSources = conversationResultSchema.shape.sources.parse(dependencies);
-        if (++calls > chatToolCallLimit || !/^[a-z][a-z0-9.]{0,63}$/.test(name))
+        if (++calls > chatToolCallLimit || !conversationToolNameAllowed(name))
           throw new Error('conversation-tool-unavailable');
         const callId = randomUUID();
         const toolStarted = performance.now();
