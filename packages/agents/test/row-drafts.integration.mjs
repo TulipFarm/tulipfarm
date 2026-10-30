@@ -238,31 +238,35 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.equal((await live()).includes(existing), false);
   });
 
-  await t.test('with only TulipFarm table and chat sources rows.create still writes directly', async () => {
-    for (const sources of [
-      [],
-      [
-        { kind: 'table-rows', tableId: table.tableId, revision: table.revision },
-        { kind: 'table-schema', tableId: table.tableId, revision: table.revision },
-      ],
-    ]) {
-      const before = await live();
-      const { chatId, result } = await chatTool(createCall('direct'), sources);
-      assert.equal(typeof result.id, 'string');
-      assert.deepEqual(await live(), [...before, result.id].sort());
-      assert.equal(
-        Number(
-          (
-            await f.db.platform.query(
-              `SELECT count(*) FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`,
-              [chatId],
-            )
-          ).rows[0].count,
-        ),
-        0,
-      );
-    }
-  });
+  await t.test(
+    'with only TulipFarm table, chat and Slack channel sources rows.create still writes directly',
+    async () => {
+      for (const sources of [
+        [],
+        [
+          { kind: 'table-rows', tableId: table.tableId, revision: table.revision },
+          { kind: 'table-schema', tableId: table.tableId, revision: table.revision },
+        ],
+        [{ kind: 'shared-slack-turn', eventId: randomUUID() }],
+      ]) {
+        const before = await live();
+        const { chatId, result } = await chatTool(createCall('direct'), sources);
+        assert.equal(typeof result.id, 'string');
+        assert.deepEqual(await live(), [...before, result.id].sort());
+        assert.equal(
+          Number(
+            (
+              await f.db.platform.query(
+                `SELECT count(*) FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`,
+                [chatId],
+              )
+            ).rows[0].count,
+          ),
+          0,
+        );
+      }
+    },
+  );
 
   await t.test(
     'knowledge content makes row writes review drafts that approve with their knowledge source',
@@ -514,12 +518,12 @@ test('chat row writes after untrusted content become member-approved review draf
 
   await t.test('sources a draft cannot show and unrecognised kinds refuse row writes without a draft', async () => {
     const before = await live();
-    for (const source of [
-      { kind: 'unknown' },
-      { kind: 'unavailable' },
-      { kind: 'shared-slack-turn', eventId: randomUUID() },
+    for (const sources of [
+      [{ kind: 'unknown' }],
+      [{ kind: 'unavailable' }],
+      [web, { kind: 'shared-slack-turn', eventId: randomUUID() }],
     ]) {
-      const { chatId, result } = await chatTool(createCall('unreviewable'), [source]);
+      const { chatId, result } = await chatTool(createCall('unreviewable'), sources);
       assert.equal(result.error, 'review-unavailable');
       assert.match(result.instruction, /^No row has been changed\./);
       assert.equal(

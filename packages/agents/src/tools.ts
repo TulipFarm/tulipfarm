@@ -1832,9 +1832,13 @@ const planErrorInstructions: Record<AgentPlanError['code'], string> = {
   'plan-closed': 'Nothing changed. This plan is closed. Create a new plan for new work.',
   'not-starter': 'Nothing changed. Only the person who started this plan can change it.',
 };
-/** Only TulipFarm-internal sources and the requester's own personal memory leave chat row writes direct; any other source, including a future kind, can carry instructions. */
+/**
+ * Only TulipFarm-internal sources, the Slack channel thread a member invoked the agent from, and the requester's own personal memory leave chat row writes direct; any other source, including a future kind, can carry instructions.
+ * Direct writes still run under the invoking member's own table permissions.
+ */
 const trustedSourceKinds: ReadonlySet<string> = new Set([
   'private-conversation',
+  'shared-slack-turn',
   'table',
   'table-rows',
   'table-schema',
