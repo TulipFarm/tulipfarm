@@ -6,10 +6,15 @@ import { createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspac
 import { fixture, connect, loadPlatformBaseline } from '../../../workspace-storage/test/integration/fixture.mjs';
 import { createTableService } from '@tulipfarm/tables/service';
 import { activeGeneration, projectWorkspaceMemberProfile, workspaceMembersTable } from '@tulipfarm/tables/store';
-import { workspaceMemberFields, WorkspaceMemberError } from '@tulipfarm/tables/workspace-members';
+import {
+  workspaceMemberAccess,
+  workspaceMemberFields,
+  WorkspaceMemberError,
+} from '@tulipfarm/tables/workspace-members';
 import { TableQueryError } from '@tulipfarm/tables/query';
 import { createTableWithRows, tableDefinition, textField } from '../fixture.mjs';
 import { createAgentRecordTools } from '../../../agents/dist/record-tools.js';
+import { createChatTools } from '../../../agents/dist/tools.js';
 
 test(
   'is me binds each human and access incarnation without changing shared queries or source permissions',
@@ -138,7 +143,30 @@ test(
     assert.equal(listed.find(table => table.id === directory.table_id).systemKind, 'workspace-members');
     assert.equal(listed.find(table => table.id === ticketsId).systemKind, undefined);
     const actor = { kind: 'human', userId: workspace.userId, membershipId: workspace.membershipId };
-    assert.equal((await recordTools.status(workspace.id, actor, directory.table_id)).systemKind, 'workspace-members');
+    const status = await recordTools.status(workspace.id, actor, directory.table_id);
+    assert.equal(status.systemKind, 'workspace-members');
+    assert.match(status.instruction, /without workspace access/);
+    const chat = createChatTools(runtime);
+    const createMember = async values =>
+      (
+        await chat.invokeWithSources(
+          { workspaceId: workspace.id, actor, callId: randomUUID() },
+          { tool: 'rows.create', tableId: directory.table_id, expectedAppliedRevision: directory.revision, values },
+        )
+      ).result;
+    const name = { [workspaceMemberFields.name]: { kind: 'text', value: 'Manual member' } };
+    assert.deepEqual(
+      { ...(await createMember(name)), message: undefined, instruction: undefined },
+      { error: 'invalid-values', fieldId: workspaceMemberFields.active, message: undefined, instruction: undefined },
+    );
+    const protectedWrite = await createMember({
+      ...name,
+      [workspaceMemberFields.active]: { kind: 'boolean', value: true },
+      [workspaceMemberFields.access]: { kind: 'single-select', optionId: workspaceMemberAccess.none },
+      [workspaceMemberFields.accountEmail]: { kind: 'text', value: 'manual@example.test' },
+    });
+    assert.equal(protectedWrite.error, 'member-field-protected');
+    assert.match(protectedWrite.instruction, /^Nothing changed\. .*Account email empty/);
     const inspected = await recordTools.inspect(workspace.id, actor, ticketsId);
     assert.ok(inspected.query.fields.find(field => field.fieldId === assigneeId).ops.includes('is-me'));
     assert.ok(!inspected.query.fields.find(field => field.fieldId === unrelatedId).ops.includes('is-me'));
@@ -235,6 +263,15 @@ test(
       ids: [members.get(readerId)],
     });
     assert.equal(choices.choices[0].label, 'Same name (inactive)');
+    const byEmail = await tables.references(workspace.id, workspace.userId, {
+      tableId: ticketsId,
+      fieldId: assigneeId,
+      search: readerId,
+    });
+    assert.deepEqual(
+      byEmail.choices.map(choice => choice.id),
+      [members.get(readerId)],
+    );
     const missingUser = randomUUID(),
       missingAccess = randomUUID();
     await raw.query(`INSERT INTO ${s}.tf_memberships(id,user_id,role) VALUES($1,$2,'member')`, [

@@ -87,8 +87,14 @@ test('decimal, date, timestamp and required values have exact constraints', () =
   ])
     assert.equal(valueSchema.safeParse({ kind: 'timestamp', value }).success, false);
   assert.deepEqual(validateRecord(definitionSchema.parse(definition()), {}), { [field]: null });
-  assert.throws(() => validateRecord(definitionSchema.parse(definition([{ ...text, required: true }])), {}));
-  assert.throws(() => validateRecord(definitionSchema.parse(definition()), { [second]: null }));
+  assert.throws(() => validateRecord(definitionSchema.parse(definition([{ ...text, required: true }])), {}), {
+    name: 'TableValidationError',
+    fieldId: field,
+  });
+  assert.throws(() => validateRecord(definitionSchema.parse(definition()), { [second]: null }), {
+    name: 'TableValidationError',
+    fieldId: second,
+  });
 });
 
 test('select values use stable active option identities rather than labels', () => {

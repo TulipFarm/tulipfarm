@@ -20,9 +20,11 @@ export const revisionSchema = z
   .regex(/^[a-f0-9]{40}$/)
   .brand<'TableRevision'>();
 export class TableValidationError extends Error {
-  constructor(message: string) {
+  readonly fieldId: string | undefined;
+  constructor(message: string, fieldId?: string) {
     super(message);
     this.name = 'TableValidationError';
+    this.fieldId = fieldId;
   }
 }
 export const tableDefinitionMessages = {
@@ -437,13 +439,22 @@ export function validateRecord(definition: TableDefinition, input: unknown): Tab
   const values = valuesSchema.parse(input);
   const fields = new Map(definition.fields.map(field => [String(field.id), field]));
   const result: TableValues = {};
+  const validateField = (field: TableField, value: unknown) => {
+    try {
+      return validateValue(field, value);
+    } catch (error) {
+      if (error instanceof TableValidationError && error.fieldId === undefined)
+        throw new TableValidationError(error.message, field.id);
+      throw error;
+    }
+  };
   for (const [id, value] of Object.entries(values)) {
     const field = fields.get(id);
-    if (!field) throw new TableValidationError('Unknown field identity');
-    result[field.id] = validateValue(field, value);
+    if (!field) throw new TableValidationError('Unknown field identity', id);
+    result[field.id] = validateField(field, value);
   }
   for (const field of definition.fields) {
-    if (!Object.hasOwn(result, field.id)) result[field.id] = validateValue(field, null);
+    if (!Object.hasOwn(result, field.id)) result[field.id] = validateField(field, null);
   }
   return result;
 }

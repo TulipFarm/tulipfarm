@@ -32,7 +32,10 @@ export const agentTableStatusSchema = z.strictObject({
   maintenance: z.boolean(),
   migration: z.null(),
   systemKind: z.literal('workspace-members').optional(),
+  instruction: z.string().optional(),
 });
+export const workspaceMembersInstruction =
+  'In Workspace members you can add or edit a person without workspace access: set Name, Active, Workspace access to No access, and optionally Contact email. Leave Photo and Account email empty. Only an invitation from workspace settings gives access.';
 export const agentRecordListSchema = z.strictObject({
   records: z.array(agentRecordSchema),
   total: z.string().nullable(),
