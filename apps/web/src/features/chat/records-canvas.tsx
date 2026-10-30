@@ -361,65 +361,63 @@ function ChangedRows({
                 </Alert>
               )}
               <ReferenceRetry linked={linked} files={files} />
-              <div className="overflow-hidden rounded-xl border">
-                <Table<RecordRow>
-                  aria-label={table.definition.label}
-                  data={rows.map(record => ({ id: record.id, record }))}
-                  getRowId={row => row.id}
-                  columns={[
-                    ...(change
-                      ? [
-                          {
-                            key: 'change',
-                            header: 'Change',
-                            cell: ({ record }) =>
-                              created.has(record.id) ? (
-                                <Badge variant="success">Added</Badge>
-                              ) : (
-                                <Badge variant="info">Updated</Badge>
-                              ),
-                          } satisfies TableColumn<RecordRow>,
-                        ]
-                      : []),
-                    ...table.definition.fields.map((field): TableColumn<RecordRow> => ({
-                      key: `field:${field.id}`,
-                      header: field.label,
-                      cell: ({ record }) => (
-                        <TableValueView
-                          compact
-                          record={record}
-                          systemKind={table.systemKind}
-                          value={record.values[field.id]}
-                          definition={table.definition}
-                          fieldId={field.id}
-                          linked={linked.state}
-                          files={files.state}
-                          unavailableFileIds={record.unavailableFileIds}
-                          workspace={scope}
-                        />
-                      ),
-                    })),
-                  ]}
-                  actions={({ record }) => (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Open row"
-                      aria-label="Open row"
-                      nativeButton={false}
-                      render={
-                        <Link
-                          to="/$workspaceSlug/tables/$tableId"
-                          params={{ workspaceSlug: workspace.slug, tableId: table.id }}
-                          search={{ row: record.id }}
-                        />
-                      }
-                    >
-                      <ArrowUpRight size={14} />
-                    </Button>
-                  )}
-                />
-              </div>
+              <Table<RecordRow>
+                aria-label={table.definition.label}
+                data={rows.map(record => ({ id: record.id, record }))}
+                getRowId={row => row.id}
+                columns={[
+                  ...(change
+                    ? [
+                        {
+                          key: 'change',
+                          header: 'Change',
+                          cell: ({ record }) =>
+                            created.has(record.id) ? (
+                              <Badge variant="success">Added</Badge>
+                            ) : (
+                              <Badge variant="info">Updated</Badge>
+                            ),
+                        } satisfies TableColumn<RecordRow>,
+                      ]
+                    : []),
+                  ...table.definition.fields.map((field): TableColumn<RecordRow> => ({
+                    key: `field:${field.id}`,
+                    header: field.label,
+                    cell: ({ record }) => (
+                      <TableValueView
+                        compact
+                        record={record}
+                        systemKind={table.systemKind}
+                        value={record.values[field.id]}
+                        definition={table.definition}
+                        fieldId={field.id}
+                        linked={linked.state}
+                        files={files.state}
+                        unavailableFileIds={record.unavailableFileIds}
+                        workspace={scope}
+                      />
+                    ),
+                  })),
+                ]}
+                actions={({ record }) => (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Open row"
+                    aria-label="Open row"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        to="/$workspaceSlug/tables/$tableId"
+                        params={{ workspaceSlug: workspace.slug, tableId: table.id }}
+                        search={{ row: record.id }}
+                      />
+                    }
+                  >
+                    <ArrowUpRight size={14} />
+                  </Button>
+                )}
+              />
             </div>
           )
         }

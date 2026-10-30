@@ -230,18 +230,16 @@ export function CanvasItemView({
     case 'table':
       return (
         <CanvasSection title={item.title} meta={`${content.rows.length} ${content.rows.length === 1 ? 'row' : 'rows'}`}>
-          <div className="overflow-hidden rounded-xl border">
-            <Table<Record<string, string | number>>
-              aria-label={item.title}
-              caption={content.caption}
-              data={content.rows.map((cells, index) => ({
-                id: String(index),
-                ...Object.fromEntries(cells.map((cell, column) => [`c${column}`, cell])),
-              }))}
-              columns={content.columns.map((header, column) => ({ key: `c${column}`, header }))}
-              getRowId={row => String(row.id)}
-            />
-          </div>
+          <Table<Record<string, string | number>>
+            aria-label={item.title}
+            caption={content.caption}
+            data={content.rows.map((cells, index) => ({
+              id: String(index),
+              ...Object.fromEntries(cells.map((cell, column) => [`c${column}`, cell])),
+            }))}
+            columns={content.columns.map((header, column) => ({ key: `c${column}`, header }))}
+            getRowId={row => String(row.id)}
+          />
         </CanvasSection>
       );
     case 'chart':
