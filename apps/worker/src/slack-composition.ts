@@ -105,15 +105,6 @@ export async function createSlackPromptComposition(
     process.env.SLACK_CHANNEL_AGENTS_ENABLED === 'true' ? createSlackChannelAgents(channelOptions) : undefined;
   // Channel replies compact a long reply's tool results with the workspace policy and summary models, as a chat does.
   const compactor = conversationCompactor(runtime, family => conversationModel(family));
-  const defaults = channels
-    ? createSlackDefault({
-        ...channelOptions,
-        channels,
-        compactor,
-        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
-      })
-    : undefined;
-  const replies = createConversationExecutor(runtime);
   const pool = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_AUTHORING_DATABASE_URL),
     max: 1,
@@ -121,6 +112,32 @@ export async function createSlackPromptComposition(
     statement_timeout: 10000,
   });
   pool.on('error', () => log('error', 'dependency', 'database_connection_failed'));
+  // Row cards link to the row in the web app; a workspace whose address cannot be read gets unlinked cards.
+  const rowLink = async (workspaceId: string, tableId: string, recordId: string) => {
+    const slug = z
+      .string()
+      .min(1)
+      .optional()
+      .catch(undefined)
+      .parse(
+        (await pool.query('SELECT slug FROM app.workspace_flag_context($1)', [workspaceId]).catch(() => null))?.rows[0]
+          ?.slug,
+      );
+    if (!slug) return undefined;
+    const url = new URL(`/${encodeURIComponent(slug)}/tables/${encodeURIComponent(tableId)}`, settings.webOrigin);
+    url.searchParams.set('row', recordId);
+    return url.href;
+  };
+  const defaults = channels
+    ? createSlackDefault({
+        ...channelOptions,
+        channels,
+        compactor,
+        rowLink,
+        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
+      })
+    : undefined;
+  const replies = createConversationExecutor(runtime);
   const installations = createSlackInstallationDiscovery(pool, runtime, settings.config.appId);
   let connection: Connection;
   try {

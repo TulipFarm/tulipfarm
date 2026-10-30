@@ -116,7 +116,7 @@ const usingTools = (mode: PromptMode) =>
     ...(mode === 'tools'
       ? [
           'For multiple new rows in an existing table, inspect its fields once and use rows.create.batch with all requested rows. Do not create each row in a separate tool call. This row work does not need the table-authoring skill.',
-          'Before you create or change a row that names a person or another linked row, find that row with rows.resolveReference. If no row matches, ask the user what to do before you change anything.',
+          'Before you create or change a row that names a person or another linked row, call schema.inspect on the table you will write, then rows.resolveReference with its link field. Do not page through tables to look for the person. If no row matches, change nothing and ask the user to choose: leave that field empty, add the person to Workspace members without access, or give another name or email.',
         ]
       : []),
     'When a call needs data from an earlier call, wait for that result first.',
