@@ -231,7 +231,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.13.0 on 29 October 2026. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.14.0 on 30 October 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -367,8 +367,10 @@ dense rows; some older screens still use `lucide-react`. Third-party marks use
 
 ### Business record tables
 
-The record grid uses the shared Table's `grid` variant: a visible `input`-color
-frame and cell separators, a muted sticky header, and contained scrolling.
+Shared Sprout tables always use a grid look: a visible `input`-color frame and
+cell separators, a muted sticky header, and contained scrolling capped at 60dvh.
+There is no shared `Table` variant prop. The app-local records grid retains its
+own `grid` variant with the same visual treatment.
 Sortable headers always show a direction control; active sorts have a filled
 background. Low priority uses information blue, Medium/Normal uses warning
 amber, and High/Urgent uses destructive red. Keep authored option labels intact;
