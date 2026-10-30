@@ -4,13 +4,13 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { AccessDenied, canAccessTable } from '@tulipfarm/access';
 import { createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
+import { inTransaction, withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createGeneration, activateGeneration } from '@tulipfarm/tables/store';
 import { createTableService } from '@tulipfarm/tables/service';
 import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createSystemPackages } from '../src/system-packages.ts';
-import { packageCompiler } from '../src/system-package-compiler.ts';
+import { packageCompiler, packageIdentity } from '../src/system-package-compiler.ts';
 import { createWorkspaceSkills } from '../src/workspace-skills.ts';
 import { memorySkillBytes } from './skill-draft-fixture.mjs';
 
@@ -177,6 +177,76 @@ test('durable installation honors retries and review versions; readback drift ca
   assert.deepEqual(await createSystemPackages(options).read(w.id, w.userId, fresh.id), fresh);
 });
 
+for (const recovery of ['approve', 'resume'])
+  test(`package approval ${recovery} recovers committed approval with waiting nodes exactly once`, async t => {
+    const f = await packageFixture(t);
+    const pkg = await f.example('leave-management');
+    const skill = pkg.resources.find(resource => resource.kind === 'skill');
+    skill.requestedState = 'saved';
+    pkg.resources = [skill];
+    pkg.inputs = pkg.inputs.filter(input => ['owning-team', 'package-manager'].includes(input.key));
+    pkg.outputs = [];
+    pkg.requires.capabilities = ['skills'];
+    let view = await f.service.create(f.w.id, f.w.userId, {
+      requestId: randomUUID(),
+      package: pkg,
+      bindings: f.bindings,
+    });
+    view = await f.resume(view);
+    assert.equal(view.nodes[0].state, 'waiting-review');
+    const waiting = structuredClone(view);
+    const approval = { packageDigest: view.packageDigest, inputDigest: view.inputDigest };
+
+    // The protected approval commits independently of the installation's node-state transaction.
+    await withMaintenanceTransaction({
+      connectionString: f.db.login(f.w, 'confirmation'),
+      workspaceId: f.w.id,
+      capability: 'confirmation',
+      operation: tx =>
+        tx.client.query(
+          `INSERT INTO ${f.schema}.tf_system_package_reviews
+         (installation_id,resource_key,membership_id,request_id,digest,decision,attempt)
+         VALUES($1,'$package',$2,$3,$4,'approve',0)`,
+          [view.id, f.w.membershipId, packageIdentity(view.id, 'approve-package'), view.inputDigest],
+        ),
+    });
+    const service = createSystemPackages({
+      ...f.options,
+      resolveConfirmationCredential: async () => {
+        assert.fail('an already committed package approval must not request another protected write');
+      },
+    });
+    assert.deepEqual(await service.read(f.w.id, f.w.userId, view.id), { ...waiting, packageApproved: true });
+    await assert.rejects(
+      service.approve(f.w.id, f.w.userId, view.id, { ...approval, inputDigest: '0'.repeat(64) }),
+      /review-digest-conflict/,
+    );
+    const recover = current =>
+      recovery === 'approve'
+        ? service.approve(f.w.id, f.w.userId, current.id, approval)
+        : service.resume(f.w.id, f.w.userId, current.id, { expectedVersion: current.version });
+    view = await recover(view);
+    assert.equal(view.packageApproved, true);
+    assert.equal(view.status, recovery === 'approve' ? 'running' : 'completed');
+    assert.equal(view.nodes[0].state, recovery === 'approve' ? 'running' : 'completed');
+    assert.equal(view.version, waiting.version + 1);
+    if (recovery === 'approve') assert.deepEqual(view.nodes[0], { ...waiting.nodes[0], state: 'running' });
+    assert.deepEqual(await recover(view), view);
+    assert.deepEqual(await service.read(f.w.id, f.w.userId, view.id), view);
+    assert.deepEqual(
+      (
+        await f.db.platform.query(
+          `SELECT resource_key,decision FROM ${f.schema}.tf_system_package_reviews WHERE installation_id=$1`,
+          [view.id],
+        )
+      ).rows,
+      [{ resource_key: '$package', decision: 'approve' }],
+    );
+    view = await service.resume(f.w.id, f.w.userId, view.id, { expectedVersion: view.version });
+    assert.equal(view.status, 'completed');
+    assert.deepEqual(await service.approve(f.w.id, f.w.userId, view.id, approval), view);
+  });
+
 test('expired and confirmed-stale unapplied proposals require new reviews without changing identities or losing decisions', async t => {
   const f = await packageFixture(t);
   const pkg = await f.example('leave-management');
@@ -292,6 +362,111 @@ test('expired and confirmed-stale unapplied proposals require new reviews withou
   view = await f.resume(view);
   assert.equal(view.nodes[0].attempt, 2);
   assert.equal(view.nodes.at(-1).state, 'pending');
+  assert.deepEqual(await createSystemPackages(f.options).read(f.w.id, f.w.userId, view.id), view);
+});
+
+test('seed verification accepts decimal readback formatting but rejects numeric and text changes', async t => {
+  const f = await packageFixture(t);
+  const pkg = await f.example('leave-management');
+  const table = pkg.resources.find(resource => resource.key === 'leave-policies');
+  const seed = pkg.resources.find(resource => resource.key === 'leave-policies-initial');
+  const skill = pkg.resources.find(resource => resource.kind === 'skill');
+  skill.requestedState = 'saved';
+  seed.values.name.value = '20';
+  for (const [key, value, precision, scale] of [
+    ['allowance', '20', 12, 2],
+    ['fraction', '-1.250', 12, 3],
+    ['zero', '-0', 12, 2],
+    ['large', '9007199254740993.12', 20, 2],
+  ]) {
+    table.fields.push({ key, label: key, kind: 'numeric', required: true, precision, scale });
+    seed.values[key] = { kind: 'numeric', value };
+  }
+  pkg.resources = [table, seed, skill];
+  pkg.outputs = [];
+  pkg.requires.capabilities = ['tables', 'seed-rows', 'skills'];
+  let view = await f.service.create(f.w.id, f.w.userId, {
+    requestId: randomUUID(),
+    package: pkg,
+    bindings: f.bindings,
+  });
+  const compiler = packageCompiler(pkg, f.bindings, view.id);
+  const definition = compiler.definition(table);
+  const revision = 'b'.repeat(40);
+  view = await f.resume(view);
+  const prepared = await f.prepared(view, view.nodes[0]);
+  view = await f.approve(view);
+  view = await f.resume(view);
+  const migration = await connect(f.db.login(f.w, 'migration'));
+  try {
+    await inTransaction(migration, async client => {
+      await client.query(`SET LOCAL ROLE "${f.w.names.customOwner}"`);
+      const tx = { client, schema: f.w.names.schema };
+      const generation = await createGeneration(tx, { definition, revision });
+      await activateGeneration(tx, { generationId: generation.id, expectedActiveGenerationId: null });
+      await client.query(
+        `UPDATE ${f.schema}.tf_table_catalog SET applied_revision=$2,target_revision=$2,applied_definition=$3,physical_table=$4 WHERE id=$1`,
+        [definition.id, revision, definition, generation.physical_table],
+      );
+    });
+  } finally {
+    await migration.end();
+  }
+  await f.db.platform.query(
+    `INSERT INTO ${f.schema}.tf_table_proposal_receipts(proposal_id,table_id,attempt,receipt) VALUES($1,$2,0,$3)`,
+    [prepared.receipt.id, definition.id, { status: 'completed', executionId: randomUUID(), revision }],
+  );
+  view = await f.resume(view);
+  assert.equal(view.nodes.find(node => node.state === 'waiting-review').key, seed.key);
+  const seedPrepared = await f.prepared(
+    view,
+    view.nodes.find(node => node.key === seed.key),
+  );
+  view = await f.approve(view);
+  view = await f.resume(view);
+  const tables = createTableService(f.runtime, { readableFiles: async () => new Set() }, commonCompatibility);
+  await tables.mutate(f.w.id, f.w.userId, {
+    kind: 'create',
+    tableId: definition.id,
+    revision,
+    recordId: compiler.id(seed.key),
+    values: compiler.rows(seed),
+  });
+  await f.db.platform.query(
+    `INSERT INTO ${f.schema}.tf_table_proposal_receipts(proposal_id,table_id,attempt,receipt) VALUES($1,$2,0,$3)`,
+    [seedPrepared.receipt.id, definition.id, { status: 'completed', executionId: randomUUID(), revision }],
+  );
+  view = await f.resume(view);
+  const records = () => tables.list(f.w.id, f.w.userId, { tableId: definition.id, revision, limit: 10 });
+  const [saved] = await records();
+  assert.equal(saved.values[compiler.fieldId(table.key, 'allowance')].value, '20.00');
+  assert.equal(saved.values[compiler.fieldId(table.key, 'zero')].value, '0.00');
+  const change = async (key, value) => {
+    const [record] = await records();
+    await tables.mutate(f.w.id, f.w.userId, {
+      kind: 'update',
+      tableId: definition.id,
+      revision,
+      recordId: record.id,
+      expectedToken: record.token,
+      values: { [compiler.fieldId(table.key, key)]: value },
+    });
+  };
+  view = await f.approve(view);
+  for (const [key, value] of [
+    ['allowance', { kind: 'numeric', value: '21' }],
+    ['large', { kind: 'numeric', value: '9007199254740993.13' }],
+    ['name', { kind: 'text', value: '20.00' }],
+  ]) {
+    await change(key, value);
+    view = await f.resume(view);
+    assert.equal(view.status, 'blocked');
+    assert.equal(view.nodes.at(-1).error, `verification-drift:${seed.key}`);
+    await change(key, seed.values[key]);
+  }
+  view = await f.resume(view);
+  assert.equal(view.status, 'completed');
+  assert.equal(view.nodes.at(-1).state, 'completed');
   assert.deepEqual(await createSystemPackages(f.options).read(f.w.id, f.w.userId, view.id), view);
 });
 

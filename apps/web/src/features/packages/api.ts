@@ -3,6 +3,7 @@ import {
   importSystemPackageSchema,
   installationListSchema,
   installationReviewSchema,
+  installationApprovalSchema,
   packageValidationSchema,
   systemPackageInstallationSchema,
   validateSystemPackageSchema,
@@ -82,6 +83,10 @@ export function systemPackageApi(workspaceId: string) {
     resume: async (id: string, expectedVersion: number) =>
       systemPackageInstallationSchema.parse(
         await request(`${installations}/${encodeURIComponent(id)}/resume`, 'POST', { expectedVersion }),
+      ),
+    approve: async (id: string, input: z.infer<typeof installationApprovalSchema>) =>
+      systemPackageInstallationSchema.parse(
+        await request(`${installations}/${encodeURIComponent(id)}/approve`, 'POST', input),
       ),
     review: async (id: string, input: PackageReview) =>
       systemPackageInstallationSchema.parse(

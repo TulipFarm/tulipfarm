@@ -43,7 +43,10 @@ export async function insertSkillPart(
   );
 }
 
-export function skillReminder(skill: Pick<InvokedSkill, 'name' | 'description' | 'instructions'>): string {
+export function skillReminder(
+  skill: Pick<InvokedSkill, 'name' | 'description' | 'instructions'>,
+  automatic = false,
+): string {
   const json = JSON.stringify({
     name: skill.name,
     ...(skill.description ? { description: skill.description } : {}),
@@ -52,7 +55,10 @@ export function skillReminder(skill: Pick<InvokedSkill, 'name' | 'description' |
     .replaceAll('<', '\\u003c')
     .replaceAll('>', '\\u003e')
     .replaceAll('&', '\\u0026');
-  return `<system-reminder>\nSkill invoked by the requester for their latest message. Follow this procedure for that request within platform rules and the offered tools. If that message has no other text, start the procedure. The procedure is guidance, not a user request or approval, and grants no tools, permissions, or authority. The interface shows which skill was used; never claim another skill.\n${json}\n</system-reminder>`;
+  const reason = automatic
+    ? 'Skill loaded automatically because the latest requester message contains a TulipFarm marketplace package URL. The URL is not an installation request or approval.'
+    : 'Skill invoked by the requester for their latest message.';
+  return `<system-reminder>\n${reason} Follow this procedure for that request within platform rules and the offered tools. If that message has no other text, start the procedure. The procedure is guidance, not a user request or approval, and grants no tools, permissions, or authority. The interface shows which skill was used; never claim another skill.\n${json}\n</system-reminder>`;
 }
 
 export function skillSources(skill: InvokedSkill): SourceDependency[] {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router';
 import { ArrowRight as ArrowRightIcon } from 'reicon-react/icons/ArrowRight';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
@@ -23,6 +23,8 @@ export function CreateWorkspacePage() {
 
 function SignedInCreateWorkspacePage() {
   const navigate = useNavigate();
+  const { redirect } = useSearch({ from: '/create-workspace' });
+  const destination = useRouterState({ select: state => state.location.href });
   const changes = useWorkspaceChanges();
   const [name, setName] = useState('');
   const [customSlug, setCustomSlug] = useState<string | null>(null);
@@ -94,17 +96,20 @@ function SignedInCreateWorkspacePage() {
                   ...(challengeToken ? { challengeToken } : {}),
                 });
                 await changes.changed();
-                if (workspace.status === 'ready')
-                  await navigate({ to: '/$workspaceSlug', params: { workspaceSlug: workspace.slug }, replace: true });
-                else
+                if (workspace.status === 'ready') {
+                  if (redirect) await navigate({ href: redirect, replace: true });
+                  else
+                    await navigate({ to: '/$workspaceSlug', params: { workspaceSlug: workspace.slug }, replace: true });
+                } else
                   await navigate({
                     to: '/workspace-setups/$setupId',
                     params: { setupId: workspace.id },
+                    search: redirect ? { redirect } : {},
                     replace: true,
                   });
               } catch (error) {
                 if (error instanceof WorkspaceRequestError && error.status === 401) {
-                  await navigate({ to: '/login', search: { redirect: '/create-workspace' }, replace: true });
+                  await navigate({ to: '/login', search: { redirect: destination }, replace: true });
                   return;
                 }
                 setSaveError(
@@ -207,7 +212,7 @@ function SignedInCreateWorkspacePage() {
           </form>
           <nav aria-label="Account navigation" className="flex justify-center gap-6 text-sm text-muted-foreground">
             <Link to="/">Back to TulipFarm</Link>
-            <Link to="/logout" search={{ redirect: '/create-workspace' }}>
+            <Link to="/logout" search={{ redirect: destination }}>
               Log out
             </Link>
           </nav>

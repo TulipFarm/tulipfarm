@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { ZodError } from 'zod';
+import { loadModelCatalog, modelCatalogEnvNames, readModelCatalog, shippedModelCatalogPath } from '@tulipfarm/config';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { chatSkills } from '../../../agents/src/chat-skills.ts';
 import { readSkill } from '../../../agents/src/skills.ts';
@@ -9,6 +10,7 @@ import { createWorkspaceSkills } from '../../../agents/src/workspace-skills.ts';
 import { createConversations } from '../../src/index.ts';
 import { createProjects } from '../../src/projects.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
+import { checkLayout, packagesInLayout } from '../../src/layout-contracts.ts';
 import { conversationFixture } from '../fixture.mjs';
 
 const instructions = 'Ask for company size, then budget.';
@@ -18,11 +20,11 @@ Skill invoked by the requester for their latest message. Follow this procedure f
 {"name":"Qualify lead","description":"Qualify an inbound lead before handoff.","procedure":"Ask for company size, then budget."}
 </system-reminder>`;
 
-async function setup() {
+async function setup(admission) {
   const f = await conversationFixture();
   const w = f.workspace;
   const skills = createWorkspaceSkills(f.runtime);
-  const conversations = createConversations(f.runtime, chatSkills);
+  const conversations = createConversations(f.runtime, chatSkills, admission);
   const replies = [];
   const hooks = { reply: async () => {} };
   const executor = createConversationExecutor(
@@ -30,7 +32,7 @@ async function setup() {
     async input => {
       replies.push({ messages: input.messages, sourceMessages: input.sourceMessages });
       await hooks.reply();
-      return { text: answer, sources: [] };
+      return { text: hooks.text ?? answer, sources: [] };
     },
     undefined,
     undefined,
@@ -79,6 +81,266 @@ async function setup() {
     ).rows.map(row => row.sources);
   return { ...f, w, skills, conversations, replies, hooks, skill, enable, chat, send, process, messages, results };
 }
+
+test('exact Install handoff works without any configured model provider', { timeout: 60000 }, async t => {
+  const keys = ['MODEL_CATALOG', 'MODEL_CATALOG_FILE', ...modelCatalogEnvNames(readModelCatalog({}).catalog)];
+  const previous = new Map(keys.map(key => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  for (const key of keys) delete process.env[key];
+  process.env.MODEL_CATALOG_FILE = shippedModelCatalogPath;
+  assert.throws(() => loadModelCatalog(), /model catalog/i);
+  const f = await setup({
+    pinTurn: async () => assert.fail('a package handoff must not admit a model'),
+  });
+  t.after(() => f.close());
+  const chatId = await f.chat();
+  const input = {
+    commandId: randomUUID(),
+    messageId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Install https://packages.tulipfarm.ai/packages/leave-management/1.0.0/' }],
+  };
+  const sent = await f.conversations.send(f.w.id, f.w.userId, chatId, input);
+  assert.deepEqual(
+    (
+      await f.db.platform.query(`SELECT responder,status FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+        sent.turnId,
+      ])
+    ).rows,
+    [{ responder: 'package-install-v1', status: 'completed' }],
+  );
+  assert.equal((await f.messages(chatId)).at(-1).parts[0].kind, 'layout');
+  assert.deepEqual(await f.conversations.send(f.w.id, f.w.userId, chatId, input), sent);
+  assert.equal(await f.process(chatId, sent), 'idle');
+  assert.deepEqual(f.replies, []);
+});
+
+test(
+  'exact Install commands save one replayable layout without model admission, while quoted or contextual sends queue normally',
+  { timeout: 60000 },
+  async () => {
+    let admissions = 0;
+    const f = await setup({
+      pinTurn: async () => {
+        admissions += 1;
+        return null;
+      },
+    });
+    try {
+      const url = 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/';
+      const text = `Install ${url}`;
+      const paragraph = {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Install ' },
+          { type: 'text', text: url },
+        ],
+      };
+      const rich = block => ({ kind: 'text', text, content: { version: 1, doc: { type: 'doc', content: [block] } } });
+      for (const part of [{ kind: 'text', text }, rich(paragraph)]) {
+        const chatId = await f.chat();
+        const input = { commandId: randomUUID(), messageId: randomUUID(), parts: [part] };
+        const sent = await f.conversations.send(f.w.id, f.w.userId, chatId, input);
+        const history = await f.messages(chatId);
+        assert.equal(history.length, 2);
+        assert.deepEqual(history[0].parts, [part]);
+        assert.equal(history[0].turn.status, 'completed');
+        assert.equal(history[0].turn.id, sent.turnId);
+        assert.equal(history[1].parts.length, 1);
+        assert.equal(history[1].parts[0].kind, 'layout');
+        assert.equal(checkLayout(history[1].parts[0].layout, history[1].id).ok, true);
+        assert.deepEqual(packagesInLayout(history[1].parts[0].layout), [
+          { name: 'leave-management', version: '1.0.0', url: `${url}package.json` },
+        ]);
+        assert.deepEqual(await f.results(chatId), [[{ kind: 'private-conversation', conversationId: chatId }]]);
+        assert.deepEqual(await f.conversations.send(f.w.id, f.w.userId, chatId, input), sent);
+        assert.deepEqual(await f.messages(chatId), history, 'command replay does not add another turn or layout');
+        assert.equal(await f.process(chatId, sent), 'idle', 'completed handoffs cannot reach the reply engine');
+        assert.deepEqual(
+          (
+            await f.db.platform.query(
+              `SELECT
+             (SELECT count(*)::int FROM ${f.table('tf_conversation_turns')} WHERE conversation_id=$1) AS turns,
+             (SELECT count(*)::int FROM ${f.table('tf_conversation_outbox')} WHERE conversation_id=$1) AS outbox,
+             (SELECT count(*)::int FROM ${f.table('tf_conversation_tool_calls')} WHERE conversation_id=$1) AS tools,
+             (SELECT count(*)::int FROM ${f.table('tf_conversation_parts')} WHERE conversation_id=$1 AND kind IN ('skill','skill-use')) AS skills`,
+              [chatId],
+            )
+          ).rows[0],
+          { turns: 1, outbox: 0, tools: 0, skills: 0 },
+        );
+      }
+      assert.equal(admissions, 0);
+      assert.deepEqual(f.replies, []);
+      assert.equal(
+        (await f.db.platform.query(`SELECT count(*)::int AS count FROM ${f.table('tf_system_package_installations')}`))
+          .rows[0].count,
+        0,
+        'the form does not authorize or start an installation',
+      );
+
+      const projectId = randomUUID();
+      await createProjects(f.runtime).create(f.w.id, f.w.userId, { id: projectId, name: 'Package discussion' });
+      const attachmentChat = await f.chat();
+      const attachmentId = randomUUID();
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_conversation_attachments')}
+       (id,conversation_id,membership_id,filename,media_type,size,sha256,state,object_key)
+       VALUES($1,$2,$3,'note.txt','text/plain',1,$4,'ready',$5)`,
+        [attachmentId, attachmentChat, f.w.membershipId, 'a'.repeat(64), randomUUID()],
+      );
+      const cases = [
+        { parts: [rich({ type: 'codeBlock', content: [{ type: 'text', text }] })] },
+        { parts: [rich({ type: 'blockquote', content: [paragraph] })] },
+        { parts: [{ kind: 'text', text: `Explain how to ${text}` }] },
+        { parts: [{ kind: 'text', text }], mode: 'plan' },
+        { parts: [{ kind: 'text', text }], projectId },
+        {
+          parts: [
+            { kind: 'text', text },
+            { kind: 'attachment', attachmentId },
+          ],
+          chatId: attachmentChat,
+        },
+        {
+          parts: [
+            { kind: 'text', text },
+            { kind: 'skill', skillId: 'package-install', revision: 'latest' },
+          ],
+        },
+      ];
+      for (const entry of cases) {
+        const chatId = entry.chatId ?? (await f.chat(entry.projectId));
+        const sent = await f.conversations.send(f.w.id, f.w.userId, chatId, {
+          commandId: randomUUID(),
+          messageId: randomUUID(),
+          parts: entry.parts,
+          ...(entry.mode ? { mode: entry.mode } : {}),
+        });
+        const history = await f.messages(chatId);
+        assert.equal(history.length, 1);
+        assert.equal(history[0].turn.status, 'queued');
+        assert.equal(
+          (
+            await f.db.platform.query(
+              `SELECT count(*)::int AS count FROM ${f.table('tf_conversation_outbox')} WHERE turn_id=$1`,
+              [sent.turnId],
+            )
+          ).rows[0].count,
+          1,
+        );
+      }
+      assert.equal(admissions, cases.length);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'marketplace URLs load the package skill only for the latest private-chat request, without installing',
+  { timeout: 60000 },
+  async () => {
+    const f = await setup();
+    try {
+      const url = 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/';
+      const chatId = await f.chat();
+      const used = async (id, parts) => {
+        assert.equal(await f.process(id, await f.send(id, parts)), 'completed');
+        return (await f.messages(id))
+          .at(-1)
+          .parts.filter(part => part.kind === 'skill-use')
+          .map(part => part.skillId);
+      };
+      assert.deepEqual(await used(chatId, [{ kind: 'text', text: `Explain [this](${url}) and ${url}package.json` }]), [
+        'package-install',
+      ]);
+      assert.equal(
+        f.replies.at(-1).messages.filter(message => message.text.includes('Skill loaded automatically')).length,
+        1,
+      );
+      assert.equal(f.replies.at(-1).sourceMessages.length, 1, 'automatic guidance is not requester-authored text');
+      assert.deepEqual(
+        await used(chatId, [{ kind: 'text', text: 'Thanks.' }]),
+        [],
+        'history does not reload the skill',
+      );
+
+      assert.deepEqual(
+        await used(await f.chat(), [
+          { kind: 'text', text: url.replace('packages.tulipfarm.ai', 'packages.tulipfarm.ai.example.test') },
+        ]),
+        [],
+      );
+      assert.deepEqual(
+        await used(await f.chat(), [
+          { kind: 'skill', skillId: 'package-install', revision: 'latest' },
+          { kind: 'text', text: url },
+        ]),
+        ['package-install'],
+        'explicit invocation is not duplicated',
+      );
+      assert.equal(
+        f.replies.at(-1).messages.some(message => message.text.includes('Skill loaded automatically')),
+        false,
+      );
+
+      const selected = await f.skill();
+      assert.deepEqual(
+        await used(await f.chat(), [
+          { kind: 'skill', ...selected },
+          { kind: 'text', text: url },
+        ]),
+        [selected.skillId],
+        'a different chosen skill is preserved',
+      );
+      assert.ok(f.replies.at(-1).messages.some(message => message.text.includes('Skill loaded automatically')));
+      assert.ok(f.replies.at(-1).messages.some(message => message.text === qualifyReminder));
+
+      const planningChat = await f.chat();
+      const planningRequest = await f.conversations.send(f.w.id, f.w.userId, planningChat, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        mode: 'plan',
+        parts: [{ kind: 'text', text: url }],
+      });
+      assert.equal(await f.process(planningChat, planningRequest), 'completed');
+      assert.deepEqual(
+        (await f.messages(planningChat))
+          .at(-1)
+          .parts.filter(part => part.kind === 'skill-use')
+          .map(part => part.skillId),
+        ['planning'],
+      );
+      assert.ok(f.replies.at(-1).messages.some(message => message.text.includes('Skill loaded automatically')));
+
+      const projectId = randomUUID();
+      await createProjects(f.runtime).create(f.w.id, f.w.userId, { id: projectId, name: 'Package discussion' });
+      assert.deepEqual(await used(await f.chat(projectId), [{ kind: 'text', text: url }]), []);
+
+      const assistantLink = await f.chat();
+      f.hooks.text = url;
+      assert.deepEqual(await used(assistantLink, [{ kind: 'text', text: 'Show an example.' }]), []);
+      f.hooks.text = answer;
+      assert.deepEqual(
+        await used(assistantLink, [{ kind: 'text', text: 'Explain that.' }]),
+        [],
+        'assistant URLs do not trigger',
+      );
+      assert.equal(
+        (await f.db.platform.query(`SELECT count(*)::int AS count FROM ${f.table('tf_system_package_installations')}`))
+          .rows[0].count,
+        0,
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 test(
   'a picked skill shows on the message, guides only that reply, and marks the reply that used it',

@@ -20,6 +20,31 @@ and [current feature evidence](../../docs/features.md) for delivery limits.
 
 ## Chat-tool composition
 
+An exact `Install <versioned marketplace URL>` private-chat message with one
+text part and no explicit skill or Planning mode receives a saved A2UI installer
+reply in the send transaction. It queues no model work and does not invoke
+`packages.inspect` or the package-install skill. The ordinary completed turn
+keeps the request and installer reference in history and compaction.
+
+For other requests, versioned `packages.tulipfarm.ai` package-page and `package.json` links in the
+latest private-chat prompt automatically load the built-in
+[`package-install`](skills/package-install/SKILL.md) procedure. The conversation
+records its use unless an explicit or Planning skill already owns the reply's
+single skill label; both procedures still guide that reply. Other hosts,
+marketplace home/catalog links, shared project chats and autonomous runtimes do
+not trigger it.
+
+`packages.inspect` is read-only: it checks the package schema and exact URL
+identity through the bounded public-file reader, with redirects refused. Public
+web reads must be enabled. It does not validate workspace access or install.
+The chat's package card uses the existing installer for input selection,
+preflight and one whole-package approval. Only the human starts a write;
+that approval covers the exact package, selected inputs and requested states.
+The installer then runs without per-resource approval prompts.
+Import request IDs remain stable for one chat/package/version across retries
+and reloads, and differ between packages. A changed definition resets the card's
+input and validation state.
+
 Inspected on 11 October 2026. `createChatTools(runtime, options)` takes named
 `ChatToolsOptions`; callers supply only the dependencies they use, such as
 `{ knowledge }` or `{ google, slack }`. An omitted or `undefined` dependency stays

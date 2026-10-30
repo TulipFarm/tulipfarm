@@ -21,6 +21,7 @@ import { reserveTableIdentities } from '@tulipfarm/tables/identities';
 import { tableName } from '@tulipfarm/tables/names';
 import { activeGeneration, generationProposalData } from '@tulipfarm/tables/store';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import type { TableValues } from '@tulipfarm/tables/definition';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { createFiles, requireReadableFile, type FileBytes } from '@tulipfarm/files';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
@@ -42,6 +43,8 @@ import {
   importSystemPackageSchema,
   installationResumeSchema,
   installationReviewSchema,
+  installationApprovalSchema,
+  validateSystemPackageSchema,
   systemPackageSchema,
   packageBindingsSchema,
   installationNodeSchema,
@@ -78,6 +81,7 @@ const rowSchema = z.object({
   conversation_id: z.uuid().nullable(),
   package_digest: z.string(),
   input_digest: z.string(),
+  package_approved: z.boolean(),
   package: systemPackageSchema,
   bindings: packageBindingsSchema,
   identities: z.record(z.string(), z.uuid()),
@@ -100,6 +104,21 @@ type Options = {
   skillRuntimeAvailable?: (() => Promise<boolean>) | undefined;
 };
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+const seedValues = (values: TableValues) =>
+  Object.fromEntries(
+    Object.entries(values).map(([id, value]) => [
+      id,
+      value?.kind === 'numeric'
+        ? {
+            ...value,
+            value: value.value
+              .replace(/(\.\d*?)0+$/, '$1')
+              .replace(/\.$/, '')
+              .replace(/^-0$/, '0'),
+          }
+        : value,
+    ]),
+  );
 const nodeTitle = (resource: PackageResource) =>
   resource.kind === 'table'
     ? resource.label
@@ -111,6 +130,14 @@ const nodeTitle = (resource: PackageResource) =>
 
 export function createSystemPackages(options: Options) {
   const { runtime } = options;
+  function installationColumns(tx: Transaction) {
+    return `installation.*, EXISTS (
+      SELECT 1 FROM ${relation(tx, 'tf_system_package_reviews')} approval
+      WHERE approval.installation_id=installation.id AND approval.resource_key='$package'
+      AND approval.membership_id=installation.membership_id AND approval.attempt=0
+      AND approval.digest=installation.input_digest AND approval.decision='approve'
+    ) AS package_approved`;
+  }
   async function transaction<T>(
     workspaceId: string,
     user: string,
@@ -126,8 +153,8 @@ export function createSystemPackages(options: Options) {
   async function load(tx: Transaction, actor: HumanActor, id: string) {
     const stored = (
       await tx.client.query(
-        `SELECT * FROM ${relation(tx, 'tf_system_package_installations')}
-       WHERE id=$1 AND membership_id=$2 AND user_id=$3 FOR NO KEY UPDATE`,
+        `SELECT ${installationColumns(tx)} FROM ${relation(tx, 'tf_system_package_installations')} installation
+       WHERE installation.id=$1 AND installation.membership_id=$2 AND installation.user_id=$3 FOR NO KEY UPDATE OF installation`,
         [z.uuid().parse(id), actor.membershipId, actor.userId],
       )
     ).rows[0];
@@ -149,6 +176,7 @@ export function createSystemPackages(options: Options) {
       package: row.package.package,
       packageDigest: row.package_digest,
       inputDigest: row.input_digest,
+      packageApproved: row.package_approved,
       bindings: row.bindings,
       assets: row.package.assets,
       version: row.version,
@@ -420,14 +448,20 @@ export function createSystemPackages(options: Options) {
     return result;
   }
   async function validate(workspaceId: string, user: string, value: unknown) {
-    const input = importSystemPackageSchema.omit({ requestId: true, chatId: true }).parse(value);
+    const input = validateSystemPackageSchema.parse(value);
     return transaction(workspaceId, user, (tx, actor) =>
       preflight(tx, actor, workspaceId, input.package, input.bindings),
     );
   }
   async function create(workspaceId: string, user: string, value: unknown) {
     const input = importSystemPackageSchema.parse(value);
-    return transaction(workspaceId, user, async (tx, actor) => {
+    if (
+      input.approval &&
+      (input.approval.packageDigest !== packageDigest(input.package) ||
+        input.approval.inputDigest !== packageDigest({ package: input.package, bindings: input.bindings }))
+    )
+      throw new SystemPackageError('review-digest-conflict');
+    const created = await transaction(workspaceId, user, async (tx, actor) => {
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 734812))', [
         `${tx.schema}:${actor.membershipId}:${input.requestId}`,
       ]);
@@ -507,6 +541,40 @@ export function createSystemPackages(options: Options) {
         ],
       );
       return view(workspaceId, await load(tx, actor, id));
+    });
+    return input.approval ? approve(workspaceId, user, created.id, input.approval) : created;
+  }
+  async function approve(workspaceId: string, user: string, id: string, value: unknown) {
+    const input = installationApprovalSchema.parse(value);
+    return transaction(workspaceId, user, async (tx, actor) => {
+      const row = await load(tx, actor, id);
+      if (row.package_digest !== input.packageDigest || row.input_digest !== input.inputDigest)
+        throw new SystemPackageError('review-digest-conflict');
+      if (row.package_approved && !row.nodes.some(node => node.state === 'waiting-review'))
+        return view(workspaceId, row);
+      if (!row.package_approved) {
+        await withMaintenanceTransaction({
+          connectionString: await options.resolveConfirmationCredential(workspaceId),
+          workspaceId,
+          capability: 'confirmation',
+          operation: async confirmation => {
+            await confirmation.client.query(
+              `INSERT INTO ${relation(confirmation, 'tf_system_package_reviews')}
+             (installation_id,resource_key,membership_id,request_id,digest,decision,attempt)
+             VALUES($1,'$package',$2,$3,$4,'approve',0)
+             ON CONFLICT (installation_id,resource_key,attempt) DO NOTHING`,
+              [row.id, actor.membershipId, packageIdentity(row.id, 'approve-package'), row.input_digest],
+            );
+          },
+        });
+      }
+      const approved = await load(tx, actor, id);
+      if (!approved.package_approved) throw new SystemPackageError('review-digest-conflict');
+      for (const node of approved.nodes) {
+        if (node.state === 'waiting-review') node.state = 'running';
+      }
+      await persist(tx, approved);
+      return view(workspaceId, approved);
     });
   }
   async function prepare(
@@ -798,13 +866,15 @@ export function createSystemPackages(options: Options) {
     const s = services(tx, workspaceId);
     const prepared = await operation(tx, row, node.key, 'prepare');
     if (!prepared) throw new SystemPackageError('operation-missing');
-    const approved = (
-      await tx.client.query(
-        `SELECT digest,decision FROM ${relation(tx, 'tf_system_package_reviews')} WHERE installation_id=$1 AND resource_key=$2 AND membership_id=$3 AND attempt=$4`,
-        [row.id, node.key, actor.membershipId, attempt(row, node.key)],
-      )
-    ).rows[0];
-    if (!approved || approved.digest !== node.review?.digest || approved.decision !== 'approve') return;
+    if (!row.package_approved) {
+      const approved = (
+        await tx.client.query(
+          `SELECT digest,decision FROM ${relation(tx, 'tf_system_package_reviews')} WHERE installation_id=$1 AND resource_key=$2 AND membership_id=$3 AND attempt=$4`,
+          [row.id, node.key, actor.membershipId, attempt(row, node.key)],
+        )
+      ).rows[0];
+      if (!approved || approved.digest !== node.review?.digest || approved.decision !== 'approve') return;
+    }
     node.state = 'running';
     if (resource.kind === 'table' || resource.kind === 'seed-row') {
       await recordOperation(tx, row, node.key, 'apply', { prepared: prepared.input });
@@ -1018,7 +1088,7 @@ export function createSystemPackages(options: Options) {
         const tableId = compiler.id(resource.table.key);
         const generation = await activeGeneration(tx, tableId);
         const actual = await s.records.getRecord(workspaceId, actor, tableId, generation.revision, id);
-        if (!actual || !same(actual.values, compiler.rows(resource)))
+        if (!actual || !same(seedValues(actual.values), seedValues(compiler.rows(resource))))
           throw new SystemPackageError(`verification-drift:${resource.key}`);
       } else if (resource.kind === 'skill') {
         const actual = await s.skills.read(workspaceId, actor, id);
@@ -1316,8 +1386,10 @@ export function createSystemPackages(options: Options) {
             node.error = null;
           } else {
             const resource = resources.get(node.key)!;
-            if (!node.review) await prepare(tx, actor, workspaceId, row, node, resource);
-            else await apply(tx, actor, workspaceId, row, node, resource);
+            if (!node.review) {
+              await prepare(tx, actor, workspaceId, row, node, resource);
+              if (row.package_approved) node.state = 'running';
+            } else await apply(tx, actor, workspaceId, row, node, resource);
           }
           await tx.client.query('RELEASE SAVEPOINT package_step');
           await tx.client.query(`UPDATE ${relation(tx, 'tf_system_package_installations')} SET nodes=$2 WHERE id=$1`, [
@@ -1405,6 +1477,7 @@ export function createSystemPackages(options: Options) {
   return {
     validate,
     create,
+    approve,
     resume,
     review,
     pending: (workspaceId: string) =>
@@ -1426,8 +1499,10 @@ export function createSystemPackages(options: Options) {
         const rows = z.array(rowSchema).parse(
           (
             await tx.client.query(
-              `SELECT * FROM ${relation(tx, 'tf_system_package_installations')} WHERE membership_id=$1 AND user_id=$2
-         AND ($3::uuid IS NULL OR id>$3) AND ($4::uuid IS NULL OR conversation_id=$4) ORDER BY id LIMIT 26`,
+              `SELECT ${installationColumns(tx)} FROM ${relation(tx, 'tf_system_package_installations')} installation
+         WHERE installation.membership_id=$1 AND installation.user_id=$2
+         AND ($3::uuid IS NULL OR installation.id>$3) AND ($4::uuid IS NULL OR installation.conversation_id=$4)
+         ORDER BY installation.id LIMIT 26`,
               [actor.membershipId, actor.userId, after ?? null, chatId ?? null],
             )
           ).rows,

@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { test } from 'node:test';
 import { Agent, request } from 'undici';
 import { fetchPublicFile, pinnedLookup, publicFileLimits, publicNetwork } from '../src/web-fetch.ts';
+import { inspectMarketplacePackage } from '../src/package-inspection.ts';
 
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -67,6 +70,79 @@ const send =
   (status, body = '', headers = {}) =>
   (_request, response) =>
     response.writeHead(status, headers).end(body);
+
+test('marketplace inspection returns the exact package as untrusted data, not a workspace validation', async t => {
+  const body = await readFile(new URL('../../config/examples/system-packages/leave-management.json', import.meta.url));
+  const document = JSON.parse(body);
+  const path = `/packages/${document.package.name}/${document.package.version}/package.json`;
+  const web = await localWeb(t, {
+    [`packages.tulipfarm.ai${path}`]: send(200, body, { 'content-type': 'application/json' }),
+  });
+  const result = await inspectMarketplacePackage(
+    `https://packages.tulipfarm.ai${path.replace('package.json', '')}`,
+    AbortSignal.timeout(5000),
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.untrusted, true);
+  assert.equal(result.installed, false);
+  assert.equal(result.workspaceValidated, false);
+  assert.equal(result.digest, createHash('sha256').update(body).digest('hex'));
+  for (const key of ['package', 'inputs', 'requires', 'resources', 'outputs'])
+    assert.deepEqual(result[key], document[key]);
+  assert.deepEqual(
+    web.requests.map(request => request.path),
+    [path],
+  );
+});
+
+test('marketplace inspection refuses invalid data and redirects without fetching their targets', async t => {
+  const body = await readFile(new URL('../../config/examples/system-packages/leave-management.json', import.meta.url));
+  const base = name => `packages.tulipfarm.ai/packages/${name}/1.0.0/package.json`;
+  const web = await localWeb(t, {
+    [base('broken-json')]: send(200, '{'),
+    [base('broken-utf8')]: send(200, Buffer.from([0xff])),
+    [base('broken-schema')]: send(200, '{}'),
+    [base('wrong-identity')]: send(200, body),
+    [base('unavailable')]: send(503),
+    [base('html')]: send(200, '<html>Sign in</html>', { 'content-type': 'text/html' }),
+    [base('redirect')]: send(302, '', { location: `https://${base('leave-management')}` }),
+    [base('leave-management')]: send(200, body),
+  });
+  for (const [name, error] of [
+    ['broken-json', 'package-json-invalid'],
+    ['broken-utf8', 'package-json-invalid'],
+    ['broken-schema', 'package-schema-invalid'],
+    ['wrong-identity', 'package-identity-mismatch'],
+    ['unavailable', 'unavailable'],
+    ['html', 'package-json-required'],
+    ['redirect', 'unavailable'],
+  ]) {
+    assert.deepEqual(await inspectMarketplacePackage(`https://${base(name)}`, AbortSignal.timeout(5000)), {
+      error,
+      installed: false,
+    });
+  }
+  assert.equal(
+    web.requests.some(request => request.path.includes('/leave-management/')),
+    false,
+  );
+});
+
+test('inspection rejects foreign URLs and disabled public web access before connecting', async t => {
+  const web = await localWeb(t, {});
+  const signal = AbortSignal.timeout(5000);
+  assert.deepEqual(
+    await inspectMarketplacePackage('https://packages.tulipfarm.ai.example.test/packages/demo/1.0.0/', signal),
+    { error: 'marketplace-package-url-required', installed: false },
+  );
+  delete process.env.HUNTSMAN_ENDPOINT;
+  assert.deepEqual(await inspectMarketplacePackage('https://packages.tulipfarm.ai/packages/demo/1.0.0/', signal), {
+    error: 'web-off',
+    installed: false,
+  });
+  assert.deepEqual(web.resolved, []);
+  assert.deepEqual(web.requests, []);
+});
 
 test('a public file is fetched once with no credentials and typed from its bytes', async t => {
   const web = await localWeb(t, {

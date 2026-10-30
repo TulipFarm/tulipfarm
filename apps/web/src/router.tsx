@@ -97,6 +97,7 @@ const ProjectDetailPage = lazyRouteComponent(() => import('@/pages/projects'), '
 const ProjectSettingsPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectSettingsPage');
 const SkillsPage = lazyRouteComponent(() => import('@/pages/skills'), 'SkillsPage');
 const SystemPackagesPage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagesPage');
+const PublicPackagePage = lazyRouteComponent(() => import('@/pages/system-packages'), 'PublicPackagePage');
 const SystemPackagePage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagePage');
 const ImportSkillPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'ImportSkillPage');
 const SkillImportPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'SkillImportPage');
@@ -373,20 +374,23 @@ async function requireProfile(destination: string) {
     throw redirect({ to: '/complete-profile', search: { redirect: safeAuthRedirect(destination) }, replace: true });
   return session;
 }
+async function defaultWorkspaceDestination(destination: string) {
+  const session = await requireProfile(destination);
+  let workspaces;
+  try {
+    workspaces = await readWorkspaceList({ userId: session.user.id, sessionId: session.session.id });
+  } catch (error) {
+    if (error instanceof WorkspaceRequestError && error.status === 401)
+      throw redirect({ to: '/login', search: { redirect: destination }, replace: true });
+    throw error;
+  }
+  return workspaceDestination(session.user.id, workspaces);
+}
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: async () => {
-    const session = await requireProfile('/');
-    let workspaces;
-    try {
-      workspaces = await readWorkspaceList({ userId: session.user.id, sessionId: session.session.id });
-    } catch (error) {
-      if (error instanceof WorkspaceRequestError && error.status === 401)
-        throw redirect({ to: '/login', search: { redirect: '/' }, replace: true });
-      throw error;
-    }
-    throw redirect({ href: workspaceDestination(session.user.id, workspaces), replace: true });
+    throw redirect({ href: await defaultWorkspaceDestination('/'), replace: true });
   },
 });
 export const slackLinkRoute = createRoute({
@@ -403,6 +407,7 @@ export const slackLinkRoute = createRoute({
 const createWorkspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/create-workspace',
+  validateSearch: authSearch,
   beforeLoad: async ({ location }) => {
     preloadRouteCode(location.pathname);
     const session = await loadSession();
@@ -438,6 +443,7 @@ export const workspaceRecoveryRoute = createRoute({
 export const workspaceSetupRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/workspace-setups/$setupId',
+  validateSearch: authSearch,
   beforeLoad: async ({ location }) => {
     preloadRouteCode(location.pathname);
     await requireProfile(location.href);
@@ -696,6 +702,8 @@ export const workspaceRoute = createRoute({
   notFoundComponent: WorkspaceNotFoundPage,
 });
 const chatScopeSearch = z.object({ project: z.uuid().optional().catch(undefined) });
+const publicPackageName = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+const publicPackageVersion = z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
 export const newChatSearch = chatScopeSearch.extend({
   intent: z
     .enum([
@@ -708,6 +716,7 @@ export const newChatSearch = chatScopeSearch.extend({
       'use-skill',
       'create-workflow',
       'edit-workflow',
+      'install-package',
     ])
     .optional()
     .catch(undefined),
@@ -720,6 +729,28 @@ export const newChatSearch = chatScopeSearch.extend({
     .optional()
     .catch(undefined),
   skillVersion: z.coerce.number().int().positive().optional().catch(undefined),
+  packageName: publicPackageName.optional().catch(undefined),
+  packageVersion: publicPackageVersion.optional().catch(undefined),
+});
+const chatRedirectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/_chat',
+  validateSearch: z.object({
+    intent: z.literal('install-package'),
+    packageName: publicPackageName,
+    packageVersion: publicPackageVersion,
+  }),
+  beforeLoad: async ({ location, search }) => {
+    const destination = await defaultWorkspaceDestination(location.href);
+    if (destination === '/create-workspace')
+      throw redirect({ to: '/create-workspace', search: { redirect: location.href }, replace: true });
+    throw redirect({
+      to: '/$workspaceSlug',
+      params: { workspaceSlug: destination.slice(1) },
+      search,
+      replace: true,
+    });
+  },
 });
 export const workspaceHomeRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -847,6 +878,18 @@ const systemPackagesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'packages',
   component: SystemPackagesPage,
+});
+export const publicPackageRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'packages/catalog/$packageName/$packageVersion',
+  beforeLoad: ({ params }) => {
+    if (
+      !publicPackageName.safeParse(params.packageName).success ||
+      !publicPackageVersion.safeParse(params.packageVersion).success
+    )
+      throw notFound();
+  },
+  component: PublicPackagePage,
 });
 export const systemPackageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1016,6 +1059,7 @@ export const router = createRouter({
       : (location.state.__TSR_key ?? location.href),
   routeTree: rootRoute.addChildren([
     indexRoute,
+    chatRedirectRoute,
     googleCallbackRoute,
     githubCallbackRoute,
     atlassianCallbackRoute,
@@ -1053,6 +1097,7 @@ export const router = createRouter({
       projectSettingsRoute,
       workspaceSkillsRoute,
       systemPackagesRoute,
+      publicPackageRoute,
       systemPackageRoute,
       newSkillRoute,
       importSkillRoute,

@@ -25,6 +25,7 @@ function hasUnsafeCharacters(value: string) {
 // Signed-in pages outside a workspace. Their first segments are reserved from workspace slugs.
 function isAccountDestination(pathname: string) {
   if (
+    pathname === '/_chat' ||
     pathname === '/create-workspace' ||
     pathname === '/onboarding' ||
     pathname === '/onboarding/chat' ||

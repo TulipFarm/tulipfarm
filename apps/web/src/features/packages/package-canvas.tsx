@@ -5,7 +5,8 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { ReadFeedback, ReadError } from '@/components/read-feedback';
 import { useCanvas, useResultAttention, type CanvasItem } from '@/features/chat/canvas-state';
-import { InstallationOutline } from './progress';
+import { InstallationOutline, installationVerified } from './progress';
+import { PackageSuccess } from './package-surface';
 import { usePackageInstallations } from './queries';
 
 export function PackageCanvasButton({
@@ -35,7 +36,7 @@ export function PackageCanvasButton({
   }, [autoOpen, foreground, activeId, show, item]);
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <p className="text-sm text-muted-foreground tabular-nums">{summary}</p>
+      <span className="text-sm text-muted-foreground tabular-nums">{summary}</span>
       <Button variant="outline" size="sm" onClick={() => show(item)}>
         Open installation
       </Button>
@@ -57,6 +58,16 @@ export function PackageInstallationCanvas({
     read.state.kind === 'ready'
       ? read.state.data.installations.find(installation => installation.id === installationId)
       : undefined;
+  const outline = view ? (
+    <InstallationOutline
+      view={view}
+      stale={
+        read.state.kind === 'ready' && read.state.error
+          ? 'Showing the last loaded installation. Refresh to see the latest progress.'
+          : undefined
+      }
+    />
+  ) : null;
   useResultAttention(`package:${installationId}`, view?.status === 'waiting-review', 'A package needs your review');
   const retry = (
     <Button variant="outline" onClick={() => void read.refresh()}>
@@ -87,16 +98,14 @@ export function PackageInstallationCanvas({
         {() =>
           view ? (
             <section aria-label="Package installation progress" className="space-y-4">
-              <h2 className="text-base font-medium">{view.package.title}</h2>
-              <InstallationOutline
-                view={view}
-                stale={
-                  read.state.kind === 'ready' && read.state.error
-                    ? 'Showing the last loaded installation. Refresh to see the latest progress.'
-                    : undefined
-                }
-              />
-              <p className="text-sm text-muted-foreground">Review changes and continue the installation in chat.</p>
+              {installationVerified(view) ? (
+                <PackageSuccess id={`package-canvas-success-${view.id}`} title={view.package.title} details={outline} />
+              ) : (
+                <>
+                  <h2 className="text-base font-medium">{view.package.title}</h2>
+                  {outline}
+                </>
+              )}
             </section>
           ) : (
             <StatePanel

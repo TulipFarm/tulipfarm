@@ -16,6 +16,8 @@ export function editorDocument(node: DraftNode): JSONContent {
 }
 
 function messageNode(node: DraftNode): JSONContent {
+  if (node.type === 'packageReference')
+    return { type: 'text', text: typeof node.attrs?.url === 'string' ? node.attrs.url : '' };
   const { content, marks, ...rest } = node;
   const result: JSONContent = { ...rest };
   if (content) result.content = content.map(messageNode);

@@ -130,7 +130,11 @@ class LinkFailure extends Error {
  * streamed under a 10 MiB cap within 25 seconds and typed from its bytes: HTML is a `page` for `web.fetch`, anything
  * else is a `file`. Aborting `signal` rejects with its reason; every other failure is a named `failed` result.
  */
-export async function fetchPublicFile(input: string, signal: AbortSignal): Promise<PublicFile> {
+export async function fetchPublicFile(
+  input: string,
+  signal: AbortSignal,
+  options: { redirect?: 'error' } = {},
+): Promise<PublicFile> {
   denyMcpEgress();
   if (!publicWebConfiguration()?.pages) return { kind: 'failed', url: input, reason: 'web-off' };
   const deadline = AbortSignal.timeout(publicFileLimits.deadlineMs);
@@ -159,6 +163,7 @@ export async function fetchPublicFile(input: string, signal: AbortSignal): Promi
         const location = response.headers.location;
         if (response.statusCode >= 300 && response.statusCode < 400 && location) {
           await response.body.dump().catch(() => {});
+          if (options.redirect === 'error') throw new LinkFailure('unavailable');
           if (hop >= publicFileLimits.maxRedirects) throw new LinkFailure('unavailable');
           current = new URL(Array.isArray(location) ? (location[0] ?? '') : location, url).href;
           continue;

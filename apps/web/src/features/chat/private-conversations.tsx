@@ -14,10 +14,12 @@ import {
   type RefObject,
 } from 'react';
 import { chatDocumentReferences, chatDocumentText, type ChatDocument } from '@tulipfarm/conversations/rich-content';
+import { packageInstallRequest } from '@tulipfarm/conversations/layout-contracts';
 import { parseChatDraft, type ChatDraft } from './editor-document';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { createPortal } from 'react-dom';
 import { newChatSearch, workspaceChatRoute, workspaceRoute } from '@/router';
+import { publicPackageInstallPrompt } from '@/features/packages/public-catalog';
 import { ArrowDown } from 'reicon-react/icons/ArrowDown';
 import { Danger } from 'reicon-react/icons/Danger';
 import { Folder } from 'reicon-react/icons/Folder';
@@ -81,12 +83,18 @@ import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-pi
 import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
 import { RichMessage } from './rich-message';
+import { PackageMessageText } from './package-reference';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModels } from './chat-models';
 import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
-import { ChatPackages, useChatPackages } from '@/features/packages/chat-packages';
+import {
+  ChatPackages,
+  PackageChatContext,
+  useChatPackages,
+  type PackageChatContextValue,
+} from '@/features/packages/chat-packages';
 import { InteractionCard } from './interaction-card';
 import { AuthoringDraftCard } from './authoring-draft-card';
 import { Welcome } from './welcome';
@@ -205,6 +213,7 @@ const newChatPrefillKey = (workspaceId: string) => `tulipfarm:new-chat-prefill:$
 type NewChatPrefill = {
   source: 'intent' | 'storage';
   prompt: string;
+  autoSend?: boolean;
   skill?: { id: string; revision: string };
   workflow?: WorkflowReference;
 };
@@ -239,40 +248,46 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
   );
   const workflowHandoff = useWorkflowHandoff(workspace.id, intent === 'edit-workflow', searchIntent.workflowId ?? null);
   const prefill: NewChatPrefill | null =
-    intent === 'create-agent'
+    intent === 'install-package' && searchIntent.packageName && searchIntent.packageVersion
       ? {
           source: 'intent',
-          prompt:
-            'Help me create an agent. Read the authoring context and ask only what is still needed about its purpose, instructions, team, skills, access, Slack channels, and scheduled task prompts. Keep it private by default. Prepare the complete setup for my review; do not activate or install anything without my explicit approval.',
+          prompt: publicPackageInstallPrompt(searchIntent.packageName, searchIntent.packageVersion),
+          autoSend: true,
         }
-      : intent === 'create-skill'
+      : intent === 'create-agent'
         ? {
             source: 'intent',
             prompt:
-              'Help me create a reusable skill. Ask only what you need to know, then prepare a skill package for my review.',
+              'Help me create an agent. Read the authoring context and ask only what is still needed about its purpose, instructions, team, skills, access, Slack channels, and scheduled task prompts. Keep it private by default. Prepare the complete setup for my review; do not activate or install anything without my explicit approval.',
           }
-        : intent === 'edit-skill' && skillIntent.id && skillIntent.version
+        : intent === 'create-skill'
           ? {
               source: 'intent',
-              prompt: `Help me edit skill ${skillIntent.id}, starting from saved version ${skillIntent.version}. Read the skill first, ask what I want to change, and preserve unrelated files. Prepare the changes for my review.`,
+              prompt:
+                'Help me create a reusable skill. Ask only what you need to know, then prepare a skill package for my review.',
             }
-          : intent === 'use-skill' && skillIntent.id && skillIntent.revision
-            ? { source: 'intent', prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
-            : intent === 'create-table'
-              ? { source: 'intent', prompt: createTablePrompt }
-              : intent === 'create-workflow'
-                ? {
-                    source: 'intent',
-                    prompt:
-                      'Help me create a workflow. Ask what should start it, which steps and agents it needs, and who should act. Use configured connected sources when needed. Prepare a workflow draft for my review, without saving or activating it.',
-                  }
-                : workflowHandoff?.kind === 'ready'
-                  ? { source: 'intent', prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
-                  : tableHandoff?.kind === 'ready'
-                    ? { source: 'intent', prompt: tableHandoff.prompt }
-                    : storedPrefill === createTablePrompt
-                      ? { source: 'storage', prompt: storedPrefill }
-                      : null;
+          : intent === 'edit-skill' && skillIntent.id && skillIntent.version
+            ? {
+                source: 'intent',
+                prompt: `Help me edit skill ${skillIntent.id}, starting from saved version ${skillIntent.version}. Read the skill first, ask what I want to change, and preserve unrelated files. Prepare the changes for my review.`,
+              }
+            : intent === 'use-skill' && skillIntent.id && skillIntent.revision
+              ? { source: 'intent', prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
+              : intent === 'create-table'
+                ? { source: 'intent', prompt: createTablePrompt }
+                : intent === 'create-workflow'
+                  ? {
+                      source: 'intent',
+                      prompt:
+                        'Help me create a workflow. Ask what should start it, which steps and agents it needs, and who should act. Use configured connected sources when needed. Prepare a workflow draft for my review, without saving or activating it.',
+                    }
+                  : workflowHandoff?.kind === 'ready'
+                    ? { source: 'intent', prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
+                    : tableHandoff?.kind === 'ready'
+                      ? { source: 'intent', prompt: tableHandoff.prompt }
+                      : storedPrefill === createTablePrompt
+                        ? { source: 'storage', prompt: storedPrefill }
+                        : null;
   const consumePrefill = (source: NewChatPrefill['source']) => {
     if (source === 'storage') {
       sessionStorage.removeItem(prefillKey);
@@ -414,8 +429,20 @@ function ConversationDetail({
   const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
-  const packages = useChatPackages(workspace.id, chatId, !draft);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
+  const packages = useChatPackages(
+    workspace.id,
+    chatId,
+    !draft,
+    savedData && !savedData.chat.projectId
+      ? savedData.messages
+          .filter(message => message.author === 'human')
+          .map(message => message.parts.flatMap(part => (part.kind === 'text' ? [part.text] : [])).join(''))
+      : [],
+    savedData?.messages.flatMap(message =>
+      message.parts.flatMap(part => (part.kind === 'layout' ? [part.layout] : [])),
+    ) ?? [],
+  );
   const data = useMemo(
     () => (savedData ? { ...savedData, messages: reconcileLiveTools(savedData.messages, stream.tools) } : null),
     [savedData, stream.tools],
@@ -459,7 +486,7 @@ function ConversationDetail({
   const appliedPrefill = useRef<NewChatPrefill['source'] | null>(null);
   const [skillHandoffError, setSkillHandoffError] = useState('');
   useEffect(() => {
-    if (!prefill || prefill.skill) {
+    if (!prefill || prefill.skill || prefill.autoSend) {
       appliedPrefill.current = null;
       return;
     }
@@ -560,6 +587,7 @@ function ConversationDetail({
   // Once saved history has the message, the server copy replaces the optimistic one for good.
   if (outgoing && data?.messages.some(message => message.id === outgoing.id)) setOutgoing(null);
   const posting = useRef(false);
+  const sentPrefill = useRef(false);
   const sendNavigation = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
@@ -622,8 +650,26 @@ function ConversationDetail({
     uploads.ready &&
     !googleBlocked &&
     (hasText ? !textError(text) && !compactCommandError(text) : staged);
+  const packageSend =
+    !sharedChat &&
+    mode !== 'plan' &&
+    !staged &&
+    !!validContent &&
+    !!packageInstallRequest([{ kind: 'text', text, content: validContent }], mode);
+  const sendAvailable = (models.usable && !!models.model) || packageSend;
+  useEffect(() => {
+    if (!draft || !prefill?.autoSend || sentPrefill.current || locked) return;
+    const content = textDocument(prefill.prompt);
+    if (
+      !(models.usable && models.model) &&
+      !(!sharedChat && packageInstallRequest([{ kind: 'text', text: prefill.prompt, content }], mode))
+    )
+      return;
+    sentPrefill.current = true;
+    post(content, [{ kind: 'text', text: prefill.prompt, content }], null, []);
+  }, [draft, prefill, locked, models.usable, models.model, sharedChat, mode]);
   function send() {
-    if (locked || !validContent || !canSend || !models.usable || !models.model) return;
+    if (locked || !validContent || !canSend || !sendAvailable) return;
     const compact = !draft && !staged ? compactCommand(text) : null;
     if (compact) {
       post(validContent, [{ kind: 'compact', ...compact }], null, []);
@@ -663,12 +709,17 @@ function ConversationDetail({
     skill: SkillReference | null = null,
     references = mentions.references,
   ) {
-    if (!models.model || locked || posting.current) return;
+    const packageRequest = !sharedChat && packageInstallRequest(parts, mode);
+    if ((!packageRequest && (!models.usable || !models.model)) || locked || posting.current) return;
     posting.current = true;
     const messageId = crypto.randomUUID();
     if (draft) {
       sendNavigation.current = true;
-      void navigate({ to: '/$workspaceSlug/chat/$chatId', params: { workspaceSlug, chatId } }).finally(() => {
+      void navigate({
+        to: '/$workspaceSlug/chat/$chatId',
+        params: { workspaceSlug, chatId },
+        replace: prefill?.autoSend === true,
+      }).finally(() => {
         sendNavigation.current = false;
       });
     }
@@ -681,7 +732,7 @@ function ConversationDetail({
         chatId,
         commandId: crypto.randomUUID(),
         messageId,
-        model: models.model.id,
+        ...(models.model ? { model: models.model.id } : {}),
         parts,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         mode,
@@ -951,14 +1002,6 @@ function ConversationDetail({
           >
             {history => (
               <>
-                {!draft && (
-                  <ChatPackages
-                    packages={packages}
-                    chatId={chatId}
-                    disabled={history.chat.isClosed || projectArchived}
-                    foreground={visible && !compact}
-                  />
-                )}
                 {history.nextBefore && (
                   <div className="flex justify-center">
                     <Button
@@ -1002,6 +1045,12 @@ function ConversationDetail({
                               latest={index === history.messages.length - 1}
                               rowViews={rowViewsForMessage(history.messages, message)}
                               disabled={locked}
+                              packageContext={{
+                                packages,
+                                chatId,
+                                disabled: history.chat.isClosed || projectArchived,
+                                foreground: visible && !compact,
+                              }}
                               retryHandoff={compactionId => {
                                 if (!locked && models.usable)
                                   post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
@@ -1220,6 +1269,14 @@ function ConversationDetail({
                     )}
                   </ol>
                 )}
+                {!draft && (
+                  <ChatPackages
+                    packages={packages}
+                    chatId={chatId}
+                    disabled={history.chat.isClosed || projectArchived}
+                    foreground={visible && !compact}
+                  />
+                )}
                 {!empty && (
                   <IntegrationLinks
                     workspaceId={workspace.id}
@@ -1303,7 +1360,7 @@ function ConversationDetail({
               content={draftSent ? emptyRichDocument() : content}
               onContentChange={setContent}
               onSend={send}
-              canSend={!locked && canSend && models.usable}
+              canSend={!locked && canSend && sendAvailable}
               placeholder={compact ? 'Reply…' : empty ? 'What would you like to get done?' : 'Reply…'}
               mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
               scope={draft && empty ? scope : projectSharingScope}
@@ -1533,6 +1590,7 @@ function ConversationEntry({
   latest,
   rowViews,
   disabled,
+  packageContext,
   retryHandoff,
   control,
 }: {
@@ -1543,6 +1601,7 @@ function ConversationEntry({
   latest: boolean;
   rowViews: RowView[];
   disabled: boolean;
+  packageContext: PackageChatContextValue;
   retryHandoff: (compactionId: string) => void;
   control: (kind: 'retry' | 'cancel') => void;
 }) {
@@ -1620,14 +1679,15 @@ function ConversationEntry({
                 );
               case 'layout':
                 return (
-                  <LayoutReply
-                    key={index}
-                    chatId={chatId}
-                    messageId={message.id}
-                    latest={latest}
-                    text={part.text}
-                    value={part.layout}
-                  />
+                  <PackageChatContext value={packageContext} key={index}>
+                    <LayoutReply
+                      chatId={chatId}
+                      messageId={message.id}
+                      latest={latest}
+                      text={part.text}
+                      value={part.layout}
+                    />
+                  </PackageChatContext>
                 );
               case 'text':
                 return message.author === 'assistant' ? (
@@ -1662,7 +1722,9 @@ function ConversationEntry({
                         }
                       />
                     ) : (
-                      <p className="whitespace-pre-wrap text-base break-words">{part.text}</p>
+                      <p className="whitespace-pre-wrap text-base break-words">
+                        <PackageMessageText text={part.text} />
+                      </p>
                     )}
                   </MessageBubble>
                 );

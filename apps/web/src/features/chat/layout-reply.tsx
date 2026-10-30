@@ -15,6 +15,7 @@ import {
 import { workspaceRoute } from '@/router';
 import { useOptionalCanvas, type CanvasContent, type CanvasItem } from './canvas-state';
 import { ConversationFileReference } from './file-mentions';
+import { PackageInstallationReply } from '@/features/packages/chat-packages';
 
 const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCardKind }> = {
   plan: { title: 'Plan', kind: 'Plan' },
@@ -26,6 +27,7 @@ const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCa
   'google-file': { title: 'Google file', kind: 'File' },
   'workspace-file': { title: 'File', kind: 'File' },
   workflow: { title: 'Workflow', kind: 'Workflow' },
+  'package-install': { title: 'Package installation', kind: 'Action' },
 };
 
 function embedContent(ref: EmbedReference, workspaceId: string, chatId: string): CanvasContent | null {
@@ -45,6 +47,7 @@ function embedContent(ref: EmbedReference, workspaceId: string, chatId: string):
     case 'google-file':
       return { kind: 'google-file', workspaceId, fileId: ref.fileId };
     case 'workspace-file':
+    case 'package-install':
       return null;
     case 'workflow':
       return {
@@ -71,6 +74,7 @@ function EmbedAdapter({ props, chatId }: A2uiAdapterProps<{ ref: EmbedReference 
   const { workspace } = workspaceRoute.useRouteContext();
   const canvas = useOptionalCanvas();
   const { ref } = props;
+  if (ref.kind === 'package-install') return <PackageInstallationReply url={ref.url} chatId={chatId} />;
   if (ref.kind === 'workspace-file')
     return <ConversationFileReference workspaceId={workspace.id} slug={workspace.slug} fileId={ref.fileId} />;
   const title = embedTitle(ref);

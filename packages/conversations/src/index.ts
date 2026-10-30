@@ -1,4 +1,10 @@
 import { loadModelCatalog } from '@tulipfarm/config';
+import {
+  layoutCompatibility,
+  layoutText,
+  packageInstallationLayout,
+  packageInstallRequest,
+} from './layout-contracts.ts';
 import { imageReceipt } from './image-outputs.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
@@ -341,6 +347,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     return command(tx, actor, chatId, input.commandId, 'send', input, sentSchema, async () => {
       await allowance(tx);
       const chat = await owned(tx, actor, chatId, true, 'turn');
+      const packageInstall =
+        tx.commonVersion >= layoutCompatibility.minimum
+          ? packageInstallRequest(input.parts, input.mode, chat.projectId)
+          : null;
       const attachments = input.parts.flatMap(part => (part.kind === 'attachment' ? [part.attachmentId] : [])).sort();
       if (attachments.length) {
         for (const id of attachments) {
@@ -434,7 +444,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           );
         } else if (skill) await insertSkillPart(tx, chatId, input.messageId, ordinal, 'skill', skill);
       }
-      const responder = input.model ?? loadModelCatalog().defaultModel.id;
+      const responder = packageInstall ? 'package-install-v1' : (input.model ?? loadModelCatalog().defaultModel.id);
       const turnId = randomUUID();
       // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
       const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
@@ -449,7 +459,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
         ],
       );
-      if (admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
+      if (!packageInstall && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
         const pinned = await admission.pinTurn(
           tx,
           workspaceId,
@@ -461,11 +471,32 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             JSON.stringify(pinned),
           ]);
       }
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
-        [turnId, chatId],
-      );
-      if (tx.commonVersion >= 1) {
+      if (packageInstall) {
+        const responseId = randomUUID();
+        const layout = packageInstallationLayout(packageInstall, responseId);
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind) VALUES ($1,$2,$3,'assistant')`,
+          [responseId, chatId, chat.nextSequence + 1],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, layout) VALUES ($1,$2,0,'layout',$3,$4)`,
+          [chatId, responseId, layoutText(layout), JSON.stringify(layout)],
+        );
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
+          [chatId, turnId, responseId, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId }])],
+        );
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2 WHERE id=$1`,
+          [turnId, responseId],
+        );
+      } else {
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
+          [turnId, chatId],
+        );
+      }
+      if (!packageInstall && tx.commonVersion >= 1) {
         await tx.client.query(
           `WITH interrupted AS (
           UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',generation=generation+1,error_code=NULL,retry_at=NULL
@@ -476,10 +507,15 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           [chatId],
         );
       }
-      const title = chat.nextSequence === 1 && !chat.titleManual ? initialTitle(input.parts, skill?.name) : null;
+      const title =
+        chat.nextSequence === 1 && !chat.titleManual
+          ? packageInstall
+            ? `Install ${packageInstall.name.replaceAll('-', ' ')}`
+            : initialTitle(input.parts, skill?.name)
+          : null;
       await tx.client.query(
-        `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + 1, activity_at = clock_timestamp(), title = COALESCE($2, title), title_revision = title_revision + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END WHERE id = $1`,
-        [chatId, title],
+        `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + $3, activity_at = clock_timestamp(), title = COALESCE($2, title), title_revision = title_revision + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END WHERE id = $1`,
+        [chatId, title, packageInstall ? 2 : 1],
       );
       await recordConversationActivity(tx, chatId);
       if (tx.commonVersion >= budCompatibility.minimum) {

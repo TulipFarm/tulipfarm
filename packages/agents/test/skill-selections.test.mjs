@@ -207,6 +207,7 @@ test('built-in skills load from their directories and old pins resolve to the cu
     skills.map(skill => [skill.id, skill.revision]),
     [
       ['table-authoring', 'latest'],
+      ['package-install', 'latest'],
       ['agent-authoring', 'latest'],
       ['workspace-skill-authoring', 'latest'],
       ['workflow-authoring', 'latest'],
