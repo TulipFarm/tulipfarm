@@ -1643,11 +1643,15 @@ function nativeWire(
               {
                 role: 'assistant',
                 content: item.text || null,
-                tool_calls: item.calls.map(call => ({
-                  id: call.id,
-                  type: 'function',
-                  function: { name: call.name, arguments: JSON.stringify(call.input) },
-                })),
+                ...(item.calls.length
+                  ? {
+                      tool_calls: item.calls.map(call => ({
+                        id: call.id,
+                        type: 'function',
+                        function: { name: call.name, arguments: JSON.stringify(call.input) },
+                      })),
+                    }
+                  : {}),
               },
             ];
           return item.results.map(result => ({ role: 'tool', tool_call_id: result.id, content: result.output }));

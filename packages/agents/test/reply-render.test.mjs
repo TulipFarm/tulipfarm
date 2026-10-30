@@ -167,6 +167,12 @@ test('a plain-text answer gets one request for a layout; a second one is kept as
   assert.equal(kept.requests.length, 2);
 });
 
+test('chat completions resend a plain-text answer without an empty tool_calls list', async t => {
+  const { requests } = await layoutTurn(t, 'azure', [{ text: 'Use Valkey.' }, render(chatReply)]);
+  const answer = requests[1].messages.find(message => message.role === 'assistant');
+  assert.deepEqual(answer, { role: 'assistant', content: 'Use Valkey.' });
+});
+
 test('after three invalid layouts the reply is saved as its summary with a layout-failed mark', async t => {
   const { result, requests } = await layoutTurn(t, 'anthropic', [
     render(invalidReply),

@@ -18,9 +18,10 @@ export function workflowTransaction<T>(
   runtime: WorkflowRuntime,
   workspaceId: string,
   operation: (tx: WorkflowTransaction) => Promise<T>,
+  mode: 'read' | 'write' = 'write',
 ) {
   return runtime.transaction(idSchema.parse(workspaceId), commonCompatibility, async tx => {
-    await lockAuthorization(tx, 'write');
+    await lockAuthorization(tx, mode);
     return operation(tx);
   });
 }

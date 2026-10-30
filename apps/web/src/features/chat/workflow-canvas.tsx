@@ -136,19 +136,21 @@ export function WorkflowCanvasButton({
   const { show } = useCanvas();
   const item = workflowCanvasItem(workspaceId, reference);
   return (
-    <ResultCard
-      title={name}
-      kind="Workflow"
-      apps={[]}
-      icon={<BranchDown size={18} />}
-      status={
-        reference.kind === 'definition'
-          ? 'Saved definition · Not a completed run'
-          : reference.kind === 'draft'
-            ? 'Draft · Not saved yet'
-            : 'Run details available'
-      }
-      action={{ label: reference.kind === 'run' ? 'View run' : 'View workflow', onClick: () => show(item) }}
-    />
+    <div className="w-full">
+      <ResultCard
+        title={name}
+        kind="Workflow"
+        apps={[]}
+        icon={<BranchDown size={18} />}
+        status={
+          reference.kind === 'definition'
+            ? 'Saved definition · Not a completed run'
+            : reference.kind === 'draft'
+              ? 'Draft · Not saved yet'
+              : 'Run details available'
+        }
+        action={{ label: reference.kind === 'run' ? 'View run' : 'View workflow', onClick: () => show(item) }}
+      />
+    </div>
   );
 }

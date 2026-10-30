@@ -51,8 +51,12 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   const cipher = credentialCipher(options.keyring);
   const adapters = createProviderAdapters(options.providerFetch);
   const discovery = createProviderDiscovery(options.providerFetch);
-  async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
-    return workflowTransaction(runtime, workspaceId, operation);
+  async function transaction<T>(
+    workspaceId: string,
+    operation: (tx: AuthorizationTransaction) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    return workflowTransaction(runtime, workspaceId, operation, mode);
   }
   async function integration(tx: AuthorizationTransaction, id: string) {
     const row = (
@@ -121,25 +125,29 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     ]);
   }
   async function list(workspaceId: string, user: string) {
-    return transaction(workspaceId, async tx => {
-      const actor = await workflowMember(tx, user);
-      const rows = (
-        await tx.client.query(
-          `SELECT c.id,c.name,c.source,c.enabled,c.generation,c.membership_id,(m.removed_at IS NULL) AS authorized FROM ${table(tx, 'tf_provider_integrations')} c JOIN ${table(tx, 'tf_memberships')} m ON m.id=c.membership_id ORDER BY c.name,c.id LIMIT 100`,
-        )
-      ).rows;
-      const result = [];
-      for (const row of rows) {
-        const capabilities = {
-          use: await hasGrant(tx, actor.membershipId, row.id, 'use', 'provider'),
-          manage: await hasGrant(tx, actor.membershipId, row.id, 'manage', 'provider'),
-          rotate: actor.membershipId === row.membership_id,
-        };
-        if (capabilities.use || capabilities.manage)
-          result.push(providerIntegrationSchema.parse({ ...row, capabilities }));
-      }
-      return result;
-    });
+    return transaction(
+      workspaceId,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        const rows = (
+          await tx.client.query(
+            `SELECT c.id,c.name,c.source,c.enabled,c.generation,c.membership_id,(m.removed_at IS NULL) AS authorized FROM ${table(tx, 'tf_provider_integrations')} c JOIN ${table(tx, 'tf_memberships')} m ON m.id=c.membership_id ORDER BY c.name,c.id LIMIT 100`,
+          )
+        ).rows;
+        const result = [];
+        for (const row of rows) {
+          const capabilities = {
+            use: await hasGrant(tx, actor.membershipId, row.id, 'use', 'provider'),
+            manage: await hasGrant(tx, actor.membershipId, row.id, 'manage', 'provider'),
+            rotate: actor.membershipId === row.membership_id,
+          };
+          if (capabilities.use || capabilities.manage)
+            result.push(providerIntegrationSchema.parse({ ...row, capabilities }));
+        }
+        return result;
+      },
+      'read',
+    );
   }
   async function create(workspaceId: string, user: string, input: unknown) {
     const value = providerIntegrationInputSchema.parse(input);
