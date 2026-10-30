@@ -6,7 +6,13 @@ import { slackDecisionSchema, slackActionViewSchema, slackConfigurationSchema } 
 import { createSlackActions, createSlackActionDecision } from '@tulipfarm/agents/slack-actions';
 import { slackActionSettings } from '@tulipfarm/agents/slack-environment';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
-import { createSlackDefault, slackReplyRetryAction } from '@tulipfarm/agents/slack-default';
+import {
+  createSlackDefault,
+  slackReplyRetryAction,
+  slackRowDraftApprove,
+  slackRowDraftDismiss,
+  slackRowDraftValueSchema,
+} from '@tulipfarm/agents/slack-default';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
@@ -26,6 +32,15 @@ async function respondEphemeral(responseUrl: string | undefined, text: string) {
     // The retry is already recorded; a missed confirmation only hides the status from the person who pressed it.
   }
 }
+
+const rowDraftReplies = {
+  created: 'Row added.',
+  updated: 'Row updated.',
+  deleted: 'Row deleted.',
+  dismissed: 'Draft dismissed. No row was changed.',
+  stale: 'The table or row changed after this draft. Nothing was changed. Ask again for a fresh draft.',
+  decided: 'This row change was already decided. Nothing else was changed.',
+} as const;
 
 export function registerSlackActions(
   app: FastifyInstance,
@@ -171,7 +186,13 @@ export function registerSlackActions(
               actions: z
                 .array(
                   z.object({
-                    action_id: z.enum(['slack_action_approve', 'slack_action_reject', slackReplyRetryAction]),
+                    action_id: z.enum([
+                      'slack_action_approve',
+                      'slack_action_reject',
+                      slackReplyRetryAction,
+                      slackRowDraftApprove,
+                      slackRowDraftDismiss,
+                    ]),
                     value: z.string().max(512),
                   }),
                 )
@@ -195,6 +216,26 @@ export function registerSlackActions(
             } catch (error) {
               if (!(error instanceof AccessDenied)) throw error;
               text = 'Only the person who asked can retry this request.';
+            }
+            await respondEphemeral(payload.response_url, text);
+            return {};
+          }
+          if (action.action_id === slackRowDraftApprove || action.action_id === slackRowDraftDismiss) {
+            const value = slackRowDraftValueSchema.parse(JSON.parse(action.value));
+            let text: string;
+            try {
+              text =
+                rowDraftReplies[
+                  await defaults.decideRowDraft(value, action.action_id === slackRowDraftApprove ? 'save' : 'dismiss', {
+                    appId: config.appId,
+                    teamId: payload.team.id,
+                    slackUserId: payload.user.id,
+                  })
+                ];
+            } catch (error) {
+              if (!(error instanceof AccessDenied)) throw error;
+              text =
+                'Nothing was changed. Only the person who asked can decide this row change, while they can still see this thread and the table.';
             }
             await respondEphemeral(payload.response_url, text);
             return {};

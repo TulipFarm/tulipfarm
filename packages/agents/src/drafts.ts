@@ -110,11 +110,20 @@ async function savepoint<T>(tx: AgentTransaction, operation: () => Promise<T>, k
   }
 }
 
+/** Confirms the member can still see the Slack thread a turn answered; draft sources cannot check it themselves. */
+export type SlackTurnAudience = (
+  tx: AgentTransaction,
+  workspaceId: string,
+  actor: HumanActor,
+  eventId: string,
+) => Promise<void>;
+
 export function createAuthoringDrafts(
   runtime: AgentStorage,
   eligible?: ModelFamilyEligibility,
   wake?: (work: Work) => Promise<void>,
   setupOptions?: AgentSetupOptions,
+  slackTurnAudience?: SlackTurnAudience,
 ) {
   async function transaction<T>(
     workspaceId: string,
@@ -345,13 +354,18 @@ export function createAuthoringDrafts(
       throw error;
     }
   }
-  /** Only row drafts may carry personal memory, and only the requester's own; every other draft refuses it. */
+  /**
+   * Only row drafts may carry personal memory, and only the requester's own; every other draft refuses it.
+   * Only row drafts may carry the Slack thread they were asked from, checked against its current audience.
+   */
   async function requireSources(
     tx: AgentTransaction,
+    workspaceId: string,
     actor: HumanActor,
     proposal: AuthoringProposal,
     sources: z.infer<typeof sourcesSchema>,
   ) {
+    const audience = proposal.kind === 'row' ? slackTurnAudience : undefined;
     await requireDraftSources(
       bindFileSources(tx),
       actor,
@@ -360,9 +374,10 @@ export function createAuthoringDrafts(
       undefined,
       false,
       proposal.kind === 'row',
+      audience && (eventId => audience(tx, workspaceId, actor, eventId)),
     );
   }
-  async function load(tx: AgentTransaction, actor: HumanActor, chatId: string, id: string) {
+  async function load(tx: AgentTransaction, workspaceId: string, actor: HumanActor, chatId: string, id: string) {
     await owned(tx, actor, chatId);
     const row = rowSchema
       .optional()
@@ -375,7 +390,7 @@ export function createAuthoringDrafts(
         ).rows[0],
       );
     if (!row) throw new AccessDenied();
-    await requireSources(tx, actor, row.proposal, row.sources);
+    await requireSources(tx, workspaceId, actor, row.proposal, row.sources);
     return row;
   }
   async function propose(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
@@ -396,7 +411,7 @@ export function createAuthoringDrafts(
         { kind: 'private-conversation', conversationId: origin.conversationId },
         ...sources,
       ]);
-      await requireSources(tx, actor, proposal, sources);
+      await requireSources(tx, workspaceId, actor, proposal, sources);
       await writable(tx, actor, proposal, bound, workspaceId);
       if (proposal.kind === 'agent') await resolveProcedures(tx, proposal.input.definition.skills, actor);
       if (proposal.kind === 'row') await savepoint(tx, () => applyRow(bound, workspaceId, actor, id, proposal), false);
@@ -471,7 +486,7 @@ export function createAuthoringDrafts(
     chatId = uuidSchema.parse(chatId);
     id = uuidSchema.parse(id);
     return transaction(workspaceId, user, id, async (tx, actor, bound) => {
-      const row = await load(tx, actor, chatId, id);
+      const row = await load(tx, workspaceId, actor, chatId, id);
       const saved = (
         await tx.client.query(`SELECT outcome FROM ${relation(tx, 'tf_chat_authoring_decisions')} WHERE draft_id=$1`, [
           id,
@@ -551,7 +566,7 @@ export function createAuthoringDrafts(
     // Woken runs read their workflow state, so they are signalled only once this decision has committed.
     const woken: Work[] = [];
     const decided = await transaction(workspaceId, user, true, async (tx, actor, bound) => {
-      const row = await load(tx, actor, chatId, id);
+      const row = await load(tx, workspaceId, actor, chatId, id);
       if (row.digest !== input.digest) throw new AgentError('draft-conflict');
       if (input.decision === 'activate' && (row.proposal.kind !== 'agent' || !row.proposal.input.setup))
         throw new AgentError('setup-review-required', 400);

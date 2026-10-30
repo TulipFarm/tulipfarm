@@ -98,11 +98,14 @@ export async function postBotMessage(input: {
   replaceTs?: string | undefined;
   text: string;
   presentation?: SlackMessage | undefined;
+  /** Blocks shown under the answer, such as review buttons; the answer text alone stays the message text. */
+  blocks?: SlackMessage['blocks'] | undefined;
   agentName?: string | undefined;
   customizeName?: boolean;
   fetcher?: typeof fetch;
 }): Promise<BotMessageOutcome> {
-  const message = input.presentation ?? renderSlackAnswer(input.text);
+  const rendered = input.presentation ?? renderSlackAnswer(input.text);
+  const message = input.blocks?.length ? { ...rendered, blocks: [...rendered.blocks, ...input.blocks] } : rendered;
   const username =
     input.customizeName && input.agentName && /^[CG]/.test(input.channel) && !input.replaceTs
       ? `${input.agentName} \u00b7 TulipFarm`

@@ -1215,14 +1215,21 @@ export function createChatTools(
           !(await importedSkillPackages(workspaceId, actor, origin.conversationId))
         )
           return registry.invoke(context, call);
-        if (sources.some(source => unreviewableSourceKinds.has(source.kind))) return rowReviewUnavailable;
+        const turnAudience = sources.some(source => source.kind === 'shared-slack-turn')
+          ? slack?.(runtime).turnAudience
+          : undefined;
+        if (
+          sources.some(source => unreviewableSourceKinds.has(source.kind)) ||
+          (!turnAudience && sources.some(source => source.kind === 'shared-slack-turn'))
+        )
+          return rowReviewUnavailable;
         if (call.tool === 'rows.create.batch')
           return {
             error: 'review-required',
             instruction:
               'No rows have been created. This chat used untrusted content, so batch writes are unavailable. Call rows.create for one row; it returns a review draft the member approves on the chat card.',
           };
-        return createAuthoringDrafts(runtime).propose(
+        return createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience).propose(
           workspaceId,
           actor,
           callId,
@@ -1852,18 +1859,17 @@ const usedUntrustedContent = (sources: readonly SourceDependency[], actor: Human
       ? source.membershipId !== actor.membershipId
       : !trustedSourceKinds.has(source.kind),
   );
-/** Draft review refuses these sources, so a row draft could never be approved. */
+/** Draft review refuses these sources, so a row draft could never be approved. A Slack thread is reviewable only from a Slack reply. */
 const unreviewableSourceKinds: ReadonlySet<string> = new Set([
   'unknown',
   'unavailable',
-  'shared-slack-turn',
   'mcp-integration',
   'private-task',
 ]);
 const rowReviewUnavailable = {
   error: 'review-unavailable',
   instruction:
-    'No row has been changed. This chat used content that cannot be shown for review, such as MCP tools, agent task results or shared Slack messages, so row changes are unavailable here. Ask the member to make the change in the table.',
+    'No row has been changed. This chat used content that cannot be shown for review, such as MCP tools or agent task results, so row changes are unavailable here. Ask the member to make the change in the table.',
 };
 
 async function workflowStale<T>(proposal: Promise<T>) {

@@ -521,6 +521,7 @@ test('chat row writes after untrusted content become member-approved review draf
     for (const sources of [
       [{ kind: 'unknown' }],
       [{ kind: 'unavailable' }],
+      // Without Slack action settings nothing can recheck the thread, so a Slack draft could never be decided.
       [web, { kind: 'shared-slack-turn', eventId: randomUUID() }],
     ]) {
       const { chatId, result } = await chatTool(createCall('unreviewable'), sources);
@@ -548,6 +549,60 @@ test('chat row writes after untrusted content become member-approved review draf
     };
     await assert.rejects(createChatTools(runtime).invokeWithSources(context, createCall('future')));
     assert.deepEqual(await live(), before);
+  });
+
+  await t.test('Slack channel turns with web content draft rows decided against the Slack thread', async () => {
+    const eventId = randomUUID(),
+      checked = [];
+    let visible = true;
+    const turnAudience = async (_tx, workspaceId, actor, event) => {
+      checked.push([workspaceId, actor.userId, event]);
+      if (!visible) throw new AccessDenied();
+    };
+    const slack = () => ({ turnAudience });
+    const before = await live();
+    const { chatId, result: draft } = await chatTool(
+      createCall('SLACK'),
+      [web, { kind: 'shared-slack-turn', eventId }],
+      {
+        invoke: context => createChatTools(context.runtime, { slack }).invokeWithSources(context, createCall('SLACK')),
+      },
+    );
+    assert.equal(draft.status, 'review-required');
+    assert.deepEqual(checked, [[w.id, owner.userId, eventId]]);
+    assert.deepEqual(await live(), before);
+
+    const slackDrafts = createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience);
+    const decideSlack = (actor, decision, commandId = randomUUID()) =>
+      slackDrafts.decide(w.id, actor.userId, chatId, draft.draftId, { commandId, digest: draft.digest, decision });
+    await assert.rejects(decide(owner, chatId, draft, 'save'), AccessDenied);
+    await assert.rejects(decideSlack(other, 'save'), AccessDenied);
+    visible = false;
+    await assert.rejects(decideSlack(owner, 'save'), AccessDenied);
+    assert.deepEqual(await live(), before);
+    visible = true;
+    const commandId = randomUUID();
+    const saved = await decideSlack(owner, 'save', commandId);
+    assert.deepEqual(saved, { kind: 'row', operation: 'create', recordId: draft.draftId });
+    assert.deepEqual(await decideSlack(owner, 'save', commandId), saved);
+    assert.deepEqual(await live(), [...before, draft.draftId].sort());
+    assert.equal(checked.at(-1)[2], eventId);
+
+    const { chatId: dismissChat, result: dismissed } = await chatTool(
+      createCall('SLACK-DISMISS'),
+      [web, { kind: 'shared-slack-turn', eventId }],
+      {
+        invoke: context =>
+          createChatTools(context.runtime, { slack }).invokeWithSources(context, createCall('SLACK-DISMISS')),
+      },
+    );
+    const outcome = await slackDrafts.decide(w.id, owner.userId, dismissChat, dismissed.draftId, {
+      commandId: randomUUID(),
+      digest: dismissed.digest,
+      decision: 'dismiss',
+    });
+    assert.equal(outcome.kind, 'dismissed');
+    assert.deepEqual(await live(), [...before, draft.draftId].sort());
   });
 
   await t.test('batch creates are refused after public web content', async () => {
