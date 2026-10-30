@@ -1,0 +1,57 @@
+# Two pull requests can each pass CI with the same new migration number and still
+# collide once both merge. The check runs against the latest main, and every push
+# to main re-runs it on open pull requests that touch a migration stream.
+name: Migrations
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numbers:
+    name: migration numbers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Fetch the latest main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+      - name: Check migration numbers
+        run: node tooling/check-migration-numbers.mjs --base origin/main
+
+  recheck:
+    name: recheck open pull requests
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Re-run the check on open pull requests that touch migrations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr list -R "$REPOSITORY" --state open --limit 200 --json number,headRefOid,files \
+            --jq '.[] | select(any(.files[].path; test("^(apps/database/migrations|packages/workspace-storage/common)/"))) | "\(.number) \(.headRefOid)"' |
+            while read -r number sha; do
+              run=$(gh run list -R "$REPOSITORY" --workflow migrations.yml --event pull_request --commit "$sha" \
+                --limit 1 --json databaseId,status --jq '.[] | select(.status == "completed") | .databaseId')
+              if [[ -n "$run" ]]; then
+                echo "Re-running the migration check for #$number (run $run)"
+                gh run rerun "$run" -R "$REPOSITORY"
+              fi
+            done

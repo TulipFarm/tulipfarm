@@ -68,7 +68,11 @@ schema with its own `<schema>.schema_migrations` ledger. See
 ## Integration test inputs
 
 `migrations/0001_baseline.sql` is the whole platform schema; later changes
-append `0002_*.sql` and onward. Run the suite against a disposable server:
+append `0002_*.sql` and onward. Numbers must be unique and have no gaps. The
+`migration numbers` CI job checks this against the latest `main`, and re-runs
+on open pull requests that add migrations whenever `main` changes; run
+`node tooling/check-migration-numbers.mjs --base origin/main` locally. Run the
+suite against a disposable server:
 
 ```sh
 TEST_ADMIN_DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5432/postgres \
