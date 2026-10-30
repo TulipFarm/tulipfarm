@@ -316,15 +316,20 @@ try {
     await page.keyboard.press('Escape');
     const rows = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { name: 'Rows', exact: true }) })
+      .filter({ has: page.getByRole('region', { name: 'Customers rows', exact: true }) })
       .last();
-    const rowActions = id => rows.getByRole('button', { name: `Actions for row ${id.slice(0, 8)}`, exact: true });
-    const rowAction = async (id, item) => {
-      await rowActions(id).click();
+    // Row action names use the row's leading values, so find the button inside the Northwind row.
+    const rowActions = () =>
+      rows
+        .getByRole('row')
+        .filter({ has: page.getByRole('cell', { name: 'Northwind Traders', exact: true }) })
+        .getByRole('button', { name: /^Actions for Northwind Traders/ });
+    const rowAction = async item => {
+      await rowActions().click();
       await page.getByRole('menuitem', { name: item, exact: true }).click();
     };
-    const rowMenu = async id => {
-      await rowActions(id).click();
+    const rowMenu = async () => {
+      await rowActions().click();
       await page.getByRole('menuitem').first().waitFor();
       const items = await page.getByRole('menuitem').allTextContents();
       await page.keyboard.press('Escape');
@@ -361,13 +366,13 @@ try {
         notes,
         'A truncated value keeps its full text available',
       );
-      assert.deepEqual(await rowMenu(recordId), ['Edit row', 'History', 'Delete row']);
-      await rowAction(recordId, 'Edit row');
+      assert.deepEqual(await rowMenu(), ['Edit row', 'History', 'Delete row']);
+      await rowAction('Edit row');
       assert.equal(await page.getByLabel('Notes', { exact: true }).inputValue(), notes);
       await screenshot('record-details');
       await page.getByRole('button', { name: 'Discard edits', exact: true }).click();
       await page.getByLabel('Notes', { exact: true }).waitFor({ state: 'detached' });
-      await rowAction(recordId, 'Delete row');
+      await rowAction('Delete row');
       const confirmDelete = page.getByRole('alertdialog', { name: `Delete row ${recordId.slice(0, 8)}?`, exact: true });
       await confirmDelete.getByText(/recoverable for 30 days from Deleted rows in the ⋯ menu/).waitFor();
       await confirmDelete.getByRole('button', { name: 'Keep row', exact: true }).click();
@@ -382,9 +387,9 @@ try {
       readOnly = true;
       await page.reload();
       await rows.getByRole('cell', { name: 'Northwind Traders', exact: true }).waitFor();
-      assert.deepEqual(await rowMenu(recordId), ['History'], 'Read-only rows offer only actions the member can take');
+      assert.deepEqual(await rowMenu(), ['History'], 'Read-only rows offer only actions the member can take');
       assert.equal(await rows.getByRole('button', { name: 'Add row', exact: true }).count(), 0);
-      await rowAction(recordId, 'History');
+      await rowAction('History');
       const history = page.getByRole('region', { name: 'Row history', exact: true });
       await history.getByRole('heading', { name: `History for row ${recordId}`, exact: true }).waitFor();
       await history.getByRole('button', { name: 'Close history', exact: true }).click();
@@ -408,17 +413,17 @@ try {
       await page.getByRole('heading', { level: 1, name: 'Tables', exact: true }).waitFor();
       await page.getByRole('searchbox', { name: 'Search tables' }).fill('Customer');
       await page.waitForURL(url => url.searchParams.get('q') === 'Customer');
-      // Sprout's Button rendered as a router link keeps the link role (@tulipfarm/sprout/button with nativeButton={false}).
-      await page.getByRole('link', { name: 'Customers', exact: true }).waitFor();
+      const tableList = page.getByRole('list', { name: /^Tables, \d+ rows?$/ });
+      await tableList.getByRole('listitem', { name: 'Customers', exact: true }).waitFor();
       const resources = page.getByRole('navigation', { name: 'Table pages' });
       assert.equal(await resources.getByRole('button', { name: 'Previous tables', exact: true }).isDisabled(), true);
       await resources.getByRole('button', { name: 'Next tables', exact: true }).click();
-      await page.getByRole('link', { name: 'Customer contacts', exact: true }).waitFor();
+      await tableList.getByRole('listitem', { name: 'Customer contacts', exact: true }).waitFor();
       await resources.getByRole('button', { name: 'Next tables', exact: true }).click();
-      await page.getByRole('link', { name: 'Customer archive', exact: true }).waitFor();
+      await tableList.getByRole('listitem', { name: 'Customer archive', exact: true }).waitFor();
       assert.equal(await resources.getByRole('button', { name: 'Next tables', exact: true }).isDisabled(), true);
       await resources.getByRole('button', { name: 'Previous tables', exact: true }).click();
-      await page.getByRole('link', { name: 'Customer contacts', exact: true }).waitFor();
+      await tableList.getByRole('listitem', { name: 'Customer contacts', exact: true }).waitFor();
       assert.equal(await page.getByRole('searchbox', { name: 'Search tables' }).inputValue(), 'Customer');
       assert.deepEqual(
         [...new Set(tablePages.slice(tableSearches.indexOf('Customer')))],
@@ -444,7 +449,7 @@ try {
       );
       await page.getByRole('button', { name: 'Retry refresh' }).waitFor();
       await page.getByText(/The last loaded data is still shown\./).waitFor();
-      await page.getByRole('link', { name: 'Customer contacts', exact: true }).waitFor();
+      await tableList.getByRole('listitem', { name: 'Customer contacts', exact: true }).waitFor();
       listFailure = false;
       await page.getByRole('button', { name: 'Retry refresh' }).click();
       await page.getByRole('button', { name: 'Retry refresh' }).waitFor({ state: 'detached' });

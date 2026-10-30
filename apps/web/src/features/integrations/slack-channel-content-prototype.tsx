@@ -198,7 +198,6 @@ export function SlackChannelContentPrototype() {
 
       <Table
         aria-label="Content indexed from each Slack channel"
-        variant="plain"
         narrow="stack"
         data={rows}
         getRowId={row => row.id}

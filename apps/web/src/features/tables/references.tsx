@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from '@tanstack/react-router';
+import { AvatarGroup, AvatarGroupCount, EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { useFeatureRead } from '@/lib/query';
 import { fileKeys, useFilesApi, type FileSummary } from '@/features/files/api';
 import { formatTableValue } from './definition-view';
 import { optionTone } from './table-view';
 import { MemberPhoto } from './member-profile';
-import { workspaceMemberFields, workspaceMemberLabel } from '@tulipfarm/tables/workspace-members';
+import {
+  workspaceMemberAccess,
+  workspaceMemberFields,
+  workspaceMemberLabel,
+} from '@tulipfarm/tables/workspace-members';
 import type { TableDataRow } from './api';
 import type { ReadState } from './request-state';
 import type { TableDefinition, TableValue, TableValues } from './review-contracts';
@@ -152,6 +158,81 @@ function LinkedRowName({
   );
 }
 
+/** Linked rows on one line: two avatars and linked names, and everyone else as a count. Hovering the avatars lists every name. */
+function LinkedPeople({
+  tableId,
+  ids,
+  linked,
+  workspace,
+}: {
+  tableId: string;
+  ids: readonly string[];
+  linked: LinkedLabels;
+  workspace: TableWorkspace;
+}) {
+  const names = ids.map(id => (linked.kind === 'ready' ? linked.data[id] : undefined) ?? linkedLabel(linked, id));
+  const rest = ids.length - 2;
+  const avatars = (
+    // The ring matches the card and grid surface, so overlapping avatars stay distinct.
+    <span className="flex shrink-0" style={{ '--sprout-avatar-ring': 'var(--card)' } as CSSProperties}>
+      <AvatarGroup>
+        {ids.slice(0, 2).map((id, index) => (
+          <EntityAvatar key={id} seed={id} name={names[index]!} size="sm" />
+        ))}
+        {rest > 0 && <AvatarGroupCount>+{rest}</AvatarGroupCount>}
+      </AvatarGroup>
+    </span>
+  );
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {ids.length < 2 ? (
+        <span aria-hidden="true" className="flex shrink-0">
+          {avatars}
+        </span>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger aria-hidden="true" tabIndex={-1} render={<span className="flex shrink-0" />}>
+            {avatars}
+          </TooltipTrigger>
+          <TooltipContent>
+            <span className="flex flex-col items-start">
+              {names.map((name, index) => (
+                <span key={ids[index]}>{name}</span>
+              ))}
+            </span>
+          </TooltipContent>
+        </Tooltip>
+      )}
+      <span className="min-w-0 truncate [&_a]:hover:underline [&_a]:underline-offset-4">
+        {ids.slice(0, 2).map((id, index) => (
+          <span key={id}>
+            {index > 0 && ', '}
+            {linked.kind === 'ready' && linked.data[id] !== undefined ? (
+              <Link
+                to="/$workspaceSlug/tables/$tableId"
+                params={{ workspaceSlug: workspace.slug, tableId }}
+                search={{ row: id }}
+              >
+                {names[index]}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">{names[index]}</span>
+            )}
+          </span>
+        ))}
+        {rest > 0 && <span className="sr-only">{` and ${rest} more`}</span>}
+      </span>
+    </span>
+  );
+}
+
+const accessTone = (optionId: string) =>
+  optionId === workspaceMemberAccess.active
+    ? 'success'
+    : optionId === workspaceMemberAccess.invited
+      ? 'warning'
+      : 'outline';
+
 /** Grid cells are compact and truncate long text with a tooltip; detail views wrap the full value. */
 export function TableValueView({
   value,
@@ -164,8 +245,11 @@ export function TableValueView({
   compact = false,
   systemKind,
   record,
+  withPhoto = false,
 }: {
   compact?: boolean;
+  /** Show the member's photo beside their name, for grids that fold the Photo column into Name. */
+  withPhoto?: boolean;
   value: TableValue | undefined;
   definition: TableDefinition;
   fieldId: string;
@@ -180,12 +264,36 @@ export function TableValueView({
     return <MemberPhoto workspaceId={workspace.id} value={value} record={record} />;
   if (systemKind === 'workspace-members' && fieldId === workspaceMemberFields.name && record) {
     const label = workspaceMemberLabel(record.values);
-    return (
+    const name = (
       <span title={label} className={compact ? 'block max-w-64 truncate' : 'whitespace-pre-wrap wrap-anywhere'}>
         {label}
       </span>
     );
+    if (!withPhoto) return name;
+    return (
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span aria-hidden="true" className="flex shrink-0">
+          <MemberPhoto workspaceId={workspace.id} value={record.values[workspaceMemberFields.photo]} record={record} />
+        </span>
+        {name}
+      </span>
+    );
   }
+  if (compact && systemKind === 'workspace-members' && fieldId === workspaceMemberFields.accountEmail && record) {
+    const contact = record.values[workspaceMemberFields.contactEmail];
+    if (
+      value?.kind === 'text' &&
+      contact?.kind === 'text' &&
+      value.value.trim().toLowerCase() === contact.value.trim().toLowerCase()
+    )
+      return (
+        <span title={value.value} className="text-muted-foreground">
+          Same as contact
+        </span>
+      );
+  }
+  if (value?.kind === 'relationship' && value.recordIds.length && compact)
+    return <LinkedPeople tableId={value.tableId} ids={value.recordIds} linked={linked} workspace={workspace} />;
   if (value?.kind === 'relationship' && value.recordIds.length)
     return (
       <ul className="space-y-1">
@@ -230,7 +338,13 @@ export function TableValueView({
       >
         {shown.map(id => (
           <span key={id} className="flex min-w-0">
-            <Badge variant={optionTone(label(id))}>
+            <Badge
+              variant={
+                systemKind === 'workspace-members' && fieldId === workspaceMemberFields.access
+                  ? accessTone(id)
+                  : optionTone(label(id))
+              }
+            >
               <span className="min-w-0 truncate">{label(id)}</span>
             </Badge>
           </span>

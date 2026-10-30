@@ -854,7 +854,11 @@ try {
   await page.getByRole('status', { name: 'Loading tables', exact: true }).waitFor();
   assert.equal(await page.getByText('No tables yet', { exact: true }).count(), 0);
   await page.getByText('Support tickets', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Sort by Records', exact: true }).waitFor();
+  await page
+    .getByRole('list', { name: /^Tables, \d+ rows?$/ })
+    .getByRole('listitem', { name: 'Support tickets', exact: true })
+    .getByText('Records', { exact: true })
+    .waitFor();
   listDelay = 0;
   await page.getByLabel('Search tables', { exact: true }).fill('CUSTOM');
   await page.waitForURL(url => url.searchParams.get('q') === 'CUSTOM');
@@ -896,7 +900,7 @@ try {
       path: `${process.env.TABLE_UI_SCREENSHOTS}/tables-empty-before-create-chat.png`,
       fullPage: true,
     });
-  const createTableLink = page.getByText('Create table in chat', { exact: true }).last();
+  const createTableLink = page.getByRole('link', { name: 'New table', exact: true }).last();
   assert.equal(await createTableLink.getAttribute('href'), '/acme?intent=create-table');
   await createTableLink.click();
   const createTablePrompt =
@@ -939,8 +943,12 @@ try {
     await page.getByRole('menuitem', { name, exact: true }).click();
     await page.getByRole('dialog', { name, exact: true }).waitFor();
   };
-  const rowAction = async (id, item) => {
-    await page.getByRole('button', { name: `Actions for row ${id.slice(0, 8)}`, exact: true }).click();
+  // The grid holds this one record, and its actions are named after its changing values.
+  const rowAction = async item => {
+    await page
+      .getByRole('region', { name: 'Support tickets rows', exact: true })
+      .getByRole('button', { name: /^Actions for / })
+      .click();
     await page.getByRole('menuitem', { name: item, exact: true }).click();
   };
   const closePanel = async () => {
@@ -964,7 +972,7 @@ try {
   await schemas.getByRole('button', { name: 'Previous schema history', exact: true }).click();
   schemaSecondPage = false;
   await closePanel();
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   await page.getByLabel('Subject', { exact: true }).fill('Updated subject');
   await page.getByLabel('Amount', { exact: true }).fill('100000000000000000000');
   await page.getByRole('button', { name: 'Save row', exact: true }).click();
@@ -1052,7 +1060,6 @@ try {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.getByRole('button', { name: 'Save row', exact: true }).dblclick();
   await page.getByText('Updated subject', { exact: true }).waitFor();
-  // Sprout's Button rendered as a router link keeps the link role (@tulipfarm/sprout/button with nativeButton={false}).
   await page.getByRole('link', { name: 'Acme customer', exact: true }).waitFor();
   await page.getByRole('link', { name: 'contract.pdf', exact: true }).waitFor();
   assert.equal(
@@ -1117,7 +1124,7 @@ try {
   assert.deepEqual(recordWrites[0].values[timestampId], { kind: 'timestamp', value: '2026-10-02T12:30:00.000Z' });
   assert.deepEqual(recordWrites[0].values[fileFieldId], { kind: 'file', fileIds: [fileId] });
   recordConflict = true;
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   await page.getByLabel('Subject', { exact: true }).fill('Preserved draft');
   await page.getByRole('button', { name: 'Save row', exact: true }).click();
   await page.getByText(/This row changed since you opened it/).waitFor();
@@ -1129,7 +1136,7 @@ try {
   await page.getByText(/This table or a referenced file is missing/).waitFor();
   assert.equal(await page.getByLabel('Subject', { exact: true }).inputValue(), 'Preserved draft');
   await page.getByRole('button', { name: 'Discard edits', exact: true }).click();
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   const chooser = page.locator('input[type="file"]');
   await chooser.setInputFiles({ name: 'empty.png', mimeType: 'image/png', buffer: Buffer.alloc(0) });
   await page.getByText('empty.png is empty. Choose a file with content.', { exact: true }).waitFor();
@@ -1146,7 +1153,7 @@ try {
     { id: undefined, name: 'photo.png', parentId: 'null', session: 'session-ada' },
   );
   await page.getByRole('button', { name: 'Discard edits', exact: true }).click();
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   await page.getByLabel('Subject', { exact: true }).fill('Saved despite lost response');
   dropRecord = true;
   await page.getByRole('button', { name: 'Save row', exact: true }).click();
@@ -1167,7 +1174,7 @@ try {
   await page.getByText('Saved despite lost response', { exact: true }).waitFor();
   assert.deepEqual(recordWrites.at(-1), uncertainRequest);
   unknownReceipt = false;
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   await page.getByLabel('Subject', { exact: true }).fill('Confirmed from expired receipt');
   dropRecord = true;
   await page.getByRole('button', { name: 'Save row', exact: true }).click();
@@ -1184,7 +1191,7 @@ try {
     'Metadata-only reconciliation reloads current rows without a duplicate write',
   );
   historyStatus = 503;
-  await rowAction(recordId, 'History');
+  await rowAction('History');
   const historyPanel = page.getByRole('region', { name: 'Row history', exact: true });
   await historyPanel.getByRole('button', { name: 'Try again', exact: true }).waitFor();
   historyStatus = 200;
@@ -1300,7 +1307,7 @@ try {
   };
   history[0].unavailable_file_ids = [hiddenFileId];
   await tableChange([['tables', 'detail', tableId, 'record-history']]);
-  await rowAction(recordId, 'History');
+  await rowAction('History');
   await historyPanel.getByRole('button', { name: 'Review values before update', exact: true }).click();
   await historyPanel.getByText('Historical subject', { exact: true }).waitFor();
   await historyPanel.getByText('File unavailable', { exact: true }).waitFor();
@@ -1338,7 +1345,7 @@ try {
   history[0].before_values = null;
   history[0].values = null;
   await tableChange([['tables', 'detail', tableId, 'record-history']]);
-  await rowAction(recordId, 'History');
+  await rowAction('History');
   await historyPanel.getByText(/Recovery expired/).waitFor();
   assert.equal(await historyPanel.getByRole('button', { name: 'Review values before update', exact: true }).count(), 0);
   await historyPanel.getByRole('button', { name: 'Close history', exact: true }).click();
@@ -1385,23 +1392,23 @@ try {
   await page.getByRole('button', { name: 'Back to table', exact: true }).click();
   await page.waitForURL(`${origin}/acme/tables/${customerId}`);
   await page.goto(`${origin}/acme/tables/${tableId}`);
-  const layoutTabs = page.getByRole('tablist', { name: 'Layout', exact: true });
-  await layoutTabs.getByRole('tab', { name: 'Board', exact: true }).click();
+  const viewTabs = page.getByRole('tablist', { name: 'Views', exact: true });
+  await viewTabs.getByRole('tab', { name: 'Board', exact: true }).click();
   const board = page.locator('[data-slot="board"]');
   await board.getByText('Open', { exact: true }).first().waitFor();
   const subject = record.values[fieldId].value;
   await board.getByText(subject, { exact: true }).first().waitFor();
-  assert.equal(await page.getByRole('tabpanel').count(), 1, 'The board is the Layout tab panel');
-  await layoutTabs.getByRole('tab', { name: 'List', exact: true }).click();
+  assert.equal(await page.getByRole('tabpanel').count(), 1, 'The board is the view tab panel');
+  await viewTabs.getByRole('tab', { name: 'List', exact: true }).click();
   const recordList = page.locator('[data-slot="record-list"]');
   await recordList.getByText(subject, { exact: true }).waitFor();
   await recordList.getByText(subject, { exact: true }).click();
   await page.getByRole('dialog', { name: 'Edit row', exact: true }).waitFor();
   await page.keyboard.press('Escape');
   await page.getByRole('dialog', { name: 'Edit row', exact: true }).waitFor({ state: 'detached' });
-  await layoutTabs.getByRole('tab', { name: 'Table', exact: true }).click();
+  await viewTabs.getByRole('tab', { name: 'Table', exact: true }).click();
   await page.locator('table[data-slot=table]').waitFor();
-  await rowAction(recordId, 'Edit row');
+  await rowAction('Edit row');
   const evidence = page.getByRole('list', { name: 'Files attached to Evidence', exact: true });
   await evidence.getByText('File unavailable', { exact: true }).waitFor();
   await page

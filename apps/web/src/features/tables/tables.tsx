@@ -30,6 +30,7 @@ import {
   AlertDialogTitle,
 } from '@tulipfarm/sprout/alert-dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSortHead } from '@/components/data-grid';
+import { RecordList } from '@tulipfarm/sprout/record-list';
 import { useCursorPages } from '@/lib/use-cursor-pages';
 import { TableRead } from './feedback';
 import {
@@ -54,6 +55,8 @@ import {
   type TableApi,
 } from './api';
 import { rowTotal, useUrlDraft } from './row-query';
+import { rowLabel } from './definition-view';
+import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import {
   narrowed,
   queryDefinition,
@@ -69,7 +72,7 @@ import {
   type TableView,
 } from './table-view';
 import { QueryBar } from './query-bar';
-import { BoardView, ListView } from './table-layouts';
+import { BoardView, ChartView, ListView, TimelineView } from './table-layouts';
 import { viewSwitcherTabId } from '@tulipfarm/sprout/view-switcher';
 import { SummaryTable } from './summary-table';
 import type { TableQueryResult } from '@tulipfarm/tables/query';
@@ -81,7 +84,7 @@ import { MemberProfilePanel } from './member-profile';
 // Sprout gives its select trigger a resting shadow; table controls stay flat like the rest of the toolbar.
 const noControlShadow = { '--sprout-shadow-control': 'none' } as CSSProperties;
 
-const plural = (count: number, noun: string) => `${count.toLocaleString('en-US')} ${noun}${count === 1 ? '' : 's'}`;
+const byName: TableListSort = { by: 'name', direction: 'asc' };
 const recordCountLabel = (count: string) => (/^\d+$/.test(count) ? Number(count).toLocaleString('en-US') : count);
 
 export function TableList({
@@ -97,40 +100,30 @@ export function TableList({
 }) {
   const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
   const query = search.trim();
-  const [sort, setSort] = useState<TableListSort>({ by: 'name', direction: 'asc' });
-  const pages = useCursorPages(`${query}|${sort.by}:${sort.direction}`);
+  const pages = useCursorPages(query);
   const [draft, setDraft] = useUrlDraft(search, changeSearch);
-  const read = useTableList(api, pages.after, query || undefined, sort);
-  const sorted = (by: TableListSort['by']) => (sort.by === by ? sort.direction : false);
-  const sortBy = (by: TableListSort['by']) =>
-    setSort(current => ({
-      by,
-      direction: current.by === by && current.direction === 'asc' ? 'desc' : by === 'name' ? 'asc' : 'desc',
-    }));
+  const read = useTableList(api, pages.after, query || undefined, byName);
   const open = useNavigate();
-  const chat = (
-    <Button
-      nativeButton={false}
-      render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ intent: 'create-table' }} />}
-    >
-      Create table in chat
-    </Button>
-  );
   return (
     <section className="space-y-6">
-      <PageHeader
-        title="Tables"
-        description="Read active fields and edit business rows. Schema changes are reviewed in chat."
-        actions={chat}
-      />
-      <SearchField
-        id="table-search"
-        label="Search tables"
-        value={draft}
-        maxLength={255}
-        onChange={setDraft}
-        placeholder="Search tables"
-      />
+      <PageHeader title="Tables" />
+      <div className="flex items-center justify-between gap-3">
+        <SearchField
+          id="table-search"
+          label="Search tables"
+          value={draft}
+          maxLength={255}
+          onChange={setDraft}
+          placeholder="Search tables"
+        />
+        <Button
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ intent: 'create-table' }} />}
+        >
+          <Add size={16} aria-hidden="true" />
+          New table
+        </Button>
+      </div>
       <TableRead state={read.state} refresh={read.refresh}>
         {data => (
           <>
@@ -172,69 +165,23 @@ export function TableList({
                     }
                   >
                     <Add size={16} aria-hidden="true" />
-                    Create table in chat
+                    New table
                   </Button>
                 </StatePanel>
               )
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableSortHead sorted={sorted('name')} onSort={() => sortBy('name')}>
-                      Table
-                    </TableSortHead>
-                    <TableSortHead align="right" sorted={sorted('records')} onSort={() => sortBy('records')}>
-                      Records
-                    </TableSortHead>
-                    <TableSortHead align="right" sorted={sorted('changed')} onSort={() => sortBy('changed')}>
-                      Fields changed
-                    </TableSortHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.tables.map(table => (
-                    <TableRow
-                      key={table.id}
-                      interactive
-                      onClick={event => {
-                        if (!(event.target instanceof Element && event.target.closest('a')))
-                          void open({
-                            to: '/$workspaceSlug/tables/$tableId',
-                            params: { workspaceSlug, tableId: table.id },
-                          });
-                      }}
-                    >
-                      <TableCell>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          nativeButton={false}
-                          render={
-                            <Link to="/$workspaceSlug/tables/$tableId" params={{ workspaceSlug, tableId: table.id }} />
-                          }
-                        >
-                          {table.definition.label}
-                        </Button>
-                        <p className="text-xs text-muted-foreground">
-                          {plural(table.definition.fields.length, 'field')}
-                        </p>
-                      </TableCell>
-                      <TableCell align="right">{recordCountLabel(table.recordCount)}</TableCell>
-                      <TableCell align="right">
-                        <span className="text-muted-foreground" title={table.appliedAt ?? undefined}>
-                          {table.appliedAt
-                            ? new Date(table.appliedAt).toLocaleDateString(undefined, {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric',
-                              })
-                            : '—'}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <RecordList
+                label="Tables"
+                items={data.tables.map(table => ({
+                  id: table.id,
+                  title: table.definition.label,
+                  records: table.recordCount,
+                }))}
+                values={table => [{ label: 'Records', value: recordCountLabel(table.records) }]}
+                onItemOpen={table =>
+                  void open({ to: '/$workspaceSlug/tables/$tableId', params: { workspaceSlug, tableId: table.id } })
+                }
+              />
             )}
             {(pages.after || data.nextCursor) && (
               <nav aria-label="Table pages" className="flex gap-2">
@@ -496,9 +443,9 @@ export function Records({
       </section>
     );
   const firstUse = result?.mode === 'rows' && !result.records.length && !pages.after && !filtered && !summary;
-  const addRow = (
-    <Button disabled={locked || editing} onClick={() => select({ kind: 'create' })}>
-      <Add size={16} aria-hidden="true" />
+  const addRow = (size: 'sm' | 'md' = 'md') => (
+    <Button size={size} disabled={locked || editing} onClick={() => select({ kind: 'create' })}>
+      <Add size={size === 'sm' ? 14 : 16} aria-hidden="true" />
       {systemKind ? 'Add member' : 'Add row'}
     </Button>
   );
@@ -511,10 +458,16 @@ export function Records({
   const columns = view.select
     ? table.definition.fields.filter(field => view.select!.includes(field.id))
     : table.definition.fields;
+  // The member grid shows each photo beside the name instead of in its own column.
+  const photoInName =
+    systemKind === 'workspace-members' &&
+    columns.some(field => field.id === workspaceMemberFields.name) &&
+    columns.some(field => field.id === workspaceMemberFields.photo);
+  const gridColumns = photoInName ? columns.filter(field => field.id !== workspaceMemberFields.photo) : columns;
   const total =
     result?.mode === 'rows'
       ? result.total && !pages.after && !firstUse
-        ? rowTotal(result.total, filtered)
+        ? rowTotal(result.total, filtered, systemKind === 'workspace-members' ? ['member', 'members'] : undefined)
         : ''
       : result?.mode === 'summary' && result.groupCount
         ? `${result.groupCount} ${result.groupCount === '1' ? 'group' : 'groups'}${filtered ? ' from matching rows' : ''}`
@@ -606,7 +559,7 @@ export function Records({
           variant="ghost"
           size="icon-sm"
           disabled={locked || editing}
-          aria-label={`Edit row ${record.id.slice(0, 8)}`}
+          aria-label={`Edit ${rowLabel(table.definition, record.values, systemKind)}`}
           onClick={() => select({ kind: 'edit', record })}
         >
           <Edit size={16} aria-hidden="true" />
@@ -614,6 +567,7 @@ export function Records({
       )}
       <RowActions
         record={record}
+        label={rowLabel(table.definition, record.values, systemKind)}
         permissions={permissions}
         disabled={locked || editing}
         select={select}
@@ -668,7 +622,7 @@ export function Records({
               />
             </div>
           </TableHead>
-          {columns.map(header)}
+          {gridColumns.map(header)}
           <TableHead stickyEnd>Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -681,7 +635,7 @@ export function Records({
                     <Skeleton shape="checkbox" />
                   </div>
                 </TableCell>
-                {columns.map(field => (
+                {gridColumns.map(field => (
                   <TableCell key={field.id}>
                     <div className="min-w-24">
                       <Skeleton />
@@ -701,7 +655,7 @@ export function Records({
                 <TableCell selection>
                   <div className="flex justify-center">
                     <Checkbox
-                      aria-label={`Select row ${record.id.slice(0, 8)}`}
+                      aria-label={`Select ${rowLabel(table.definition, record.values, systemKind)}`}
                       checked={selectedIds.has(record.id)}
                       disabled={locked || editing}
                       onCheckedChange={value =>
@@ -713,10 +667,11 @@ export function Records({
                     />
                   </div>
                 </TableCell>
-                {columns.map(field => (
+                {gridColumns.map(field => (
                   <TableCell key={field.id}>
                     <TableValueView
                       compact
+                      withPhoto={photoInName}
                       record={record}
                       systemKind={systemKind}
                       value={record.values[field.id]}
@@ -807,7 +762,7 @@ export function Records({
             <RecordsSample table={table.definition.label} fields={table.definition.fields.map(field => field.label)} />
           }
         >
-          {permissions.create && addRow}
+          {permissions.create && addRow()}
           <Button
             variant={permissions.create ? 'outline' : 'default'}
             nativeButton={false}
@@ -823,6 +778,19 @@ export function Records({
           </Button>
         </StatePanel>
       )
+    ) : layout === 'timeline' ? (
+      <TimelineView
+        label={`${table.definition.label} timeline`}
+        table={table}
+        records={current.records.map(dataRow)}
+        columns={columns}
+        values={values}
+        actions={actions}
+        open={openRow}
+        startId={search.start}
+        endId={search.end}
+        change={changeSearch}
+      />
     ) : layout === 'list' ? (
       <ListView
         label={`${table.definition.label} rows`}
@@ -838,18 +806,25 @@ export function Records({
   return (
     <>
       <section key={applied.revision} className="space-y-4 pb-20">
-        {systemKind === 'workspace-members' && (
-          <MemberDirectoryStatus table={table} api={api} workspace={workspace} refresh={refresh} />
-        )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-baseline gap-3">
-            <h2 ref={heading} tabIndex={-1} className="text-sm font-medium">
-              {summary ? 'Summary' : 'Rows'}
+            <h2
+              ref={heading}
+              tabIndex={-1}
+              aria-live={!summary && filtered ? 'polite' : undefined}
+              className="text-sm font-medium tabular-nums"
+            >
+              {summary ? 'Summary' : total || (systemKind === 'workspace-members' ? 'Members' : 'Rows')}
             </h2>
-            <p role={filtered ? 'status' : undefined} className="text-sm text-muted-foreground">
-              {total}
-            </p>
+            {summary && (
+              <p role={filtered ? 'status' : undefined} className="text-sm text-muted-foreground">
+                {total}
+              </p>
+            )}
           </div>
+          {systemKind === 'workspace-members' && (
+            <MemberDirectoryStatus table={table} api={api} workspace={workspace} refresh={refresh} />
+          )}
         </div>
         {!firstUse && read.state.kind !== 'unavailable' && (
           <QueryBar
@@ -864,7 +839,7 @@ export function Records({
             layoutPanel={layoutPanel}
             mode={search.find}
             changeMode={find => changeSearch({ find })}
-            actions={headerAdd && addRow}
+            actions={headerAdd && addRow('sm')}
             selection={
               layout === 'table' && !summary && selectedRows.length > 0 ? (
                 <BulkRecordActions
@@ -911,6 +886,17 @@ export function Records({
               workspace={workspace}
               menu={rowMenu}
               open={openRow}
+              canMove={permissions.update && !locked && !editing}
+            />
+          ) : layout === 'chart' && !firstUse && read.state.kind !== 'unavailable' ? (
+            <ChartView
+              api={api}
+              table={table}
+              view={view}
+              noun={systemKind === 'workspace-members' ? 'members' : 'rows'}
+              fieldId={search.chart}
+              changeField={chart => changeSearch({ chart })}
+              filter={where => apply({ ...view, where })}
             />
           ) : read.state.kind === 'error' && last.current ? (
             <div className="space-y-3">
@@ -963,30 +949,40 @@ export function Records({
               }
             </TableRead>
           )}
-          {layout !== 'board' && !firstUse && (read.state.kind === 'loading' || result) && (
-            <div className="contents" style={noControlShadow}>
-              <TablePagination
-                page={pages.page}
-                pageSize={limit}
-                count={result?.mode === 'rows' ? result.records.length : (result?.groups.length ?? 0)}
-                total={pageTotal.current.total}
-                hasNext={!!result?.nextCursor}
-                disabled={locked || editing}
-                loading={read.state.kind === 'loading'}
-                groups={summary}
-                unknownStart={!!initialAfter && !!pages.after && pageTotal.current.total === null}
-                onFirst={pages.first}
-                onPrevious={pages.previous}
-                onNext={() => {
-                  if (result?.nextCursor) pages.next(result.nextCursor);
-                }}
-                onPageSize={size => {
-                  pages.first();
-                  setLimit(size);
-                }}
-              />
-            </div>
-          )}
+          {layout !== 'board' &&
+            layout !== 'chart' &&
+            !firstUse &&
+            (read.state.kind === 'loading' || result) &&
+            // One short page has nothing to page through; the heading already states the count.
+            !(
+              result &&
+              pages.page === 1 &&
+              !result.nextCursor &&
+              (result.mode === 'rows' ? result.records.length : result.groups.length) <= 10
+            ) && (
+              <div className="contents" style={noControlShadow}>
+                <TablePagination
+                  page={pages.page}
+                  pageSize={limit}
+                  count={result?.mode === 'rows' ? result.records.length : (result?.groups.length ?? 0)}
+                  total={pageTotal.current.total}
+                  hasNext={!!result?.nextCursor}
+                  disabled={locked || editing}
+                  loading={read.state.kind === 'loading'}
+                  groups={summary}
+                  unknownStart={!!initialAfter && !!pages.after && pageTotal.current.total === null}
+                  onFirst={pages.first}
+                  onPrevious={pages.previous}
+                  onNext={() => {
+                    if (result?.nextCursor) pages.next(result.nextCursor);
+                  }}
+                  onPageSize={size => {
+                    pages.first();
+                    setLimit(size);
+                  }}
+                />
+              </div>
+            )}
         </div>
       </section>
       {panel}
@@ -1027,12 +1023,18 @@ function RowActionItems({ record, permissions, select, systemKind }: RowActionPr
 }
 
 /** One menu per row keeps the grid compact. The trigger names the row so screen readers can tell rows apart. */
-function RowActions({ disabled, record, permissions, select, systemKind }: RowActionProps & { disabled: boolean }) {
-  const id = record.id.slice(0, 8);
+function RowActions({
+  disabled,
+  label,
+  record,
+  permissions,
+  select,
+  systemKind,
+}: RowActionProps & { disabled: boolean; label: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-sm" disabled={disabled} aria-label={`Actions for row ${id}`} />}
+        render={<Button variant="ghost" size="icon-sm" disabled={disabled} aria-label={`Actions for ${label}`} />}
       >
         <MoreH size={16} aria-hidden="true" />
       </DropdownMenuTrigger>

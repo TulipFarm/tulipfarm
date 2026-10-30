@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Add } from 'reicon-react/icons/Add';
+import { ChevronDown } from 'reicon-react/icons/ChevronDown';
+import { ChartBar } from 'reicon-react/icons/ChartBar';
 import { Download } from 'reicon-react/icons/Download';
 import { Eye } from 'reicon-react/icons/Eye';
 import { Filter } from 'reicon-react/icons/Filter';
@@ -30,6 +32,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
@@ -50,7 +53,8 @@ import { SelectionSlot } from '@tulipfarm/sprout/selection-slot';
 import { ToolbarStatus } from '@tulipfarm/sprout/toolbar-status';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { Textarea } from '@tulipfarm/sprout/textarea';
-import { ViewSwitcher } from '@tulipfarm/sprout/view-switcher';
+import { ButtonGroup } from '@tulipfarm/sprout/button-group';
+import { ViewSwitcher, type ViewSwitcherView } from '@tulipfarm/sprout/view-switcher';
 import { exportCsv, exportRowCap } from './table-export';
 import { TableRequestError } from './request-state';
 import { useTableCapabilities } from './hooks';
@@ -75,6 +79,11 @@ import {
   type DraftGroup,
   type DraftNode,
   type DraftRule,
+  boardFields,
+  recentLayouts,
+  storedOpenLayouts,
+  storeOpenLayouts,
+  timelineFields,
   type Layout,
   type QueryDefinition,
   type SearchMode,
@@ -106,11 +115,49 @@ type ToolbarProps = Props & {
 const filterable = (definition: Definition) => definition.fields.filter(field => kindQueryOps[field.kind].length > 0);
 const fieldOf = (definition: Definition, id: string) => definition.fields.find(field => field.id === id);
 const tooLong = 'This search is too long to keep in the page link. Remove some conditions and apply it again.';
-const layouts: { id: Layout; label: string; icon: typeof Grid }[] = [
-  { id: 'table', label: 'Table', icon: Grid },
-  { id: 'board', label: 'Board', icon: Kanban },
-  { id: 'list', label: 'List', icon: List },
+// reicon has no gantt glyph, so this one is drawn on its 24px grid with its 1.5 stroke.
+function TimelineIcon({ size = 24 }: { size?: number }) {
+  const bar = { stroke: 'currentColor', strokeWidth: 1.5, strokeLinejoin: 'round' } as const;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="2" y="2.75" width="8" height="4" rx="2" {...bar} />
+      <rect x="8" y="10" width="9" height="4" rx="2" {...bar} />
+      <rect x="15" y="17.25" width="7" height="4" rx="2" {...bar} />
+    </svg>
+  );
+}
+
+const layouts: (ViewSwitcherView & { id: Layout; description: string })[] = [
+  { id: 'table', label: 'Table', icon: Grid, description: 'Rows and columns. Edit, group and sum.' },
+  { id: 'list', label: 'List', icon: List, description: 'One item per row for quick reading.' },
+  { id: 'board', label: 'Board', icon: Kanban, description: 'Cards in lanes, one lane per choice.' },
+  { id: 'chart', label: 'Chart', icon: ChartBar, description: 'Counts for each choice of a field.' },
+  { id: 'timeline', label: 'Timeline', icon: TimelineIcon, description: 'Rows placed on their dates.' },
 ];
+
+/** Why a view can't be added to this table, or undefined when it can. */
+function unavailable(definition: Definition, id: Layout) {
+  if ((id === 'board' || id === 'chart') && !boardFields(definition).length) return 'Needs a single-choice field.';
+  if (id === 'timeline' && !timelineFields(definition).length) return 'Needs a date field.';
+  return undefined;
+}
+
+/** The open view tabs, kept per table. A linked view that was closed opens again so the link works. */
+/** The open tabs, most recently used first. Using a view moves it to the front and drops the oldest past the limit. */
+function useOpenLayouts(tableId: string, layout: Layout) {
+  const [stored, setStored] = useState(() => storedOpenLayouts(tableId));
+  const open = recentLayouts(layout, stored);
+  useEffect(() => {
+    if (open.join() === stored.join()) return;
+    setStored(open);
+    storeOpenLayouts(tableId, open);
+  });
+  const save = (next: Layout[]) => {
+    setStored(next);
+    storeOpenLayouts(tableId, next);
+  };
+  return { open, save };
+}
 
 /** Layout, search, column, summary, and export controls, then the applied filters as chips. Every applied change is written to the URL. */
 export function QueryBar({
@@ -130,37 +177,64 @@ export function QueryBar({
 }: ToolbarProps) {
   const definition = queryDefinition(table.definition);
   const [advanced, setAdvanced] = useState(false);
+  const views = useOpenLayouts(table.id, layout);
   return (
     <div className="@container/queries space-y-3">
       <ViewSwitcher
-        label="Layout"
-        views={layouts}
+        label="Views"
+        views={views.open.flatMap(id => {
+          const item = layouts.find(entry => entry.id === id);
+          return item ? [{ id, label: item.label, icon: item.icon, closable: views.open.length > 1 }] : [];
+        })}
         value={layout}
         panelId={layoutPanel}
         onValueChange={id => {
           const next = layouts.find(item => item.id === id);
           if (next && !disabled) changeLayout(next.id);
         }}
+        options={layouts.map(item => ({ ...item, unavailable: unavailable(definition, item.id) }))}
+        onAdd={id => {
+          const next = layouts.find(item => item.id === id);
+          if (next && !disabled) changeLayout(next.id);
+        }}
+        onClose={id => {
+          const index = views.open.indexOf(id as Layout);
+          if (index < 0 || views.open.length < 2 || disabled) return;
+          const next = views.open.filter(item => item !== id);
+          views.save(next);
+          if (id === layout) changeLayout(next[0] ?? 'table');
+        }}
       />
-      <div className="flex min-w-0 flex-col gap-2 @3xl/queries:flex-row @3xl/queries:items-center">
-        <div className="@container/selection min-w-0 flex-1">
-          <SelectionSlot active={!!selection} selection={selection}>
-            <fieldset
-              disabled={disabled}
-              aria-label="Table tools"
-              className="flex min-w-0 flex-wrap items-center gap-2"
-            >
-              <SearchMenu
+      {/* Finding rows sits on the left; shaping and acting on the view sits on the right, ending with the primary action. */}
+      <div className="@container/selection min-w-0">
+        <SelectionSlot active={!!selection} selection={selection}>
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-start gap-2">
+              <fieldset disabled={disabled} aria-label="Search" className="contents">
+                <SearchMenu
+                  api={api}
+                  table={table}
+                  view={view}
+                  references={references}
+                  apply={apply}
+                  disabled={disabled}
+                  mode={mode}
+                  changeMode={changeMode}
+                />
+              </fieldset>
+              <FilterChips
                 api={api}
                 table={table}
                 view={view}
                 references={references}
                 apply={apply}
                 disabled={disabled}
-                mode={mode}
-                changeMode={changeMode}
+                advanced={advanced}
+                toggleAdvanced={() => setAdvanced(open => !open)}
               />
-              {!(layout === 'table' && summarized(view)) && (
+            </div>
+            <fieldset disabled={disabled} aria-label="Table tools" className="flex flex-wrap items-center gap-2">
+              {layout !== 'chart' && !(layout === 'table' && summarized(view)) && (
                 <ColumnsMenu definition={definition} view={view} apply={apply} disabled={disabled} />
               )}
               {layout === 'table' && (
@@ -169,19 +243,9 @@ export function QueryBar({
               <ExportButton api={api} table={table} view={view} disabled={disabled} />
               {actions}
             </fieldset>
-          </SelectionSlot>
-        </div>
+          </div>
+        </SelectionSlot>
       </div>
-      <FilterChips
-        api={api}
-        table={table}
-        view={view}
-        references={references}
-        apply={apply}
-        disabled={disabled}
-        advanced={advanced}
-        toggleAdvanced={() => setAdvanced(open => !open)}
-      />
       {advanced && (
         <AdvancedFilters
           key={view.where}
@@ -470,25 +534,44 @@ function FilterChips({
             />
           ))
         )}
-        {chips.kind === 'chips' && rules.length < queryLimits.comparisons && (
-          <RuleChip
-            api={api}
-            table={table}
-            labels={labels.current}
+        {chips.kind === 'chips' && rules.length < queryLimits.comparisons ? (
+          // Advanced filtering is the less common path, so it sits behind the Add filter chevron.
+          <ButtonGroup aria-label="Add filter">
+            <RuleChip
+              api={api}
+              table={table}
+              labels={labels.current}
+              disabled={disabled}
+              save={next => save([...rules, next])}
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="icon-sm" disabled={disabled} aria-label="More filter options" />
+                }
+              >
+                <ChevronDown size={14} aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent size="menu" align="start">
+                <DropdownMenuItem onClick={toggleAdvanced}>
+                  <Filter size={14} aria-hidden="true" />
+                  {advanced ? 'Close advanced filter' : 'Advanced filter…'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={disabled}
-            save={next => save([...rules, next])}
-          />
+            aria-expanded={advanced}
+            aria-controls="table-query-panel"
+            onClick={toggleAdvanced}
+          >
+            Advanced…
+          </Button>
         )}
-        <Button
-          variant="link"
-          size="sm"
-          disabled={disabled}
-          aria-expanded={advanced}
-          aria-controls="table-query-panel"
-          onClick={toggleAdvanced}
-        >
-          Advanced…
-        </Button>
         {view.where && (
           <Button variant="ghost" size="sm" disabled={disabled} onClick={() => apply({ ...view, where: '' })}>
             Clear filters
@@ -555,7 +638,7 @@ function RuleChip({
           rule ? (
             <Button variant="outline" size="sm" disabled={disabled} aria-label={`Edit filter: ${label}`} />
           ) : (
-            <Button variant="ghost" size="sm" disabled={disabled} />
+            <Button variant="outline" size="sm" disabled={disabled} />
           )
         }
       >
@@ -732,7 +815,7 @@ function ExportButton({
     }
   };
   return (
-    <div className="grid w-28 shrink-0">
+    <div className="grid shrink-0">
       {rows !== null ? (
         <Button
           variant="outline"

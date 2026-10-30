@@ -382,7 +382,7 @@ try {
       await page.goto(`${origin}/acme/tables`);
       await page.getByRole('heading', { name: 'Tables', exact: true }).last().waitFor();
       // Table creation moved to a reviewed chat handoff; the list no longer gates it on authoring context (cloud 0c6cac9d, 5e9daa6e #880, features/tables/tables.tsx:51; features/chat/private-conversations.tsx:143).
-      await page.getByRole('link', { name: 'Create table in chat', exact: true }).click();
+      await page.getByRole('link', { name: 'New table', exact: true }).first().click();
       await page.waitForURL(url => url.pathname === '/acme' && url.searchParams.get('intent') === 'create-table');
       const tablePrompt = page
         .locator('main')

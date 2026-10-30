@@ -29,9 +29,12 @@ export const tableRowsSearchSchema = z.object({
   group: list(uuid, queryLimits.groupBy),
   calc: list(`(count|(sum|avg|min|max)\\.${uuid})`, queryLimits.metrics),
   cols: list(uuid, 64),
-  // Page layout, the board's grouping field, and the open search mode are shared in links too.
-  view: z.enum(['table', 'board', 'list']).optional().catch(undefined),
+  // Page layout, each layout's fields, and the open search mode are shared in links too.
+  view: z.enum(['table', 'board', 'list', 'chart', 'timeline']).optional().catch(undefined),
   board: z.uuid().optional().catch(undefined),
+  chart: z.uuid().optional().catch(undefined),
+  start: z.uuid().optional().catch(undefined),
+  end: z.uuid().optional().catch(undefined),
   find: z.enum(['text', 'ai', 'rsql']).optional().catch(undefined),
   // Single sort and filter links from before typed queries.
   sort: z.uuid().optional().catch(undefined),

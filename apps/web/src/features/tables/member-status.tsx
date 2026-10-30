@@ -24,13 +24,9 @@ export function MemberDirectoryStatus({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="space-y-2">
-      <p className="max-w-3xl text-sm text-muted-foreground">
-        People can receive links without signing in. Core fields stay fixed; add business fields in chat. All columns
-        are shared with workspace readers. Keep private HR data in a separate restricted table.
-      </p>
+    <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        Profile status
+        Profile sync status
       </Button>
       {open && (
         <MemberStatusPanel
@@ -41,7 +37,7 @@ export function MemberDirectoryStatus({
           close={() => setOpen(false)}
         />
       )}
-    </div>
+    </>
   );
 }
 

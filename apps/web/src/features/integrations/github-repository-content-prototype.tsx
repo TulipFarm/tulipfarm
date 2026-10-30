@@ -219,7 +219,6 @@ export function GitHubRepositoryContentPrototype() {
 
       <Table
         aria-label="Content indexed from each repository"
-        variant="plain"
         narrow="stack"
         data={rows}
         getRowId={row => row.id}
