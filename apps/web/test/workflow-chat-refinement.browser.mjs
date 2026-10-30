@@ -122,7 +122,7 @@ test(
           assert.equal(after.y, before.y, 'selecting the last scrolled option keeps actions in place');
           assert.ok(after.y + after.height <= 600, 'Continue remains on screen');
           await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-          await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+          await page.locator('[data-slot="choice-summary"]').getByText('Team account', { exact: true }).waitFor();
           await page.close();
         }
       }
@@ -229,7 +229,10 @@ test(
       await dock.getByText('Choose an answer.', { exact: true }).waitFor();
       await dock.getByRole('radio', { name: /TulipFarm app/ }).check();
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await page
+        .locator('[data-slot="choice-summary"]')
+        .getByText('TulipFarm app (Recommended)', { exact: true })
+        .waitFor();
       await open();
       await dock.getByRole('button', { name: 'Skip', exact: true }).click();
       await page.getByText('This request was cancelled without an answer.', { exact: true }).waitFor();
@@ -243,7 +246,7 @@ test(
       await dock.getByRole('button', { name: 'Other answer', exact: true }).click();
       assert.equal(await dock.getByRole('textbox', { name: 'Your answer' }).inputValue(), 'Use the release bot.');
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await page.locator('[data-slot="choice-summary"]').getByText('Use the release bot.', { exact: true }).waitFor();
       await page.setViewportSize({ width: 1600, height: 1000 });
       await open('workflow-errors');
       const retryActions = page.getByRole('button', { name: 'Check connected-tool actions again', exact: true });
@@ -353,7 +356,7 @@ for (const colorScheme of ['light', 'dark']) {
               'idle composer stays one line while an answer is needed',
             );
             assert.equal(
-              await dock.getByRole('button', { name: 'Check request status' }).count(),
+              await dock.locator('[data-slot="request-status"]').count(),
               0,
               'routine request tools do not crowd the input group',
             );
@@ -385,7 +388,10 @@ for (const colorScheme of ['light', 'dark']) {
           }
           await dock.getByRole('radio').last().check();
           await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-          await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+          await page
+            .locator('[data-slot="choice-summary"]')
+            .getByText('A dedicated team account used only for engineering release notifications', { exact: true })
+            .waitFor();
           assert.equal(
             await page.getByRole('form', { name: 'Message composer' }).getAttribute('data-condensed'),
             null,

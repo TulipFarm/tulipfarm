@@ -1,6 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Refresh } from 'reicon-react/icons/Refresh';
 import { useChoiceDock, useRegisterPendingQuestion } from './choice-dock';
 import { useResultAttention } from './canvas-state';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -70,15 +69,21 @@ export function InteractionCard({
     setReviewed(true);
   };
   const busy = read.state.kind === 'loading' || (read.state.kind === 'ready' && read.state.refreshing);
+  const latestRefresh = useRef(refresh);
+  latestRefresh.current = refresh;
+  const rejected = write.state.kind === 'rejected';
+  useEffect(() => {
+    if (rejected) void latestRefresh.current();
+  }, [rejected]);
   const locked = write.locked || write.state.kind === 'accepted' || read.state.kind !== 'ready' || !!read.state.error;
   const blockedReason =
     read.state.kind === 'ready' && read.state.error
-      ? 'Check request status below to enable your answer.'
+      ? 'Try again below to enable your answer.'
       : write.state.kind === 'uncertain'
         ? 'Retry your saved response below to confirm the outcome.'
         : write.state.kind === 'accepted'
           ? 'Your response is saved. Waiting for the updated request.'
-          : 'Check request status below, then review your retained answer.';
+          : 'Checking the request, then you can review your retained answer.';
   const interaction = read.state.kind === 'ready' ? read.state.data : null;
   const submit = (command: InteractionCommand) => {
     if (locked || !pending) return;
@@ -94,25 +99,8 @@ export function InteractionCard({
         description="This request is missing or your current access does not allow it. Its details have been cleared."
       />
     );
-  const showRecovery =
-    read.delayed ||
-    (read.state.kind === 'ready' && !!read.state.error) ||
-    write.state.kind === 'rejected' ||
-    write.state.kind === 'uncertain';
-  const checkStatus = (
-    <Button
-      size="sm"
-      variant="ghost"
-      aria-label="Check request status"
-      aria-busy={busy}
-      disabled={busy || write.state.kind === 'sending'}
-      onClick={() => void refresh()}
-    >
-      <Refresh size={14} aria-hidden="true" />
-      Check status
-    </Button>
-  );
-  const metadata = read.state.kind === 'ready' && (kind === 'approval' || showRecovery || !pending) && (
+  const stalled = pending && (read.delayed || (read.state.kind === 'ready' && !!read.state.error));
+  const metadata = read.state.kind === 'ready' && ((kind === 'approval' && pending) || stalled) && (
     <div
       data-slot="request-status"
       className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-muted-foreground"
@@ -129,17 +117,26 @@ export function InteractionCard({
               <p className="max-w-sm py-1">
                 Only this card records your approval. Your current permission is checked when you decide.
               </p>
-              {!showRecovery && checkStatus}
             </CollapsibleContent>
           </Collapsible>
         </div>
       )}
-      {(read.delayed || read.state.error) && pending && (
-        <span role="status" className="min-w-0 flex-1">
-          {read.state.error ? 'Request status needs a check' : 'Automatic status checks paused'}
-        </span>
+      {stalled && (
+        <>
+          <span role="status" className="min-w-0 flex-1">
+            {read.state.error ? 'Could not check this request' : 'Automatic status checks paused'}
+          </span>
+          <Button
+            size="sm"
+            variant="link"
+            aria-busy={busy}
+            disabled={busy || write.state.kind === 'sending'}
+            onClick={() => void refresh()}
+          >
+            Try again
+          </Button>
+        </>
       )}
-      {(showRecovery || !pending) && checkStatus}
     </div>
   );
   const card = (
@@ -220,7 +217,7 @@ export function InteractionCard({
           {read.state.kind === 'ready' && read.state.error && (
             <Alert variant="destructive">
               <AlertDescription>
-                Could not refresh this request. Your input is retained. Check its status before submitting.
+                Could not refresh this request. Your input is retained. Try again before submitting.
               </AlertDescription>
             </Alert>
           )}
@@ -335,13 +332,13 @@ function InformationCard({
               : undefined
           }
         />
-        <p role="status" className="pl-6 text-xs text-muted-foreground">
-          {request.status === 'answered'
-            ? 'Your answer was recorded.'
-            : request.status === 'expired'
+        {request.status !== 'answered' && (
+          <p role="status" className="pl-6 text-xs text-muted-foreground">
+            {request.status === 'expired'
               ? 'This request expired without an answer.'
               : 'This request was cancelled without an answer.'}
-        </p>
+          </p>
+        )}
       </section>
     );
   return (
