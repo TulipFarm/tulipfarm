@@ -2842,7 +2842,10 @@ export async function inferWithTools(
         preview('');
         throw error;
       }
-      recordChatCompletionCheck(checked.status === 'continue' ? 'continue' : 'done');
+      recordChatCompletionCheck(
+        checked.status === 'continue' ? 'continue' : 'done',
+        checked.status === 'continue' ? checked.reason : undefined,
+      );
       if (checked.status !== 'continue') return accept();
       preview('');
       if (finalizing) return finish(stoppingReply);
