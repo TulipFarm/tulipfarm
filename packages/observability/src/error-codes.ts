@@ -53,6 +53,7 @@ const codes = new Set<string>([
   // Fixed codes a chat turn stores when it ends without an answer.
   'attempts-exhausted',
   'transient-failure',
+  'tool-unavailable',
   'credits-exhausted',
   'project-context-too-large',
   'skill-unavailable',

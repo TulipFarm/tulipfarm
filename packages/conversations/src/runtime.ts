@@ -378,8 +378,13 @@ function replyFailureCause(error: unknown): string | undefined {
   if (code === '40P01' || code === '40001') return 'database-conflict';
   if (error instanceof Error && error.message === 'conversation-context-overflow') return 'context-limit';
   if (error instanceof SourceAuthorizationUnavailable && code === 'github-rate-limited') return code;
+  if (code === 'tool-unavailable') return code;
   return undefined;
 }
+// A retry repeats the same tool request, so these causes end the turn.
+const terminalReplyCauses = new Set(['tool-unavailable']);
+export const conversationToolNameAllowed = (name: string) => /^[a-z][a-zA-Z0-9.]{0,63}$/.test(name);
+
 export const modelFailureEndsTurn = (failure: string) => {
   const parsed = modelFailureSchema.safeParse(failure);
   return parsed.success && terminalModelFailures.has(parsed.data);
@@ -1847,8 +1852,8 @@ export function createConversationExecutor(
               name === 'web.search' ||
               name === 'files.create'));
         const currentSources = conversationResultSchema.shape.sources.parse(dependencies);
-        if (++calls > chatToolCallLimit || !/^[a-z][a-z0-9.]{0,63}$/.test(name))
-          throw new Error('conversation-tool-unavailable');
+        if (++calls > chatToolCallLimit || !conversationToolNameAllowed(name))
+          throw Object.assign(new Error('conversation-tool-unavailable'), { code: 'tool-unavailable' });
         const callId = randomUUID();
         const toolStarted = performance.now();
         let sequence = calls;
@@ -2548,6 +2553,7 @@ export function createConversationExecutor(
         denied ||
         planningFailure !== undefined ||
         (modelFailure !== undefined && terminalModelFailures.has(modelFailure)) ||
+        (cause !== undefined && terminalReplyCauses.has(cause)) ||
         turn.attempts >= attemptLimit(modelFailure);
       await tx.client.query(
         `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, lease_until = NULL, error_code = $3, generation = generation + 1, retry_at = CASE WHEN $2 = 'queued' THEN clock_timestamp() + $4 * interval '1 second' ELSE NULL END WHERE id = $1`,

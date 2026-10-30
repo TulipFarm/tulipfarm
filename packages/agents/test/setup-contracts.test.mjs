@@ -10,6 +10,7 @@ import { agentContextSchema } from '../src/saved-contracts.ts';
 import { listSkills } from '../src/skills.ts';
 import { nativeChatTools } from '../src/native-tools.ts';
 import { previewAgentTaskSchedule } from '../src/schedules.ts';
+import { conversationToolNameAllowed } from '@tulipfarm/conversations/runtime';
 
 const member = randomUUID();
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
@@ -172,4 +173,11 @@ test('create agent discovery loads setup, Slack checks and publication status to
     previewAgentTaskSchedule({ kind: 'interval', minutes: 60 }, new Date('2026-10-12T00:00:00.000Z')).nextRunAt,
     '2026-10-12T01:00:00.000Z',
   );
+});
+
+test('the chat runtime accepts every framework tool name', () => {
+  for (const option of frameworkCallSchema.options) {
+    const name = option.shape.tool.value;
+    assert.equal(conversationToolNameAllowed(name), true, name);
+  }
 });

@@ -247,3 +247,72 @@ test('an unverifiable source retries the reply and logs its classification', asy
     await f.close();
   }
 });
+
+test('a camelCase tool name runs and is saved', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Open the linked row' }],
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool('rows.resolveReference', false, async () => ({ result: { rows: [] }, sources: [] }), [], {
+        tool: 'rows.resolveReference',
+      });
+      return 'Found no linked rows.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    const saved = await f.db.platform.query(
+      `SELECT tool, status FROM ${f.table('tf_conversation_tool_calls')} WHERE turn_id=$1`,
+      [sent.turnId],
+    );
+    assert.deepEqual(saved.rows, [{ tool: 'rows.resolveReference', status: 'completed' }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an unavailable tool name ends the reply without a retry and logs its code', async t => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Private request text' }],
+    });
+    const lines = [];
+    t.mock.method(process.stdout, 'write', line => {
+      lines.push(String(line));
+      return true;
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool('Rows.list', false, () => assert.fail('An unavailable tool executed'));
+      return 'Unreachable.';
+    });
+    const outcome = await executor.process({
+      workspaceId: w.id,
+      conversationId: chatId,
+      turnId: sent.turnId,
+      generation: 0,
+    });
+    t.mock.restoreAll();
+    assert.equal(outcome, 'failed');
+    const history = await f.store.history(w.id, w.userId, chatId);
+    assert.equal(history.messages[0].turn.errorCode, 'tool-unavailable');
+    const failure = lines.map(line => JSON.parse(line)).find(record => record.operation === 'conversation.reply');
+    assert.equal(failure['error.code'], 'tool-unavailable');
+  } finally {
+    t.mock.restoreAll();
+    await f.close();
+  }
+});
