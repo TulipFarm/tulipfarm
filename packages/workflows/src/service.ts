@@ -238,8 +238,12 @@ export function createWorkflows(
     if (!agentStepsAvailable && definition.steps.some(step => step.kind === 'agent'))
       throw new WorkflowConflict('agent-steps-unavailable');
   }
-  function transaction<T>(workspaceId: string, operation: (tx: WorkflowTransaction) => Promise<T>) {
-    return workflowTransaction(runtime, workspaceId, operation);
+  function transaction<T>(
+    workspaceId: string,
+    operation: (tx: WorkflowTransaction) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
+  ) {
+    return workflowTransaction(runtime, workspaceId, operation, mode);
   }
   // A trigger that reads a source carries that source's data into runs, so each member who sponsors or sees them needs source access.
   async function authorizeSource(tx: AuthorizationTransaction, trigger: Trigger, membershipId: string) {
@@ -519,32 +523,36 @@ export function createWorkflows(
     });
   }
   async function list(workspaceId: string, user: string, options: { archived?: boolean } = {}) {
-    return transaction(workspaceId, async tx => {
-      const actor = await workflowMember(tx, user);
-      if (options.archived) {
-        if (tx.commonVersion < 1) return [];
-        // Archived workflows have no quota, so filter by access before the limit or older readable ones would be cut off.
-        const archived = (
+    return transaction(
+      workspaceId,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        if (options.archived) {
+          if (tx.commonVersion < 1) return [];
+          // Archived workflows have no quota, so filter by access before the limit or older readable ones would be cut off.
+          const archived = (
+            await tx.client.query(
+              `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE w.archived_at IS NOT NULL AND ${readableWorkflow(tx, 'w', '$1')} ORDER BY w.archived_at DESC,w.id LIMIT 100`,
+              [actor.membershipId],
+            )
+          ).rows;
+          const result = [];
+          for (const row of archived) result.push(await read(tx, row.id, actor.membershipId));
+          return result;
+        }
+        const rows = (
           await tx.client.query(
-            `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE w.archived_at IS NOT NULL AND ${readableWorkflow(tx, 'w', '$1')} ORDER BY w.archived_at DESC,w.id LIMIT 100`,
-            [actor.membershipId],
+            `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')} ORDER BY w.id LIMIT 100`,
           )
         ).rows;
         const result = [];
-        for (const row of archived) result.push(await read(tx, row.id, actor.membershipId));
+        for (const row of rows)
+          if (await hasGrant(tx, actor.membershipId, row.id, 'read'))
+            result.push(await read(tx, row.id, actor.membershipId));
         return result;
-      }
-      const rows = (
-        await tx.client.query(
-          `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')} ORDER BY w.id LIMIT 100`,
-        )
-      ).rows;
-      const result = [];
-      for (const row of rows)
-        if (await hasGrant(tx, actor.membershipId, row.id, 'read'))
-          result.push(await read(tx, row.id, actor.membershipId));
-      return result;
-    });
+      },
+      'read',
+    );
   }
   async function calendar(workspaceId: string, user: string, value: unknown) {
     const range = calendarRangeSchema.parse(value);
@@ -1077,52 +1085,56 @@ export function createWorkflows(
   }
   async function definition(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = definitionQuerySchema.parse(value);
-    return transaction(workspaceId, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'read');
-      const current = await read(tx, id, actor.membershipId);
-      const revision =
-        query.revision === 'saved'
-          ? current.revision
-          : query.revision === 'active'
-            ? current.activeRevision
-            : query.revision;
-      if (!revision) throw new AccessDenied();
-      if (revision !== current.revision && revision !== current.activeRevision) {
-        // Old definitions are reachable only through the same audience boundary as their runs.
-        const run = (
+    return transaction(
+      workspaceId,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        await requireGrant(tx, actor.membershipId, id, 'read');
+        const current = await read(tx, id, actor.membershipId);
+        const revision =
+          query.revision === 'saved'
+            ? current.revision
+            : query.revision === 'active'
+              ? current.activeRevision
+              : query.revision;
+        if (!revision) throw new AccessDenied();
+        if (revision !== current.revision && revision !== current.activeRevision) {
+          // Old definitions are reachable only through the same audience boundary as their runs.
+          const run = (
+            await tx.client.query(
+              `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND revision=$2 AND ((sponsorship_id IS NULL AND membership_id=$3 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$3)) ORDER BY created_at DESC LIMIT 1`,
+              [id, revision, actor.membershipId],
+            )
+          ).rows[0];
+          if (!run) throw new AccessDenied();
+          await requireRunAccess(tx, actor.membershipId, id, run.id, false);
+        }
+        const row = (
           await tx.client.query(
-            `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND revision=$2 AND ((sponsorship_id IS NULL AND membership_id=$3 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$3)) ORDER BY created_at DESC LIMIT 1`,
-            [id, revision, actor.membershipId],
+            `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+            [id, revision],
           )
         ).rows[0];
-        if (!run) throw new AccessDenied();
-        await requireRunAccess(tx, actor.membershipId, id, run.id, false);
-      }
-      const row = (
-        await tx.client.query(
-          `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
-          [id, revision],
-        )
-      ).rows[0];
-      if (!row) throw new AccessDenied();
-      const selected = definitionSchema.parse(row.definition);
-      await authorizeSources(tx, selected, actor.membershipId);
-      await requireDefinitionProvenance(tx, actor, id, revision);
-      return definitionViewSchema.parse({
-        workflowId: id,
-        revision,
-        savedRevision: current.revision,
-        activeRevision: current.activeRevision,
-        definition: selected,
-        actor:
-          revision === current.revision || revision === current.activeRevision
-            ? await person(tx, current.sponsorMembershipId)
-            : null,
-        canManage: current.capabilities.manage,
-        archived: current.archivedAt !== null,
-      });
-    });
+        if (!row) throw new AccessDenied();
+        const selected = definitionSchema.parse(row.definition);
+        await authorizeSources(tx, selected, actor.membershipId);
+        await requireDefinitionProvenance(tx, actor, id, revision);
+        return definitionViewSchema.parse({
+          workflowId: id,
+          revision,
+          savedRevision: current.revision,
+          activeRevision: current.activeRevision,
+          definition: selected,
+          actor:
+            revision === current.revision || revision === current.activeRevision
+              ? await person(tx, current.sponsorMembershipId)
+              : null,
+          canManage: current.capabilities.manage,
+          archived: current.archivedAt !== null,
+        });
+      },
+      'read',
+    );
   }
   async function runReceipts(tx: AuthorizationTransaction, actor: HumanActor, runId: string) {
     const rows = (

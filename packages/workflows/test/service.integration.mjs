@@ -47,6 +47,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
       assert.equal((await service.list(w.id, w.userId))[0].definition.name, 'Review order');
+      // Chat runs read-only tools side by side, so workflow reads must share the authorization lock.
+      const reader = await connect(db.login(w));
+      try {
+        await reader.query(`BEGIN; SELECT id FROM ${table('tf_authorization_lock')} WHERE id=1 FOR SHARE`);
+        assert.equal((await service.list(w.id, w.userId))[0].definition.name, 'Review order');
+        assert.equal((await service.definition(w.id, w.userId, id)).definition.name, 'Review order');
+      } finally {
+        await reader.query('ROLLBACK');
+        await reader.end();
+      }
       await assert.rejects(
         service.start(w.id, w.userId, id, { requestId: randomUUID(), input: {} }),
         /workflow-disabled/,
