@@ -22,7 +22,9 @@ test('table cleanup preserves each failure while continuing its bounded sweep', 
     assert.equal(error.errors.length, 2);
     assert.equal(error.errors[0], failures[0]);
     assert.equal(error.errors[1], failures[1]);
-    assert.deepEqual(errorAttributes(error), {
+    const { 'error.origin': origin, ...attributes } = errorAttributes(error);
+    assert.match(origin, /^worker\/table-cleanup\.ts:\d+$/);
+    assert.deepEqual(attributes, {
       'error.type': 'Error',
       'error.stage': 'table-cleanup-credentials',
       'error.code': '42501',
