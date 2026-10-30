@@ -345,7 +345,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.definitions':
     'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. Use tables.list when an agent needs schemas it may operate on.',
   'rows.page':
-    'Read typed rows from one active table revision when a compact page is sufficient. Returns rows ordered by ID, at most 1–100 (default 25), and a cursor; pass after for the next page. Results omit inaccessible rows and do not search or sort—use rows.list for the applied-revision query interface.',
+    'Read typed rows from one active table revision when a compact page is sufficient. Returns rows ordered by ID, at most 1–100 (default 25), and a cursor; pass after for the next page. Results omit inaccessible rows and do not search or sort—use rows.list for the applied-revision query interface. To find a person or linked row by name, use rows.resolveReference instead of paging.',
   'tables.propose':
     'Prepare a table/schema review from JSON; it never creates or changes tables. First read skills.read(table-authoring), then submit its exact proposal shape. The result is a human-review draft; correct invalid arguments and submit a new draft rather than treating it as a safe retry of a write.',
   'slack.resolve':
@@ -384,7 +384,7 @@ const descriptions: Record<ToolName, string> = {
   'rows.summarize':
     'Count or total rows by group at the applied revision: query {version:2,mode:"summary",where,groupBy,metrics}, or an RSQL filter in rsql. Each group has keys in groupBy order and values in metrics order; groupCount and nextCursor page the groups. Returns figures only, never rows. Field, link, and revision rules match rows.list.',
   'rows.resolveReference':
-    'Find linked row ids by name for one relationship field before filtering on it. Returns up to limit choices with id and label from the linked table you can read, and more when other rows also match. Ask the human when several choices fit. It changes nothing.',
+    'Find linked row ids by name or email for one relationship field before filtering on it or writing it, such as a person to assign. Returns up to limit choices with id and label from the linked table you can read, and more when other rows also match. Ask the human when several choices fit. It changes nothing.',
   'rows.reverse':
     'Read one page of incoming links through a reverse field. It requires read permission on both the viewed table and the source table. Pass nextCursor as after.',
   'rows.get':

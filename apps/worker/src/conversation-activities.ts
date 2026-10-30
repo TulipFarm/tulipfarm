@@ -236,6 +236,14 @@ export function meteredReply(
             },
           ]
         : []),
+      ...(externalContext
+        ? [
+            {
+              role: 'user' as const,
+              text: 'Server note: your answer is posted in a Slack thread. Slack shows a card with the values of each row you create or update, so confirm a row change in one short sentence without listing its values. Choice buttons are not available here; when the user must choose, ask with a short numbered list.',
+            },
+          ]
+        : []),
       ...(routeCapabilities(validatedRoute).imageInput ? messages : withoutImages(messages)),
     ]);
     const publisher = observeChatDetailSync('publisher-open', () => createReplyTextPublisher(runtime, fence));

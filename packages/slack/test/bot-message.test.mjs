@@ -127,3 +127,30 @@ test('retains customized-send retry and uncertain-delivery behavior without rese
     assert.equal(calls, 1);
   }
 });
+
+test('sends validated colour-bar attachments under the answer', async () => {
+  let body;
+  const fetcher = async (_, init) => {
+    body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ ok: true, channel: 'C123', ts: '1700000000.000001' }));
+  };
+  const card = {
+    color: '#146c2f',
+    fallback: 'Fix login in Tickets',
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '*Fix login*' } }],
+  };
+  await postBotMessage({ token: 'xoxb-test', channel: 'C123', text: 'Created it.', attachments: [card], fetcher });
+  assert.deepEqual(body.attachments, [card]);
+
+  await postBotMessage({ token: 'xoxb-test', channel: 'C123', text: 'An answer', fetcher });
+  assert.equal('attachments' in body, false);
+
+  for (const invalid of [
+    { ...card, color: 'good' },
+    { ...card, blocks: [] },
+  ])
+    await assert.rejects(
+      postBotMessage({ token: 'xoxb-test', channel: 'C123', text: 'Created it.', attachments: [invalid], fetcher }),
+      { name: 'Error', message: 'slack-payload-invalid' },
+    );
+});

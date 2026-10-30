@@ -38,6 +38,7 @@ import {
 import { requireDraftSources } from './draft-sources.ts';
 import { createAuthoringDrafts } from './drafts.ts';
 import { AgentError } from './saved-contracts.ts';
+import { slackRowChangeCards, type SlackRowLink } from './slack-row-changes.ts';
 import { slackRowDraftCards, slackRowDraftCommand, type slackRowDraftValueSchema } from './slack-row-drafts.ts';
 
 export { slackReplyRetryAction } from './slack-rejections.ts';
@@ -87,6 +88,8 @@ export function createSlackDefault(
     channels: ReturnType<typeof createSlackChannelAgents>;
     /** Supplies the workspace compaction policy, so a long channel reply compacts its own tool results like a chat. */
     compactor?: ConversationCompactor | undefined;
+    /** Links each row card to the row in the web app. */
+    rowLink?: SlackRowLink | undefined;
   },
 ) {
   const { runtime, channels } = options;
@@ -539,12 +542,15 @@ export function createSlackDefault(
         return 'blocked';
       }
       const channel = destination.kind === 'ChannelAllowed' ? destination.channel : row.dm_channel;
-      const cards = await slackRowDraftCards(
+      const requester = await resolveHuman(tx, row.user_id);
+      const cards = await slackRowDraftCards(tx, workspaceId, requester, row.conversation_id, row.turn_id);
+      const changed = await slackRowChangeCards(
         tx,
         workspaceId,
-        await resolveHuman(tx, row.user_id),
+        requester,
         row.conversation_id,
         row.turn_id,
+        options.rowLink,
       );
       const outcome = await postBotMessage({
         token: options.cipher.decrypt(
@@ -555,6 +561,7 @@ export function createSlackDefault(
         rootTs: destination.kind === 'ChannelAllowed' ? destination.rootTs : (row.dm_root ?? undefined),
         text: row.text,
         blocks: cards,
+        attachments: changed,
         ...(options.fetcher ? { fetcher: options.fetcher } : {}),
       });
       await tx.client.query(

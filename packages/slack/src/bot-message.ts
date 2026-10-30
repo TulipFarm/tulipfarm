@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { renderSlackAnswer, parseSlackSurface, type SlackMessage } from '@tulipfarm/slack-presentation';
+import {
+  renderSlackAnswer,
+  parseSlackSurface,
+  SlackPayloadError,
+  type SlackMessage,
+} from '@tulipfarm/slack-presentation';
 import { slackId } from './contracts.ts';
 
 export type BotMessageOutcome =
@@ -100,6 +105,8 @@ export async function postBotMessage(input: {
   presentation?: SlackMessage | undefined;
   /** Blocks shown under the answer, such as review buttons; the answer text alone stays the message text. */
   blocks?: SlackMessage['blocks'] | undefined;
+  /** Cards with a coloured side bar shown under the answer, such as rows the reply created. */
+  attachments?: { color: `#${string}`; fallback: string; blocks: SlackMessage['blocks'] }[] | undefined;
   agentName?: string | undefined;
   customizeName?: boolean;
   fetcher?: typeof fetch;
@@ -118,6 +125,11 @@ export async function postBotMessage(input: {
         ]
       : message.blocks;
   parseSlackSurface({ ...message, blocks });
+  if ((input.attachments?.length ?? 0) > 20) throw new SlackPayloadError();
+  for (const attachment of input.attachments ?? []) {
+    if (!/^#[0-9a-f]{6}$/i.test(attachment.color)) throw new SlackPayloadError();
+    parseSlackSurface({ kind: 'message', text: attachment.fallback, blocks: attachment.blocks });
+  }
   try {
     const response = await (input.fetcher ?? fetch)(
       input.replaceTs ? 'https://slack.com/api/chat.update' : 'https://slack.com/api/chat.postMessage',
@@ -132,6 +144,7 @@ export async function postBotMessage(input: {
           ts: input.replaceTs,
           text: message.text,
           blocks,
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
           ...(username ? { username } : {}),
           mrkdwn: false,
           parse: 'none',
