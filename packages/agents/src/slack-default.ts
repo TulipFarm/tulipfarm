@@ -36,8 +36,12 @@ import {
   slackAdmissionReason,
 } from './slack-rejections.ts';
 import { requireDraftSources } from './draft-sources.ts';
+import { createAuthoringDrafts } from './drafts.ts';
+import { AgentError } from './saved-contracts.ts';
+import { slackRowDraftCards, slackRowDraftCommand, type slackRowDraftValueSchema } from './slack-row-drafts.ts';
 
 export { slackReplyRetryAction } from './slack-rejections.ts';
+export { slackRowDraftApprove, slackRowDraftDismiss, slackRowDraftValueSchema } from './slack-row-drafts.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import type { ExternalConversationContext } from '@tulipfarm/conversations/runtime';
 import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts';
@@ -535,6 +539,13 @@ export function createSlackDefault(
         return 'blocked';
       }
       const channel = destination.kind === 'ChannelAllowed' ? destination.channel : row.dm_channel;
+      const cards = await slackRowDraftCards(
+        tx,
+        workspaceId,
+        await resolveHuman(tx, row.user_id),
+        row.conversation_id,
+        row.turn_id,
+      );
       const outcome = await postBotMessage({
         token: options.cipher.decrypt(
           { workspaceId, installationId: row.root.installation_id, generation: row.root.generation, kind: 'bot' },
@@ -543,6 +554,7 @@ export function createSlackDefault(
         channel,
         rootTs: destination.kind === 'ChannelAllowed' ? destination.rootTs : (row.dm_root ?? undefined),
         text: row.text,
+        blocks: cards,
         ...(options.fetcher ? { fetcher: options.fetcher } : {}),
       });
       await tx.client.query(
@@ -635,5 +647,51 @@ export function createSlackDefault(
       return 'retrying';
     });
   }
-  return { due, process, actionSources, retry };
+  /**
+   * Approves or dismisses a row draft from its Slack review card. Only the Slack user linked to the member who asked
+   * may decide, and the decision runs through the chat draft path, so permissions, staleness and replays match a chat card.
+   */
+  async function decideRowDraft(
+    value: z.infer<typeof slackRowDraftValueSchema>,
+    decision: 'save' | 'dismiss',
+    clicker: { appId: string; teamId: string; slackUserId: string },
+  ): Promise<'created' | 'updated' | 'deleted' | 'dismissed' | 'stale' | 'decided'> {
+    const userId = await transaction(value.workspaceId, async tx => {
+      const owner = z
+        .object({ user_id: z.string(), membership_id: z.uuid() })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT i.user_id,i.membership_id FROM ${table(tx, 'tf_chat_authoring_drafts')} d JOIN ${table(tx, 'tf_slack_default_turns')} t ON t.conversation_id=d.conversation_id AND t.turn_id=d.turn_id
+      JOIN ${table(tx, 'tf_slack_agent_branches')} b ON b.id=t.branch_id JOIN ${table(tx, 'tf_slack_identities')} i ON i.id=b.identity_id
+      JOIN ${table(tx, 'tf_slack_installations')} s ON s.id=i.installation_id AND s.generation=i.generation
+      WHERE d.id=$1 AND d.conversation_id=$2 AND d.membership_id=i.membership_id AND d.user_id=i.user_id AND s.app_id=$3 AND s.team_id=$4 AND s.state='active' AND i.state='authorized' AND i.slack_user_id=$5`,
+              [value.draftId, value.chatId, clicker.appId, clicker.teamId, clicker.slackUserId],
+            )
+          ).rows[0],
+        );
+      if (!owner || (await resolveHuman(tx, owner.user_id)).membershipId !== owner.membership_id)
+        throw new AccessDenied();
+      return owner.user_id;
+    });
+    try {
+      const outcome = await createAuthoringDrafts(runtime, undefined, undefined, undefined, actionSources).decide(
+        value.workspaceId,
+        userId,
+        value.chatId,
+        value.draftId,
+        { commandId: slackRowDraftCommand(value.draftId, decision), digest: value.digest, decision },
+      );
+      if (outcome.kind === 'dismissed') return 'dismissed';
+      if (outcome.kind !== 'row') throw new AccessDenied();
+      return outcome.operation === 'create' ? 'created' : outcome.operation === 'update' ? 'updated' : 'deleted';
+    } catch (error) {
+      if (!(error instanceof AgentError)) throw error;
+      if (error.code === 'idempotency-conflict') return 'decided';
+      if (error.code === 'draft-stale' || error.code === 'draft-conflict') return 'stale';
+      throw error;
+    }
+  }
+  return { due, process, actionSources, retry, decideRowDraft };
 }

@@ -5,6 +5,9 @@ import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createSlackInbox, slackCredentialCipher } from '../../slack/src/index.ts';
 import { createSlackChannelAgents } from '../src/slack-channels.ts';
 import { createSlackDefault } from '../src/slack-default.ts';
+import { createChatTools } from '../src/tools.ts';
+import { createTableWithRows, tableDefinition, textField } from '../../tables/test/fixture.mjs';
+import { AccessDenied } from '@tulipfarm/access';
 
 // Slack does not hand back the text a bot posted. A blocks-backed post comes back from conversations.replies with its
 // newlines flattened, and plain text can come back with bare URLs auto-linked. The fake does both, like production.
@@ -20,7 +23,7 @@ const answer = [
   'Run `pnpm deploy` from the `deploy` repo.',
 ].join('\n');
 
-async function threadFixture() {
+async function threadFixture({ reply, outbound = false } = {}) {
   const f = await conversationFixture(),
     installationId = randomUUID(),
     identityId = randomUUID();
@@ -97,15 +100,17 @@ async function threadFixture() {
     `INSERT INTO ${f.table('tf_slack_installation_grants')} (installation_id,membership_id) VALUES ($1,$2)`,
     [installationId, f.workspace.membershipId],
   );
-  const options = { runtime: f.runtime, appId: 'ATEST', cipher, fetcher, model: null, publicDelivery: true };
+  const options = { runtime: f.runtime, appId: 'ATEST', cipher, fetcher, model: null, publicDelivery: true, outbound };
   const channels = createSlackChannelAgents(options);
   const defaults = createSlackDefault({
     ...options,
     channels,
-    reply: () => async input => {
-      prompts.push(input.messages.at(-1).text);
-      return { text: prompts.length === 1 ? answer : 'Opened a draft PR proposal.', sources: [] };
-    },
+    reply:
+      reply ??
+      (() => async input => {
+        prompts.push(input.messages.at(-1).text);
+        return { text: prompts.length === 1 ? answer : 'Opened a draft PR proposal.', sources: [] };
+      }),
   });
   const inbox = createSlackInbox(f.runtime, channels.freeze);
   let events = 0;
@@ -209,6 +214,139 @@ test('a tagged message that is rejected still gets a visible reply; an untagged 
     // The notice is posted once; a later dispatch does not repeat it.
     await defaults.due(f.workspace.id);
     assert.equal(posts.length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+async function leadsTable(f, permissions) {
+  const team = randomUUID(),
+    note = textField('Note');
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')} (id,name) VALUES ($1,'Operators')`, [team]);
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')} (membership_id,team_id) VALUES ($1,$2)`, [
+    f.workspace.membershipId,
+    team,
+  ]);
+  const table = await createTableWithRows({
+    db: f.db,
+    workspace: f.workspace,
+    runtime: f.runtime,
+    definition: tableDefinition({ owningTeamId: team, label: 'Leads', fields: [note] }),
+    records: [],
+  });
+  for (const permission of permissions)
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,$3)`, [
+      team,
+      table.tableId,
+      permission,
+    ]);
+  return { table, note };
+}
+
+test('a channel reply that used web content drafts its row change with owner-only Slack buttons', async () => {
+  let call;
+  const { f, defaults, messages, posts, send } = await threadFixture({
+    outbound: true,
+    reply:
+      (_guard, slack) =>
+      async ({ executeTool }) => {
+        await executeTool(
+          'rows.create',
+          false,
+          context => createChatTools(context.runtime, { slack }).invokeWithSources(context, call),
+          [{ kind: 'public-web', url: 'https://example.net/page' }],
+          call,
+        );
+        return { text: 'I drafted the row for your approval.', sources: [] };
+      },
+  });
+  try {
+    const { table, note } = await leadsTable(f, ['table.row.read', 'table.row.create']);
+    call = {
+      tool: 'rows.create',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      values: { [note.id]: { kind: 'text', value: 'Acme' } },
+    };
+    const live = async () =>
+      (
+        await f.db.platform.query(`SELECT row_id FROM ${f.table('tf_table_identities')} WHERE table_id=$1 AND live`, [
+          table.tableId,
+        ])
+      ).rows.map(row => row.row_id);
+    await send(messages[0]);
+    messages.shift();
+    const [work] = await defaults.due(f.workspace.id);
+    assert.equal(await defaults.process(work), 'sent');
+    assert.deepEqual(await live(), []);
+    const blocks = posts[0].blocks;
+    assert.equal(posts[0].text, 'I drafted the row for your approval.');
+    assert.ok(
+      blocks.some(block => block.type === 'section' && block.text?.text === 'Review row change: Add a row in Leads'),
+    );
+    assert.ok(blocks.some(block => block.fields?.some(field => field.text === 'Note\nAcme')));
+    const buttons = blocks.find(block => block.type === 'actions').elements;
+    assert.deepEqual(
+      buttons.map(button => button.action_id),
+      ['slack_row_draft_approve', 'slack_row_draft_dismiss'],
+    );
+    const value = JSON.parse(buttons[0].value);
+    assert.equal(buttons[1].value, buttons[0].value);
+    const clicker = slackUserId => ({ appId: 'ATEST', teamId: 'TTEST', slackUserId });
+
+    await assert.rejects(defaults.decideRowDraft(value, 'save', clicker('UMOHIT')), AccessDenied);
+    await assert.rejects(
+      defaults.decideRowDraft(value, 'save', { ...clicker('UREQUESTER'), teamId: 'TOTHER' }),
+      AccessDenied,
+    );
+    assert.deepEqual(await live(), []);
+    assert.equal(await defaults.decideRowDraft(value, 'save', clicker('UREQUESTER')), 'created');
+    assert.equal(await defaults.decideRowDraft(value, 'save', clicker('UREQUESTER')), 'created');
+    assert.equal(await defaults.decideRowDraft(value, 'dismiss', clicker('UREQUESTER')), 'decided');
+    assert.deepEqual(await live(), [value.draftId]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('dismissing a Slack row draft changes nothing', async () => {
+  let call;
+  const { f, defaults, messages, posts, send } = await threadFixture({
+    outbound: true,
+    reply:
+      (_guard, slack) =>
+      async ({ executeTool }) => {
+        await executeTool(
+          'rows.create',
+          false,
+          context => createChatTools(context.runtime, { slack }).invokeWithSources(context, call),
+          [{ kind: 'public-web', url: 'https://example.net/page' }],
+          call,
+        );
+        return { text: 'I drafted the row for your approval.', sources: [] };
+      },
+  });
+  try {
+    const { table, note } = await leadsTable(f, ['table.row.read', 'table.row.create']);
+    call = {
+      tool: 'rows.create',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      values: { [note.id]: { kind: 'text', value: 'Acme' } },
+    };
+    await send(messages[0]);
+    messages.shift();
+    const [work] = await defaults.due(f.workspace.id);
+    assert.equal(await defaults.process(work), 'sent');
+    const value = JSON.parse(posts[0].blocks.find(block => block.type === 'actions').elements[1].value);
+    const clicker = { appId: 'ATEST', teamId: 'TTEST', slackUserId: 'UREQUESTER' };
+    assert.equal(await defaults.decideRowDraft(value, 'dismiss', clicker), 'dismissed');
+    assert.equal(await defaults.decideRowDraft(value, 'save', clicker), 'decided');
+    assert.equal(
+      (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_table_identities')} WHERE table_id=$1`, [table.tableId]))
+        .rowCount,
+      0,
+    );
   } finally {
     await f.close();
   }

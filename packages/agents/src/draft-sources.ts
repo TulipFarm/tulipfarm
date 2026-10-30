@@ -15,7 +15,10 @@ import { relation, type AgentTransaction } from './store.ts';
 import { requireAgentPermission } from './saved-policy.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
-/** `ownMemory` accepts the actor's own personal memory anywhere in the closure; only row drafts set it. */
+/**
+ * `ownMemory` accepts the actor's own personal memory anywhere in the closure; only row drafts set it. `slackTurn`
+ * checks a Slack thread in the closure against its current audience; without it a Slack thread is refused.
+ */
 export async function requireDraftSources(
   tx: AgentTransaction,
   actor: HumanActor,
@@ -24,6 +27,7 @@ export async function requireDraftSources(
   runId?: string,
   publicOnly = false,
   ownMemory = false,
+  slackTurn?: (eventId: string) => Promise<void>,
 ): Promise<void> {
   await currentMember(tx, actor);
   await lockAuthorization(tx);
@@ -32,6 +36,7 @@ export async function requireDraftSources(
     if (visited.has(key)) continue;
     visited.add(key);
     if (ownMemory && source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
+    else if (slackTurn && source.kind === 'shared-slack-turn') await slackTurn(source.eventId);
     else await requireProtectedSource(tx, actor, source, runId, publicOnly);
     if (source.kind === 'agent-definition') await requireAgentPermission(tx, actor, source.agentId, 'read');
   }

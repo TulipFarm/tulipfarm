@@ -1234,6 +1234,8 @@ export function createSlackActions(options: Options) {
     resumeConversation,
     taskActions,
     workflow,
+    /** Checks a Slack turn's audience for chat row drafts asked from that thread; absent outside Slack replies. */
+    turnAudience: options.audienceSources,
   };
 }
 
