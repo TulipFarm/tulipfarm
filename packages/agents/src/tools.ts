@@ -9,7 +9,8 @@ import { z } from 'zod';
 import { observeTool, type ToolObservation, type ToolOutcome, type ToolRuntime } from '@tulipfarm/observability';
 import { AccessDenied, type AuthorizationTransaction, type HumanActor, type SourceDependency } from '@tulipfarm/access';
 import { createAgentRecordTools } from './record-tools.ts';
-import { createRecordBatchSchema, rowsListModelSchema, toolCallSchema } from './contracts.ts';
+import { workspaceMembersInstruction } from './record-contracts.ts';
+import { createRecordBatchSchema, recordConflict, rowsListModelSchema, toolCallSchema } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
@@ -52,6 +53,10 @@ import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/propos
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals } from './table-proposals.ts';
 import { createTableService } from '@tulipfarm/tables/service';
+import { TableError } from '@tulipfarm/tables/service-contracts';
+import { TableValidationError } from '@tulipfarm/tables/definition';
+import { GenerationError } from '@tulipfarm/tables/store';
+import { WorkspaceMemberError, type workspaceMemberErrorCodeSchema } from '@tulipfarm/tables/workspace-members';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import { createTableImports, type TableImportOptions } from '@tulipfarm/tables/imports';
 import { humanReadableTableFiles, requireTableSources } from './table-sources.ts';
@@ -1657,7 +1662,14 @@ export function createChatTools(
     let sources = await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
       providerSources(tx, context.actor, call),
     );
-    const result = await invoke(context, call);
+    let result;
+    try {
+      result = await invoke(context, call);
+    } catch (error) {
+      const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error) : null;
+      if (!failure) throw error;
+      return { result: failure, sources: [] };
+    }
     if (
       call.tool.startsWith('google.') &&
       z.object({ provider: z.literal('google-workspace'), error: z.string() }).safeParse(result).success
@@ -1871,6 +1883,49 @@ const rowReviewUnavailable = {
   instruction:
     'No row has been changed. This chat used content that cannot be shown for review, such as MCP tools or agent task results, so row changes are unavailable here. Ask the member to make the change in the table.',
 };
+
+const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const memberErrorInstructions: Record<z.infer<typeof workspaceMemberErrorCodeSchema>, string> = {
+  'member-table-protected': 'The Workspace members table schema is fixed and cannot be changed.',
+  'member-field-protected': `${workspaceMembersInstruction} Members linked to an account or with a pending invitation cannot be deleted.`,
+  'member-inactive': 'A linked member is inactive. Ask the user to choose an active member.',
+  'member-unavailable': 'Workspace members are unavailable right now. Tell the user and do not retry in this reply.',
+  'member-link-conflict': 'That member is linked to an account and cannot be changed this way.',
+  'member-selection-required': 'Choose an existing member row first.',
+  'member-profile-pending': 'Member profiles are still syncing. Tell the user and do not retry in this reply.',
+  'member-profile-failed': 'Member profiles failed to sync. Tell the user and do not retry in this reply.',
+};
+const generationErrorInstructions: Partial<Record<string, string>> = {
+  'stale-generation': 'The table schema changed. Call schema.inspect again, then retry with the new applied revision.',
+  'duplicate-key': 'Another row already has the same value in a unique field. Use or update that row instead.',
+  'linked-record': 'A linked row does not exist. Find it again with rows.resolveReference.',
+  'not-found': 'The row no longer exists.',
+};
+
+/** Rule failures the model can correct, returned with their cause instead of as an unexplained tool failure. */
+function rowWriteFailure(error: unknown) {
+  if (error instanceof WorkspaceMemberError)
+    return { error: error.code, instruction: `Nothing changed. ${memberErrorInstructions[error.code]}` };
+  if (error instanceof TableValidationError)
+    return {
+      error: 'invalid-values',
+      message: error.message,
+      ...(error.fieldId ? { fieldId: error.fieldId } : {}),
+      instruction:
+        'Nothing changed. Fix the value for this field using the schema from schema.inspect, then try once more. Every required field needs a value.',
+    };
+  if (error instanceof GenerationError) {
+    if (error.code === 'stale-record') return recordConflict;
+    const instruction = generationErrorInstructions[error.code];
+    return instruction ? { error: error.code, instruction: `Nothing changed. ${instruction}` } : null;
+  }
+  if (error instanceof TableError && error.code === 'table-maintenance')
+    return {
+      error: 'table-maintenance',
+      instruction: 'Nothing changed. The table is under maintenance. Tell the user and do not retry in this reply.',
+    };
+  return null;
+}
 
 async function workflowStale<T>(proposal: Promise<T>) {
   try {

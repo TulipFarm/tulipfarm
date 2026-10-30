@@ -87,6 +87,7 @@ const reportingOutcomes = bullets('Reporting outcomes', [
   'Give each item its correct state: pending, completed, blocked, or failed.',
   'If you do not know the result of a write, check its status before you try again. Do not do the same write two times.',
   'At the end, tell the user what is not complete and what the next step is.',
+  'If a change fails, give the cause from the error in one sentence. Then give one specific next step. If you need more information, say exactly which information.',
   'Say what you did not check. For example, say "I did not find it in the sources that I read", not "It does not exist".',
 ]);
 
@@ -95,6 +96,7 @@ const toneAndOutput = bullets('Tone and output', [
   'Do not show internal terms, tool names, or IDs unless the user needs them.',
   'Give the answer first. Do not repeat the question. Do not add filler.',
   'Use lists or tables when they make information easier to read. Use plain sentences for simple answers.',
+  'Put related sentences in one paragraph. Do not start a new line for each sentence. Show field values as a list, with no period after each item.',
   'Show links as Markdown links. Keep each URL exactly as you got it.',
   'Reply in the language of the user.',
 ]);
@@ -114,6 +116,7 @@ const usingTools = (mode: PromptMode) =>
     ...(mode === 'tools'
       ? [
           'For multiple new rows in an existing table, inspect its fields once and use rows.create.batch with all requested rows. Do not create each row in a separate tool call. This row work does not need the table-authoring skill.',
+          'Before you create or change a row that names a person or another linked row, find that row with rows.resolveReference. If no row matches, ask the user what to do before you change anything.',
         ]
       : []),
     'When a call needs data from an earlier call, wait for that result first.',

@@ -39,7 +39,7 @@ import {
   type TableQuery,
 } from './query.ts';
 import { bindCurrentMemberQuery, runRowsQuery, runSummaryQuery } from './query-execution.ts';
-import { workspaceMemberMutationSchema, WorkspaceMemberError } from './workspace-members.ts';
+import { workspaceMemberFields, workspaceMemberMutationSchema, WorkspaceMemberError } from './workspace-members.ts';
 
 /** listPage counts matching rows on the first page only and stops at this many, reporting `"10000+"` beyond it. */
 export const listPageCountLimit = 10000;
@@ -761,7 +761,16 @@ export function createTableService(
     const target = await activeFor(tx, actor, field.targetTableId);
     const named = nameField(target.definition),
       parameters: unknown[] = [];
-    const column = named ? `"f_${named.id.replaceAll('-', '')}"` : null;
+    const physical = (id: string) => `"f_${id.replaceAll('-', '')}"`;
+    const column = named ? physical(named.id) : null;
+    const systemKind =
+      (await store.workspaceMembersTable(tx))?.coreDefinition.id === target.table_id ? 'workspace-members' : undefined;
+    // People are often named by part of their email, so a member search also matches both email fields.
+    const searched = !column
+      ? []
+      : systemKind
+        ? [column, physical(workspaceMemberFields.contactEmail), physical(workspaceMemberFields.accountEmail)]
+        : [column];
     let where: string;
     if ('ids' in lookup) {
       parameters.push(lookup.ids);
@@ -773,7 +782,7 @@ export function createTableService(
     } else if (lookup.search) {
       if (!column) return [];
       parameters.push(likePattern(lookup.search));
-      where = `${column} ILIKE $1`;
+      where = `(${searched.map(item => `${item} ILIKE $1`).join(' OR ')})`;
     } else where = 'TRUE';
     parameters.push(limit);
     const ids = z
@@ -789,8 +798,6 @@ export function createTableService(
       .map(row => row.id);
     const records = ids.length ? await store.readRecords(tx, target, { ids, limit: ids.length }) : [];
     const byId = new Map(records.map(record => [record.id, record]));
-    const systemKind =
-      (await store.workspaceMembersTable(tx))?.coreDefinition.id === target.table_id ? 'workspace-members' : undefined;
     return ids.flatMap(id => {
       const record = byId.get(id);
       return record ? [{ id, label: recordLabel(target.definition, record.values, systemKind) }] : [];

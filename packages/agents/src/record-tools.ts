@@ -29,6 +29,7 @@ import {
   agentRecordSchema,
   agentRecordListSchema,
   agentTableStatusSchema,
+  workspaceMembersInstruction,
   agentTableInspectSchema,
   agentQueryRecordListSchema,
   agentQuerySummarySchema,
@@ -232,7 +233,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           appliedDefinition: generation.definition,
           maintenance: row?.maintenance,
           migration: null,
-          ...(systemKind ? { systemKind } : {}),
+          ...(systemKind ? { systemKind, instruction: workspaceMembersInstruction } : {}),
         });
       },
       'schema',
