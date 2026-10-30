@@ -8,6 +8,7 @@ import {
   slackLinkFailure,
   slackOAuthErrorCode,
   type createSlackInbox,
+  type createSlackWelcome,
   type createSlackInstallations,
   type createSlackMemberLinking,
   type SlackConfiguration,
@@ -20,6 +21,7 @@ export type SlackDependencies = {
   config: SlackConfiguration;
   installations: ReturnType<typeof createSlackInstallations>;
   inbox: ReturnType<typeof createSlackInbox>;
+  welcome?: ReturnType<typeof createSlackWelcome>;
   memberLinking?: ReturnType<typeof createSlackMemberLinking>;
   channels?: ReturnType<typeof createSlackChannelAgents>;
 };
@@ -469,7 +471,10 @@ export function registerSlack(
               return reply.code(403).send({ error: 'slack-app-mismatch' });
             const route = await dependencies.installations.route(envelope.api_app_id, envelope.team_id);
             if (!route) return reply.code(404).send({ error: 'slack-installation-unavailable' });
-            return await dependencies.inbox.accept(route, envelope);
+            const accepted = await dependencies.inbox.accept(route, envelope);
+            // Suggested prompts and the Home tab are best effort and must not delay Slack's acknowledgement.
+            void dependencies.welcome?.handle(route, envelope);
+            return accepted;
           } catch (error) {
             if (error instanceof SlackSignatureError) return reply.code(401).send({ error: 'slack-signature-invalid' });
             if (error instanceof z.ZodError || error instanceof SyntaxError)

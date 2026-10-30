@@ -651,6 +651,9 @@ importers:
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../slack
+      '@tulipfarm/slack-presentation':
+        specifier: workspace:*
+        version: link:../slack-presentation
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../tables

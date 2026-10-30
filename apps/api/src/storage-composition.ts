@@ -235,6 +235,7 @@ export function registerStorageComposition(
   registerSlackActions(app, {
     runtime,
     auth: dependencies.auth,
+    pool: dependencies.pool,
     resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
     wakeTaskAction,
   });

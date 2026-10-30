@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { slackReplyProgress } from '@tulipfarm/agents/slack-default';
 import {
   createConversationExecutor,
   replyWorkSchema,
@@ -226,6 +228,11 @@ export function meteredReply(
       }),
     );
     const { requester, destinations } = session;
+    // A Slack turn is laid out as Block Kit, with follow-ups and forms. The flag only changes what the model is asked
+    // for; saved layouts always render.
+    const generativeUi = await observeChatDetail('feature-flag', () =>
+      isFeatureEnabled('generative-ui', null, { id: fence.workspaceId }),
+    );
     const context = observeChatDetailSync('render', () => [
       ...projectReminder(project),
       ...(destinations
@@ -240,7 +247,7 @@ export function meteredReply(
         ? [
             {
               role: 'user' as const,
-              text: 'Server note: your answer is posted in a Slack thread. Slack shows a card with the values of each row you create or update, so confirm a row change in one short sentence without listing its values. Choice buttons are not available here; when the user must choose, ask with a short numbered list.',
+              text: `Server note: your answer is posted in a Slack thread. Slack shows a card with the values of each row you create or update, so confirm a row change in one short sentence without listing its values. ${generativeUi ? 'Lay the answer out with slack_render; when the user must choose, offer buttons.' : 'Choice buttons are not available here; when the user must choose, ask with a short numbered list.'}`,
             },
           ]
         : []),
@@ -270,12 +277,7 @@ export function meteredReply(
           }) => publisher.avatar(step, avatar),
         }
       : undefined;
-    // Slack replies stay Markdown. The flag only changes what the model is asked for; saved layouts always render.
-    const generativeUi =
-      !externalContext &&
-      (await observeChatDetail('feature-flag', () =>
-        isFeatureEnabled('generative-ui', null, { id: fence.workspaceId }),
-      ));
+    const layout = generativeUi ? (externalContext ? { slack: { interactive: true } } : true) : undefined;
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
     const chatToolOptions = (
@@ -321,7 +323,11 @@ export function meteredReply(
         async (call, sources, activity, narration) => {
           session.toolRan(call.tool);
           await session.beforeTool();
-          return executeTool(
+          const step = slackReplyProgress.getStore();
+          const id = randomUUID();
+          const title = activity ?? call.tool;
+          void step?.step({ id, title, status: 'in_progress' });
+          const ran = executeTool(
             call.tool,
             isExternalTool(call.tool),
             async context => {
@@ -391,6 +397,11 @@ export function meteredReply(
             activity,
             narration,
           );
+          void ran.then(
+            () => step?.step({ id, title, status: 'complete' }),
+            () => step?.step({ id, title, status: 'error' }),
+          );
+          return ran;
         },
         session.meter,
         session.authorizeSources,
@@ -399,7 +410,7 @@ export function meteredReply(
         mcp && requester && !externalContext
           ? {
               ...(avatar ? { avatar } : {}),
-              ...(generativeUi ? { layout: true } : {}),
+              ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
               earlierMessages,
@@ -426,7 +437,7 @@ export function meteredReply(
             }
           : {
               ...(avatar ? { avatar } : {}),
-              ...(generativeUi ? { layout: true } : {}),
+              ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
               earlierMessages,

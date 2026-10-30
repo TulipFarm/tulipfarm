@@ -52,15 +52,27 @@ export const slackFileScope = 'files:read';
 /** The bot scope that lets TulipFarm upload the images a run generated to the Slack destination it delivers to. */
 export const slackFileUploadScope = 'files:write';
 
+/** The bot scope that lets TulipFarm put a long laid-out reply in a Slack canvas. */
+export const slackCanvasScope = 'canvases:write';
+/** The bot scope for Slack's agent features: streamed progress, suggested prompts and thread titles. */
+export const slackAssistantScope = 'assistant:write';
+
 /**
  * The bot scopes an installation needs. While the `images` flag is on, reading shared files adds `files:read` and
- * delivering generated images adds `files:write`, so an installation without them shows the notice to update Slack
- * permissions.
+ * delivering generated images adds `files:write`. While the `generative-ui` flag is on, canvases add `canvases:write`
+ * and agent features add `assistant:write`. An installation without them shows the notice to update Slack permissions.
  */
-export function requiredBotScopes(config: Pick<SlackConfiguration, 'scopeApproval'>, images: boolean) {
+export function requiredBotScopes(
+  config: Pick<SlackConfiguration, 'scopeApproval'>,
+  images: boolean,
+  generativeUi = false,
+) {
   const scopes = config.scopeApproval.botScopes;
-  if (!images) return scopes;
-  return [...scopes, ...[slackFileScope, slackFileUploadScope].filter(scope => !scopes.includes(scope))];
+  const extra = [
+    ...(images ? [slackFileScope, slackFileUploadScope] : []),
+    ...(generativeUi ? [slackCanvasScope, slackAssistantScope] : []),
+  ];
+  return [...scopes, ...extra.filter(scope => !scopes.includes(scope))];
 }
 export const eventEnvelopeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('url_verification'), challenge: z.string().min(1).max(1024) }),

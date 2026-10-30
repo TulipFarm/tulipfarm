@@ -307,6 +307,7 @@
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
+    "@tulipfarm/slack-presentation": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflow-snippets": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",

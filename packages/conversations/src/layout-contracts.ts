@@ -51,12 +51,35 @@ const maxText = 65536;
 const encoder = new TextEncoder();
 const bytes = (value: string) => encoder.encode(value).length;
 
+const slackBlock = z.record(z.string(), z.unknown());
+/**
+ * A reply laid out for Slack: Block Kit blocks with server action IDs, an optional Markdown report for a Slack canvas,
+ * and the modals its buttons open. The worker checks the blocks against Block Kit; the web shows the A2UI copy.
+ */
+export const slackLayoutSchema = z.strictObject({
+  blocks: z.array(slackBlock).min(1).max(50),
+  report: z.string().min(1).max(60_000).optional(),
+  modals: z
+    .array(
+      z.strictObject({
+        id: z.string().regex(/^[a-z0-9_-]{1,32}$/u),
+        title: z.string().min(1).max(24),
+        submit: z.string().min(1).max(24),
+        blocks: z.array(slackBlock).min(1).max(100),
+      }),
+    )
+    .max(5)
+    .optional(),
+});
+export type SlackLayout = z.infer<typeof slackLayoutSchema>;
+
 /** What the model sends as `reply.render` arguments. The worker adds the protocol, catalog and surface ID. */
 export const replyRenderInputSchema = z.strictObject({
   placement: layoutPlacementSchema,
   title: z.string().trim().min(1).max(120),
   summary: z.string().trim().min(1).max(maxSummary),
   messages: z.array(surfaceMessageSchema).min(1).max(64),
+  slack: slackLayoutSchema.optional(),
 });
 export type ReplyRenderInput = z.infer<typeof replyRenderInputSchema>;
 
@@ -67,6 +90,7 @@ export const layoutSchema = z.strictObject({
   title: z.string().min(1).max(120),
   summary: z.string().min(1).max(maxSummary),
   messages: z.array(surfaceMessageSchema).min(1).max(64),
+  slack: slackLayoutSchema.optional(),
   /** Set when the model's layout failed its checks and this one-Text layout replaced it. */
   notice: z.literal('layout-failed').optional(),
 });

@@ -100,7 +100,7 @@ export const featureFlags = {
   'generative-ui': {
     description:
       'Chat replies are A2UI layouts of Sprout components, shown in the chat or in Canvas. Off keeps Markdown replies. Saved layouts always render.',
-    default: 'development',
+    default: true,
     scope: 'workspace',
     env: 'FEATURE_FLAG_GENERATIVE_UI',
   },

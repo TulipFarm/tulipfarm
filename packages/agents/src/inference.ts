@@ -70,6 +70,7 @@ import {
 import type { WorkspaceInventory } from './workspace-inventory.ts';
 import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
 import { generativeUiPrompt, parseReplyRender, replyRenderTool, replyRenderToolName } from './reply-render.ts';
+import { parseSlackRender, slackRenderPrompt, slackRenderTool, slackRenderToolName } from './slack-render.ts';
 import type { ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
 import { isWorkTool } from './non-work-tools.ts';
 import {
@@ -1233,8 +1234,11 @@ export type ToolModelMeter = (attempt: {
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   avatar?: { update: (update: { step: number; avatar: AvatarSnapshot }) => void };
-  /** The model answers with a `reply_render` layout (the generative-ui flag). */
-  layout?: boolean;
+  /**
+   * The model answers with a layout (the generative-ui flag): `reply_render` A2UI for the web, or `slack_render` Block
+   * Kit for a Slack reply. `interactive` allows follow-up buttons, choices and forms, which only the default agent handles.
+   */
+  layout?: boolean | { slack: { interactive: boolean } };
   readWorkspaceInventory?: (() => Promise<WorkspaceInventory | undefined>) | undefined;
   /** Runtime-owned, ephemeral read for each model step; never retained in loop history. */
   readPersonalMemory?: (() => Promise<PersonalMemoryContext | undefined>) | undefined;
@@ -2189,6 +2193,17 @@ export async function inferWithTools(
   let expressionCalls = 0;
   let layoutFailures = 0;
   let layoutAsked = false;
+  const slackLayout = typeof tools?.layout === 'object' ? tools.layout.slack : undefined;
+  const renderer = !tools?.layout
+    ? undefined
+    : slackLayout
+      ? {
+          name: slackRenderToolName,
+          tool: slackRenderTool,
+          prompt: slackRenderPrompt(slackLayout.interactive),
+          parse: (input: unknown, _options?: { design?: boolean }) => parseSlackRender(input, slackLayout),
+        }
+      : { name: replyRenderToolName, tool: replyRenderTool, prompt: generativeUiPrompt, parse: parseReplyRender };
   // A canvas report is sent back once for a visual redesign; a second text-heavy one is kept.
   let designAsked = false;
   let toolRounds = 0;
@@ -2366,11 +2381,11 @@ export async function inferWithTools(
           ...active.tools,
           ...(rereadOffered ? [toolResultReadTool] : []),
           ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
-          ...(tools?.layout ? [replyRenderTool] : []),
+          ...(renderer ? [renderer.tool] : []),
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions),
-    ...(tools?.layout ? [generativeUiPrompt] : []),
+    ...(renderer ? [renderer.prompt] : []),
     ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
   /**
@@ -2693,29 +2708,27 @@ export async function inferWithTools(
       continue;
     }
     let rendered: { input: ReplyRenderInput; text: string } | undefined;
-    if (tools?.layout && selected.calls.some(call => call.name === replyRenderToolName)) {
+    if (renderer && selected.calls.some(call => call.name === renderer.name)) {
       const only = selected.calls.length === 1 && selected.calls[0];
       const failed = (output: string) => ({
         kind: 'results' as const,
         results: selected.calls.map(call => ({
           id: call.id,
           name: call.name,
-          output: call === only || call.name === replyRenderToolName ? output : notRun,
+          output: call === only || call.name === renderer.name ? output : notRun,
           error: true,
           providerId: call.providerId,
         })),
       });
       if (!only) {
-        reject(
-          failed(`Not run. Finish other tools first, then call ${replyRenderToolName} alone.`).results,
-          'render-batch',
-          [replyRenderToolName],
-        );
+        reject(failed(`Not run. Finish other tools first, then call ${renderer.name} alone.`).results, 'render-batch', [
+          renderer.name,
+        ]);
         items.splice(-1, 0, { kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
         continue;
       }
-      const parsed = parseReplyRender(only.input, { design: !designAsked });
-      if (!parsed.ok && !designAsked && parseReplyRender(only.input).ok) {
+      const parsed = renderer.parse(only.input, { design: !designAsked });
+      if (!parsed.ok && !designAsked && renderer.parse(only.input).ok) {
         designAsked = true;
         log('info', 'activity', 'call_failed', { operation: 'chat.layout-redesign', 'error.type': 'layout-design' });
         items.push(
@@ -2746,7 +2759,7 @@ export async function inferWithTools(
       rendered = parsed;
     }
     // A plain-text answer is sent back once with a request for the layout; a second one is kept as text.
-    if (tools?.layout && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {
+    if (renderer && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {
       layoutAsked = true;
       items.push(
         { kind: 'model', text: selected.text, calls: [], raw: selected.raw },
@@ -2754,7 +2767,7 @@ export async function inferWithTools(
           kind: 'turn',
           turn: {
             role: 'user',
-            text: `Give that answer by calling ${replyRenderToolName}, as the answer format requires.`,
+            text: `Give that answer by calling ${renderer.name}, as the answer format requires.`,
           },
         },
       );
