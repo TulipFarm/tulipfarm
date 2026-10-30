@@ -132,6 +132,7 @@ export function NamedWorkflowViewer({
       onTask={props.onTask}
       stepContent={props.stepContent}
       navigation={props.navigation}
+      header={props.header ?? true}
       onRefresh={() => {
         props.onRefresh();
         void read.refresh();

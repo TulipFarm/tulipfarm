@@ -143,17 +143,25 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       await page.goto(`${origin}/archive-proof/workflows`);
       await page.getByRole('link', { name: 'Old intake', exact: true }).click();
+      await page.getByRole('tab', { name: 'Settings', exact: true }).click();
       await page.getByRole('button', { name: 'Archive workflow' }).click();
       const dialog = page.getByRole('alertdialog', { name: 'Archive Old intake?' });
-      await dialog.getByText('Run history and the audit trail are kept.', { exact: false }).waitFor();
+      await dialog.getByText('History is kept.', { exact: false }).waitFor();
       await dialog.getByRole('button', { name: 'Keep workflow' }).click();
       await dialog.waitFor({ state: 'detached' });
       assert.equal(archiveRequests, 0);
 
       await page.getByRole('button', { name: 'Archive workflow' }).click();
       await dialog.getByRole('button', { name: 'Archive workflow' }).click();
-      await page.getByRole('button', { name: 'Archiving workflow…' }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Archiving workflow…' }).isDisabled(), true);
+      // While the archive request is in flight the button is blocked with a reason, not relabelled.
+      await page.getByText('Finish or retry the current request first.', { exact: true }).waitFor();
+      assert.equal(
+        await page
+          .getByRole('region', { name: 'Danger zone', exact: true })
+          .getByRole('button', { name: 'Archive workflow', exact: true })
+          .isDisabled(),
+        true,
+      );
       release();
       await page
         .getByRole('alert')
@@ -180,7 +188,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('alert').filter({ hasText: 'workflow-archived' }).waitFor();
       await page.getByText('Its run history is read-only.', { exact: false }).waitFor();
       assert.equal(await page.getByRole('button', { name: 'Run workflow' }).count(), 0);
-      assert.equal(await page.getByRole('tab', { name: 'Definition', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('tab', { name: 'Settings', exact: true }).count(), 0);
 
       await showWorkflowList(page);
       await page.getByRole('button', { name: /^Current( \d+)?$/ }).click();

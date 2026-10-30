@@ -140,20 +140,6 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
       <Button aria-label={`${action.label} ${app.name}`} onClick={() => setTab('settings')}>
         {action.label}
       </Button>
-    ) : action.kind === 'workflow' && admin ? (
-      <Button
-        nativeButton={false}
-        render={
-          <Link
-            to="/$workspaceSlug/workflows"
-            params={{ workspaceSlug: slug }}
-            search={{ provider: app.workflowProvider }}
-            hash="provider-setup"
-          />
-        }
-      >
-        Set up workflow
-      </Button>
     ) : app.provider === 'soon' ? (
       <Button disabled>Coming soon</Button>
     ) : null;
@@ -276,14 +262,7 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
             )}
             <TabsContent value="advanced">
               <Pane>
-                <Advanced
-                  app={app}
-                  status={status}
-                  admin={admin}
-                  slug={slug}
-                  refreshing={refreshing}
-                  onRefresh={() => void refresh()}
-                />
+                <Advanced app={app} status={status} refreshing={refreshing} onRefresh={() => void refresh()} />
               </Pane>
             </TabsContent>
           </Tabs>
@@ -655,15 +634,11 @@ function SettingsTab({
 function Advanced({
   app,
   status,
-  admin,
-  slug,
   refreshing,
   onRefresh,
 }: {
   app: Integration;
   status: Status | null;
-  admin: boolean;
-  slug: string;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
@@ -672,28 +647,6 @@ function Advanced({
   const granted = status?.kind === 'connected' ? status.granted : undefined;
   return (
     <div className="max-w-3xl divide-y divide-border rounded-xl border border-border">
-      {app.workflowProvider && admin && (
-        <AdvancedRow
-          title="Start workflows from this app"
-          description={`Run a workflow when something happens in ${app.name}.`}
-          action={
-            <Button
-              variant="outline"
-              nativeButton={false}
-              render={
-                <Link
-                  to="/$workspaceSlug/workflows"
-                  params={{ workspaceSlug: slug }}
-                  search={{ provider: app.workflowProvider }}
-                  hash="provider-setup"
-                />
-              }
-            >
-              Set up trigger
-            </Button>
-          }
-        />
-      )}
       {app.provider === 'github-personal' && (
         <AdvancedRow
           title="Privacy"

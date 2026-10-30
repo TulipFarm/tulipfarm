@@ -147,7 +147,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const interval = await saved('Hourly sync');
       assert.deepEqual(interval.definition.trigger, { kind: 'interval', minutes: 15 });
       assert.ok(Math.abs(Date.parse(interval.nextRunAt) - Date.now() - 15 * 60000) < 60000, interval.nextRunAt);
-      await page.getByText(`Next scheduled run ${formatted(interval.nextRunAt)}.`, { exact: false }).waitFor();
+      await page
+        .getByRole('region', { name: 'Workflow summary', exact: true })
+        .getByText(`Next run ${formatted(interval.nextRunAt)}`, { exact: false })
+        .waitFor();
       const savedCronOverInterval = await saveWorkflow(
         service,
         w,
@@ -156,15 +159,22 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       viewer = await openWorkflow(page, savedCronOverInterval);
       await assertConfiguration(viewer, 0, savedCronOverInterval.definition.trigger);
-      await page.getByText(`Next scheduled run ${formatted(interval.nextRunAt)}.`, { exact: false }).waitFor();
+      await page
+        .getByRole('region', { name: 'Workflow summary', exact: true })
+        .getByText(`Next run ${formatted(interval.nextRunAt)}`, { exact: false })
+        .waitFor();
       assert.deepEqual(savedCronOverInterval.definition.trigger, {
         kind: 'cron',
         expression: '30 8 * * 1',
         timezone: 'UTC',
       });
       assert.deepEqual(savedCronOverInterval.activeTrigger, { kind: 'interval', minutes: 15 });
-      await page.getByRole('button', { name: 'Active revision', exact: true }).click();
-      await viewer.getByText('Active revision', { exact: true }).waitFor();
+      const revisions = page.getByRole('group', { name: 'Displayed revision', exact: true });
+      await revisions.getByRole('button', { name: 'Active', exact: true }).click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[aria-label="Displayed revision"] [aria-pressed="true"]')?.textContent === 'Active',
+      );
       await assertConfiguration(viewer, 0, interval.definition.trigger);
 
       const monday = await saveWorkflow(
@@ -182,7 +192,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const next = new Date(cron.nextRunAt);
       assert.deepEqual([next.getUTCDay(), next.getUTCHours(), next.getUTCMinutes()], [1, 8, 30]);
       assert.ok(next.getTime() > Date.now() && next.getTime() - Date.now() <= 7 * 86400000, cron.nextRunAt);
-      await page.getByText(`Next scheduled run ${formatted(cron.nextRunAt)}.`, { exact: false }).waitFor();
+      await page
+        .getByRole('region', { name: 'Workflow summary', exact: true })
+        .getByText(`Next run ${formatted(cron.nextRunAt)}`, { exact: false })
+        .waitFor();
       await showWorkflowList(page);
       await page.getByText('Every Monday at 08:30 in UTC', { exact: true }).waitFor();
       await page.getByText(`Next run ${formatted(cron.nextRunAt)}`, { exact: true }).waitFor();

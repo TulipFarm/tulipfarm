@@ -11,11 +11,7 @@ import {
 import * as fileContracts from '@tulipfarm/files/contracts';
 import { accountCallbackResultSchema, accountProtocolSchema } from '@tulipfarm/atlassian/callback-contracts';
 import * as accountContracts from '@tulipfarm/atlassian/account-contracts';
-import { workflowPageSearch, workflowProviderSearch } from '../src/features/workflows/page-search.ts';
-import {
-  workflowSources,
-  workflowProviderSearch as providerSearch,
-} from '../src/features/workflows/provider-sources.ts';
+import { workflowPageSearch } from '../src/features/workflows/page-search.ts';
 import { agentTabValues } from '../src/features/agents/tab-values.ts';
 import { agentTabs, agentTabValues as setupTabValues } from '../src/features/agents/setup.ts';
 
@@ -25,18 +21,11 @@ test('URL contracts retain shared values, validation, fallbacks and viewer curso
     agentTabValues,
     agentTabs.map(tab => tab.value),
   );
-  assert.equal(workflowProviderSearch, providerSearch);
-  assert.deepEqual(
-    workflowProviderSearch.shape.provider.unwrap().unwrap().options,
-    workflowSources.map(item => item.source.provider),
-  );
-  assert.deepEqual(workflowPageSearch.parse({ provider: 'slack', view: 'runs', workflow: 'bad', run: 'bad' }), {
-    provider: 'slack',
+  assert.deepEqual(workflowPageSearch.parse({ view: 'runs', workflow: 'bad', run: 'bad' }), {
     view: 'runs',
     workflow: undefined,
     run: undefined,
   });
-  assert.equal(workflowPageSearch.parse({ provider: 'unsupported' }).provider, undefined);
   assert.equal(fileTypeSchema, fileContracts.fileTypeSchema);
   assert.equal(libraryOwnerFilterSchema, fileContracts.libraryOwnerFilterSchema);
   assert.equal(librarySectionSchema, fileContracts.librarySectionSchema);
@@ -108,7 +97,7 @@ test('public route contracts do not initialize editors, query engines, model pri
       models: models.modelCatalogSchema.parse({ families: [] }),
       callback: google.googleCallbackResultSchema.parse({ outcome: 'consent-denied' }),
       files: files.filesSearchSchema.parse({ section: 'google' }),
-      workflow: workflows.workflowPageSearch.parse({ provider: 'slack' }),
+      workflow: workflows.workflowPageSearch.parse({ view: 'settings' }),
       account: atlassian.accountCallbackResultSchema.parse({ outcome: 'denied' }),
       tab: agents.agentTabValues[0],
     }));
@@ -123,7 +112,7 @@ test('public route contracts do not initialize editors, query engines, model pri
     models: { families: [], imageModels: [] },
     callback: { outcome: 'consent-denied' },
     files: { section: 'google' },
-    workflow: { provider: 'slack' },
+    workflow: { view: 'settings' },
     account: { outcome: 'denied' },
     tab: 'overview',
   });

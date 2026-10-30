@@ -37,6 +37,10 @@ export async function showWorkflowList(page) {
   await page.getByRole('region', { name: 'Workflow selection', exact: true }).waitFor();
 }
 
+export async function showWorkflowSettings(page) {
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+}
+
 export async function openWorkflow(page, workflow) {
   await showWorkflowList(page);
   await Promise.all([
@@ -60,7 +64,8 @@ export async function openWorkflow(page, workflow) {
   assert.equal(response.status(), 200);
   assert.equal((await response.json()).revision, workflow.revision);
   const viewer = page.getByRole('region', { name: `${workflow.definition.name} workflow`, exact: true });
-  await viewer.getByRole('heading', { name: workflow.definition.name, exact: true }).waitFor();
+  await page.getByRole('heading', { level: 1, name: workflow.definition.name, exact: true }).waitFor();
+  await viewer.waitFor();
   await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
   assert.equal(await viewer.getByRole('button', { name: 'Diagram', exact: true }).getAttribute('aria-pressed'), 'true');
   const diagram = viewer.getByRole('figure', { name: 'Read-only workflow diagram', exact: true });

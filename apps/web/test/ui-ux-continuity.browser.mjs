@@ -537,16 +537,18 @@ test('workflow saved and active diagrams stay exact, refresh independently, and 
     assert.equal(await page.getByLabel('Name', { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('Workflow definition JSON').count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Save revision', exact: true }).count(), 0);
-    await page.getByRole('button', { name: 'Active revision', exact: true }).click();
-    await page.getByRole('heading', { name: 'Active customer review', exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Saved revision', exact: true }).click();
+    const revisions = page.getByRole('group', { name: 'Displayed revision', exact: true });
+    await revisions.getByRole('button', { name: 'Active', exact: true }).click();
+    await page.getByRole('region', { name: 'Active customer review workflow', exact: true }).waitFor();
+    await revisions.getByRole('button', { name: 'Saved', exact: true }).click();
+    await page.getByRole('region', { name: 'Customer review workflow', exact: true }).waitFor();
     state.workflows[0] = {
       ...state.workflows[0],
       revision: id('f'),
       definition: { ...workflow.definition, name: 'Fresh customer review' },
     };
     await page.getByRole('button', { name: 'Refresh workflow', exact: true }).click();
-    await page.getByRole('heading', { name: 'Fresh customer review', exact: true }).waitFor();
+    await page.getByRole('region', { name: 'Fresh customer review workflow', exact: true }).waitFor();
     assert.deepEqual(state.saves, []);
     await page.getByRole('button', { name: 'Edit in chat', exact: true }).click();
     await waitForPrompt(page, 'Help me edit workflow "Fresh customer review"');
@@ -579,6 +581,7 @@ test('workflow read recovery, access loss and archive keep their existing screen
     await page.getByRole('button', { name: 'Retry loading', exact: true }).click();
     await showWorkflowList(page);
     await page.getByRole('link', { name: 'Customer review', exact: true }).click();
+    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Archive workflow', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Archive workflow', exact: true }).click();
     await page.getByRole('heading', { name: 'No workflows yet', exact: true }).waitFor();
@@ -587,7 +590,7 @@ test('workflow read recovery, access loss and archive keep their existing screen
     await page.getByRole('link', { name: 'Customer review', exact: true }).click();
     await page.getByText(/Its run history is read-only/).waitFor();
     await page.getByRole('region', { name: 'Run history' }).waitFor();
-    await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+    await page.getByRole('tab', { name: 'Overview', exact: true }).click();
     await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
     assert.equal(await page.getByRole('button', { name: 'Edit in chat', exact: true }).count(), 0);
     assert.deepEqual(errors, []);
@@ -604,14 +607,14 @@ test('a workflow run link reopens the workflow run history at that run, and unkn
   });
   await page.locator(`#workflow-run-${runId}`).getByText('0 workflow steps', { exact: true }).click();
   const runLink = page.getByRole('link', { name: `Run ${runId}`, exact: true });
-  assert.equal(await runLink.getAttribute('href'), `/acme/workflows?workflow=${workflow.id}&view=runs&run=${runId}`);
-  await page.getByRole('tab', { name: 'Definition', exact: true }).click();
-  await page.waitForURL(url => url.searchParams.get('workflow') === workflow.id && !url.searchParams.has('view'));
+  assert.equal(await runLink.getAttribute('href'), `/acme/workflows/${workflow.id}?view=runs&run=${runId}`);
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await page.waitForURL(url => url.pathname === `/acme/workflows/${workflow.id}` && !url.searchParams.has('view'));
   await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
   await page.getByRole('tab', { name: 'Runs', exact: true }).click();
   await page.waitForURL(url => url.searchParams.get('view') === 'runs');
   assert.equal(await page.getByRole('alertdialog').count(), 0, 'read-only view changes need no leave prompt');
-  await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
   await page.getByRole('heading', { name: 'Customer review', exact: true }).first().waitFor();
   await evidence(page, 'workflow-definition', async () => {});
   assert.deepEqual(errors, []);
@@ -622,13 +625,13 @@ test('a workflow run link reopens the workflow run history at that run, and unkn
   await shows('Customer review');
   await history.page.getByRole('link', { name: 'Workflows', exact: true }).first().click();
   await history.page.getByRole('link', { name: 'Invoice check', exact: true }).click();
-  await history.page.waitForURL(url => url.searchParams.get('workflow') === invoices.id);
+  await history.page.waitForURL(url => url.pathname === `/acme/workflows/${invoices.id}`);
   await shows('Invoice check');
   await history.page.goBack();
-  await history.page.waitForURL(url => url.searchParams.get('workflow') === workflow.id);
+  await history.page.waitForURL(url => url.pathname === `/acme/workflows/${workflow.id}`);
   await shows('Customer review');
   await history.page.goForward();
-  await history.page.waitForURL(url => url.searchParams.get('workflow') === invoices.id);
+  await history.page.waitForURL(url => url.pathname === `/acme/workflows/${invoices.id}`);
   await shows('Invoice check');
   assert.deepEqual(history.errors, []);
   await history.close();

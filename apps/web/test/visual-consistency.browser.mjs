@@ -91,6 +91,8 @@ try {
           grants: [],
         });
       else if (path.endsWith('/invitations')) json = [];
+      // The archived shelf loads alongside the list; these states exercise the current list only.
+      else if (path.endsWith('/workflows') && new URL(route.request().url()).searchParams.has('archived')) json = [];
       else if (path.endsWith('/workflows')) {
         if (workflowsState === 'loading')
           await new Promise(resolve => {

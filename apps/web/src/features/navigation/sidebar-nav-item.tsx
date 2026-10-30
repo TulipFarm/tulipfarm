@@ -34,9 +34,8 @@ function itemLink(section: RecentSection, slug: string, item: RecentItem) {
     case 'workflows':
       return (
         <Link
-          to="/$workspaceSlug/workflows"
-          params={{ workspaceSlug: slug }}
-          search={{ workflow: item.id }}
+          to="/$workspaceSlug/workflows/$workflowId"
+          params={{ workspaceSlug: slug, workflowId: item.id }}
           preload={false}
         />
       );
@@ -74,10 +73,7 @@ export function SidebarNavItem({
   const entries = items.map(item => ({
     ...item,
     link: itemLink(section, slug, item),
-    active:
-      section === 'workflows'
-        ? sectionActive && new URLSearchParams(location.search).get('workflow') === item.id
-        : location.pathname === `${base}/${item.id}`,
+    active: location.pathname === `${base}/${item.id}`,
   }));
   const Icon = page.icon;
   return (

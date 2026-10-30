@@ -14,7 +14,13 @@ import { createWorkflows } from '../../../packages/workflows/src/service.ts';
 import { registerWorkflows } from '../../api/src/workflows.ts';
 import { protectBusinessRequests } from '../../api/src/business.ts';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
-import { reviewDefinition, saveWorkflow, openWorkflow, showWorkflowList } from './workflow-definition.fixture.mjs';
+import {
+  reviewDefinition,
+  saveWorkflow,
+  openWorkflow,
+  showWorkflowList,
+  showWorkflowSettings,
+} from './workflow-definition.fixture.mjs';
 
 const requireApi = createRequire(new URL('../../api/package.json', import.meta.url));
 const Fastify = requireApi('fastify'),
@@ -120,7 +126,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const author = { ...w, userId: creator.userId };
       const current = await saveWorkflow(service, author, reviewDefinition('Private ordinary workflow'));
       await openWorkflow(page, current);
-      await page.getByRole('heading', { name: 'Definition sharing' }).waitFor();
+      await showWorkflowSettings(page);
+      await page
+        .getByRole('region', { name: 'Workflow sharing', exact: true })
+        .getByRole('heading', { name: 'Access', exact: true })
+        .waitFor();
       const base = `${apiOrigin}/v1/workspaces/${w.id}/workflows`;
       const unrelatedHeaders = { cookie: 'unrelated-admin=1', origin, 'content-type': 'application/json' };
       assert.deepEqual(await (await fetch(base, { headers: unrelatedHeaders })).json(), []);
@@ -147,13 +157,19 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const sharing = page.getByRole('region', { name: 'Workflow sharing', exact: true });
       await sharing.getByLabel('Person or team', { exact: true }).click();
       await page.getByRole('option', { name: other.userId, exact: true }).click();
-      await sharing.getByRole('checkbox', { name: 'Run workflow', exact: true }).check();
-      await sharing.getByRole('button', { name: 'Save sharing', exact: true }).click();
-      await sharing.getByText('Sharing saved. Run histories remain private.', { exact: true }).waitFor();
+      await sharing.getByLabel('Access level', { exact: true }).click();
+      await page.getByRole('option', { name: 'Can run', exact: true }).click();
+      await sharing.getByRole('button', { name: 'Share', exact: true }).click();
+      await sharing.getByText('Access saved.', { exact: true }).waitFor();
+      await sharing
+        .getByRole('list', { name: 'People with access', exact: true })
+        .getByLabel(`Access for ${other.userId}`, { exact: true })
+        .getByText('Can run', { exact: true })
+        .waitFor();
       assert.equal((await service.list(w.id, other.userId))[0].capabilities.invoke, true);
       await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
-      await page.getByRole('tab', { name: 'Runs', exact: true }).click();
+      await page.getByRole('button', { name: 'Start a run', exact: true }).click();
       await page.getByLabel('Request to review', { exact: true }).fill('Private creator input');
       await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
       await page.locator('article').getByText('Queued', { exact: true }).waitFor();
@@ -173,7 +189,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.advance({ workspaceId: w.id, runId: ownRun.id });
       await page.getByRole('button', { name: 'Check run history', exact: true }).click();
       await page.locator('article').getByText('Completed', { exact: true }).waitFor();
-      await page.getByRole('tab', { name: 'Definition', exact: true }).click();
+      await page.getByRole('tab', { name: 'Overview', exact: true }).click();
       const scheduled = await saveWorkflow(
         service,
         author,
@@ -181,17 +197,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         current,
       );
       await openWorkflow(page, scheduled);
-      await page.getByRole('region', { name: 'Unattended execution', exact: true }).waitFor();
-      await page.getByLabel('Execution sponsor', { exact: true }).click();
-      await page.getByRole('option', { name: creator.userId, exact: true }).click();
-      await page
-        .getByRole('region', { name: 'Unattended execution', exact: true })
-        .getByRole('checkbox', { name: creator.userId, exact: true })
-        .check();
-      await page.getByRole('button', { name: 'Save sponsor and audience', exact: true }).click();
-      await page
-        .getByText('You sponsor this revision. Activate the saved revision to start unattended runs.', { exact: true })
-        .waitFor();
+      await showWorkflowSettings(page);
+      const scheduledRuns = page.getByRole('region', { name: 'Scheduled runs', exact: true });
+      await scheduledRuns.getByLabel('Runs as', { exact: true }).click();
+      await page.getByRole('option', { name: 'You', exact: true }).click();
+      await scheduledRuns.getByRole('checkbox', { name: 'You', exact: true }).check();
+      await page.getByRole('button', { name: 'Save scheduled runs', exact: true }).click();
+      await page.getByText('Saved. Activate the saved revision to start scheduled runs.', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await db.platform.query(
@@ -214,6 +226,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       });
       await page.getByRole('button', { name: 'Refresh workflows', exact: true }).click();
       await page.getByRole('region', { name: 'Workflow sharing', exact: true }).waitFor({ state: 'hidden' });
+      await page.getByRole('tab', { name: 'Overview', exact: true }).click();
       await page.getByRole('button', { name: 'Refresh workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor({ state: 'hidden' });
       assert.equal(await page.getByRole('button', { name: 'Activate saved revision', exact: true }).count(), 0);

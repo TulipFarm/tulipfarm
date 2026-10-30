@@ -296,7 +296,8 @@ export function workflowGraph(
       kind: step.kind,
       title: title(step),
       summary,
-      actor: step.kind === 'agent' ? actor : step.kind === 'human' ? `Response from ${actor}` : `Runs as ${actor}`,
+      // The trigger card already names who the workflow runs as; repeat it only when a step differs.
+      actor: step.kind === 'agent' ? actor : step.kind === 'human' ? `Response from ${actor}` : '',
       ordinal: index + 1,
       state: state(step.id),
       position: { x: 0, y: 0 },

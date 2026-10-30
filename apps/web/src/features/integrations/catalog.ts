@@ -85,7 +85,6 @@ export type Integration = {
   recommended?: boolean;
   googleApp?: GoogleApp;
   can?: Permission[];
-  workflowProvider?: 'sheets' | 'slack' | 'notion' | 'gmail' | 'forms' | 'jira' | 'hubspot';
 };
 
 export const integrations: Integration[] = [
@@ -102,7 +101,6 @@ export const integrations: Integration[] = [
       'Label every invoice email',
     ],
     recommended: true,
-    workflowProvider: 'gmail',
     googleApp: 'gmail',
     can: [
       { text: 'Read and label your email', scope: googleAppScopes.gmail[0] },
@@ -133,7 +131,6 @@ export const integrations: Integration[] = [
     blurb: 'Chat with agents in Slack',
     prompts: ['Post the weekly update in #team', 'Answer questions in #support', 'DM me when a big order lands'],
     recommended: true,
-    workflowProvider: 'slack',
   },
   {
     id: 'google-drive',
@@ -182,7 +179,6 @@ export const integrations: Integration[] = [
     blurb: 'Read and update issues',
     prompts: ['Triage new bugs from today', 'Show what slipped this sprint', 'Write a status note for the team'],
     recommended: true,
-    workflowProvider: 'jira',
   },
   {
     id: 'google-sheets',
@@ -192,7 +188,6 @@ export const integrations: Integration[] = [
     provider: 'google',
     blurb: 'Read and update rows',
     prompts: ['Add today’s orders to the tracker', 'Flag rows with missing emails', 'Sum sales by region'],
-    workflowProvider: 'sheets',
     googleApp: 'sheets',
     can: [
       { text: 'Read spreadsheets', scope: googleAppScopes.sheets[0] },
@@ -250,30 +245,27 @@ export const integrations: Integration[] = [
     name: 'Notion',
     brand: 'notion',
     category: 'Docs and files',
-    provider: 'workflow',
+    provider: 'soon',
     blurb: 'Start workflows from new pages',
-    prompts: ['Start a task for each new page', 'Welcome each new client page', 'Send new pages to Slack'],
-    workflowProvider: 'notion',
+    prompts: [],
   },
   {
     id: 'google-forms',
     name: 'Google Forms',
     brand: 'google-forms',
     category: 'CRM and support',
-    provider: 'workflow',
+    provider: 'soon',
     blurb: 'Start workflows from responses',
-    prompts: ['Reply to each new response', 'Add responses to a sheet', 'Tag urgent requests'],
-    workflowProvider: 'forms',
+    prompts: [],
   },
   {
     id: 'hubspot',
     name: 'HubSpot',
     brand: 'hubspot',
     category: 'CRM and support',
-    provider: 'workflow',
+    provider: 'soon',
     blurb: 'Start workflows from new CRM records',
-    prompts: ['Greet each new contact', 'Plan next steps for new deals', 'Alert sales on big deals'],
-    workflowProvider: 'hubspot',
+    prompts: [],
   },
   {
     id: 'microsoft-365',

@@ -189,7 +189,7 @@ export function WorkflowStepList({
             <span className="workflow-step-copy">
               <span className="workflow-step-row-title">{step.title}</span>
               <span className="workflow-step-row-summary">{step.summary}</span>
-              <span className="workflow-step-row-actor">{step.actor}</span>
+              {step.actor && <span className="workflow-step-row-actor">{step.actor}</span>}
             </span>
             {step.state !== 'definition' && (
               <Badge variant={badges[step.state]}>{workflowStepLabels[step.state]}</Badge>
@@ -222,12 +222,14 @@ function StepCard({ data: { step, inspected, inspect } }: NodeProps<StepNode>) {
         </span>
         <span className="workflow-node-title">{step.title}</span>
         <span className="workflow-node-summary">{step.summary}</span>
-        <span className="workflow-node-actor">
-          {(step.state === 'active' || step.state === 'completed') && (
-            <span className="workflow-activity-mark" aria-hidden="true" />
-          )}
-          {step.actor}
-        </span>
+        {(step.actor || step.state === 'active' || step.state === 'completed') && (
+          <span className="workflow-node-actor">
+            {(step.state === 'active' || step.state === 'completed') && (
+              <span className="workflow-activity-mark" aria-hidden="true" />
+            )}
+            {step.actor}
+          </span>
+        )}
       </button>
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
       <Handle type="source" id="gate-out" position={Position.Right} isConnectable={false} />
@@ -424,10 +426,6 @@ export function WorkflowDiagram({
         <WorkflowViewport />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
-      <span className="workflow-readonly">
-        <Play size={12} aria-hidden="true" />
-        View only
-      </span>
     </div>
   );
 }

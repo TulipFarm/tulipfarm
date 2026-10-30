@@ -47,8 +47,10 @@ export function WorkflowViewer({
   onTask,
   stepContent,
   navigation,
+  header = true,
 }: {
   view: WorkflowView;
+  header?: boolean;
   surface?: 'page' | 'canvas';
   onEdit?: (() => void) | undefined;
   onRefresh: () => void;
@@ -71,66 +73,65 @@ export function WorkflowViewer({
   const inspect = useCallback((id: string) => setSelection({ key: view.key, id }), [view.key]);
   const node = graph.nodes.find(item => item.id === selected) ?? graph.nodes[0]!;
   const task = view.run?.task;
+  const actions = (
+    <div className="flex shrink-0 items-center gap-1">
+      <Button variant="ghost" size="icon-sm" aria-label="Refresh workflow" title="Refresh workflow" onClick={onRefresh}>
+        <Refresh size={15} aria-hidden="true" />
+      </Button>
+      {onEdit && (
+        <Button variant="outline" size="sm" onClick={onEdit}>
+          Edit in chat
+          <ArrowUpRight size={14} aria-hidden="true" />
+        </Button>
+      )}
+    </div>
+  );
   return (
     <section className="workflow-viewer" data-surface={surface} aria-label={`${view.definition.name} workflow`}>
-      <header className="workflow-viewer-header">
-        <div className="min-w-0 flex-1 space-y-2">
-          <ResultCard
-            title={view.definition.name}
-            kind="Workflow"
-            status={view.run?.label ?? view.revisionLabel}
-            state={
-              view.run?.status === 'completed'
-                ? 'success'
-                : view.run?.status === 'failed' || view.run?.status === 'blocked'
-                  ? 'error'
-                  : view.run?.status === 'running'
-                    ? 'running'
-                    : 'default'
-            }
-            icon={<BranchDown size={18} />}
-            apps={graph.nodes.flatMap(node =>
-              node.identity?.kind === 'app'
-                ? [
-                    {
-                      brand: node.identity.brand,
-                      name: brandNames[node.identity.brand],
-                      actions: [{ label: node.title, state: actionStates[node.state] }],
-                    },
-                  ]
-                : [],
-            )}
-          />
-          <span className="text-xs text-muted-foreground">
-            {view.run
-              ? view.revisionLabel
-              : `${view.definition.steps.length} ${view.definition.steps.length === 1 ? 'step' : 'steps'}`}
-          </span>
-          <p className="text-xs text-muted-foreground">
-            {view.run?.note ??
-              (view.source === 'Draft'
-                ? 'Review this draft before saving.'
-                : 'Definition only. A saved workflow does not confirm a run or delivery.')}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Refresh workflow"
-            title="Refresh workflow"
-            onClick={onRefresh}
-          >
-            <Refresh size={15} aria-hidden="true" />
-          </Button>
-          {onEdit && (
-            <Button variant="outline" size="sm" onClick={onEdit}>
-              Edit in chat
-              <ArrowUpRight size={14} aria-hidden="true" />
-            </Button>
-          )}
-        </div>
-      </header>
+      {header && (
+        <header className="workflow-viewer-header">
+          <div className="min-w-0 flex-1 space-y-2">
+            <ResultCard
+              title={view.definition.name}
+              kind="Workflow"
+              status={view.run?.label ?? view.revisionLabel}
+              state={
+                view.run?.status === 'completed'
+                  ? 'success'
+                  : view.run?.status === 'failed' || view.run?.status === 'blocked'
+                    ? 'error'
+                    : view.run?.status === 'running'
+                      ? 'running'
+                      : 'default'
+              }
+              icon={<BranchDown size={18} />}
+              apps={graph.nodes.flatMap(node =>
+                node.identity?.kind === 'app'
+                  ? [
+                      {
+                        brand: node.identity.brand,
+                        name: brandNames[node.identity.brand],
+                        actions: [{ label: node.title, state: actionStates[node.state] }],
+                      },
+                    ]
+                  : [],
+              )}
+            />
+            <span className="text-xs text-muted-foreground">
+              {view.run
+                ? view.revisionLabel
+                : `${view.definition.steps.length} ${view.definition.steps.length === 1 ? 'step' : 'steps'}`}
+            </span>
+            <p className="text-xs text-muted-foreground">
+              {view.run?.note ??
+                (view.source === 'Draft'
+                  ? 'Review this draft before saving.'
+                  : 'Definition only. A saved workflow does not confirm a run or delivery.')}
+            </p>
+          </div>
+          {actions}
+        </header>
+      )}
       {view.notice && (
         <div className="px-4">
           <Alert>
@@ -157,7 +158,14 @@ export function WorkflowViewer({
             Steps
           </Button>
         </div>
-        {navigation ?? <p className="text-xs text-muted-foreground">Select a step to inspect</p>}
+        {header ? (
+          (navigation ?? <p className="text-xs text-muted-foreground">Select a step to inspect</p>)
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            {navigation}
+            {actions}
+          </div>
+        )}
       </div>
       <div className="workflow-viewer-body">
         <div className="min-w-0">
