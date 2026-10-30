@@ -991,82 +991,85 @@ function ConversationDetail({
                 ) : (
                   <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
                     {[
-                      ...history.messages.map((message, index) => (
-                        <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
-                          <ConversationEntry
-                            api={api}
-                            chatId={chatId}
-                            slug={workspaceSlug}
-                            message={message}
-                            latest={index === history.messages.length - 1}
-                            rowViews={rowViewsForMessage(history.messages, message)}
-                            disabled={locked}
-                            retryHandoff={compactionId => {
-                              if (!locked && models.usable)
-                                post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
-                            }}
-                            control={kind => {
-                              if (message.turn)
-                                submit({
-                                  kind,
-                                  chatId,
-                                  commandId: crypto.randomUUID(),
-                                  turnId: message.turn.id,
-                                  expectedGeneration: message.turn.generation,
-                                });
-                            }}
-                          />
-                          <ToolActivity
-                            key="activity"
-                            variant="transcript"
-                            items={toolActivityItems(message.tools)}
-                            active={thinking && !!turn && message.turn?.id === turn.id}
-                            activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
-                            onToggle={() => {
-                              followLatest.current = 'inspecting';
-                              setAwayFromLatest(true);
-                            }}
-                          />
-                          {message.tools.map(tool => {
-                            const replyTurn = message.turn;
-                            return tool.tool === 'agents.delegate' ? (
-                              <SubagentFanout
-                                key={`subagents:${tool.id}`}
-                                tool={tool}
-                                live={stream.subagents?.get(tool.id)}
-                                families={modelFamilies}
-                                stop={
-                                  replyTurn?.status === 'processing'
-                                    ? key =>
-                                        api.stopSubagent(
-                                          chatId,
-                                          replyTurn.id,
-                                          tool.id,
-                                          key,
-                                          AbortSignal.timeout(15_000),
-                                        )
-                                    : undefined
-                                }
-                              />
-                            ) : null;
-                          })}
-                          <ConversationTools
-                            api={api}
-                            chatId={chatId}
-                            slug={workspaceSlug}
-                            message={message}
-                            changed={read.refresh}
-                            githubLocked={
-                              locked ||
-                              history.messages.some(
-                                item => item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
-                              )
-                            }
-                            pickGitHub={pickGitHub}
-                            correct={() => composerInput.current?.focus()}
-                          />
-                        </li>
-                      )),
+                      ...history.messages.map((message, index) =>
+                        answerOnly(message) ? null : (
+                          <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
+                            <ConversationEntry
+                              api={api}
+                              chatId={chatId}
+                              slug={workspaceSlug}
+                              message={message}
+                              latest={index === history.messages.length - 1}
+                              rowViews={rowViewsForMessage(history.messages, message)}
+                              disabled={locked}
+                              retryHandoff={compactionId => {
+                                if (!locked && models.usable)
+                                  post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
+                              }}
+                              control={kind => {
+                                if (message.turn)
+                                  submit({
+                                    kind,
+                                    chatId,
+                                    commandId: crypto.randomUUID(),
+                                    turnId: message.turn.id,
+                                    expectedGeneration: message.turn.generation,
+                                  });
+                              }}
+                            />
+                            <ToolActivity
+                              key="activity"
+                              variant="transcript"
+                              items={toolActivityItems(message.tools)}
+                              active={thinking && !!turn && message.turn?.id === turn.id}
+                              activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
+                              onToggle={() => {
+                                followLatest.current = 'inspecting';
+                                setAwayFromLatest(true);
+                              }}
+                            />
+                            {message.tools.map(tool => {
+                              const replyTurn = message.turn;
+                              return tool.tool === 'agents.delegate' ? (
+                                <SubagentFanout
+                                  key={`subagents:${tool.id}`}
+                                  tool={tool}
+                                  live={stream.subagents?.get(tool.id)}
+                                  families={modelFamilies}
+                                  stop={
+                                    replyTurn?.status === 'processing'
+                                      ? key =>
+                                          api.stopSubagent(
+                                            chatId,
+                                            replyTurn.id,
+                                            tool.id,
+                                            key,
+                                            AbortSignal.timeout(15_000),
+                                          )
+                                      : undefined
+                                  }
+                                />
+                              ) : null;
+                            })}
+                            <ConversationTools
+                              api={api}
+                              chatId={chatId}
+                              slug={workspaceSlug}
+                              message={message}
+                              changed={read.refresh}
+                              githubLocked={
+                                locked ||
+                                history.messages.some(
+                                  item =>
+                                    item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
+                                )
+                              }
+                              pickGitHub={pickGitHub}
+                              correct={() => composerInput.current?.focus()}
+                            />
+                          </li>
+                        ),
+                      ),
                       pending ? (
                         <li key="pending">
                           <Message align="end">
@@ -1447,6 +1450,17 @@ function GooglePrivateOnly({
   );
 }
 
+// The answer already shows on its request card, so a message holding only that answer adds nothing.
+function answerOnly(message: ConversationMessage) {
+  return (
+    !message.turn &&
+    message.tools.length === 0 &&
+    message.calendarResults.length === 0 &&
+    message.parts.length > 0 &&
+    message.parts.every(part => part.kind === 'response')
+  );
+}
+
 function rowViewsForMessage(messages: ConversationMessage[], message: ConversationMessage): RowView[] {
   const source =
     message.author === 'human'
@@ -1563,11 +1577,7 @@ function ConversationEntry({
               case 'approval-resolution':
                 return <InteractionCard key={index} api={api} chatId={chatId} reference={part} />;
               case 'response':
-                return (
-                  <p key={index} className="text-sm text-muted-foreground">
-                    A response was recorded. Its answer is shown on the original request card.
-                  </p>
-                );
+                return null;
               case 'attachment':
                 return (
                   <ConversationAttachment key={part.attachmentId} api={api} chatId={chatId} id={part.attachmentId} />

@@ -27,9 +27,11 @@ response identity, revision, and input in memory for retry. A reload instead rea
 the durable result. Conflicts require a fresh read and explicit input review.
 
 Pending cards check every two seconds for at most thirty automatic checks, then
-offer **Check request status**. Errors stop automatic checks. Settled cards stop
-polling and refresh history. Focus refresh rechecks current access; concealed
-denials clear the card. Session expiry clears the private-chat view.
+offer **Try again**. Errors stop automatic checks and offer the same **Try again**.
+A rejected answer refreshes the request by itself before offering review. Settled
+cards stop polling, refresh history, and show no status row. Focus refresh
+rechecks current access; concealed denials clear the card. Session expiry clears
+the private-chat view.
 
 Tool publication in the inspected backend is a text part containing only one of
 five fixed status labels. The UI renders that part as text. It does not request

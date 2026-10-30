@@ -227,27 +227,30 @@ try {
   assert.equal(item.status, 'pending');
   assert.equal(writes.length, 0);
   readStatus = 503;
-  await page.getByRole('button', { name: 'Check request status' }).click();
   await page.getByText('Could not refresh this request.', { exact: false }).waitFor();
+  await page.getByText('Could not check this request', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('Your answer').inputValue(), 'Tuesday');
   assert.equal(await page.getByRole('button', { name: 'Continue' }).isDisabled(), true);
   // A status check still retrying (src/lib/query/policy.ts:15) would recover by itself; let it fail before the manual check.
-  await page.locator('button[aria-label="Check request status"][aria-busy="false"]').waitFor();
+  const tryAgain = page.locator('[data-slot="request-status"]').getByRole('button', { name: 'Try again', exact: true });
+  await page.locator('[data-slot="request-status"] button[aria-busy="false"]').waitFor();
   readStatus = 200;
-  await page.getByRole('button', { name: 'Check request status' }).click();
+  await tryAgain.click();
   lost = true;
   await page.getByRole('button', { name: 'Continue' }).dblclick();
   await page.getByRole('button', { name: 'Retry same response' }).waitFor();
   assert.equal(await page.getByLabel('Your answer').isDisabled(), true);
   const first = writes.at(-1);
   readStatus = 200;
+  const summary = page.locator('[data-slot="choice-summary"]');
   await page.getByRole('button', { name: 'Retry same response' }).click();
-  await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+  await summary.getByText('Tuesday', { exact: true }).waitFor();
   assert.deepEqual(writes.at(-1), first);
   assert.equal(receipts.size, 1);
-  assert.equal(await page.getByText('Tuesday', { exact: true }).textContent(), 'Tuesday');
+  assert.equal(await page.getByText('Your answer was recorded.', { exact: true }).count(), 0);
+  assert.equal(await page.locator('[data-slot="request-status"]').count(), 0, 'Settled cards drop the status row');
   await page.reload();
-  await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+  await summary.getByText('Tuesday', { exact: true }).waitFor();
   const settledReads = reads;
   await setTimeout(2200);
   assert.equal(reads, settledReads);
@@ -264,7 +267,7 @@ try {
     await page.getByRole(multiple ? 'checkbox' : 'radio', { name: 'Tuesday' }).click();
     if (multiple) await page.getByRole('checkbox', { name: 'Wednesday' }).click();
     await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+    await summary.getByText(multiple ? 'Tuesday, Wednesday' : 'Tuesday', { exact: true }).waitFor();
     assert.deepEqual(item.response.answer, { kind: 'choices', choiceIds: multiple ? ['tue', 'wed'] : ['tue'] });
   }
   information();
@@ -294,11 +297,11 @@ try {
   approval();
   await open();
   writeStatus = 409;
+  // The rejected write refreshes the card on its own, so the newer revision must already be readable.
+  item.revision = 2;
   await page.getByRole('button', { name: 'Decline', exact: true }).click();
   await page.getByText('This request or proposal changed.', { exact: false }).waitFor();
-  item.revision = 2;
   writeStatus = 200;
-  await page.getByRole('button', { name: 'Check request status' }).click();
   await page.getByRole('button', { name: 'Review retained response' }).click();
   await page.getByRole('button', { name: 'Decline', exact: true }).click();
   await page.getByText('The proposed action was declined.').waitFor();
@@ -369,11 +372,10 @@ try {
       path: `${process.env.CONVERSATION_SCREENSHOT_DIR}/approval-desktop-light.png`,
       fullPage: true,
     });
-  // A pending approval keeps its status check under Details since cloud e1a348e8 (#1042), interaction-card.tsx:68.
   await page.locator('[aria-label="Table approval"]').getByRole('button', { name: 'Details', exact: true }).click();
-  await page.getByRole('button', { name: 'Check request status' }).scrollIntoViewIfNeeded();
+  assert.equal(await page.getByRole('button', { name: 'Try again', exact: true }).count(), 0);
   readStatus = 404;
-  await page.getByRole('button', { name: 'Check request status' }).click();
+  await page.reload();
   await page.getByRole('heading', { name: 'Request unavailable' }).waitFor();
   assert.equal(await page.getByText('Remove the old field?', { exact: true }).count(), 0);
   const stoppedReads = reads;

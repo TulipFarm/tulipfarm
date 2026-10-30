@@ -126,6 +126,19 @@ test(
                 turn: null,
                 tools: [],
               },
+              ...(view.response
+                ? [
+                    {
+                      id: view.response.id,
+                      sequence: 3,
+                      author: 'human',
+                      createdAt: workspace.createdAt,
+                      parts: [{ kind: 'response', responseId: view.response.id }],
+                      turn: null,
+                      tools: [],
+                    },
+                  ]
+                : []),
             ],
             nextBefore: null,
             hasGitHubProposals: false,
@@ -145,6 +158,7 @@ test(
       });
       const load = () => page.goto(`${origin}/${workspace.slug}/chat/${chatId}`);
       const dock = page.getByRole('region', { name: 'Questions', exact: true });
+      const answered = text => page.locator('[data-slot="choice-summary"]').getByText(text, { exact: true }).waitFor();
       await load();
       await dock.getByRole('button', { name: 'Retry loading request' }).waitFor();
       failRead = false;
@@ -241,12 +255,18 @@ test(
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
       assert.equal(await recommended.isDisabled(), true, 'pending writes lock the answer options');
       await dock.getByRole('button', { name: 'Retry same response' }).click();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await answered('TulipFarm app (Recommended)');
       assert.deepEqual(answers[0], answers[1], 'retry keeps command and answer');
       assert.deepEqual(answers[1].answer, { kind: 'choices', choiceIds: ['app'] });
       await load();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await answered('TulipFarm app (Recommended)');
       assert.equal(await dock.getByRole('button', { name: 'Continue', exact: true }).count(), 0);
+      assert.equal(await page.getByText('Your answer was recorded.', { exact: true }).count(), 0);
+      assert.equal(
+        await page.getByText('A response was recorded', { exact: false }).count(),
+        0,
+        'a response-only message is not rendered',
+      );
       view.status = 'pending';
       view.response = null;
       await load();
@@ -256,11 +276,15 @@ test(
       await dock.getByText('Could not refresh this request.', { exact: false }).waitFor();
       assert.equal(await custom.inputValue(), 'Use a different channel first.');
       assert.equal(await dock.getByRole('button', { name: 'Continue', exact: true }).isDisabled(), true);
+      await dock
+        .locator('[data-slot="request-status"]')
+        .getByText('Could not check this request', { exact: true })
+        .waitFor();
       failRead = false;
-      await dock.getByRole('button', { name: 'Check request status' }).click();
+      await dock.getByRole('button', { name: 'Try again', exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('[data-slot="choice-text"] textarea')?.disabled);
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await answered('Use a different channel first.');
       assert.deepEqual(answers.at(-1).answer, { kind: 'text', text: 'Use a different channel first.' });
       view.status = 'pending';
       view.response = null;
@@ -269,11 +293,10 @@ test(
       failWrite = 'rejected';
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
       await dock.getByText('This request or proposal changed.', { exact: false }).waitFor();
-      await dock.getByRole('button', { name: 'Check request status' }).click();
       await dock.getByRole('button', { name: 'Review retained response' }).click();
       assert.equal(await recommended.isChecked(), true, 'rejected answers survive status review without Details');
       await dock.getByRole('button', { name: 'Continue', exact: true }).click();
-      await page.getByText('Your answer was recorded.', { exact: true }).waitFor();
+      await answered('TulipFarm app (Recommended)');
       view.status = 'pending';
       view.response = null;
       await page.clock.install();
@@ -288,7 +311,7 @@ test(
         'request details stay outside answer controls',
       );
       assert.equal(
-        await footer.getByRole('button', { name: 'Check request status' }).count(),
+        await footer.getByRole('button', { name: 'Try again', exact: true }).count(),
         0,
         'polling recovery stays outside answer controls',
       );
@@ -297,6 +320,10 @@ test(
           .locator('[data-slot="request-status"]')
           .getByText('Automatic status checks paused', { exact: true })
           .isVisible(),
+        true,
+      );
+      assert.equal(
+        await dock.locator('[data-slot="request-status"]').getByRole('button', { name: 'Try again' }).isVisible(),
         true,
       );
       assert.equal(
@@ -329,7 +356,7 @@ test(
         else await page.screenshot({ path });
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-      await dock.getByRole('button', { name: 'Check request status' }).click();
+      await dock.getByRole('button', { name: 'Try again', exact: true }).click();
       await dock.getByRole('button', { name: 'Skip', exact: true }).click();
       await page.clock.runFor(1000);
       await page.getByText('This request was cancelled without an answer.', { exact: true }).waitFor();
