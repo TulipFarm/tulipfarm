@@ -2,7 +2,17 @@ import type { FastifyError, FastifyInstance } from 'fastify';
 import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
 import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
-import { slackDecisionSchema, slackActionViewSchema, slackConfigurationSchema } from '@tulipfarm/slack';
+import {
+  openSlackModal,
+  slackActionViewSchema,
+  slackConfigurationSchema,
+  slackDecisionSchema,
+  slackFormAnswers,
+  slackFormCallbackId,
+  slackModalView,
+  slackPickedText,
+} from '@tulipfarm/slack';
+import { log } from '@tulipfarm/observability';
 import { createSlackActions, createSlackActionDecision } from '@tulipfarm/agents/slack-actions';
 import { slackActionSettings } from '@tulipfarm/agents/slack-environment';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
@@ -46,6 +56,7 @@ export function registerSlackActions(
   app: FastifyInstance,
   options: {
     auth: ReturnType<typeof registerAuth>['auth'];
+    pool: Pick<ReturnType<typeof registerAuth>['pool'], 'query'>;
     runtime: Parameters<typeof createSlackActions>[0]['runtime'];
     resolveConfirmationCredential: (workspaceId: string) => Promise<string>;
     wakeTaskAction?: (workspaceId: string, actionId: string) => Promise<void>;
@@ -150,6 +161,151 @@ export function registerSlackActions(
           return result;
         },
       });
+    // Presses on a laid-out reply: follow-up buttons, choices, forms, modals, links and feedback.
+    const clicker = (team: string, user: string) => ({ appId: config.appId, teamId: team, slackUserId: user });
+    const workspaceFor = async (team: string) =>
+      z
+        .object({ workspace_id: z.uuid() })
+        .optional()
+        .parse(
+          (
+            await options.pool.query(
+              `SELECT workspace_id FROM app.slack_workspace_links WHERE app_id=$1 AND team_id=$2 AND state='active'`,
+              [config.appId, team],
+            )
+          ).rows[0],
+        )?.workspace_id;
+    const followUp = async (
+      team: string,
+      user: string,
+      reply: { channel: string; messageTs: string },
+      text: string,
+    ): Promise<string> => {
+      const workspaceId = await workspaceFor(team);
+      if (!workspaceId) return 'This Slack workspace is no longer connected to TulipFarm.';
+      try {
+        const outcome = await defaults.followUp(workspaceId, reply, clicker(team, user), text.slice(0, 4000));
+        return outcome === 'busy' ? 'Wait for the current reply to finish, then try again.' : 'Working on it.';
+      } catch (error) {
+        if (!(error instanceof AccessDenied)) throw error;
+        return 'Only the person who asked can answer this reply.';
+      }
+    };
+    const pickedSchema = z.looseObject({
+      action_id: z.string().max(255),
+      block_id: z.string().max(255).optional(),
+    });
+    const blocksSchema = z
+      .array(
+        z.looseObject({
+          type: z.string().optional(),
+          block_id: z.string().optional(),
+          label: z.object({ text: z.string().optional() }).optional(),
+        }),
+      )
+      .max(100);
+    const stateSchema = z.object({ values: z.record(z.string(), z.record(z.string(), z.looseObject({}))) });
+    const interactionSchema = z.discriminatedUnion('type', [
+      z.object({
+        type: z.literal('block_actions'),
+        api_app_id: z.literal(config.appId),
+        team: z.object({ id: z.string() }),
+        user: z.object({ id: z.string() }),
+        trigger_id: z.string().max(255).optional(),
+        response_url: z.url().optional(),
+        container: z.object({ message_ts: z.string(), channel_id: z.string() }),
+        message: z.object({ blocks: blocksSchema.optional() }).optional(),
+        state: stateSchema.optional(),
+        actions: z.array(pickedSchema).length(1),
+      }),
+      z.object({
+        type: z.literal('view_submission'),
+        api_app_id: z.literal(config.appId),
+        team: z.object({ id: z.string() }),
+        user: z.object({ id: z.string() }),
+        view: z.object({
+          callback_id: z.literal(slackFormCallbackId),
+          private_metadata: z.string().max(3000),
+          title: z.object({ text: z.string() }),
+          blocks: blocksSchema,
+          state: stateSchema,
+        }),
+      }),
+    ]);
+    const isReplyInteraction = (value: unknown) => {
+      const probe = z
+        .object({
+          type: z.string(),
+          actions: z.array(z.object({ action_id: z.string() })).optional(),
+          view: z.object({ callback_id: z.string().optional() }).optional(),
+        })
+        .safeParse(value);
+      if (!probe.success) return false;
+      if (probe.data.type === 'view_submission') return probe.data.view?.callback_id === slackFormCallbackId;
+      return probe.data.type === 'block_actions' && Boolean(probe.data.actions?.[0]?.action_id.startsWith('tf_'));
+    };
+    const replyInteraction = async (value: unknown): Promise<Record<string, unknown> | undefined> => {
+      const payload = interactionSchema.parse(value);
+      if (payload.type === 'view_submission') {
+        const origin = z
+          .strictObject({ channel: z.string(), messageTs: z.string() })
+          .parse(JSON.parse(payload.view.private_metadata));
+        const answers = slackFormAnswers(payload.view.state.values, payload.view.blocks);
+        const text = await followUp(
+          payload.team.id,
+          payload.user.id,
+          origin,
+          `Form "${payload.view.title.text}":\n${answers}`,
+        );
+        const field = payload.view.blocks.find(block => block.type === 'input' && block.block_id)?.block_id;
+        return text === 'Working on it.' || !field
+          ? undefined
+          : { response_action: 'errors', errors: { [field]: text } };
+      }
+      const action = payload.actions[0];
+      if (!action) throw new SyntaxError();
+      const reply = { channel: payload.container.channel_id, messageTs: payload.container.message_ts };
+      const [kind, modalId] = action.action_id.split(':');
+      let text: string | undefined;
+      if (kind === 'tf_feedback') {
+        log('info', 'activity', 'call_completed', {
+          operation: 'slack.reply.feedback',
+          outcome: action.value === 'positive' ? 'positive' : 'negative',
+        });
+        text = 'Thanks for the feedback.';
+      } else if (kind === 'tf_followup' && typeof action.value === 'string')
+        text = await followUp(payload.team.id, payload.user.id, reply, action.value);
+      else if (kind === 'tf_choice') {
+        const picked = slackPickedText(action);
+        if (picked) text = await followUp(payload.team.id, payload.user.id, reply, picked);
+      } else if (kind === 'tf_submit') {
+        const answers = slackFormAnswers(payload.state?.values ?? {}, payload.message?.blocks ?? []);
+        text = answers
+          ? await followUp(payload.team.id, payload.user.id, reply, `Form answers:\n${answers}`)
+          : 'Fill in the form first.';
+      } else if (kind === 'tf_modal' && modalId && payload.trigger_id) {
+        const workspaceId = await workspaceFor(payload.team.id);
+        const found = workspaceId
+          ? await defaults
+              .replyModal(workspaceId, reply, clicker(payload.team.id, payload.user.id), modalId)
+              .catch((error: unknown) => {
+                if (error instanceof AccessDenied) return null;
+                throw error;
+              })
+          : undefined;
+        if (found)
+          await openSlackModal({
+            token: found.token,
+            triggerId: payload.trigger_id,
+            view: slackModalView(found.modal, JSON.stringify(reply)),
+          });
+        else
+          text =
+            found === null ? 'Only the person who asked can answer this reply.' : 'This form is no longer available.';
+      }
+      if (text) await respondEphemeral(payload.response_url, text);
+      return {};
+    };
     routes.register(async callbacks => {
       callbacks.addContentTypeParser(
         'application/x-www-form-urlencoded',
@@ -176,6 +332,11 @@ export function registerSlackActions(
           const form = new URLSearchParams(request.body.toString('utf8'));
           if (form.getAll('payload').length !== 1 || [...form.keys()].some(key => key !== 'payload'))
             throw new SyntaxError();
+          const raw: unknown = JSON.parse(form.get('payload') ?? '');
+          if (isReplyInteraction(raw)) {
+            const answer = await replyInteraction(raw);
+            return answer === undefined ? reply.code(200).send() : answer;
+          }
           const payload = z
             .object({
               type: z.literal('block_actions'),
@@ -198,7 +359,7 @@ export function registerSlackActions(
                 )
                 .length(1),
             })
-            .parse(JSON.parse(form.get('payload') ?? ''));
+            .parse(raw);
           const action = payload.actions[0];
           if (!action) throw new SyntaxError();
           if (action.action_id === slackReplyRetryAction) {

@@ -2,12 +2,13 @@ import {
   createSlackInbox,
   createSlackInstallations,
   createSlackMemberLinking,
+  createSlackWelcome,
   slackConfigurationSchema,
   slackCredentialCipher,
 } from '@tulipfarm/slack';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
-import type { registerAuth } from './auth.ts';
+import { authConfig, type registerAuth } from './auth.ts';
 import type { SlackDependencies } from './slack.ts';
 import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 
@@ -49,6 +50,7 @@ export function slackDependencies(
       config,
       installations,
       inbox: createSlackInbox(runtime, channels?.freeze),
+      welcome: createSlackWelcome({ runtime, cipher, appUrl: authConfig().webOrigin }),
       memberLinking: createSlackMemberLinking({
         runtime,
         config,

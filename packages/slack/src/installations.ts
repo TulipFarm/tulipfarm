@@ -109,9 +109,13 @@ export function createSlackInstallations(options: {
       return actor;
     });
   }
-  // Reading shared files needs `files:read` while the `images` flag is on; without it an installation asks to update.
+  // Optional scopes follow the `images` and `generative-ui` flags; without them an installation asks to update.
   const botScopes = async (workspaceId: string) =>
-    requiredBotScopes(config, await isFeatureEnabled('images', null, { id: workspaceId }));
+    requiredBotScopes(
+      config,
+      await isFeatureEnabled('images', null, { id: workspaceId }),
+      await isFeatureEnabled('generative-ui', null, { id: workspaceId }),
+    );
   async function status(workspaceId: string, userId: string) {
     const evidence = await installer(workspaceId);
     const required = await botScopes(workspaceId);

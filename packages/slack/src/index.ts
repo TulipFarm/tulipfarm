@@ -8,6 +8,8 @@ export {
   eventEnvelopeSchema,
   slackConfigurationSchema,
   slackFileUploadScope,
+  slackAssistantScope,
+  slackCanvasScope,
   type SlackConfiguration,
 } from './contracts.ts';
 export { postSlackThreadNote, shareSlackFiles, type SlackUpload } from './file-uploads.ts';
@@ -15,6 +17,16 @@ export { createSlackDirectMessages } from './direct-messages.ts';
 export { createChannelProvider, threadSnapshotSchema } from './channel-provider.ts';
 export { messageSchema, slackId } from './contracts.ts';
 export { postBotMessage, openBotDirectMessage, botChannelInfo, setBotThreadStatus } from './bot-message.ts';
+export {
+  createSlackCanvas,
+  openSlackModal,
+  slackFeedbackActionId,
+  slackFormAnswers,
+  slackFormCallbackId,
+  slackModalView,
+  slackPickedText,
+  slackReplyMessage,
+} from './generative-reply.ts';
 export { currentSlackMessage, sameSlackMessage } from './message-source.ts';
 export {
   slackMessageText,
@@ -34,3 +46,5 @@ export {
 export { slackActionCard } from './action-card.ts';
 export { createSlackRecovery, slackCredentialsReady } from './recovery.ts';
 export { canAccessSlackInstallation, requireSlackInstallationUse } from './installation-access.ts';
+export { startSlackProgress, type SlackProgress, type SlackProgressStep } from './progress-stream.ts';
+export { createSlackWelcome, setSlackThreadTitle, slackHomeView, slackSuggestedPrompts } from './welcome.ts';

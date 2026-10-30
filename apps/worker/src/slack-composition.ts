@@ -112,9 +112,8 @@ export async function createSlackPromptComposition(
     statement_timeout: 10000,
   });
   pool.on('error', () => log('error', 'dependency', 'database_connection_failed'));
-  // Row cards link to the row in the web app; a workspace whose address cannot be read gets unlinked cards.
-  const rowLink = async (workspaceId: string, tableId: string, recordId: string) => {
-    const slug = z
+  const workspaceSlug = async (workspaceId: string) =>
+    z
       .string()
       .min(1)
       .optional()
@@ -123,6 +122,16 @@ export async function createSlackPromptComposition(
         (await pool.query('SELECT slug FROM app.workspace_flag_context($1)', [workspaceId]).catch(() => null))?.rows[0]
           ?.slug,
       );
+  // Laid-out replies link to their chat in the web app.
+  const chatLink = async (workspaceId: string, conversationId: string) => {
+    const slug = await workspaceSlug(workspaceId);
+    return slug
+      ? new URL(`/${encodeURIComponent(slug)}/chat/${encodeURIComponent(conversationId)}`, settings.webOrigin).href
+      : undefined;
+  };
+  // Row cards link to the row in the web app; a workspace whose address cannot be read gets unlinked cards.
+  const rowLink = async (workspaceId: string, tableId: string, recordId: string) => {
+    const slug = await workspaceSlug(workspaceId);
     if (!slug) return undefined;
     const url = new URL(`/${encodeURIComponent(slug)}/tables/${encodeURIComponent(tableId)}`, settings.webOrigin);
     url.searchParams.set('row', recordId);
@@ -134,6 +143,7 @@ export async function createSlackPromptComposition(
         channels,
         compactor,
         rowLink,
+        chatLink,
         reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
       })
     : undefined;
