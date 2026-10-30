@@ -629,13 +629,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             selection: { ...input.selection, repositories: ['acme/handbook'] },
           });
           let parses = 0;
+          let reason = 'timeout';
+          const outcomes = [];
           const importer = createGitHubKnowledge({
             runtime,
             provider,
             sync: fast,
+            telemetry: { recordImport: (stage, outcome, code) => outcomes.push(`${stage} ${outcome} ${code}`) },
             parseDocument: async () => {
               parses++;
-              throw new KnowledgeParseError('resource-limited', { reason: 'timeout' });
+              throw new KnowledgeParseError('resource-limited', { reason });
             },
           });
           const run = async () => {
@@ -649,6 +652,20 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           try {
             for (let i = 0; i < 10; i++) await run();
             assert.equal(parses, 6, 'each of two revisions is attempted at most three times');
+            assert.ok(
+              outcomes.filter(entry => entry.startsWith('item ')).every(entry => entry === 'item error timeout'),
+              'a parser timeout is a failure',
+            );
+            reason = 'content-limit';
+            outcomes.length = 0;
+            await github.manage(ws.id, ws.userId, temporary.sourceId, { commandId: randomUUID(), action: 'retry' });
+            await run();
+            assert.deepEqual(
+              outcomes.filter(entry => entry.startsWith('item ')),
+              ['item skipped content-limit', 'item skipped content-limit'],
+              'a document over the content limit is an expected skip',
+            );
+            reason = 'timeout';
             assert.equal((await importer.health(ws.id)).failedItems, 2);
             await db.platform.query(
               `UPDATE ${table('work')} w SET failure='resource-limited' FROM ${table('documents')} d WHERE d.source_id=$1 AND w.revision_id=d.observed_revision_id`,

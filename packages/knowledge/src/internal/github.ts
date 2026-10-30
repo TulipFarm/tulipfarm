@@ -1565,7 +1565,10 @@ export function createGitHubKnowledge({
       });
       telemetry.recordImport(
         'item',
-        error instanceof GitHubCorpusError && skippable.includes(error.code) ? 'skipped' : 'error',
+        (error instanceof GitHubCorpusError && skippable.includes(error.code)) ||
+          (error instanceof KnowledgeParseError && error.reason === 'content-limit')
+          ? 'skipped'
+          : 'error',
         error instanceof KnowledgeParseError
           ? error.reason
           : error instanceof KnowledgeError || error instanceof GitHubCorpusError
