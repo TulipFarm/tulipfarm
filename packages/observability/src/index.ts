@@ -70,6 +70,7 @@ import {
   errorAttributes,
   type ChatStage,
   safeDiagnosticNumber,
+  safeErrorOrigin,
   safeErrorReason,
   safeErrorStage,
   safeErrorType,
@@ -191,6 +192,7 @@ const spanAttributes = new Set([
   'error.reason',
   'error.issues',
   'error.stage',
+  'error.origin',
   'duration_ms',
   'title_generation',
   'dispatch_source',
@@ -304,6 +306,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'usage.unknown_reason') return (modelUsageUnknownReasons as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
+  if (key === 'error.origin') return safeErrorOrigin(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
   if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
   if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);

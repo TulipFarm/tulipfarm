@@ -5,7 +5,7 @@ import {
   pruneGitHubEventBodies,
   pruneGitHubEventDeliveries,
 } from '@tulipfarm/github/event-retention';
-import { createBackgroundJob } from '@tulipfarm/observability';
+import { createBackgroundJob, errorAttributes } from '@tulipfarm/observability';
 
 const intervalMs = 60_000;
 // Bodies live one minute, so they are swept far more often than deliveries.
@@ -29,7 +29,7 @@ export function registerGitHubDeliveryRetention(
       .then(deleted => {
         if (deleted) app.log.info({ deleted }, 'Deleted processed GitHub webhook deliveries');
       })
-      .catch(() => app.log.error('GitHub webhook delivery cleanup will retry'))
+      .catch(error => app.log.error(errorAttributes(error), 'GitHub webhook delivery cleanup will retry'))
       .finally(() => {
         running = undefined;
       });
@@ -41,7 +41,7 @@ export function registerGitHubDeliveryRetention(
     bodyRunning ??= bodyJob
       .run(() => pruneGitHubEventBodies(pool))
       .then(() => undefined)
-      .catch(() => app.log.error('GitHub webhook body cleanup will retry'))
+      .catch(error => app.log.error(errorAttributes(error), 'GitHub webhook body cleanup will retry'))
       .finally(() => {
         bodyRunning = undefined;
       });

@@ -3,6 +3,7 @@ import type { createTemporalClient } from './temporal.ts';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
+import { errorAttributes } from '@tulipfarm/observability';
 
 export function taskWake(app: FastifyInstance, temporal: ReturnType<typeof createTemporalClient>) {
   return async (workspaceId: string, taskId: string) => {
@@ -18,8 +19,11 @@ export function taskWake(app: FastifyInstance, temporal: ReturnType<typeof creat
           workflowIdReusePolicy: 'ALLOW_DUPLICATE',
         }),
       );
-    } catch {
-      app.log.error({ workspaceId, taskId }, 'Task dispatch will retry from worker recovery');
+    } catch (error) {
+      app.log.error(
+        { workspaceId, taskId, ...errorAttributes(error) },
+        'Task dispatch will retry from worker recovery',
+      );
     }
   };
 }
@@ -39,8 +43,11 @@ export function planWake(app: FastifyInstance, temporal: ReturnType<typeof creat
           workflowIdReusePolicy: 'ALLOW_DUPLICATE',
         }),
       );
-    } catch {
-      app.log.error({ workspaceId, planId }, 'Plan dispatch will retry from worker recovery');
+    } catch (error) {
+      app.log.error(
+        { workspaceId, planId, ...errorAttributes(error) },
+        'Plan dispatch will retry from worker recovery',
+      );
     }
   };
 }
@@ -83,8 +90,11 @@ export function taskActionWake(
         );
         for (const run of runs) await wakeWorkflow({ workspaceId, runId: run.run_id });
       }
-    } catch {
-      app.log.error({ workspaceId, actionId }, 'Task action wake will retry from worker recovery');
+    } catch (error) {
+      app.log.error(
+        { workspaceId, actionId, ...errorAttributes(error) },
+        'Task action wake will retry from worker recovery',
+      );
     }
   };
 }

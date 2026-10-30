@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
-import { createBackgroundJob, withErrorStage, type BackgroundJob } from '@tulipfarm/observability';
+import { createBackgroundJob, withErrorStage, type BackgroundJob, errorAttributes } from '@tulipfarm/observability';
 
 type Sweep = { run: (stopped: () => boolean) => Promise<void>; failure: string; job: BackgroundJob };
 
@@ -41,10 +41,10 @@ export function backgroundSweeps(app: FastifyInstance, sweeps: readonly Sweep[],
             failures = 0;
             resumeAt = 0;
           },
-          () => {
+          error => {
             failures++;
             resumeAt = Date.now() + sweepFailureBackoffMs(failures);
-            app.log.error(sweep.failure);
+            app.log.error(errorAttributes(error), sweep.failure);
           },
         )
         .finally(() => {

@@ -23,6 +23,33 @@ test('gRPC service errors map only reviewed status codes, through wrappers', () 
   );
 });
 
+test('error origin keeps the first TulipFarm frame, closest cause first, and never the message', () => {
+  const failure = (message, frames, cause) =>
+    Object.assign(new Error(message, cause ? { cause } : undefined), {
+      stack: [`Error: ${message}`, ...frames.map(frame => `    at fn (${frame})`)].join('\n'),
+    });
+  const root = failure('PRIVATE root', [
+    '/app/node_modules/.pnpm/pg-pool@3.10.1/node_modules/pg-pool/index.js:45:11',
+    '/app/node_modules/@tulipfarm/observability/dist/index.js:2390:9',
+    '/app/node_modules/.pnpm/@tulipfarm+tables@file+packages+tables/node_modules/@tulipfarm/tables/dist/service.js:812:17',
+    '/app/dist/server.js:10:3',
+  ]);
+  assert.equal(errorAttributes(root)['error.origin'], '@tulipfarm/tables/service.js:812');
+  const wrapped = failure('PRIVATE wrapper', ['/app/dist/table-dispatch.js:63:9'], root);
+  assert.equal(errorAttributes(wrapped)['error.origin'], '@tulipfarm/tables/service.js:812');
+  assert.equal(
+    errorAttributes(failure('x', ['/app/dist/table-dispatch.js:63:9']))['error.origin'],
+    'app/table-dispatch.js:63',
+  );
+  assert.equal(
+    errorAttributes(failure('x', ['/Users/dev/tulipfarm/packages/agents/src/tools.ts:1711:7']))['error.origin'],
+    'agents/tools.ts:1711',
+  );
+  assert.equal(errorAttributes(failure('x', ['node:internal/process/task_queues:95:5']))['error.origin'], undefined);
+  assert.equal(errorAttributes({ stack: '    at fn (/app/dist/a.js:1:1)' })['error.origin'], undefined);
+  assert.doesNotMatch(JSON.stringify(errorAttributes(wrapped)), /PRIVATE/);
+});
+
 test('export diagnostics retain only reviewed codes and HTTP status, never transport text', () => {
   for (const [message, code] of [
     ['Request Timeout', 'export-timeout'],
