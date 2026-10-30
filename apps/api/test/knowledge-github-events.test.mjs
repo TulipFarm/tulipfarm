@@ -79,23 +79,41 @@ test('the webhook route maps receipts and failures to GitHub-visible statuses', 
   }
 });
 
-test('only the all-events route asks to keep the body', async () => {
+test('only the all-events route keeps the body and hands it to workflows', async () => {
   const kept = [];
+  const fannedOut = [];
+  const deliveryId = randomUUID();
   const app = Fastify();
-  registerGitHubKnowledgeEvents(app, {
-    accept: async (_raw, _headers, options) => {
-      kept.push(options.keepBody);
-      return { deliveryId: randomUUID(), status: 'ignored', reason: 'ping', duplicate: false };
+  app.log.error = () => {};
+  registerGitHubKnowledgeEvents(
+    app,
+    {
+      accept: async (_raw, _headers, options) => {
+        kept.push(options.keepBody);
+        return { deliveryId, status: 'ignored', reason: 'unsupported-event', duplicate: false };
+      },
     },
-  });
+    async delivery => {
+      fannedOut.push(delivery);
+      throw new Error('one workspace failed');
+    },
+  );
   try {
     for (const url of ['/github/knowledge/events', '/github/events'])
       assert.equal(
-        (await app.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload: '{}' }))
-          .statusCode,
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            headers: { 'content-type': 'application/json', 'x-github-event': 'star' },
+            payload: '{"action":"created"}',
+          })
+        ).statusCode,
         202,
+        'a failed fan-out still answers GitHub with 202',
       );
     assert.deepEqual(kept, [false, true]);
+    assert.deepEqual(fannedOut, [{ event: 'star', deliveryId, body: { action: 'created' } }]);
   } finally {
     await app.close();
   }

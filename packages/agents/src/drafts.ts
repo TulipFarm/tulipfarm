@@ -36,6 +36,7 @@ import { createAgentRecordTools } from './record-tools.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { bindFileSources } from '@tulipfarm/conversations/file-references';
 import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
+import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import { requireSharedMcpSlots } from '@tulipfarm/access';
 import { requireSkillGrant } from '@tulipfarm/access';
@@ -124,6 +125,7 @@ export function createAuthoringDrafts(
   wake?: (work: Work) => Promise<void>,
   setupOptions?: AgentSetupOptions,
   slackTurnAudience?: SlackTurnAudience,
+  githubSubscriptions?: GitHubSubscriptions,
 ) {
   async function transaction<T>(
     workspaceId: string,
@@ -659,6 +661,7 @@ export function createAuthoringDrafts(
                     wake: async work => {
                       woken.push(work);
                     },
+                    ...(githubSubscriptions ? { githubSubscriptions } : {}),
                   }).apply(actor, id, input.commandId, proposal)
                 : {
                     kind: 'agent',

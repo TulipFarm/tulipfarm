@@ -37,6 +37,7 @@ The full shapes are in two references. Read them with `skills.read` and `resourc
 - `{"kind":"event","name"}`
 - `{"kind":"provider","integrationId","event":"created" or "updated","minutes":1 to 1440}`: first call `workflows.providers` and use a returned configured source. Only Sheets supports `updated`. Never invent integration IDs or ask for tokens in chat.
 - `{"kind":"record",...}` or `{"kind":"row",...}`: see `references/table-triggers.md`.
+- `{"kind":"github","repositoryId","event","actions"?}`: runs when GitHub sends that event for a connected repository. First call `workflows.providers` and copy a `repositoryId` from `githubRepositories`; never guess it. `event` and its `actions`: `star` (created, deleted), `watch` (started), `issues`, `pull_request`, `issue_comment`, `release`, `push` (no actions). Omit `actions` to run on every action. The run input has `event`, `action`, `repository` (owner/name) and `sender` (the GitHub login), plus `issue`, `pullRequest`, `comment` or `release` for those events. The TulipFarm GitHub App must be installed on the repository; the card says so.
 
 Use the person's stated timezone. Ask when it is unknown; a wrong timezone silently runs the work at the wrong hour.
 

@@ -434,6 +434,17 @@ sends. It feeds Knowledge the same way, and also keeps each accepted body for on
 minute for workflow triggers. The delivery ID row stays for
 `GITHUB_WEBHOOK_DELIVERY_RETENTION_HOURS` so redeliveries are recognized.
 
+After the 202 is sent, a kept delivery whose event is `star`, `watch`, `issues`,
+`pull_request`, `issue_comment`, `push` or `release` is matched against
+`app.github_workflow_subscriptions` (platform migration
+`0008_github_workflow_subscriptions.sql`) by repository ID, event and action. Each
+matching workflow gets a short summary of the delivery in its workspace's
+`tf_provider_events`, keyed by the delivery ID, so a redelivery starts no second
+run. A workflow trigger may name only an active repository of a GitHub Knowledge
+source that includes the workflow's sponsor; this is checked when the workflow is
+saved, activated, and when each event starts a run. Fan-out failures are logged and
+never change the response.
+
 Each delivery's `X-Hub-Signature-256` is verified before anything is stored, and
 deliveries are deduplicated by `X-GitHub-Delivery`: a redelivery is acknowledged
 again, and a reused delivery ID with a different body is rejected with 409.

@@ -1,4 +1,4 @@
-import type { Definition, RecordFilter } from '@tulipfarm/workflows/contracts';
+import type { Definition, GitHubTrigger, GitHubTriggerEvent, RecordFilter } from '@tulipfarm/workflows/contracts';
 
 export type WorkflowValue = Extract<Definition['steps'][number], { kind: 'transform' }>['fields'][string];
 
@@ -39,6 +39,20 @@ export function filterPhrase(filter: RecordFilter, shown: string | null) {
     default:
       return `${orderedWords[filter.value.kind === 'numeric' ? 'numeric' : 'date'][filter.match]} ${shown}`;
   }
+}
+const githubEventText: Record<GitHubTriggerEvent, string> = {
+  star: 'When someone stars a GitHub repository',
+  watch: 'When someone watches a GitHub repository',
+  issues: 'When a GitHub issue changes',
+  pull_request: 'When a GitHub pull request changes',
+  issue_comment: 'When someone comments on a GitHub issue or pull request',
+  push: 'When someone pushes to a GitHub repository',
+  release: 'When a GitHub release changes',
+};
+export const githubInstallNote = 'Events arrive only after the TulipFarm GitHub App is installed on this repository.';
+export function describeGitHubTrigger(trigger: GitHubTrigger) {
+  const actions = trigger.actions?.map(action => action.replaceAll('_', ' ')).join(', ');
+  return `${githubEventText[trigger.event]}${actions ? ` (${actions})` : ''}`;
 }
 export function recordScheduleDescription(
   field: Extract<Definition['trigger'], { kind: 'record' }>['field'],

@@ -66,10 +66,12 @@ import {
   waitUntilInstant,
   workflowSchema,
   workSchema,
+  type GitHubTrigger,
   type Progress,
   type Trigger,
   type Work,
 } from './contracts.ts';
+import type { GitHubSubscriptions } from './github-triggers.ts';
 import {
   jobSchema,
   resultSchema,
@@ -222,6 +224,7 @@ export function createWorkflows(
     slackActions?: SlackClient;
     wake?: (work: Work) => Promise<void>;
     webhookToleranceSeconds?: number;
+    githubSubscriptions?: GitHubSubscriptions;
   } = {},
 ) {
   const providers = createWorkflowProviders(runtime, options);
@@ -483,6 +486,74 @@ export function createWorkflows(
     await requireRecordZone(tx, trigger);
     return generation;
   }
+  async function githubRepositoryConnected(tx: WorkflowTransaction, trigger: GitHubTrigger, membershipId: string) {
+    return (
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_knowledge_github_repositories')} r
+          JOIN ${table(tx, 'tf_knowledge_github_members')} m ON m.source_id=r.source_id
+          JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=r.source_id
+          WHERE r.repository_id=$1 AND r.state='active' AND m.membership_id=$2 AND s.state IN ('active','paused') LIMIT 1`,
+          [trigger.repositoryId, membershipId],
+        )
+      ).rowCount === 1
+    );
+  }
+  async function requireGitHubRepository(tx: WorkflowTransaction, trigger: GitHubTrigger, membershipId: string) {
+    if (!(await githubRepositoryConnected(tx, trigger, membershipId)))
+      throw new WorkflowConflict('github-repository-not-connected');
+  }
+  /** The repositories a `github` trigger may name for this user: the same rule as the save check. */
+  async function githubRepositories(workspaceId: string, user: string) {
+    return transaction(
+      workspaceId,
+      async tx => {
+        const { membershipId } = await workflowMember(tx, user);
+        const { rows } = await tx.client.query(
+          `SELECT DISTINCT r.repository_id AS "repositoryId", r.full_name AS "fullName"
+        FROM ${table(tx, 'tf_knowledge_github_repositories')} r
+        JOIN ${table(tx, 'tf_knowledge_github_members')} m ON m.source_id=r.source_id
+        JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=r.source_id
+        WHERE r.state='active' AND m.membership_id=$1 AND s.state IN ('active','paused')
+        ORDER BY "fullName" LIMIT 200`,
+          [membershipId],
+        );
+        return z.array(z.object({ repositoryId: z.string(), fullName: z.string() })).parse(rows);
+      },
+      'read',
+    );
+  }
+  /** Runs the repository check a save would, so a chat draft fails before review. */
+  async function checkGitHubRepository(workspaceId: string, user: string, trigger: GitHubTrigger) {
+    return transaction(workspaceId, async tx =>
+      requireGitHubRepository(tx, trigger, (await workflowMember(tx, user)).membershipId),
+    );
+  }
+  async function activeTriggerKind(tx: WorkflowTransaction, id: string, revision: string | null) {
+    if (revision === null) return null;
+    return z
+      .string()
+      .nullable()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT definition->'trigger'->>'kind' AS kind FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+            [id, revision],
+          )
+        ).rows[0]?.kind ?? null,
+      );
+  }
+  function removeGitHubSubscriptionAfterCommit(
+    tx: WorkflowTransaction,
+    workspaceId: string,
+    id: string,
+    generation: number,
+  ) {
+    const subscriptions = options.githubSubscriptions;
+    if (!subscriptions) return;
+    // The fan-out deletes a subscription it finds stopped, so a failed delete here only costs that later check.
+    afterCommit(tx.client, () => void subscriptions.remove(workspaceId, id, generation).catch(() => undefined));
+  }
   async function savableRowSource(tx: WorkflowTransaction, trigger: RowTrigger, membershipId: string) {
     if (tx.commonVersion < rowTriggerCommonVersion) throw new WorkflowConflict('record-trigger-unavailable');
     return rowSource(tx, trigger, membershipId);
@@ -720,6 +791,7 @@ export function createWorkflows(
         throw new WorkflowConflict('schedule-in-past');
       if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
       if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
+      if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
       await requireTableStepFields(tx, actor.membershipId, input.definition);
       await requireAgentStepReader(tx, actor.membershipId, input.definition);
       if ((previous?.revision ?? null) !== input.expectedRevision) throw new WorkflowConflict('stale-revision');
@@ -816,6 +888,15 @@ export function createWorkflows(
             if (trigger.kind === 'record') await recordSource(tx, trigger, sponsor);
             else await savableRowSource(tx, trigger, sponsor);
           }
+          if (enabled && trigger.kind === 'github') {
+            if (!options.githubSubscriptions) throw new WorkflowConflict('github-trigger-unavailable');
+            await requireGitHubRepository(tx, trigger, (await requireSponsor(tx, id, revision)).sponsor_membership_id);
+            await tx.client.query(
+              `DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`,
+              [id],
+            );
+          }
+          const wasGitHub = (await activeTriggerKind(tx, id, current.activeRevision)) === 'github';
           // Occurrences not yet fired belong to the previous activation; the next sweep recomputes them from this one.
           if (tx.commonVersion >= recordTriggerCommonVersion) {
             await tx.client.query(
@@ -842,10 +923,20 @@ export function createWorkflows(
               )
             ).rowCount === 1;
           const next = fired ? null : nextOccurrence(trigger, await databaseNow(tx));
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,next_run_at=$4,generation=generation+1 WHERE id=$1`,
-            [id, revision, enabled, next],
-          );
+          const generation = z
+            .number()
+            .parse(
+              (
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,next_run_at=$4,generation=generation+1 WHERE id=$1 RETURNING generation`,
+                  [id, revision, enabled, next],
+                )
+              ).rows[0]?.generation,
+            );
+          // Written before commit so a failure fails the activation; a row left by a rollback is inert and the fan-out deletes it.
+          if (enabled && trigger.kind === 'github')
+            await options.githubSubscriptions?.replace({ workspaceId, workflowId: id, revision, generation, trigger });
+          else if (wasGitHub) removeGitHubSubscriptionAfterCommit(tx, workspaceId, id, generation);
           if (trigger.kind !== 'webhook')
             await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET ${webhookCleared(tx)} WHERE id=$1`, [id]);
           if (!enabled)
@@ -887,10 +978,18 @@ export function createWorkflows(
         },
         async () => {
           await requireUnarchived(tx, id);
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET archived_at=clock_timestamp(),enabled=false,next_run_at=NULL,${webhookCleared(tx)},generation=generation+1 WHERE id=$1`,
-            [id],
-          );
+          const wasGitHub = (await activeTriggerKind(tx, id, current.activeRevision)) === 'github';
+          const generation = z
+            .number()
+            .parse(
+              (
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tf_workflows')} SET archived_at=clock_timestamp(),enabled=false,next_run_at=NULL,${webhookCleared(tx)},generation=generation+1 WHERE id=$1 RETURNING generation`,
+                  [id],
+                )
+              ).rows[0]?.generation,
+            );
+          if (wasGitHub) removeGitHubSubscriptionAfterCommit(tx, workspaceId, id, generation);
           await tx.client.query(`UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2 WHERE workflow_id=$1`, [
             id,
             randomUUID(),
@@ -1024,7 +1123,11 @@ export function createWorkflows(
     revision: string,
     key: string,
     input: z.infer<typeof payloadSchema>,
-    reason: 'previous-run-unfinished' | 'missed-occurrences-coalesced' | 'record-values-too-large',
+    reason:
+      | 'previous-run-unfinished'
+      | 'missed-occurrences-coalesced'
+      | 'record-values-too-large'
+      | 'github-repository-not-connected',
   ) {
     // Workspaces below common version 2 reject the skipped status until the rollout reaches them.
     if (tx.commonVersion < 1) return;
@@ -1805,19 +1908,31 @@ export function createWorkflows(
   }
   async function admitProviderEvent(tx: WorkflowTransaction, workflowId: string, event: Record<string, unknown>) {
     const trigger = definitionSchema.parse(event.definition).trigger;
-    if (trigger.kind !== 'provider') return 'ignored';
-    try {
-      await admit(
-        tx,
-        workflowId,
-        `provider:${idSchema.parse(event.revision)}:${z.string().parse(event.event_key)}`,
-        payloadSchema.parse(event.payload),
-        null,
-      );
-      await tx.client.query(
+    if (trigger.kind !== 'provider' && trigger.kind !== 'github') return 'ignored';
+    const revision = idSchema.parse(event.revision);
+    const key = `${trigger.kind}:${revision}:${z.string().parse(event.event_key)}`;
+    const payload = payloadSchema.parse(event.payload);
+    const admitted = () =>
+      tx.client.query(
         `UPDATE ${table(tx, 'tf_provider_events')} SET admitted=true WHERE workflow_id=$1 AND revision=$2 AND event_key=$3`,
         [workflowId, event.revision, event.event_key],
       );
+    try {
+      // A disconnected repository only pauses delivery: reconnecting it in Knowledge resumes runs without re-enabling.
+      if (
+        trigger.kind === 'github' &&
+        !(await githubRepositoryConnected(
+          tx,
+          trigger,
+          (await workflowSponsor(tx, workflowId, revision)).sponsor_membership_id,
+        ))
+      ) {
+        await skip(tx, workflowId, revision, key, payload, 'github-repository-not-connected');
+        await admitted();
+        return 'skipped';
+      }
+      await admit(tx, workflowId, key, payload, null);
+      await admitted();
     } catch (error) {
       if (error instanceof AccessDenied) {
         await disableAutomatically(tx, workflowId, 'workflow.disable.sponsor-access-lost');
@@ -2539,6 +2654,8 @@ export function createWorkflows(
     recordSourceLabels,
     rowSourceLabels,
     checkTableSteps,
+    checkGitHubRepository,
+    githubRepositories,
     save,
     activate,
     archive,

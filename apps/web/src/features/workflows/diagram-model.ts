@@ -9,8 +9,10 @@ import { runTime } from './calendar-schedule.ts';
 import { workflowLayout } from './diagram-layout.ts';
 import {
   comparisonWords,
+  describeGitHubTrigger,
   describeValue,
   filterPhrase,
+  githubInstallNote,
   recordScheduleDescription,
   type WorkflowValue,
 } from './definition-description.ts';
@@ -58,6 +60,7 @@ export const triggerTitles: Record<Trigger['kind'], string> = {
   webhook: 'Webhook received',
   event: 'Event received',
   provider: 'Connected app event',
+  github: 'GitHub event',
   once: 'At a scheduled time',
   interval: 'On a repeating schedule',
   cron: 'On a calendar schedule',
@@ -121,6 +124,8 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
       return trigger.name;
     case 'provider':
       return `${labels.provider ?? 'Connected source'} / every ${workflowDuration(trigger.minutes * 60)}`;
+    case 'github':
+      return describeGitHubTrigger(trigger);
     case 'once':
       return runTime(trigger.at, trigger.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
     case 'interval':
@@ -162,6 +167,11 @@ function triggerFacts(trigger: Trigger, labels: WorkflowLabels): WorkflowStepDet
   }
   if (trigger.kind === 'provider')
     return [{ label: 'Starts for', value: trigger.event === 'updated' ? 'Updated rows' : 'New items' }];
+  if (trigger.kind === 'github')
+    return [
+      { label: 'Repository ID', value: trigger.repositoryId },
+      { label: 'Delivery', value: githubInstallNote },
+    ];
   if (trigger.kind !== 'row' && trigger.kind !== 'record') return [];
   const facts =
     trigger.kind === 'record'
@@ -250,7 +260,9 @@ export function workflowGraph(
       : trigger.kind === 'record' && 'timezone' in trigger.field
         ? trigger.field.timezone
         : undefined) ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const triggerBrand = labels.trigger?.brand ?? (trigger.kind === 'provider' ? labels.providerBrand : undefined);
+  const triggerBrand =
+    labels.trigger?.brand ??
+    (trigger.kind === 'provider' ? labels.providerBrand : trigger.kind === 'github' ? 'github' : undefined);
   const nodes: WorkflowDiagramNode[] = [
     {
       id: '$trigger',

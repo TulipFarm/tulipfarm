@@ -35,6 +35,10 @@
       "types": "./dist/authorization.d.ts",
       "default": "./dist/authorization.js"
     },
+    "./github-triggers": {
+      "types": "./dist/github-triggers.d.ts",
+      "default": "./dist/github-triggers.js"
+    },
     "./temporal": {
       "types": "./dist/temporal.d.ts",
       "default": "./dist/temporal.js"

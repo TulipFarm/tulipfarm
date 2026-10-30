@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { sourceSchema, snippetPayloadSchema } from '@tulipfarm/workflow-snippets/protocol';
 import { canonical } from '@tulipfarm/workflow-snippets/canonical';
+import { githubEventIdSchema } from '@tulipfarm/github/event-contracts';
 import { providerTriggerSchema } from './provider-contracts.ts';
 import { outputPathIssues, stepValueEntries } from './output-fields.ts';
 export {
@@ -418,10 +419,50 @@ export const rowTriggerSchema = z
   });
 /** Bound scheduler work per transaction, never the number of retained row events. */
 export const rowEventBatchSize = 100;
+// Each GitHub webhook event a workflow can start from, with the `action` values it may narrow to. Push has no action.
+export const githubTriggerEvents = {
+  star: ['created', 'deleted'],
+  watch: ['started'],
+  issues: ['opened', 'edited', 'closed', 'reopened', 'assigned', 'unassigned', 'labeled', 'unlabeled', 'deleted'],
+  pull_request: [
+    'opened',
+    'edited',
+    'closed',
+    'reopened',
+    'synchronize',
+    'ready_for_review',
+    'converted_to_draft',
+    'assigned',
+    'unassigned',
+    'labeled',
+    'unlabeled',
+    'review_requested',
+  ],
+  issue_comment: ['created', 'edited', 'deleted'],
+  push: [],
+  release: ['published', 'unpublished', 'created', 'edited', 'deleted', 'prereleased', 'released'],
+} as const satisfies Record<string, readonly string[]>;
+export type GitHubTriggerEvent = keyof typeof githubTriggerEvents;
+export const githubTriggerSchema = z
+  .strictObject({
+    kind: z.literal('github'),
+    repositoryId: githubEventIdSchema,
+    event: z.enum(Object.keys(githubTriggerEvents) as [GitHubTriggerEvent, ...GitHubTriggerEvent[]]),
+    actions: z.array(z.string()).min(1).max(16).optional(),
+  })
+  .refine(
+    trigger =>
+      trigger.actions === undefined ||
+      (new Set(trigger.actions).size === trigger.actions.length &&
+        trigger.actions.every(action => (githubTriggerEvents[trigger.event] as readonly string[]).includes(action))),
+    { message: 'Name each action once, and only actions this event has', path: ['actions'] },
+  );
+export type GitHubTrigger = z.infer<typeof githubTriggerSchema>;
 export const triggerSchema = z.discriminatedUnion('kind', [
   recordTriggerSchema,
   rowTriggerSchema,
   providerTriggerSchema,
+  githubTriggerSchema,
   z.strictObject({ kind: z.literal('manual') }),
   z.strictObject({ kind: z.literal('webhook'), payload: rawWebhookSchema.optional() }),
   z.strictObject({ kind: z.literal('event'), name }),
@@ -607,7 +648,16 @@ export const webhookDeliveryLogSchema = z.object({
   deliveries: z.array(webhookDeliverySchema),
 });
 export const webhookTestSchema = z.strictObject({ requestId: idSchema });
-export const runSourceSchema = z.enum(['manual', 'webhook', 'schedule', 'event', 'provider', 'record', 'row']);
+export const runSourceSchema = z.enum([
+  'manual',
+  'webhook',
+  'schedule',
+  'event',
+  'provider',
+  'github',
+  'record',
+  'row',
+]);
 export const runSchema = z.object({
   id: idSchema,
   workflowId: idSchema,

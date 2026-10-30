@@ -18,6 +18,7 @@ const triggerName: Record<TriggerKind, string> = {
   interval: 'repeating',
   cron: 'schedule',
   provider: 'connected service',
+  github: 'GitHub event',
   record: 'record date',
   row: 'row change',
 };

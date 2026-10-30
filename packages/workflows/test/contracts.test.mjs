@@ -5,6 +5,7 @@ import {
   ConditionIncomparable,
   definitionSchema,
   evaluateCondition,
+  githubTriggerSchema,
   nextStep,
   recordFilterSchema,
   runCondition,
@@ -12,6 +13,20 @@ import {
   transform,
   waitUntilInstant,
 } from '../src/contracts.ts';
+
+test('a GitHub trigger names only actions its event has, each once', () => {
+  const trigger = actions =>
+    githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'star', actions }).success;
+  assert.equal(trigger(undefined), true);
+  assert.equal(trigger(['created', 'deleted']), true);
+  assert.equal(trigger(['opened']), false);
+  assert.equal(trigger(['created', 'created']), false);
+  assert.equal(
+    githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'push', actions: ['created'] }).success,
+    false,
+  );
+  assert.equal(githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'fork' }).success, false);
+});
 
 test('saving rejects copied signature and secret headers but stored revisions still parse', () => {
   const webhook = headers => ({

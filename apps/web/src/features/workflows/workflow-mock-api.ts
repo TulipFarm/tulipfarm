@@ -73,6 +73,7 @@ export const mockTriggers: Record<Trigger['kind'], Trigger> = {
   webhook: { kind: 'webhook' },
   event: { kind: 'event', name: 'review_requested' },
   provider: { kind: 'provider', integrationId: destinationId, event: 'created', minutes: 5 },
+  github: { kind: 'github', repositoryId: '1296269', event: 'star', actions: ['created'] },
   once: { kind: 'once', at: '2027-01-12T03:30:00Z', timezone: 'Asia/Kolkata' },
   interval: { kind: 'interval', minutes: 60 },
   cron: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },

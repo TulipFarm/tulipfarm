@@ -1158,6 +1158,9 @@ function commandError(error: RequestError) {
       'Signed webhook keys are unavailable until the storage update finishes. Create a bearer key for now.',
     'workflow-inactive': 'Activate the webhook revision before sending a test event.',
     'stale-generation': 'This workflow changed. Refresh workflows and try again.',
+    'github-repository-not-connected':
+      'This GitHub repository is not in your GitHub Knowledge. Connect it in the GitHub Knowledge picker, then try again.',
+    'github-trigger-unavailable': 'GitHub event triggers are unavailable here. Activate the workflow from chat.',
     'limit-reached': 'A workflow or run limit was reached. Cancel or wait for unfinished runs, or reuse a workflow.',
   };
   return errors[error.code] ?? 'The server rejected this change. Refresh and review your input before retrying.';
@@ -1178,6 +1181,7 @@ const runSourceLabel = {
   schedule: 'Started by schedule',
   event: 'Started by event',
   provider: 'Started by connected app',
+  github: 'Started by GitHub event',
   record: 'Started by record date',
   row: 'Started by row change',
 } as const;
