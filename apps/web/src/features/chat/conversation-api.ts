@@ -186,7 +186,7 @@ export type ConversationCommand =
       chatId: string;
       commandId: string;
       messageId: string;
-      model: string;
+      model?: string;
       parts: ConversationPart[];
       timeZone?: string;
       mode?: 'normal' | 'plan';

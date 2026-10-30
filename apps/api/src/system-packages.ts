@@ -10,6 +10,7 @@ import {
   systemPackageInstallationSchema,
   installationResumeSchema,
   installationReviewSchema,
+  installationApprovalSchema,
   installationListSchema,
 } from '@tulipfarm/agents/system-package-contracts';
 import { authConfig } from './auth.ts';
@@ -120,6 +121,22 @@ export function registerSystemPackages(
       request => {
         const p = installation.parse(request.params);
         return service.resume(p.workspaceId, user(request), p.installationId, request.body);
+      },
+    );
+    routes.post(
+      `${base}/:installationId/approve`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'approveSystemPackageInstallationV1',
+          installation,
+          systemPackageInstallationSchema,
+          installationApprovalSchema,
+        ),
+      },
+      request => {
+        const p = installation.parse(request.params);
+        return service.approve(p.workspaceId, user(request), p.installationId, request.body);
       },
     );
     routes.post(

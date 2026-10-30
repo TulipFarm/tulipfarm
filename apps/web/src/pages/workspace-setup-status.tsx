@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useWorkspaceSetup, useWorkspaceListCommand } from '@/features/workspaces/queries';
@@ -49,6 +49,8 @@ const content = {
 
 export function WorkspaceSetupStatusPage() {
   const { setupId } = useParams({ from: '/workspace-setups/$setupId' });
+  const { redirect } = useSearch({ from: '/workspace-setups/$setupId' });
+  const destination = useRouterState({ select: state => state.location.href });
   const navigate = useNavigate();
   const read = useWorkspaceSetup(setupId);
   const list = useWorkspaceListCommand();
@@ -82,8 +84,8 @@ export function WorkspaceSetupStatusPage() {
   }, [state]);
   useEffect(() => {
     if (read.state.kind === 'unavailable' && read.state.status === 401)
-      void navigate({ to: '/login', search: { redirect: `/workspace-setups/${setupId}` }, replace: true });
-  }, [read.state.kind, read.state.kind === 'unavailable' && read.state.status, setupId, navigate]);
+      void navigate({ to: '/login', search: { redirect: destination }, replace: true });
+  }, [read.state.kind, read.state.kind === 'unavailable' && read.state.status, destination, navigate]);
 
   const autoOpened = useRef(false);
   const open = async () => {
@@ -95,7 +97,8 @@ export function WorkspaceSetupStatusPage() {
         setOpening('unavailable');
         return;
       }
-      await navigate({ to: '/$workspaceSlug', params: { workspaceSlug: workspace.slug }, replace: true });
+      if (redirect) await navigate({ href: redirect, replace: true });
+      else await navigate({ to: '/$workspaceSlug', params: { workspaceSlug: workspace.slug }, replace: true });
     } catch {
       setOpening('error');
     }

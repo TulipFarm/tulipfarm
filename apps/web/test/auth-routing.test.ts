@@ -100,6 +100,51 @@ test('returning user lands in an existing workspace', async () => {
   assert.deepEqual(requests, ['/v1/auth/get-session', '/v1/workspaces']);
 });
 
+const packageHandoff = '/_chat?intent=install-package&packageName=marketing-content&packageVersion=1.0.0';
+
+test('public package handoff chooses an accessible default workspace and retains exact package identity', async () => {
+  workspaces = [acme, other];
+  rememberWorkspace('returning-user', other.id);
+  const selected = await destination(packageHandoff);
+  assert.equal(selected.pathname, '/other');
+  assert.equal(selected.search, new URL(packageHandoff, 'https://app.tulipfarm.ai').search);
+  workspaces = [acme];
+  assert.equal((await destination(packageHandoff)).pathname, '/acme');
+});
+
+test('public package handoff survives sign-in, profile completion and workspace creation', async () => {
+  assert.equal(safeAuthRedirect(packageHandoff), packageHandoff);
+  assert.equal(safeAuthRedirect('/_chat/unknown'), '/');
+  session = null;
+  const login = await destination(packageHandoff);
+  assert.equal(login.pathname, '/login');
+  assert.equal(login.searchParams.get('redirect'), packageHandoff);
+  const callbacks = authCallbackURLs(packageHandoff, 'https://app.tulipfarm.ai');
+  assert.equal(magicLinkDestination(callbacks.callbackURL, 'https://app.tulipfarm.ai'), packageHandoff);
+  session = { session: { id: 'session' }, user: { id: 'returning-user', name: '' } };
+  const profile = await destination(packageHandoff);
+  assert.equal(profile.pathname, '/complete-profile');
+  assert.equal(profile.searchParams.get('redirect'), packageHandoff);
+  session.user.name = 'Ada';
+  workspaces = [];
+  const creation = await destination(packageHandoff);
+  assert.equal(creation.pathname, '/create-workspace');
+  assert.equal(creation.searchParams.get('redirect'), packageHandoff);
+});
+
+test('public chat route rejects unknown intents and malformed package identities', async () => {
+  for (const path of [
+    '/_chat',
+    packageHandoff.replace('install-package', 'execute'),
+    packageHandoff.replace('marketing-content', '..%2Fbad'),
+    packageHandoff.replace('1.0.0', 'latest'),
+  ]) {
+    const router = await load(path);
+    assert.notEqual(router._serverResult?.type, 'redirect');
+    assert.ok(router.state.matches.some(match => match.status === 'error'));
+  }
+});
+
 test('chat routes admit UUID deep links and redirect saved hash links', async () => {
   const chatId = '33333333-3333-4333-8333-333333333333';
   const router = await load(`/acme/chat/${chatId}`);

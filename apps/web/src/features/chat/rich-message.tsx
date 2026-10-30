@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
 import type { JSONContent } from '@tiptap/core';
 import { chatDocumentSchema, type ChatDocument, type ChatFileReference } from '@tulipfarm/conversations/rich-content';
+import { PackageMessageText } from './package-reference';
 
 export function RichMessage({
   content,
@@ -22,7 +23,11 @@ export function RichMessage({
 function Inline({ node, file }: { node: JSONContent; file: (reference: ChatFileReference) => ReactNode }) {
   if (node.type === 'hardBreak') return <br />;
   if (node.type === 'fileReference') return <>{file(node.attrs as ChatFileReference)}</>;
-  let content: ReactNode = node.text ?? '';
+  let content: ReactNode = node.marks?.some(mark => mark.type === 'code' || mark.type === 'link') ? (
+    (node.text ?? '')
+  ) : (
+    <PackageMessageText text={node.text ?? ''} />
+  );
   for (const mark of node.marks ?? []) {
     if (mark.type === 'bold') content = <strong>{content}</strong>;
     else if (mark.type === 'italic') content = <em>{content}</em>;

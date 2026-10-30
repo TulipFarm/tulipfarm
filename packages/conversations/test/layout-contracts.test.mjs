@@ -4,6 +4,7 @@ import {
   checkLayout,
   layoutFromReply,
   layoutText,
+  packageInstallRequest,
   replyRenderInputSchema,
   textLayout,
 } from '../src/layout-contracts.ts';
@@ -26,6 +27,50 @@ const valid = [
   { id: 'metric', component: 'Metric', label: 'Signups', value: 42 },
 ];
 const errors = check => (check.ok ? [] : check.errors.map(error => error.message));
+
+test('package install requests require an unquoted plain-text command, not its rich-text projection', () => {
+  const url = 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/';
+  const text = `Install ${url}`;
+  const expected = { name: 'leave-management', version: '1.0.0', url: `${url}package.json` };
+  const part = content => ({
+    kind: 'text',
+    text,
+    ...(content ? { content: { version: 1, doc: { type: 'doc', content } } } : {}),
+  });
+  const paragraph = {
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Install ' },
+      { type: 'text', text: url },
+    ],
+  };
+  assert.deepEqual(packageInstallRequest([part()]), expected);
+  assert.deepEqual(
+    packageInstallRequest([part([paragraph])], 'normal', null),
+    expected,
+    'converted package pills remain text',
+  );
+  for (const content of [
+    [{ type: 'codeBlock', content: [{ type: 'text', text }] }],
+    [{ type: 'blockquote', content: [paragraph] }],
+    [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text }] }],
+    [paragraph, { type: 'paragraph' }],
+    [{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'code' }] }] }],
+    [{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'link', attrs: { href: url } }] }] }],
+    [{ type: 'paragraph', content: [{ type: 'text', text: 'Different text' }] }],
+  ])
+    assert.equal(packageInstallRequest([part(content)]), null);
+  assert.equal(packageInstallRequest([{ kind: 'text', text: `Please explain how to ${text}` }]), null);
+  assert.equal(packageInstallRequest([part()], 'plan'), null);
+  assert.equal(packageInstallRequest([part()], 'normal', surfaceId), null);
+  for (const extra of [
+    { kind: 'attachment', attachmentId: surfaceId },
+    { kind: 'file', fileId: surfaceId },
+    { kind: 'skill', skillId: 'package-install', revision: 'latest' },
+    { kind: 'text', text: 'More context' },
+  ])
+    assert.equal(packageInstallRequest([part(), extra]), null);
+});
 
 test('a reply layout takes the reply surface and catalog, whatever the model sent', () => {
   const built = layoutFromReply(reply(valid), surfaceId);

@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { Extensions } from '@tiptap/core';
 import { editorDocument, type ChatDraft } from './editor-document';
+import { packageReferenceExtension } from './package-reference';
 import { usePendingQuestion } from './choice-dock';
 import { ArrowUp } from 'reicon-react/icons/ArrowUp';
 import { Stop3 } from 'reicon-react/icons/Stop3';
@@ -120,7 +121,10 @@ export function Composer({
   const errorId = useId();
   const editorValue = useMemo(() => editorDocument(content.doc), [content.doc]);
   const editorExtensions = useMemo(
-    () => (compact ? extensions?.filter(extension => extension.type !== 'extension') : extensions),
+    () => [
+      packageReferenceExtension,
+      ...(compact ? (extensions?.filter(extension => extension.type !== 'extension') ?? []) : (extensions ?? [])),
+    ],
     [compact, extensions],
   );
   const send = () => {

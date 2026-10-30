@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import {
+  marketplaceInstallRequest,
+  marketplacePackage,
+  type MarketplacePackage,
+} from '@tulipfarm/config/package-links';
+import {
   checkSurface,
   defaultSurfaceLimits,
   defineCatalog,
@@ -12,8 +17,11 @@ import {
   type SurfaceError,
 } from '@tulipfarm/sprout/a2ui/catalog';
 import { workflowReferenceSchema } from './tool-activity.ts';
+import type { inputPartSchema } from './contracts.ts';
 
 const id = z.uuid();
+
+export const layoutCompatibility = Object.freeze({ minimum: 20 });
 
 /** An existing TulipFarm card, referenced by the ID of the record that owns it. The viewer's own permissions apply. */
 export const embedReferenceSchema = z.discriminatedUnion('kind', [
@@ -26,12 +34,16 @@ export const embedReferenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('google-file'), fileId: z.string().min(1).max(256) }),
   z.strictObject({ kind: z.literal('workspace-file'), fileId: id }),
   z.strictObject({ kind: z.literal('workflow'), reference: workflowReferenceSchema }),
+  z.strictObject({
+    kind: z.literal('package-install'),
+    url: z.string().refine(value => marketplacePackage(value) !== null, 'A versioned marketplace package is required'),
+  }),
 ]);
 export type EmbedReference = z.infer<typeof embedReferenceSchema>;
 
 const Embed = defineComponent({
   description:
-    'An existing TulipFarm card (plan, schema proposal, GitHub batch, Slack action, calendar or Google action, file or workflow) by the ID of its record, as returned by an earlier tool call.',
+    'An existing TulipFarm card (plan, schema proposal, GitHub batch, Slack action, calendar or Google action, file or workflow) by the ID of its record, as returned by an earlier tool call. A package-install card opens a versioned marketplace URL for human review; it does not authorize installation.',
   props: z.strictObject({ ref: embedReferenceSchema }),
   text: ({ ref }) => `[${ref.kind}]`,
 });
@@ -173,6 +185,66 @@ export function textLayout(
     ],
     ...(options.notice ? { notice: options.notice } : {}),
   };
+}
+
+export function packageInstallRequest(
+  parts: readonly z.infer<typeof inputPartSchema>[],
+  mode?: 'normal' | 'plan',
+  projectId?: string | null,
+): MarketplacePackage | null {
+  const part = parts[0];
+  if (projectId || mode === 'plan' || parts.length !== 1 || part?.kind !== 'text') return null;
+  if (part.content) {
+    const blocks = part.content.doc.content;
+    const block = blocks[0];
+    if (
+      blocks.length !== 1 ||
+      block?.type !== 'paragraph' ||
+      !block.content?.length ||
+      block.content.some(
+        node => node.type !== 'text' || node.marks?.some(mark => mark.type === 'code' || mark.type === 'link'),
+      ) ||
+      block.content.map(node => (node.type === 'text' ? node.text : '')).join('') !== part.text
+    )
+      return null;
+  }
+  return marketplaceInstallRequest(part.text);
+}
+
+export function packageInstallationLayout(link: MarketplacePackage, surfaceId: string): Layout {
+  return {
+    protocol: layoutProtocol,
+    catalogId: tulipfarmCatalogId,
+    placement: 'chat',
+    title: 'Package installation',
+    summary: `Review ${link.url}, choose its workspace inputs, and approve the whole package once to install it. Opening this form does not install anything.`,
+    messages: [
+      { version: 'v0.9.1', createSurface: { surfaceId, catalogId: tulipfarmCatalogId } },
+      {
+        version: 'v0.9.1',
+        updateComponents: {
+          surfaceId,
+          components: [{ id: 'root', component: 'Embed', ref: { kind: 'package-install', url: link.url } }],
+        },
+      },
+    ],
+  };
+}
+
+export function packagesInLayout(value: unknown): MarketplacePackage[] {
+  const checked = checkLayout(value);
+  if (!checked.ok) return [];
+  return checked.layout.messages.flatMap(message =>
+    'updateComponents' in message
+      ? message.updateComponents.components.flatMap(component => {
+          if (component.component !== 'Embed') return [];
+          const parsed = embedReferenceSchema.safeParse(component.ref);
+          if (!parsed.success || parsed.data.kind !== 'package-install') return [];
+          const link = marketplacePackage(parsed.data.url);
+          return link ? [link] : [];
+        })
+      : [],
+  );
 }
 
 /** The layout as plain text: the summary, then the surface. It is the copy, search and model-history text. */

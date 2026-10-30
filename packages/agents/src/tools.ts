@@ -26,6 +26,7 @@ import { skillImportInputSchema, skillImportSelectionSchema } from './skill-impo
 import { SkillPackageError } from './skill-package-contracts.ts';
 import { relation, type AgentStorage } from './store.ts';
 import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
+import { inspectMarketplacePackage } from './package-inspection.ts';
 import { listSkills, readSkill } from './skills.ts';
 import type { IntegrationService } from '@tulipfarm/integrations';
 import {
@@ -114,6 +115,7 @@ const tableProposalInput = z
   .max(1048576)
   .describe('JSON-encoded {plans:[...]}. Read skills.read(table-authoring) for proposalInputSchema and constraints.');
 export const frameworkCallSchema = z.discriminatedUnion('tool', [
+  z.strictObject({ tool: z.literal('packages.inspect'), url: z.url().max(2048) }),
   presentChoiceSchema,
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
@@ -219,6 +221,7 @@ export type ToolName = FrameworkCall['tool'];
 // A tool result over 96,000 characters of JSON is dropped whole; a fetched file's result is cut below that instead.
 const fetchedFileChars = 90_000;
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
+  'packages.inspect',
   'github.investigation.account',
   'github.investigation.repositories',
   'github.investigation.read',
@@ -319,6 +322,8 @@ export const conversationPlanning: ConversationPlanning = {
       : null,
 };
 const descriptions: Record<ToolName, string> = {
+  'packages.inspect':
+    'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
   'github.investigation.account':
     'Show the explicit personal-account or team-integration chooser for this private investigation. Never chooses a source from model output. If no source is selected, ask the human to choose in the card and stop. Read skills.read(github-investigation) first.',
   'github.investigation.repositories':
@@ -1156,6 +1161,8 @@ export function createChatTools(
         return (await readFileTool(context, call)).result;
       case 'web.fetch':
         return fetchPublicText(call.url);
+      case 'packages.inspect':
+        return inspectMarketplacePackage(call.url, context.signal ?? AbortSignal.timeout(25_000));
       case 'web.search':
         return searchPublicWeb(call);
       case 'knowledge.search':

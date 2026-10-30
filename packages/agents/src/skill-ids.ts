@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const skillIdSchema = z.enum([
   'table-authoring',
+  'package-install',
   'agent-authoring',
   'workspace-skill-authoring',
   'workflow-authoring',

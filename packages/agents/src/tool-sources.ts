@@ -404,6 +404,7 @@ export async function resultSources(
     case 'workflows.list':
     case 'workflows.draft':
     case 'skills.list':
+    case 'packages.inspect':
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':

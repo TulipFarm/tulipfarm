@@ -446,9 +446,14 @@ export const validateSystemPackageSchema = z.strictObject({
   package: systemPackageSchema,
   bindings: packageBindingsSchema,
 });
+export const installationApprovalSchema = z.strictObject({
+  packageDigest: digest,
+  inputDigest: digest,
+});
 export const importSystemPackageSchema = validateSystemPackageSchema.extend({
   requestId: z.uuid(),
   chatId: z.uuid().optional(),
+  approval: installationApprovalSchema.optional(),
 });
 export const packageIssueSchema = z.strictObject({
   code: z.string(),
@@ -489,6 +494,7 @@ export const systemPackageInstallationSchema = z.strictObject({
   packageDigest: digest,
   inputDigest: digest,
   bindings: packageBindingsSchema,
+  packageApproved: z.boolean().default(false),
   assets: systemPackageSchema.shape.assets,
   version: z.number().int().nonnegative(),
   status: z.enum(['pending', 'waiting-review', 'running', 'blocked', 'failed', 'completed']),

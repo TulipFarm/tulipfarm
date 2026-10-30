@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./package-links": {
+      "types": "./dist/package-links.d.ts",
+      "default": "./dist/package-links.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

@@ -22,7 +22,7 @@ const verificationCriteria = [
   'The server reads back every installed resource and verifies its requested configuration.',
 ];
 type Resource = SystemPackage['resources'][number];
-const resourceTypes = {
+export const resourceTypes = {
   table: { icon: <Database />, label: 'Table' },
   'seed-row': { icon: <AddCircle />, label: 'Starter record' },
   skill: { icon: <BookOpen />, label: 'Skill' },
@@ -32,7 +32,7 @@ const resourceTypes = {
   file: { icon: <Files />, label: 'File' },
 } satisfies Record<Resource['kind'], NonNullable<PlanOutlineTask['typeIcon']>>;
 
-function resourceTitle(resource: Resource, resources: Resource[], assets: SystemPackage['assets']): string {
+export function resourceTitle(resource: Resource, resources: Resource[], assets: SystemPackage['assets']): string {
   switch (resource.kind) {
     case 'table':
       return `Create ${resource.label}`;
@@ -206,10 +206,7 @@ export function InstallationOutline({ view, stale }: { view: SystemPackageInstal
     ...view.nodes.filter(node => node.kind === 'verify'),
   ];
   const verification = view.nodes.find(node => node.key === '$verify' && node.kind === 'verify');
-  const verified =
-    view.status === 'completed' &&
-    verification?.state === 'completed' &&
-    view.nodes.every(node => node.state === 'completed');
+  const verified = installationVerified(view);
   const status =
     view.status === 'completed' && !verified
       ? { status: 'Verification missing', tone: 'attention' as const }
@@ -270,5 +267,13 @@ export function InstallationOutline({ view, stale }: { view: SystemPackageInstal
           : []),
       ])}
     />
+  );
+}
+
+export function installationVerified(view: SystemPackageInstallation): boolean {
+  return (
+    view.status === 'completed' &&
+    view.nodes.some(node => node.key === '$verify' && node.kind === 'verify' && node.state === 'completed') &&
+    view.nodes.every(node => node.state === 'completed')
   );
 }

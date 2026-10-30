@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { defaultCallTimeoutMs } from '@tulipfarm/config/timeouts';
 import { storedToolPresentation } from './tool-activity-history.ts';
 import { toolPresentation } from './tool-activity.ts';
+import { marketplacePackagesInPrompt } from '@tulipfarm/config/package-links';
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
@@ -132,7 +133,15 @@ import {
   type TurnFilePart,
   type TurnFiles,
 } from './turn-files.ts';
-import { layoutFromReply, layoutText, textLayout, type Layout, type ReplyRenderInput } from './layout-contracts.ts';
+import {
+  layoutCompatibility,
+  layoutFromReply,
+  layoutText,
+  textLayout,
+  type Layout,
+  type ReplyRenderInput,
+} from './layout-contracts.ts';
+export { layoutCompatibility } from './layout-contracts.ts';
 import { linkNotice, linkReadsInstalled, messageLinkReads, messageLinks, readMessageLinks } from './links.ts';
 
 export type ConversationRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -281,8 +290,6 @@ const historySchema = z.array(
   }),
 );
 
-/** The first common migration with layout parts. */
-export const layoutCompatibility = Object.freeze({ minimum: 20 });
 type AnswerLayout = { input: ReplyRenderInput } | { failed: string } | undefined;
 
 /** The reply's layout, or `null` for a text reply. Text replaced after the model answered stays text. */
@@ -1331,6 +1338,14 @@ export function createConversationExecutor(
             (turn.planning_mode || planningContext) && invoked?.skillId !== 'planning'
               ? await skills?.resolve(tx, chat.requester, { skillId: 'planning', revision: 'latest' })
               : null;
+          const packageSkill =
+            !chat.slack &&
+            !chat.context &&
+            !chat.project_id &&
+            invoked?.skillId !== 'package-install' &&
+            marketplacePackagesInPrompt(currentMessage.text).length > 0
+              ? await skills?.resolve(tx, chat.requester, { skillId: 'package-install', revision: 'latest' })
+              : null;
           if (turn.planning_mode && !planningSkill && invoked?.skillId !== 'planning') {
             await skillUnavailable(tx, fence);
             return null;
@@ -1657,6 +1672,7 @@ export function createConversationExecutor(
             interactiveChat: !chat.slack && !chat.context,
             planningMode: turn.planning_mode,
             planningSkill,
+            packageSkill,
             planningContext,
             generateTitle: turn.accepted_sequence === 1 && needsGeneratedTitle(chat),
             titleRevision: chat.title_revision,
@@ -2314,6 +2330,7 @@ export function createConversationExecutor(
         const procedure = [source.invoked, source.planningSkill].flatMap(skill =>
           skill ? [{ role: 'user' as const, text: skillReminder(skill) }] : [],
         );
+        if (source.packageSkill) procedure.push({ role: 'user', text: skillReminder(source.packageSkill, true) });
         if (source.planningContext) procedure.push({ role: 'user', text: source.planningContext });
         if (source.planningMode)
           procedure.push({
@@ -2473,6 +2490,8 @@ export function createConversationExecutor(
         if (used) await insertSkillPart(tx, fence.conversationId, messageId, ordinal++, 'skill-use', used);
         if (replied && source.planningSkill && !used)
           await insertSkillPart(tx, fence.conversationId, messageId, ordinal++, 'skill-use', source.planningSkill);
+        if (replied && source.packageSkill && !used && !source.planningSkill)
+          await insertSkillPart(tx, fence.conversationId, messageId, ordinal++, 'skill-use', source.packageSkill);
         for (const text of result) {
           await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text) VALUES ($1,$2,$3,'text',$4)`,

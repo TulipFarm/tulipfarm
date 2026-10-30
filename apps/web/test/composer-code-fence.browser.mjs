@@ -5,6 +5,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { chatDocumentSchema } from '@tulipfarm/conversations/rich-content';
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { createWorkspaceFixture, workspaceShellReads } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
@@ -39,7 +40,7 @@ async function openComposer(run, { project = false } = {}) {
   let history = [];
   const sends = [];
   try {
-    await page.route('**/v1/**', async route => {
+    await context.route('**/v1/**', async route => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
       const method = request.method();
@@ -71,6 +72,13 @@ async function openComposer(run, { project = false } = {}) {
       if (path.endsWith('/model-catalog')) return route.fulfill({ json: chatCatalog });
       if (path.endsWith('/google-workspace/availability')) return route.fulfill({ json: { configured: false } });
       if (path.endsWith('/google-workspace')) return route.fulfill({ json: { status: 'disconnected' } });
+      if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: false, accounts: [] } });
+      if (path.endsWith('/atlassian/accounts')) return route.fulfill({ json: { accounts: [], providers: [] } });
+      if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+      if (path.endsWith('/slack/status'))
+        return route.fulfill({
+          json: { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] },
+        });
       if (path.endsWith('/projects')) return route.fulfill({ json: project ? [projectFixture] : [] });
       if (path.endsWith(`/projects/${projectFixture.id}`))
         return route.fulfill({ json: { project: projectFixture, members: [], files: [] } });
@@ -79,6 +87,8 @@ async function openComposer(run, { project = false } = {}) {
       if (path.endsWith('/workspace-mcp/capabilities'))
         return route.fulfill({ status: 404, json: { error: 'not-found' } });
       if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
+      if (path.endsWith('/system-package-installations'))
+        return route.fulfill({ json: { installations: [], nextCursor: null } });
       if (path.endsWith('/files/suggestions')) return route.fulfill({ json: { items: [], next: null } });
       if (path.endsWith('/conversations') && method === 'GET')
         return route.fulfill({ json: { chats: chat ? [chat] : [], nextCursor: null } });
@@ -264,6 +274,150 @@ async function sendRichText(page, editor, sends) {
 }
 
 test(
+  'package pills preserve URLs through typing, paste, copy, deletion, undo and send',
+  { timeout: 120000 },
+  async () => {
+    await openComposer(async ({ page, editor, sends }) => {
+      const pkg = JSON.parse(
+        await readFile(
+          new URL('../../../packages/config/examples/system-packages/leave-management.json', import.meta.url),
+          'utf8',
+        ),
+      );
+      const url = `https://packages.tulipfarm.ai/packages/${pkg.package.name}/${pkg.package.version}/`;
+      const definition = `${url}package.json?source=chat#review`;
+      await page.context().route('https://packages.tulipfarm.ai/**', route =>
+        route.fulfill({
+          json:
+            new URL(route.request().url()).pathname === '/catalog.json'
+              ? {
+                  schema: 'https://tulipfarm.ai/schemas/system-package.v1.json',
+                  packages: [
+                    {
+                      ...pkg.package,
+                      title: 'Leave Management',
+                      category: 'People',
+                      tags: [],
+                      url: `${url}package.json`,
+                      page: url,
+                    },
+                  ],
+                }
+              : pkg,
+        }),
+      );
+      const pills = editor.locator('[data-node-view-wrapper]').filter({ hasText: 'Package:' });
+      await editor.pressSequentially(`Use Slack and Jira with ${url}`);
+      assert.equal(await pills.count(), 0, 'a URL being typed is not replaced before the user finishes it');
+      await editor.pressSequentially(' and ');
+      await pills.getByText('Package: Leave Management', { exact: true }).waitFor();
+      assert.equal(await editor.locator('.sprout-rich-text-keyword').count(), 2);
+      await page.evaluate(text => navigator.clipboard.writeText(text), definition);
+      await editor.press(`${modifier}+v`);
+      await pills.nth(1).waitFor();
+      assert.equal(await pills.nth(1).locator('span[title]').getAttribute('title'), definition);
+      assert.equal(
+        await pills
+          .locator('img')
+          .evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)),
+        true,
+      );
+
+      const packageLink = pills.first().getByRole('link');
+      const originalPage = page.url();
+      const draft = await editor.textContent();
+      await packageLink.hover();
+      await page.getByRole('tooltip').getByText('Open package in new tab', { exact: true }).waitFor();
+      for (const action of ['click', 'keyboard']) {
+        const opened = page.waitForEvent('popup');
+        if (action === 'click') await packageLink.click();
+        else {
+          await packageLink.focus();
+          await packageLink.press('Enter');
+        }
+        const details = await opened;
+        try {
+          await details.getByRole('heading', { name: pkg.package.title, exact: true }).waitFor();
+          assert.equal(new URL(details.url()).origin, new URL(originalPage).origin);
+          assert.ok(
+            new URL(details.url()).pathname.endsWith(`/packages/catalog/${pkg.package.name}/${pkg.package.version}`),
+          );
+          assert.equal(await details.evaluate(() => window.opener === null), true);
+          assert.equal(page.url(), originalPage);
+          assert.equal(await editor.textContent(), draft);
+          assert.equal(sends.length, 0, 'opening a package does not submit the chat');
+        } finally {
+          await details.close();
+        }
+      }
+
+      await editor.click();
+      await editor.press(`${modifier}+a`);
+      await editor.press(`${modifier}+c`);
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      assert.match(copied, /^Use Slack\sand Jira\swith /);
+      assert.ok(copied.endsWith(`${url} and ${definition}`), 'clipboard retains both exact URLs, not package labels');
+      await editor.press('ArrowRight');
+      await page.waitForTimeout(550);
+      await editor.press('Backspace');
+      assert.equal(await pills.count(), 1);
+      await editor.press(`${modifier}+z`);
+      await pills.nth(1).waitFor();
+      const part = await sendRichText(page, editor, sends);
+      assert.equal(part.text, copied);
+      assert.equal(JSON.stringify(part.content).includes('packageReference'), false);
+      const sent = page.locator('[data-slot="message-bubble"]').first();
+      await sent
+        .getByRole('link', { name: `Open ${pkg.package.title}, version ${pkg.package.version}, in a new tab` })
+        .first()
+        .waitFor();
+      assert.equal(await sent.getByRole('link', { name: /Open .* in a new tab/ }).count(), 2);
+      assert.equal((await sent.innerText()).includes(url), false);
+      await page.reload();
+      await sent
+        .getByRole('link', { name: /Open .* in a new tab/ })
+        .first()
+        .waitFor();
+      assert.equal(await sent.getByRole('link', { name: /Open .* in a new tab/ }).count(), 2);
+    });
+  },
+);
+
+test('code samples and lookalike domains remain text rather than package pills', { timeout: 120000 }, async () => {
+  await openComposer(async ({ page, editor, sends }) => {
+    const url = 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/';
+    const foreign = url.replace('packages.tulipfarm.ai', 'packages.tulipfarm.ai.example.test');
+    let catalogReads = 0;
+    await page.route('https://packages.tulipfarm.ai/**', route => {
+      catalogReads++;
+      return route.fulfill({ json: { schema: 'https://tulipfarm.ai/schemas/system-package.v1.json', packages: [] } });
+    });
+    await page.evaluate(
+      ({ url, foreign }) =>
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([`<p><code>${url}</code></p><pre><code>${url}</code></pre><p>${foreign}</p>`], {
+              type: 'text/html',
+            }),
+            'text/plain': new Blob([`${url}\n${url}\n${foreign}`], { type: 'text/plain' }),
+          }),
+        ]),
+      { url, foreign },
+    );
+    await editor.press(`${modifier}+v`);
+    assert.equal(await editor.locator('code').count(), 2);
+    assert.equal(await editor.locator('[data-node-view-wrapper]').count(), 0);
+    assert.equal(catalogReads, 0);
+    const part = await sendRichText(page, editor, sends);
+    assert.ok(part.text.includes(foreign));
+    assert.ok(part.content.doc.content.some(node => node.type === 'codeBlock' && node.content[0].text === url));
+    const sent = page.locator('[data-slot="message-bubble"]').first();
+    assert.equal(await sent.getByRole('link', { name: /Open .* in a new tab/ }).count(), 0);
+    assert.ok((await sent.innerText()).includes(url));
+  });
+});
+
+test(
   'emails, domains, URLs and angle-bracket addresses remain sendable when typed or pasted',
   { timeout: 120000 },
   async () => {
@@ -283,7 +437,12 @@ test(
       await page.evaluate(text => navigator.clipboard.writeText(text), address);
       await editor.press(`${modifier}+v`);
       assert.equal(await editor.getAttribute('aria-invalid'), 'false');
-      assert.equal(await editor.textContent(), `${typed.join(' ')} ${address}`);
+      const text = await editor.evaluate(element => {
+        const content = element.cloneNode(true);
+        for (const decoration of content.querySelectorAll('[aria-hidden="true"]')) decoration.remove();
+        return content.textContent;
+      });
+      assert.equal(text, `${typed.join(' ')} ${address}`);
       assert.equal(await editor.locator('a[href="mailto:someemail@gmai.com"]').count(), 1);
       assert.equal(await editor.locator('a[href="http://website.com"]').count(), 1);
       assert.equal(

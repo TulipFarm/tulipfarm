@@ -252,6 +252,88 @@ not a new browser verification.
 
 ## Colors
 
+The public Packages gallery uses compact, equal-height linked Sprout cards:
+a 20px colored outline Reicon with no background, title and small single-line
+description with an ellipsis.
+Icon strokes use Sprout's palette; categories, topic tags and versions are not shown on cards. The full
+description remains available to assistive technology and on hover. Cards open
+an in-app, version-specific detail page, never the public marketplace. Details
+show the validated package's resources, inputs, capabilities, outputs and full
+definition. A prominent package title and native metadata badges precede
+resource groups with counts and the same type icons used in navigation.
+The contents and install cards use native CardHeader/CardTitle components.
+Resource-group Accordions use native trigger spacing,
+without padded wrappers; page sections use 32px gaps and the columns use 24px.
+One native Card contains closed resource-group Accordions. Opening a group
+reveals its resources; opening a resource reveals its details and requested
+state. No table opens by default. Native grid Tables show fields, type and rule badges, and
+the package's actual starter records under their owning table. Skills retain
+file CodeBlocks, agents show linked-skill badges and instructions, and workflows
+use a native RecordList for ordered steps. Requested-state badges describe
+intent, not live activation. Workspace inputs use type icons and badges in a
+separate requirements card. Capabilities and outputs live in the closed
+Technical details disclosure; capabilities use badges and outputs use type icons.
+The full original definition remains available in a CodeBlock.
+Install is a large native primary Button, stretched by its grid wrapper across
+the top of a dedicated right-hand card beside the package summary. Approval
+guidance and workspace inputs follow inside that card. On mobile the install
+card follows the summary and precedes the resource list. Install opens New chat, sending
+`Install <versioned package URL>` once. Resource installation still requires
+review and approval in chat.
+Public marketplaces can use
+`/_chat?intent=install-package&packageName=marketing-content&packageVersion=1.0.0`
+without knowing a workspace slug. This entry validates the package identity,
+preserves the link through sign-in and profile completion, and uses the same
+last-used accessible workspace (or first membership) as the app home page.
+If no workspace exists, creation and provisioning retain the handoff. The
+resolved private chat uses the same exact prompt, automatic send and A2UI
+approval flow as the in-app Packages page. Other intents and malformed package
+identities are rejected; arbitrary prompts and redirect targets are not accepted.
+In the composer, marketplace URLs become inline `Package: <title>` pills with
+the TulipFarm mark. Pasting, finishing a typed URL or leaving the input creates
+the pill; code samples stay unchanged. Catalog titles fall back to the package
+name when unavailable. Copy and send preserve the original URL, including its
+version, query and fragment; the pill itself grants no approval.
+Hover or keyboard focus offers **Open package in new tab**. Clicking the pill
+opens the in-app, version-specific details page in a separate tab without
+changing or sending the draft.
+An exact `Install <versioned marketplace URL>` private-chat message opens one
+saved A2UI reply containing the installer. The send transaction completes the
+handoff without queuing model work, inspection tools, a skill annotation or
+an extra explanation. Attachments, explicit skills and Planning mode retain
+their normal reply behavior. Legacy package offers remain below the messages,
+but a package already embedded in a saved reply is not repeated there.
+The compact Sprout A2UI surface shows resource counts and expandable
+contents, then asks one workspace input at a time. Selected answers remain
+available during the mounted flow; the final review lets the person change an
+answer without re-asking the others. Preflight runs after the last answer.
+Only successful preflight enables the human-only Install package action.
+The saved reply holds the exact marketplace URL, not an approval or a copy of
+the definition. The client loads and validates that definition and builds the
+domain surface with the package-install A2UI catalog. Domain adapters connect native Sprout
+inputs and actions to permitted choices and the existing installer APIs.
+The final Install package action records one protected approval bound to the
+exact package and selected inputs. Installation then advances through every
+resource without per-resource prompts, while still checking current access
+and verifying the result. Running surfaces show progress, not competing approval
+and continue buttons. Once every step and final verification complete, both chat
+and canvas switch to a clear "<package> installed" success view. Progress and
+technical records remain under a collapsed Installation details disclosure.
+Retry appears only for a stopped
+installation; manual refresh is inside Installation details. Legacy installs
+without a whole-package approval require one explicit approval, never an
+automatic backfill of consent.
+The built-in Package install skill guides a short reply rather than a second
+form; loading it does not approve a write. Package plans stay in the native
+canvas, opened from the surface. Version, license and source metadata are
+omitted from the chat surface; the exact version is retained in the package
+definition and installation request.
+In development, `?state=loading` and `?state=error` show the catalog's existing
+feedback states without fetching the catalog. Retry clears the forced state.
+Production ignores these parameters.
+Loading uses six native Sprout skeleton cards in a three-column, two-row desktop
+grid, matching the catalog's two-column and single-column responsive breakpoints.
+
 ### Primary
 
 Action green supplies solid primary-button fills. In light mode the fill is

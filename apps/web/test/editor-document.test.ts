@@ -136,3 +136,34 @@ test('persisted optional fields become editor JSON without a cast or a changed m
   });
   assert.equal(parseChatDraft(document).success, true);
 });
+
+test('package pills send the original URLs, not their labels or editor-only nodes', () => {
+  const urls = [
+    'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/?source=chat#readme',
+    'https://packages.tulipfarm.ai/packages/sales-crm/1.0.0/package.json',
+  ];
+  const draft: ChatDraft = {
+    version: 1,
+    doc: {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Compare ' },
+            { type: 'packageReference', attrs: { url: urls[0] } },
+            { type: 'text', text: ' and ' },
+            { type: 'packageReference', attrs: { url: urls[1] } },
+          ],
+        },
+      ],
+    },
+  };
+  const before = structuredClone(draft);
+  const result = parseChatDraft(draft);
+  assert.equal(result.success, true);
+  if (!result.success) throw result.error;
+  assert.equal(chatDocumentText(result.data), `Compare ${urls[0]} and ${urls[1]}`);
+  assert.ok(result.data.doc.content[0]!.content!.every(node => node.type === 'text'));
+  assert.deepEqual(draft, before);
+});
