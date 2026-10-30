@@ -263,6 +263,7 @@ const logOnlyAttributes = new Set([
   'github.ratelimit_remaining',
   'github.retry_after_s',
   'github.ratelimit_resource',
+  'completion.reason',
 ]);
 // A stored Slack event's own row id: it locates the event in the database and carries no Slack content.
 const rowIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -296,6 +297,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
     if (key === 'github.ratelimit_resource') return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value);
     if (key.startsWith('github.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    // The completion check's own model-written reason, at most 240 characters by its schema; it can quote the chat.
+    if (key === 'completion.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
@@ -2116,12 +2119,16 @@ export function recordChatRequestSizes(sizes: Partial<Record<(typeof chatRequest
 
 export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error';
 /** One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran. */
-export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome) {
+export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome, reason?: string) {
   metrics
     .getMeter(scope)
     .createCounter('cloud_chat_completion_checks')
     .add(1, { ...dimensions, outcome });
-  log('info', 'inference', 'call_completed', { operation: 'chat.completion-check', outcome });
+  log('info', 'inference', 'call_completed', {
+    operation: 'chat.completion-check',
+    outcome,
+    ...(reason ? { 'completion.reason': reason } : {}),
+  });
 }
 
 export function recordChatDiscovery(counts: { offered: number; loaded: number; added: number; matched: number }) {
@@ -2336,7 +2343,7 @@ export type ToolOutcome = 'success' | 'error' | 'result_error' | 'waiting' | 'bl
  * such as an unavailable source, which the chat shows as failed. `errorType` names a failure that the dispatcher caught
  * and reported as a returned outcome.
  */
-export type ToolObservation = { outcome: ToolOutcome; errorCode?: unknown; errorType?: string };
+export type ToolObservation = { outcome: ToolOutcome; errorCode?: unknown; errorType?: string; issues?: unknown };
 
 const loggedToolFailures = new WeakSet<object>();
 /** True when `observeTool` already logged this thrown error, so a caller that catches it must not log it again. */
@@ -2345,12 +2352,19 @@ export function toolFailureLogged(error: unknown) {
 }
 
 function issueCodes(error: unknown) {
-  if (!(error instanceof Error) || error.name !== 'ZodError' || !('issues' in error) || !Array.isArray(error.issues))
-    return undefined;
-  return error.issues.map(
-    (issue: { path?: unknown; code?: unknown }) =>
-      `${Array.isArray(issue.path) ? issue.path.join('.') : ''}:${String(issue.code)}`,
-  );
+  if (!(error instanceof Error) || error.name !== 'ZodError' || !('issues' in error)) return undefined;
+  return issueList(error.issues);
+}
+
+// Paths and codes only: an issue's message can quote the rejected value.
+function issueList(issues: unknown) {
+  if (!Array.isArray(issues)) return undefined;
+  return issues
+    .slice(0, 20)
+    .map(
+      (issue: { path?: unknown; code?: unknown }) =>
+        `${Array.isArray(issue.path) ? issue.path.join('.') : ''}:${String(issue.code)}`,
+    );
 }
 
 export async function observeTool<T>(
@@ -2375,6 +2389,7 @@ export async function observeTool<T>(
         outcome = typeof observation === 'string' ? observation : observation.outcome;
         if (typeof observation !== 'string') {
           errorCode = telemetryErrorCode(observation.errorCode);
+          if (outcome === 'result_error') issues = issueList(observation.issues);
           if (observation.errorType !== undefined)
             failure = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(observation.errorType) ? observation.errorType : 'Error';
         }

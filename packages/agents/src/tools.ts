@@ -1802,6 +1802,7 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
           ].includes(status),
       ) ??
       branchFailure,
+    ...((envelope.issues ?? result.issues) === undefined ? {} : { issues: envelope.issues ?? result.issues }),
   };
 }
 
