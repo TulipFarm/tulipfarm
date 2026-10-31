@@ -43,3 +43,12 @@ export function toolTextPreview(text: string): string | undefined {
   const start = text.search(/[{[`]/);
   return start < 0 ? text : text.slice(0, start) || undefined;
 }
+
+/** A Block Kit array, as a layout call written out as text carries it: `[{"type":"section", ...`. */
+const blockArray =
+  /\[\s*\{\s*"type"\s*:\s*"(?:header|section|actions|divider|context|rich_text|table|markdown|input|data_visualization|image)"/;
+
+/** True when an answer describes a call to the layout tool `name` instead of making it. */
+export function writesLayoutCall(text: string, name: string): boolean {
+  return text.includes(name) || blockArray.test(text);
+}

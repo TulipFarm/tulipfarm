@@ -513,7 +513,7 @@ export function createSlackDefault(
           channel: selected.root.channel,
           threadTs: selected.root.root_ts,
           recipient: { user: selected.request_snapshot.user, team: selected.team_id },
-          title: 'Working on it',
+          title: 'Steps',
           ...(options.fetcher ? { fetcher: options.fetcher } : {}),
         })
       : undefined;

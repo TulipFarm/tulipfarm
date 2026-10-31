@@ -57,7 +57,7 @@ export const slackRenderPrompt = (interactive: boolean) =>
     '- `summary` is one or two plain sentences that answer the question. It is the notification text. `title` names the reply in a few words.',
     '- `blocks` are Slack Block Kit blocks, at most 48. Build what reads best in Slack: a short answer is one markdown block; structure uses header, section (with fields for key facts), context, divider, table, data_table, data_visualization (bar, line, area or pie), card, carousel of cards, alert, container, rich_text, image, plan and task_card.',
     '- A markdown block holds standard Markdown. Text objects of type "mrkdwn" use Slack syntax: *bold*, _italic_, `code`, <https://example.com|label>.',
-    '- Tables: when the answer compares several items across the same attributes, or lists figures by row (such as months with revenue and deals), use a table, not lists or stacked lines.',
+    '- Tables: when the answer compares several items across the same attributes, or lists figures by row (such as months with revenue and deals), use a table, not lists or stacked lines. Options the user names with a price and a feature, such as three CRMs, are such a comparison.',
     '- Keep numbers, prices and currency symbols as the user or the source wrote them, such as $90 or €1.5k; do not spell them out in words.',
     '- At most one table and two data_visualization blocks. A table is {"type":"table","rows":[[{"type":"raw_text","text":"Name"}, ...], ...]}; its first row is the header.',
     '- Charts: when the user asks for a chart, graph or plot, or numbers show a trend, a comparison or a share, add a data_visualization block. Never draw a chart with text, bars of characters or a code block.',
