@@ -57,7 +57,7 @@ import {
 import { isMcpCall, mcpExecutionResultSchema, type McpModelCatalog } from './mcp-contracts.ts';
 import { validateMcpCall } from './mcp-catalog.ts';
 import { readModelResponse, streamRequestFields, streamUrl, type StreamFormat } from './inference-stream.ts';
-import { containsToolEnvelope, toolTextPreview } from './tool-text.ts';
+import { containsToolEnvelope, toolTextPreview, writesLayoutCall } from './tool-text.ts';
 import {
   bindCalendarText,
   calendarTextCheckPrompt,
@@ -2762,6 +2762,32 @@ export async function inferWithTools(
         continue;
       }
       rendered = parsed;
+    }
+    // A layout call written out as text is never posted: it counts as a failed layout and asks for the real call.
+    if (
+      renderer &&
+      !rendered &&
+      !selected.calls.length &&
+      !finalizing &&
+      writesLayoutCall(selected.text, renderer.name)
+    ) {
+      log('warn', 'activity', 'call_failed', {
+        operation: 'chat.layout-invalid',
+        'error.type': 'layout-as-text',
+        attempt: layoutFailures + 1,
+      });
+      if (layoutFailures++ >= 2) return finish(layoutFailedReply, true, { layoutFailed: true });
+      items.push(
+        { kind: 'model', text: selected.text, calls: [], raw: selected.raw },
+        {
+          kind: 'turn',
+          turn: {
+            role: 'user',
+            text: `You wrote the ${renderer.name} call as text. Call the ${renderer.name} tool with that input instead. Do not describe the call.`,
+          },
+        },
+      );
+      continue;
     }
     // A plain-text answer is sent back once with a request for the layout; a second one is kept as text.
     if (renderer && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {

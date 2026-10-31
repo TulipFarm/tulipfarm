@@ -144,6 +144,7 @@ const outputStyle = bullets('Output style: ASD-STE100 Simplified Technical Engli
   'Put a condition before the instruction. For example, write "If the import fails, try again."',
   'Use 6 sentences or less in a paragraph. Start each paragraph with its main point.',
   'Keep names of products, records, fields, and quoted text exactly as they are. These rules do not change them.',
+  'Write numbers, amounts, and percentages with digits and symbols, such as $56k, 1,500, or 30%. Do not write them as words, such as "56 thousand dollars" or "30 percent".',
 ]);
 
 const skills = bullets('Skills', [
