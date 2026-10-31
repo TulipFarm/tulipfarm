@@ -203,6 +203,43 @@ export function createAuthoringDrafts(
       if (current) await requireSkillGrant(tx, actor, proposal.targetId, 'manage');
     }
   }
+  async function superseded(tx: AgentTransaction, id: string, targetId: string) {
+    return (
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} older JOIN ${relation(tx, 'tf_chat_authoring_drafts')} newer ON newer.conversation_id=older.conversation_id AND newer.created_at>older.created_at AND newer.proposal->>'kind'=older.proposal->>'kind' WHERE older.id=$1 AND newer.proposal->>'targetId'=$2 LIMIT 1`,
+          [id, targetId],
+        )
+      ).rowCount !== 0
+    );
+  }
+  // One chat owns one new workflow: a later create draft replaces the earlier one, or edits it once saved.
+  async function chatWorkflow(
+    tx: AgentTransaction,
+    bound: AgentStorage,
+    workspaceId: string,
+    actor: HumanActor,
+    conversationId: string,
+    proposal: Extract<WorkflowProposal, { kind: 'workflow' }>,
+  ): Promise<AuthoringProposal> {
+    if (proposal.input.expectedRevision !== null) return proposal;
+    const earlier = z
+      .object({ target: z.uuid(), decided: z.boolean() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT draft.proposal->>'targetId' AS target, decision.draft_id IS NOT NULL AS decided FROM ${relation(tx, 'tf_chat_authoring_drafts')} draft LEFT JOIN ${relation(tx, 'tf_chat_authoring_decisions')} decision ON decision.draft_id=draft.id WHERE draft.conversation_id=$1 AND draft.proposal->>'kind'='workflow' AND draft.proposal->'input'->'expectedRevision'='null'::jsonb ORDER BY draft.created_at DESC LIMIT 1`,
+            [conversationId],
+          )
+        ).rows[0],
+      );
+    if (!earlier) return proposal;
+    const current = await createWorkflowDrafts(bound, workspaceId).find(actor, earlier.target);
+    if (current)
+      return { ...proposal, targetId: current.id, input: { ...proposal.input, expectedRevision: current.revision } };
+    return earlier.decided ? proposal : { ...proposal, targetId: earlier.target };
+  }
   async function stale(
     tx: AgentTransaction,
     proposal: AuthoringProposal,
@@ -211,7 +248,10 @@ export function createAuthoringDrafts(
     workspaceId: string,
     id: string,
   ) {
-    if (isWorkflow(proposal)) return createWorkflowDrafts(bound, workspaceId).stale(actor, proposal);
+    if (isWorkflow(proposal))
+      return (
+        (await superseded(tx, id, proposal.targetId)) || createWorkflowDrafts(bound, workspaceId).stale(actor, proposal)
+      );
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -397,18 +437,22 @@ export function createAuthoringDrafts(
   }
   async function propose(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
     id = uuidSchema.parse(id);
-    const proposal = authoringProposalSchema.parse(value);
+    const parsed = authoringProposalSchema.parse(value);
     const sources = sourcesSchema.parse([
       ...origin.sources,
-      ...(proposal.kind === 'agent'
-        ? (proposal.input.definition.skills ?? [])
+      ...(parsed.kind === 'agent'
+        ? (parsed.input.definition.skills ?? [])
             .filter(skill => z.uuid().safeParse(skill.id).success)
             .map(skill => ({ kind: 'workspace-skill', skillId: skill.id, revision: skill.revision }))
         : []),
     ]);
-    const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
-    return transaction(workspaceId, actor, isWorkflow(proposal), async (tx, _actor, bound) => {
+    return transaction(workspaceId, actor, isWorkflow(parsed), async (tx, _actor, bound) => {
       await owned(tx, actor, origin.conversationId);
+      const proposal =
+        parsed.kind === 'workflow'
+          ? await chatWorkflow(tx, bound, workspaceId, actor, origin.conversationId, parsed)
+          : parsed;
+      const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
       await requireNoMcpDerived(tx, [
         { kind: 'private-conversation', conversationId: origin.conversationId },
         ...sources,

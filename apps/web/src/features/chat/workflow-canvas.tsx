@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Link } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { Button } from '@tulipfarm/sprout/button';
@@ -15,6 +15,43 @@ import { conversationApi } from './conversation-api';
 import { useAuthoringDraft } from './queries';
 import { useCanvas, type CanvasItem } from './canvas-state';
 import { workspaceRoute } from '@/router';
+
+// Opens a workflow draft made while this chat is open; drafts already in the chat when it loads stay closed.
+export function NewWorkflowDrafts({
+  workspaceId,
+  chatId,
+  tools,
+  foreground,
+}: {
+  workspaceId: string;
+  chatId: string;
+  tools: { id: string; tool: string; status: string; activityStatus?: string | undefined }[];
+  foreground: boolean;
+}) {
+  const canvas = useCanvas();
+  const observed = useRef<{ chatId: string; ids: Set<string> } | null>(null);
+  const ids = tools
+    .filter(tool => tool.tool === 'workflows.draft' && tool.status === 'completed' && tool.activityStatus !== 'failed')
+    .map(tool => tool.id);
+  const key = ids.join(',');
+  useEffect(() => {
+    const previous = observed.current;
+    if (!previous || previous.chatId !== chatId) {
+      observed.current = { chatId, ids: new Set(ids) };
+      return;
+    }
+    const added = ids.filter(id => !previous.ids.has(id)).at(-1);
+    for (const id of ids) previous.ids.add(id);
+    if (
+      added &&
+      foreground &&
+      (!canvas.activeId || canvas.activeId.startsWith(`workflow:draft:${chatId}:`)) &&
+      window.matchMedia('(min-width: 768px)').matches
+    )
+      canvas.show(workflowCanvasItem(workspaceId, { kind: 'draft', chatId, draftId: added }));
+  }, [key, chatId, workspaceId, foreground, canvas.activeId, canvas.show]);
+  return null;
+}
 
 export function workflowCanvasItem(workspaceId: string, reference: WorkflowReference): CanvasItem {
   const key =

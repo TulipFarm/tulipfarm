@@ -588,6 +588,76 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   assert.equal(stale.error, 'draft-stale', 'an edit against an old revision is refused');
 });
 
+test('one chat owns one new workflow: a later create draft replaces the earlier one, then edits it once saved', async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const user = randomUUID();
+  await db.platform.query(`INSERT INTO "${w.names.schema}".tf_memberships (id,user_id,role) VALUES ($1,$2,'member')`, [
+    randomUUID(),
+    user,
+  ]);
+  const chats = createConversations(runtime),
+    drafts = createAuthoringDrafts(runtime),
+    workflows = createWorkflows(runtime),
+    chatId = randomUUID();
+  await chats.create(w.id, user, { chatId, commandId: randomUUID() });
+  async function draft(definition) {
+    const sent = await chats.send(w.id, user, chatId, {
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Draft the weekday review workflow.' }],
+    });
+    const call = { tool: 'workflows.draft', definition: JSON.stringify(definition), activate: false };
+    let output;
+    const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
+      output = (
+        await executeTool(
+          call.tool,
+          false,
+          context => createChatTools(context.runtime).invokeWithSources(context, call),
+          [],
+          call,
+        )
+      ).result;
+      return { text: 'Review the workflow card.', sources: [] };
+    });
+    await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
+    return output;
+  }
+
+  const first = await draft(weekdayReview);
+  const second = await draft({ ...weekdayReview, name: 'Review urgent tickets' });
+  assert.equal(second.change, 'create');
+  assert.equal(second.workflowId, first.workflowId, 'the replacement keeps the same workflow');
+  assert.equal((await drafts.read(w.id, user, chatId, first.draftId)).status, 'stale');
+  assert.equal((await drafts.read(w.id, user, chatId, second.draftId)).status, 'pending');
+
+  await drafts.decide(w.id, user, chatId, second.draftId, {
+    commandId: randomUUID(),
+    digest: second.digest,
+    decision: 'save',
+  });
+  const [saved] = await workflows.list(w.id, user);
+  const third = await draft({ ...weekdayReview, trigger: { ...weekdayReview.trigger, expression: '0 8 * * 1-5' } });
+  assert.equal(third.change, 'update', 'after a save, the next draft edits the saved workflow');
+  assert.equal(third.workflowId, saved.id);
+  assert.equal((await drafts.read(w.id, user, chatId, third.draftId)).proposal.input.expectedRevision, saved.revision);
+  assert.equal((await workflows.list(w.id, user)).length, 1);
+});
+
 test('chat drafts a record-date reminder that names its table and field on the card, and refuses sources the human cannot use', async t => {
   const db = await fixture();
   const cleanup = [];

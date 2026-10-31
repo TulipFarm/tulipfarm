@@ -1588,7 +1588,8 @@ export function createConversationExecutor(
                   { kind: 'private-conversation', conversationId: fence.conversationId },
                   ...(chat.context?.sources ?? []),
                 ];
-          const assistants = messages.filter(message => message.role === 'assistant');
+          // Question and approval cards add no text to model context, so they carry no result sources.
+          const assistants = messages.filter(message => message.role === 'assistant' && message.text);
           const rows = z
             .array(z.object({ message_id: uuidSchema, sources: conversationResultSchema.shape.sources }))
             .parse(

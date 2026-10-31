@@ -354,6 +354,10 @@ test(
           if (path.endsWith('/workspace-mcp/capabilities'))
             return route.fulfill({ status: 404, json: { error: 'not-found' } });
           if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
+          if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+          if (path.endsWith('/system-package-installations'))
+            return route.fulfill({ json: { installations: [], nextCursor: null } });
+          if (path.endsWith('/governance')) return route.fulfill({ status: 404, json: { error: 'not-found' } });
           const table = tableDefinitions.find(item => path.endsWith(`/tables/${item.id}`));
           if (table)
             return tableFailure

@@ -29,7 +29,7 @@ import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
 import { CanvasProvider, useCanvas, useResultAttention } from './canvas-state';
-import { WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
+import { NewWorkflowDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
 import { RecordChangesCard, RowViewCard, RowViewResponse } from './records-canvas';
@@ -1286,6 +1286,14 @@ function ConversationDetail({
                   />
                 )}
                 {!draft && !empty && (
+                  <NewWorkflowDrafts
+                    workspaceId={workspace.id}
+                    chatId={chatId}
+                    tools={history.messages.flatMap(message => message.tools)}
+                    foreground={visible && !compact}
+                  />
+                )}
+                {!draft && !empty && (
                   <ChatPlans
                     workspaceId={workspace.id}
                     chatId={chatId}
@@ -1861,6 +1869,7 @@ function ConversationTools({
         .filter(
           tool =>
             tool.status === 'completed' &&
+            tool.activityStatus !== 'failed' &&
             !tool.importId &&
             (['agents.draft', 'skills.draft', 'workflows.draft'].includes(tool.tool) || tool.rowDraftId === tool.id),
         )
