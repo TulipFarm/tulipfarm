@@ -14,6 +14,7 @@ import { requireSlackInstallationUse } from './installation-access.ts';
 import { watchIntegrationRecommendations } from '@tulipfarm/integrations/authorization';
 import { slackRecommendations } from './recommendations.ts';
 import { normalizeSlackContent, slackContentFields } from './message-content.ts';
+import { renderSlackAnswer } from '@tulipfarm/slack-presentation';
 export const threadMessageSchema = z.strictObject({
   user: slackId,
   text: z.string().max(40000),
@@ -283,15 +284,19 @@ export function createChannelProvider(options: {
         : call(tx, workspaceId, actor, source, member, method, params, effect);
     switch (action.tool) {
       case 'slack.message.send':
-        return z
-          .object({ ts: z.string().regex(/^\d{1,16}\.\d{6}$/) })
-          .parse(
-            await send(
-              'chat.postMessage',
-              { channel: source.channel, text: action.text, unfurl_links: false, unfurl_media: false },
-              {},
-            ),
-          ).ts;
+        return z.object({ ts: z.string().regex(/^\d{1,16}\.\d{6}$/) }).parse(
+          await send(
+            'chat.postMessage',
+            {
+              channel: source.channel,
+              text: action.text,
+              ...formatted(action.text),
+              unfurl_links: false,
+              unfurl_media: false,
+            },
+            {},
+          ),
+        ).ts;
       case 'slack.thread.reply':
         return z.object({ ts: z.string().regex(/^\d{1,16}\.\d{6}$/) }).parse(
           await send(
@@ -299,6 +304,7 @@ export function createChannelProvider(options: {
             {
               channel: source.channel,
               text: action.text,
+              ...formatted(action.text),
               thread_ts: action.threadTs,
               unfurl_links: false,
               unfurl_media: false,
@@ -452,4 +458,13 @@ export function createChannelProvider(options: {
     return names;
   }
   return { observe, identity, dispatch, search, authors };
+}
+
+// Markdown renders as formatted blocks; `text` stays the exact approved message and the notification fallback.
+function formatted(text: string): Record<string, string> {
+  try {
+    return { blocks: JSON.stringify(renderSlackAnswer(text).blocks) };
+  } catch {
+    return {};
+  }
 }

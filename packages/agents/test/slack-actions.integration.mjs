@@ -78,6 +78,10 @@ test('shared executor sends all three bounded operations with isolated requester
       { token: 'Bearer xoxp-bob', name: 'reply', channel: 'CHR', text: 'Thread update', ts: '1.000001' },
       { token: 'Bearer xoxp-bob', name: 'react', channel: 'CHR', reaction: 'white_check_mark', ts: '1.000001' },
     ]);
+    assert.deepEqual(
+      f.posts.map(post => JSON.parse(post.blocks)[0].type),
+      ['rich_text', 'rich_text'],
+    );
   } finally {
     await f.close();
   }
@@ -1419,15 +1423,6 @@ test('agent saved to post as the TulipFarm app sends with the bot token and stil
     const removed = await f.queue();
     assert.equal(await f.executor.execute(removed.ids), 'blocked');
     assert.equal(f.effects.length, 1);
-    f.setAudience(['UALICE', 'UBOB', 'UGUEST', 'BOTHERBOT', 'UBOT']);
-    const off = createAgentExecutor({
-      runtime: f.runtime,
-      slack: runtime => createSlackActions({ ...f.settings, runtime, appSenderEnabled: async () => false }),
-    });
-    const fallback = await f.queue();
-    assert.equal(await off.execute(fallback.ids), 'completed');
-    assert.equal((await f.service.read(f.workspace.id, f.alice.userId, fallback.ids.callId)).sender, 'user');
-    assert.equal(f.effects.at(-1).token, 'Bearer xoxp-alice');
   } finally {
     await f.close();
   }

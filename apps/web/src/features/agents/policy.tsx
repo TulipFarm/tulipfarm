@@ -25,7 +25,6 @@ import {
 } from './administration';
 import { taskLimitFields } from '../tasks/limits';
 import { ScopeSummary } from './reference-names';
-import { useFlag } from '@/lib/feature-flags';
 
 type Api = ReturnType<typeof agentApi>;
 type Operation =
@@ -129,7 +128,6 @@ function PolicyForm({
   const [limits, setLimits] = useState(policy.limits);
   const [taskLimits, setTaskLimits] = useState(policy.taskLimits);
   const [slackSender, setSlackSender] = useState(policy.slackSender);
-  const appSender = useFlag('slack-app-sender');
   const [review, setReview] = useState<{ policy: Policy; reloaded: boolean } | null>(null);
   const [submitted, setSubmitted] = useState<Section | null>(null);
   const write = useTableWrite(
@@ -468,29 +466,27 @@ function PolicyForm({
                   </Field>
                 ))}
               </div>
-              {(appSender || slackSender === 'app') && (
-                <Field
-                  id="agent-slack-sender"
-                  label="Post Slack messages as"
-                  required
-                  helper="The TulipFarm app must be added to each channel. Your personal account posts under your name."
+              <Field
+                id="agent-slack-sender"
+                label="Post Slack messages as"
+                required
+                helper="The TulipFarm app must be added to each channel. Your personal account posts under your name."
+              >
+                <Select
+                  value={slackSender}
+                  onValueChange={value => {
+                    if (value === 'app' || value === 'user') setSlackSender(value);
+                  }}
                 >
-                  <Select
-                    value={slackSender}
-                    onValueChange={value => {
-                      if (value === 'app' || value === 'user') setSlackSender(value);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue>{slackSenderLabel(slackSender)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="app">{slackSenderLabel('app')}</SelectItem>
-                      <SelectItem value="user">{slackSenderLabel('user')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
+                  <SelectTrigger>
+                    <SelectValue>{slackSenderLabel(slackSender)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="app">{slackSenderLabel('app')}</SelectItem>
+                    <SelectItem value="user">{slackSenderLabel('user')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
               <FormFooter
                 dirty={dirty.execution}
                 cancel={discard(() => {

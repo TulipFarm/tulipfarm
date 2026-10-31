@@ -9,7 +9,6 @@ import { agentApi } from '@/features/agents/api';
 import { SlackAction } from '@/features/agents/slack-action';
 import { useAgentSlackApi, useAgentSlackDestinations } from '@/features/agents/slack-queries';
 import { useFeatureRead } from '@/lib/query';
-import { useFlag } from '@/lib/feature-flags';
 import { slackSenderLabel } from '@/features/agents/administration';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
@@ -35,7 +34,6 @@ export function SlackStepControls({
   const { workspace } = workspaceRoute.useRouteContext();
   const api = useAgentSlackApi(workspace.id);
   const read = useAgentSlackDestinations(api);
-  const appSender = useFlag('slack-app-sender');
   const destinations =
     read.state.kind === 'ready'
       ? read.state.data.destinations.filter(item => item.permissions.includes('slack.message.send'))
@@ -86,30 +84,28 @@ export function SlackStepControls({
       <Button variant="ghost" onClick={() => void read.refresh()}>
         Refresh Slack destinations
       </Button>
-      {(appSender || step.sender === 'app') && (
-        <>
-          <Label htmlFor={`slack-sender-${step.id}`}>Post as</Label>
-          <Select
-            value={step.sender ?? 'user'}
-            onValueChange={sender => {
-              if (sender === 'app' || sender === 'user') onChange({ ...step, sender });
-            }}
-          >
-            <SelectTrigger id={`slack-sender-${step.id}`}>
-              <SelectValue>{slackSenderLabel(step.sender)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="app">{slackSenderLabel('app')}</SelectItem>
-              <SelectItem value="user">{slackSenderLabel('user')}</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-sm text-muted-foreground">
-            {step.sender === 'app'
-              ? 'Posts as the TulipFarm app. Add the app to the channel first.'
-              : 'Posts under the Slack account of the person who starts the run, or its sponsor.'}
-          </p>
-        </>
-      )}
+      <>
+        <Label htmlFor={`slack-sender-${step.id}`}>Post as</Label>
+        <Select
+          value={step.sender ?? 'user'}
+          onValueChange={sender => {
+            if (sender === 'app' || sender === 'user') onChange({ ...step, sender });
+          }}
+        >
+          <SelectTrigger id={`slack-sender-${step.id}`}>
+            <SelectValue>{slackSenderLabel(step.sender)}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="app">{slackSenderLabel('app')}</SelectItem>
+            <SelectItem value="user">{slackSenderLabel('user')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-sm text-muted-foreground">
+          {step.sender === 'app'
+            ? 'Posts as the TulipFarm app. Add the app to the channel first.'
+            : 'Posts under the Slack account of the person who starts the run, or its sponsor.'}
+        </p>
+      </>
       <Label>Message text</Label>
       <ValueControl
         id={`slack-text-${step.id}`}

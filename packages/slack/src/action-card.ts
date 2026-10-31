@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { SlackMessage } from '@tulipfarm/slack-presentation';
+import { renderSlackAnswer, type SlackMessage } from '@tulipfarm/slack-presentation';
 import type { slackActionViewSchema } from './action-contracts.ts';
 
 export function slackActionCard(workspaceId: string, action: z.infer<typeof slackActionViewSchema>): SlackMessage {
@@ -7,17 +7,16 @@ export function slackActionCard(workspaceId: string, action: z.infer<typeof slac
     action.action.tool === 'slack.reaction.add'
       ? `Reaction ${action.action.reaction} on message ${action.action.messageTs}`
       : action.action.text;
-  const target = `Destination ${action.channel}${action.action.tool === 'slack.thread.reply' ? `, thread ${action.action.threadTs}` : ''}`;
+  const thread = action.action.tool === 'slack.thread.reply' ? `, thread ${action.action.threadTs}` : '';
+  const target = `Destination ${action.channel}${thread}`;
   const value = JSON.stringify({ workspaceId, actionId: action.id, digest: action.digest });
   return {
     kind: 'message',
     text: `Review Slack action. ${target}. ${content}. Status ${action.status}.`,
     blocks: [
       { type: 'header', text: { type: 'plain_text', text: 'Review Slack action' } },
-      { type: 'section', text: { type: 'plain_text', text: target } },
-      ...[content.slice(0, 2800), content.slice(2800)]
-        .filter(Boolean)
-        .map(text => ({ type: 'section' as const, text: { type: 'plain_text' as const, text } })),
+      { type: 'section', text: { type: 'mrkdwn', text: `Destination <#${action.channel}>${thread}` } },
+      ...preview(action.action.tool === 'slack.reaction.add' ? null : content, content),
       {
         type: 'context',
         elements: [
@@ -50,4 +49,15 @@ export function slackActionCard(workspaceId: string, action: z.infer<typeof slac
         : []),
     ],
   };
+}
+
+// Shows the message as Slack will render it; text the converter rejects stays exact as plain text.
+function preview(markdown: string | null, content: string): SlackMessage['blocks'] {
+  if (markdown !== null)
+    try {
+      return renderSlackAnswer(markdown).blocks;
+    } catch {}
+  return [content.slice(0, 2800), content.slice(2800)]
+    .filter(Boolean)
+    .map(text => ({ type: 'section' as const, text: { type: 'plain_text' as const, text } }));
 }

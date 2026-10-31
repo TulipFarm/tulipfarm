@@ -31,25 +31,25 @@ test('override values are true or false only', () => {
 });
 
 test('configured flags resolve env override, then FEATURE_FLAGS_OFF, then default', () => {
-  assert.equal(configuredFeatureFlag('slack-app-sender', {}), true);
-  assert.equal(configuredFeatureFlag('slack-app-sender', { NODE_ENV: 'production' }), false);
+  assert.equal(configuredFeatureFlag('images', {}), true);
+  assert.equal(configuredFeatureFlag('images', { NODE_ENV: 'production' }), false);
   assert.equal(
-    configuredFeatureFlag('slack-app-sender', {
+    configuredFeatureFlag('images', {
       NODE_ENV: 'production',
-      FEATURE_FLAG_SLACK_APP_SENDER: 'true',
+      FEATURE_FLAG_IMAGES: 'true',
     }),
     true,
   );
   assert.equal(
-    configuredFeatureFlag('slack-app-sender', {
-      FEATURE_FLAGS_OFF: 'slack-app-sender',
+    configuredFeatureFlag('images', {
+      FEATURE_FLAGS_OFF: 'images',
     }),
     false,
   );
   assert.equal(
-    configuredFeatureFlag('slack-app-sender', {
-      FEATURE_FLAGS_OFF: 'slack-app-sender',
-      FEATURE_FLAG_SLACK_APP_SENDER: 'true',
+    configuredFeatureFlag('images', {
+      FEATURE_FLAGS_OFF: 'images',
+      FEATURE_FLAG_IMAGES: 'true',
     }),
     true,
   );
