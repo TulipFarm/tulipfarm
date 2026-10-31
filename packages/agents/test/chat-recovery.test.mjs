@@ -18,7 +18,17 @@ test('text tool detection covers native, wrapped, truncated and multi-call shape
     `I will do this:\n\`\`\`json\n${JSON.stringify({ kind: 'tool', call })}\n\`\`\``,
   ])
     assert.equal(containsToolEnvelope(text), true, text);
-  for (const text of ['Created five tickets.', '{"tickets":5}', '{"kind":"tool","name":"hammer"}'])
+  for (const text of [
+    '<function_calls>\n<invoke name="slack_render">\n<parameter name="blocks">[]</parameter>\n</invoke>\n</function_calls>',
+    '<function call>\n<invoke name="slack_render">\n<parameter name="title">Plan</parameter>',
+  ])
+    assert.equal(containsToolEnvelope(text), true, text);
+  for (const text of [
+    'Created five tickets.',
+    '{"tickets":5}',
+    '{"kind":"tool","name":"hammer"}',
+    'Use `<invoke>` in the XML config to start a job.',
+  ])
     assert.equal(containsToolEnvelope(text), false, text);
 });
 

@@ -45,6 +45,7 @@ const interactivePrompt = [
   '- A choice: a static_select, multi_static_select, radio_buttons, checkboxes, overflow, datepicker or timepicker in an actions block. Choosing sends the option text, so make each option text a complete answer.',
   '- A form in the message: input blocks, each with a label, then an actions block with a button whose action_id is "submit". Pressing it sends every label and answer.',
   '- A modal for a longer form: put its blocks (mostly input blocks) in `modals` with an `id`, a `title` and a `submit` label of at most 24 characters each, and open it with a button whose action_id is "open_modal:<id>".',
+  '- To ask the user to choose, use these buttons or choices in your blocks. present_choice is not available in Slack.',
   '- Suggest at most three follow-ups, and only ones that would help.',
 ].join('\n');
 
@@ -56,6 +57,8 @@ export const slackRenderPrompt = (interactive: boolean) =>
     '- `summary` is one or two plain sentences that answer the question. It is the notification text. `title` names the reply in a few words.',
     '- `blocks` are Slack Block Kit blocks, at most 48. Build what reads best in Slack: a short answer is one markdown block; structure uses header, section (with fields for key facts), context, divider, table, data_table, data_visualization (bar, line, area or pie), card, carousel of cards, alert, container, rich_text, image, plan and task_card.',
     '- A markdown block holds standard Markdown. Text objects of type "mrkdwn" use Slack syntax: *bold*, _italic_, `code`, <https://example.com|label>.',
+    '- Tables: when the answer compares several items across the same attributes, or lists figures by row (such as months with revenue and deals), use a table, not lists or stacked lines.',
+    '- Keep numbers, prices and currency symbols as the user or the source wrote them, such as $90 or €1.5k; do not spell them out in words.',
     '- At most one table and two data_visualization blocks. A table is {"type":"table","rows":[[{"type":"raw_text","text":"Name"}, ...], ...]}; its first row is the header.',
     '- Charts: when the user asks for a chart, graph or plot, or numbers show a trend, a comparison or a share, add a data_visualization block. Never draw a chart with text, bars of characters or a code block.',
     '- A bar, line or area chart: {"type":"data_visualization","title":"Monthly revenue","chart":{"type":"line","axis_config":{"categories":["Jan","Feb","Mar"],"x_label":"Month","y_label":"Revenue ($k)"},"series":[{"name":"Revenue","data":[{"label":"Jan","value":40},{"label":"Feb","value":52},{"label":"Mar","value":47}]}]}}. Each series has one point per category, labelled with it. Use line or area for trends over time and bar for comparisons; several series compare groups, and values may be negative.',
@@ -68,7 +71,7 @@ export const slackRenderPrompt = (interactive: boolean) =>
     '',
     interactive
       ? interactivePrompt
-      : '- Buttons may only open links (a button with a `url`). Do not use inputs, selects or other interactive elements.',
+      : '- Buttons may only open links (a button with a `url`). Do not use inputs, selects or other interactive elements. present_choice is not available in Slack; to ask a question, write the options in the answer.',
   ].join('\n');
 
 type Element = Record<string, unknown>;

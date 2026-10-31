@@ -16,7 +16,12 @@ function toolEnvelope(value: unknown): boolean {
   return object.decision !== undefined && toolEnvelope(object.decision);
 }
 
+/** A tool call written out in a provider's XML markup: an `<invoke>` or `<function_calls>` tag with `<parameter name=...>`. */
+const markupCall = /<\/?(?:function[ _]?calls?|(?:\w+:)?invoke)\b[^>]*>/i;
+const markupParameter = /<(?:\w+:)?parameter\s+name\s*=/i;
+
 export function containsToolEnvelope(text: string): boolean {
+  if (markupCall.test(text) && markupParameter.test(text)) return true;
   const candidates = [
     text.trim(),
     ...[...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map(match => match[1]!.trim()),

@@ -29,6 +29,10 @@ import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 
 // Tells only the person who pressed a button what happened; the thread itself stays unchanged.
 async function respondEphemeral(responseUrl: string | undefined, text: string) {
+  await respond(responseUrl, { response_type: 'ephemeral', replace_original: false, text });
+}
+
+async function respond(responseUrl: string | undefined, body: Record<string, unknown>) {
   if (!responseUrl || new URL(responseUrl).origin !== 'https://hooks.slack.com') return;
   try {
     await fetch(responseUrl, {
@@ -36,7 +40,7 @@ async function respondEphemeral(responseUrl: string | undefined, text: string) {
       redirect: 'error',
       signal: AbortSignal.timeout(5000),
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ response_type: 'ephemeral', replace_original: false, text }),
+      body: JSON.stringify(body),
     });
   } catch {
     // The retry is already recorded; a missed confirmation only hides the status from the person who pressed it.
@@ -180,12 +184,13 @@ export function registerSlackActions(
       user: string,
       reply: { channel: string; messageTs: string },
       text: string,
-    ): Promise<string> => {
+    ): Promise<string | undefined> => {
       const workspaceId = await workspaceFor(team);
       if (!workspaceId) return 'This Slack workspace is no longer connected to TulipFarm.';
       try {
         const outcome = await defaults.followUp(workspaceId, reply, clicker(team, user), text.slice(0, 4000));
-        return outcome === 'busy' ? 'Wait for the current reply to finish, then try again.' : 'Working on it.';
+        // A started follow-up shows its progress in the thread, so it needs no confirmation.
+        return outcome === 'busy' ? 'Wait for the current reply to finish, then try again.' : undefined;
       } catch (error) {
         if (!(error instanceof AccessDenied)) throw error;
         return 'Only the person who asked can answer this reply.';
@@ -258,9 +263,7 @@ export function registerSlackActions(
           `Form "${payload.view.title.text}":\n${answers}`,
         );
         const field = payload.view.blocks.find(block => block.type === 'input' && block.block_id)?.block_id;
-        return text === 'Working on it.' || !field
-          ? undefined
-          : { response_action: 'errors', errors: { [field]: text } };
+        return !text || !field ? undefined : { response_action: 'errors', errors: { [field]: text } };
       }
       const action = payload.actions[0];
       if (!action) throw new SyntaxError();
@@ -272,7 +275,6 @@ export function registerSlackActions(
           operation: 'slack.reply.feedback',
           outcome: action.value === 'positive' ? 'positive' : 'negative',
         });
-        text = 'Thanks for the feedback.';
       } else if (kind === 'tf_followup' && typeof action.value === 'string')
         text = await followUp(payload.team.id, payload.user.id, reply, action.value);
       else if (kind === 'tf_choice') {
@@ -364,21 +366,21 @@ export function registerSlackActions(
           if (!action) throw new SyntaxError();
           if (action.action_id === slackReplyRetryAction) {
             const value = z.strictObject({ workspaceId: z.uuid(), eventId: z.uuid() }).parse(JSON.parse(action.value));
-            let text: string;
+            let text: string | undefined;
             try {
-              text =
-                (await defaults.retry(value.workspaceId, value.eventId, {
-                  appId: config.appId,
-                  teamId: payload.team.id,
-                  slackUserId: payload.user.id,
-                })) === 'retrying'
-                  ? 'Retrying your request now.'
-                  : 'This request was already retried.';
+              const outcome = await defaults.retry(value.workspaceId, value.eventId, {
+                appId: config.appId,
+                teamId: payload.team.id,
+                slackUserId: payload.user.id,
+              });
+              // A started retry removes the failure notice; its progress and answer then appear in the thread.
+              if (outcome === 'retrying') await respond(payload.response_url, { delete_original: true });
+              else text = 'This request was already retried.';
             } catch (error) {
               if (!(error instanceof AccessDenied)) throw error;
               text = 'Only the person who asked can retry this request.';
             }
-            await respondEphemeral(payload.response_url, text);
+            if (text) await respondEphemeral(payload.response_url, text);
             return {};
           }
           if (action.action_id === slackRowDraftApprove || action.action_id === slackRowDraftDismiss) {
