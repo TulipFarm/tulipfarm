@@ -11,9 +11,20 @@ export const followUpSchema = z.strictObject({
 });
 export type FollowUp = z.infer<typeof followUpSchema>;
 
+// A message's markdown blocks share a 12,000 character limit; the rest is left for the cut notice.
+const reportLimit = 11500;
+
+/** A report as one markdown block, cut at a paragraph when it is longer than a message holds. */
+export function reportText(report: string): string {
+  if (report.length <= reportLimit) return report;
+  const cut = report.lastIndexOf('\n\n', reportLimit);
+  return `${report.slice(0, cut > reportLimit / 2 ? cut : reportLimit).trimEnd()}\n\n_The report is cut here. Open it in TulipFarm to read the rest._`;
+}
+
 /**
  * The Slack message for a reply laid out with `slack_render`, or `undefined` for a text reply, which is sent as
- * Markdown. A report becomes a canvas when the installation may create one; the reply links it and the chat.
+ * Markdown. A report becomes a canvas when the installation may create one; the reply links it and the chat. When the canvas
+ * cannot be made, the reply carries the report itself.
  * `reserve` leaves room for blocks the caller adds, such as review cards.
  */
 export async function slackLayoutPresentation(input: {
@@ -41,12 +52,14 @@ export async function slackLayoutPresentation(input: {
         })
       : undefined;
   const room = 50 - (input.reserve ?? 0);
+  // Without a canvas, such as on a free Slack plan, the full report is posted in the reply instead of its preview.
+  const blocks = slack.report && !canvas ? [{ type: 'markdown', text: reportText(slack.report) }] : slack.blocks;
   const build = (echo: boolean, feedback: boolean) =>
     slackReplyMessage({
       summary,
       blocks: [
         ...(echo && input.echo ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: input.echo }] }] : []),
-        ...slack.blocks,
+        ...blocks,
       ],
       links: { canvas, app: input.app },
       feedback,

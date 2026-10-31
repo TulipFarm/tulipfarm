@@ -507,13 +507,6 @@ export function createSlackDefault(
     const progressShown =
       selected.status !== 'completed' &&
       ((selected.context_kind === 'channel' && options.publicDelivery) || selected.root.channel.startsWith('D'));
-    if (selected.status !== 'completed' && selected.context_kind === 'channel' && options.publicDelivery)
-      await setBotThreadStatus({
-        token,
-        channel: selected.root.channel,
-        threadTs: selected.root.root_ts,
-        ...(options.fetcher ? { fetcher: options.fetcher } : {}),
-      });
     const progress = progressShown
       ? await startSlackProgress({
           token,
@@ -524,6 +517,14 @@ export function createSlackDefault(
           ...(options.fetcher ? { fetcher: options.fetcher } : {}),
         })
       : undefined;
+    // The streamed plan is the one progress display; the thread status only stands in when Slack refuses the stream.
+    if (!progress && selected.status !== 'completed' && selected.context_kind === 'channel' && options.publicDelivery)
+      await setBotThreadStatus({
+        token,
+        channel: selected.root.channel,
+        threadTs: selected.root.root_ts,
+        ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+      });
     if (selected.status !== 'completed') {
       try {
         await (progress

@@ -3,6 +3,8 @@ import { log } from '@tulipfarm/observability';
 import { slackId } from './contracts.ts';
 import { callSlackApi } from './web-api.ts';
 
+const firstStep = 'tf_request';
+
 export type SlackProgressStep = { id: string; title: string; status: 'in_progress' | 'complete' | 'error' };
 
 const failed = (operation: string, error: unknown) =>
@@ -36,7 +38,11 @@ export async function startSlackProgress(input: {
           channel,
           thread_ts: input.threadTs,
           task_display_mode: 'plan',
-          chunks: JSON.stringify([{ type: 'plan_update', title: input.title }]),
+          // The plan opens with a running step, so Slack shows it at once rather than a blank "Thinking" message.
+          chunks: JSON.stringify([
+            { type: 'plan_update', title: input.title },
+            { type: 'task_update', id: firstStep, title: 'Reading your request', status: 'in_progress' },
+          ]),
           ...(input.recipient
             ? { recipient_user_id: input.recipient.user, recipient_team_id: input.recipient.team }
             : {}),
@@ -50,6 +56,7 @@ export async function startSlackProgress(input: {
     return undefined;
   }
   let open = true;
+  let read = false;
   let queue = Promise.resolve();
   const append = (chunks: unknown[]) => {
     queue = queue.then(async () => {
@@ -71,7 +78,14 @@ export async function startSlackProgress(input: {
   return {
     ts,
     step(step: SlackProgressStep) {
-      return append([{ type: 'task_update', id: step.id, title: step.title.slice(0, 256), status: step.status }]);
+      const chunks: unknown[] = read
+        ? []
+        : [{ type: 'task_update', id: firstStep, title: 'Reading your request', status: 'complete' }];
+      read = true;
+      return append([
+        ...chunks,
+        { type: 'task_update', id: step.id, title: step.title.slice(0, 256), status: step.status },
+      ]);
     },
     async finish() {
       await queue;

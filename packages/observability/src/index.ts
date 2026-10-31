@@ -264,6 +264,7 @@ const logOnlyAttributes = new Set([
   'github.retry_after_s',
   'github.ratelimit_resource',
   'completion.reason',
+  'layout.reason',
 ]);
 // A stored Slack event's own row id: it locates the event in the database and carries no Slack content.
 const rowIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -299,6 +300,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key.startsWith('github.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     // The completion check's own model-written reason, at most 240 characters by its schema; it can quote the chat.
     if (key === 'completion.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
+    // Why a reply layout was rejected: the validator's rule, with quoted values removed.
+    if (key === 'layout.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
