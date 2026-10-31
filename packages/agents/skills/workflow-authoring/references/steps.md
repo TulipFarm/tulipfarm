@@ -53,10 +53,9 @@ Slack account (`"sender":"user"`). Do not choose for them. The app must already
 be a member of the channel. Omitting `sender` posts from the personal account.
 Chat sends outside a workflow always use the person's own account.
 
-Each run needs its requester (manual/event) or sponsor (unattended) to approve
-the exact message within 24 hours. Saving or activating the workflow does not
-approve its messages. Lost access to the destination or its sources stops the
-action. Run history shows the exact message, approval controls, and delivery status.
+Each run posts its message to the channel straight away, without a separate
+approval. Lost access to the destination or its sources stops the action. Run
+history shows the exact message and its delivery status.
 Only a confirmed send completes the step, with `actionId`, `status:"sent"` and
 `sentMessageTs` (the outbound message timestamp).
 An unknown delivery is terminal: inspect Slack before making a new request.

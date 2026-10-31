@@ -114,8 +114,7 @@ export function SlackStepControls({
         onChange={text => onChange({ ...step, text })}
       />
       <p className="text-sm text-muted-foreground">
-        The value must be text, from 1 to 4,000 characters. Each send needs the requester’s or sponsor’s approval within
-        24 hours. Saving or activating this workflow does not approve messages.
+        The value must be text, from 1 to 4,000 characters. Each run posts it to the channel straight away.
       </p>
     </fieldset>
   );

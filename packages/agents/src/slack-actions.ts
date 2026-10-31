@@ -36,7 +36,7 @@ import { taskRun } from './task-approval-gate.ts';
 import { requireCurrentConversationSources } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { canAccessSlackInstallation, SlackChannelAccessError, slackResolveSchema } from '@tulipfarm/slack';
-import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { errorType, isFeatureEnabled, log } from '@tulipfarm/observability';
 import { claimRunImages, deliverRunImages, type DeliveredMessage, type SlackImageFiles } from './slack-images.ts';
@@ -405,8 +405,6 @@ export function createSlackActions(options: Options) {
       if ((await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_slack_actions')} WHERE id=$1`, [callId])).rowCount) {
         const row = await load(tx, callId);
         if (row.run_id !== runId || canonicalJson(row.action) !== canonicalJson(action)) throw new AccessDenied();
-        if (workflow && !row.approval_required && ['pending', 'retry'].includes(row.state))
-          throw new StorageUnavailableError('incompatible_version');
         return view(row);
       }
       const actor = await owner(tx, runId, callId, action);
@@ -429,7 +427,6 @@ export function createSlackActions(options: Options) {
       const policy = await agentPolicy(tx, runId, callId),
         policyVersion = policy.version;
       const sender: SlackSender = policy.sender === 'app' && hasSender(tx) ? 'app' : 'user';
-      const approvalRequired = Boolean(workflow);
       const digest = createHash('sha256')
         .update(
           canonicalJson({
@@ -461,7 +458,8 @@ export function createSlackActions(options: Options) {
           destination.channel,
           action,
           digest,
-          approvalRequired,
+          // Until migration 25 the origin trigger only accepts workflow sends that wait for approval.
+          Boolean(workflow) && Number(tx.commonVersion) < 25,
           policyVersion,
           providerDigest,
           ...(hasSender(tx) ? [sender] : []),
@@ -589,8 +587,7 @@ export function createSlackActions(options: Options) {
         seconds = 0,
         sentMessageTs: string | null = null;
       try {
-        if ((await workflowOrigin(tx, runId, callId)) && (!row.approval_required || row.decision !== 'approve'))
-          throw new Error('slack-action-stale');
+        if (row.approval_required && row.decision !== 'approve') throw new Error('slack-action-stale');
         const { actor, audience } = await fresh(tx, workspaceId, row);
         if (row.expires_at.getTime() <= Date.now()) state = 'expired';
         else {
