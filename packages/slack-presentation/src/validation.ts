@@ -171,7 +171,8 @@ export function parseSlackSurface(value: unknown): SlackSurface {
         }
         case 'data_visualization': {
           charts++;
-          if (block.title.length > 50) throw new SlackPayloadError(limitReason(block.type));
+          if (block.title.length > 50)
+            throw new SlackPayloadError('A data_visualization title has at most 50 characters.');
           const chart = block.chart;
           if (chart.type === 'pie') {
             if (
@@ -179,7 +180,9 @@ export function parseSlackSurface(value: unknown): SlackSurface {
               chart.segments.length > 12 ||
               chart.segments.some(segment => segment.value <= 0 || segment.label.length > 20)
             )
-              throw new SlackPayloadError(limitReason(block.type));
+              throw new SlackPayloadError(
+                'A pie chart has 1 to 12 segments, each with a positive value and a label of at most 20 characters.',
+              );
           } else {
             const categories = chart.axis_config.categories;
             if (
@@ -190,7 +193,9 @@ export function parseSlackSurface(value: unknown): SlackSurface {
               chart.series.length > 12 ||
               new Set(chart.series.map(series => series.name)).size !== chart.series.length
             )
-              throw new SlackPayloadError(limitReason(block.type));
+              throw new SlackPayloadError(
+                'A bar, line or area chart has 1 to 20 distinct axis_config.categories and 1 to 12 series with distinct names.',
+              );
             if (
               chart.series.some(
                 series =>
@@ -200,7 +205,9 @@ export function parseSlackSurface(value: unknown): SlackSurface {
                   series.data.some(point => !categories.includes(point.label)),
               )
             )
-              throw new SlackPayloadError(limitReason(block.type));
+              throw new SlackPayloadError(
+                'Each chart series has a name of at most 20 characters and exactly one data point per category, labelled with that category.',
+              );
           }
           break;
         }
