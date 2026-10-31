@@ -85,12 +85,7 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
   const slackUnchecked =
     (proposal.kind === 'workflow' || (proposal.kind === 'workflow-activation' && proposal.input.enabled)) &&
     proposal.input.definition.steps.some(step => step.kind === 'slack-message' && !slackReady[step.destinationId]);
-  const locked =
-    write.locked ||
-    write.state.kind === 'accepted' ||
-    read.state.kind !== 'ready' ||
-    !!read.state.error ||
-    read.state.refreshing;
+  const locked = write.locked || write.state.kind === 'accepted' || read.state.kind !== 'ready' || !!read.state.error;
   const decide = (
     decision: Extract<ConversationCommand, { kind: 'draft-decision' }>['decision'],
     consent?: Extract<ConversationCommand, { kind: 'draft-decision' }>['consent'],

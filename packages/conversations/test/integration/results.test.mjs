@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { conversationFixture } from '../fixture.mjs';
 import { createConversationExecutor } from '../../src/runtime.ts';
+import { createConversationRequests } from '../../src/requests.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 async function send(f, chatId, text = 'Continue') {
@@ -196,6 +197,47 @@ test('source receipt failure rolls back the answer and the next attempt publishe
       (await f.store.history(f.workspace.id, f.workspace.userId, chatId)).messages[1].parts[0].text,
       'Atomic answer',
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a question card adds no unknown lineage to later replies in the chat', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    let asked = false;
+    const choice = {
+      tool: 'present.choice',
+      prompt: 'Which day?',
+      choices: [
+        { id: 'mon', label: 'Monday' },
+        { id: 'tue', label: 'Tuesday' },
+      ],
+    };
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      if (!asked) {
+        asked = true;
+        await executeTool(choice.tool, false, async () => ({ result: {}, sources: [] }), [], choice);
+      }
+      return { text: 'Tuesday it is', sources: [] };
+    });
+    const requests = createConversationRequests(f.runtime);
+    assert.equal(await executor.process(await send(f, chatId, 'Book the review')), 'idle');
+    const [{ requestId }] = (
+      await f.db.platform.query(`SELECT id AS "requestId" FROM ${f.table('tf_conversation_requests')}`)
+    ).rows;
+    await requests.answer(w.id, w.userId, chatId, requestId, randomUUID(), {
+      commandId: randomUUID(),
+      expectedRevision: 1,
+      answer: { kind: 'text', text: 'Tuesday' },
+    });
+    const [resumed] = await executor.due(w.id);
+    assert.equal(await executor.process(resumed), 'completed');
+    assert.equal(await executor.process(await send(f, chatId, 'Make it Wednesday')), 'completed');
+    assert.deepEqual((await results(f)).at(-1).sources, [{ kind: 'private-conversation', conversationId: chatId }]);
   } finally {
     await f.close();
   }
