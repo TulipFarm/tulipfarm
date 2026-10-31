@@ -458,8 +458,8 @@ export function createSlackActions(options: Options) {
           destination.channel,
           action,
           digest,
-          // Until migration 25 the origin trigger only accepts workflow sends that wait for approval.
-          Boolean(workflow) && Number(tx.commonVersion) < 25,
+          // Until migration 26 the origin trigger only accepts workflow sends that wait for approval.
+          Boolean(workflow) && Number(tx.commonVersion) < 26,
           policyVersion,
           providerDigest,
           ...(hasSender(tx) ? [sender] : []),
