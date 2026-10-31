@@ -323,9 +323,6 @@ export function workflowGraph(
       facts: [
         { label: 'Action', value: sourceText(step, labels, timezone) },
         { label: 'Acts as', value: actor },
-        ...(step.kind === 'slack-message'
-          ? [{ label: 'Approval', value: 'The requester or sponsor approves each exact message before it is sent.' }]
-          : []),
         ...(step.kind === 'agent'
           ? [{ label: 'Limits', value: `${step.limits.toolCalls} tool calls / ${step.limits.credits} credits` }]
           : []),

@@ -14,7 +14,7 @@ import { createChatTools } from '../src/tools.ts';
 import { createSlackActions } from '../src/slack-actions.ts';
 import { outboundFixture } from './slack-actions.integration.mjs';
 
-test('native Slack workflow: Tickets chat draft, row event, per-send approval, restart and exact sent receipt', async t => {
+test('native Slack workflow: Tickets chat draft, row event, direct send, restart and exact sent receipt', async t => {
   const f = await outboundFixture({ channelName: 'tech' });
   t.after(() => f.close());
   const w = f.workspace;
@@ -99,7 +99,7 @@ test('native Slack workflow: Tickets chat draft, row event, per-send approval, r
         activate: true,
       }),
     );
-    return { text: 'Review this workflow. Each message still needs approval.', sources: [] };
+    return { text: 'Review this workflow before it posts to Slack.', sources: [] };
   });
   assert.equal(
     await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
@@ -132,7 +132,7 @@ test('native Slack workflow: Tickets chat draft, row event, per-send approval, r
   const progress = await workflows.advance(work);
   assert.equal(
     progress.kind,
-    'wait',
+    'continue',
     JSON.stringify({
       runs: (await workflows.history(w.id, w.userId, saved.workflowId)).runs,
       sources: (
@@ -144,61 +144,43 @@ test('native Slack workflow: Tickets chat draft, row event, per-send approval, r
   );
   let [run] = (await workflows.history(w.id, w.userId, saved.workflowId)).runs;
   const actionId = run.steps[0].output.actionId;
-  assert.equal(run.status, 'waiting');
+  assert.equal(run.steps[0].status, 'completed');
+  assert.deepEqual(run.steps[0].output, { provider: 'slack', actionId, status: 'sent', sentMessageTs: '6.000001' });
   const action = await f.service.read(w.id, w.userId, actionId);
-  assert.equal(action.approvalRequired, true, 'even a direct destination requires per-send workflow approval');
-  assert.equal(action.status, 'pending');
+  assert.equal(action.approvalRequired, false, 'a workflow step posts without a per-send approval');
+  assert.equal(action.status, 'sent');
   assert.equal(action.action.text, 'Synthetic ticket');
-  assert.equal(f.effects.length, 0);
-  await workflows.advance(work);
-  assert.equal(f.effects.length, 0);
-  assert.equal(
-    (
-      await f.db.platform.query(
-        `SELECT count(*)::int AS n FROM ${f.table('tf_slack_workflow_actions')} WHERE run_id=$1`,
-        [work.runId],
-      )
-    ).rows[0].n,
-    1,
-  );
+  assert.equal(action.sentMessageTs, '6.000001');
+  assert.deepEqual(f.effects, [{ token: 'Bearer xoxp-alice', name: 'send', channel: 'CHR', text: 'Synthetic ticket' }]);
+  assert.deepEqual(f.cards, [], 'no approval card is posted for a direct send');
   const origin = (
     await f.db.platform.query(
       `SELECT workflow_id,revision,step_id FROM ${f.table('tf_slack_workflow_actions')} WHERE run_id=$1`,
       [work.runId],
     )
-  ).rows[0];
-  assert.deepEqual(origin, { workflow_id: saved.workflowId, revision: saved.revision, step_id: 'notify' });
+  ).rows;
+  assert.deepEqual(origin, [{ workflow_id: saved.workflowId, revision: saved.revision, step_id: 'notify' }]);
   assert.equal(
     (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_agent_runs')} WHERE id=$1`, [work.runId])).rowCount,
     0,
   );
-  await assert.rejects(f.decide(w.id, f.bob.userId, actionId, { digest: action.digest, decision: 'approve' }));
-  await assert.rejects(f.decide(w.id, w.userId, actionId, { digest: '0'.repeat(64), decision: 'approve' }));
-  await f.decide(w.id, w.userId, actionId, { digest: action.digest, decision: 'approve' });
-  assert.ok(
-    (await workflows.resumable(w.id)).some(item => item.runId === work.runId),
-    'a lost decision wake is recovered',
-  );
   const restarted = createWorkflows(f.runtime, {
     slackActions: createSlackActions({ ...f.settings, runtime: f.runtime }),
   });
-  assert.equal((await restarted.advance(work)).kind, 'continue');
   assert.equal((await restarted.advance(work)).kind, 'done');
   await restarted.advance(work);
   [run] = (await restarted.history(w.id, w.userId, saved.workflowId)).runs;
   assert.equal(run.status, 'completed');
   assert.equal(run.steps[0].output.sentMessageTs, '6.000001');
-  assert.equal((await f.service.read(w.id, w.userId, actionId)).sentMessageTs, '6.000001');
-  assert.equal(f.effects.length, 1);
-  assert.ok(f.cards.length);
+  assert.equal(f.effects.length, 1, 'a restart never sends twice');
   assert.equal(
-    (await f.decide(w.id, w.userId, actionId, { digest: action.digest, decision: 'approve' })).status,
-    'sent',
+    (await workflows.resumable(w.id)).some(item => item.runId === work.runId),
+    false,
   );
   assert.equal((await drafts.read(w.id, w.userId, chatId, proposed.draftId)).status, 'saved');
 });
 
-test('native Slack workflow: retry, reject, expiry, revoke, disabled outbound, unknown and auth never replay', async t => {
+test('native Slack workflow: retry, expiry while retrying, revoke, disabled outbound, unknown and auth never replay', async t => {
   const f = await outboundFixture();
   t.after(() => f.close());
   const w = f.workspace;
@@ -231,44 +213,44 @@ test('native Slack workflow: retry, reject, expiry, revoke, disabled outbound, u
     const actionId = run.steps[0]?.output?.actionId;
     return { id, work, action: actionId && (await f.service.read(w.id, w.userId, actionId).catch(() => undefined)) };
   };
+  f.setMode('retry', '3600');
   const retried = await create();
-  assert.equal(retried.action.status, 'pending');
-  assert.equal(retried.action.approvalRequired, true);
+  assert.equal(retried.action.status, 'retry');
+  assert.equal(retried.action.approvalRequired, false);
   assert.equal(f.effects.length, 0);
-  await f.decide(w.id, w.userId, retried.action.id, { digest: retried.action.digest, decision: 'approve' });
-  f.setMode('retry');
-  assert.equal((await service.advance(retried.work)).kind, 'wait');
+  assert.equal((await service.advance(retried.work)).kind, 'wait', 'a retry waits for its next attempt');
   assert.equal(f.effects.length, 0);
   await f.db.databaseAdmin.query(
     `UPDATE ${f.table('tf_slack_action_effects')} SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE action_id=$1`,
     [retried.action.id],
   );
   f.setMode('success');
+  assert.equal((await service.advance(retried.work)).kind, 'continue');
   await service.advance(retried.work);
   await service.advance(retried.work);
   assert.equal(f.effects.length, 1, 'only a known rejected rate-limit attempt is retried');
   assert.equal((await service.history(w.id, w.userId, retried.id)).runs[0].status, 'completed');
-  for (const scenario of ['reject', 'expire', 'revoke', 'disabled', 'lost', 'auth']) {
-    f.setMode('success');
+  for (const scenario of ['expire', 'revoke', 'disabled', 'lost', 'auth']) {
+    f.setMode(scenario === 'expire' ? 'retry' : scenario === 'lost' || scenario === 'auth' ? scenario : 'success');
     const count = f.effects.length;
-    const { id, work, action } = await create();
-    assert.equal(action.status, 'pending', scenario);
-    assert.equal(action.approvalRequired, true, scenario);
-    if (scenario === 'reject') await f.decide(w.id, w.userId, action.id, { digest: action.digest, decision: 'reject' });
-    else if (scenario === 'expire')
+    if (scenario === 'revoke')
+      await f.db.databaseAdmin.query(`UPDATE ${f.table('tf_slack_destinations')} SET enabled=false WHERE id=$1`, [
+        f.destinationId,
+      ]);
+    const runner = scenario === 'disabled' ? createWorkflows(f.runtime) : service;
+    const { id, work, action } = await create(runner);
+    if (scenario === 'expire') {
+      assert.equal(action.status, 'retry', scenario);
       await f.db.databaseAdmin.query(
         `UPDATE ${f.table('tf_slack_actions')} SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
         [action.id],
       );
-    else {
-      await f.decide(w.id, w.userId, action.id, { digest: action.digest, decision: 'approve' });
-      if (scenario === 'revoke')
-        await f.db.databaseAdmin.query(`UPDATE ${f.table('tf_slack_destinations')} SET enabled=false WHERE id=$1`, [
-          f.destinationId,
-        ]);
-      if (scenario === 'auth' || scenario === 'lost') f.setMode(scenario);
+      await f.db.databaseAdmin.query(
+        `UPDATE ${f.table('tf_slack_action_effects')} SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE action_id=$1`,
+        [action.id],
+      );
     }
-    const runner = scenario === 'disabled' ? createWorkflows(f.runtime) : service;
+    f.setMode('success');
     await runner.advance(work);
     await runner.advance(work);
     const [run] = (await service.history(w.id, w.userId, id)).runs;
@@ -277,7 +259,6 @@ test('native Slack workflow: retry, reject, expiry, revoke, disabled outbound, u
     assert.equal(
       run.error,
       {
-        reject: 'slack-action-rejected',
         expire: 'slack-action-expired',
         revoke: 'slack-action-revoked',
         disabled: 'slack-action-unavailable',
@@ -311,7 +292,7 @@ test('native Slack workflow recovery follows only its current waiting step and r
     expectedRevision: null,
     definition: {
       version: 1,
-      name: 'Two approvals',
+      name: 'Two Slack sends',
       trigger: { kind: 'manual' },
       steps: [
         {
@@ -355,39 +336,39 @@ test('native Slack workflow recovery follows only its current waiting step and r
     'a committed preparing step with no provider origin is recoverable',
   );
   const firstId = (await service.history(w.id, w.userId, id)).runs[0].steps[0].output.actionId;
-  await service.advance(work);
-  let action = await f.service.read(w.id, w.userId, firstId);
-  assert.equal(action.status, 'pending');
-  assert.equal(
-    (await service.resumable(w.id)).some(item => item.runId === runId),
-    false,
-  );
-  await f.decide(w.id, w.userId, firstId, { digest: action.digest, decision: 'approve' });
-  assert.ok((await service.resumable(w.id)).some(item => item.runId === runId));
-  await service.advance(work);
-  await service.advance(work);
+  assert.equal((await service.advance(work)).kind, 'continue', 'the recovered preparation sends at once');
+  assert.equal((await f.service.read(w.id, w.userId, firstId)).status, 'sent');
+  assert.equal(f.effects.length, 1);
+  f.setMode('retry', '3600');
+  assert.equal((await service.advance(work)).kind, 'wait');
   const secondId = (await service.history(w.id, w.userId, id)).runs[0].steps[1].output.actionId;
   assert.notEqual(secondId, firstId);
+  assert.equal((await f.service.read(w.id, w.userId, secondId)).status, 'retry');
   assert.equal(
     (await service.resumable(w.id)).some(item => item.runId === runId),
     false,
-    'the first approval must not wake a second pending Slack step',
+    'the sent first action must not wake a second Slack step that is still waiting to retry',
   );
-  action = await f.service.read(w.id, w.userId, secondId);
-  await f.decide(w.id, w.userId, secondId, { digest: action.digest, decision: 'approve' });
-  await service.advance(work);
+  await f.db.databaseAdmin.query(
+    `UPDATE ${f.table('tf_slack_action_effects')} SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE action_id=$1`,
+    [secondId],
+  );
+  assert.ok((await service.resumable(w.id)).some(item => item.runId === runId));
+  f.setMode('success');
+  assert.equal((await service.advance(work)).kind, 'continue');
   await service.advance(work);
   assert.equal(
     (await service.resumable(w.id)).some(item => item.runId === runId),
     false,
-    'past approvals must not wake an unrelated delay',
+    'past Slack sends must not wake an unrelated delay',
   );
   assert.equal(f.effects.length, 2);
 });
 
-test('native Slack workflow retains in-app approval and retries a missing notification after storage failure', async t => {
+test('native Slack workflow action prepared under per-send approval keeps it and retries a missing notification', async t => {
   const f = await outboundFixture();
   t.after(() => f.close());
+  await f.legacyApproval();
   let failed = false;
   const interrupted = {
     transaction: (workspaceId, compatibility, operation) =>
@@ -437,6 +418,7 @@ test('native Slack workflow retains in-app approval and retries a missing notifi
   const actionId = (await service.history(w.id, w.userId, id)).runs[0].steps[0].output.actionId;
   let action = await f.service.read(w.id, w.userId, actionId);
   assert.equal(action.status, 'pending');
+  assert.equal(action.approvalRequired, true);
   assert.equal(action.notificationStatus, null);
   assert.ok((await service.resumable(w.id)).some(item => item.runId === runId));
   await service.advance(work);
@@ -448,6 +430,18 @@ test('native Slack workflow retains in-app approval and retries a missing notifi
   );
   assert.equal(f.cards.length, 1);
   assert.equal(f.effects.length, 0);
+  await assert.rejects(f.decide(w.id, f.bob.userId, actionId, { digest: action.digest, decision: 'approve' }));
+  await assert.rejects(f.decide(w.id, w.userId, actionId, { digest: '0'.repeat(64), decision: 'approve' }));
+  await f.decide(w.id, w.userId, actionId, { digest: action.digest, decision: 'approve' });
+  assert.ok(
+    (await service.resumable(w.id)).some(item => item.runId === runId),
+    'a lost decision wake is recovered',
+  );
+  assert.equal((await service.advance(work)).kind, 'continue');
+  assert.equal((await service.advance(work)).kind, 'done');
+  assert.equal((await service.history(w.id, w.userId, id)).runs[0].status, 'completed');
+  assert.equal((await f.service.read(w.id, w.userId, actionId)).sentMessageTs, '6.000001');
+  assert.equal(f.effects.length, 1);
 });
 
 test('native Slack workflow does not export private history through authored literal text', async t => {
@@ -550,17 +544,15 @@ test('native Slack workflow step saved to post as the TulipFarm app sends with t
   });
   const service = createWorkflows(f.runtime, { slackActions: f.service });
   const { runId } = await service.start(w.id, w.userId, saved.workflowId, { requestId: randomUUID(), input: {} });
-  assert.equal((await service.advance({ workspaceId: w.id, runId })).kind, 'wait');
+  assert.equal((await service.advance({ workspaceId: w.id, runId })).kind, 'continue');
   const [step] = (await service.history(w.id, w.userId, saved.workflowId)).runs[0].steps;
-  assert.equal(step.status, 'waiting');
+  assert.equal(step.status, 'completed');
   const actionId = step.output.actionId;
   const action = await f.service.read(w.id, w.userId, actionId);
   assert.equal(action.sender, 'app');
-  assert.equal(action.approvalRequired, true);
-  assert.equal(action.status, 'pending');
-  assert.equal(f.effects.length, 0);
-  await f.decide(w.id, w.userId, actionId, { digest: action.digest, decision: 'approve' });
-  assert.equal((await service.advance({ workspaceId: w.id, runId })).kind, 'continue');
+  assert.equal(action.approvalRequired, false);
+  assert.equal(action.status, 'sent');
+  assert.deepEqual(f.cards, []);
   assert.deepEqual(f.effects, [
     { token: 'Bearer xoxb-fixture', name: 'send', channel: 'CHR', text: 'Release notes are ready' },
   ]);
