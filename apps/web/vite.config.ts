@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
@@ -55,6 +57,31 @@ function webExtensions(): Plugin {
   };
 }
 
+// `virtual:emoji-glyphs` maps each Slack emoji short name, including `name::skin-tone-N`, to its
+// character. Built from emoji-datasource so the browser loads about 15 KB instead of its full JSON.
+function emojiGlyphs(): Plugin {
+  const id = 'virtual:emoji-glyphs';
+  type Emoji = { unified: string; short_names: string[]; skin_variations?: Record<string, { unified: string }> };
+  const glyph = (unified: string) => String.fromCodePoint(...unified.split('-').map(hex => Number.parseInt(hex, 16)));
+  return {
+    name: 'emoji-glyphs',
+    resolveId: source => (source === id ? `\0${id}` : undefined),
+    load(source) {
+      if (source !== `\0${id}`) return undefined;
+      const file = createRequire(import.meta.url).resolve('emoji-datasource/emoji.json');
+      const glyphs: Record<string, string> = {};
+      for (const emoji of JSON.parse(readFileSync(file, 'utf8')) as Emoji[]) {
+        for (const name of emoji.short_names) glyphs[name] = glyph(emoji.unified);
+        for (const [tones, variation] of Object.entries(emoji.skin_variations ?? {})) {
+          const tone = ['1F3FB', '1F3FC', '1F3FD', '1F3FE', '1F3FF'].indexOf(tones);
+          if (tone !== -1) glyphs[`${emoji.short_names[0]}::skin-tone-${tone + 2}`] = glyph(variation.unified);
+        }
+      }
+      return `export default ${JSON.stringify(glyphs)};\n`;
+    },
+  };
+}
+
 export default defineConfig(({ command }) => {
   // Release builds come from the publication controller, which allocates a version.
   const identity =
@@ -68,6 +95,7 @@ export default defineConfig(({ command }) => {
       tailwindcss(),
       apiPreconnect(),
       webExtensions(),
+      emojiGlyphs(),
       {
         name: 'build-identity',
         generateBundle() {

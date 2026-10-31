@@ -37,3 +37,51 @@ export function sameSlackMessage(left: z.infer<typeof messageSchema>, right: z.i
     (left.thread_ts ?? left.ts) === (right.thread_ts ?? right.ts)
   );
 }
+
+/** Marks a held request made by reacting to a message: the request's user reacted to `itemTs` with `reaction`. */
+export const slackReactionRequestSchema = z.strictObject({
+  reaction: z.string().regex(/^[a-z0-9_+'-]{1,100}(::skin-tone-[2-6])?$/),
+  prompt: z.string().min(1).max(2000),
+  itemTs: z.string().regex(/^\d{1,16}\.\d{6}$/),
+});
+export type SlackReactionRequest = z.infer<typeof slackReactionRequestSchema>;
+
+export async function slackReactionRequest(tx: AuthorizationTransaction, eventId: string) {
+  const value = (
+    await tx.client.query(
+      `SELECT payload->'tf_reaction' AS reaction FROM ${qualified(tx.schema, 'tf_slack_events')} WHERE id=$1 AND disposition='held'`,
+      [eventId],
+    )
+  ).rows[0]?.reaction;
+  return value == null ? null : slackReactionRequestSchema.parse(value);
+}
+
+/**
+ * Whether a request is still in the thread Slack returned. A message request must be there unchanged; a reaction
+ * request needs its message there, still carrying that reaction from the requester.
+ */
+export function slackRequestInThread(
+  thread: {
+    messages: readonly Parameters<typeof matchesSlackSnapshot>[0][];
+    reactions: readonly { ts: string; name: string; users: readonly string[] }[];
+  },
+  request: z.infer<typeof messageSchema>,
+  reaction: SlackReactionRequest | null,
+) {
+  if (!reaction) return thread.messages.some(message => matchesSlackSnapshot(message, request));
+  const base = reaction.reaction.split('::')[0];
+  return (
+    thread.messages.some(message => message?.ts === reaction.itemTs) &&
+    thread.reactions.some(
+      item =>
+        item.ts === reaction.itemTs &&
+        (item.name === reaction.reaction || item.name.split('::')[0] === base) &&
+        item.users.includes(request.user),
+    )
+  );
+}
+
+/** The request a reaction makes: the workspace's prompt for that reaction, applied to the reacted message. */
+export function slackReactionPrompt(reaction: SlackReactionRequest) {
+  return `The requester reacted with :${reaction.reaction}: to the message with ts ${reaction.itemTs} in this thread. This channel's instruction for that reaction comes from the workspace, not from Slack text.\nCurrent request: ${reaction.prompt}`;
+}

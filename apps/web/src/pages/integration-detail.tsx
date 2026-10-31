@@ -31,6 +31,7 @@ import {
   githubRepositoryPrototypeEnabled,
 } from '@/features/integrations/github-repository-content-prototype';
 import { GoogleKnowledgeSources } from '@/features/integrations/google-knowledge';
+import { SlackChannelSettingsTab } from '@/features/integrations/slack-channel-settings';
 import {
   actionFor,
   defaultKnowledgeProducts,
@@ -161,7 +162,8 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
       />
       <WorkspaceRefreshNotice />
       <fieldset disabled={workspaceStale} className="min-w-0">
-        <div className="max-w-5xl space-y-6">
+        {/* The Channels table uses the full width; other tabs keep the reading width. */}
+        <div className={tab === 'channels' ? 'space-y-6' : 'max-w-5xl space-y-6'}>
           <section aria-label={`${app.name} summary`} className="flex flex-wrap items-start gap-4">
             <BrandIcon brand={app.brand} size="xl" />
             <div className="min-w-0 flex-1 basis-56 space-y-1.5">
@@ -251,6 +253,11 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
                 <Pane>
                   {accessLost ? <AccessLost /> : <KnowledgeTab app={app} status={status} workspaceId={workspaceId} />}
                 </Pane>
+              </TabsContent>
+            )}
+            {tabs.includes('channels') && (
+              <TabsContent value="channels">
+                <Pane>{accessLost ? <AccessLost /> : <SlackChannelSettingsTab workspaceId={workspaceId} />}</Pane>
               </TabsContent>
             )}
             {tabs.includes('settings') && (

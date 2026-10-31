@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
-import { classifyEvent, eventEnvelopeSchema, type SlackEvent } from './contracts.ts';
+import { classifyEvent, eventEnvelopeSchema, type SlackEvent, type SlackReactionEvent } from './contracts.ts';
 import { slackCompatibility, type SlackRuntime, type createSlackInstallations } from './installations.ts';
 import { lockAuthorization, type AuthorizationTransaction } from '@tulipfarm/access';
 import { watchIntegrationRecommendations } from '@tulipfarm/integrations/authorization';
@@ -18,6 +18,14 @@ export function createSlackInbox(
     generation: number,
     workspaceId: string,
   ) => Promise<unknown>,
+  /** Turns a reaction into a held request payload when the channel has a rule for it, otherwise null. */
+  react?: (
+    tx: AuthorizationTransaction,
+    event: SlackReactionEvent,
+    installationId: string,
+    generation: number,
+    workspaceId: string,
+  ) => Promise<Record<string, unknown> | null>,
 ) {
   async function accept(route: Route, input: SlackEvent) {
     const envelope = eventEnvelopeSchema.parse(input);
@@ -55,14 +63,21 @@ export function createSlackInbox(
       )
         throw new Error('slack-installation-unavailable');
       const isMessage = classified.kind === 'message' && classified.event.user !== installation.bot_user_id;
+      const reaction =
+        classified.kind === 'reaction' && react && classified.event.user !== installation.bot_user_id
+          ? await react(tx, classified.event, route.installationId, route.generation, route.workspaceId)
+          : null;
       const semantic = isMessage
         ? `message:${classified.event.channel}:${classified.event.ts}`
-        : `event:${envelope.event_id}`;
-      const disposition = isMessage
-        ? 'held'
-        : ['uninstall', 'revocation'].includes(classified.kind)
-          ? 'lifecycle'
-          : 'ignored';
+        : reaction && classified.kind === 'reaction'
+          ? `reaction:${classified.event.item.channel}:${classified.event.item.ts}:${classified.event.reaction}:${classified.event.user}`
+          : `event:${envelope.event_id}`;
+      const disposition =
+        isMessage || reaction
+          ? 'held'
+          : ['uninstall', 'revocation'].includes(classified.kind)
+            ? 'lifecycle'
+            : 'ignored';
       const receipt = await tx.client.query(
         `INSERT INTO ${table('tf_slack_events')} (id,installation_id,generation,event_id,semantic_key,event_time,payload,disposition)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING id`,
@@ -73,9 +88,10 @@ export function createSlackInbox(
           envelope.event_id,
           semantic,
           envelope.event_time,
-          classified.kind === 'message' || classified.kind === 'revocation' || classified.kind === 'message-change'
-            ? classified.event
-            : { type: envelope.event.type },
+          reaction ??
+            (classified.kind === 'message' || classified.kind === 'revocation' || classified.kind === 'message-change'
+              ? classified.event
+              : { type: envelope.event.type }),
           disposition,
         ],
       );
@@ -105,11 +121,11 @@ export function createSlackInbox(
           ],
         );
       }
-      if (isMessage && freeze)
+      if ((isMessage || reaction) && freeze)
         await freeze(
           tx,
           z.uuid().parse(receipt.rows[0]?.id),
-          classified.event,
+          reaction ?? (classified.kind === 'message' ? classified.event : null),
           route.installationId,
           route.generation,
           route.workspaceId,

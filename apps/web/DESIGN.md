@@ -447,6 +447,11 @@ Icons come from `reicon-react` (per-icon imports such as
 dense rows; some older screens still use `lucide-react`. Third-party marks use
 `BrandIcon`.
 
+Dropdowns are Sprout's searchable `Combobox` (`@tulipfarm/sprout/combobox`):
+`ComboboxInput`, `ComboboxContent`, `ComboboxEmpty` and a `ComboboxList` of
+`ComboboxItem`s, with `itemToStringLabel` for the field text. Never use a native
+`<select>`. Keep a Sprout `Select` only for a short, fixed list that can't grow.
+
 ### Business record tables
 
 Shared Sprout tables always use a grid look: a visible `input`-color frame and
@@ -506,6 +511,22 @@ can do and example prompts with an "At a glance" aside. Knowledge progress uses
 over-limit items whose legend always lists all five states. A repository picker
 keeps one vertical scrolling body with its selected count and actions in a
 footer, associated with the owning form through the native `form` attribute.
+
+Slack adds a Channels tab after Knowledge. It has no heading or intro and
+lifts the page's `max-w-5xl` cap so the table fills the width. It lists every
+channel the bot can see in a Sprout `Table` (`narrow="stack"`) with Channel, Agent, Replies to, and
+Reactions columns, a `SearchField`, and an outline `ToggleGroup` (All, Every
+message, Reactions) with counts, both at the default control height, and a muted
+"Select a channel to edit…" hint for managers. Defaults are muted text, overrides are plain
+text or an `info` badge, and a channel the bot has left shows a `warning`
+badge. Managers open a row into a `Sheet` editor (agent `Combobox`, replies
+`ChoiceGroup`, up to five bordered reaction rules, each a searchable emoji `Combobox`
+(any standard or custom Slack emoji, glyph or custom image shown before `:name:`) above a required prompt `Textarea` the agent follows on the reacted
+message; the table truncates each prompt to one line with the full text as a title);
+others get a read-only note. Manager rows end in a ghost chevron button, hidden
+in stacked cards. Closing a changed editor asks "Leave these edits?" like the
+record editor. The reaction column, filter and editor section show only with the `slack-reactions` flag. Saves send the row's version, confirm in a `role="status"` line at
+the end of the toolbar (so the table doesn't shift), and a conflict offers to load the newer settings.
 
 Workflows follow the same directory pattern. The list has a `SearchField`, an
 outline `ToggleGroup` (Current, Archived) with counts, and one bordered list. Each
@@ -829,3 +850,4 @@ examples and browser checks.
 - Do keep navigation neutral and reserve green fills for main actions.
 - Don't use dark-mode primary-button green as a body-text color.
 - Don't nest elevated cards to separate ordinary content.
+- Don't use a native `<select>`; use Sprout's searchable `Combobox`.

@@ -9,6 +9,7 @@ import './features/navigation/sidebar-mock-api';
 import './features/agents/builder-mock-api';
 import './features/integrations/github-mock-api';
 import './features/integrations/default-knowledge-mock-api';
+import './features/integrations/slack-channel-settings-mock-api';
 import './features/chat/github-investigation-mock-api';
 import { createRoot } from 'react-dom/client';
 import './index.css';

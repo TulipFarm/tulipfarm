@@ -202,3 +202,40 @@ export async function postBotMessage(input: {
     return { kind: 'unknown' };
   }
 }
+
+/** The thread a channel message belongs to, read with the bot token: its root timestamp and the message's author. */
+export async function botMessageThread(token: string, channel: string, ts: string, fetcher: typeof fetch = fetch) {
+  const url = new URL('https://slack.com/api/conversations.replies');
+  url.searchParams.set('channel', slackId.parse(channel));
+  url.searchParams.set(
+    'ts',
+    z
+      .string()
+      .regex(/^\d{1,16}\.\d{6}$/)
+      .parse(ts),
+  );
+  url.searchParams.set('limit', '1');
+  const response = await fetcher(url, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(8000),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok || !response.body) throw new Error('slack-message-unavailable');
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  for await (const chunk of response.body) {
+    bytes += chunk.byteLength;
+    if (bytes > 262144) throw new Error('slack-message-unavailable');
+    chunks.push(chunk);
+  }
+  const result = z
+    .object({
+      ok: z.literal(true),
+      messages: z
+        .array(z.object({ ts: z.string(), thread_ts: z.string().optional(), user: slackId.optional() }))
+        .min(1),
+    })
+    .parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+  const [first] = result.messages;
+  return { rootTs: first?.thread_ts ?? first?.ts ?? ts };
+}

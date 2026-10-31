@@ -29,6 +29,13 @@ const cursorSchema = z.object({
   response_metadata: z.object({ next_cursor: z.string().max(2048).optional() }).optional(),
 });
 const nextCursor = (value: unknown) => cursorSchema.parse(value).response_metadata?.next_cursor ?? '';
+const reactionsSchema = z.object({
+  ts: z.string(),
+  reactions: z
+    .array(z.object({ name: z.string().max(200), users: z.array(slackId).max(1000).default([]) }))
+    .max(100)
+    .optional(),
+});
 const replySchema = z
   .object({ user: slackId.optional(), bot_id: slackId.optional(), ...slackContentFields, ts: z.string() })
   .transform(normalizeSlackContent);
@@ -191,7 +198,8 @@ export function createChannelProvider(options: {
       channelName: info.channel.name ?? null,
       teamId: member.team_id,
     };
-    if (!readThread) return { identityId: member.id, slackUserId: member.slack_user_id, messages: [], ...audience };
+    if (!readThread)
+      return { identityId: member.id, slackUserId: member.slack_user_id, messages: [], reactions: [], ...audience };
     const thread = z.object({ messages: z.array(z.unknown()).max(100), has_more: z.boolean().optional() }).parse(
       await call(tx, workspaceId, actor, source, member, 'conversations.replies', {
         channel: source.channel,
@@ -217,7 +225,12 @@ export function createChannelProvider(options: {
       Buffer.byteLength(JSON.stringify(messages)) > 24000
     )
       throw new AccessDenied();
-    return { identityId: member.id, slackUserId: member.slack_user_id, messages, ...audience };
+    // Who reacted with what, kept apart from the stored snapshot; a reaction request must still be on its message.
+    const reactions = thread.messages.flatMap(value => {
+      const parsed = reactionsSchema.safeParse(value);
+      return parsed.success ? (parsed.data.reactions ?? []).map(reaction => ({ ts: parsed.data.ts, ...reaction })) : [];
+    });
+    return { identityId: member.id, slackUserId: member.slack_user_id, messages, reactions, ...audience };
   }
   async function appToken(
     tx: AuthorizationTransaction,
