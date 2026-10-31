@@ -57,6 +57,10 @@ export const slackRenderPrompt = (interactive: boolean) =>
     '- `blocks` are Slack Block Kit blocks, at most 48. Build what reads best in Slack: a short answer is one markdown block; structure uses header, section (with fields for key facts), context, divider, table, data_table, data_visualization (bar, line, area or pie), card, carousel of cards, alert, container, rich_text, image, plan and task_card.',
     '- A markdown block holds standard Markdown. Text objects of type "mrkdwn" use Slack syntax: *bold*, _italic_, `code`, <https://example.com|label>.',
     '- At most one table and two data_visualization blocks. A table is {"type":"table","rows":[[{"type":"raw_text","text":"Name"}, ...], ...]}; its first row is the header.',
+    '- Charts: when the user asks for a chart, graph or plot, or numbers show a trend, a comparison or a share, add a data_visualization block. Never draw a chart with text, bars of characters or a code block.',
+    '- A bar, line or area chart: {"type":"data_visualization","title":"Monthly revenue","chart":{"type":"line","axis_config":{"categories":["Jan","Feb","Mar"],"x_label":"Month","y_label":"Revenue ($k)"},"series":[{"name":"Revenue","data":[{"label":"Jan","value":40},{"label":"Feb","value":52},{"label":"Mar","value":47}]}]}}. Each series has one point per category, labelled with it. Use line or area for trends over time and bar for comparisons; several series compare groups, and values may be negative.',
+    '- A pie chart: {"type":"data_visualization","title":"Revenue by region","chart":{"type":"pie","segments":[{"label":"North","value":60},{"label":"South","value":40}]}}. Use it for shares of a whole, with positive values.',
+    '- Chart limits: title at most 50 characters; 1 to 20 categories; 1 to 12 series or segments; series names and labels at most 20 characters.',
     '- Use numbers you got from tools or the user. Never invent data for a chart, table or metric.',
     '- `placement` is "canvas" when the user asks for a report, document or detailed view, or the answer would need more than about 40 blocks or two charts. Then also write the full report in `report` as Markdown (headings, lists and tables); it is saved as a Slack canvas. Keep `blocks` to the answer and the key facts, and the canvas is linked below them.',
     '- Do not add context_actions blocks, feedback buttons or links to TulipFarm; they are added for you.',
@@ -392,6 +396,9 @@ const failed = (errors: string[]): ReplyRender => ({
  * Checks a `slack_render` call against Slack's Block Kit rules. On success the input is a web layout built from the
  * blocks, with the Slack blocks, report and modals kept for delivery.
  */
+/** A run of block characters, the usual sign of a bar chart drawn in text. */
+const textChart = /[\u2580-\u259f\u25a0-\u25aa\u25ac]{3,}/u;
+
 export function parseSlackRender(input: unknown, options: { interactive: boolean }): ReplyRender {
   const parsed = slackRenderInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: `Invalid Slack reply: ${z.prettifyError(parsed.error)}` };
@@ -404,6 +411,8 @@ export function parseSlackRender(input: unknown, options: { interactive: boolean
   const errors = assignActions(value.blocks, { ...options, modals: modalIds, inModal: false });
   for (const modal of value.modals ?? [])
     errors.push(...assignActions(modal.blocks, { ...options, modals: modalIds, inModal: true }));
+  if (textChart.test(JSON.stringify(value.blocks)))
+    errors.push('Draw charts with a data_visualization block, not with characters in text or code.');
   if (errors.length) return failed(errors);
   try {
     parseSlackSurface({ kind: 'message', text: value.summary, blocks: value.blocks });

@@ -65,3 +65,46 @@ test('a canvas reply needs a report', () => {
   assert.equal(parseSlackRender({ ...base, placement: 'canvas' }, { interactive: true }).ok, false);
   assert.equal(parseSlackRender({ ...base, placement: 'canvas', report: '# Report' }, { interactive: true }).ok, true);
 });
+
+test('charts are data_visualization blocks, not text drawings', () => {
+  const chart = {
+    type: 'data_visualization',
+    title: 'Monthly revenue',
+    chart: {
+      type: 'line',
+      axis_config: { categories: ['Jan', 'Feb'] },
+      series: [
+        {
+          name: 'Revenue',
+          data: [
+            { label: 'Jan', value: 40 },
+            { label: 'Feb', value: 52 },
+          ],
+        },
+      ],
+    },
+  };
+  assert.equal(
+    parseSlackRender({ ...base, modals: undefined, blocks: [base.blocks[0], chart] }, { interactive: true }).ok,
+    true,
+  );
+  const drawn = { type: 'markdown', text: '```\nJan: 40k |■■■■\nFeb: 52k |■■■■■\n```' };
+  const result = parseSlackRender({ ...base, modals: undefined, blocks: [drawn] }, { interactive: true });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /data_visualization/);
+});
+
+test('a chart that breaks a limit says which one', () => {
+  const chart = {
+    type: 'data_visualization',
+    title: 'Revenue',
+    chart: {
+      type: 'bar',
+      axis_config: { categories: ['Jan', 'Feb'] },
+      series: [{ name: 'Revenue', data: [{ label: 'Jan', value: 40 }] }],
+    },
+  };
+  const result = parseSlackRender({ ...base, modals: undefined, blocks: [chart] }, { interactive: true });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /one data point per category/);
+});
