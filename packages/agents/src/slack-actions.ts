@@ -45,7 +45,6 @@ type Transaction = AgentTransaction & { commonVersion: number };
 type Options = Parameters<typeof createChannelProvider>[0] & {
   runtime: AgentStorage;
   audienceSources?: (tx: AgentTransaction, workspaceId: string, actor: HumanActor, runId: string) => Promise<void>;
-  appSenderEnabled?: (workspaceId: string, userId: string) => Promise<boolean>;
   /** Reads the images a run generated, so a delivered message can carry them as Slack files. */
   images?: SlackImageFiles;
 };
@@ -429,12 +428,7 @@ export function createSlackActions(options: Options) {
       const identity = await provider.identity(tx, actor, source(destination, action));
       const policy = await agentPolicy(tx, runId, callId),
         policyVersion = policy.version;
-      const sender: SlackSender =
-        policy.sender === 'app' &&
-        hasSender(tx) &&
-        (await options.appSenderEnabled?.(workspaceId, actor.userId)) !== false
-          ? 'app'
-          : 'user';
+      const sender: SlackSender = policy.sender === 'app' && hasSender(tx) ? 'app' : 'user';
       const approvalRequired = Boolean(workflow);
       const digest = createHash('sha256')
         .update(

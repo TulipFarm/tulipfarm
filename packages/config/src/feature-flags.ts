@@ -50,12 +50,6 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_IMAGES',
   },
-  'slack-app-sender': {
-    description: 'Workflow and agent Slack sends can post as the TulipFarm app instead of the requester.',
-    default: 'development',
-    scope: 'workspace',
-    env: 'FEATURE_FLAG_SLACK_APP_SENDER',
-  },
   'default-connection-knowledge': {
     description:
       'New eligible integration enablements automatically get owner-only Knowledge with ongoing discovery. Applies to every integration, GitHub included.',

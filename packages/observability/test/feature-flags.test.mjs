@@ -135,7 +135,7 @@ const userId = '22222222-2222-4222-8222-222222222222';
 test('every flag declares a scope, and background-evaluated flags are workspace or global', () => {
   for (const definition of Object.values(featureFlags))
     assert.ok(['user', 'workspace', 'global'].includes(definition.scope));
-  for (const name of ['social-publishing', 'default-connection-knowledge', 'slack-app-sender'])
+  for (const name of ['social-publishing', 'default-connection-knowledge'])
     assert.equal(featureFlags[name].scope, 'workspace', `${name} runs in background work`);
   assert.equal(featureFlags['public-tulipfarm-guide'].scope, 'global');
 });
@@ -266,6 +266,5 @@ test('a snapshot uses evaluateMany once per scope; false decides and missing fal
   assert.equal(snapshot['google-calendar-canvas'], true);
   assert.equal(snapshot['soul-repository-explorer'], false, 'a missing answer falls back to the default');
   assert.equal(snapshot['social-publishing'], true);
-  assert.equal(snapshot['slack-app-sender'], false);
   assert.equal(snapshot['public-tulipfarm-guide'], false, 'a failed batch falls back');
 });

@@ -1,5 +1,4 @@
 import { slackConfigurationSchema, slackCredentialCipher } from '@tulipfarm/slack';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { createSlackActions, type SlackActionsFactory } from './slack-actions.ts';
 import { createSlackChannelAgents } from './slack-channels.ts';
 import { slackOutboundEnabled } from './slack-outbound.ts';
@@ -40,8 +39,6 @@ export function slackActionSettings(env: NodeJS.ProcessEnv = process.env) {
     appId: config.appId,
     outbound: true,
     cipher: slackCredentialCipher(JSON.parse(env.SLACK_CREDENTIAL_KEYS ?? '')),
-    appSenderEnabled: (workspaceId: string, userId: string) =>
-      isFeatureEnabled('slack-app-sender', { id: userId }, { id: workspaceId }),
   };
 }
 let objects: ReturnType<typeof chatObjectStore> | undefined;

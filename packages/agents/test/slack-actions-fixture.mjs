@@ -36,7 +36,8 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
     cards = [],
     files = [],
     uploads = [],
-    bodies = [];
+    bodies = [],
+    posts = [];
   const users = [{ id: 'UBOB', name: 'bob', profile: { display_name: 'Bob' } }];
   let directoryResponse = method =>
     method === 'conversations.list'
@@ -74,6 +75,7 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
         return;
       }
       effects.push({ token: authorization, ...slackUserEffect(method, params) });
+      if (method === 'chat.postMessage') posts.push(params);
       if (mode === 'lost') {
         req.socket.destroy();
         return;
@@ -332,6 +334,7 @@ export async function outboundFixture({ channelName, prepareActors, images = fal
       files,
       uploads,
       bodies,
+      posts,
       imageFiles,
       setMode: (value, seconds = '1') => {
         mode = value;
