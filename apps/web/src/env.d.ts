@@ -16,3 +16,9 @@ declare module 'virtual:tulipfarm-web-extensions' {
   const extensions: readonly WebExtension<WebSlots>[];
   export default extensions;
 }
+
+declare module 'virtual:emoji-glyphs' {
+  /** Slack emoji short name, including `name::skin-tone-N`, to its character. */
+  const glyphs: Readonly<Record<string, string>>;
+  export default glyphs;
+}

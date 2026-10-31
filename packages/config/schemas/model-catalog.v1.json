@@ -164,7 +164,8 @@
                   "openai-models",
                   "anthropic-models",
                   "openai-image-models",
-                  "generative-ui"
+                  "generative-ui",
+                  "slack-reactions"
                 ]
               },
               {
@@ -492,7 +493,8 @@
                   "openai-models",
                   "anthropic-models",
                   "openai-image-models",
-                  "generative-ui"
+                  "generative-ui",
+                  "slack-reactions"
                 ]
               },
               {

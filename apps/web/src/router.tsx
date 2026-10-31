@@ -1044,7 +1044,7 @@ export const integrationDetailRoute = createRoute({
   validateSearch: search =>
     z
       .object({
-        tab: z.enum(['accounts', 'knowledge', 'settings', 'advanced']).optional().catch(undefined),
+        tab: z.enum(['accounts', 'knowledge', 'channels', 'settings', 'advanced']).optional().catch(undefined),
         returnChat: z.uuid().optional().catch(undefined),
       })
       .parse(search),

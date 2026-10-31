@@ -15,8 +15,14 @@ export {
 export { postSlackThreadNote, shareSlackFiles, type SlackUpload } from './file-uploads.ts';
 export { createSlackDirectMessages } from './direct-messages.ts';
 export { createChannelProvider, threadSnapshotSchema } from './channel-provider.ts';
-export { messageSchema, slackId } from './contracts.ts';
-export { postBotMessage, openBotDirectMessage, botChannelInfo, setBotThreadStatus } from './bot-message.ts';
+export { messageSchema, slackId, type SlackReactionEvent } from './contracts.ts';
+export {
+  postBotMessage,
+  openBotDirectMessage,
+  botChannelInfo,
+  botMessageThread,
+  setBotThreadStatus,
+} from './bot-message.ts';
 export {
   createSlackCanvas,
   openSlackModal,
@@ -27,7 +33,15 @@ export {
   slackPickedText,
   slackReplyMessage,
 } from './generative-reply.ts';
-export { currentSlackMessage, sameSlackMessage } from './message-source.ts';
+export {
+  currentSlackMessage,
+  sameSlackMessage,
+  slackReactionPrompt,
+  slackReactionRequest,
+  slackReactionRequestSchema,
+  slackRequestInThread,
+  type SlackReactionRequest,
+} from './message-source.ts';
 export {
   slackMessageText,
   matchesSlackSnapshot,

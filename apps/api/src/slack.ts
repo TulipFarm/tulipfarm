@@ -7,13 +7,18 @@ import {
   eventEnvelopeSchema,
   slackLinkFailure,
   slackOAuthErrorCode,
+  SlackChannelAccessError,
   type createSlackInbox,
   type createSlackWelcome,
   type createSlackInstallations,
   type createSlackMemberLinking,
   type SlackConfiguration,
 } from '@tulipfarm/slack';
-import { attachmentInputSchema, type createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
+import {
+  attachmentInputSchema,
+  channelSettingInputSchema,
+  type createSlackChannelAgents,
+} from '@tulipfarm/agents/slack-channels';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 import { authConfig, type registerAuth } from './auth.ts';
 
@@ -58,6 +63,10 @@ export function registerSlack(
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'slack-not-found' });
       if (error.validation || error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid-request' });
       if (error.message === 'slack-grants-conflict') return reply.code(409).send({ error: 'slack-grants-conflict' });
+      if (error.message === 'slack-attachment-conflict')
+        return reply.code(409).send({ error: 'slack-attachment-conflict' });
+      if (error instanceof SlackChannelAccessError)
+        return reply.code(403).send({ error: 'slack-channel-membership-required' });
       if (error.statusCode === 413 || error.statusCode === 415)
         return reply.code(error.statusCode).send({ error: 'invalid-request' });
       return reply.code(503).send({ error: 'slack-unavailable' });
@@ -145,6 +154,91 @@ export function registerSlack(
           });
         },
       });
+    const workspaceParams = {
+      type: 'object',
+      properties: { workspaceId: { type: 'string', format: 'uuid' } },
+      required: ['workspaceId'],
+      additionalProperties: false,
+    };
+    routes.get(
+      '/workspaces/:workspaceId/slack/channel-settings',
+      {
+        schema: {
+          ...schema('listSlackChannelSettingsV1', 'List Slack channels with their agent, reply and reaction settings'),
+          params: workspaceParams,
+        },
+      },
+      async (request, reply) => {
+        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        if (!session) return reply.code(401).send({ error: 'sign-in-required' });
+        if (!dependencies?.channels) return reply.code(503).send({ error: 'slack-channels-disabled' });
+        const { workspaceId } = z.object({ workspaceId: z.uuid() }).parse(request.params);
+        const [directory, saved] = await Promise.all([
+          dependencies.installations.channels(workspaceId, session.user.id, 'directory'),
+          dependencies.channels.settings(workspaceId, session.user.id),
+        ]);
+        const byChannel = new Map(saved.channels.map(channel => [channel.id, channel]));
+        return {
+          canManage: saved.canManage && directory.manage,
+          agents: saved.agents,
+          complete: directory.complete,
+          missingScopes: directory.missingScopes,
+          channels: directory.channels.map(channel => ({
+            ...channel,
+            agentId: null,
+            replies: 'tag',
+            reactions: [],
+            version: 0,
+            ...byChannel.get(channel.id),
+          })),
+        };
+      },
+    );
+    routes.put(
+      '/workspaces/:workspaceId/slack/channel-settings/:channel',
+      {
+        schema: {
+          ...schema('saveSlackChannelSettingV1', "Replace one Slack channel's agent, reply and reaction settings"),
+          params: {
+            type: 'object',
+            properties: {
+              workspaceId: { type: 'string', format: 'uuid' },
+              channel: { type: 'string', pattern: '^[CG][A-Z0-9]+$' },
+            },
+            required: ['workspaceId', 'channel'],
+            additionalProperties: false,
+          },
+          body: z.toJSONSchema(channelSettingInputSchema, { target: 'draft-7', io: 'input' }),
+        },
+      },
+      async (request, reply) => {
+        if (request.headers.origin !== authConfig().webOrigin)
+          return reply.code(403).send({ error: 'untrusted-origin' });
+        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        if (!session) return reply.code(401).send({ error: 'sign-in-required' });
+        if (!dependencies?.channels) return reply.code(503).send({ error: 'slack-channels-disabled' });
+        const p = z.object({ workspaceId: z.uuid(), channel: z.string() }).parse(request.params);
+        return dependencies.channels.configure(p.workspaceId, session.user.id, p.channel, request.body);
+      },
+    );
+    routes.get(
+      '/workspaces/:workspaceId/slack/emoji',
+      {
+        schema: {
+          ...schema('listSlackEmojiV1', 'List standard and custom emoji names in the Slack workspace'),
+          params: workspaceParams,
+        },
+      },
+      async (request, reply) => {
+        const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+        if (!session) return reply.code(401).send({ error: 'sign-in-required' });
+        if (!dependencies) return reply.code(503).send({ error: 'slack-release-disabled' });
+        return dependencies.installations.emoji(
+          z.object({ workspaceId: z.uuid() }).parse(request.params).workspaceId,
+          session.user.id,
+        );
+      },
+    );
     const callbackFields = {
       state: { type: 'string', minLength: 1, maxLength: 128 },
       code: { type: 'string', minLength: 1, maxLength: 4096 },

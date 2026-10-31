@@ -98,6 +98,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_GENERATIVE_UI',
   },
+  'slack-reactions': {
+    description:
+      "Slack channel reaction rules: reacting to a message with a configured emoji runs that rule's prompt on the message. Needs the reactions:read and emoji:read bot scopes and the reaction_added event.",
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_SLACK_REACTIONS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

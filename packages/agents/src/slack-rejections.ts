@@ -71,11 +71,12 @@ export async function recordSlackRejection(
   return mentionTarget(tx, eventId);
 }
 
-/** Returns where to post a notice in the requester's thread, only when the event explicitly mentioned the bot. */
+/** Returns where to post a notice in the requester's thread, only when the event explicitly mentioned the bot or reacted under a channel rule. */
 export async function mentionTarget(tx: AuthorizationTransaction, eventId: string): Promise<NoticeTarget | undefined> {
   const row = z
     .object({
       payload: messageSchema,
+      reacted: z.boolean(),
       installation_id: z.uuid(),
       generation: z.number().int(),
       bot_user_id: z.string(),
@@ -85,13 +86,15 @@ export async function mentionTarget(tx: AuthorizationTransaction, eventId: strin
     .parse(
       (
         await tx.client.query(
-          `SELECT e.payload,e.installation_id,e.generation,s.bot_user_id,s.bot_credential FROM ${qualified(tx.schema, 'tf_slack_events')} e JOIN ${qualified(tx.schema, 'tf_slack_installations')} s ON s.id=e.installation_id AND s.generation=e.generation AND s.state='active' WHERE e.id=$1`,
+          `SELECT e.payload,e.payload ? 'tf_reaction' AS reacted,e.installation_id,e.generation,s.bot_user_id,s.bot_credential FROM ${qualified(tx.schema, 'tf_slack_events')} e JOIN ${qualified(tx.schema, 'tf_slack_installations')} s ON s.id=e.installation_id AND s.generation=e.generation AND s.state='active' WHERE e.id=$1`,
           [eventId],
         )
       ).rows[0],
     );
   if (!row) return undefined;
-  const mentioned = row.payload.type === 'app_mention' || row.payload.text.includes(`<@${row.bot_user_id}>`);
+  // A reaction that matched a channel rule asked for the agent as explicitly as a mention does.
+  const mentioned =
+    row.reacted || row.payload.type === 'app_mention' || row.payload.text.includes(`<@${row.bot_user_id}>`);
   if (!mentioned) return undefined;
   return {
     channel: row.payload.channel,

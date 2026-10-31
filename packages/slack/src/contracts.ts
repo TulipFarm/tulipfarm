@@ -60,17 +60,20 @@ export const slackAssistantScope = 'assistant:write';
 /**
  * The bot scopes an installation needs. While the `images` flag is on, reading shared files adds `files:read` and
  * delivering generated images adds `files:write`. While the `generative-ui` flag is on, canvases add `canvases:write`
- * and agent features add `assistant:write`. An installation without them shows the notice to update Slack permissions.
+ * and agent features add `assistant:write`. While the `slack-reactions` flag is on, reaction rules add `reactions:read`
+ * and the emoji picker adds `emoji:read`. An installation without them shows the notice to update Slack permissions.
  */
 export function requiredBotScopes(
   config: Pick<SlackConfiguration, 'scopeApproval'>,
   images: boolean,
   generativeUi = false,
+  reactions = false,
 ) {
   const scopes = config.scopeApproval.botScopes;
   const extra = [
     ...(images ? [slackFileScope, slackFileUploadScope] : []),
     ...(generativeUi ? [slackCanvasScope, slackAssistantScope] : []),
+    ...(reactions ? ['reactions:read', 'emoji:read'] : []),
   ];
   return [...scopes, ...extra.filter(scope => !scopes.includes(scope))];
 }
@@ -120,6 +123,14 @@ const deletedSchema = z.object({
   event_ts: timestamp,
   deleted_ts: timestamp,
 });
+const reactionSchema = z.object({
+  type: z.literal('reaction_added'),
+  user: slackId,
+  reaction: z.string().regex(/^[a-z0-9_+'-]{1,100}(::skin-tone-[2-6])?$/),
+  item: z.object({ type: z.literal('message'), channel: slackId, ts: timestamp }),
+  event_ts: timestamp,
+});
+export type SlackReactionEvent = z.infer<typeof reactionSchema>;
 const revokedSchema = z.object({
   type: z.literal('tokens_revoked'),
   tokens: z.object({ oauth: z.array(slackId).max(1000).default([]), bot: z.array(slackId).max(1000).default([]) }),
@@ -133,6 +144,10 @@ export function classifyEvent(envelope: SlackEvent) {
   if (envelope.event.type === 'tokens_revoked')
     return { kind: 'revocation' as const, event: revokedSchema.parse(envelope.event) };
   if (envelope.event.type === 'app_uninstalled') return { kind: 'uninstall' as const };
+  if (envelope.event.type === 'reaction_added') {
+    const reaction = reactionSchema.safeParse(envelope.event);
+    return reaction.success ? { kind: 'reaction' as const, event: reaction.data } : { kind: 'ignored' as const };
+  }
   const message = messageSchema.safeParse(envelope.event);
   if (message.success && !message.data.bot_id && (!message.data.subtype || message.data.subtype === 'file_share'))
     return { kind: 'message' as const, event: message.data };

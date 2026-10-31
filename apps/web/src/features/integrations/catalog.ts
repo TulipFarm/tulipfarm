@@ -386,7 +386,7 @@ export const integrations: Integration[] = [
   },
 ];
 
-export const integrationTabs = ['overview', 'accounts', 'knowledge', 'settings', 'advanced'] as const;
+export const integrationTabs = ['overview', 'accounts', 'knowledge', 'channels', 'settings', 'advanced'] as const;
 export type IntegrationTab = (typeof integrationTabs)[number];
 
 const legacyHashes: Record<string, { id: string; tab: IntegrationTab }> = {

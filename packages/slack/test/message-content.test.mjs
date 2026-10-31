@@ -212,6 +212,18 @@ test('rich-only events and file shares retain content through intake and saved p
   assert.equal(classifyEvent({ event: { ...raw, bot_id: 'BBOT' } }).kind, 'ignored');
 });
 
+test('message reactions classify as reactions, other reaction targets are ignored', () => {
+  const reaction = {
+    type: 'reaction_added',
+    user: 'UALICE',
+    reaction: 'thumbsup::skin-tone-3',
+    item: { type: 'message', channel: 'CTEST', ts: '1.000001' },
+    event_ts: '2.000001',
+  };
+  assert.equal(classifyEvent({ event: reaction }).kind, 'reaction');
+  assert.equal(classifyEvent({ event: { ...reaction, item: { type: 'file', file: 'F1' } } }).kind, 'ignored');
+});
+
 test('rich-only edits invalidate new snapshots while old plain-text snapshots remain readable', () => {
   const before = messageSchema.parse({ ...base, text: 'fallback', blocks: rich('Saturday') });
   const after = messageSchema.parse({ ...base, text: 'fallback', blocks: rich('Sunday') });

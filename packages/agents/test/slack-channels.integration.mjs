@@ -48,6 +48,8 @@ for (const scenario of [
   'private-delivery',
   'poison',
   'starvation',
+  'every-message',
+  'reaction',
 ])
   test(`channel agent ${scenario}`, { skip: workflowSkip || (scenario === 'journey' && soulStorageSkip) }, async () => {
     const f = await conversationFixture();
@@ -80,6 +82,11 @@ for (const scenario of [
         assert.equal(req.headers.authorization, 'Bearer fixture-github-token');
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ number: 17, title: 'Shared issue', body: 'Source content', state: 'open' }));
+        return;
+      }
+      if (req.url === '/thread') {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ ok: true, messages: [{ ts: '1.000001', user: 'UALICE' }] }));
         return;
       }
       if (req.method !== 'POST') {
@@ -168,7 +175,7 @@ for (const scenario of [
     await once(server, 'listening');
     const fetcher = (url, init) =>
       fetch(
-        `http://127.0.0.1:${server.address().port}/${slackUserCall(url, init) ? `user/${slackUserCall(url, init)}` : String(url).endsWith('conversations.open') ? 'open' : String(url).endsWith('chat.postMessage') ? 'post' : String(url).endsWith('chat.postEphemeral') ? 'ephemeral' : 'unknown'}`,
+        `http://127.0.0.1:${server.address().port}/${slackUserCall(url, init) ? `user/${slackUserCall(url, init)}` : String(url).endsWith('conversations.open') ? 'open' : String(url).endsWith('chat.postMessage') ? 'post' : String(url).endsWith('chat.postEphemeral') ? 'ephemeral' : String(url).includes('conversations.replies') ? 'thread' : 'unknown'}`,
         init,
       );
     const model = syntheticContinuity(async () => assert.fail('real adapter must run'));
@@ -202,7 +209,8 @@ for (const scenario of [
       model,
       publicDelivery: scenario === 'public',
     });
-    const inbox = createSlackInbox(f.runtime, channels.freeze);
+    process.env.FEATURE_FLAG_SLACK_REACTIONS = 'true';
+    const inbox = createSlackInbox(f.runtime, channels.freeze, channels.react);
     const { default: Fastify } = await import('../../../apps/api/node_modules/fastify/fastify.js');
     const { registerSlack } = await import('../../../apps/api/dist/slack.js');
     const api = Fastify(),
@@ -472,7 +480,7 @@ for (const scenario of [
       assert.equal(attachment.status, 200);
       assert.deepEqual(await attachment.json(), { version: 1, channelResponses: scenario === 'public' });
       let sequence = 0;
-      async function event(user, text, ts, thread_ts, channel = 'CHR') {
+      async function event(user, text, ts, thread_ts, channel = 'CHR', raw = undefined) {
         if (channel.startsWith('D') && thread_ts)
           privateThreads.get(`${channel}/${thread_ts}`)?.push({ user, text, ts });
         const event_id = `E${++sequence}`;
@@ -483,7 +491,7 @@ for (const scenario of [
           team_id: 'TTEST',
           event_id,
           event_time: Number(timestamp),
-          event: { type: 'message', user, channel, ts, text, ...(thread_ts ? { thread_ts } : {}) },
+          event: raw ?? { type: 'message', user, channel, ts, text, ...(thread_ts ? { thread_ts } : {}) },
         });
         const response = await fetch(`${address}/v1/slack/events`, {
           method: 'POST',
@@ -497,6 +505,69 @@ for (const scenario of [
         assert.equal(response.status, 200);
         return (await f.db.platform.query(`SELECT id FROM ${f.table('tf_slack_events')} WHERE event_id=$1`, [event_id]))
           .rows[0].id;
+      }
+      if (scenario === 'every-message' || scenario === 'reaction') {
+        const prompt = 'File this message as an HR ticket';
+        await f.db.platform.query(
+          `INSERT INTO ${f.table('tf_slack_installation_managers')} (installation_id,membership_id) VALUES ($1,$2)`,
+          [installationId, f.workspace.membershipId],
+        );
+        // A channel's own reply rule overrides the agent's `tag` rule.
+        assert.deepEqual(
+          await channels.configure(f.workspace.id, f.workspace.userId, 'CHR', {
+            agentId,
+            replies: scenario === 'every-message' ? 'every-message' : 'tag',
+            reactions: scenario === 'reaction' ? [{ reaction: 'bookmark', prompt }] : [],
+            expectedVersion: 1,
+          }),
+          {
+            id: 'CHR',
+            agentId,
+            replies: scenario === 'every-message' ? 'every-message' : 'tag',
+            reactions: scenario === 'reaction' ? [{ reaction: 'bookmark', prompt }] : [],
+            version: 2,
+          },
+        );
+        await assert.rejects(
+          channels.configure(f.workspace.id, f.workspace.userId, 'CHR', {
+            agentId,
+            replies: 'tag',
+            reactions: [],
+            expectedVersion: 1,
+          }),
+          /slack-attachment-conflict/,
+        );
+        messages[0].text = 'HR question';
+        const plain = await event('UALICE', 'HR question', '1.000001');
+        if (scenario === 'every-message') {
+          assert.deepEqual(await channels.due(f.workspace.id), [{ workspaceId: f.workspace.id, eventId: plain }]);
+          assert.equal(await execute(plain), 'sent');
+          assert.equal(delivered[0].text, 'HR PRIVATE ANSWER');
+          return;
+        }
+        assert.deepEqual(await channels.due(f.workspace.id), []);
+        const reaction = (name, user, ts) =>
+          event(user, '', ts, undefined, 'CHR', {
+            type: 'reaction_added',
+            user,
+            reaction: name,
+            item: { type: 'message', channel: 'CHR', ts: '1.000001' },
+            event_ts: ts,
+          });
+        const unruled = await reaction('eyes', 'UALICE', '5.000001');
+        assert.equal(
+          (await f.db.platform.query(`SELECT disposition FROM ${f.table('tf_slack_events')} WHERE id=$1`, [unruled]))
+            .rows[0].disposition,
+          'ignored',
+        );
+        assert.deepEqual(await channels.due(f.workspace.id), []);
+        messages[0].reactions = [{ name: 'bookmark', users: ['UALICE'], count: 1 }];
+        const reacted = await reaction('bookmark', 'UALICE', '6.000001');
+        assert.deepEqual(await channels.due(f.workspace.id), [{ workspaceId: f.workspace.id, eventId: reacted }]);
+        assert.equal(await execute(reacted), 'sent');
+        assert.equal(delivered[0].text, 'HR PRIVATE ANSWER');
+        assert.match(JSON.stringify(modelInputs[0]), /File this message as an HR ticket/);
+        return;
       }
       const id = await event('UALICE', messages[0].text, '1.000001');
       assert.deepEqual(await channels.due(f.workspace.id), [{ workspaceId: f.workspace.id, eventId: id }]);

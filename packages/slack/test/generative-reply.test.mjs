@@ -24,3 +24,8 @@ test('generative UI asks for canvas and assistant scopes once', () => {
   assert.deepEqual(requiredBotScopes(config, false, true), ['chat:write', 'canvases:write', 'assistant:write']);
   assert.deepEqual(requiredBotScopes(config, false), ['chat:write', 'canvases:write']);
 });
+
+test('reaction rules ask for reaction and emoji read scopes', () => {
+  const config = { scopeApproval: { botScopes: ['chat:write'] } };
+  assert.deepEqual(requiredBotScopes(config, false, false, true), ['chat:write', 'reactions:read', 'emoji:read']);
+});

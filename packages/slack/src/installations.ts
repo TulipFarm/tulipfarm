@@ -109,12 +109,13 @@ export function createSlackInstallations(options: {
       return actor;
     });
   }
-  // Optional scopes follow the `images` and `generative-ui` flags; without them an installation asks to update.
+  // Optional scopes follow the `images`, `generative-ui` and `slack-reactions` flags; without them an installation asks to update.
   const botScopes = async (workspaceId: string) =>
     requiredBotScopes(
       config,
       await isFeatureEnabled('images', null, { id: workspaceId }),
       await isFeatureEnabled('generative-ui', null, { id: workspaceId }),
+      await isFeatureEnabled('slack-reactions', null, { id: workspaceId }),
     );
   async function status(workspaceId: string, userId: string) {
     const evidence = await installer(workspaceId);
@@ -555,8 +556,8 @@ export function createSlackInstallations(options: {
       return read();
     });
   }
-  // Lists conversations the bot user belongs to. Only scopes granted at install decide which kinds are read.
-  async function channels(workspaceId: string, userId: string) {
+  // The bot credential is shared, so reading through it follows the installation grants that status uses; workspace role grants nothing.
+  async function botReader(workspaceId: string, userId: string) {
     const link = await installer(workspaceId);
     const local = await runtime.transaction(workspaceId, managementCompatibility, async tx => {
       await lockAuthorization(tx);
@@ -580,29 +581,35 @@ export function createSlackInstallations(options: {
         );
       if (!row || !link || link.installation_id !== row.id || link.generation !== row.generation)
         throw new AccessDenied();
-      // The bot credential is shared, so listing follows the installation grants that status uses; workspace role grants nothing.
-      if (
-        !(await canAccessSlackInstallation(tx, actor, row.id, 'manage')) &&
-        !(await canAccessSlackInstallation(tx, actor, row.id, 'use'))
-      )
-        throw new AccessDenied();
-      return row;
+      const manage = await canAccessSlackInstallation(tx, actor, row.id, 'manage');
+      if (!manage && !(await canAccessSlackInstallation(tx, actor, row.id, 'use'))) throw new AccessDenied();
+      return { ...row, manage };
     });
+    const token = () => {
+      try {
+        return cipher.decrypt(
+          { workspaceId, installationId: local.id, generation: local.generation, kind: 'bot' },
+          local.bot_credential,
+        );
+      } catch {
+        throw new SlackApiError('provider-auth-rejected');
+      }
+    };
+    return { scopes: local.scopes, manage: local.manage, token };
+  }
+  /**
+   * Lists conversations. `member` reads only those the bot user belongs to; `directory` reads every channel
+   * the bot can see, with member counts and whether the bot is in it. Only scopes granted at install decide which kinds are read.
+   */
+  async function channels(workspaceId: string, userId: string, mode: 'member' | 'directory' = 'member') {
+    const reader = await botReader(workspaceId, userId);
     const types = [
-      ...(local.scopes.includes('channels:read') ? ['public_channel'] : []),
-      ...(local.scopes.includes('groups:read') ? ['private_channel'] : []),
+      ...(reader.scopes.includes('channels:read') ? ['public_channel'] : []),
+      ...(reader.scopes.includes('groups:read') ? ['private_channel'] : []),
     ];
-    const missingScopes = ['channels:read', 'groups:read'].filter(scope => !local.scopes.includes(scope));
-    if (!types.length) return { channels: [], complete: true, missingScopes };
-    let token: string;
-    try {
-      token = cipher.decrypt(
-        { workspaceId, installationId: local.id, generation: local.generation, kind: 'bot' },
-        local.bot_credential,
-      );
-    } catch {
-      throw new SlackApiError('provider-auth-rejected');
-    }
+    const missingScopes = ['channels:read', 'groups:read'].filter(scope => !reader.scopes.includes(scope));
+    if (!types.length) return { channels: [], complete: true, missingScopes, manage: reader.manage };
+    const token = reader.token();
     const pageSchema = z.object({
       channels: z.array(
         z.object({
@@ -610,25 +617,36 @@ export function createSlackInstallations(options: {
           name: z.string().max(256).optional(),
           is_private: z.boolean().optional(),
           is_archived: z.boolean().optional(),
+          is_member: z.boolean().optional(),
+          num_members: z.number().int().nonnegative().optional(),
         }),
       ),
       response_metadata: z.object({ next_cursor: z.string().max(2048).optional() }).optional(),
     });
-    const found = new Map<string, { id: string; name: string; private: boolean }>();
+    const found = new Map<
+      string,
+      { id: string; name: string; private: boolean; members: number | null; botMember: boolean }
+    >();
     let cursor = '';
     let pages = 0;
     do {
       const page = pageSchema.parse(
         await callSlackApi({
           token,
-          method: 'users.conversations',
+          method: mode === 'member' ? 'users.conversations' : 'conversations.list',
           fetcher,
           params: { types: types.join(','), exclude_archived: true, limit: 200, cursor: cursor || undefined },
         }),
       );
       for (const channel of page.channels)
         if (channel.name && !channel.is_archived)
-          found.set(channel.id, { id: channel.id, name: channel.name, private: channel.is_private === true });
+          found.set(channel.id, {
+            id: channel.id,
+            name: channel.name,
+            private: channel.is_private === true,
+            members: channel.num_members ?? null,
+            botMember: mode === 'member' || channel.is_member === true,
+          });
       cursor = page.response_metadata?.next_cursor ?? '';
       pages++;
     } while (cursor && pages < channelPageLimit);
@@ -636,7 +654,42 @@ export function createSlackInstallations(options: {
       channels: [...found.values()].sort((a, b) => a.name.localeCompare(b.name)),
       complete: !cursor,
       missingScopes,
+      manage: reader.manage,
     };
   }
-  return { status, begin, complete, disconnect, route, grants, channels };
+  /**
+   * Every emoji name the Slack workspace knows. `standard` holds the built-in names by category; `custom`
+   * maps uploaded names to their image URL. Aliases resolve to their target image.
+   */
+  async function emoji(workspaceId: string, userId: string) {
+    const reader = await botReader(workspaceId, userId);
+    if (!reader.scopes.includes('emoji:read'))
+      return { standard: [] as string[], custom: [] as { name: string; url: string }[], missingScopes: ['emoji:read'] };
+    const response = z
+      .object({
+        emoji: z.record(z.string(), z.string()).optional(),
+        categories: z.array(z.object({ name: z.string(), emoji_names: z.array(z.string()) })).optional(),
+      })
+      .parse(
+        await callSlackApi({
+          token: reader.token(),
+          method: 'emoji.list',
+          fetcher,
+          params: { include_categories: true },
+        }),
+      );
+    const uploaded = response.emoji ?? {};
+    const resolve = (name: string, depth = 0): string | null => {
+      const value = uploaded[name];
+      if (!value || depth > 3) return null;
+      return value.startsWith('alias:') ? resolve(value.slice(6), depth + 1) : value;
+    };
+    const custom = Object.keys(uploaded)
+      .map(name => ({ name, url: resolve(name) }))
+      .filter((entry): entry is { name: string; url: string } => entry.url?.startsWith('https://') === true)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const standard = [...new Set((response.categories ?? []).flatMap(category => category.emoji_names))];
+    return { standard, custom, missingScopes: [] as string[] };
+  }
+  return { status, begin, complete, disconnect, route, grants, channels, emoji };
 }
