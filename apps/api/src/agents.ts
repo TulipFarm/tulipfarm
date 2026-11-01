@@ -361,11 +361,18 @@ export function registerAgents(
       after: z.uuid().optional(),
       limit: z.coerce.number().int().min(1).max(100).optional(),
       search: z.string().trim().max(120).optional(),
+      archived: z.enum(['true', 'false']).optional(),
     });
     routes.get(
       base,
       { schema: { ...schema('listAgentsV1', workspace, agentListSchema), querystring: json(page) } },
-      request => service.list(workspace.parse(request.params).workspaceId, user(request), page.parse(request.query)),
+      request => {
+        const { archived, ...query } = page.parse(request.query);
+        return service.list(workspace.parse(request.params).workspaceId, user(request), {
+          ...query,
+          archived: archived === 'true',
+        });
+      },
     );
     routes.get(
       `${base}/authoring-context`,
@@ -412,6 +419,22 @@ export function registerAgents(
       request => {
         const p = agent.parse(request.params);
         return service.remove(p.workspaceId, user(request), p.agentId);
+      },
+    );
+    routes.post(
+      `${base}/:agentId/archive`,
+      { schema: schema('archiveAgentV1', agent, z.object({ archived: z.literal(true) })) },
+      request => {
+        const p = agent.parse(request.params);
+        return service.archive(p.workspaceId, user(request), p.agentId);
+      },
+    );
+    routes.post(
+      `${base}/:agentId/restore`,
+      { schema: schema('restoreAgentV1', agent, z.object({ restored: z.literal(true) })) },
+      request => {
+        const p = agent.parse(request.params);
+        return service.restore(p.workspaceId, user(request), p.agentId);
       },
     );
     routes.get(

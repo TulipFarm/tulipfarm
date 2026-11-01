@@ -13,6 +13,7 @@ import {
   type ConversationCommand,
   type ConversationHistory,
 } from './conversation-api';
+import type { AuthoringProposal } from '@tulipfarm/agents/draft-contracts';
 import { createPageReuse } from './page-reuse';
 import { interactionPending, type InteractionReference } from './interaction-contracts';
 
@@ -58,15 +59,20 @@ export function useConversationChanges() {
       progress: () => change({ keys: [conversationKeys.lists(), creditKeys.balance()] }),
       interaction: (chatId: string) =>
         change({ keys: [conversationKeys.detail(chatId), conversationKeys.lists(), creditKeys.balance()] }),
-      savedDraft: (
-        chatId: string,
-        kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'workflow-archive' | 'workflow-restore' | 'row',
-      ) =>
+      savedDraft: (chatId: string, kind: AuthoringProposal['kind'] | 'row') =>
         change({
           keys: [
             conversationKeys.detail(chatId),
             conversationKeys.lists(),
-            [kind === 'agent' ? 'agents' : kind === 'skill' ? 'skills' : kind === 'row' ? 'tables' : 'workflows'],
+            [
+              kind === 'agent' || kind.startsWith('agent-')
+                ? 'agents'
+                : kind === 'skill' || kind.startsWith('skill-')
+                  ? 'skills'
+                  : kind === 'row'
+                    ? 'tables'
+                    : 'workflows',
+            ],
           ],
         }),
       rejected: (code: string) =>

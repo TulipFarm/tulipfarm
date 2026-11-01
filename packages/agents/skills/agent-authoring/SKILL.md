@@ -1,7 +1,7 @@
 ---
 name: agent-authoring
 title: Set up an agent for review
-description: Guide Basics, Skills, Access and Triggers into one bounded agent setup for human review. Use when someone wants an assistant, bot or helper, or wants to change an existing agent.
+description: Guide Basics, Skills, Access and Triggers into one bounded agent setup for human review. Use when someone wants an assistant, bot or helper, or wants to change, archive, remove or restore an existing agent.
 ---
 
 # Draft an agent for review
@@ -17,6 +17,7 @@ For a larger request spanning tables, agents, and automation, use Planning in th
 3. Decide which case applies:
    - **New agent:** the person asks for a new or separate agent. Never update an existing agent for this request, even when a name is similar.
    - **Change an existing agent:** only when the person asks to change that agent. Read its definition with `agents.read` and call `agents.context` with its `agentId` for current policy and activation IDs.
+   - **Archive or restore:** to remove agents, call `agents.archive` with up to 20 agent IDs on one card. Archiving hides each agent, turns it off and ends its activations and schedules, but keeps its team, sharing and history. To bring one back, call `agents.list` with `archived: true`, then `agents.restore`; restored agents stay off until a manager turns them on and activates them. Only someone who may delete the agent can archive or restore it, and human review still applies.
 
 ## 2. Resolve Basics, Skills, Access and Triggers
 

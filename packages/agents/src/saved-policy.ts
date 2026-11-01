@@ -36,8 +36,9 @@ export async function requireAgentPermission(
   actor: HumanActor,
   agentId: string,
   permission: z.infer<typeof agentPermissionSchema>,
+  options: { archived?: boolean } = {},
 ) {
-  await requireAgentGrant(transaction, actor, agentId, permission);
+  await requireAgentGrant(transaction, actor, agentId, permission, options);
   await requirePersonalDefinitionSources(
     transaction,
     [{ kind: 'agent-definition', agentId, revision: 'all-saved-revisions' }],
