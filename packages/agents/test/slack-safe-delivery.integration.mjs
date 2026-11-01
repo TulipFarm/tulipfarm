@@ -21,7 +21,9 @@ test('GENERAL default answers use complete current audiences and retain private 
   const threads = new Map(),
     posts = [],
     modelInputs = [],
-    tokens = [];
+    tokens = [],
+    reactions = [],
+    decisions = [];
   let members = ['UALICE', 'UBOB', 'UBOT'],
     archived = false,
     sequence = 0,
@@ -73,8 +75,21 @@ test('GENERAL default answers use complete current audiences and retain private 
       res.writeHead(404).end();
       return;
     }
+    if (req.url === '/unknown') {
+      res.writeHead(404).end();
+      return;
+    }
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
+    if (req.url === '/react') {
+      reactions.push({
+        method: req.headers['x-slack-method'],
+        bot: req.headers.authorization === 'Bearer xoxb-fixture',
+        ...Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString())),
+      });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     const input = JSON.parse(Buffer.concat(chunks));
     if (req.url === '/model' && failModel) {
       res
@@ -88,7 +103,7 @@ test('GENERAL default answers use complete current audiences and retain private 
         await f.db.platform.query(
           `UPDATE ${f.table('tf_slack_identities')} SET state='revoked',credential=NULL WHERE slack_user_id='UALICE'`,
         );
-      const decision = { kind: 'answer', text: 'A safe shared answer.' };
+      const decision = decisions.shift() ?? { kind: 'answer', text: 'A safe shared answer.' };
       res.end(
         JSON.stringify(
           anthropicChat(decision, {
@@ -124,8 +139,10 @@ test('GENERAL default answers use complete current audiences and retain private 
   const native = globalThis.fetch;
   const fetcher = (url, init) =>
     native(
-      `http://127.0.0.1:${server.address().port}/${slackUserCall(url, init) ? `user/${slackUserCall(url, init)}` : String(url).includes('conversations.info') ? 'info' : String(url).endsWith('conversations.open') ? 'open' : String(url).endsWith('chat.postMessage') ? 'post' : 'unknown'}`,
-      init,
+      `http://127.0.0.1:${server.address().port}/${slackUserCall(url, init) ? `user/${slackUserCall(url, init)}` : String(url).includes('conversations.info') ? 'info' : String(url).endsWith('conversations.open') ? 'open' : String(url).endsWith('chat.postMessage') ? 'post' : String(url).includes('/reactions.') ? 'react' : 'unknown'}`,
+      String(url).includes('/reactions.')
+        ? { ...init, headers: { ...init.headers, 'x-slack-method': String(url).split('/').at(-1) } }
+        : init,
     );
   const channels = createSlackChannelAgents({
     runtime: f.runtime,
@@ -163,7 +180,7 @@ test('GENERAL default answers use complete current audiences and retain private 
   const inbox = createSlackInbox(f.runtime, channels.freeze);
   try {
     await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_slack_installations')} (id,app_id,team_id,bot_user_id,generation,state,scopes,bot_credential,accepts_events_after) VALUES ($1,'ATEST','TTEST','UBOT',1,'active',ARRAY['chat:write','im:write'],$2,0)`,
+      `INSERT INTO ${f.table('tf_slack_installations')} (id,app_id,team_id,bot_user_id,generation,state,scopes,bot_credential,accepts_events_after) VALUES ($1,'ATEST','TTEST','UBOT',1,'active',ARRAY['chat:write','im:write','reactions:write'],$2,0)`,
       [
         installationId,
         cipher.encrypt({ workspaceId: f.workspace.id, installationId, generation: 1, kind: 'bot' }, 'xoxb-fixture'),
@@ -308,6 +325,7 @@ test('GENERAL default answers use complete current audiences and retain private 
         Object.assign(process.env, {
           ANTHROPIC_API_KEY: 'fixture',
           SLACK_LINK_PROMPTS_ENABLED: 'true',
+          SLACK_OUTBOUND_ENABLED: 'true',
           SLACK_CHANNEL_AGENTS_ENABLED: 'true',
           SLACK_PUBLIC_DELIVERY_ENABLED: 'true',
           SLACK_CONFIGURATION: JSON.stringify(config),
@@ -453,11 +471,27 @@ test('GENERAL default answers use complete current audiences and retain private 
     assert.equal((await invoke('Fails quietly', { root: '2.000001' })).status, 'blocked');
     failModel = false;
     assert.equal(posts.length, quiet);
+    // A Slack-started reply reacts as the app, and only to messages in its own thread.
+    const react = (messageTs, reaction, remove) => ({
+      kind: 'tool',
+      call: { tool: 'slack.thread.react', messageTs, reaction, ...(remove ? { remove } : {}) },
+    });
+    decisions.push(react('2.000001', 'white_check_mark'));
+    assert.equal((await invoke('<@UBOT> Mark it done', { root: '2.000001' })).status, 'sent');
+    decisions.push(react('2.000001', 'white_check_mark', true));
+    assert.equal((await invoke('<@UBOT> Undo that', { root: '2.000001' })).status, 'sent');
+    decisions.push(react('4.000001', 'eyes'));
+    assert.equal((await invoke('<@UBOT> React to the other thread', { root: '2.000001' })).status, 'sent');
+    assert.deepEqual(reactions, [
+      { method: 'reactions.add', bot: true, channel: 'CGENERAL', timestamp: '2.000001', name: 'white_check_mark' },
+      { method: 'reactions.remove', bot: true, channel: 'CGENERAL', timestamp: '2.000001', name: 'white_check_mark' },
+    ]);
+    assert.match(JSON.stringify(modelInputs.at(-1)), /slack-message-not-in-thread/);
     const before = posts.length;
     revoke = true;
     assert.equal((await invoke('<@UBOT> Revoke in flight')).status, 'blocked');
     assert.equal(posts.length, before);
-    assert.equal(modelInputs.length, 7);
+    assert.equal(modelInputs.length, 26);
     const firstPage = await fetch(chatBase);
     assert.equal(firstPage.status, 200);
     const page = await firstPage.json();

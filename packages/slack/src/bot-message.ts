@@ -6,6 +6,7 @@ import {
   type SlackMessage,
 } from '@tulipfarm/slack-presentation';
 import { slackId } from './contracts.ts';
+import { callSlackApi } from './web-api.ts';
 
 export type BotMessageOutcome =
   | { kind: 'sent'; channel: string; ts: string; text: string }
@@ -238,4 +239,23 @@ export async function botMessageThread(token: string, channel: string, ts: strin
     .parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
   const [first] = result.messages;
   return { rootTs: first?.thread_ts ?? first?.ts ?? ts };
+}
+
+/** Adds or removes the app's reaction on a message. An existing reaction, or a missing one to remove, counts as done. */
+export async function setBotReaction(input: {
+  token: string;
+  channel: string;
+  messageTs: string;
+  reaction: string;
+  remove: boolean;
+  fetcher?: typeof fetch;
+}): Promise<void> {
+  await callSlackApi({
+    token: input.token,
+    method: input.remove ? 'reactions.remove' : 'reactions.add',
+    params: { channel: slackId.parse(input.channel), timestamp: input.messageTs, name: input.reaction },
+    fetcher: input.fetcher ?? fetch,
+    effect: true,
+    completed: [input.remove ? 'no_reaction' : 'already_reacted'],
+  });
 }

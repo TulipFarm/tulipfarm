@@ -394,6 +394,7 @@ export async function resultSources(
     case 'slack.message.send':
     case 'slack.thread.reply':
     case 'slack.reaction.add':
+    case 'slack.thread.react':
     case 'tables.import.attachments':
     case 'tables.import.file':
     case 'files.create':
