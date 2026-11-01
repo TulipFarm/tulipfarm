@@ -71,7 +71,9 @@ export function useConversationChanges() {
                   ? 'skills'
                   : kind === 'row'
                     ? 'tables'
-                    : 'workflows',
+                    : kind === 'project'
+                      ? 'projects'
+                      : 'workflows',
             ],
           ],
         }),

@@ -34,6 +34,16 @@ const skillLifecycleInput = z.strictObject({
     .max(20)
     .refine(distinct, 'Skills must be distinct'),
 });
+const projectSettings = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  instructions: z.string().refine(value => Buffer.byteLength(value) <= 65536, 'Instructions exceed 64 KiB'),
+  archived: z.boolean(),
+});
+const projectDraftInput = z.strictObject({
+  expectedRevision: z.number().int().nonnegative().nullable(),
+  settings: projectSettings,
+  current: projectSettings.nullable(),
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -61,6 +71,7 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent-restore'), targetId: uuidSchema, input: agentLifecycleInput }),
   z.strictObject({ kind: z.literal('skill-archive'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('skill-restore'), targetId: uuidSchema, input: skillLifecycleInput }),
+  z.strictObject({ kind: z.literal('project'), targetId: uuidSchema, input: projectDraftInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -99,6 +110,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('agent-restore'), agentIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('skill-archive'), skillIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('skill-restore'), skillIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('project'), projectId: z.uuid(), revision: z.number().int() }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -158,6 +170,7 @@ export type DefinitionLifecycleProposal = Extract<
 >;
 export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is DefinitionLifecycleProposal =>
   ['agent-archive', 'agent-restore', 'skill-archive', 'skill-restore'].includes(proposal.kind);
+export type ProjectProposal = Extract<AuthoringProposal, { kind: 'project' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;

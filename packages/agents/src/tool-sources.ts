@@ -356,6 +356,19 @@ export async function resultSources(
         .object({ workspace: z.array(z.object({ id: z.uuid(), revision: z.string() })) })
         .parse(result)
         .workspace.map(item => ({ kind: 'workspace-skill', skillId: item.id, revision: item.revision }));
+    case 'projects.list':
+      return z
+        .object({ projects: z.array(z.object({ id: z.uuid(), revision: z.number().int() })) })
+        .parse(result)
+        .projects.map(item => ({ kind: 'project', projectId: item.id, revision: item.revision }));
+    case 'projects.read':
+      return [
+        {
+          kind: 'project',
+          projectId: call.projectId,
+          revision: z.object({ revision: z.number().int() }).parse(result).revision,
+        },
+      ];
     case 'skills.workspace.read':
       return [
         {
@@ -408,6 +421,7 @@ export async function resultSources(
     case 'workflows.draft':
     case 'workflows.archive':
     case 'workflows.restore':
+    case 'projects.draft':
     case 'agents.archive':
     case 'agents.restore':
     case 'skills.archive':

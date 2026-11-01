@@ -194,6 +194,8 @@ export const sourceDependencySchema = z.discriminatedUnion('kind', [
     generation: z.number().int().positive(),
   }),
   z.strictObject({ kind: z.literal('workspace-skill'), skillId: uuidSchema, revision: z.string() }),
+  /** A project's settings and knowledge list, readable only by its current members. */
+  z.strictObject({ kind: z.literal('project'), projectId: uuidSchema, revision: z.number().int().nonnegative() }),
   z.strictObject({ kind: z.literal('creation-team'), teamId: uuidSchema, authority: z.enum(['agent', 'table']) }),
   z.strictObject({ kind: z.literal('private-conversation'), conversationId: uuidSchema }),
   z.strictObject({ kind: z.literal('shared-slack-turn'), eventId: uuidSchema }),

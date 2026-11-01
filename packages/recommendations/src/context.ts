@@ -180,6 +180,8 @@ function protectedReferences(source: SourceDependency): RecommendationSource[] {
       return [reference('integration', source.integrationId, String(source.generation))];
     case 'workspace-skill':
       return [reference('skill', source.skillId, source.revision)];
+    case 'project':
+      return [reference('project', source.projectId, String(source.revision))];
     case 'tulipfarm-file':
       return [reference('file', source.fileId, source.read.sha256), reference('settings', source.conversationId)];
     case 'google-file':
