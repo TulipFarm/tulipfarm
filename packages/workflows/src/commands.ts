@@ -5,7 +5,8 @@ import type { AuthorizationTransaction } from '@tulipfarm/access';
 
 export class WorkflowConflict extends Error {}
 
-// Quotas apply per member and per workspace, and unattended runs also per workflow. Runs parked in a
+// Run quotas apply per member and per workspace, and unattended runs also per workflow. Saved workflows
+// are not capped; only active runs and provider integrations count. Runs parked in a
 // delay or wait-until step skip those and count only toward their workflow's parked cap. All report the
 // same public code so a member cannot infer how much other people have created or started.
 export const workflowLimits = { workspace: 100, member: 25, workflow: 10, parked: 100 } as const;

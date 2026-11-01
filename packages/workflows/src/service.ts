@@ -611,9 +611,11 @@ export function createWorkflows(
           for (const row of archived) result.push(await read(tx, row.id, actor.membershipId));
           return result;
         }
+        // Saved workflows have no quota, so filter by access before the limit like archived ones.
         const rows = (
           await tx.client.query(
-            `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')} ORDER BY w.id LIMIT 100`,
+            `SELECT w.id FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')} AND ${readableWorkflow(tx, 'w', '$1')} ORDER BY w.id LIMIT 500`,
+            [actor.membershipId],
           )
         ).rows;
         const result = [];
@@ -796,18 +798,6 @@ export function createWorkflows(
       await requireAgentStepReader(tx, actor.membershipId, input.definition);
       if ((previous?.revision ?? null) !== input.expectedRevision) throw new WorkflowConflict('stale-revision');
       if (!previous) {
-        const counts = z.object({ workspace: z.number(), member: z.number() }).parse(
-          (
-            await tx.client.query(
-              `SELECT count(*)::integer AS workspace,
-          count(*) FILTER (WHERE (SELECT r.author_membership_id FROM ${table(tx, 'tf_workflow_revisions')} r WHERE r.workflow_id=w.id ORDER BY r.created_at,r.id LIMIT 1)=$1)::integer AS member
-          FROM ${table(tx, 'tf_workflows')} w WHERE ${unarchived(tx, 'w')}`,
-              [actor.membershipId],
-            )
-          ).rows[0],
-        );
-        if (counts.member >= workflowLimits.member) throw new WorkflowLimitReached('member');
-        if (counts.workspace >= workflowLimits.workspace) throw new WorkflowLimitReached('workspace');
         await tx.client.query(`INSERT INTO ${table(tx, 'tf_workflows')} (id,revision) VALUES ($1,$2)`, [
           id,
           input.revision,

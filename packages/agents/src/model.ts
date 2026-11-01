@@ -177,6 +177,9 @@ export function parseModelDecision(value: unknown, input: Parameters<AgentModel>
           ? new Set<string>(agentRuntimeToolNames[input.runtime])
           : null;
       const automaticSkillRead = call.tool === 'skills.read' && (input.definition.skills?.length ?? 0) > 0;
+      // An attached skill is pinned, so a read that omits the revision means the pinned one.
+      if (automaticSkillRead && call.revision === undefined)
+        call.revision = input.definition.skills?.find(selection => selection.id === call.skillId)?.revision;
       if (
         (!withKnowledgeRetrieveGrant(input.definition.tools).includes(call.tool) && !automaticSkillRead) ||
         (runtimeTools && !runtimeTools.has(call.tool))

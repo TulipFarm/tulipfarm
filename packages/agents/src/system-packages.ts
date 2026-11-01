@@ -119,6 +119,17 @@ const seedValues = (values: TableValues) =>
         : value,
     ]),
   );
+// Storage keeps multi-value ids sorted, so seed verification compares them without package order.
+const storedOrder = (values: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(values).map(([field, value]) => {
+      if (!value || typeof value !== 'object') return [field, value];
+      const sorted = { ...value } as Record<string, unknown>;
+      for (const key of ['optionIds', 'recordIds', 'fileIds'])
+        if (Array.isArray(sorted[key])) sorted[key] = [...(sorted[key] as string[])].sort();
+      return [field, sorted];
+    }),
+  );
 const nodeTitle = (resource: PackageResource) =>
   resource.kind === 'table'
     ? resource.label
@@ -1088,7 +1099,7 @@ export function createSystemPackages(options: Options) {
         const tableId = compiler.id(resource.table.key);
         const generation = await activeGeneration(tx, tableId);
         const actual = await s.records.getRecord(workspaceId, actor, tableId, generation.revision, id);
-        if (!actual || !same(seedValues(actual.values), seedValues(compiler.rows(resource))))
+        if (!actual || !same(storedOrder(seedValues(actual.values)), storedOrder(seedValues(compiler.rows(resource)))))
           throw new SystemPackageError(`verification-drift:${resource.key}`);
       } else if (resource.kind === 'skill') {
         const actual = await s.skills.read(workspaceId, actor, id);
