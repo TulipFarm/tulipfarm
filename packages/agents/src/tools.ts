@@ -180,7 +180,10 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     offset: z.number().int().min(0).max(100).default(0),
   }),
   z.strictObject({ tool: z.literal('skills.import.select'), importId: z.uuid(), input: skillImportSelectionSchema }),
-  z.strictObject({ tool: z.literal('workflows.list') }),
+  z.strictObject({
+    tool: z.literal('workflows.list'),
+    archived: z.boolean().optional().describe('List archived workflows instead of current ones.'),
+  }),
   z.strictObject({ tool: z.literal('workflows.read'), workflowId: z.uuid() }),
   z.strictObject({ tool: z.literal('workflows.providers') }),
   z.strictObject({
@@ -192,6 +195,13 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   }),
   z.strictObject({
     tool: z.literal('workflows.archive'),
+    workflows: z
+      .array(z.strictObject({ workflowId: z.uuid(), revision: z.uuid() }))
+      .min(1)
+      .max(20),
+  }),
+  z.strictObject({
+    tool: z.literal('workflows.restore'),
     workflows: z
       .array(z.strictObject({ workflowId: z.uuid(), revision: z.uuid() }))
       .min(1)
@@ -482,7 +492,9 @@ const descriptions: Record<ToolName, string> = {
   'workflows.draft':
     'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
   'workflows.archive':
-    'Prepare an archive review for 1–20 workflows the human manages, using IDs and revisions from workspaceInventory or workflows.list. Archiving stops triggers and blocks unfinished runs; run history stays readable, and there is no restore yet, so say so. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
+    'Prepare an archive review for 1–20 workflows the human manages, using IDs and revisions from workspaceInventory or workflows.list. Archiving stops triggers and blocks unfinished runs; run history stays readable, and workflows.restore can bring it back disabled. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
+  'workflows.restore':
+    'Prepare a restore review for 1–20 archived workflows the human manages, using IDs and revisions from workflows.list with archived=true. Restored workflows come back disabled with no webhook key; use workflows.draft with activate=true afterwards if the human wants one running. Returns one draft card and restores nothing until the human approves it. Never treat chat text as approval.',
   'skills.list':
     'List bundled authoring procedures available in this runtime, not workspace-authored skills. Returns stable IDs, names, and revisions without procedure bodies, paging, or authority. Use skills.read for one body and skills.workspace for reviewed workspace skills.',
   'skills.read':
@@ -1079,8 +1091,14 @@ export function createChatTools(
         return skillImportSummary(
           await createSkillImports(runtime).select(workspaceId, actor, call.importId, call.input),
         );
-      case 'workflows.list':
-        return { workflows: (await createWorkflowDrafts(runtime, workspaceId).list(actor)).map(summarizeWorkflow) };
+      case 'workflows.list': {
+        const workflowDrafts = createWorkflowDrafts(runtime, workspaceId);
+        return {
+          workflows: (call.archived ? await workflowDrafts.listArchived(actor) : await workflowDrafts.list(actor)).map(
+            summarizeWorkflow,
+          ),
+        };
+      }
       case 'workflows.read':
         return createWorkflowDrafts(runtime, workspaceId).read(actor, call.workflowId);
       case 'workflows.providers': {
@@ -1148,8 +1166,10 @@ export function createChatTools(
           }),
         );
       }
-      case 'workflows.archive': {
+      case 'workflows.archive':
+      case 'workflows.restore': {
         if (!context.origin) throw new AccessDenied();
+        const restoring = call.tool === 'workflows.restore';
         const ids = call.workflows.map(item => item.workflowId);
         if (new Set(ids).size !== ids.length)
           return {
@@ -1157,22 +1177,32 @@ export function createChatTools(
             issues: [{ path: ['workflows'], code: 'duplicate' }],
             instruction: 'List each workflow once.',
           };
-        const current = await createWorkflowDrafts(runtime, workspaceId).list(actor);
+        const workflowDrafts = createWorkflowDrafts(runtime, workspaceId);
+        const current = restoring ? await workflowDrafts.listArchived(actor) : await workflowDrafts.list(actor);
         const workflows = [];
         for (const item of call.workflows) {
           const workflow = current.find(candidate => candidate.id === item.workflowId);
-          if (!workflow) throw new AccessDenied();
+          if (!workflow) {
+            const opposite = restoring ? await workflowDrafts.list(actor) : await workflowDrafts.listArchived(actor);
+            if (!opposite.some(candidate => candidate.id === item.workflowId)) throw new AccessDenied();
+            return restoring
+              ? {
+                  error: 'workflow-not-archived',
+                  instruction: 'No draft was created. That workflow is not archived, so it needs no restore.',
+                }
+              : { error: 'workflow-archived', instruction: 'No draft was created. That workflow is already archived.' };
+          }
           if (workflow.revision !== item.revision) return workflowChanged;
           if (!workflow.capabilities.manage)
             return {
               error: 'workflow-manage-required',
-              instruction: `No draft was created. The human cannot manage “${workflow.definition.name}”, so they cannot archive it. Ask a workflow manager.`,
+              instruction: `No draft was created. The human cannot manage “${workflow.definition.name}”, so they cannot ${restoring ? 'restore' : 'archive'} it. Ask a workflow manager.`,
             };
           workflows.push({ id: workflow.id, revision: workflow.revision, name: workflow.definition.name });
         }
         return workflowStale(
           createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
-            kind: 'workflow-archive',
+            kind: restoring ? 'workflow-restore' : 'workflow-archive',
             targetId: randomUUID(),
             input: { workflows },
           }),

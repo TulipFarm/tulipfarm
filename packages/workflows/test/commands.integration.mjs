@@ -219,7 +219,7 @@ test('human waits remain actionable after fifty newer terminal runs', { timeout:
 });
 
 test(
-  'archiving a workflow stops its triggers and runs, frees its quota slot and keeps its history',
+  'archiving a workflow stops its triggers and runs and keeps its history; restoring brings it back disabled',
   { timeout: 120000 },
   async () => {
     const db = await fixture();
@@ -384,6 +384,38 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await assert.rejects(
         login.query(`UPDATE ${table('tf_workflows')} SET enabled=true WHERE id=$1`, [id]),
         /tf_workflows_archived_disabled/,
+      );
+
+      await assert.rejects(
+        service.restore(w.id, reader.userId, id, { commandId: randomUUID(), expectedGeneration: 5 }),
+        AccessDenied,
+      );
+      const restore = { commandId: randomUUID(), expectedGeneration: 5 };
+      const restored = await service.restore(w.id, w.userId, id, restore);
+      assert.deepEqual([restored.archivedAt, restored.enabled, restored.generation], [null, false, 6]);
+      assert.equal((await service.restore(w.id, w.userId, id, restore)).generation, 6, 'a replay changes nothing');
+      await assert.rejects(service.restore(w.id, w.userId, id, { commandId: randomUUID(), expectedGeneration: 6 }), {
+        message: 'workflow-not-archived',
+      });
+      assert.equal(
+        (await service.list(w.id, w.userId)).some(item => item.id === id),
+        true,
+      );
+      assert.deepEqual(await service.list(w.id, w.userId, { archived: true }), []);
+      assert.equal(
+        (await service.save(w.id, w.userId, id, { revision: randomUUID(), expectedRevision: revision, definition }))
+          .archivedAt,
+        null,
+        'a restored workflow can be edited again',
+      );
+      assert.deepEqual(
+        (
+          await db.platform.query(
+            `SELECT count(*)::integer AS count FROM ${table('tf_audit_events')} WHERE operation='workflow.restore' AND subject_id=$1`,
+            [id],
+          )
+        ).rows[0],
+        { count: 1 },
       );
     } finally {
       await login?.end();

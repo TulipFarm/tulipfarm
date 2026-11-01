@@ -13,7 +13,7 @@ import type {
 } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { AgentStorage } from './store.ts';
-import type { DraftOutcome, WorkflowArchiveProposal, WorkflowProposal } from './draft-contracts.ts';
+import type { DraftOutcome, WorkflowLifecycleProposal, WorkflowProposal } from './draft-contracts.ts';
 
 type Trigger = Definition['trigger'];
 type Workflow = z.infer<typeof workflowSchema>;
@@ -39,13 +39,14 @@ export type WorkflowDrafts = {
   writable(actor: HumanActor, proposal: WorkflowProposal): Promise<void>;
   stale(actor: HumanActor, proposal: WorkflowProposal): Promise<boolean>;
   apply(actor: HumanActor, draftId: string, commandId: string, proposal: WorkflowProposal): Promise<DraftOutcome>;
-  archivable(actor: HumanActor, proposal: WorkflowArchiveProposal): Promise<void>;
-  archiveStale(actor: HumanActor, proposal: WorkflowArchiveProposal): Promise<boolean>;
-  archive(actor: HumanActor, commandId: string, proposal: WorkflowArchiveProposal): Promise<DraftOutcome>;
+  listArchived(actor: HumanActor): Promise<Workflow[]>;
+  lifecycleWritable(actor: HumanActor, proposal: WorkflowLifecycleProposal): Promise<void>;
+  lifecycleStale(actor: HumanActor, proposal: WorkflowLifecycleProposal): Promise<boolean>;
+  applyLifecycle(actor: HumanActor, commandId: string, proposal: WorkflowLifecycleProposal): Promise<DraftOutcome>;
 };
-// Each workflow needs its own archive command ID, derived from the one decision so a replay archives nothing twice.
-function archiveCommandId(commandId: string, workflowId: string) {
-  const hex = createHash('sha256').update(`workflow-archive:${commandId}:${workflowId}`).digest('hex');
+// Each workflow needs its own command ID, derived from the one decision so a replay changes nothing twice.
+function lifecycleCommandId(kind: WorkflowLifecycleProposal['kind'], commandId: string, workflowId: string) {
+  const hex = createHash('sha256').update(`${kind}:${commandId}:${workflowId}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${((Number.parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 const unattended = (trigger: Trigger) => !['manual', 'event'].includes(trigger.kind);
@@ -355,38 +356,43 @@ export function createWorkflowDrafts(
     });
     return proposal.input.activate ? activation(actor, saved, true, commandId) : outcome(saved, 'not-requested');
   }
-  async function archivable(actor: HumanActor, proposal: WorkflowArchiveProposal) {
-    // A replayed approval finds its workflows already archived.
-    const current = [...(await list(actor)), ...(await service.list(workspaceId, actor.userId, { archived: true }))];
+  const listArchived = (actor: HumanActor) => service.list(workspaceId, actor.userId, { archived: true });
+  // Both lists are read so a replayed approval still finds workflows that it already moved.
+  const lifecycleCandidates = async (actor: HumanActor) => [...(await list(actor)), ...(await listArchived(actor))];
+  async function lifecycleWritable(actor: HumanActor, proposal: WorkflowLifecycleProposal) {
+    const current = await lifecycleCandidates(actor);
     for (const item of proposal.input.workflows)
       if (!current.find(workflow => workflow.id === item.id)?.capabilities.manage) throw new AccessDenied();
   }
-  async function archiveStale(actor: HumanActor, proposal: WorkflowArchiveProposal) {
-    const current = await list(actor);
+  async function lifecycleStale(actor: HumanActor, proposal: WorkflowLifecycleProposal) {
+    const current = proposal.kind === 'workflow-archive' ? await list(actor) : await listArchived(actor);
     return proposal.input.workflows.some(
       item => current.find(workflow => workflow.id === item.id)?.revision !== item.revision,
     );
   }
-  async function archive(
+  async function applyLifecycle(
     actor: HumanActor,
     commandId: string,
-    proposal: WorkflowArchiveProposal,
+    proposal: WorkflowLifecycleProposal,
   ): Promise<DraftOutcome> {
-    const current = await list(actor);
+    const current = await lifecycleCandidates(actor);
     for (const item of proposal.input.workflows) {
       const workflow = current.find(candidate => candidate.id === item.id);
       if (!workflow) throw new AccessDenied();
-      await service.archive(workspaceId, actor.userId, item.id, {
-        commandId: archiveCommandId(commandId, item.id),
+      const command = {
+        commandId: lifecycleCommandId(proposal.kind, commandId, item.id),
         expectedGeneration: workflow.generation,
-      });
+      };
+      if (proposal.kind === 'workflow-archive') await service.archive(workspaceId, actor.userId, item.id, command);
+      else await service.restore(workspaceId, actor.userId, item.id, command);
     }
-    return { kind: 'workflow-archive', workflowIds: proposal.input.workflows.map(item => item.id) };
+    return { kind: proposal.kind, workflowIds: proposal.input.workflows.map(item => item.id) };
   }
   return {
-    archivable,
-    archiveStale,
-    archive,
+    listArchived,
+    lifecycleWritable,
+    lifecycleStale,
+    applyLifecycle,
     list,
     read,
     providers,

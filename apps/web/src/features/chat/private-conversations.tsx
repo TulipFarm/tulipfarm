@@ -1887,7 +1887,9 @@ function ConversationTools({
             tool.status === 'completed' &&
             tool.activityStatus !== 'failed' &&
             !tool.importId &&
-            (['agents.draft', 'skills.draft', 'workflows.draft', 'workflows.archive'].includes(tool.tool) ||
+            (['agents.draft', 'skills.draft', 'workflows.draft', 'workflows.archive', 'workflows.restore'].includes(
+              tool.tool,
+            ) ||
               tool.rowDraftId === tool.id),
         )
         .map(tool => (
