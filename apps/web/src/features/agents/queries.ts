@@ -10,7 +10,8 @@ type Api = ReturnType<typeof agentApi>;
 export const agentKeys = {
   all: ['agents'] as const,
   lists: ['agents', 'list'] as const,
-  list: (after?: string, search = '') => ['agents', 'list', { after: after ?? null, search }] as const,
+  list: (after?: string, search = '', archived = false) =>
+    ['agents', 'list', { after: after ?? null, search, archived }] as const,
   context: ['agents', 'authoring-context'] as const,
   detail: (id: string) => ['agents', 'detail', id] as const,
   policy: (id: string) => ['agents', 'detail', id, 'policy'] as const,
@@ -22,9 +23,9 @@ export const agentKeys = {
   slackChannel: (channel: string) => ['agents', 'slack-channels', channel] as const,
 };
 export const agentReads = {
-  list: (api: Api, after?: string, search = '') => ({
-    key: agentKeys.list(after, search),
-    load: (signal: AbortSignal) => api.list(signal, after, search),
+  list: (api: Api, after?: string, search = '', archived = false) => ({
+    key: agentKeys.list(after, search, archived),
+    load: (signal: AbortSignal) => api.list(signal, after, search, archived),
   }),
   context: (api: Api) => ({ key: agentKeys.context, load: (signal: AbortSignal) => api.context(signal) }),
   detail: (api: Api, id: string) => ({
@@ -53,8 +54,8 @@ export function combineAgentReads<A, B, T>(a: ReadState<A>, b: ReadState<B>, com
     error: a.error ?? b.error,
   };
 }
-export function useAgents(api: Api, after?: string, search = '') {
-  const page = useFeatureRead(agentReads.list(api, after, search));
+export function useAgents(api: Api, after?: string, search = '', archived = false) {
+  const page = useFeatureRead(agentReads.list(api, after, search, archived));
   const context = useFeatureRead(agentReads.context(api));
   return {
     state: combineAgentReads(page.state, context.state, (page, context) => ({ page, context })),
@@ -204,6 +205,8 @@ export function useAgentApi(workspaceId: string) {
         permissions(id, api.updatePolicy(id, input)),
       configure: (id: string, input: Parameters<Api['configure']>[1]) => permissions(id, api.configure(id, input)),
       remove: (id: string) => permissions(id, api.remove(id)),
+      archive: (id: string) => permissions(id, api.archive(id)),
+      restore: (id: string) => saved(id, api.restore(id)),
       activate: (id: string, input: Parameters<Api['activate']>[1]) => saved(id, api.activate(id, input)),
       activateInspection: (id: string, input: Parameters<Api['activateInspection']>[1]) =>
         saved(id, api.activateInspection(id, input)),

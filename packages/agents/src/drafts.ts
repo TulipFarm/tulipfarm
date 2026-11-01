@@ -27,6 +27,7 @@ import {
   draftDecisionSchema,
   draftOutcomeSchema,
   draftViewSchema,
+  isDefinitionLifecycle,
   isWorkflowLifecycle,
   type AgentDraftChange,
   type AuthoringProposal,
@@ -37,6 +38,7 @@ import { createAgentRecordTools } from './record-tools.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { bindFileSources } from '@tulipfarm/conversations/file-references';
 import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
+import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import { requireSharedMcpSlots } from '@tulipfarm/access';
@@ -179,6 +181,8 @@ export function createAuthoringDrafts(
     if (isWorkflow(proposal)) return createWorkflowDrafts(bound, workspaceId).writable(actor, proposal);
     if (isWorkflowLifecycle(proposal))
       return createWorkflowDrafts(bound, workspaceId).lifecycleWritable(actor, proposal);
+    if (isDefinitionLifecycle(proposal))
+      return createDefinitionLifecycleDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -256,6 +260,7 @@ export function createAuthoringDrafts(
         (await superseded(tx, id, proposal.targetId)) || createWorkflowDrafts(bound, workspaceId).stale(actor, proposal)
       );
     if (isWorkflowLifecycle(proposal)) return createWorkflowDrafts(bound, workspaceId).lifecycleStale(actor, proposal);
+    if (isDefinitionLifecycle(proposal)) return createDefinitionLifecycleDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -522,6 +527,20 @@ export function createAuthoringDrafts(
               ? 'No workflow has been archived. The human must review the listed workflows on the chat card and choose Archive. Never treat chat text as approval.'
               : 'No workflow has been restored. The human must review the listed workflows on the chat card and choose Restore. Restored workflows stay disabled until activated. Never treat chat text as approval.',
         };
+      if (isDefinitionLifecycle(proposal)) {
+        const agent = proposal.kind === 'agent-archive' || proposal.kind === 'agent-restore';
+        const restoring = proposal.kind === 'agent-restore' || proposal.kind === 'skill-restore';
+        const noun = agent ? 'agent' : 'skill';
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          ...(agent
+            ? { agentIds: proposal.input.agents.map(item => item.id) }
+            : { skillIds: proposal.input.skills.map(item => item.id) }),
+          instruction: `No ${noun} has been ${restoring ? 'restored' : 'archived'}. The human must review the listed ${noun}s on the chat card and choose ${restoring ? 'Restore' : 'Archive'}.${restoring && agent ? ' Restored agents stay turned off until a manager turns them on and activates them again.' : ''} Never treat chat text as approval.`,
+        };
+      }
       const change = proposal.input.expectedSavedRevision === null ? 'create' : 'update';
       if (proposal.input.setup)
         return {
@@ -591,6 +610,10 @@ export function createAuthoringDrafts(
                 outcome.kind === 'workflow' ||
                 outcome.kind === 'workflow-archive' ||
                 outcome.kind === 'workflow-restore' ||
+                outcome.kind === 'agent-archive' ||
+                outcome.kind === 'agent-restore' ||
+                outcome.kind === 'skill-archive' ||
+                outcome.kind === 'skill-restore' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -722,6 +745,8 @@ export function createAuthoringDrafts(
             },
             ...(githubSubscriptions ? { githubSubscriptions } : {}),
           }).applyLifecycle(actor, input.commandId, proposal);
+        else if (isDefinitionLifecycle(proposal))
+          outcome = await createDefinitionLifecycleDrafts(bound, workspaceId).apply(actor, input.commandId, proposal);
         else
           outcome =
             proposal.kind === 'row'

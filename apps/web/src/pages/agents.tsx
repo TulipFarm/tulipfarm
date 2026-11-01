@@ -19,12 +19,15 @@ import { Add } from 'reicon-react/icons/Add';
 import { Users } from 'reicon-react/icons/Users';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from '@/features/agents/api';
 import { AgentRead } from '@/features/agents/feedback';
-import { KeepsEditsContext, samePage } from '@/features/tables/feedback';
+import { KeepsEditsContext, samePage, WriteFeedback } from '@/features/tables/feedback';
+import { useTableWrite } from '@/features/tables/use-table-write';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
+import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
 import { AgentSchedules } from '@/features/agents/schedules';
 import { AgentChat } from '@/features/agents/chat';
-import { AgentDelete } from '@/features/agents/delete';
+import { AgentArchive, AgentDelete } from '@/features/agents/delete';
 import { AgentActivations } from '@/features/agents/activations';
 import { useAgentApi, useAgents, useAgentDetail, useAgentPage, useAgentPolicy } from '@/features/agents/queries';
 import { toolLabels } from '@/features/agents/labels';
@@ -47,7 +50,9 @@ export function AgentsPage() {
   const api = useAgentApi(workspace.id);
   const pages = useCatalogNavigation(`${user.id}/${workspace.id}/agents`);
   const { after, search, setSearch } = pages;
-  const read = useAgents(api, after, search);
+  const [shelf, setShelf] = useState<'current' | 'archived'>('current');
+  const archived = shelf === 'archived';
+  const read = useAgents(api, after, search, archived);
   const canCreate = read.state.kind === 'ready';
   return (
     <PageContent>
@@ -61,6 +66,23 @@ export function AgentsPage() {
           value={search}
           onChange={setSearch}
         />
+        <ToggleGroup
+          aria-label="Agent filter"
+          variant="outline"
+          size="sm"
+          spacing={0}
+          value={[shelf]}
+          onValueChange={value => {
+            const next = value[0];
+            if ((next === 'current' || next === 'archived') && next !== shelf) {
+              setSearch('');
+              setShelf(next);
+            }
+          }}
+        >
+          <ToggleGroupItem value="current">Current</ToggleGroupItem>
+          <ToggleGroupItem value="archived">Archived</ToggleGroupItem>
+        </ToggleGroup>
         {canCreate && (
           <div className="flex shrink-0 gap-2">
             <Button
@@ -93,7 +115,14 @@ export function AgentsPage() {
               <p className="text-sm text-muted-foreground">{page.count} matching agents</p>
             )}
             {!page.agents.length ? (
-              search ? (
+              archived && !search ? (
+                <StatePanel
+                  kind="empty"
+                  icon={Users}
+                  title="No archived agents"
+                  description="Agents you archive appear here, ready to restore."
+                />
+              ) : search ? (
                 <StatePanel
                   kind="empty"
                   icon={Users}
@@ -127,6 +156,12 @@ export function AgentsPage() {
                   </Button>
                 </StatePanel>
               )
+            ) : archived ? (
+              <DataList aria-label="Archived agents" columns="two" headings={['Name', 'Actions']}>
+                {page.agents.map(agent => (
+                  <ArchivedAgentRow key={agent.id} api={api} id={agent.id} name={agent.name} refresh={read.refresh} />
+                ))}
+              </DataList>
             ) : (
               <DataList aria-label="Agents" columns="three" headings={['Name', 'Instructions', 'Status']}>
                 {page.agents.map(agent => (
@@ -181,6 +216,54 @@ export function AgentsPage() {
         )}
       </AgentRead>
     </PageContent>
+  );
+}
+
+function ArchivedAgentRow({
+  api,
+  id,
+  name,
+  refresh,
+}: {
+  api: ReturnType<typeof useAgentApi>;
+  id: string;
+  name: string;
+  refresh: () => Promise<void>;
+}) {
+  const write = useTableWrite(
+    (agentId: string) => api.restore(agentId),
+    () => undefined,
+  );
+  return (
+    <DataListRow>
+      <DataListCell>
+        <AgentAvatar agentId={id} name={name} />
+        {name}
+      </DataListCell>
+      <DataListActions>
+        <Button
+          size="sm"
+          variant="outline"
+          pendingLabel="Restoring agent…"
+          onClick={() => void write.submit(id)}
+          state={
+            write.state.kind === 'sending'
+              ? { kind: 'busy' }
+              : write.state.kind === 'uncertain'
+                ? { kind: 'blocked', reason: 'Check whether the agent was restored before trying again.' }
+                : { kind: 'ready' }
+          }
+        >
+          <ArchiveUp size={16} aria-hidden="true" />
+          Restore
+        </Button>
+        <WriteFeedback
+          state={write.state}
+          checkStatus={() => void refresh()}
+          retry={agentId => void write.submit(agentId)}
+        />
+      </DataListActions>
+    </DataListRow>
   );
 }
 
@@ -403,7 +486,8 @@ function AgentPage({
   const api = useAgentApi(workspaceId);
   const [snapshot, setSnapshot] = useState<{ context: AgentContext; detail: AgentDetail | null } | null>(null);
   const [receipt, setReceipt] = useState<AgentCommand | null>(null);
-  const [deleted, setDeleted] = useState(false);
+  const [removed, setRemoved] = useState<'archived' | 'deleted' | null>(null);
+  const deleted = removed !== null;
   const read = useAgentPage(api, id, creating);
   if (
     read.state.kind === 'ready' &&
@@ -462,7 +546,13 @@ function AgentPage({
           }
           actions={status && <Badge variant={statusVariant[status.kind]}>{status.label}</Badge>}
         />
-        {deleted ? (
+        {removed === 'archived' ? (
+          <StatePanel
+            kind="success"
+            title="Agent archived"
+            description="Its activations and schedules have ended. Restore it from Archived on the agents page."
+          />
+        ) : deleted ? (
           <StatePanel
             kind="success"
             title="Agent deleted"
@@ -700,11 +790,18 @@ function AgentPage({
                           <dd>{detail.definitionRevision}</dd>
                         </dl>
                       </Disclosure>
+                      <AgentArchive
+                        api={api}
+                        id={id}
+                        concealed={!ready || !can('delete')}
+                        onArchived={() => setRemoved('archived')}
+                        refresh={refresh}
+                      />
                       <AgentDelete
                         api={api}
                         id={id}
                         concealed={!ready || !can('delete')}
-                        onDeleted={() => setDeleted(true)}
+                        onDeleted={() => setRemoved('deleted')}
                         refresh={refresh}
                       />
                     </>,

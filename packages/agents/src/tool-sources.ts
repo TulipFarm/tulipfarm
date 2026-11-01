@@ -312,6 +312,8 @@ export async function resultSources(
         .parse(result)
         .teams.map(item => ({ kind: 'creation-team', teamId: item.id, authority: 'agent' }));
     case 'agents.list':
+      // Archived agents fail current-agent source checks; like workflows.list, the archived list records none.
+      if (call.archived) return [];
       return z
         .object({ agents: z.array(z.object({ id: z.uuid(), savedRevision: z.string() })) })
         .parse(result)
@@ -406,6 +408,10 @@ export async function resultSources(
     case 'workflows.draft':
     case 'workflows.archive':
     case 'workflows.restore':
+    case 'agents.archive':
+    case 'agents.restore':
+    case 'skills.archive':
+    case 'skills.restore':
     case 'skills.list':
     case 'packages.inspect':
     case 'followups.schedule':

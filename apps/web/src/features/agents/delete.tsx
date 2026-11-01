@@ -74,3 +74,67 @@ export function AgentDelete({
     </FormSection>
   );
 }
+
+export function AgentArchive({
+  api,
+  id,
+  concealed,
+  onArchived,
+  refresh,
+}: {
+  api: ReturnType<typeof agentApi>;
+  id: string;
+  concealed: boolean;
+  onArchived: () => void;
+  refresh: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const write = useTableWrite((agentId: string) => api.archive(agentId), onArchived);
+  if (concealed) return null;
+  return (
+    <FormSection
+      title="Archive agent"
+      description="Hides the agent and stops its active versions and schedules. You can restore it later from Archived agents."
+    >
+      <Button
+        variant="outline"
+        pendingLabel="Archiving agent…"
+        onClick={() => setConfirming(true)}
+        state={
+          write.state.kind === 'sending'
+            ? { kind: 'busy' }
+            : write.state.kind === 'uncertain'
+              ? { kind: 'blocked', reason: 'Check whether the agent was archived before trying again.' }
+              : { kind: 'ready' }
+        }
+      >
+        Archive agent
+      </Button>
+      <WriteFeedback
+        state={write.state}
+        checkStatus={() => void refresh()}
+        retry={agentId => void write.submit(agentId)}
+      />
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogTitle>Archive this agent?</AlertDialogTitle>
+          <AlertDialogDescription>
+            It leaves the agent list, turns off and ends its activations and schedules. Its team, sharing and history
+            stay. Restoring brings it back turned off, ready to activate again.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep agent</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirming(false);
+                void write.submit(id);
+              }}
+            >
+              Archive agent
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </FormSection>
+  );
+}

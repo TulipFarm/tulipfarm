@@ -19,6 +19,21 @@ const workflowLifecycleInput = z.strictObject({
     .max(20)
     .refine(items => new Set(items.map(item => item.id)).size === items.length, 'Workflows must be distinct'),
 });
+const distinct = (items: { id: string }[]) => new Set(items.map(item => item.id)).size === items.length;
+const agentLifecycleInput = z.strictObject({
+  agents: z
+    .array(z.strictObject({ id: uuidSchema, name: z.string() }))
+    .min(1)
+    .max(20)
+    .refine(distinct, 'Agents must be distinct'),
+});
+const skillLifecycleInput = z.strictObject({
+  skills: z
+    .array(z.strictObject({ id: uuidSchema, version: z.number().int().positive(), name: z.string() }))
+    .min(1)
+    .max(20)
+    .refine(distinct, 'Skills must be distinct'),
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -42,6 +57,10 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('workflow-archive'), targetId: uuidSchema, input: workflowLifecycleInput }),
   z.strictObject({ kind: z.literal('workflow-restore'), targetId: uuidSchema, input: workflowLifecycleInput }),
+  z.strictObject({ kind: z.literal('agent-archive'), targetId: uuidSchema, input: agentLifecycleInput }),
+  z.strictObject({ kind: z.literal('agent-restore'), targetId: uuidSchema, input: agentLifecycleInput }),
+  z.strictObject({ kind: z.literal('skill-archive'), targetId: uuidSchema, input: skillLifecycleInput }),
+  z.strictObject({ kind: z.literal('skill-restore'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -76,6 +95,10 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('row'), operation: z.enum(['create', 'update', 'delete']), recordId: z.uuid() }),
   z.object({ kind: z.literal('workflow-archive'), workflowIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('workflow-restore'), workflowIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('agent-archive'), agentIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('agent-restore'), agentIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('skill-archive'), skillIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('skill-restore'), skillIds: z.array(z.uuid()) }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -129,6 +152,12 @@ export type WorkflowProposal = Extract<AuthoringProposal, { kind: 'workflow' | '
 export type WorkflowLifecycleProposal = Extract<AuthoringProposal, { kind: 'workflow-archive' | 'workflow-restore' }>;
 export const isWorkflowLifecycle = (proposal: AuthoringProposal): proposal is WorkflowLifecycleProposal =>
   proposal.kind === 'workflow-archive' || proposal.kind === 'workflow-restore';
+export type DefinitionLifecycleProposal = Extract<
+  AuthoringProposal,
+  { kind: 'agent-archive' | 'agent-restore' | 'skill-archive' | 'skill-restore' }
+>;
+export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is DefinitionLifecycleProposal =>
+  ['agent-archive', 'agent-restore', 'skill-archive', 'skill-restore'].includes(proposal.kind);
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;
