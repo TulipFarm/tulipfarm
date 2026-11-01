@@ -404,6 +404,7 @@ export async function resultSources(
     case 'skills.draft':
     case 'workflows.list':
     case 'workflows.draft':
+    case 'workflows.archive':
     case 'skills.list':
     case 'packages.inspect':
     case 'followups.schedule':

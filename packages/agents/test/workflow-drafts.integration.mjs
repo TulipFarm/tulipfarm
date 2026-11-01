@@ -947,3 +947,102 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     },
   );
 });
+
+test('chat archives several workflows only after the human approves one card, and refuses a stale card', async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const chats = createConversations(runtime),
+    drafts = createAuthoringDrafts(runtime),
+    workflows = createWorkflows(runtime),
+    chatId = randomUUID();
+  const saved = [];
+  for (const name of ['Review open tickets', 'Send weekly digest', 'Check renewals']) {
+    const id = randomUUID();
+    await workflows.save(w.id, w.userId, id, {
+      revision: randomUUID(),
+      expectedRevision: null,
+      definition: { ...weekdayReview, name },
+    });
+    saved.push((await workflows.list(w.id, w.userId)).find(workflow => workflow.id === id));
+  }
+  await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+  async function archive(items) {
+    const sent = await chats.send(w.id, w.userId, chatId, {
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Archive these workflows.' }],
+    });
+    const call = { tool: 'workflows.archive', workflows: items };
+    let output;
+    const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
+      output = (
+        await executeTool(
+          call.tool,
+          false,
+          context => createChatTools(context.runtime).invokeWithSources(context, call),
+          [],
+          call,
+        )
+      ).result;
+      return { text: 'Review the archive card.', sources: [] };
+    });
+    await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
+    return output;
+  }
+  const item = workflow => ({ workflowId: workflow.id, revision: workflow.revision });
+
+  assert.equal((await archive([item(saved[0]), item(saved[0])])).error, 'invalid-arguments');
+  assert.equal((await archive([{ ...item(saved[0]), revision: randomUUID() }])).error, 'draft-stale');
+
+  const batch = await archive([item(saved[0]), item(saved[1])]);
+  const card = await drafts.read(w.id, w.userId, chatId, batch.draftId);
+  assert.equal(card.status, 'pending');
+  assert.deepEqual(
+    card.proposal.input.workflows.map(workflow => workflow.name),
+    ['Review open tickets', 'Send weekly digest'],
+    'the card names every workflow it will archive',
+  );
+  assert.equal((await workflows.list(w.id, w.userId)).length, 3, 'proposing archives nothing');
+
+  const decision = { commandId: randomUUID(), digest: batch.digest, decision: 'save' };
+  await drafts.decide(w.id, w.userId, chatId, batch.draftId, decision);
+  await drafts.decide(w.id, w.userId, chatId, batch.draftId, decision);
+  assert.equal((await drafts.read(w.id, w.userId, chatId, batch.draftId)).status, 'saved');
+  assert.deepEqual(
+    (await workflows.list(w.id, w.userId)).map(workflow => workflow.id),
+    [saved[2].id],
+  );
+  assert.deepEqual(
+    (await workflows.list(w.id, w.userId, { archived: true })).map(workflow => workflow.id).sort(),
+    [saved[0].id, saved[1].id].sort(),
+  );
+
+  const late = await archive([item(saved[2])]);
+  await workflows.save(w.id, w.userId, saved[2].id, {
+    revision: randomUUID(),
+    expectedRevision: saved[2].revision,
+    definition: { ...weekdayReview, name: 'Check renewals daily' },
+  });
+  assert.equal((await drafts.read(w.id, w.userId, chatId, late.draftId)).status, 'stale');
+  await assert.rejects(
+    drafts.decide(w.id, w.userId, chatId, late.draftId, {
+      commandId: randomUUID(),
+      digest: late.digest,
+      decision: 'save',
+    }),
+  );
+  assert.equal((await workflows.list(w.id, w.userId)).length, 1, 'an edited workflow is not archived from an old card');
+});

@@ -190,6 +190,13 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     definition: z.string().max(131072).optional(),
     activate: z.boolean(),
   }),
+  z.strictObject({
+    tool: z.literal('workflows.archive'),
+    workflows: z
+      .array(z.strictObject({ workflowId: z.uuid(), revision: z.uuid() }))
+      .min(1)
+      .max(20),
+  }),
   z.strictObject({ tool: z.literal('agents.status'), commandId: z.uuid(), setup: z.boolean().optional() }),
   z.strictObject({ tool: z.literal('plans.create'), ...createPlanSchema.omit({ budget: true }).shape }),
   z.strictObject({
@@ -474,6 +481,8 @@ const descriptions: Record<ToolName, string> = {
     'List enabled, authorized connected workflow sources you may use. Returns safe source configuration, never credentials. Only Sheets supports updated events; all support created events. Also returns githubRepositories: the connected GitHub repositories a github trigger may name, with their repositoryId. Missing integrations must be set up outside chat.',
   'workflows.draft':
     'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
+  'workflows.archive':
+    'Prepare an archive review for 1–20 workflows the human manages, using IDs and revisions from workspaceInventory or workflows.list. Archiving stops triggers and blocks unfinished runs; run history stays readable, and there is no restore yet, so say so. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
   'skills.list':
     'List bundled authoring procedures available in this runtime, not workspace-authored skills. Returns stable IDs, names, and revisions without procedure bodies, paging, or authority. Use skills.read for one body and skills.workspace for reviewed workspace skills.',
   'skills.read':
@@ -1136,6 +1145,36 @@ export function createChatTools(
             kind: 'workflow',
             targetId: call.workflowId ?? randomUUID(),
             input: { expectedRevision: call.revision ?? null, definition, activate: call.activate },
+          }),
+        );
+      }
+      case 'workflows.archive': {
+        if (!context.origin) throw new AccessDenied();
+        const ids = call.workflows.map(item => item.workflowId);
+        if (new Set(ids).size !== ids.length)
+          return {
+            error: 'invalid-arguments',
+            issues: [{ path: ['workflows'], code: 'duplicate' }],
+            instruction: 'List each workflow once.',
+          };
+        const current = await createWorkflowDrafts(runtime, workspaceId).list(actor);
+        const workflows = [];
+        for (const item of call.workflows) {
+          const workflow = current.find(candidate => candidate.id === item.workflowId);
+          if (!workflow) throw new AccessDenied();
+          if (workflow.revision !== item.revision) return workflowChanged;
+          if (!workflow.capabilities.manage)
+            return {
+              error: 'workflow-manage-required',
+              instruction: `No draft was created. The human cannot manage “${workflow.definition.name}”, so they cannot archive it. Ask a workflow manager.`,
+            };
+          workflows.push({ id: workflow.id, revision: workflow.revision, name: workflow.definition.name });
+        }
+        return workflowStale(
+          createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
+            kind: 'workflow-archive',
+            targetId: randomUUID(),
+            input: { workflows },
           }),
         );
       }
