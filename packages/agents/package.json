@@ -259,6 +259,14 @@
       "types": "./dist/schedule-contracts.d.ts",
       "default": "./dist/schedule-contracts.js"
     },
+    "./follow-ups": {
+      "types": "./dist/follow-ups.d.ts",
+      "default": "./dist/follow-ups.js"
+    },
+    "./follow-up-contracts": {
+      "types": "./dist/follow-up-contracts.d.ts",
+      "default": "./dist/follow-up-contracts.js"
+    },
     "./authoring": {
       "types": "./dist/authoring.d.ts",
       "default": "./dist/authoring.js"

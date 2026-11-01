@@ -298,6 +298,8 @@ export const toolReceiptSchema = z.object({
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),
   importId: uuidSchema.optional(),
+  /** The follow-up a `followups.schedule` call saved. */
+  followUpId: uuidSchema.optional(),
   googleProposalId: uuidSchema.optional(),
   rowDraftId: uuidSchema.optional(),
   rowView: rowViewSchema.optional(),
@@ -320,6 +322,8 @@ export const messageSchema = z.object({
   turn: turnSummarySchema.nullable(),
   tools: z.array(toolReceiptSchema).default([]),
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
+  /** Set on a message that a scheduled follow-up sent for its requester, not one they typed then. */
+  followUp: z.object({ id: uuidSchema, instruction: z.string(), requestedAt: z.string() }).nullable().optional(),
 });
 export const historySchema = z.object({
   messages: z.array(messageSchema),

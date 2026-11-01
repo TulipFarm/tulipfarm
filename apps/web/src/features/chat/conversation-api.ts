@@ -16,6 +16,7 @@ import {
   compactionPartSchema,
 } from '@tulipfarm/conversations/compaction-contracts';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
+import { firedFollowUpSchema, followUpViewSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { subagentResultSchema } from '@tulipfarm/conversations/events';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
@@ -107,6 +108,7 @@ const messageSchema = z.object({
         fileId: z.uuid().optional(),
         fileIds: z.array(z.uuid()).max(64).optional(),
         importId: z.uuid().optional(),
+        followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),
@@ -118,6 +120,7 @@ const messageSchema = z.object({
     )
     .default([]),
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
+  followUp: firedFollowUpSchema.nullable().optional(),
 });
 const historySchema = z.object({
   messages: z.array(messageSchema),
@@ -393,6 +396,14 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
       return z
         .object({ requested: z.boolean() })
         .parse(await request(`/${chatId}/turns/${turnId}/subagents/stop`, 'POST', signal, { id, key }, true));
+    },
+    async followUp(chatId: string, id: string, signal: AbortSignal) {
+      return followUpViewSchema.parse(await request(`/${chatId}/follow-ups/${id}`, 'GET', signal, undefined, true));
+    },
+    async cancelFollowUp(chatId: string, id: string, signal: AbortSignal) {
+      return followUpViewSchema.parse(
+        await request(`/${chatId}/follow-ups/${id}/cancel`, 'POST', signal, undefined, true),
+      );
     },
     async maintenance(chatId: string, signal: AbortSignal): Promise<MaintenanceView> {
       return maintenanceViewSchema.parse(await request(`/${chatId}/maintenance`, 'GET', signal, undefined, true));

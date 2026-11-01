@@ -1862,6 +1862,7 @@ export function createConversationExecutor(
           durable ||
           name === 'present.choice' ||
           name === 'agents.delegate' ||
+          name === 'followups.schedule' ||
           ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
           (interactiveChat &&
             (isCalendarReadCall(name, call) ||

@@ -21,6 +21,7 @@ export const conversationKeys = {
   list: (archived: boolean, search: string, pages: number, projectId: string | null) =>
     ['conversations', 'list', { archived, search, pages, projectId }] as const,
   detail: (id: string) => ['conversations', 'detail', id] as const,
+  followUp: (chatId: string, id: string) => ['conversations', 'detail', chatId, 'follow-up', id] as const,
   histories: (id: string) => ['conversations', 'detail', id, 'history'] as const,
   history: (id: string, pages: number) => ['conversations', 'detail', id, 'history', { pages }] as const,
   interaction: (id: string, reference: InteractionReference) =>

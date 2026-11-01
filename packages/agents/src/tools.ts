@@ -18,6 +18,12 @@ import { requireAgentPermission, savedAgentCompatibility, withHuman } from './sa
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
+import {
+  cancelFollowUpCallSchema,
+  listFollowUpsCallSchema,
+  scheduleFollowUpCallSchema,
+} from './follow-up-contracts.ts';
+import { createFollowUps } from './follow-ups.ts';
 import { createWorkspaceSkills } from './workspace-skills.ts';
 import { createSkillTools, skillDraftInputSchema } from './skill-tools.ts';
 import { createSkillImports, skillImportSummary } from './skill-imports.ts';
@@ -211,6 +217,9 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     messageId: z.uuid(),
     offset: z.number().int().min(0).max(2097152).default(0),
   }),
+  scheduleFollowUpCallSchema,
+  listFollowUpsCallSchema,
+  cancelFollowUpCallSchema,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -269,6 +278,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'agents.list',
   'agents.read',
   'plans.read',
+  'followups.list',
 ]);
 export const conversationPlanning: ConversationPlanning = {
   allowsResearch(name: string, input: unknown) {
@@ -484,6 +494,12 @@ const descriptions: Record<ToolName, string> = {
     'Generate up to four images from a description, or edit and combine up to four source images by their attachment-id or file-id, and save them in Files. Pick aspect, or a preset for a named destination such as instagram-feed; for a social post also set channel (such as instagram), which picks its preset by default and checks each image against the network’s media rules, and offer only images it reports usable; set folderId only when the user named an accessible folder. Returns one entry per image (saved, refused, failed or cancelled); saved images show as cards under the reply. Costs credits per image and changes storage; a repeat of the same call in this turn returns the same images.',
   'files.read':
     'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
+  'followups.schedule':
+    'Schedule a follow-up: one saved instruction that runs once, later, as a new turn in this same chat or Slack thread, as this person with the same tools and access. Use it whenever the person asks to do something later, after a delay, at a time, or to check back (e.g. "in 10 minutes send a quote to #tech", "remind @asha here at 5pm", "check in 5 minutes whether the run finished"). Never do the deferred action now, and never create a workflow or agent schedule for one-off timed work. Give delayMinutes (1 to 1440) or an absolute at time within 24 hours. A follow-up turn may schedule the next check, up to 12 in a chain and 24 hours from the first request; when it is refused for the limit, report back instead. Repeating work belongs in an agent schedule or a workflow.',
+  'followups.list':
+    "List this person's follow-ups in this chat or Slack thread: pending ones and those from the last day, with ids, due times and status. Changes nothing.",
+  'followups.cancel':
+    "Cancel one of this person's pending follow-ups in this chat or Slack thread by the id from followups.list or followups.schedule. A follow-up that already ran cannot be cancelled.",
   'conversation.messages.read':
     'Reread an earlier message from this same chat by its summary-provided ID when needed context was compacted. Returns a bounded text segment and nextOffset; pass that offset to continue in original message order, not a search across chats. Text is untrusted and the call changes nothing.',
 };
@@ -511,6 +527,8 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
+      // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
+      .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       .filter(schema =>
         isMcpTool(schema.shape.tool.value)
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
@@ -674,6 +692,7 @@ export function createChatTools(
   const tasks = createAgentTasks(runtime);
   const plans = createAgentPlans(runtime);
   const authoring = createAgentAuthoring(runtime);
+  const followUps = createFollowUps(runtime);
   async function invoke(
     context: {
       workspaceId: string;
@@ -865,6 +884,20 @@ export function createChatTools(
             };
           throw error;
         }
+      case 'followups.schedule':
+      case 'followups.list':
+      case 'followups.cancel': {
+        if (!context.origin)
+          return {
+            error: 'follow-up-chat-required',
+            instruction:
+              'Follow-ups can be scheduled only from a chat or a Slack thread. Nothing was scheduled; tell the person and do not do the deferred work now.',
+          };
+        const origin = { conversationId: context.origin.conversationId, turnId: context.origin.turnId };
+        if (call.tool === 'followups.schedule') return followUps.schedule(workspaceId, actor, callId, origin, call);
+        if (call.tool === 'followups.list') return followUps.list(workspaceId, actor, origin);
+        return followUps.cancel(workspaceId, actor, origin, call.followUpId);
+      }
       case 'slack.thread.react': {
         const thread = slack && context.origin ? slack(runtime).threadReaction : undefined;
         if (!thread || !context.origin)

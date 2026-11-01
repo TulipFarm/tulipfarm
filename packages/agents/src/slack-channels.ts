@@ -30,6 +30,9 @@ import {
 import { requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import type { ExternalRunGuard } from './external-run.ts';
 import { createSlackActions } from './slack-actions.ts';
+import { followUpReaction } from './follow-up-contracts.ts';
+import { cancelReactionFollowUp, confirmReactionFollowUp, createReactionFollowUp } from './follow-ups.ts';
+import { afterCommit } from '@tulipfarm/workspace-storage/runtime';
 import { providerSources, resultSources } from './tool-sources.ts';
 import {
   messageSchema,
@@ -537,22 +540,27 @@ export function createSlackChannelAgents(options: {
     generation: number,
     workspaceId: string,
   ) {
-    if (!/^[CG]/.test(event.item.channel) || !(await isFeatureEnabled('slack-reactions', null, { id: workspaceId })))
-      return null;
-    const row = z
-      .object({ reactions: reactionRulesSchema })
-      .optional()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT reactions FROM ${table(tx, 'tf_slack_channel_attachments')} WHERE installation_id=$1 AND generation=$2 AND channel=$3`,
-            [installationId, generation, event.item.channel],
-          )
-        ).rows[0],
-      );
+    if (!/^[CG]/.test(event.item.channel)) return null;
     const base = event.reaction.split('::')[0];
-    const rule = row?.reactions.find(item => item.reaction === event.reaction || item.reaction === base);
-    if (!rule) return null;
+    const rules = (await isFeatureEnabled('slack-reactions', null, { id: workspaceId }))
+      ? (z
+          .object({ reactions: reactionRulesSchema })
+          .optional()
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT reactions FROM ${table(tx, 'tf_slack_channel_attachments')} WHERE installation_id=$1 AND generation=$2 AND channel=$3`,
+                [installationId, generation, event.item.channel],
+              )
+            ).rows[0],
+          )?.reactions ?? [])
+      : [];
+    const rule = rules.find(item => item.reaction === event.reaction || item.reaction === base);
+    // Without a channel rule of its own, ⏰ asks for a reminder about the message an hour later.
+    if (!rule) {
+      if (base === followUpReaction) await remindLater(tx, event, installationId, generation, workspaceId);
+      return null;
+    }
     const credential = (
       await tx.client.query(
         `SELECT bot_credential FROM ${table(tx, 'tf_slack_installations')} WHERE id=$1 AND generation=$2 AND state='active'`,
@@ -587,6 +595,57 @@ export function createSlackChannelAgents(options: {
         itemTs: event.item.ts,
       }),
     };
+  }
+  async function remindLater(
+    tx: AuthorizationTransaction,
+    event: SlackReactionEvent,
+    installationId: string,
+    generation: number,
+    workspaceId: string,
+  ) {
+    // Only a linked member can set a reminder, so nobody else's reaction costs a Slack call.
+    const linked = await tx.client.query(
+      `SELECT 1 FROM ${table(tx, 'tf_slack_identities')} WHERE installation_id=$1 AND generation=$2 AND slack_user_id=$3 AND state='authorized'`,
+      [installationId, generation, event.user],
+    );
+    if (!linked.rowCount) return;
+    const credential = (
+      await tx.client.query(
+        `SELECT bot_credential FROM ${table(tx, 'tf_slack_installations')} WHERE id=$1 AND generation=$2 AND state='active'`,
+        [installationId, generation],
+      )
+    ).rows[0]?.bot_credential;
+    if (!credential) return;
+    const token = options.cipher.decrypt({ workspaceId, installationId, generation, kind: 'bot' }, credential);
+    let rootTs: string;
+    try {
+      rootTs = (await botMessageThread(token, event.item.channel, event.item.ts, options.fetcher)).rootTs;
+    } catch {
+      log('warn', 'activity', 'call_failed', { operation: 'slack.follow-up.reaction', outcome: 'message-unavailable' });
+      return;
+    }
+    const created = await createReactionFollowUp(tx, {
+      installationId,
+      generation,
+      user: event.user,
+      channel: event.item.channel,
+      itemTs: event.item.ts,
+      rootTs,
+    });
+    if (created)
+      afterCommit(tx.client, () => {
+        void confirmReactionFollowUp(token, workspaceId, created, event.user, options.fetcher);
+      });
+  }
+  /** Removing ⏰ before its reminder runs cancels the reminder. */
+  async function unreact(tx: AuthorizationTransaction, event: SlackReactionEvent, installationId: string) {
+    if (event.reaction.split('::')[0] !== followUpReaction) return;
+    await cancelReactionFollowUp(tx, {
+      installationId,
+      user: event.user,
+      channel: event.item.channel,
+      itemTs: event.item.ts,
+    });
   }
   async function freeze(
     tx: AuthorizationTransaction,
@@ -1385,6 +1444,7 @@ export function createSlackChannelAgents(options: {
     settings,
     configure,
     react,
+    unreact,
     freeze,
     guard,
     due,
