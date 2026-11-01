@@ -17,6 +17,10 @@ export const defaultKnowledgeIntentInputSchema = z.strictObject({
   membershipId: z.uuid(),
   accountKey: z.string().min(1).max(256),
   accountLabel: z.string().min(1).max(256),
+  githubUserId: z
+    .string()
+    .regex(/^[1-9][0-9]{0,15}$/)
+    .optional(),
 });
 export type DefaultKnowledgeIntentInput = z.infer<typeof defaultKnowledgeIntentInputSchema>;
 export const defaultKnowledgeWorkSchema = z.strictObject({

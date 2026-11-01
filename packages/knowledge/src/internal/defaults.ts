@@ -66,12 +66,45 @@ async function installed(tx: Tx & { commonVersion?: number }) {
 export async function recordDefaultKnowledgeIntent(tx: Tx, value: DefaultKnowledgeIntentInput) {
   const input = defaultKnowledgeIntentInputSchema.parse(value);
   if (!(await installed(tx))) return { intentId: '', created: false };
+  const githubUser =
+    input.product === 'github' && input.githubUserId && (await githubUsers(tx)) ? input.githubUserId : null;
+  if (githubUser) {
+    // A new account row for a GitHub user who already has an intent takes that intent over, so it never stays on a row that is gone.
+    const moved = z.array(z.object({ id: uuidSchema })).parse(
+      (
+        await tx.client.query(
+          `UPDATE ${table(tx, 'default_intents')} SET account_key=$3,account_label=$4,generation=generation+1,lease_token=NULL,lease_until=NULL,cursor=NULL,failure=NULL,attempts=0,next_attempt_at=clock_timestamp(),sync_state=CASE WHEN sync_state='failed' THEN 'queued' ELSE sync_state END
+        WHERE product='github' AND membership_id=$1 AND github_user_id=$2 AND account_key<>$3 RETURNING id`,
+          [input.membershipId, githubUser, input.accountKey, input.accountLabel],
+        )
+      ).rows,
+    );
+    if (moved[0]) return { intentId: moved[0].id, created: true };
+  }
   const id = identity(`default-intent:${input.product}:${input.membershipId}:${input.accountKey}`);
   const inserted = await tx.client.query(
-    `INSERT INTO ${table(tx, 'default_intents')} (id,product,membership_id,account_key,account_label) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-    [id, input.product, input.membershipId, input.accountKey, input.accountLabel],
+    githubUser
+      ? `INSERT INTO ${table(tx, 'default_intents')} (id,product,membership_id,account_key,account_label,github_user_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
+      : `INSERT INTO ${table(tx, 'default_intents')} (id,product,membership_id,account_key,account_label) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+    [id, input.product, input.membershipId, input.accountKey, input.accountLabel, ...(githubUser ? [githubUser] : [])],
   );
   return { intentId: id, created: inserted.rowCount === 1 };
+}
+
+/** The first common storage version whose intents record the GitHub user. */
+const githubIntentUserVersion = 28;
+async function githubUsers(tx: Tx & { commonVersion?: number }) {
+  if (typeof tx.commonVersion === 'number') return tx.commonVersion >= githubIntentUserVersion;
+  return z
+    .object({ present: z.boolean() })
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid=to_regclass($1) AND attname='github_user_id' AND NOT attisdropped) AS present`,
+          [table(tx, 'default_intents')],
+        )
+      ).rows[0],
+    ).present;
 }
 
 export const defaultKnowledgeFlagEnabled = (workspaceId: string, userId: string) =>
@@ -182,6 +215,7 @@ const intentSchema = z.object({
   membership_id: uuidSchema,
   account_key: z.string(),
   account_label: z.string(),
+  github_user_id: z.string().nullish(),
   state: z.enum(['active', 'opted-out']),
   sync_state: z.enum(['queued', 'discovering', 'ready', 'failed']),
   failure: z.string().nullable(),
@@ -296,13 +330,13 @@ export function createDefaultKnowledge({
         await required(engines.github).discover(ws, i.user_id, i.account_key);
         return { scopes: [{ key: 'all-repositories', group: '', title: 'All repositories' }], nextCursor: null };
       },
-      // Any all-repositories source of this account, in any state, is the member's own choice; it is never recreated.
+      // Any all-repositories source of this account or GitHub user, in any state, is the member's own choice; it is never recreated.
       covered: (tx, i) =>
         owned(
           tx,
           `SELECT 'all-repositories' AS key FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id
-        WHERE s.owner_membership_id=$1 AND g.binding->>'accountId'=$2 AND g.selection->>'scope'='all' LIMIT 1`,
-          [i.membership_id, i.account_key],
+        WHERE s.owner_membership_id=$1 AND (g.binding->>'accountId'=$2 OR g.binding->>'githubUserId'=$3) AND g.selection->>'scope'='all' LIMIT 1`,
+          [i.membership_id, i.account_key, i.github_user_id ?? null],
         ),
       selection: () => ({ scope: 'all', repositories: [], kinds: [...githubCorpusKinds].sort() }),
       configure: (ws, i, commandId, selection) =>
@@ -760,6 +794,7 @@ export function createDefaultKnowledge({
           [work.intentId, done, limited, now(), defaultKnowledgeLimits.rediscoverMs],
         ),
       );
+      if (claim.product === 'github') await rebind(work, claim);
       return { disposition: done ? 'ready' : 'retry' };
     } catch (error) {
       if (error instanceof KnowledgeError && error.code === 'superseded') return { disposition: 'stale' };
@@ -925,12 +960,39 @@ export function createDefaultKnowledge({
           await tx.client.query(
             `SELECT d.source_id FROM ${table(tx, 'default_sources')} d JOIN ${table(tx, 'default_intents')} i ON i.id=d.intent_id
       JOIN ${table(tx, 'sources')} s ON s.id=d.source_id JOIN ${table(tx, `${kind}_sources`)} g ON g.source_id=d.source_id
-      WHERE d.intent_id=$1 AND d.state='created' AND s.state='active' AND g.sync_state='failed' AND ${account}=i.account_key${usable} ORDER BY d.ordinal`,
-            [i.id],
+      WHERE d.intent_id=$1 AND d.state='created' AND s.state='active' AND g.sync_state='failed' AND (${account}=i.account_key${kind === 'github' ? ` OR g.binding->>'githubUserId'=$2` : ''})${usable} ORDER BY d.ordinal`,
+            kind === 'github' ? [i.id, i.github_user_id ?? null] : [i.id],
           )
         ).rows,
       )
       .map(row => row.source_id);
+  }
+  /** A failed source still bound to an older account row of the intent's GitHub user runs its own Retry, which rebinds it to the current row. */
+  async function rebind(work: DefaultKnowledgeWork, i: Intent) {
+    if (!i.github_user_id || !engines.github?.manage) return;
+    const stale = await transaction(work.workspaceId, async tx =>
+      z.array(z.object({ source_id: uuidSchema })).parse(
+        (
+          await tx.client.query(
+            `SELECT d.source_id FROM ${table(tx, 'default_sources')} d JOIN ${table(tx, 'sources')} s ON s.id=d.source_id
+        JOIN ${table(tx, 'github_sources')} g ON g.source_id=d.source_id
+        WHERE d.intent_id=$1 AND d.state='created' AND s.state='active' AND g.sync_state='failed'
+        AND g.binding->>'githubUserId'=$2 AND g.binding->>'accountId'<>$3 ORDER BY d.ordinal`,
+            [i.id, i.github_user_id, i.account_key],
+          )
+        ).rows,
+      ),
+    );
+    for (const { source_id } of stale) {
+      try {
+        await engines.github.manage(work.workspaceId, i.user_id, source_id, {
+          commandId: identity(`default-rebind:${i.id}:${work.generation}:${source_id}`),
+          action: 'retry',
+        });
+      } catch {
+        /* The source keeps its failure and its own Retry. */
+      }
+    }
   }
   /** Opt-out stops future automatic discovery only. Existing sources keep their own pause/remove controls and retention. */
   async function manage(workspaceId: string, userId: string, intentId: string, value: unknown) {
