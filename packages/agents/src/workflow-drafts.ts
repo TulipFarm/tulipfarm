@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { createWorkflows, WorkflowConflict, workflowCodeStepsEnabled } from '@tulipfarm/workflows';
@@ -12,7 +13,7 @@ import type {
 } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { AgentStorage } from './store.ts';
-import type { DraftOutcome, WorkflowProposal } from './draft-contracts.ts';
+import type { DraftOutcome, WorkflowArchiveProposal, WorkflowProposal } from './draft-contracts.ts';
 
 type Trigger = Definition['trigger'];
 type Workflow = z.infer<typeof workflowSchema>;
@@ -38,7 +39,15 @@ export type WorkflowDrafts = {
   writable(actor: HumanActor, proposal: WorkflowProposal): Promise<void>;
   stale(actor: HumanActor, proposal: WorkflowProposal): Promise<boolean>;
   apply(actor: HumanActor, draftId: string, commandId: string, proposal: WorkflowProposal): Promise<DraftOutcome>;
+  archivable(actor: HumanActor, proposal: WorkflowArchiveProposal): Promise<void>;
+  archiveStale(actor: HumanActor, proposal: WorkflowArchiveProposal): Promise<boolean>;
+  archive(actor: HumanActor, commandId: string, proposal: WorkflowArchiveProposal): Promise<DraftOutcome>;
 };
+// Each workflow needs its own archive command ID, derived from the one decision so a replay archives nothing twice.
+function archiveCommandId(commandId: string, workflowId: string) {
+  const hex = createHash('sha256').update(`workflow-archive:${commandId}:${workflowId}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${((Number.parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 const unattended = (trigger: Trigger) => !['manual', 'event'].includes(trigger.kind);
 const githubProblems: Record<string, DraftProblem> = {
   'github-repository-not-connected': {
@@ -346,7 +355,38 @@ export function createWorkflowDrafts(
     });
     return proposal.input.activate ? activation(actor, saved, true, commandId) : outcome(saved, 'not-requested');
   }
+  async function archivable(actor: HumanActor, proposal: WorkflowArchiveProposal) {
+    // A replayed approval finds its workflows already archived.
+    const current = [...(await list(actor)), ...(await service.list(workspaceId, actor.userId, { archived: true }))];
+    for (const item of proposal.input.workflows)
+      if (!current.find(workflow => workflow.id === item.id)?.capabilities.manage) throw new AccessDenied();
+  }
+  async function archiveStale(actor: HumanActor, proposal: WorkflowArchiveProposal) {
+    const current = await list(actor);
+    return proposal.input.workflows.some(
+      item => current.find(workflow => workflow.id === item.id)?.revision !== item.revision,
+    );
+  }
+  async function archive(
+    actor: HumanActor,
+    commandId: string,
+    proposal: WorkflowArchiveProposal,
+  ): Promise<DraftOutcome> {
+    const current = await list(actor);
+    for (const item of proposal.input.workflows) {
+      const workflow = current.find(candidate => candidate.id === item.id);
+      if (!workflow) throw new AccessDenied();
+      await service.archive(workspaceId, actor.userId, item.id, {
+        commandId: archiveCommandId(commandId, item.id),
+        expectedGeneration: workflow.generation,
+      });
+    }
+    return { kind: 'workflow-archive', workflowIds: proposal.input.workflows.map(item => item.id) };
+  }
   return {
+    archivable,
+    archiveStale,
+    archive,
     list,
     read,
     providers,

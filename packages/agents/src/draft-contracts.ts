@@ -33,6 +33,17 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
     targetId: uuidSchema,
     input: z.strictObject({ revision: uuidSchema, enabled: z.boolean(), definition: definitionSchema }),
   }),
+  z.strictObject({
+    kind: z.literal('workflow-archive'),
+    targetId: uuidSchema,
+    input: z.strictObject({
+      workflows: z
+        .array(z.strictObject({ id: uuidSchema, revision: uuidSchema, name: z.string() }))
+        .min(1)
+        .max(20)
+        .refine(items => new Set(items.map(item => item.id)).size === items.length, 'Workflows must be distinct'),
+    }),
+  }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -65,6 +76,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     activation: workflowActivationOutcomeSchema,
   }),
   z.object({ kind: z.literal('row'), operation: z.enum(['create', 'update', 'delete']), recordId: z.uuid() }),
+  z.object({ kind: z.literal('workflow-archive'), workflowIds: z.array(z.uuid()) }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -115,6 +127,7 @@ export const draftViewSchema = z.object({
 export type AuthoringProposal = z.infer<typeof authoringProposalSchema>;
 export type RowProposal = Extract<AuthoringProposal, { kind: 'row' }>;
 export type WorkflowProposal = Extract<AuthoringProposal, { kind: 'workflow' | 'workflow-activation' }>;
+export type WorkflowArchiveProposal = Extract<AuthoringProposal, { kind: 'workflow-archive' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;

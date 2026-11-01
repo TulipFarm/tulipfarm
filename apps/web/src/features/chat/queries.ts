@@ -57,7 +57,10 @@ export function useConversationChanges() {
       progress: () => change({ keys: [conversationKeys.lists(), creditKeys.balance()] }),
       interaction: (chatId: string) =>
         change({ keys: [conversationKeys.detail(chatId), conversationKeys.lists(), creditKeys.balance()] }),
-      savedDraft: (chatId: string, kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'row') =>
+      savedDraft: (
+        chatId: string,
+        kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'workflow-archive' | 'row',
+      ) =>
         change({
           keys: [
             conversationKeys.detail(chatId),
