@@ -56,7 +56,7 @@ export const slackRenderPrompt = (interactive: boolean) =>
     `- This reply is shown in Slack. Give every final answer by calling ${slackRenderToolName}, alone, after all other work. Do not also write the answer as text.`,
     '- `summary` is one or two plain sentences that answer the question. It is the notification text. `title` names the reply in a few words.',
     '- `blocks` are Slack Block Kit blocks, at most 48. Build what reads best in Slack: a short answer is one markdown block; structure uses header, section (with fields for key facts), context, divider, table, data_table, data_visualization (bar, line, area or pie), card, carousel of cards, alert, container, rich_text, image, plan and task_card.',
-    '- A markdown block holds standard Markdown. Text objects of type "mrkdwn" use Slack syntax: *bold*, _italic_, `code`, <https://example.com|label>.',
+    '- A markdown block holds standard Markdown. Text objects of type "mrkdwn" use Slack syntax with a single asterisk: *bold*, _italic_, `code`, <https://example.com|label>; never **bold** or [label](url) there.',
     '- Tables: when the answer compares several items across the same attributes, or lists figures by row (such as months with revenue and deals), use a table, not lists or stacked lines. Options the user names with a price and a feature, such as three CRMs, are such a comparison.',
     '- Keep numbers, prices and currency symbols as the user or the source wrote them, such as $90 or €1.5k; do not spell them out in words.',
     '- At most one table and two data_visualization blocks. A table is {"type":"table","rows":[[{"type":"raw_text","text":"Name"}, ...], ...]}; its first row is the header.',
@@ -65,6 +65,7 @@ export const slackRenderPrompt = (interactive: boolean) =>
     '- A pie chart: {"type":"data_visualization","title":"Revenue by region","chart":{"type":"pie","segments":[{"label":"North","value":60},{"label":"South","value":40}]}}. Use it for shares of a whole, with positive values.',
     '- Chart limits: title at most 50 characters; 1 to 20 categories; 1 to 12 series or segments; series names and labels at most 20 characters.',
     '- Use numbers you got from tools or the user. Never invent data for a chart, table or metric.',
+    '- Sources: when you used web.search or web.fetch, end the blocks with a context block linking the pages you relied on, such as <https://example.com/pricing|Example pricing>.',
     '- `placement` is "canvas" when the user asks for a report, document or detailed view, or the answer would need more than about 40 blocks or two charts. Then also write the full report in `report` as Markdown (headings, lists and tables); it is saved as a Slack canvas. Keep `blocks` to the answer and the key facts, and the canvas is linked below them.',
     '- Do not add context_actions blocks, feedback buttons or links to TulipFarm; they are added for you.',
     '- If the tool returns errors, fix them and call it again.',
@@ -189,6 +190,21 @@ function assignActions(blocks: Element[], options: { interactive: boolean; modal
   };
   visit(blocks, options.inModal ? '/modals' : '/blocks');
   return errors;
+}
+
+/** Markdown bold and links that models write in mrkdwn text, which Slack would show as literal characters. */
+export function markdownToMrkdwn(text: string) {
+  return text
+    .replace(/\*\*([^*\n]+)\*\*/gu, '*$1*')
+    .replace(/\[([^\]\n]+)\]\(((?:https?|mailto):[^)\s]+)\)/gu, '<$2|$1>');
+}
+
+/** Rewrites every mrkdwn text object in place, inside blocks, fields and elements. */
+function fixMrkdwn(value: unknown) {
+  if (Array.isArray(value)) return value.forEach(fixMrkdwn);
+  if (!isObject(value)) return;
+  if (value.type === 'mrkdwn' && typeof value.text === 'string') value.text = markdownToMrkdwn(value.text);
+  Object.values(value).forEach(fixMrkdwn);
 }
 
 /** Slack mrkdwn as Markdown: bold, strike and links. */
@@ -395,17 +411,51 @@ const failed = (errors: string[]): ReplyRender => ({
     .join('\n')}`,
 });
 
-/**
- * Checks a `slack_render` call against Slack's Block Kit rules. On success the input is a web layout built from the
- * blocks, with the Slack blocks, report and modals kept for delivery.
- */
 /** A run of block characters, the usual sign of a bar chart drawn in text. */
 const textChart = /[\u2580-\u259f\u25a0-\u25aa\u25ac]{3,}/u;
+/** A line that starts with a bold name and carries a price: one option of a comparison written as a list. */
+const pricedOption = /^\s*(?:[-•*]\s+)?\*{1,2}[^*\n]{1,80}\*{1,2}[^\n]*?[$€£₹]\s?\d/u;
 
-export function parseSlackRender(input: unknown, options: { interactive: boolean }): ReplyRender {
+const textsOf = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.flatMap(textsOf)
+    : isObject(value)
+      ? Object.entries(value).flatMap(([key, item]) =>
+          key === 'text' && typeof item === 'string' ? [item] : textsOf(item),
+        )
+      : [];
+
+/** Layout advice sent back once: valid blocks that leave out web sources or list a priced comparison as lines. */
+function designHints(blocks: Element[], usedWeb: boolean) {
+  const hints: string[] = [];
+  const json = JSON.stringify(blocks);
+  if (usedWeb && !/https?:\/\//u.test(json))
+    hints.push(
+      'You used web pages: end the blocks with a context block linking the main sources, such as <https://example.com/pricing|Example pricing>.',
+    );
+  const hasTable = blocks.some(item => item.type === 'table' || item.type === 'data_table');
+  const options = textsOf(blocks)
+    .flatMap(text => text.split('\n'))
+    .filter(line => pricedOption.test(line));
+  if (!hasTable && options.length >= 3)
+    hints.push('These options are compared on price: show them in a table block, one row per option.');
+  return hints;
+}
+
+/**
+ * Checks a `slack_render` call against Slack's Block Kit rules. On success the input is a web layout built from the
+ * blocks, with the Slack blocks, report and modals kept for delivery. With `design`, valid blocks may also come back
+ * once with layout advice.
+ */
+export function parseSlackRender(
+  input: unknown,
+  options: { interactive: boolean; design?: boolean; usedWeb?: boolean },
+): ReplyRender {
   const parsed = slackRenderInputSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: `Invalid Slack reply: ${z.prettifyError(parsed.error)}` };
   const value: SlackRenderInput = structuredClone(parsed.data);
+  fixMrkdwn(value.blocks);
+  fixMrkdwn(value.modals);
   if (value.placement === 'canvas' && !value.report)
     return failed(['A canvas placement needs the full report in `report`.']);
   const modalIds = new Set(value.modals?.map(modal => modal.id));
@@ -442,5 +492,13 @@ export function parseSlackRender(input: unknown, options: { interactive: boolean
   const checked = layoutFromReply(layout, checkSurfaceId);
   if (!checked.ok)
     return failed(checked.errors.map(error => `The web copy of these blocks failed: ${error.path}: ${error.message}`));
+  if (options.design) {
+    const hints = designHints(value.blocks, options.usedWeb ?? false);
+    if (hints.length)
+      return {
+        ok: false,
+        error: `Improve these and call ${slackRenderToolName} again:\n${hints.map(hint => `- ${hint}`).join('\n')}`,
+      };
+  }
   return { ok: true, input: layout, text: layoutText(checked.layout) };
 }

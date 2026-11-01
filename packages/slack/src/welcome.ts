@@ -18,7 +18,10 @@ export const slackSuggestedPrompts = [
   },
   { title: 'What changed this week?', message: 'What changed in our workspace this week? Group it by project.' },
   { title: 'Draft a plan', message: 'Help me draft a plan. Ask me what the goal is first.' },
-  { title: 'Find in my knowledge', message: 'Search my knowledge sources and tell me what you find about ' },
+  {
+    title: 'Find in my knowledge',
+    message: 'Search my knowledge sources for our latest pricing and policies, and link the documents you used.',
+  },
 ] as const;
 
 /** The App Home tab: what TulipFarm can do in Slack and how to start. */
@@ -31,7 +34,7 @@ export function slackHomeView(appUrl: string | undefined) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: 'Ask me anything about your workspace: send me a direct message, or mention me in a channel thread. I answer with tables, charts and buttons, and put long reports in a canvas.',
+          text: 'Ask me anything about your workspace: send me a direct message, or mention me in a channel thread. I answer with tables, charts and buttons, and put long reports in a canvas when your Slack plan allows it.',
         },
       },
       { type: 'divider' },
