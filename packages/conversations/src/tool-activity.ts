@@ -75,6 +75,7 @@ export const toolActivityLabels = {
   'knowledge.retrieve': 'Reading knowledge sources',
   'web.fetch': 'Reading a web page',
   'packages.inspect': 'Inspecting a system package',
+  'packages.recommend': 'Finding ready-made packages',
   'conversation.messages.read': 'Rereading an earlier message',
   'files.read': 'Reading an attached file',
   'files.create': 'Saving a file to Files',

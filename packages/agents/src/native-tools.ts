@@ -104,6 +104,7 @@ function nativeTools(
 const coreChatTools = new Set(
   [
     'present.choice',
+    'packages.recommend',
     'tables.definitions',
     'rows.page',
     'schema.context',

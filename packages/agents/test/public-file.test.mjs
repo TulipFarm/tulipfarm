@@ -7,6 +7,11 @@ import { test } from 'node:test';
 import { Agent, request } from 'undici';
 import { fetchPublicFile, pinnedLookup, publicFileLimits, publicNetwork } from '../src/web-fetch.ts';
 import { inspectMarketplacePackage } from '../src/package-inspection.ts';
+import {
+  rankMarketplacePackages,
+  recommendMarketplacePackages,
+  resetMarketplaceCatalogCache,
+} from '../src/package-recommendation.ts';
 
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -328,4 +333,75 @@ test('non-public links and web access off are refused without a request', async 
   });
   assert.deepEqual(web.resolved, []);
   assert.deepEqual(web.requests, []);
+});
+
+const listing = (name, title, tags, description = title) => ({
+  name,
+  version: '1.0.0',
+  title,
+  description,
+  license: 'MIT',
+  category: 'Operations',
+  tags,
+  url: `/packages/${name}/1.0.0/package.json`,
+  page: `/packages/${name}/`,
+});
+const listings = [
+  listing('leave-management', 'Leave Management', ['leave', 'time-off', 'pto']),
+  listing('support-desk', 'Support Desk', ['tickets', 'helpdesk']),
+  listing('sla-ticket-desk', 'SLA Ticket Desk', ['tickets', 'sla']),
+  listing('it-incident-desk', 'IT Incident Desk', ['incidents']),
+  listing('client-reporting', 'Client Reports', ['reporting']),
+  listing('expense-claims', 'Expense Claims', ['expenses', 'reimbursement']),
+];
+
+test('recommendations match plural and verb forms, drop weak matches, and return at most three', () => {
+  const names = need => rankMarketplacePackages(listings, need).map(entry => entry.name);
+  assert.deepEqual(names('set up a system for leaves and PTO'), ['leave-management']);
+  assert.deepEqual(names('expense reports and reimbursements'), ['expense-claims']);
+  assert.deepEqual(names('customer support tickets helpdesk'), ['support-desk']);
+  assert.deepEqual(names('tickets'), ['sla-ticket-desk', 'support-desk']);
+  assert.deepEqual(names('build a tracker for bakery recipes'), []);
+  const many = Array.from({ length: 5 }, (_, index) => listing(`desk-${index}`, 'Desk', ['tickets']));
+  assert.equal(rankMarketplacePackages(many, 'tickets').length, 3);
+});
+
+test('recommendations read the public catalog once and return versioned page links', async t => {
+  resetMarketplaceCatalogCache();
+  t.after(resetMarketplaceCatalogCache);
+  const web = await localWeb(t, {
+    'packages.tulipfarm.ai/catalog.json': send(
+      200,
+      JSON.stringify({ schema: 'https://tulipfarm.ai/schemas/system-package.v1.json', packages: listings }),
+      { 'content-type': 'application/json' },
+    ),
+  });
+  const result = await recommendMarketplacePackages('leave requests', AbortSignal.timeout(5000));
+  assert.deepEqual(result.packages, [
+    {
+      title: 'Leave Management',
+      description: 'Leave Management',
+      category: 'Operations',
+      url: 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0/',
+    },
+  ]);
+  assert.equal(result.untrusted, true);
+  assert.equal(result.installed, false);
+  assert.deepEqual((await recommendMarketplacePackages('bakery recipes', AbortSignal.timeout(5000))).packages, []);
+  assert.equal(web.requests.length, 1);
+});
+
+test('recommendations report an invalid or unavailable catalog without packages', async t => {
+  resetMarketplaceCatalogCache();
+  t.after(resetMarketplaceCatalogCache);
+  await localWeb(t, { 'packages.tulipfarm.ai/catalog.json': send(200, '{"packages":[]}') });
+  assert.deepEqual(await recommendMarketplacePackages('tickets', AbortSignal.timeout(5000)), {
+    error: 'catalog-invalid',
+    packages: [],
+  });
+  delete process.env.HUNTSMAN_ENDPOINT;
+  assert.deepEqual(await recommendMarketplacePackages('tickets', AbortSignal.timeout(5000)), {
+    error: 'web-off',
+    packages: [],
+  });
 });

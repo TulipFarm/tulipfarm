@@ -27,6 +27,7 @@ import { SkillPackageError } from './skill-package-contracts.ts';
 import { relation, type AgentStorage } from './store.ts';
 import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
 import { inspectMarketplacePackage } from './package-inspection.ts';
+import { recommendMarketplacePackages } from './package-recommendation.ts';
 import { listSkills, readSkill } from './skills.ts';
 import type { IntegrationService } from '@tulipfarm/integrations';
 import {
@@ -116,6 +117,15 @@ const tableProposalInput = z
   .describe('JSON-encoded {plans:[...]}. Read skills.read(table-authoring) for proposalInputSchema and constraints.');
 export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('packages.inspect'), url: z.url().max(2048) }),
+  z.strictObject({
+    tool: z.literal('packages.recommend'),
+    need: z
+      .string()
+      .trim()
+      .min(1)
+      .max(300)
+      .describe('What the person wants to run, plus a few synonyms, such as "leave requests time off PTO approvals".'),
+  }),
   presentChoiceSchema,
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
@@ -222,6 +232,7 @@ export type ToolName = FrameworkCall['tool'];
 const fetchedFileChars = 90_000;
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'packages.inspect',
+  'packages.recommend',
   'github.investigation.account',
   'github.investigation.repositories',
   'github.investigation.read',
@@ -322,6 +333,8 @@ export const conversationPlanning: ConversationPlanning = {
       : null,
 };
 const descriptions: Record<ToolName, string> = {
+  'packages.recommend':
+    'Find up to 3 ready-made packages.tulipfarm.ai packages that fit a system, tracker or process the person wants to set up, such as tickets, leave requests or hiring. Call it before you design new tables, workflows or agents for such a setup. Returns untrusted catalog summaries with versioned page URLs, not installation or workspace compatibility.',
   'packages.inspect':
     'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
   'github.investigation.account':
@@ -1163,6 +1176,8 @@ export function createChatTools(
         return fetchPublicText(call.url);
       case 'packages.inspect':
         return inspectMarketplacePackage(call.url, context.signal ?? AbortSignal.timeout(25_000));
+      case 'packages.recommend':
+        return recommendMarketplacePackages(call.need, context.signal ?? AbortSignal.timeout(25_000));
       case 'web.search':
         return searchPublicWeb(call);
       case 'knowledge.search':
