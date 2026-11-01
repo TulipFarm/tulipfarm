@@ -1897,6 +1897,7 @@ function ConversationTools({
               'agents.restore',
               'skills.archive',
               'skills.restore',
+              'projects.draft',
             ].includes(tool.tool) ||
               tool.rowDraftId === tool.id),
         )

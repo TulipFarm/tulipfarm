@@ -349,6 +349,19 @@ export async function requireProtectedSource(
       )
         throw new AccessDenied();
       break;
+    case 'project':
+      if (runId || publicOnly) throw new AccessDenied();
+      await currentMember(tx, actor);
+      if (
+        !(
+          await tx.client.query(
+            `SELECT 1 FROM ${table('tf_project_members')} WHERE project_id=$1 AND membership_id=$2 AND removed_at IS NULL`,
+            [source.projectId, actor.membershipId],
+          )
+        ).rowCount
+      )
+        throw new AccessDenied();
+      break;
     case 'private-conversation':
       if (publicOnly) throw new AccessDenied();
       if (

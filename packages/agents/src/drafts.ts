@@ -39,6 +39,7 @@ import { requireDraftSources } from './draft-sources.ts';
 import { bindFileSources } from '@tulipfarm/conversations/file-references';
 import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
 import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
+import { createProjectDrafts } from './project-drafts.ts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import { requireSharedMcpSlots } from '@tulipfarm/access';
@@ -183,6 +184,7 @@ export function createAuthoringDrafts(
       return createWorkflowDrafts(bound, workspaceId).lifecycleWritable(actor, proposal);
     if (isDefinitionLifecycle(proposal))
       return createDefinitionLifecycleDrafts(bound, workspaceId).writable(tx, actor, proposal);
+    if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -261,6 +263,7 @@ export function createAuthoringDrafts(
       );
     if (isWorkflowLifecycle(proposal)) return createWorkflowDrafts(bound, workspaceId).lifecycleStale(actor, proposal);
     if (isDefinitionLifecycle(proposal)) return createDefinitionLifecycleDrafts(bound, workspaceId).stale(tx, proposal);
+    if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -527,6 +530,24 @@ export function createAuthoringDrafts(
               ? 'No workflow has been archived. The human must review the listed workflows on the chat card and choose Archive. Never treat chat text as approval.'
               : 'No workflow has been restored. The human must review the listed workflows on the chat card and choose Restore. Restored workflows stay disabled until activated. Never treat chat text as approval.',
         };
+      if (proposal.kind === 'project') {
+        const { current, settings } = proposal.input;
+        const change = !current
+          ? 'create'
+          : settings.archived !== current.archived
+            ? settings.archived
+              ? 'archive'
+              : 'restore'
+            : 'edit';
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          change,
+          projectId: proposal.targetId,
+          instruction: `Nothing has been ${change === 'create' ? 'created' : change === 'edit' ? 'changed' : `${change}d`}. The human must review the project on the chat card and approve it. Never treat chat text as approval.`,
+        };
+      }
       if (isDefinitionLifecycle(proposal)) {
         const agent = proposal.kind === 'agent-archive' || proposal.kind === 'agent-restore';
         const restoring = proposal.kind === 'agent-restore' || proposal.kind === 'skill-restore';
@@ -614,6 +635,7 @@ export function createAuthoringDrafts(
                 outcome.kind === 'agent-restore' ||
                 outcome.kind === 'skill-archive' ||
                 outcome.kind === 'skill-restore' ||
+                outcome.kind === 'project' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -747,6 +769,8 @@ export function createAuthoringDrafts(
           }).applyLifecycle(actor, input.commandId, proposal);
         else if (isDefinitionLifecycle(proposal))
           outcome = await createDefinitionLifecycleDrafts(bound, workspaceId).apply(actor, input.commandId, proposal);
+        else if (proposal.kind === 'project')
+          outcome = await createProjectDrafts(bound, workspaceId).apply(actor, proposal);
         else
           outcome =
             proposal.kind === 'row'
