@@ -948,7 +948,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   );
 });
 
-test('chat archives several workflows only after the human approves one card, and refuses a stale card', async t => {
+test('chat archives and restores several workflows only after the human approves one card, and refuses a stale card', async t => {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -979,13 +979,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     saved.push((await workflows.list(w.id, w.userId)).find(workflow => workflow.id === id));
   }
   await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-  async function archive(items) {
+  async function archive(items, tool = 'workflows.archive') {
     const sent = await chats.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
-      parts: [{ kind: 'text', text: 'Archive these workflows.' }],
+      parts: [{ kind: 'text', text: 'Change these workflows.' }],
     });
-    const call = { tool: 'workflows.archive', workflows: items };
+    const call = { tool, ...(items ? { workflows: items } : { archived: true }) };
     let output;
     const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
       output = (
@@ -1045,4 +1045,24 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     }),
   );
   assert.equal((await workflows.list(w.id, w.userId)).length, 1, 'an edited workflow is not archived from an old card');
+
+  const restore = items => archive(items, 'workflows.restore');
+  assert.equal((await restore([item(saved[2])])).error, 'workflow-not-archived');
+  assert.equal((await archive([item(saved[0])])).error, 'workflow-archived');
+  const listed = (await archive(null, 'workflows.list')).workflows;
+  assert.deepEqual(listed.map(workflow => workflow.id).sort(), [saved[0].id, saved[1].id].sort());
+  const back = await restore(listed.map(workflow => ({ workflowId: workflow.id, revision: workflow.revision })));
+  assert.equal((await workflows.list(w.id, w.userId)).length, 1, 'proposing a restore changes nothing');
+  const restoreDecision = { commandId: randomUUID(), digest: back.digest, decision: 'save' };
+  await drafts.decide(w.id, w.userId, chatId, back.draftId, restoreDecision);
+  await drafts.decide(w.id, w.userId, chatId, back.draftId, restoreDecision);
+  assert.equal((await drafts.read(w.id, w.userId, chatId, back.draftId)).status, 'saved');
+  assert.deepEqual(await workflows.list(w.id, w.userId, { archived: true }), []);
+  assert.deepEqual(
+    (await workflows.list(w.id, w.userId))
+      .filter(workflow => workflow.id !== saved[2].id)
+      .map(workflow => workflow.enabled),
+    [false, false],
+    'restored workflows stay disabled',
+  );
 });

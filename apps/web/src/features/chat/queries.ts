@@ -60,7 +60,7 @@ export function useConversationChanges() {
         change({ keys: [conversationKeys.detail(chatId), conversationKeys.lists(), creditKeys.balance()] }),
       savedDraft: (
         chatId: string,
-        kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'workflow-archive' | 'row',
+        kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'workflow-archive' | 'workflow-restore' | 'row',
       ) =>
         change({
           keys: [

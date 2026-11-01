@@ -70,6 +70,7 @@ export const toolActivityLabels = {
   'workflows.providers': 'Reading connected workflow sources',
   'workflows.draft': 'Preparing a workflow for review',
   'workflows.archive': 'Preparing workflows to archive',
+  'workflows.restore': 'Preparing workflows to restore',
   'web.search': 'Searching the web',
   'knowledge.search': 'Searching knowledge',
   'knowledge.read': 'Reading a knowledge source',

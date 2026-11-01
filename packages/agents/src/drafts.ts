@@ -27,6 +27,7 @@ import {
   draftDecisionSchema,
   draftOutcomeSchema,
   draftViewSchema,
+  isWorkflowLifecycle,
   type AgentDraftChange,
   type AuthoringProposal,
   type RowProposal,
@@ -176,8 +177,8 @@ export function createAuthoringDrafts(
     workspaceId: string,
   ) {
     if (isWorkflow(proposal)) return createWorkflowDrafts(bound, workspaceId).writable(actor, proposal);
-    if (proposal.kind === 'workflow-archive')
-      return createWorkflowDrafts(bound, workspaceId).archivable(actor, proposal);
+    if (isWorkflowLifecycle(proposal))
+      return createWorkflowDrafts(bound, workspaceId).lifecycleWritable(actor, proposal);
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -254,8 +255,7 @@ export function createAuthoringDrafts(
       return (
         (await superseded(tx, id, proposal.targetId)) || createWorkflowDrafts(bound, workspaceId).stale(actor, proposal)
       );
-    if (proposal.kind === 'workflow-archive')
-      return createWorkflowDrafts(bound, workspaceId).archiveStale(actor, proposal);
+    if (isWorkflowLifecycle(proposal)) return createWorkflowDrafts(bound, workspaceId).lifecycleStale(actor, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -511,14 +511,16 @@ export function createAuthoringDrafts(
           enabled: proposal.input.enabled,
           instruction: `The workflow has not been ${proposal.input.enabled ? 'activated' : 'disabled'}. The human must review and approve the chat card. Never treat chat text as approval.`,
         };
-      if (proposal.kind === 'workflow-archive')
+      if (isWorkflowLifecycle(proposal))
         return {
           draftId: id,
           digest,
           status: 'review-required',
           workflowIds: proposal.input.workflows.map(item => item.id),
           instruction:
-            'No workflow has been archived. The human must review the listed workflows on the chat card and choose Archive. Never treat chat text as approval.',
+            proposal.kind === 'workflow-archive'
+              ? 'No workflow has been archived. The human must review the listed workflows on the chat card and choose Archive. Never treat chat text as approval.'
+              : 'No workflow has been restored. The human must review the listed workflows on the chat card and choose Restore. Restored workflows stay disabled until activated. Never treat chat text as approval.',
         };
       const change = proposal.input.expectedSavedRevision === null ? 'create' : 'update';
       if (proposal.input.setup)
@@ -588,6 +590,7 @@ export function createAuthoringDrafts(
             : outcome.kind === 'skill' ||
                 outcome.kind === 'workflow' ||
                 outcome.kind === 'workflow-archive' ||
+                outcome.kind === 'workflow-restore' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -712,13 +715,13 @@ export function createAuthoringDrafts(
             receipt: await coordinator.definitionCommand(workspaceId, actor, setupReceipt.commandId),
             setupReceipt,
           };
-        } else if (proposal.kind === 'workflow-archive')
+        } else if (isWorkflowLifecycle(proposal))
           outcome = await createWorkflowDrafts(bound, workspaceId, {
             wake: async work => {
               woken.push(work);
             },
             ...(githubSubscriptions ? { githubSubscriptions } : {}),
-          }).archive(actor, input.commandId, proposal);
+          }).applyLifecycle(actor, input.commandId, proposal);
         else
           outcome =
             proposal.kind === 'row'

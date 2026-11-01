@@ -16,7 +16,7 @@ import type {
   WorkflowProposal,
 } from '@tulipfarm/agents/draft-contracts';
 import { RowDraftCard, TechnicalDetail } from './row-draft-card';
-import { WorkflowArchiveDraftCard } from './workflow-archive-draft-card';
+import { WorkflowLifecycleDraftCard } from './workflow-lifecycle-draft-card';
 import { formatRun, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowCanvasButton } from './workflow-canvas';
 import { GitHubInstallNote } from '@/features/workflows/github-install-note';
@@ -172,9 +172,9 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
         checkStatus={checkStatus}
       />
     );
-  if (proposal.kind === 'workflow-archive')
+  if (proposal.kind === 'workflow-archive' || proposal.kind === 'workflow-restore')
     return (
-      <WorkflowArchiveDraftCard
+      <WorkflowLifecycleDraftCard
         id={id}
         draft={draft}
         proposal={proposal}

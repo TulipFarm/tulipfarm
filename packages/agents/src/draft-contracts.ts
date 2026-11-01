@@ -12,6 +12,13 @@ export const agentDraftInputSchema = saveAgentSchema.omit({ requestId: true }).e
   expectedPolicyVersion: z.number().int().nonnegative().optional(),
   expectedActivationIds: z.array(uuidSchema).optional(),
 });
+const workflowLifecycleInput = z.strictObject({
+  workflows: z
+    .array(z.strictObject({ id: uuidSchema, revision: uuidSchema, name: z.string() }))
+    .min(1)
+    .max(20)
+    .refine(items => new Set(items.map(item => item.id)).size === items.length, 'Workflows must be distinct'),
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -33,17 +40,8 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
     targetId: uuidSchema,
     input: z.strictObject({ revision: uuidSchema, enabled: z.boolean(), definition: definitionSchema }),
   }),
-  z.strictObject({
-    kind: z.literal('workflow-archive'),
-    targetId: uuidSchema,
-    input: z.strictObject({
-      workflows: z
-        .array(z.strictObject({ id: uuidSchema, revision: uuidSchema, name: z.string() }))
-        .min(1)
-        .max(20)
-        .refine(items => new Set(items.map(item => item.id)).size === items.length, 'Workflows must be distinct'),
-    }),
-  }),
+  z.strictObject({ kind: z.literal('workflow-archive'), targetId: uuidSchema, input: workflowLifecycleInput }),
+  z.strictObject({ kind: z.literal('workflow-restore'), targetId: uuidSchema, input: workflowLifecycleInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -77,6 +75,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('row'), operation: z.enum(['create', 'update', 'delete']), recordId: z.uuid() }),
   z.object({ kind: z.literal('workflow-archive'), workflowIds: z.array(z.uuid()) }),
+  z.object({ kind: z.literal('workflow-restore'), workflowIds: z.array(z.uuid()) }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -127,7 +126,9 @@ export const draftViewSchema = z.object({
 export type AuthoringProposal = z.infer<typeof authoringProposalSchema>;
 export type RowProposal = Extract<AuthoringProposal, { kind: 'row' }>;
 export type WorkflowProposal = Extract<AuthoringProposal, { kind: 'workflow' | 'workflow-activation' }>;
-export type WorkflowArchiveProposal = Extract<AuthoringProposal, { kind: 'workflow-archive' }>;
+export type WorkflowLifecycleProposal = Extract<AuthoringProposal, { kind: 'workflow-archive' | 'workflow-restore' }>;
+export const isWorkflowLifecycle = (proposal: AuthoringProposal): proposal is WorkflowLifecycleProposal =>
+  proposal.kind === 'workflow-archive' || proposal.kind === 'workflow-restore';
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;
