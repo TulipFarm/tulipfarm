@@ -12,7 +12,7 @@ import { providerSetupFetch } from './provider-fixture.mjs';
 const limited = { message: 'limit-reached' };
 
 test(
-  'members have their own workflow, run and provider quotas under a hidden workspace cap',
+  'members have their own run and provider quotas, and saved workflows are not capped',
   { timeout: 120000 },
   async () => {
     const db = await fixture();
@@ -53,12 +53,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const save = (who, id = randomUUID(), revision = randomUUID()) =>
         service.save(w.id, who.userId, id, { revision, expectedRevision: null, definition });
 
-      // Workflows: 25 per creator.
+      // Saved workflows are not capped; only runs and providers are.
       const aliceFirst = randomUUID(),
         aliceRevision = randomUUID();
       await save(alice, aliceFirst, aliceRevision);
-      for (let n = 1; n < 25; n++) await save(alice);
-      await assert.rejects(save(alice), limited);
+      for (let n = 1; n < 30; n++) await save(alice);
       await save(bob);
 
       // Active runs: 25 per requester, counted separately for each person.
@@ -85,7 +84,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await assert.rejects(provider(alice), limited);
       await provider(bob);
 
-      // The workspace cap reports the same error, revealing nothing about others' activity.
+      // A workspace with many saved workflows still accepts more, and lists only what each person can read.
       const existing = (await db.platform.query(`SELECT count(*)::integer AS count FROM ${table('tf_workflows')}`))
         .rows[0].count;
       for (let n = existing; n < 100; n++) {
@@ -99,8 +98,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         );
         await db.platform.query('COMMIT');
       }
-      await assert.rejects(save(carol), limited);
-      assert.equal((await service.list(w.id, carol.userId)).length, 0);
+      const carolWorkflow = randomUUID();
+      await save(carol, carolWorkflow);
+      assert.deepEqual(
+        (await service.list(w.id, carol.userId)).map(item => item.id),
+        [carolWorkflow],
+      );
     } finally {
       await runtime?.close();
       await db.close();

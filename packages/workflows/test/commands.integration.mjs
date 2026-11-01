@@ -276,10 +276,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           expectedRevision: null,
           definition: { ...definition, trigger: { kind: 'manual' } },
         });
-      await assert.rejects(
-        service.save(w.id, w.userId, randomUUID(), { revision: randomUUID(), expectedRevision: null, definition }),
-        { message: 'limit-reached' },
-      );
+      await service.save(w.id, w.userId, randomUUID(), {
+        revision: randomUUID(),
+        expectedRevision: null,
+        definition: { ...definition, trigger: { kind: 'manual' } },
+      });
 
       const archive = { commandId: randomUUID(), expectedGeneration: 4 };
       await assert.rejects(service.archive(w.id, w.userId, id, { ...archive, expectedGeneration: 3 }), {
@@ -295,7 +296,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         (await service.list(w.id, w.userId)).some(item => item.id === id),
         false,
       );
-      assert.equal((await service.list(w.id, w.userId)).length, 24);
+      assert.equal((await service.list(w.id, w.userId)).length, 25);
       assert.deepEqual([...new Set((await service.list(w.id, w.userId)).map(item => item.archivedAt))], [null]);
       const archivedList = await service.list(w.id, w.userId, { archived: true });
       assert.deepEqual(
