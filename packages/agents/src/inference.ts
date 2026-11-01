@@ -1316,6 +1316,7 @@ type LoopItem =
 /** Every framework tool's native name, including tools a chat has not loaded yet. */
 const nativeFrameworkToolNames = new Set(toolNameSchema.options.map(nativeToolName));
 const presentChoiceName = nativeToolName('present.choice');
+const webToolNames = new Set(['web.search', 'web.fetch'].map(nativeToolName));
 /** Why the reply loop returned a tool request unrun, as logged. */
 type ToolRejection =
   | 'bud-batch'
@@ -2203,7 +2204,14 @@ export async function inferWithTools(
           name: slackRenderToolName,
           tool: slackRenderTool,
           prompt: slackRenderPrompt(slackLayout.interactive),
-          parse: (input: unknown, _options?: { design?: boolean }) => parseSlackRender(input, slackLayout),
+          parse: (input: unknown, options?: { design?: boolean }) =>
+            parseSlackRender(input, {
+              ...slackLayout,
+              design: options?.design ?? false,
+              usedWeb: items.some(
+                item => item.kind === 'model' && item.calls.some(call => webToolNames.has(call.name)),
+              ),
+            }),
         }
       : { name: replyRenderToolName, tool: replyRenderTool, prompt: generativeUiPrompt, parse: parseReplyRender };
   // A canvas report is sent back once for a visual redesign; a second text-heavy one is kept.
