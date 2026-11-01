@@ -83,6 +83,7 @@ export const toolActivityLabels = {
   'slack.message.send': 'Sending a Slack message',
   'slack.thread.reply': 'Replying to a Slack thread',
   'slack.reaction.add': 'Adding a Slack reaction',
+  'slack.thread.react': 'Reacting in the Slack thread',
   'github.issue.read': 'Reading a GitHub issue',
   'github.personal.account': 'Checking available GitHub accounts',
   'github.investigation.account': 'Choosing a private GitHub investigation source',

@@ -25,6 +25,7 @@ import {
   slackSenderSchema,
   type SlackAction,
   type SlackSender,
+  type SlackThreadReaction,
 } from '@tulipfarm/slack';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -48,7 +49,19 @@ type Options = Parameters<typeof createChannelProvider>[0] & {
   /** Reads the images a run generated, so a delivered message can carry them as Slack files. */
   images?: SlackImageFiles;
 };
-export type SlackActionsFactory = (runtime: AgentStorage) => ReturnType<typeof createSlackActions>;
+/** Adds or removes a reaction as the TulipFarm app in the Slack thread a reply was started from. */
+export type SlackThreadReactions = (
+  context: {
+    workspaceId: string;
+    actor: HumanActor;
+    callId: string;
+    origin: { conversationId: string; turnId: string };
+  },
+  call: SlackThreadReaction,
+) => Promise<unknown>;
+export type SlackActionsFactory = (
+  runtime: AgentStorage,
+) => ReturnType<typeof createSlackActions> & { threadReaction?: SlackThreadReactions };
 const range = commonCompatibility;
 const hasSender = (tx: AgentTransaction) => 'commonVersion' in tx && Number(tx.commonVersion) >= 1;
 const rowSchema = z.object({

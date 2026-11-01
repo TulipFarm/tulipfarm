@@ -1249,6 +1249,8 @@ export type ToolInferenceContext = {
   earlierMessages?: boolean;
   /** The workspace reads chat files with the images reader, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
+  preloadedTools?: readonly string[];
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
   /**
@@ -2335,7 +2337,7 @@ export async function inferWithTools(
   let previousMemory: string | undefined;
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
-  const loaded = new Set<string>();
+  const loaded = new Set<string>(tools?.preloadedTools?.map(nativeToolName));
   const mcpJson = new WeakMap<object, string>();
   const catalogKey = (mcp: McpModelCatalog | undefined) => {
     let json = mcp ? mcpJson.get(mcp) : 'null';

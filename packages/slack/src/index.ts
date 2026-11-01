@@ -22,6 +22,7 @@ export {
   botChannelInfo,
   botMessageThread,
   setBotThreadStatus,
+  setBotReaction,
 } from './bot-message.ts';
 export {
   createSlackCanvas,

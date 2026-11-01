@@ -442,6 +442,7 @@ export function meteredReply(
               priorToolCalls,
               earlierMessages,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
+              ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
               progress,
               ...replyContext,

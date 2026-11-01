@@ -41,7 +41,7 @@ import { providerSources, resultSources } from './tool-sources.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
-import { slackResolveSchema, SlackChannelAccessError } from '@tulipfarm/slack';
+import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubAccountError } from '@tulipfarm/github';
@@ -123,6 +123,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   createRecordBatchSchema,
   ...atlassianCallSchema.options,
   slackResolveSchema,
+  slackThreadReactionSchema,
   z.strictObject({ tool: z.literal('github.personal.execute'), batchId: z.uuid() }),
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
   z.strictObject({ tool: z.literal('tables.import.attachments') }),
@@ -364,6 +365,8 @@ const descriptions: Record<ToolName, string> = {
     'Post one reply in an existing Slack thread after slack.resolve identifies its destination; use slack.message.send for a new top-level message. It checks access and audience, posts without approval, and returns a receipt. This changes Slack, so do not retry an uncertain post as a new reply.',
   'slack.reaction.add':
     'Add one reaction to a resolved Slack message, not a reply or new message. It checks access and audience, reacts without approval, and returns the action state. The call changes Slack; do not repeat it after an uncertain result because the reaction may already exist.',
+  'slack.thread.react':
+    'Add or remove (remove: true) one emoji reaction as the TulipFarm app on a message in the Slack thread this reply was started from; pass the message ts and the emoji name without colons. Needs no slack.resolve and works only in a reply started from Slack. Adding an existing reaction or removing a missing one succeeds without change.',
   ...atlassianDescriptions,
   'github.personal.account':
     'Show the private-chat GitHub account picker only after github.personal.read reports selection-required/conflict or when the human asks to switch. Returns the currently selected login or picker state, not account data; it cannot select an account. Otherwise read first and narrow an oversized query.',
@@ -862,6 +865,16 @@ export function createChatTools(
             };
           throw error;
         }
+      case 'slack.thread.react': {
+        const thread = slack && context.origin ? slack(runtime).threadReaction : undefined;
+        if (!thread || !context.origin)
+          return {
+            error: 'slack-thread-required',
+            instruction:
+              'Reacting as the TulipFarm app works only in a reply started from a Slack channel thread. Nothing changed in Slack. Tell the person, or use slack.resolve and slack.reaction.add to react from their own Slack account.',
+          };
+        return thread({ ...context, origin: context.origin }, call);
+      }
       case 'atlassian.sources':
       case 'atlassian.read':
       case 'atlassian.propose':
