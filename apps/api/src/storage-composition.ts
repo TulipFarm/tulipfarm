@@ -23,6 +23,8 @@ import { createConversations } from '@tulipfarm/conversations';
 import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/image-settings';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerConversations } from './conversations.ts';
+import { registerFollowUps } from './follow-ups.ts';
+import { createFollowUps } from '@tulipfarm/agents/follow-ups';
 import { createConversationEventHub } from './conversation-events.ts';
 import { registerProjects } from './projects.ts';
 import { registerPersonalMemory } from './personal-memory.ts';
@@ -274,13 +276,16 @@ export function registerStorageComposition(
     events.close();
   });
   const replies = createReplyDispatch({ runtime, temporal });
+  const conversations = createConversations(runtime, chatSkills, {
+    pinTurn: async (tx, workspaceId, familyId) =>
+      (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
+    retryTurn: resumeOwnerEndedPlans,
+  });
+  const followUps = createFollowUps(runtime);
+  registerFollowUps(app, { auth: dependencies.auth, followUps });
   registerConversations(app, {
     auth: dependencies.auth,
-    service: createConversations(runtime, chatSkills, {
-      pinTurn: async (tx, workspaceId, familyId) =>
-        (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
-      retryTurn: resumeOwnerEndedPlans,
-    }),
+    service: conversations,
     requests: createConversationRequests(runtime),
     approvals: { read: approvalRequests.read, decide: confirmation.approvals.decide },
     attachments,
@@ -340,6 +345,7 @@ export function registerStorageComposition(
     temporal,
     attachments,
     replies,
+    fireFollowUps: workspaceId => followUps.due(workspaceId, conversations.send),
     expireApprovals: async workspaceId => {
       for (const requestId of await approvalRequests.due(workspaceId))
         await confirmation.approvals.expire(workspaceId, requestId);

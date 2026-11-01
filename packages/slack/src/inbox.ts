@@ -26,6 +26,8 @@ export function createSlackInbox(
     generation: number,
     workspaceId: string,
   ) => Promise<Record<string, unknown> | null>,
+  /** Undoes what a reaction started, such as a pending ⏰ reminder, when the reaction is removed. */
+  unreact?: (tx: AuthorizationTransaction, event: SlackReactionEvent, installationId: string) => Promise<void>,
 ) {
   async function accept(route: Route, input: SlackEvent) {
     const envelope = eventEnvelopeSchema.parse(input);
@@ -67,6 +69,8 @@ export function createSlackInbox(
         classified.kind === 'reaction' && react && classified.event.user !== installation.bot_user_id
           ? await react(tx, classified.event, route.installationId, route.generation, route.workspaceId)
           : null;
+      if (classified.kind === 'reaction-removed' && unreact && classified.event.user !== installation.bot_user_id)
+        await unreact(tx, classified.event, route.installationId);
       const semantic = isMessage
         ? `message:${classified.event.channel}:${classified.event.ts}`
         : reaction && classified.kind === 'reaction'

@@ -222,6 +222,12 @@ test('message reactions classify as reactions, other reaction targets are ignore
   };
   assert.equal(classifyEvent({ event: reaction }).kind, 'reaction');
   assert.equal(classifyEvent({ event: { ...reaction, item: { type: 'file', file: 'F1' } } }).kind, 'ignored');
+  const removed = classifyEvent({ event: { ...reaction, type: 'reaction_removed', reaction: 'alarm_clock' } });
+  assert.deepEqual([removed.kind, removed.event?.item.ts], ['reaction-removed', '1.000001']);
+  assert.equal(
+    classifyEvent({ event: { ...reaction, type: 'reaction_removed', item: { type: 'file', file: 'F1' } } }).kind,
+    'ignored',
+  );
 });
 
 test('rich-only edits invalidate new snapshots while old plain-text snapshots remain readable', () => {

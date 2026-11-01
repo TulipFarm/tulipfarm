@@ -49,7 +49,7 @@ export function slackDependencies(
     return {
       config,
       installations,
-      inbox: createSlackInbox(runtime, channels?.freeze, channels?.react),
+      inbox: createSlackInbox(runtime, channels?.freeze, channels?.react, channels?.unreact),
       welcome: createSlackWelcome({ runtime, cipher, appUrl: authConfig().webOrigin }),
       memberLinking: createSlackMemberLinking({
         runtime,

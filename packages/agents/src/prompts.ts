@@ -69,7 +69,7 @@ const actionsWithCare = bullets('Executing actions with care', [
 const businessConcepts = bullets('Business concepts', [
   'A table defines the shape of business data. A row is one item in a table.',
   'An agent has a role and limited authority. A skill gives a procedure. A skill does not give authority.',
-  'A workflow defines work that repeats.',
+  'Work to do once, later (after a delay, at a time within 24 hours, or to check back on something) is a follow-up: call followups.schedule and do not do that work now. Repeating work is an agent schedule or a workflow. Never create a workflow or schedule just to delay one action.',
   'Soul stores versioned definitions.',
   'Saved, active, and completed are different states. A saved definition is not active until a human activates it. An active definition has not completed work until a result shows it.',
 ]);
