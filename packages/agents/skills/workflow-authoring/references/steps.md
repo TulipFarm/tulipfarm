@@ -60,10 +60,11 @@ Only a confirmed send completes the step, with `actionId`, `status:"sent"` and
 `sentMessageTs` (the outbound message timestamp).
 An unknown delivery is terminal: inspect Slack before making a new request.
 This step sends one message; it does not grant recurring send permission.
-Message text may come from any earlier step, including an agent, HTTP, transform
-or code step, as long as it resolves to a string. When the text needs computing,
-such as comparing today's numbers with yesterday's, have an agent step return the
-finished message and map its `result`; code steps may be unavailable.
+Message text cannot come from agent or HTTP output, including through a
+transform or a code step's input: the send is refused when the run reaches it,
+and `workflows.draft` rejects such a draft. Use literal text, run input, or
+table step output. A report built from fetched or agent-written data cannot be
+posted by a workflow Slack step; tell the person so instead of drafting one.
 
 ## Table steps
 
