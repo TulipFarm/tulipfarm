@@ -17,6 +17,8 @@ import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
 import type { createGitHubReads } from '@tulipfarm/github/reads';
 import { GitHubReadError, selectAccountSchema, selectionSchema } from '@tulipfarm/github/read-contracts';
+import { botGrantInputSchema, botGrantListSchema } from '@tulipfarm/github/batch-contracts';
+import type { createGitHubBotGrants } from '@tulipfarm/github/bot';
 
 const errorSchema = {
   type: 'object',
@@ -54,6 +56,7 @@ export function registerGitHubAccounts(
   auth: Pick<ReturnType<typeof registerAuth>['auth'], 'api'>,
   accounts: ReturnType<typeof createGitHubAccounts> | null,
   reads?: ReturnType<typeof createGitHubReads>,
+  botGrants?: ReturnType<typeof createGitHubBotGrants>,
 ) {
   app.register(async routes => {
     validation.install(routes, true);
@@ -94,6 +97,36 @@ export function registerGitHubAccounts(
       return { ...session, accounts };
     };
     const base = '/workspaces/:workspaceId/github/accounts';
+    const grantsPath = '/workspaces/:workspaceId/github/bot-grants';
+    const grants = () => {
+      if (!botGrants) throw new GitHubAccountError('account-disabled');
+      return botGrants;
+    };
+    routes.get(
+      grantsPath,
+      {
+        logLevel: 'silent',
+        schema: { ...schema('listGitHubBotGrantsV1', botGrantListSchema), params: json(workspaceParams) },
+      },
+      async request => grants().list(workspaceParams.parse(request.params).workspaceId, context(request).userId),
+    );
+    for (const [path, action, operationId] of [
+      [grantsPath, 'add', 'addGitHubBotGrantV1'],
+      [`${grantsPath}/remove`, 'remove', 'removeGitHubBotGrantV1'],
+    ] as const)
+      routes.post(
+        path,
+        {
+          logLevel: 'silent',
+          schema: {
+            ...schema(operationId, botGrantListSchema),
+            params: json(workspaceParams),
+            body: json(botGrantInputSchema),
+          },
+        },
+        async request =>
+          grants()[action](workspaceParams.parse(request.params).workspaceId, context(request).userId, request.body),
+      );
     const chatParams = workspaceParams.extend({ conversationId: uuidSchema });
     const selectionPath = '/workspaces/:workspaceId/github/chats/:conversationId/selection';
     const downloadParams = chatParams.extend({ downloadId: uuidSchema });

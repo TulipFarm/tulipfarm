@@ -9,8 +9,17 @@ import { githubApi, githubConsent, githubError } from '@/lib/github';
 import { useGitHubAccounts, useIntegrationChanges } from './queries';
 import { GitHubKnowledgeSources } from './github-knowledge';
 import { githubMockEnabled } from './github-mock-api';
+import { GitHubBotGrants } from './github-bot-grants';
 
-export function GitHubAccounts({ workspaceId, onChanged }: { workspaceId: string; onChanged: () => void }) {
+export function GitHubAccounts({
+  workspaceId,
+  workspaceSlug,
+  onChanged,
+}: {
+  workspaceId: string;
+  workspaceSlug: string;
+  onChanged: () => void;
+}) {
   const { state, refresh } = useGitHubAccounts(workspaceId);
   const changes = useIntegrationChanges();
   const pending = useRef(false);
@@ -233,6 +242,7 @@ export function GitHubAccounts({ workspaceId, onChanged }: { workspaceId: string
       {githubMockEnabled && (
         <p className="text-xs text-muted-foreground">Local demo · Mock GitHub data · No real GitHub changes</p>
       )}
+      <GitHubBotGrants workspaceId={workspaceId} workspaceSlug={workspaceSlug} />
     </section>
   );
 }

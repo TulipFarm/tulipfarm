@@ -54,11 +54,14 @@ export function createGitHubBatchDecision(
               );
         if (!selected.rowCount || !current.rowCount) throw new GitHubBatchError('batch-conflict');
         const previous = await batchView(tx, row);
-        if (previous.decision && previous.decision !== decision.decision) throw new GitHubBatchError('batch-conflict');
+        const author = decision.decision === 'approve' ? decision.author : 'member';
+        if (previous.decision && (previous.decision !== decision.decision || previous.author !== author))
+          throw new GitHubBatchError('batch-conflict');
+        if (author === 'bot' && !previous.bot) throw new GitHubBatchError('batch-conflict');
         if (!previous.decision)
           await tx.client.query(
-            `INSERT INTO ${batchTable(tx, 'batch_decisions')} (batch_id,membership_id,digest,decision) VALUES ($1,$2,$3,$4)`,
-            [id, actor.membershipId, row.digest, decision.decision],
+            `INSERT INTO ${batchTable(tx, 'batch_decisions')} (batch_id,membership_id,digest,decision,author) VALUES ($1,$2,$3,$4,$5)`,
+            [id, actor.membershipId, row.digest, decision.decision, author],
           );
         return batchView(tx, row);
       },

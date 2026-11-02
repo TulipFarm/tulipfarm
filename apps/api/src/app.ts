@@ -25,6 +25,7 @@ import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
+import { createGitHubBotGrants } from '@tulipfarm/github/bot';
 import { createGitHubReads } from '@tulipfarm/github/reads';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
@@ -129,6 +130,7 @@ export function buildApp(
           auth.auth,
           github,
           runtime && github ? createGitHubReads({ runtime, accounts: github }) : undefined,
+          runtime && github ? createGitHubBotGrants(runtime) : undefined,
         );
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));

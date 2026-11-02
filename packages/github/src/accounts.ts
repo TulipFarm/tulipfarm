@@ -67,6 +67,8 @@ export type GitHubCredential = {
   generation: number;
   identity: z.infer<typeof identitySchema>;
   scopes: string[];
+  /** An App installation token acting as the bot, not the member's own token. */
+  app?: true;
 };
 
 export function createGitHubAccounts(options: {

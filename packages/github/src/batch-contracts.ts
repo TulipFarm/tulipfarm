@@ -273,6 +273,7 @@ export type BatchSnapshot = z.infer<typeof batchSnapshotSchema>;
 export const batchDecisionSchema = z.strictObject({
   digest: z.string().regex(/^[a-f0-9]{64}$/),
   decision: z.enum(['approve', 'reject']),
+  author: z.enum(['member', 'bot']).default('member'),
 });
 export const actionOutcomeSchema = z.strictObject({
   ordinal: z.number().int().nonnegative(),
@@ -307,6 +308,10 @@ export const batchViewSchema = z.strictObject({
   snapshot: batchSnapshotSchema,
   digest: z.string(),
   decision: z.enum(['approve', 'reject']).nullable(),
+  /** Who posts the actions, set by the approval. */
+  author: z.enum(['member', 'bot']).nullable(),
+  /** The member may approve the batch as the App bot. */
+  bot: z.boolean(),
   expired: z.boolean(),
   actions: z.array(actionOutcomeSchema),
 });
@@ -331,3 +336,18 @@ export class GitHubBatchError extends Error {
     this.code = code;
   }
 }
+
+export const botRepositorySchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}$/);
+/** `memberId` is the Workspace members table record of the member. */
+export const botGrantInputSchema = z.strictObject({ memberId: z.uuid(), repository: botRepositorySchema });
+export const botGrantListSchema = z.strictObject({
+  configured: z.boolean(),
+  /** Workspace admins see and manage every grant; members see their own. */
+  manage: z.boolean(),
+  grants: z.array(z.strictObject({ memberId: z.uuid(), repository: z.string() })).max(10000),
+});
+export type BotGrantList = z.infer<typeof botGrantListSchema>;

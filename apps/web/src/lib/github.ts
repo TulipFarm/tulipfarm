@@ -9,7 +9,7 @@ import {
 import { apiOrigin } from './auth';
 import { jsonResponse, readJson, requestSignal, responseError } from './http';
 import { selectionSchema } from '@tulipfarm/github/read-contracts';
-import { batchDisplaySchema } from '@tulipfarm/github/batch-contracts';
+import { batchDisplaySchema, botGrantListSchema } from '@tulipfarm/github/batch-contracts';
 import { investigationChoicesSchema, type selectInvestigationSchema } from '@tulipfarm/github/investigation-contracts';
 
 export type GitHubAccount = z.infer<typeof accountSchema>;
@@ -109,6 +109,23 @@ export const githubApi = {
   disconnect: (workspaceId: string, id: string) =>
     request(`${base(workspaceId)}/${id}/disconnect`, disconnectionSchema, 'POST'),
   complete: (body: unknown) => request('/github/oauth/callback', completionSchema, 'POST', body),
+  botGrants: (workspaceId: string, signal?: AbortSignal) =>
+    request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/github/bot-grants`,
+      botGrantListSchema,
+      'GET',
+      undefined,
+      signal,
+    ),
+  addBotGrant: (workspaceId: string, grant: { memberId: string; repository: string }) =>
+    request(`/workspaces/${encodeURIComponent(workspaceId)}/github/bot-grants`, botGrantListSchema, 'POST', grant),
+  removeBotGrant: (workspaceId: string, grant: { memberId: string; repository: string }) =>
+    request(
+      `/workspaces/${encodeURIComponent(workspaceId)}/github/bot-grants/remove`,
+      botGrantListSchema,
+      'POST',
+      grant,
+    ),
 };
 export function githubConsent(url: string) {
   const parsed = new URL(url);
