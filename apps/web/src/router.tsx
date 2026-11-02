@@ -31,6 +31,7 @@ import { forgetWorkspace, workspaceDestination } from '@/lib/last-workspace';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceSlugError } from '@/lib/workspace-slug';
+import { currentIntegrationId } from '@/features/integrations/catalog';
 import { getWorkspace, listWorkspaces, WorkspaceRequestError } from '@/lib/workspaces';
 import { readWorkspaceList, WorkspaceListQueryBridge } from '@/features/workspaces/queries';
 import { reconcileMembership } from '@/features/governance/queries';
@@ -1048,6 +1049,16 @@ export const integrationDetailRoute = createRoute({
         returnChat: z.uuid().optional().catch(undefined),
       })
       .parse(search),
+  beforeLoad: ({ params, search }) => {
+    const integrationId = currentIntegrationId(params.integrationId);
+    if (integrationId !== params.integrationId)
+      throw redirect({
+        to: '/$workspaceSlug/integrations/$integrationId',
+        params: { ...params, integrationId },
+        search,
+        replace: true,
+      });
+  },
   component: IntegrationDetailPage,
 });
 export const router = createRouter({
