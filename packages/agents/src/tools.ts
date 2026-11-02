@@ -572,7 +572,7 @@ const descriptions: Record<ToolName, string> = {
   'workflows.read':
     'Read an authorized saved workflow definition and exact revision before editing. Preserve all unrelated fields and steps. This is read-only and does not start a run.',
   'workflows.providers':
-    'List enabled, authorized connected workflow sources you may use. Returns safe source configuration, never credentials. Only Sheets supports updated events; all support created events. Also returns githubRepositories: the connected GitHub repositories a github trigger may name, with their repositoryId. Missing integrations must be set up outside chat.',
+    'List enabled, authorized workflow trigger sources you may use for provider triggers and HTTP credentials. Returns safe source configuration, never credentials. Only Sheets supports updated events; all support created events. Also returns githubRepositories: the connected GitHub repositories a github trigger may name, with their repositoryId. It does not list chat connections: an empty result never means Slack or GitHub is disconnected, and Slack message steps resolve their channel with slack.resolve instead. Missing trigger sources must be set up outside chat.',
   'workflows.draft':
     'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
   'workflows.archive':
