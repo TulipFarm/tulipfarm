@@ -75,7 +75,9 @@ export function useConversationChanges() {
                       ? 'projects'
                       : kind === 'files'
                         ? 'files'
-                        : 'workflows',
+                        : kind === 'knowledge'
+                          ? 'knowledge'
+                          : 'workflows',
             ],
           ],
         }),

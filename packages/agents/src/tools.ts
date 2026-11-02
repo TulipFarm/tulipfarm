@@ -104,7 +104,8 @@ import {
   planClaimSchema,
   planSubmitReportSchema,
 } from './plan-contracts.ts';
-import { agentDraftInputSchema, type FilesProposal } from './draft-contracts.ts';
+import { agentDraftInputSchema, type FilesProposal, type KnowledgeProposal } from './draft-contracts.ts';
+import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { createAgentSchedules, previewAgentTaskSchedule } from './schedules.ts';
@@ -263,6 +264,34 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('files.restore'),
     fileIds: z.array(z.uuid()).min(1).max(20).describe('IDs from files.list.'),
   }),
+  z.strictObject({
+    tool: z.literal('knowledge.list'),
+    documentId: z.uuid().optional().describe('One entry, with its note text. Omit to list entries.'),
+    after: z.uuid().optional().describe('The next value from the previous page.'),
+  }),
+  z.strictObject({
+    tool: z.literal('knowledge.add'),
+    title: z.string().trim().min(1).max(512).optional().describe("Required for a note; defaults to the file's name."),
+    text: z.string().min(1).max(100_000).optional().describe('The note, as Markdown. Give text or fileId, not both.'),
+    fileId: z.uuid().optional().describe('A file from files.list to add instead of a note.'),
+  }),
+  z.strictObject({
+    tool: z.literal('knowledge.update'),
+    documentId: z.uuid().describe('From knowledge.list.'),
+    revisionId: z.uuid().describe('The revisionId from knowledge.list.'),
+    title: z.string().trim().min(1).max(512).optional().describe('The new title; omit to keep it.'),
+    text: z
+      .string()
+      .min(1)
+      .max(100_000)
+      .optional()
+      .describe("The note's full replacement text, not a diff; omit to keep it. Files entries take only a title."),
+  }),
+  z.strictObject({
+    tool: z.literal('knowledge.remove'),
+    documentId: z.uuid().describe('From knowledge.list.'),
+    revisionId: z.uuid().describe('The revisionId from knowledge.list.'),
+  }),
   z.strictObject({ tool: z.literal('agents.archive'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('agents.restore'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('skills.archive'), skillIds: z.array(z.uuid()).min(1).max(20) }),
@@ -314,6 +343,12 @@ const chatFileTools: ReadonlySet<string> = new Set([
   'files.trash',
   'files.restore',
 ]);
+const chatKnowledgeTools: ReadonlySet<string> = new Set([
+  'knowledge.list',
+  'knowledge.add',
+  'knowledge.update',
+  'knowledge.remove',
+]);
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'packages.inspect',
   'github.investigation.account',
@@ -364,6 +399,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'projects.list',
   'projects.read',
   'files.list',
+  'knowledge.list',
   'plans.read',
   'followups.list',
 ]);
@@ -607,6 +643,14 @@ const descriptions: Record<ToolName, string> = {
     'Prepare a review card to move up to 20 files or folders, by their IDs from files.list, to Trash. Items in Trash can be restored; this never deletes forever. Only someone who manages an item can move it to Trash. Changes nothing until the human approves it. Never treat chat text as approval.',
   'files.restore':
     'Prepare a review card to restore up to 20 items from Trash, by their IDs from files.list with trash=true, to their original folders. If an original folder is gone or not editable, use files.move instead. Changes nothing until the human approves it. Never treat chat text as approval.',
+  'knowledge.list':
+    "List the human's own Knowledge entries, the notes and files they added for agents to search, with each documentId, revisionId, kind, title and parsing state, 100 at a time. Pass documentId for one entry with its note text. Use knowledge.retrieve to search what entries say. Changes nothing.",
+  'knowledge.add':
+    "Prepare a review card that adds one entry to the human's own Knowledge: a note (title and Markdown text) or a file from files.list by fileId. Changes nothing until the human approves it. Never treat chat text as approval.",
+  'knowledge.update':
+    "Prepare a review card that changes one of the human's own Knowledge entries from knowledge.list: a new title, or a note's full replacement text. Read the note first with knowledge.list and its documentId. Changes nothing until the human approves it. Never treat chat text as approval.",
+  'knowledge.remove':
+    "Prepare a review card that removes one of the human's own Knowledge entries from knowledge.list, so agents stop finding it. A removed file stays in Files. Changes nothing until the human approves it. Never treat chat text as approval.",
   'files.read':
     'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, or any file in Files by its ID from files.list, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'followups.schedule':
@@ -648,6 +692,8 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => !schema.shape.tool.value.startsWith('projects.') || access.kind === 'chat')
       // Files management acts for the person in this chat, through a card they approve.
       .filter(schema => !chatFileTools.has(schema.shape.tool.value) || access.kind === 'chat')
+      // A person's own Knowledge entries, managed for them in this chat through a card they approve.
+      .filter(schema => !chatKnowledgeTools.has(schema.shape.tool.value) || access.kind === 'chat')
       .filter(schema =>
         isMcpTool(schema.shape.tool.value)
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
@@ -1382,6 +1428,36 @@ export function createChatTools(
             input: { expectedRevision, settings, current },
           }),
         );
+      }
+      case 'knowledge.list': {
+        const knowledge = createKnowledgeDrafts(runtime, workspaceId);
+        if (call.documentId) {
+          const entry = await ownKnowledgeEntry(knowledge, workspaceId, actor.userId, call.documentId);
+          return 'error' in entry ? entry : { entry: knowledgeEntryView(entry) };
+        }
+        const page = await knowledge.list(workspaceId, actor.userId, call.after ? { cursor: call.after } : {});
+        return {
+          entries: page.items.map(knowledgeEntryView),
+          next: page.nextCursor,
+        };
+      }
+      case 'knowledge.add':
+      case 'knowledge.update':
+      case 'knowledge.remove': {
+        if (!context.origin) throw new AccessDenied();
+        const knowledge = createKnowledgeDrafts(runtime, workspaceId);
+        const proposal = await knowledgeProposal(knowledge, workspaceId, actor, call);
+        if ('error' in proposal) return proposal;
+        try {
+          return await createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, proposal);
+        } catch (error) {
+          if (!(error instanceof AgentError) || error.code !== 'draft-stale') throw error;
+          return {
+            error: 'draft-stale',
+            instruction:
+              'No draft was created. The entry or file changed while drafting. Call knowledge.list and try again.',
+          };
+        }
       }
       case 'files.list': {
         const page = await libraryFiles(runtime).list(workspaceId, actor.userId, {
@@ -2429,6 +2505,136 @@ function rowWriteFailure(error: unknown) {
 }
 
 const unavailableBytes = () => Promise.reject(new Error('Chat file management reads no file bytes'));
+type KnowledgeDrafts = ReturnType<typeof createKnowledgeDrafts>;
+type KnowledgeEntry = Awaited<ReturnType<KnowledgeDrafts['get']>>;
+
+function knowledgeEntryView(entry: KnowledgeEntry) {
+  return {
+    documentId: entry.documentId,
+    revisionId: entry.revisionId,
+    kind: entry.kind,
+    title: entry.title,
+    parsing: entry.parsing,
+    ...(entry.kind === 'file' ? { fileId: entry.fileId } : {}),
+    ...(entry.kind === 'note' && entry.noteText !== undefined ? { noteText: entry.noteText } : {}),
+  };
+}
+
+/** One of the person's own entries; another person's entry reads as not found. */
+async function ownKnowledgeEntry(knowledge: KnowledgeDrafts, workspaceId: string, userId: string, documentId: string) {
+  try {
+    return await knowledge.get(workspaceId, userId, documentId);
+  } catch (error) {
+    if (!(error instanceof AccessDenied)) throw error;
+    return {
+      error: 'not-found',
+      instruction: "No entry with that ID is in the human's Knowledge. Call knowledge.list for their entries.",
+    } as const;
+  }
+}
+
+const noKnowledgeDraft = (error: string, instruction: string) => ({
+  error,
+  instruction: `No draft was created. ${instruction}`,
+});
+
+async function knowledgeProposal(
+  knowledge: KnowledgeDrafts,
+  workspaceId: string,
+  actor: HumanActor,
+  call: Extract<FrameworkCall, { tool: 'knowledge.add' | 'knowledge.update' | 'knowledge.remove' }>,
+): Promise<KnowledgeProposal | { error: string; instruction: string }> {
+  async function file(fileId: string) {
+    try {
+      return await knowledge.readableFile(actor, fileId);
+    } catch (error) {
+      if (!(error instanceof AccessDenied)) throw error;
+      return noKnowledgeDraft(
+        'file-unavailable',
+        'The human cannot open that file, or it is a folder or in Trash. Pick a file from files.list.',
+      );
+    }
+  }
+  if (call.tool === 'knowledge.add') {
+    if ((call.text === undefined) === (call.fileId === undefined))
+      return noKnowledgeDraft('invalid-arguments', 'Give text for a note or fileId for a file, not both.');
+    if (call.text !== undefined) {
+      if (!call.title) return noKnowledgeDraft('invalid-arguments', 'A note needs a title.');
+      return {
+        kind: 'knowledge',
+        targetId: randomUUID(),
+        input: { operation: 'add', title: call.title, content: { kind: 'note', text: call.text } },
+      };
+    }
+    const found = await file(call.fileId!);
+    if ('error' in found) return found;
+    for (let cursor: string | null | undefined; cursor !== null;) {
+      const page = await knowledge.list(workspaceId, actor.userId, cursor ? { cursor } : {});
+      const added = page.items.find(item => item.kind === 'file' && item.fileId === found.id);
+      if (added)
+        return noKnowledgeDraft(
+          'already-added',
+          `“${found.name}” is already in Knowledge as documentId ${added.documentId}. Use knowledge.update to rename it.`,
+        );
+      cursor = page.nextCursor;
+    }
+    return {
+      kind: 'knowledge',
+      targetId: randomUUID(),
+      input: {
+        operation: 'add',
+        title: call.title ?? found.name,
+        content: { kind: 'file', fileId: found.id, fileName: found.name },
+      },
+    };
+  }
+  const current = await ownKnowledgeEntry(knowledge, workspaceId, actor.userId, call.documentId);
+  if ('error' in current) return current;
+  if (current.revisionId !== call.revisionId)
+    return noKnowledgeDraft('draft-stale', 'The entry changed since it was listed. Call knowledge.list and try again.');
+  if (call.tool === 'knowledge.remove')
+    return {
+      kind: 'knowledge',
+      targetId: current.documentId,
+      input: { operation: 'remove', expectedRevisionId: current.revisionId, title: current.title, entry: current.kind },
+    };
+  if (call.title === undefined && call.text === undefined)
+    return noKnowledgeDraft('no-change', 'Give a new title, new note text, or both.');
+  const title = call.title ?? current.title;
+  let content: Extract<KnowledgeProposal['input'], { operation: 'update' }>['content'];
+  if (current.kind === 'file') {
+    if (call.text !== undefined)
+      return noKnowledgeDraft(
+        'invalid-arguments',
+        'A Files entry takes only a new title. Change the file itself in Files.',
+      );
+    const found = await file(current.fileId);
+    if ('error' in found) return found;
+    content = { kind: 'file', fileId: found.id, fileName: found.name };
+  } else {
+    const text = call.text ?? current.noteText ?? '';
+    if (text.length > 100_000)
+      return noKnowledgeDraft('note-too-long', 'This note is too long to change in chat. Edit it in Knowledge.');
+    content = { kind: 'note', text };
+  }
+  if (
+    title === current.title &&
+    (current.kind === 'file' || content.kind === 'file' || content.text === current.noteText)
+  )
+    return noKnowledgeDraft('no-change', 'The entry already has that title and text.');
+  return {
+    kind: 'knowledge',
+    targetId: current.documentId,
+    input: {
+      operation: 'update',
+      expectedRevisionId: current.revisionId,
+      previousTitle: current.title,
+      title,
+      content,
+    },
+  };
+}
+
 function libraryFiles(runtime: Runtime) {
   return createFiles(runtime, { putIfAbsent: unavailableBytes, read: unavailableBytes, remove: unavailableBytes });
 }

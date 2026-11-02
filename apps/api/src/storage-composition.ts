@@ -113,6 +113,7 @@ export function registerStorageComposition(
   const wakeTask = taskWake(app, temporal);
   const wakeTaskAction = taskActionWake(app, runtime, wakeTask, wake);
   const githubSubscriptions = createGitHubSubscriptions(dependencies.pool);
+  const chatObjects = chatObjectStore();
   registerAuthoringDrafts(app, {
     runtime,
     auth: dependencies.auth,
@@ -120,6 +121,7 @@ export function registerStorageComposition(
     wake,
     agentSetup,
     githubSubscriptions,
+    ...(chatObjects ? { fileBytes: chatObjects } : {}),
   });
   registerAgentAuthoringAssistance(app, {
     runtime,
@@ -138,7 +140,6 @@ export function registerStorageComposition(
   });
   registerWorkflows(app, { auth: dependencies.auth, service: workflows, identity: dependencies.pool });
   registerWorkflowDispatch(app, { pool: dependencies.pool, service: workflows, temporal });
-  const chatObjects = chatObjectStore();
   if (chatObjects) {
     registerSkillImports(app, { runtime, auth: dependencies.auth, objects: chatObjects });
     registerSkillImportDispatch(app, { runtime, pool: dependencies.pool, temporal, objects: chatObjects });

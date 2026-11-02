@@ -1902,6 +1902,9 @@ function ConversationTools({
               'files.move',
               'files.trash',
               'files.restore',
+              'knowledge.add',
+              'knowledge.update',
+              'knowledge.remove',
             ].includes(tool.tool) ||
               tool.rowDraftId === tool.id),
         )
