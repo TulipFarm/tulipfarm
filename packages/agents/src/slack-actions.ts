@@ -25,6 +25,7 @@ import {
   slackSenderSchema,
   type SlackAction,
   type SlackSender,
+  type SlackThreadReaction,
 } from '@tulipfarm/slack';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -34,7 +35,7 @@ import { resultSources } from './tool-sources.ts';
 import { toolCallSchema, toolResultSchema } from './contracts.ts';
 import { taskRun } from './task-approval-gate.ts';
 import { requireCurrentConversationSources } from '@tulipfarm/conversations/source-access';
-import { turnRequester } from '@tulipfarm/conversations/turn-requester';
+import { standaloneTurn, turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { canAccessSlackInstallation, SlackChannelAccessError, slackResolveSchema } from '@tulipfarm/slack';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
@@ -48,7 +49,19 @@ type Options = Parameters<typeof createChannelProvider>[0] & {
   /** Reads the images a run generated, so a delivered message can carry them as Slack files. */
   images?: SlackImageFiles;
 };
-export type SlackActionsFactory = (runtime: AgentStorage) => ReturnType<typeof createSlackActions>;
+/** Adds or removes a reaction as the TulipFarm app in the Slack thread a reply was started from. */
+export type SlackThreadReactions = (
+  context: {
+    workspaceId: string;
+    actor: HumanActor;
+    callId: string;
+    origin: { conversationId: string; turnId: string };
+  },
+  call: SlackThreadReaction,
+) => Promise<unknown>;
+export type SlackActionsFactory = (
+  runtime: AgentStorage,
+) => ReturnType<typeof createSlackActions> & { threadReaction?: SlackThreadReactions };
 const range = commonCompatibility;
 const hasSender = (tx: AgentTransaction) => 'commonVersion' in tx && Number(tx.commonVersion) >= 1;
 const rowSchema = z.object({
@@ -257,7 +270,7 @@ export function createSlackActions(options: Options) {
               [draft.conversation_id, draft.turn_id],
             )
           ).rowCount;
-          if (!prior)
+          if (!prior || (await standaloneTurn(tx, draft.conversation_id, draft.turn_id)))
             dependencies = dependencies.filter(
               source => source.kind !== 'private-conversation' || source.conversationId !== draft.conversation_id,
             );
@@ -353,7 +366,14 @@ export function createSlackActions(options: Options) {
       if (row.call.tool === 'github.issue.read' || row.call.tool.startsWith('google.')) throw new AccessDenied();
       if ('tableId' in row.call && !(await canAccessAsset(tx, actor, row.call.tableId, 'table.row.read')))
         throw new AccessDenied();
-      await requireDraftSources(tx, actor, await resultSources(tx, row.call, row.result), new Set(), undefined, true);
+      await requireDraftSources(
+        tx,
+        actor,
+        await resultSources(tx, row.call, row.result, actor),
+        new Set(),
+        undefined,
+        true,
+      );
     }
   }
   async function fresh(tx: AgentTransaction, workspaceId: string, row: Row) {
@@ -1104,7 +1124,7 @@ export function createSlackActions(options: Options) {
           [context.origin.conversationId, context.origin.turnId],
         )
       ).rowCount;
-      if (!prior)
+      if (!prior || (await standaloneTurn(tx, context.origin.conversationId, context.origin.turnId)))
         sources = sources.filter(
           source => source.kind !== 'private-conversation' || source.conversationId !== context.origin.conversationId,
         );

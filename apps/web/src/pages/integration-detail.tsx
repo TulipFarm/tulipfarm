@@ -24,7 +24,6 @@ import {
 } from '@/features/integrations/catalog';
 import { connector } from '@/features/integrations/connect';
 import { DefaultKnowledge, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
-import { GitHubIntegrations } from '@/features/integrations/github';
 import { GitHubAccounts, GitHubKnowledge } from '@/features/integrations/github-accounts';
 import {
   GitHubRepositoryContentPrototype,
@@ -241,6 +240,7 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
                       app={app}
                       status={status}
                       workspaceId={workspaceId}
+                      slug={slug}
                       onChanged={() => void refresh()}
                       primary={primary}
                     />
@@ -263,7 +263,7 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
             {tabs.includes('settings') && (
               <TabsContent value="settings">
                 <Pane>
-                  <SettingsTab app={app} status={status} workspaceId={workspaceId} onChanged={() => void refresh()} />
+                  <SettingsTab app={app} status={status} workspaceId={workspaceId} />
                 </Pane>
               </TabsContent>
             )}
@@ -535,12 +535,14 @@ function Accounts({
   app,
   status,
   workspaceId,
+  slug,
   onChanged,
   primary,
 }: {
   app: Integration;
   status: Status | null;
   workspaceId: string;
+  slug: string;
   onChanged: () => void;
   primary: ReactNode;
 }) {
@@ -571,7 +573,8 @@ function Accounts({
       </div>
     );
   if (app.provider === 'slack') return <SlackAccount workspaceId={workspaceId} knowledge={false} />;
-  if (app.provider === 'github-personal') return <GitHubAccounts workspaceId={workspaceId} onChanged={onChanged} />;
+  if (app.provider === 'github-personal')
+    return <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />;
   if (app.provider === 'atlassian' || app.provider === 'trello')
     return (
       <AtlassianIntegrations
@@ -616,24 +619,13 @@ function GoogleSources({ workspaceId, gmail }: { workspaceId: string; gmail: boo
   return <GoogleKnowledgeSources workspaceId={workspaceId} kinds={gmail ? gmailKinds : driveKinds} />;
 }
 
-function SettingsTab({
-  app,
-  status,
-  workspaceId,
-  onChanged,
-}: {
-  app: Integration;
-  status: Status | null;
-  workspaceId: string;
-  onChanged: () => void;
-}) {
+function SettingsTab({ app, status, workspaceId }: { app: Integration; status: Status | null; workspaceId: string }) {
   return (
     <div className="space-y-10">
       {app.provider === 'slack' && <SlackIntegration workspaceId={workspaceId} />}
       {app.provider === 'slack' && (status?.kind === 'connected' || status?.kind === 'installed') && (
         <SlackBotChannels workspaceId={workspaceId} />
       )}
-      {app.provider === 'github' && <GitHubIntegrations workspaceId={workspaceId} onChanged={onChanged} />}
     </div>
   );
 }

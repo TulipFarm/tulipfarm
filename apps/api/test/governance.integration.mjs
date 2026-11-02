@@ -140,10 +140,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     );
     assert.equal((await http(stranger, 'GET')).statusCode, 404);
     assert.equal((await http(stranger, 'GET', '/me')).statusCode, 404);
+    const adminTeamId = (await f.platform.query(`SELECT id FROM "${a.names.schema}".tf_teams WHERE name = '_admin'`))
+      .rows[0].id;
     assert.deepEqual(await ok(admin, 'GET', '/me'), {
       membershipId: a.membershipId,
       role: 'admin',
       teams: [],
+      adminTeamId,
       capabilities: { manageGovernance: true, canLeave: false },
     });
     const adminTeamMembers = `SELECT m.membership_id FROM "${a.names.schema}".tf_member_teams m JOIN "${a.names.schema}".tf_teams t ON t.id = m.team_id WHERE t.name = '_admin'`;
@@ -500,6 +503,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       membershipId: memberId,
       role: 'member',
       teams: [],
+      adminTeamId: null,
       capabilities: { manageGovernance: false, canLeave: true },
     });
     assert.equal((await http(member, 'GET', '/invitations')).statusCode, 404);
@@ -613,6 +617,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       membershipId: memberId,
       role: 'member',
       teams: [{ id: teamId, name: 'Operations', role: 'member' }],
+      adminTeamId: null,
       capabilities: { manageGovernance: false, canLeave: true },
     });
     const retiredTeam = randomUUID();
@@ -813,6 +818,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       membershipId: rejoined.membershipId,
       role: 'member',
       teams: [],
+      adminTeamId: null,
       capabilities: { manageGovernance: false, canLeave: true },
     });
     assert.equal(

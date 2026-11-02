@@ -24,6 +24,8 @@ import {
   slackRowDraftValueSchema,
 } from '@tulipfarm/agents/slack-default';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { createFollowUps } from '@tulipfarm/agents/follow-ups';
+import { slackFollowUpCancelAction, slackFollowUpCancelValueSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 
@@ -70,6 +72,7 @@ export function registerSlackActions(
   if (!settings) return;
   const config = slackConfigurationSchema.parse(JSON.parse(process.env.SLACK_CONFIGURATION ?? ''));
   const channels = createSlackChannelAgents({ ...settings, runtime: options.runtime, model: null });
+  const followUps = createFollowUps(options.runtime);
   const defaults = createSlackDefault({
     ...settings,
     runtime: options.runtime,
@@ -355,6 +358,7 @@ export function registerSlackActions(
                       slackReplyRetryAction,
                       slackRowDraftApprove,
                       slackRowDraftDismiss,
+                      slackFollowUpCancelAction,
                     ]),
                     value: z.string().max(512),
                   }),
@@ -381,6 +385,26 @@ export function registerSlackActions(
               text = 'Only the person who asked can retry this request.';
             }
             if (text) await respondEphemeral(payload.response_url, text);
+            return {};
+          }
+          if (action.action_id === slackFollowUpCancelAction) {
+            const value = slackFollowUpCancelValueSchema.parse(JSON.parse(action.value));
+            let text: string;
+            try {
+              const followUp = await followUps.cancelFromSlack(value.workspaceId, value.followUpId, {
+                appId: config.appId,
+                teamId: payload.team.id,
+                slackUserId: payload.user.id,
+              });
+              text =
+                followUp.status === 'cancelled'
+                  ? 'Follow-up cancelled. It will not run.'
+                  : `This follow-up can no longer be cancelled; it is ${followUp.status}.`;
+            } catch (error) {
+              if (!(error instanceof AccessDenied)) throw error;
+              text = 'Only the person who asked for this follow-up can cancel it.';
+            }
+            await respondEphemeral(payload.response_url, text);
             return {};
           }
           if (action.action_id === slackRowDraftApprove || action.action_id === slackRowDraftDismiss) {

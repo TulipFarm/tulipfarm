@@ -148,19 +148,6 @@ export const integrations: Integration[] = [
     ],
   },
   {
-    id: 'github',
-    name: 'GitHub team',
-    brand: 'github',
-    category: 'Code',
-    provider: 'github',
-    blurb: 'Investigate permitted repositories',
-    prompts: [
-      'Investigate this bug across related repositories',
-      'Read this issue using my team integration',
-      'Explain this failed Actions run',
-    ],
-  },
-  {
     id: 'github-personal',
     name: 'GitHub',
     brand: 'github',
@@ -392,7 +379,7 @@ export type IntegrationTab = (typeof integrationTabs)[number];
 const legacyHashes: Record<string, { id: string; tab: IntegrationTab }> = {
   'google-workspace': { id: 'gmail', tab: 'accounts' },
   'google-proposals-heading': { id: 'gmail', tab: 'accounts' },
-  'github-integrations': { id: 'github', tab: 'settings' },
+  'github-integrations': { id: 'github-personal', tab: 'accounts' },
   'github-accounts': { id: 'github-personal', tab: 'accounts' },
   'slack-account': { id: 'slack', tab: 'accounts' },
   'atlassian-heading': { id: 'jira', tab: 'accounts' },

@@ -16,6 +16,10 @@ import type {
   WorkflowProposal,
 } from '@tulipfarm/agents/draft-contracts';
 import { RowDraftCard, TechnicalDetail } from './row-draft-card';
+import { LifecycleDraftCard } from './lifecycle-draft-card';
+import { ProjectDraftCard } from './project-draft-card';
+import { FileDraftCard } from './file-draft-card';
+import { KnowledgeDraftCard } from './knowledge-draft-card';
 import { formatRun, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowCanvasButton } from './workflow-canvas';
 import { GitHubInstallNote } from '@/features/workflows/github-install-note';
@@ -159,6 +163,73 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
   if (proposal.kind === 'row')
     return (
       <RowDraftCard
+        id={id}
+        draft={draft}
+        proposal={proposal}
+        locked={locked}
+        sending={write.state.kind === 'sending'}
+        dirty={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
+        decide={decide}
+        result={result}
+        feedback={feedback}
+        checkStatus={checkStatus}
+      />
+    );
+  if (proposal.kind === 'files')
+    return (
+      <FileDraftCard
+        id={id}
+        draft={draft}
+        proposal={proposal}
+        locked={locked}
+        sending={write.state.kind === 'sending'}
+        dirty={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
+        decide={decide}
+        result={result}
+        feedback={feedback}
+        checkStatus={checkStatus}
+      />
+    );
+  if (proposal.kind === 'knowledge')
+    return (
+      <KnowledgeDraftCard
+        id={id}
+        draft={draft}
+        proposal={proposal}
+        locked={locked}
+        sending={write.state.kind === 'sending'}
+        dirty={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
+        decide={decide}
+        result={result}
+        feedback={feedback}
+        checkStatus={checkStatus}
+      />
+    );
+  if (proposal.kind === 'project')
+    return (
+      <ProjectDraftCard
+        id={id}
+        draft={draft}
+        proposal={proposal}
+        locked={locked}
+        sending={write.state.kind === 'sending'}
+        dirty={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
+        decide={decide}
+        result={result}
+        feedback={feedback}
+        checkStatus={checkStatus}
+      />
+    );
+  if (
+    proposal.kind === 'workflow-archive' ||
+    proposal.kind === 'workflow-restore' ||
+    proposal.kind === 'agent-archive' ||
+    proposal.kind === 'agent-restore' ||
+    proposal.kind === 'skill-archive' ||
+    proposal.kind === 'skill-restore'
+  )
+    return (
+      <LifecycleDraftCard
         id={id}
         draft={draft}
         proposal={proposal}

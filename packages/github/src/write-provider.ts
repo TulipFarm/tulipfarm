@@ -404,7 +404,8 @@ export async function dispatchGitHubWrite(input: {
 }): Promise<WriteOutcome> {
   const { operation, credential, fetcher } = input;
   if (isFileWrite(operation)) return dispatchFileWrite({ ...input, operation });
-  const binding = input.bindings.find(item => item.operation === operation.kind);
+  // GitHub's MCP server does not document App installation tokens, so bot writes use the REST and GraphQL paths.
+  const binding = credential.app ? undefined : input.bindings.find(item => item.operation === operation.kind);
   if (binding) {
     if (isProjectWrite(operation)) throw new GitHubBatchError('batch-unavailable');
     const { kind: _kind, ...args } = operation;

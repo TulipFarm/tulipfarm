@@ -122,6 +122,7 @@ test('chat is offered Slack tools only when this deployment enables Slack action
     'slack.message.send',
     'slack.reaction.add',
     'slack.resolve',
+    'slack.thread.react',
     'slack.thread.reply',
   ]);
   const previous = process.env.SLACK_OUTBOUND_ENABLED;

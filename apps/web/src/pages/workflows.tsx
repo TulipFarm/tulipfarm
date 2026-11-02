@@ -278,6 +278,10 @@ function WorkflowPage({
         setFocusTarget('workflow-views');
         notice =
           'Workflow archived. Its schedule, webhook, and connected-app triggers stopped, and unfinished runs were stopped. Run history is kept.';
+      } else if (command.path.endsWith('/restore')) {
+        selection.observed(workflowSchema.parse(result));
+        setShelf('current');
+        notice = 'Workflow restored. It is disabled; activate it when it should run again.';
       }
       setPending(null);
       setMessage(notice);
@@ -327,8 +331,8 @@ function WorkflowPage({
         <AlertDialogContent>
           <AlertDialogTitle>Archive {selected?.definition.name ?? 'this workflow'}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Its schedule, webhook and connected-app triggers stop. Unfinished runs stop. History is kept. This cannot be
-            undone.
+            Its schedule, webhook and connected-app triggers stop. Unfinished runs stop. History is kept. You can
+            restore it from Archived later; it comes back disabled and needs a new webhook key.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep workflow</AlertDialogCancel>
@@ -596,11 +600,40 @@ function WorkflowPage({
                 )}
               </section>
               {selected.archivedAt ? (
-                <Alert>
-                  <AlertDescription>
-                    Archived {formatTime(selected.archivedAt)}. Its definition and run history are read-only.
-                  </AlertDescription>
-                </Alert>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <Alert>
+                      <AlertDescription>
+                        Archived {formatTime(selected.archivedAt)}. Its definition and run history are read-only.
+                        {selected.capabilities.manage
+                          ? ' Restore it to edit or run it again; it comes back disabled.'
+                          : ' Ask a workflow manager to restore it.'}
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                  {selected.capabilities.manage && (
+                    <Button
+                      variant="outline"
+                      pendingLabel="Restoring workflow..."
+                      state={
+                        pending?.path === `${base}/${selected.id}/restore` && busy
+                          ? { kind: 'busy' }
+                          : blocked
+                            ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                            : { kind: 'ready' }
+                      }
+                      onClick={() =>
+                        void execute({
+                          path: `${base}/${selected.id}/restore`,
+                          method: 'POST',
+                          body: { commandId: crypto.randomUUID(), expectedGeneration: selected.generation },
+                        })
+                      }
+                    >
+                      Restore workflow
+                    </Button>
+                  )}
+                </div>
               ) : (
                 <>
                   {!selected.enabled &&
@@ -1154,7 +1187,8 @@ function commandError(error: RequestError) {
     'record-field-unavailable': 'The table, fields or filter are no longer available. Edit the trigger in chat.',
     'record-source-denied': recordSourceDenied,
     'code-steps-unavailable': 'Code steps cannot run until an isolated code runner is configured.',
-    'workflow-archived': 'This workflow is archived and can no longer change. Refresh workflows.',
+    'workflow-archived': 'This workflow is archived. Restore it from Archived before changing it.',
+    'workflow-not-archived': 'This workflow was already restored. Refresh workflows.',
     'workflow-archive-unavailable':
       'Archiving is unavailable until the storage update finishes. Disable the workflow to stop it now.',
     'webhook-signing-unavailable':

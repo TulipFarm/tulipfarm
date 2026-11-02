@@ -165,7 +165,7 @@ export function GitHubInvestigationCard({ workspaceId, chatId, slug, disabled, p
         <StatePanel
           kind="empty"
           title="No GitHub source available"
-          description="Connect a personal account, or ask a team integration manager for integration use and repository read permissions."
+          description="Connect your GitHub account to investigate repositories you can open."
         />
       ) : (
         <Form

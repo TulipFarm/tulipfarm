@@ -18,6 +18,24 @@ import { requireGitHubTask } from './github-task.ts';
 
 export type TulipFarmFileReference = Omit<Extract<SourceDependency, { kind: 'tulipfarm-file' }>, 'read'>;
 
+export type LibraryFileReference = Omit<Extract<SourceDependency, { kind: 'library-file' }>, 'read'> & {
+  read?: Extract<SourceDependency, { kind: 'library-file' }>['read'];
+};
+
+/** The member who read or listed this Files item can still see it. Files supplies the check; a recorded citation (`read` set or null) also admits its manager once it is in Trash, a live read (`read` absent) does not. */
+export async function requireLibraryFileReference(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  reference: LibraryFileReference,
+) {
+  if (reference.membershipId !== actor.membershipId || !tx.requireTulipFarmFile) throw new AccessDenied();
+  await tx.requireTulipFarmFile(actor, {
+    fileId: reference.fileId,
+    item: reference.read === null,
+    cited: reference.read !== undefined,
+  });
+}
+
 /** The member referenced this file in this chat and can read it now. Files supplies the readability check. */
 export async function requireTulipFarmFileReference(
   tx: AuthorizationTransaction,
@@ -119,6 +137,10 @@ export async function requireProtectedSource(
     case 'tulipfarm-file':
       if (runId || publicOnly) throw new AccessDenied();
       await requireTulipFarmFileReference(tx, actor, source);
+      break;
+    case 'library-file':
+      if (runId || publicOnly) throw new AccessDenied();
+      await requireLibraryFileReference(tx, actor, source);
       break;
     case 'google-file':
       if (runId || publicOnly) throw new AccessDenied();
@@ -346,6 +368,19 @@ export async function requireProtectedSource(
       } else if (
         !(await tx.client.query(`SELECT 1 FROM ${table('tf_teams')} WHERE id=$1`, [source.teamId])).rowCount ||
         !(await canAccessTable(tx, actor, source.teamId, 'table.create'))
+      )
+        throw new AccessDenied();
+      break;
+    case 'project':
+      if (runId || publicOnly) throw new AccessDenied();
+      await currentMember(tx, actor);
+      if (
+        !(
+          await tx.client.query(
+            `SELECT 1 FROM ${table('tf_project_members')} WHERE project_id=$1 AND membership_id=$2 AND removed_at IS NULL`,
+            [source.projectId, actor.membershipId],
+          )
+        ).rowCount
       )
         throw new AccessDenied();
       break;

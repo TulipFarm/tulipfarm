@@ -118,6 +118,7 @@ const coreChatTools = new Set(
     'web.fetch',
     'files.read',
     'agents.delegate',
+    'followups.schedule',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';

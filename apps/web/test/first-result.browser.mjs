@@ -248,7 +248,7 @@ try {
     }
 
     for (const [hash, name, panel] of [
-      ['github-integrations', 'GitHub', 'Settings'],
+      ['github-integrations', 'GitHub', 'Your account'],
       ['atlassian-heading', 'Jira', 'Your account'],
     ]) {
       await page.goto(`${origin}/acme/integrations#${hash}`);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { createWorkflows, WorkflowConflict, workflowCodeStepsEnabled } from '@tulipfarm/workflows';
@@ -12,7 +13,7 @@ import type {
 } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { AgentStorage } from './store.ts';
-import type { DraftOutcome, WorkflowProposal } from './draft-contracts.ts';
+import type { DraftOutcome, WorkflowLifecycleProposal, WorkflowProposal } from './draft-contracts.ts';
 
 type Trigger = Definition['trigger'];
 type Workflow = z.infer<typeof workflowSchema>;
@@ -38,7 +39,16 @@ export type WorkflowDrafts = {
   writable(actor: HumanActor, proposal: WorkflowProposal): Promise<void>;
   stale(actor: HumanActor, proposal: WorkflowProposal): Promise<boolean>;
   apply(actor: HumanActor, draftId: string, commandId: string, proposal: WorkflowProposal): Promise<DraftOutcome>;
+  listArchived(actor: HumanActor): Promise<Workflow[]>;
+  lifecycleWritable(actor: HumanActor, proposal: WorkflowLifecycleProposal): Promise<void>;
+  lifecycleStale(actor: HumanActor, proposal: WorkflowLifecycleProposal): Promise<boolean>;
+  applyLifecycle(actor: HumanActor, commandId: string, proposal: WorkflowLifecycleProposal): Promise<DraftOutcome>;
 };
+// Each workflow needs its own command ID, derived from the one decision so a replay changes nothing twice.
+function lifecycleCommandId(kind: WorkflowLifecycleProposal['kind'], commandId: string, workflowId: string) {
+  const hex = createHash('sha256').update(`${kind}:${commandId}:${workflowId}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${((Number.parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 const unattended = (trigger: Trigger) => !['manual', 'event'].includes(trigger.kind);
 const githubProblems: Record<string, DraftProblem> = {
   'github-repository-not-connected': {
@@ -346,7 +356,43 @@ export function createWorkflowDrafts(
     });
     return proposal.input.activate ? activation(actor, saved, true, commandId) : outcome(saved, 'not-requested');
   }
+  const listArchived = (actor: HumanActor) => service.list(workspaceId, actor.userId, { archived: true });
+  // Both lists are read so a replayed approval still finds workflows that it already moved.
+  const lifecycleCandidates = async (actor: HumanActor) => [...(await list(actor)), ...(await listArchived(actor))];
+  async function lifecycleWritable(actor: HumanActor, proposal: WorkflowLifecycleProposal) {
+    const current = await lifecycleCandidates(actor);
+    for (const item of proposal.input.workflows)
+      if (!current.find(workflow => workflow.id === item.id)?.capabilities.manage) throw new AccessDenied();
+  }
+  async function lifecycleStale(actor: HumanActor, proposal: WorkflowLifecycleProposal) {
+    const current = proposal.kind === 'workflow-archive' ? await list(actor) : await listArchived(actor);
+    return proposal.input.workflows.some(
+      item => current.find(workflow => workflow.id === item.id)?.revision !== item.revision,
+    );
+  }
+  async function applyLifecycle(
+    actor: HumanActor,
+    commandId: string,
+    proposal: WorkflowLifecycleProposal,
+  ): Promise<DraftOutcome> {
+    const current = await lifecycleCandidates(actor);
+    for (const item of proposal.input.workflows) {
+      const workflow = current.find(candidate => candidate.id === item.id);
+      if (!workflow) throw new AccessDenied();
+      const command = {
+        commandId: lifecycleCommandId(proposal.kind, commandId, item.id),
+        expectedGeneration: workflow.generation,
+      };
+      if (proposal.kind === 'workflow-archive') await service.archive(workspaceId, actor.userId, item.id, command);
+      else await service.restore(workspaceId, actor.userId, item.id, command);
+    }
+    return { kind: proposal.kind, workflowIds: proposal.input.workflows.map(item => item.id) };
+  }
   return {
+    listArchived,
+    lifecycleWritable,
+    lifecycleStale,
+    applyLifecycle,
     list,
     read,
     providers,

@@ -18,7 +18,7 @@ import {
 import { AgentError, agentPolicySchema, agentProjectionSchema, savedAgentSchema } from './saved-contracts.ts';
 import { requireAgentPermission, withHuman } from './saved-policy.ts';
 export { requireAgentPermission } from './saved-policy.ts';
-import { createAgentStore, relation, type AgentStorage } from './store.ts';
+import { createAgentStore, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { visiblePage } from './visible-page.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 import { listSkills } from './skills.ts';
@@ -31,17 +31,24 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
   async function list(
     workspaceId: string,
     user: string | HumanActor,
-    query: { after?: string | undefined; limit?: number | undefined; search?: string | undefined } = {},
+    query: {
+      after?: string | undefined;
+      limit?: number | undefined;
+      search?: string | undefined;
+      archived?: boolean | undefined;
+    } = {},
   ) {
     const input = z
       .object({
         after: z.uuid().optional(),
         limit: z.number().int().min(1).max(100).default(25),
         search: z.string().trim().max(120).default(''),
+        archived: z.boolean().default(false),
       })
       .parse(query);
     return withHuman(runtime, workspaceId, user, 'read', async (transaction, actor) => {
-      const predicate = `a.saved_revision IS NOT NULL AND a.deleted_at IS NULL AND ${definitionGrantPredicate(transaction, 'agent', 'a.id', '$2', '$1')}`;
+      const lifecycle = input.archived ? 'a.archived_at IS NOT NULL' : 'a.deleted_at IS NULL';
+      const predicate = `a.saved_revision IS NOT NULL AND ${lifecycle} AND ${definitionGrantPredicate(transaction, 'agent', 'a.id', '$2', '$1')}`;
       const page = await visiblePage(
         input,
         async (after, limit) => {
@@ -51,7 +58,7 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
           );
           return z.array(savedAgentSchema).parse(rows.rows);
         },
-        item => requireAgentPermission(transaction, actor, item.id, 'read'),
+        item => requireAgentPermission(transaction, actor, item.id, 'read', { archived: input.archived }),
       );
       return {
         agents: page.items,
@@ -397,6 +404,61 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
     });
   }
 
+  async function lifecycleState(transaction: AgentTransaction, agentId: string) {
+    const row = (
+      await transaction.client.query(
+        `SELECT deleted_at IS NOT NULL AS deleted, archived_at IS NOT NULL AS archived FROM ${relation(transaction, 'tf_agents')} WHERE id = $1 AND saved_revision IS NOT NULL FOR UPDATE`,
+        [agentId],
+      )
+    ).rows[0] as { deleted: boolean; archived: boolean } | undefined;
+    if (!row || (row.deleted && !row.archived)) throw new AccessDenied();
+    return row.archived ? 'archived' : 'active';
+  }
+
+  async function archive(workspaceId: string, user: string | HumanActor, agentIdInput: string) {
+    const agentId = uuidSchema.parse(agentIdInput);
+    return withHuman(runtime, workspaceId, user, 'write', async (transaction, actor) => {
+      const state = await lifecycleState(transaction, agentId);
+      await requireAgentPermission(transaction, actor, agentId, 'delete', { archived: state === 'archived' });
+      if (state === 'archived') return { archived: true };
+      const before = await definitionRecommendationAudience(transaction, 'agent', agentId);
+      await transaction.client.query(
+        `UPDATE ${relation(transaction, 'tf_agents')} SET deleted_at = now(), archived_at = now(), enabled = false, policy_version = policy_version + 1 WHERE id = $1`,
+        [agentId],
+      );
+      await transaction.client.query(
+        `UPDATE ${relation(transaction, 'tf_agent_activations')} SET revoked_at = now() WHERE agent_id = $1 AND revoked_at IS NULL`,
+        [agentId],
+      );
+      await transaction.client.query(
+        `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.archive',$3)`,
+        [randomUUID(), actor.membershipId, agentId],
+      );
+      await recordDefinitionRecommendationChanges(transaction, 'agent', agentId, before);
+      return { archived: true };
+    });
+  }
+
+  async function restore(workspaceId: string, user: string | HumanActor, agentIdInput: string) {
+    const agentId = uuidSchema.parse(agentIdInput);
+    return withHuman(runtime, workspaceId, user, 'write', async (transaction, actor) => {
+      const state = await lifecycleState(transaction, agentId);
+      await requireAgentPermission(transaction, actor, agentId, 'delete', { archived: state === 'archived' });
+      if (state === 'active') return { restored: true };
+      const before = await definitionRecommendationAudience(transaction, 'agent', agentId);
+      await transaction.client.query(
+        `UPDATE ${relation(transaction, 'tf_agents')} SET deleted_at = NULL, archived_at = NULL, enabled = false, policy_version = policy_version + 1 WHERE id = $1`,
+        [agentId],
+      );
+      await transaction.client.query(
+        `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.restore',$3)`,
+        [randomUUID(), actor.membershipId, agentId],
+      );
+      await recordDefinitionRecommendationChanges(transaction, 'agent', agentId, before);
+      return { restored: true };
+    });
+  }
+
   async function administer<T>(
     workspaceId: string,
     user: string,
@@ -418,6 +480,8 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
     policy,
     updatePolicy,
     remove,
+    archive,
+    restore,
     revokeActivation: (workspaceId: string, user: string, agentId: string, activationId: string) =>
       administer(workspaceId, user, agentId, actor =>
         executor.revokeActivation(workspaceId, actor, { agentId, activationId }),

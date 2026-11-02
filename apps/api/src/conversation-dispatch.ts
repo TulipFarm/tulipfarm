@@ -96,6 +96,8 @@ export function registerConversationDispatch(
     temporal: ReturnType<typeof createTemporalClient>;
     attachments?: ReturnType<typeof createAttachments> | undefined;
     expireApprovals?: (workspaceId: string) => Promise<void>;
+    /** Starts the workspace's due follow-ups; the reply dispatch below then starts their chat turns. */
+    fireFollowUps?: (workspaceId: string) => Promise<unknown>;
     replies: ReplyDispatch;
   },
 ) {
@@ -120,6 +122,12 @@ export function registerConversationDispatch(
       } catch (error) {
         if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
           app.log.error({ workspaceId: row.workspace_id }, 'Approval expiry will retry');
+      }
+      try {
+        await dependencies.fireFollowUps?.(row.workspace_id);
+      } catch (error) {
+        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
+          app.log.error({ workspaceId: row.workspace_id }, 'Follow-ups will retry');
       }
       try {
         await replies.dispatch(row.workspace_id);

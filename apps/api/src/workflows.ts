@@ -491,6 +491,23 @@ export function registerWorkflows(
       },
     );
     routes.post(
+      `${base}/:workflowId/restore`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'restoreWorkflowV1',
+          'Restore an archived workflow, disabled, with its definition and run history',
+          workflow,
+          workflowSchema,
+          commandSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, workflowId } = workflow.parse(request.params);
+        return service.restore(workspaceId, user(request), workflowId, request.body);
+      },
+    );
+    routes.post(
       `${base}/:workflowId/row-events/cancel`,
       {
         logLevel: 'silent',

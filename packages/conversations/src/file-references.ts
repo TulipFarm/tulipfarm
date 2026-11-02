@@ -18,7 +18,7 @@ import {
   type GoogleFileText,
 } from '@tulipfarm/google-workspace/public-contracts';
 import { GoogleLifecycleError } from '@tulipfarm/google-workspace/operations';
-import { FileError, fileRole, requireReadableFile, type createFiles } from '@tulipfarm/files';
+import { FileError, fileRole, requireCitedLibraryFile, requireReadableFile, type createFiles } from '@tulipfarm/files';
 import { KnowledgeParseError, parseKnowledgeDocument } from '@tulipfarm/memory-core/parser';
 import { ConversationConflict } from './contracts.ts';
 import { projectReaders } from './project-membership.ts';
@@ -26,7 +26,7 @@ import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { ConversationRuntime } from './runtime.ts';
 
 export type FileContent = Pick<ReturnType<typeof createFiles>, 'download'>;
-export type FileSource = Extract<SourceDependency, { kind: 'tulipfarm-file' | 'google-file' }>;
+export type FileSource = Extract<SourceDependency, { kind: 'tulipfarm-file' | 'library-file' | 'google-file' }>;
 /** Reads a Drive file's current text through the exact integration binding it is given; the Google operations service supplies it. */
 export type GoogleFileReader = {
   fileText(workspaceId: string, userId: string, input: GoogleFileRead, signal?: AbortSignal): Promise<GoogleFileText>;
@@ -62,7 +62,9 @@ const textMediaTypes = new Set(['application/json', 'application/xml', 'applicat
 
 export function bindFileSources<T extends AuthorizationTransaction>(tx: T): T {
   tx.requireTulipFarmFile = async (actor, reference) => {
-    await requireReadableFile(tx, actor, reference.fileId);
+    if (reference.cited) await requireCitedLibraryFile(tx, actor, reference.fileId, !reference.item);
+    else if (reference.item) await fileRole(tx, actor, reference.fileId);
+    else await requireReadableFile(tx, actor, reference.fileId);
   };
   return tx;
 }
@@ -577,7 +579,7 @@ function fileContext(readings: readonly FileReading[]) {
       reading.source?.kind === 'google-file'
         ? `${reading.source.read.modifiedTime ? ` modified-time=${attribute(reading.source.read.modifiedTime)}` : ''}${reading.source.read.version ? ` version=${attribute(reading.source.read.version)}` : ''}`
         : '';
-    const head = `name=${attribute(reading.name)} media-type=${attribute(reading.mediaType)}${reading.source ? ` read-at=${attribute(reading.source.read.readAt)}` : ''}${revision}`;
+    const head = `name=${attribute(reading.name)} media-type=${attribute(reading.mediaType)}${reading.source?.read ? ` read-at=${attribute(reading.source.read.readAt)}` : ''}${revision}`;
     if (reading.kind === 'unreadable')
       return `<${tag} ${head} status="${unreadable[reading.reason][0]}">${unreadable[reading.reason][1]} Its contents were not read. Say so plainly and do not describe or guess them.</${tag}>`;
     const budget = Math.max(0, Math.min(fileReferenceLimits.fileCharacters, remaining));

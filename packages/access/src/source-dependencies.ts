@@ -50,6 +50,16 @@ export const tulipfarmFileSourceSchema = z.strictObject({
   read: fileReadReceiptSchema,
 });
 /**
+ * A Files item chat read or listed by its ID. It stays readable only by the member who read it, while Files lets them
+ * read it. `read` is null when only the item's name and place were listed, which a folder also allows.
+ */
+export const libraryFileSourceSchema = z.strictObject({
+  kind: z.literal('library-file'),
+  fileId: uuidSchema,
+  membershipId: uuidSchema,
+  read: fileReadReceiptSchema.nullable(),
+});
+/**
  * A chat-scoped read of a Google Drive file through the sender's Google integration, bound to the integration generation the
  * reference was sent with. `revision` is what Google reported for the content read; Google decides who can open the file.
  */
@@ -141,6 +151,7 @@ export const sourceDependencySchema = z.discriminatedUnion('kind', [
   privateTaskSourceDependencySchema,
   knowledgeSourceDependencySchema,
   tulipfarmFileSourceSchema,
+  libraryFileSourceSchema,
   googleFileSourceSchema,
   z.strictObject({ kind: z.literal('table'), tableId: uuidSchema }),
   z.strictObject({ kind: z.literal('table-rows'), tableId: uuidSchema, revision: z.string() }),
@@ -194,6 +205,8 @@ export const sourceDependencySchema = z.discriminatedUnion('kind', [
     generation: z.number().int().positive(),
   }),
   z.strictObject({ kind: z.literal('workspace-skill'), skillId: uuidSchema, revision: z.string() }),
+  /** A project's settings and knowledge list, readable only by its current members. */
+  z.strictObject({ kind: z.literal('project'), projectId: uuidSchema, revision: z.number().int().nonnegative() }),
   z.strictObject({ kind: z.literal('creation-team'), teamId: uuidSchema, authority: z.enum(['agent', 'table']) }),
   z.strictObject({ kind: z.literal('private-conversation'), conversationId: uuidSchema }),
   z.strictObject({ kind: z.literal('shared-slack-turn'), eventId: uuidSchema }),

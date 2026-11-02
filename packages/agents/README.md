@@ -115,6 +115,38 @@ The tool registry offers schema inspection and status, plus record listing, crea
 
 Task admission is capped at 1,000 active tasks per member: pending, waiting for clarification or approval, and paused tasks count; completed and failed history does not. Starting, reopening completed work, and retrying or pausing failed work use the same capacity check. A refused scheduled start is recorded as `agent.schedule.skip.<reason>` and shown only to its sponsor as the latest schedule result. The schedule remains enabled and tries again at the next occurrence.
 
+## Follow-ups
+
+A follow-up is one saved instruction and a due time, bound to the private web
+chat, Slack default-agent thread or Slack direct message where it was asked for
+([service](src/follow-ups.ts), [contract](src/follow-up-contracts.ts)). The
+agent schedules one with `followups.schedule` whenever someone asks for work
+later, after a delay or at a time, including "check back in 5 minutes". It
+must not do the deferred work now. One-off later work needs no workflow;
+repeating work uses agent schedules or workflows. `followups.list` and
+`followups.cancel` cover the requester's pending follow-ups in the current chat
+or thread.
+
+A follow-up runs between 1 minute and 24 hours after it is asked for, given as
+`delayMinutes` or an ISO `at` time. A member can have at most 25 pending. A
+follow-up's own turn may schedule the next one, up to 12 in a chain and 24 hours
+after the first request; then the agent reports back instead.
+
+Common migration `0027_follow_ups.sql` stores them in `tf_follow_ups`. The API
+conversation sweep calls `due()` for each ready workspace every few seconds. It
+claims at most 20 due rows with `SKIP LOCKED` and fires each once:
+
+- A chat follow-up sends a new message as the requester, marked as a follow-up,
+  and its turn queues behind any running reply.
+- A Slack follow-up adds a held Slack event in the original thread, which the
+  worker admits like a new mention from the requester. The prompt says the
+  requester is not watching, so the agent acts instead of asking questions.
+
+Before firing, the sweep checks that the requester is still a member; a lost
+membership skips the follow-up. A follow-up more than an hour overdue fails
+instead of running late. The chat shows a card with the instruction, due time,
+status and a Cancel button.
+
 ## Chat plans
 
 Added on 10 October 2026. A chat plan is a hierarchy of tasks with dependencies. Groups organize work, and dependency

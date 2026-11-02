@@ -127,7 +127,13 @@ export type DefaultKnowledgeHook = {
   enabled(workspaceId: string, userId: string): Promise<boolean>;
   record(
     tx: AuthorizationTransaction,
-    input: { product: DefaultKnowledgeProduct; membershipId: string; accountKey: string; accountLabel: string },
+    input: {
+      product: DefaultKnowledgeProduct;
+      membershipId: string;
+      accountKey: string;
+      accountLabel: string;
+      githubUserId?: string;
+    },
   ): Promise<{ intentId: string; created: boolean }>;
   /** Best-effort start after commit; due-work dispatch recovers anything missed. */
   started?(workspaceId: string, intentIds: string[]): void;

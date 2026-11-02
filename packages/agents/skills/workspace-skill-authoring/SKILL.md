@@ -1,7 +1,7 @@
 ---
 name: workspace-skill-authoring
 title: Create, import, and improve reusable skills
-description: Draft a reusable workspace procedure for review. Use it whenever someone wants to create, import, edit, or improve a skill, or to save a repeated way of working as a reusable procedure.
+description: Draft a reusable workspace procedure for review. Use it whenever someone wants to create, import, edit, or improve a skill, or to save a repeated way of working as a reusable procedure. Also use it to archive or restore a skill.
 ---
 
 # Create, import, and improve reusable skills
@@ -20,6 +20,8 @@ Identify when the skill should trigger, its inputs, expected output, edge cases,
 Draft first; do not interview. When a detail is missing, choose a common default, such as yesterday, today, and blockers for standup notes, and name each default so the person can change it on review. Ask before drafting only when a missing answer would change what the skill is for, and then ask at most two questions.
 
 Call `skills.workspace` before creating a skill, so you do not create a duplicate. For an edit, use `skills.workspace.read` and its exact `management.version`. Do not change a different skill with a similar name.
+
+To remove skills, call `skills.archive` with up to 20 skill IDs on one card; archived skills leave the skill list, agents already using them keep working. To bring one back, call `skills.workspace` with `archived: true`, then `skills.restore`. Both need the person to manage each skill, and human review still applies.
 
 ## 2. Import from a URL
 

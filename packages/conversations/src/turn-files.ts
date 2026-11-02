@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AccessDenied,
   requireGoogleFileReference,
+  requireLibraryFileReference,
   requireTulipFarmFileReference,
   type AuthorizationTransaction,
   type HumanActor,
@@ -670,6 +671,8 @@ export async function readTurnFile(input: {
   attachments: AttachmentReader;
   authorize: Authorize;
   options: ReadOptions;
+  /** The file was named by its Files ID rather than referenced in this chat, so it cites a `library-file` source. */
+  library?: boolean;
 }): Promise<TurnFileSource> {
   const { part, actor } = input;
   if (part.kind === 'attachment') {
@@ -713,13 +716,18 @@ export async function readTurnFile(input: {
   }
   if (part.kind === 'file') {
     if (!input.files) throw new Error('conversation-files-unavailable');
-    const reference = {
-      kind: 'tulipfarm-file' as const,
-      fileId: part.fileId,
-      conversationId: input.conversationId,
-      membershipId: actor.membershipId,
-    };
-    const check = (tx: AuthorizationTransaction) => requireTulipFarmFileReference(tx, actor, reference);
+    const reference = input.library
+      ? { kind: 'library-file' as const, fileId: part.fileId, membershipId: actor.membershipId }
+      : {
+          kind: 'tulipfarm-file' as const,
+          fileId: part.fileId,
+          conversationId: input.conversationId,
+          membershipId: actor.membershipId,
+        };
+    const check = (tx: AuthorizationTransaction) =>
+      reference.kind === 'library-file'
+        ? requireLibraryFileReference(tx, actor, reference)
+        : requireTulipFarmFileReference(tx, actor, reference);
     try {
       await input.authorize(check);
       const file = await input.files.download(input.workspaceId, actor.userId, part.fileId);
@@ -1037,8 +1045,28 @@ export type ChatFileImages = { label: string; images: ChatImage[] };
 // One tool result holds at most 96,000 characters of JSON; this leaves room for escaping and the envelope.
 const toolReadTokens = 20_000;
 
+/** A Files item, not a folder, the reader can open now. It is read as the turn's own part, since no message references it. */
+async function libraryFile(tx: AuthorizationTransaction, actor: HumanActor, source: string, turnId: string) {
+  if (!z.uuid().safeParse(source).success || !tx.requireTulipFarmFile) return undefined;
+  const file = (
+    await tx.client.query(`SELECT 1 FROM ${qualified(tx.schema, 'tf_files')} WHERE id=$1 AND kind='file'`, [source])
+  ).rowCount;
+  if (!file) return undefined;
+  try {
+    await requireLibraryFileReference(tx, actor, {
+      kind: 'library-file',
+      fileId: source,
+      membershipId: actor.membershipId,
+    });
+  } catch (error) {
+    if (error instanceof AccessDenied) return undefined;
+    throw error;
+  }
+  return { kind: 'library', messageId: turnId, fileId: source };
+}
+
 /**
- * `files.read`: reads one file attached to or referenced in this chat under the requester's current access, with the
+ * `files.read`: reads one file attached to or referenced in this chat, or any Files item by its ID, under the requester's current access, with the
  * turn's pinned models, in the same labelled block a turn would show. Images reach image-reading families as images.
  */
 export async function readChatFile(input: {
@@ -1079,7 +1107,8 @@ export async function readChatFile(input: {
               [input.conversationId, input.call.source],
             )
           ).rows[0]
-        : undefined);
+        : undefined) ??
+      (await libraryFile(tx, input.actor, input.call.source, input.turnId));
     if (!part) return null;
     const turn = z
       .object({ responder: z.string() })
@@ -1093,6 +1122,7 @@ export async function readChatFile(input: {
       );
     const model = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
     return {
+      library: part.kind === 'library',
       part: turnFilePartSchema.parse(
         part.kind === 'attachment'
           ? {
@@ -1101,8 +1131,8 @@ export async function readChatFile(input: {
               attachmentId: part.attachmentId,
               ...(part.sourceUrl ? { sourceUrl: part.sourceUrl } : {}),
             }
-          : part.kind === 'file'
-            ? { kind: part.kind, messageId: part.messageId, fileId: part.fileId }
+          : part.kind === 'file' || part.kind === 'library'
+            ? { kind: 'file', messageId: part.messageId, fileId: part.fileId }
             : { kind: part.kind, messageId: part.messageId, google: part.google },
       ),
       pinned: await pinnedImageModels(tx, input.turnId, model, input.turnFiles),
@@ -1113,11 +1143,11 @@ export async function readChatFile(input: {
       result: {
         error: 'file-not-found',
         instruction:
-          'No file of this chat that you may read has that id. Use an attachment-id, file-id or google-file-id from a file block of this chat.',
+          'No file you may read has that id. Use an attachment-id, file-id or google-file-id from a file block of this chat, or a file ID from files.list.',
       },
       sources: [],
     };
-  const { part, pinned } = found;
+  const { part, pinned, library } = found;
   const family = input.turnFiles.family(pinned.familyId);
   const recognitionModel = pinned.recognitionFamilyId;
   const read = await readTurnFile({
@@ -1129,6 +1159,7 @@ export async function readChatFile(input: {
     google: input.google,
     attachments: input.turnFiles.attachments,
     authorize: check => input.transaction(check),
+    library,
     options: {
       imageInput: family.imageInput && input.imageInput,
       maxImageBytes: family.maxImageBytes,

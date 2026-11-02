@@ -18,6 +18,14 @@ export const slackActionSchema = z.discriminatedUnion('tool', [
   }),
 ]);
 export type SlackAction = z.infer<typeof slackActionSchema>;
+// A reply started from Slack reacts in its own thread as the TulipFarm app; it needs no destination.
+export const slackThreadReactionSchema = z.strictObject({
+  tool: z.literal('slack.thread.react'),
+  messageTs: timestamp,
+  reaction: z.string().regex(/^[a-z0-9_+'-]{1,100}(::skin-tone-[2-6])?$/),
+  remove: z.boolean().default(false),
+});
+export type SlackThreadReaction = z.infer<typeof slackThreadReactionSchema>;
 // 'user' posts through the requester's linked account; 'app' posts as the TulipFarm app.
 export const slackSenderSchema = z.enum(['user', 'app']);
 export type SlackSender = z.infer<typeof slackSenderSchema>;

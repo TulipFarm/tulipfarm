@@ -76,6 +76,7 @@ export const integrationKeys = {
     ['integrations', 'github', 'investigation-authority', task ? 'task' : 'chat', id] as const,
   selectionAuthority: (chatId: string, task = false) =>
     ['integrations', 'github-personal', 'selection-authority', ...(task ? ['task'] : []), chatId] as const,
+  botGrants: () => ['integrations', 'github-personal', 'content', 'bot-grants'] as const,
   batches: (chatId: string, task = false) =>
     ['integrations', 'github-personal', 'content', 'batches', ...(task ? ['task'] : []), chatId] as const,
   proposals: (cursor: string | null) => ['integrations', 'google', 'content', 'proposals', { cursor }] as const,
@@ -324,6 +325,13 @@ export function useGitHubAccounts(workspaceId: string, enabled = true) {
     key: integrationKeys.accounts('github-personal'),
     enabled,
     load: signal => githubApi.list(workspaceId, signal),
+  });
+}
+export function useGitHubBotGrants(workspaceId: string) {
+  useIntegrationAuthority('github-personal');
+  return useFeatureRead({
+    key: integrationKeys.botGrants(),
+    load: signal => githubApi.botGrants(workspaceId, signal),
   });
 }
 export function useGitHubInvestigation(workspaceId: string, id: string, task = false) {

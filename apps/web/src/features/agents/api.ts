@@ -124,10 +124,10 @@ export function agentApi(workspaceId: string) {
         );
       return slackActionViewSchema.parse(await readJson(response));
     },
-    list: async (signal: AbortSignal, after?: string, search = '') =>
+    list: async (signal: AbortSignal, after?: string, search = '', archived = false) =>
       agentListSchema.parse(
         await request(
-          `?${new URLSearchParams({ ...(after ? { after } : {}), ...(search ? { search } : {}) })}`,
+          `?${new URLSearchParams({ ...(after ? { after } : {}), ...(search ? { search } : {}), ...(archived ? { archived: 'true' } : {}) })}`,
           'GET',
           undefined,
           signal,
@@ -156,6 +156,8 @@ export function agentApi(workspaceId: string) {
     updatePolicy: async (id: string, input: z.infer<typeof agentPolicySchema>) =>
       request(`/${id}/policy`, 'PUT', input),
     remove: async (id: string) => request(`/${id}`, 'DELETE'),
+    archive: async (id: string) => request(`/${id}/archive`, 'POST', {}),
+    restore: async (id: string) => request(`/${id}/restore`, 'POST', {}),
     configure: async (id: string, input: ExecutionSettings) => request(`/${id}/enrollment`, 'PUT', input),
     revokeActivation: async (id: string, activationId: string) =>
       z.object({ saved: z.literal(true) }).parse(await request(`/${id}/activations/${activationId}`, 'DELETE')),

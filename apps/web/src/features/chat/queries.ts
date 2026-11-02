@@ -13,6 +13,7 @@ import {
   type ConversationCommand,
   type ConversationHistory,
 } from './conversation-api';
+import type { AuthoringProposal } from '@tulipfarm/agents/draft-contracts';
 import { createPageReuse } from './page-reuse';
 import { interactionPending, type InteractionReference } from './interaction-contracts';
 
@@ -21,6 +22,7 @@ export const conversationKeys = {
   list: (archived: boolean, search: string, pages: number, projectId: string | null) =>
     ['conversations', 'list', { archived, search, pages, projectId }] as const,
   detail: (id: string) => ['conversations', 'detail', id] as const,
+  followUp: (chatId: string, id: string) => ['conversations', 'detail', chatId, 'follow-up', id] as const,
   histories: (id: string) => ['conversations', 'detail', id, 'history'] as const,
   history: (id: string, pages: number) => ['conversations', 'detail', id, 'history', { pages }] as const,
   interaction: (id: string, reference: InteractionReference) =>
@@ -57,12 +59,26 @@ export function useConversationChanges() {
       progress: () => change({ keys: [conversationKeys.lists(), creditKeys.balance()] }),
       interaction: (chatId: string) =>
         change({ keys: [conversationKeys.detail(chatId), conversationKeys.lists(), creditKeys.balance()] }),
-      savedDraft: (chatId: string, kind: 'agent' | 'skill' | 'workflow' | 'workflow-activation' | 'row') =>
+      savedDraft: (chatId: string, kind: AuthoringProposal['kind'] | 'row') =>
         change({
           keys: [
             conversationKeys.detail(chatId),
             conversationKeys.lists(),
-            [kind === 'agent' ? 'agents' : kind === 'skill' ? 'skills' : kind === 'row' ? 'tables' : 'workflows'],
+            [
+              kind === 'agent' || kind.startsWith('agent-')
+                ? 'agents'
+                : kind === 'skill' || kind.startsWith('skill-')
+                  ? 'skills'
+                  : kind === 'row'
+                    ? 'tables'
+                    : kind === 'project'
+                      ? 'projects'
+                      : kind === 'files'
+                        ? 'files'
+                        : kind === 'knowledge'
+                          ? 'knowledge'
+                          : 'workflows',
+            ],
           ],
         }),
       rejected: (code: string) =>

@@ -207,10 +207,12 @@ export async function providerSources(
 
 const ids = z.array(z.object({ id: z.uuid() }));
 type McpProvenanceCall = { tool: 'mcp.call' | 'mcp.search' | 'mcp.describe' };
+/** `actor` is who ran the call; a result listing Files items cites them as that member's, so it needs one. */
 export async function resultSources(
   tx: AgentTransaction,
   call: FrameworkCall | McpProvenanceCall,
   result: unknown,
+  actor?: HumanActor,
 ): Promise<SourceDependency[]> {
   switch (call.tool) {
     case 'mcp.call':
@@ -268,6 +270,10 @@ export async function resultSources(
     case 'knowledge.search':
     case 'knowledge.read':
     case 'knowledge.retrieve':
+    case 'knowledge.list':
+    case 'knowledge.add':
+    case 'knowledge.update':
+    case 'knowledge.remove':
     case 'conversation.messages.read':
     case 'files.read':
       return [];
@@ -312,6 +318,8 @@ export async function resultSources(
         .parse(result)
         .teams.map(item => ({ kind: 'creation-team', teamId: item.id, authority: 'agent' }));
     case 'agents.list':
+      // Archived agents fail current-agent source checks; like workflows.list, the archived list records none.
+      if (call.archived) return [];
       return z
         .object({ agents: z.array(z.object({ id: z.uuid(), savedRevision: z.string() })) })
         .parse(result)
@@ -354,6 +362,27 @@ export async function resultSources(
         .object({ workspace: z.array(z.object({ id: z.uuid(), revision: z.string() })) })
         .parse(result)
         .workspace.map(item => ({ kind: 'workspace-skill', skillId: item.id, revision: item.revision }));
+    case 'projects.list':
+      return z
+        .object({ projects: z.array(z.object({ id: z.uuid(), revision: z.number().int() })) })
+        .parse(result)
+        .projects.map(item => ({ kind: 'project', projectId: item.id, revision: item.revision }));
+    case 'files.list':
+      if (!actor) throw new AccessDenied();
+      return z
+        .object({ items: z.array(z.object({ id: z.uuid() })) })
+        .parse(result)
+        .items.map(
+          item => ({ kind: 'library-file', fileId: item.id, membershipId: actor.membershipId, read: null }) as const,
+        );
+    case 'projects.read':
+      return [
+        {
+          kind: 'project',
+          projectId: call.projectId,
+          revision: z.object({ revision: z.number().int() }).parse(result).revision,
+        },
+      ];
     case 'skills.workspace.read':
       return [
         {
@@ -394,6 +423,7 @@ export async function resultSources(
     case 'slack.message.send':
     case 'slack.thread.reply':
     case 'slack.reaction.add':
+    case 'slack.thread.react':
     case 'tables.import.attachments':
     case 'tables.import.file':
     case 'files.create':
@@ -403,9 +433,23 @@ export async function resultSources(
     case 'skills.draft':
     case 'workflows.list':
     case 'workflows.draft':
+    case 'workflows.archive':
+    case 'workflows.restore':
+    case 'projects.draft':
+    case 'files.rename':
+    case 'files.move':
+    case 'files.trash':
+    case 'files.restore':
+    case 'agents.archive':
+    case 'agents.restore':
+    case 'skills.archive':
+    case 'skills.restore':
     case 'skills.list':
     case 'packages.inspect':
     case 'packages.recommend':
+    case 'followups.schedule':
+    case 'followups.list':
+    case 'followups.cancel':
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':

@@ -9,7 +9,6 @@ import type { ConversationMessage } from './conversation-api';
 const destinations = {
   google: { name: 'Google', hash: 'google-workspace' },
   slack: { name: 'Slack', hash: 'slack' },
-  github: { name: 'GitHub team issues', hash: 'github-integrations' },
   'github-personal': { name: 'GitHub', hash: 'github-accounts' },
   atlassian: { name: 'Atlassian and Trello', hash: 'atlassian-heading' },
 } as const;
@@ -18,8 +17,7 @@ type Provider = keyof typeof destinations;
 function providerFor(tool: string): Provider | null {
   if (tool.startsWith('google.')) return 'google';
   if (tool.startsWith('slack.')) return 'slack';
-  if (tool.startsWith('github.personal.')) return 'github-personal';
-  if (tool === 'github.issue.read') return 'github';
+  if (tool.startsWith('github.personal.') || tool === 'github.issue.read') return 'github-personal';
   if (tool.startsWith('atlassian.')) return 'atlassian';
   return null;
 }

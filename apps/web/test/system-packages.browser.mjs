@@ -9,7 +9,7 @@ import { fallbackRecommendations } from '../../../packages/recommendations/src/r
 import { captureBrowserFailure, startBuiltApp } from './built-app.fixture.mjs';
 import { createWorkspaceFixture, workspaceShellReads, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
 
-async function packageFixture(browser, { legacy = false } = {}) {
+async function packageFixture(browser, { legacy = false, adminWithoutTeams = false } = {}) {
   const { workspace, session } = createWorkspaceFixture({ slug: 'packages-qa', name: 'Packages QA' });
   const teamId = randomUUID();
   const membershipId = randomUUID();
@@ -201,11 +201,31 @@ async function packageFixture(browser, { legacy = false } = {}) {
     if (path.endsWith('/plans')) return route.fulfill({ json: { plans: [], nextCursor: null } });
     if (path.endsWith('/governance/me'))
       return route.fulfill({
+        json: adminWithoutTeams
+          ? {
+              membershipId,
+              role: 'admin',
+              teams: [],
+              adminTeamId: teamId,
+              capabilities: { manageGovernance: true, canLeave: true },
+            }
+          : {
+              membershipId,
+              role: 'member',
+              teams: [{ id: teamId, name: 'Operations', role: 'manager' }],
+              capabilities: { manageGovernance: false, canLeave: true },
+            },
+      });
+    if (adminWithoutTeams && path.endsWith('/governance'))
+      return route.fulfill({
         json: {
-          membershipId,
-          role: 'member',
-          teams: [{ id: teamId, name: 'Operations', role: 'manager' }],
-          capabilities: { manageGovernance: false, canLeave: true },
+          actorMembershipId: membershipId,
+          members: [],
+          teams: [],
+          directory: [],
+          tableTeamIds: [],
+          tables: [],
+          grants: [],
         },
       });
     if (path.endsWith('/governance/directory'))
@@ -285,7 +305,10 @@ test(
       assert.equal(state.chatCreates.length, 0, 'ordinary chat still requires an available model');
       await page.getByRole('textbox', { name: 'Message', exact: true }).fill('');
       await page.goto(`${server.origin}/${workspace.slug}/packages`);
-      await page.getByRole('link', { name: new RegExp(pkg.package.title) }).click();
+      await page
+        .getByRole('link', { name: new RegExp(pkg.package.title) })
+        .first()
+        .click();
       assert.equal(
         new URL(page.url()).pathname,
         `/${workspace.slug}/packages/catalog/${pkg.package.name}/${pkg.package.version}`,
@@ -439,6 +462,41 @@ test(
     }
   },
 );
+
+test('an admin with only the internal admin team is not asked for an owning team', { timeout: 60000 }, async () => {
+  const server = await startBuiltApp();
+  const browser = await chromium.launch();
+  let fixture;
+  try {
+    fixture = await packageFixture(browser, { adminWithoutTeams: true });
+    const { page, workspace, pkg, installation, state } = fixture;
+    await page.goto(`${server.origin}/${workspace.slug}/packages`);
+    await page
+      .getByRole('link', { name: new RegExp(pkg.package.title) })
+      .first()
+      .click();
+    await page.getByRole('link', { name: 'Install', exact: true }).click();
+    const offer = page.getByRole('region', { name: 'Package offer', exact: true });
+    await offer.getByRole('button', { name: 'Continue', exact: true }).click();
+    await offer.getByText('Question 1 of 1', { exact: true }).waitFor();
+    assert.equal(await offer.getByRole('combobox', { name: 'Owning team' }).count(), 0);
+    await offer.getByRole('combobox', { name: 'Importing person (skill manager)' }).click();
+    await page.getByRole('option', { name: 'You (installation owner)', exact: true }).click();
+    await offer.getByRole('button', { name: 'Continue', exact: true }).click();
+    await offer.getByText('Ready for your approval', { exact: true }).waitFor();
+    await offer.getByText('Owning team: Workspace admins', { exact: true }).waitFor();
+    assert.equal(await offer.getByRole('button', { name: 'Change Owning team', exact: true }).count(), 0);
+    assert.deepEqual(state.validations, [{ package: pkg, bindings: installation.bindings }]);
+    assert.deepEqual(state.unexpected, []);
+    assert.deepEqual(state.errors, []);
+  } catch (error) {
+    await captureBrowserFailure(fixture?.page, 'system-packages-admin-team');
+    throw error;
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
 
 test(
   'legacy installation shows full definitions and safely retries one whole-package approval',

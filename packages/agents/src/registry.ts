@@ -116,6 +116,7 @@ export function createToolRegistry(resources: TableTools) {
               | 'slack.message.send'
               | 'slack.thread.reply'
               | 'slack.reaction.add'
+              | 'slack.thread.react'
               | 'google.read'
               | 'google.propose'
               | 'google.status'

@@ -1001,6 +1001,36 @@ export function createWorkflows(
       return { archived: true };
     });
   }
+  // Restoring returns the workflow disabled; its triggers and webhook keys start again only after a manager reactivates it.
+  async function restore(workspaceId: string, user: string, id: string, value: unknown) {
+    const input = commandSchema.parse(value);
+    return transaction(workspaceId, async tx => {
+      const actor = await workflowMember(tx, user);
+      await requireGrant(tx, actor.membershipId, id, 'manage');
+      if (tx.commonVersion < 1) throw new WorkflowConflict('workflow-archive-unavailable');
+      const current = await read(tx, id);
+      await administrativeCommand(
+        tx,
+        {
+          ...input,
+          generation: current.generation,
+          membershipId: actor.membershipId,
+          operation: 'restore',
+          target: current.id,
+          request: input,
+        },
+        async () => {
+          if (current.archivedAt === null) throw new WorkflowConflict('workflow-not-archived');
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflows')} SET archived_at=NULL,generation=generation+1 WHERE id=$1`,
+            [id],
+          );
+          await auditWorkflow(tx, actor.membershipId, 'workflow.restore', id);
+        },
+      );
+      return read(tx, id, actor.membershipId);
+    });
+  }
   async function cancelRowEvents(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
     return transaction(workspaceId, async tx => {
@@ -2649,6 +2679,7 @@ export function createWorkflows(
     save,
     activate,
     archive,
+    restore,
     cancelRowEvents,
     start,
     history,

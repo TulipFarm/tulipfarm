@@ -219,6 +219,7 @@ export async function recordConversationResultProvenance(
       case 'workflow-provider':
       case 'knowledge-document':
       case 'tulipfarm-file':
+      case 'library-file':
       case 'google-file':
       case 'private-task':
       case 'mcp-integration':
@@ -231,6 +232,7 @@ export async function recordConversationResultProvenance(
       case 'google-integration':
       case 'agent-definition':
       case 'workspace-skill':
+      case 'project':
       case 'creation-team':
       case 'unavailable':
         throw new AccessDenied();

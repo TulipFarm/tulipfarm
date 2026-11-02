@@ -26,13 +26,15 @@ export async function requireAgentGrant(
   actor: HumanActor,
   agentId: string,
   permission: AgentPermission,
+  options: { archived?: boolean } = {},
 ) {
   await currentMember(tx, actor);
   const predicate = definitionGrantPredicate(tx, 'agent', 'a.id', '$2', '$3');
+  const lifecycle = options.archived ? 'a.archived_at IS NOT NULL' : 'a.deleted_at IS NULL';
   if (
     !(
       await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'tf_agents')} a WHERE a.id=$1 AND a.saved_revision IS NOT NULL AND a.deleted_at IS NULL AND ${predicate}`,
+        `SELECT 1 FROM ${table(tx, 'tf_agents')} a WHERE a.id=$1 AND a.saved_revision IS NOT NULL AND ${lifecycle} AND ${predicate}`,
         [agentId, actor.membershipId, permission],
       )
     ).rowCount

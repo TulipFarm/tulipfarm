@@ -299,6 +299,10 @@ export function createGovernanceService(dependencies: {
         `SELECT t.id, t.name, mt.role FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND ${notInternal('t')} ORDER BY t.name, t.id`,
         [actor.membershipId],
       );
+      const adminTeam = await transaction.client.query(
+        `SELECT t.id FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id WHERE mt.membership_id = $1 AND t.name = '_admin'`,
+        [actor.membershipId],
+      );
       const otherAdmin =
         member.role === 'admin'
           ? await transaction.client.query(
@@ -310,6 +314,7 @@ export function createGovernanceService(dependencies: {
         membershipId: actor.membershipId,
         role: member.role,
         teams: teams.rows,
+        adminTeamId: adminTeam.rows[0]?.id ?? null,
         capabilities: {
           manageGovernance: member.role === 'admin',
           canLeave:

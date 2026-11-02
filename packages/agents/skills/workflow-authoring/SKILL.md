@@ -14,7 +14,7 @@ When the request also needs tables, agents, or integration checks, use Planning 
 
 Use `workspaceInventory.workflows` in the system reminder first when supplied. It contains readable workflow IDs, names, revisions, and enabled/active state: metadata, not full definitions. Do not call `workflows.list` just to repeat that inventory or before creating a new workflow.
 
-Call `workflows.list` when the inventory is absent, needed trigger or step summary details are missing, or a stale response requires a fresh revision. Its result is also a summary, not a full definition. Before editing, call `workflows.read` with the workflow ID and preserve every unrelated setting and step from that full definition. Pass its `workflowId` and exact `revision` to `workflows.draft`. To only enable or disable a workflow, pass `workflowId` and `activate` without a definition. Human review and current permission checks still apply.
+Call `workflows.list` when the inventory is absent, needed trigger or step summary details are missing, or a stale response requires a fresh revision. Its result is also a summary, not a full definition. Before editing, call `workflows.read` with the workflow ID and preserve every unrelated setting and step from that full definition. Pass its `workflowId` and exact `revision` to `workflows.draft`. To only enable or disable a workflow, pass `workflowId` and `activate` without a definition. To remove workflows, call `workflows.archive` with each `workflowId` and exact `revision` (up to 20 on one card). To bring archived workflows back, call `workflows.list` with `archived: true`, then `workflows.restore` with each `workflowId` and exact `revision`; restored workflows stay disabled until activated with `workflows.draft`. Human review and current permission checks still apply.
 
 ## 2. Read the reference you need
 
@@ -51,8 +51,12 @@ Get table and field IDs from `tables.definitions`.
 
 For connected-provider work, distinguish a native workflow step from an agent step and a generic HTTP request. Read the agent and HTTP sections of `references/steps.md` before declaring that no supported path exists. Inspect a suitable saved agent with `agents.list` and `agents.read`; do not assume its tools grant access or waive approvals. If the required action or setup is missing, name that gap rather than asking the person to enable a nonexistent workflow action.
 
+`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source.
+
 ## 4. Activation and review
 
 Set `activate` to true when the person wants the workflow running. Scheduled, record, row, and webhook runs use the person as sponsor.
+
+Only `workflows.draft` creates a draft, and its review card is the only proof one exists. Never say a draft is ready, pending review or created unless `workflows.draft` returned it in this turn; if you still need answers, ask them and say no draft exists yet.
 
 Then ask the person to review the trigger, the next run, and the read-only diagram in Canvas. Edits stay in the chat composer; the chat card records explicit saving and activation approval. Chat text never approves. Webhook keys, new provider integrations, and secret rotation stay on the Workflows setup page. Existing connected-app triggers can be edited through chat using the authorized sources above.

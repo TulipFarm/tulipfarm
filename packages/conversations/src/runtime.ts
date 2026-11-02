@@ -40,7 +40,7 @@ import {
   type ConversationResult,
   type SourceDependency,
 } from './results.ts';
-import { turnRequester } from './turn-requester.ts';
+import { standaloneTurn, turnRequester } from './turn-requester.ts';
 import {
   requireFileSources,
   requireGitHubSources,
@@ -653,21 +653,22 @@ export function createConversationExecutor(
       if (external && !externalContext) throw new AccessDenied();
       const context = external && externalContext ? await externalContext(tx, work) : null;
       const slack = await requireSlackTurn(tx, requester, conversationId, turnId);
-      if (sourceCheck === 'conversation') {
+      const standalone = await standaloneTurn(tx, conversationId, turnId);
+      if (sourceCheck === 'conversation' && !standalone) {
         const retained = await tx.client.query(
           `SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${table(tx, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$2)`,
           [conversationId, turnId],
         );
         for (const row of retained.rows) await requireGitHubSources(tx, requester, row.sources);
       }
-      if (slack) {
+      if (slack && !standalone) {
         const prior = await tx.client.query(
           `SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence<(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$2)`,
           [conversationId, turnId],
         );
         for (const row of prior.rows) await requireResultSources(tx, requester, conversationId, row.sources);
       }
-      return { ...chat, requester, slack, context };
+      return { ...chat, requester, slack, context, standalone };
     } catch (error) {
       if (!(error instanceof AccessDenied)) throw error;
       const blocked = await tx.client.query(
@@ -1297,7 +1298,7 @@ export function createConversationExecutor(
               )
             ).rows[0],
           );
-          const managed = Boolean(compactor) && !chat.slack && !chat.context;
+          const managed = Boolean(compactor) && !chat.slack && !chat.context && !chat.standalone;
           const compaction = managed
             ? await compactionSnapshot(tx, fence.conversationId, fence.turnId, turn.source_message_id)
             : null;
@@ -1323,7 +1324,8 @@ export function createConversationExecutor(
               compaction.summary = null;
               compaction.wording = [];
             }
-          const planningContext = !chat.slack && !chat.context ? await planning?.context?.(tx, fence) : null;
+          const planningContext =
+            !chat.slack && !chat.context && !chat.standalone ? await planning?.context?.(tx, fence) : null;
           const requested = await requestedSkill(tx, fence.conversationId, turn.source_message_id);
           let invoked: InvokedSkill | null = null;
           if (requested) {
@@ -1350,11 +1352,13 @@ export function createConversationExecutor(
             await skillUnavailable(tx, fence);
             return null;
           }
-          const messages = historySchema
-            .parse(
-              (
-                await tx.client.query(
-                  `WITH prior AS (
+          const messages: z.infer<typeof historySchema> = chat.standalone
+            ? []
+            : historySchema
+                .parse(
+                  (
+                    await tx.client.query(
+                      `WITH prior AS (
         SELECT id, source_message_id, response_message_id, accepted_sequence FROM ${table(tx, 'tf_conversation_turns')}
         WHERE conversation_id = $1 AND accepted_sequence < (SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id = $2)
         AND accepted_sequence>=COALESCE((SELECT context_start FROM ${table(tx, 'tf_github_chat_selection')} WHERE conversation_id=$1),1)
@@ -1377,11 +1381,11 @@ export function createConversationExecutor(
         FROM exchanges e JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = e.message_id AND m.conversation_id = $1
         LEFT JOIN ${table(tx, 'tf_conversation_parts')} p ON p.message_id = m.id
         GROUP BY m.id, e.accepted_sequence ORDER BY e.accepted_sequence DESC, m.sequence DESC LIMIT ${compaction ? 2000 : 39}`,
-                  [fence.conversationId, fence.turnId, compaction?.summary?.coveredThrough ?? 0],
+                      [fence.conversationId, fence.turnId, compaction?.summary?.coveredThrough ?? 0],
+                    )
+                  ).rows,
                 )
-              ).rows,
-            )
-            .reverse();
+                .reverse();
           messages.push(currentMessage);
           // Only the requester's own references authorize reads for this request; newest first, so the current message wins the file budget.
           const fileReferences = z.array(storedReferenceSchema).parse(
@@ -1862,6 +1866,7 @@ export function createConversationExecutor(
           durable ||
           name === 'present.choice' ||
           name === 'agents.delegate' ||
+          name === 'followups.schedule' ||
           ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
           (interactiveChat &&
             (isCalendarReadCall(name, call) ||

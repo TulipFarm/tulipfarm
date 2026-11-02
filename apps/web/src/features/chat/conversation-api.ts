@@ -16,6 +16,7 @@ import {
   compactionPartSchema,
 } from '@tulipfarm/conversations/compaction-contracts';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
+import { firedFollowUpSchema, followUpViewSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { subagentResultSchema } from '@tulipfarm/conversations/events';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
@@ -107,6 +108,7 @@ const messageSchema = z.object({
         fileId: z.uuid().optional(),
         fileIds: z.array(z.uuid()).max(64).optional(),
         importId: z.uuid().optional(),
+        followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),
@@ -118,6 +120,7 @@ const messageSchema = z.object({
     )
     .default([]),
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
+  followUp: firedFollowUpSchema.nullable().optional(),
 });
 const historySchema = z.object({
   messages: z.array(messageSchema),
@@ -290,6 +293,24 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
         );
+      if (code === 'knowledge-quota')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'This is too large for Knowledge, so nothing was added. Ask chat for a shorter note or a smaller file.',
+        );
+      if (code === 'knowledge-file-unavailable')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'Files can’t be read right now, so nothing changed in Knowledge. Try again later.',
+        );
+      if (code === 'file-restore-destination')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'An original folder is gone or you can no longer add to it, so nothing was restored. Ask chat to move the items to another folder instead.',
+        );
       if (code === 'limit-reached')
         throw new TableRequestError(
           response.status,
@@ -393,6 +414,14 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
       return z
         .object({ requested: z.boolean() })
         .parse(await request(`/${chatId}/turns/${turnId}/subagents/stop`, 'POST', signal, { id, key }, true));
+    },
+    async followUp(chatId: string, id: string, signal: AbortSignal) {
+      return followUpViewSchema.parse(await request(`/${chatId}/follow-ups/${id}`, 'GET', signal, undefined, true));
+    },
+    async cancelFollowUp(chatId: string, id: string, signal: AbortSignal) {
+      return followUpViewSchema.parse(
+        await request(`/${chatId}/follow-ups/${id}/cancel`, 'POST', signal, undefined, true),
+      );
     },
     async maintenance(chatId: string, signal: AbortSignal): Promise<MaintenanceView> {
       return maintenanceViewSchema.parse(await request(`/${chatId}/maintenance`, 'GET', signal, undefined, true));

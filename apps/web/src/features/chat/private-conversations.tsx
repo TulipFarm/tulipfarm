@@ -97,6 +97,7 @@ import {
 } from '@/features/packages/chat-packages';
 import { InteractionCard } from './interaction-card';
 import { AuthoringDraftCard } from './authoring-draft-card';
+import { FollowUpCard } from './follow-up-card';
 import { Welcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
 import { skillApi } from '@/features/skills/api';
@@ -1698,7 +1699,17 @@ function ConversationEntry({
                   </PackageChatContext>
                 );
               case 'text':
-                return message.author === 'assistant' ? (
+                return message.followUp ? (
+                  <MessageBubble key={index} variant="secondary">
+                    <p className="whitespace-pre-wrap text-base break-words">
+                      <span aria-hidden>⏰ </span>
+                      <span className="font-medium">Follow-up:</span> {message.followUp.instruction}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Scheduled {new Date(message.followUp.requestedAt).toLocaleString()}
+                    </p>
+                  </MessageBubble>
+                ) : message.author === 'assistant' ? (
                   <AssistantText
                     key={index}
                     workspaceId={workspace.id}
@@ -1866,12 +1877,36 @@ function ConversationTools({
           <SlackAction key={tool.id} api={slack} id={tool.id} refresh={changed} />
         ))}
       {message.tools
+        .filter(tool => tool.status === 'completed' && tool.followUpId)
+        .map(tool => (
+          <FollowUpCard key={tool.id} api={api} chatId={chatId} id={tool.followUpId!} />
+        ))}
+      {message.tools
         .filter(
           tool =>
             tool.status === 'completed' &&
             tool.activityStatus !== 'failed' &&
             !tool.importId &&
-            (['agents.draft', 'skills.draft', 'workflows.draft'].includes(tool.tool) || tool.rowDraftId === tool.id),
+            ([
+              'agents.draft',
+              'skills.draft',
+              'workflows.draft',
+              'workflows.archive',
+              'workflows.restore',
+              'agents.archive',
+              'agents.restore',
+              'skills.archive',
+              'skills.restore',
+              'projects.draft',
+              'files.rename',
+              'files.move',
+              'files.trash',
+              'files.restore',
+              'knowledge.add',
+              'knowledge.update',
+              'knowledge.remove',
+            ].includes(tool.tool) ||
+              tool.rowDraftId === tool.id),
         )
         .map(tool => (
           <AuthoringDraftCard key={tool.id} api={api} chatId={chatId} id={tool.id} />

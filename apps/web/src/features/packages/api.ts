@@ -172,8 +172,18 @@ export function systemPackageApi(workspaceId: string) {
         };
       }
       const teams = own.capabilities.manageGovernance ? (await loadGovernance(workspaceId, signal)).teams : own.teams;
+      if (!teams.length && own.adminTeamId)
+        return { items: [{ id: own.adminTeamId, label: workspaceAdminsLabel }], nextCursor: null };
       return { items: teams.map(team => ({ id: team.id, label: team.name })), nextCursor: null };
+    },
+    // Workspaces start with only the internal admin team; packages then default to it instead of asking.
+    defaultTeam: async (signal: AbortSignal): Promise<{ id: string; label: string } | null> => {
+      const own = await loadOwnMembership(workspaceId, signal);
+      if (!own.adminTeamId) return null;
+      const teams = own.capabilities.manageGovernance ? (await loadGovernance(workspaceId, signal)).teams : own.teams;
+      return teams.length ? null : { id: own.adminTeamId, label: workspaceAdminsLabel };
     },
   };
 }
+const workspaceAdminsLabel = 'Workspace admins';
 export type SystemPackageApi = ReturnType<typeof systemPackageApi>;

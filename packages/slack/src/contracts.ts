@@ -124,7 +124,7 @@ const deletedSchema = z.object({
   deleted_ts: timestamp,
 });
 const reactionSchema = z.object({
-  type: z.literal('reaction_added'),
+  type: z.enum(['reaction_added', 'reaction_removed']),
   user: slackId,
   reaction: z.string().regex(/^[a-z0-9_+'-]{1,100}(::skin-tone-[2-6])?$/),
   item: z.object({ type: z.literal('message'), channel: slackId, ts: timestamp }),
@@ -147,6 +147,12 @@ export function classifyEvent(envelope: SlackEvent) {
   if (envelope.event.type === 'reaction_added') {
     const reaction = reactionSchema.safeParse(envelope.event);
     return reaction.success ? { kind: 'reaction' as const, event: reaction.data } : { kind: 'ignored' as const };
+  }
+  if (envelope.event.type === 'reaction_removed') {
+    const reaction = reactionSchema.safeParse(envelope.event);
+    return reaction.success
+      ? { kind: 'reaction-removed' as const, event: reaction.data }
+      : { kind: 'ignored' as const };
   }
   const message = messageSchema.safeParse(envelope.event);
   if (message.success && !message.data.bot_id && (!message.data.subtype || message.data.subtype === 'file_share'))

@@ -106,6 +106,10 @@
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./bot": {
+      "types": "./dist/bot.d.ts",
+      "default": "./dist/bot.js"
     }
   },
   "scripts": {

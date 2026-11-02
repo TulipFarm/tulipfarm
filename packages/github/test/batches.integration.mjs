@@ -8,7 +8,7 @@ import { createGitHubBatches } from '@tulipfarm/github/batches';
 import { createGitHubBatchDecision } from '@tulipfarm/github/batch-approval';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
-async function fixture() {
+async function fixture(extra = {}) {
   const f = await githubFixture();
   const actor = { kind: 'human', ...f.member };
   const store = createConversations(f.runtime);
@@ -31,7 +31,8 @@ async function fixture() {
     `UPDATE ${f.table('tf_conversation_turns')} SET status='processing',lease_until=clock_timestamp()+interval '5 minutes' WHERE id=$1`,
     [sent.turnId],
   );
-  const effects = [];
+  const effects = [],
+    tokens = [];
   let failure = false,
     rejection = false,
     targetDenied = false;
@@ -54,6 +55,7 @@ async function fixture() {
       return Response.json(String(url).includes('?') ? effects : { id: 1 });
     }
     if (rejection) return Response.json({}, { status: 422 });
+    tokens.push(new Headers(init.headers).get('authorization'));
     const result = { id: effects.length + 10, number: effects.length + 1, ...JSON.parse(init.body), user: { id: 123 } };
     effects.push(result);
     if (failure) throw new Error('connection lost after commit');
@@ -64,6 +66,7 @@ async function fixture() {
     accounts: f.service,
     fetcher,
     requireSources: async (_tx, _actor, sources) => assert.deepEqual(sources, []),
+    ...extra,
   };
   const batches = createGitHubBatches(options);
   const decide = createGitHubBatchDecision({
@@ -81,6 +84,7 @@ async function fixture() {
     conversationId,
     accountId,
     effects,
+    tokens,
     batches,
     propose,
     approve,
@@ -442,3 +446,76 @@ for (const change of ['cancel', 'disconnect'])
       await f.close();
     }
   });
+
+test('a member posts as the bot only in a granted repository, and a broken bot fails only bot writes', async () => {
+  process.env.GITHUB_APP_PRIVATE_KEY = 'configured';
+  let broken = false;
+  const bot = {
+    credential: async (member, owner, repo) => {
+      if (broken) throw new Error('bad bot setting');
+      assert.equal(`${owner}/${repo}`, 'octocat/private');
+      return {
+        ...member,
+        accessToken: 'bot-token',
+        identity: { id: '999', login: 'tulipfarm[bot]' },
+        scopes: [],
+        app: true,
+      };
+    },
+  };
+  const f = await fixture({ bot });
+  const decideAs = (view, author) =>
+    f.decide(f.one.id, f.member.userId, f.conversationId, view.snapshot.id, {
+      digest: view.digest,
+      decision: 'approve',
+      author,
+    });
+  const grant = sql =>
+    f.runtime.transaction(f.one.id, commonCompatibility, tx =>
+      tx.client.query(sql.replace('$table', f.table('tf_github_bot_grants')), [f.member.membershipId]),
+    );
+  try {
+    const ungranted = await f.propose([create]);
+    assert.equal(ungranted.bot, false);
+    await assert.rejects(decideAs(ungranted, 'bot'), /batch-conflict/);
+
+    await grant(`INSERT INTO $table (membership_id,repository,granted_by) VALUES ($1,'octocat/private',$1)`);
+    const granted = await f.propose([create]);
+    assert.equal(granted.bot, true);
+    const approved = await decideAs(granted, 'bot');
+    assert.equal(approved.author, 'bot');
+    await assert.rejects(decideAs(granted, 'member'), /batch-conflict/);
+    const outcome = await f.execute(granted);
+    assert.deepEqual(
+      outcome.actions.map(action => action.status),
+      ['succeeded'],
+    );
+    assert.match(f.tokens.at(-1), /bot-token/);
+
+    const revoked = await f.propose([create]);
+    await decideAs(revoked, 'bot');
+    await grant(`DELETE FROM $table WHERE membership_id=$1`);
+    await assert.rejects(f.execute(revoked), /batch-conflict/);
+
+    await grant(`INSERT INTO $table (membership_id,repository,granted_by) VALUES ($1,'octocat/private',$1)`);
+    broken = true;
+    const failing = await f.propose([create]);
+    await decideAs(failing, 'bot');
+    const before = f.effects.length;
+    assert.deepEqual(
+      (await f.execute(failing)).actions.map(action => action.status),
+      ['rejected'],
+    );
+    assert.equal(f.effects.length, before);
+    const member = await f.propose([create]);
+    await f.approve(member);
+    assert.deepEqual(
+      (await f.execute(member)).actions.map(action => action.status),
+      ['succeeded'],
+    );
+    assert.doesNotMatch(f.tokens.at(-1), /bot-token/);
+  } finally {
+    delete process.env.GITHUB_APP_PRIVATE_KEY;
+    await f.close();
+  }
+});

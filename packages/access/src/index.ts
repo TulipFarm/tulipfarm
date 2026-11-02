@@ -38,7 +38,11 @@ export type AuthorizationTransaction = {
     source: Extract<SourceDependency, { kind: 'knowledge-document' }>,
     context: { runId?: string; publicOnly: boolean },
   ) => Promise<void>;
-  requireTulipFarmFile?: (actor: HumanActor, reference: { fileId: string }) => Promise<void>;
+  /** `item` accepts any readable Files item, folders included, rather than only a readable file. */
+  requireTulipFarmFile?: (
+    actor: HumanActor,
+    reference: { fileId: string; item?: boolean; cited?: boolean },
+  ) => Promise<void>;
   knowledgeSourceDependencies?: (
     source: Extract<SourceDependency, { kind: 'knowledge-document' }>,
   ) => Promise<SourceDependency[]>;
