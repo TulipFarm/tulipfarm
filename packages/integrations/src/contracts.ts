@@ -139,7 +139,13 @@ export type IssueResult = z.infer<typeof issueResultSchema>;
 export type ReadIssue = z.infer<typeof readIssueSchema>;
 export type CreateIntegration = z.infer<typeof createIntegrationSchema>;
 export class IntegrationError extends Error {
-  readonly code: 'conflict' | 'in-progress' | 'provider-retryable' | 'provider-failed' | 'credential-unavailable';
+  readonly code:
+    | 'conflict'
+    | 'in-progress'
+    | 'provider-retryable'
+    | 'provider-failed'
+    | 'credential-unavailable'
+    | 'retired';
   constructor(code: IntegrationError['code']) {
     super(`Integration operation ${code}`);
     this.code = code;

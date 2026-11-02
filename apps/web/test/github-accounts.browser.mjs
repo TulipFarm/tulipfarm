@@ -213,20 +213,13 @@ try {
   await page.getByRole('heading', { name: 'GitHub account access unavailable' }).waitFor();
   assert.equal(await page.getByText('@renamed-octocat', { exact: true }).count(), 0);
   accessLost = false;
-  await page.goto(`${origin}/${workspace.slug}/integrations#github-integrations`);
-  // The integrations hash now opens the provider detail dialog (cloud integration-sheet.tsx, 318d198d #340).
-  await page
-    .getByRole('dialog', { name: 'GitHub team' })
-    .getByRole('heading', { name: 'GitHub team', exact: true })
-    .waitFor();
-  assert.equal(await page.getByRole('region', { name: 'Personal GitHub accounts' }).count(), 0);
   callbackStatus = 400;
   await page.goto(`${origin}/github/callback?code=denied&state=${f.one.id}.${'x'.repeat(43)}`);
   await page.getByText(/GitHub consent was denied/).waitFor();
   assert.equal(new URL(page.url()).search, '');
   assert.deepEqual(errors, []);
   console.log(
-    'PASS GitHub browser with real API and PostgreSQL. Slow/empty/error/retry, single connect, two accounts, stale read retention, disconnect uncertainty, identity mismatch and recovery, callback cleanup, mobile/dark/keyboard, separate team controls. Provider and shell identity are synthetic.',
+    'PASS GitHub browser with real API and PostgreSQL. Slow/empty/error/retry, single connect, two accounts, stale read retention, disconnect uncertainty, identity mismatch and recovery, callback cleanup, mobile/dark/keyboard. Provider and shell identity are synthetic.',
   );
 } finally {
   await browser?.close();
