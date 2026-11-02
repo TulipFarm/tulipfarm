@@ -60,8 +60,10 @@ Only a confirmed send completes the step, with `actionId`, `status:"sent"` and
 `sentMessageTs` (the outbound message timestamp).
 An unknown delivery is terminal: inspect Slack before making a new request.
 This step sends one message; it does not grant recurring send permission.
-For this first slice, do not map message text from agent or HTTP outputs, including
-through transforms or code. Their outbound source evidence is not supported yet.
+Message text may come from any earlier step, including an agent, HTTP, transform
+or code step, as long as it resolves to a string. When the text needs computing,
+such as comparing today's numbers with yesterday's, have an agent step return the
+finished message and map its `result`; code steps may be unavailable.
 
 ## Table steps
 

@@ -51,8 +51,12 @@ Get table and field IDs from `tables.definitions`.
 
 For connected-provider work, distinguish a native workflow step from an agent step and a generic HTTP request. Read the agent and HTTP sections of `references/steps.md` before declaring that no supported path exists. Inspect a suitable saved agent with `agents.list` and `agents.read`; do not assume its tools grant access or waive approvals. If the required action or setup is missing, name that gap rather than asking the person to enable a nonexistent workflow action.
 
+`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source.
+
 ## 4. Activation and review
 
 Set `activate` to true when the person wants the workflow running. Scheduled, record, row, and webhook runs use the person as sponsor.
+
+Only `workflows.draft` creates a draft, and its review card is the only proof one exists. Never say a draft is ready, pending review or created unless `workflows.draft` returned it in this turn; if you still need answers, ask them and say no draft exists yet.
 
 Then ask the person to review the trigger, the next run, and the read-only diagram in Canvas. Edits stay in the chat composer; the chat card records explicit saving and activation approval. Chat text never approves. Webhook keys, new provider integrations, and secret rotation stay on the Workflows setup page. Existing connected-app triggers can be edited through chat using the authorized sources above.
