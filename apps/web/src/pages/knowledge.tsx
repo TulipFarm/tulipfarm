@@ -26,12 +26,21 @@ import {
 } from '@/features/integrations/default-knowledge-api';
 import { disclosures, indexing, problem, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
 import {
+  atlassianErrorMessages,
+  atlassianKnowledgeApi,
+  atlassianSourceKeys,
+} from '@/features/integrations/atlassian-knowledge-api';
+import {
   githubKnowledgeApi,
   githubKnowledgeErrorMessages,
   githubSourceKeys,
-  type GitHubSource,
-  type ManageGitHub,
 } from '@/features/integrations/github-knowledge-api';
+import {
+  googleErrorMessages,
+  googleKnowledgeApi,
+  googleSourceKeys,
+} from '@/features/integrations/google-knowledge-api';
+import { slackErrorMessages, slackKnowledgeApi, slackSourceKeys } from '@/features/integrations/slack-knowledge-api';
 import { CommandFeedback, useCommand } from '@/features/integrations/slack-knowledge-shared';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
@@ -55,13 +64,27 @@ type Part = {
   total: number;
   error: string | null;
   intentId?: string;
-  githubSourceId?: string;
+  manual?: { provider: Provider; sourceId: string };
 };
 type Source = KnowledgeBaseSource & { product: DefaultKnowledgeProduct; parts: Part[] };
 type Action = 'pause' | 'resume' | 'retry';
+type Provider = 'github' | 'google' | 'slack' | 'atlassian';
+type Manual = {
+  sourceId: string;
+  state: 'active' | 'paused' | 'disconnected' | 'removed';
+  syncState: 'queued' | 'syncing' | 'ready' | 'failed';
+  failure: string | null;
+  counts: { total: number; ready: number; failed: number } | null;
+};
+const providers: Record<Provider, { name: string; keys: string[]; messages: Record<string, string> }> = {
+  github: { name: 'GitHub', keys: githubSourceKeys, messages: githubKnowledgeErrorMessages },
+  google: { name: 'Google', keys: googleSourceKeys, messages: googleErrorMessages },
+  slack: { name: 'Slack', keys: slackSourceKeys, messages: slackErrorMessages },
+  atlassian: { name: 'Atlassian', keys: atlassianSourceKeys, messages: atlassianErrorMessages },
+};
 type Work = {
   intents: { intentId: string; action: DefaultKnowledgeAction }[];
-  github: { sourceId: string; input: ManageGitHub }[];
+  manual: { provider: Provider; sourceId: string; action: Action }[];
 };
 
 const worst: Status[] = ['error', 'syncing', 'queued', 'paused', 'connected'];
@@ -97,7 +120,7 @@ function fromIntent(intent: DefaultKnowledgeIntent): Part {
   };
 }
 
-function fromGitHub(source: GitHubSource): Part {
+function fromManual(provider: Provider, product: DefaultKnowledgeProduct, scope: number, source: Manual): Part {
   const value: Status =
     source.state === 'paused'
       ? 'paused'
@@ -106,18 +129,19 @@ function fromGitHub(source: GitHubSource): Part {
         : source.syncState === 'ready'
           ? 'connected'
           : source.syncState;
+  const { name, messages } = providers[provider];
   return {
-    product: 'github',
+    product,
     account: null,
-    scope: source.repositories?.length ?? 0,
+    scope,
     status: value,
     ready: source.counts?.ready ?? 0,
     total: source.counts?.total ?? 0,
     error:
       value === 'error'
-        ? (githubKnowledgeErrorMessages[source.failure ?? ''] ?? 'GitHub stopped syncing. Open Settings to fix it.')
+        ? (messages[source.failure ?? ''] ?? `${name} stopped syncing. Open Settings to fix it.`)
         : null,
-    githubSourceId: source.sourceId,
+    manual: { provider, sourceId: source.sourceId },
   };
 }
 
@@ -148,11 +172,34 @@ function row(product: DefaultKnowledgeProduct, parts: Part[]): Source {
   };
 }
 
-function sourcesOf(items: readonly DefaultKnowledgeIntent[], github: readonly GitHubSource[]): Source[] {
+type Lists = {
+  github: Awaited<ReturnType<ReturnType<typeof githubKnowledgeApi>['list']>>['items'];
+  google: Awaited<ReturnType<ReturnType<typeof googleKnowledgeApi>['list']>>['items'];
+  slack: Awaited<ReturnType<ReturnType<typeof slackKnowledgeApi>['list']>>['items'];
+  atlassian: Awaited<ReturnType<ReturnType<typeof atlassianKnowledgeApi>['list']>>['items'];
+};
+
+function sourcesOf(items: readonly DefaultKnowledgeIntent[], lists: Lists): Source[] {
   const automatic = new Set(items.flatMap(item => item.sources.map(source => source.sourceId)));
+  const added = <T extends Manual>(list: T[]) =>
+    list.filter(source => source.state !== 'removed' && !automatic.has(source.sourceId));
   const parts = [
     ...items.map(fromIntent),
-    ...github.filter(source => source.state !== 'removed' && !automatic.has(source.sourceId)).map(fromGitHub),
+    ...added(lists.github).map(source => fromManual('github', 'github', source.repositories?.length ?? 0, source)),
+    ...added(lists.google).map(source =>
+      fromManual('google', source.selection?.kind === 'gmail' ? 'gmail' : 'google-drive', 1, source),
+    ),
+    ...added(lists.slack).map(source =>
+      fromManual(
+        'slack',
+        'slack',
+        source.conversations?.length ?? source.selection?.conversationIds.length ?? 0,
+        source,
+      ),
+    ),
+    ...added(lists.atlassian).map(source =>
+      fromManual('atlassian', source.product, source.targets?.length ?? 0, source),
+    ),
   ];
   const rows = defaultKnowledgeProducts.map(product =>
     row(
@@ -175,10 +222,23 @@ function workFor(source: Source, action: Action): Work {
   const intentAction = ({ pause: 'opt-out', resume: 'resume', retry: 'retry' } as const)[action];
   return {
     intents: parts.flatMap(part => (part.intentId ? [{ intentId: part.intentId, action: intentAction }] : [])),
-    github: parts.flatMap(part =>
-      part.githubSourceId ? [{ sourceId: part.githubSourceId, input: { commandId: crypto.randomUUID(), action } }] : [],
-    ),
+    manual: parts.flatMap(part => (part.manual ? [{ ...part.manual, action }] : [])),
   };
+}
+
+const emptyList: never[] = [];
+
+// A product the member never connected answers with an error; its row just has no hand-picked sources.
+function useManual<T extends Manual>(keys: string[], load: (signal: AbortSignal) => Promise<{ items: T[] }>): T[] {
+  const read = useFeatureRead({
+    key: [...keys, 'list'],
+    load,
+    staleTime: 0,
+    pollWhile: data =>
+      data.items.some(source => source.state === 'active' && ['queued', 'syncing'].includes(source.syncState)),
+    maxChecks: 15,
+  });
+  return read.state.kind === 'ready' ? read.state.data.items : emptyList;
 }
 
 function KnowledgePanel({
@@ -192,30 +252,39 @@ function KnowledgePanel({
 }) {
   const navigate = useNavigate();
   const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
-  const github = useMemo(() => githubKnowledgeApi(workspaceId), [workspaceId]);
+  const apis = useMemo(
+    () => ({
+      github: githubKnowledgeApi(workspaceId),
+      google: googleKnowledgeApi(workspaceId),
+      slack: slackKnowledgeApi(workspaceId),
+      atlassian: atlassianKnowledgeApi(workspaceId),
+    }),
+    [workspaceId],
+  );
   const { change } = useFeatureChanges();
-  const githubRead = useFeatureRead({
-    key: [...githubSourceKeys, 'list'],
-    load: github.list,
-    staleTime: 0,
-    pollWhile: data =>
-      data.items.some(source => source.state === 'active' && ['queued', 'syncing'].includes(source.syncState)),
-    maxChecks: 15,
-  });
-  const githubSources = githubRead.state.kind === 'ready' ? githubRead.state.data.items : null;
+  const github = useManual(githubSourceKeys, apis.github.list);
+  const google = useManual(googleSourceKeys, apis.google.list);
+  const slack = useManual(slackSourceKeys, apis.slack.list);
+  const atlassian = useManual(atlassianSourceKeys, apis.atlassian.list);
+  const listKeys = Object.values(providers).map(provider => [...provider.keys, 'list']);
   const command = useCommand(
     (work: Work, signal: AbortSignal) =>
       Promise.all([
         ...work.intents.map(({ intentId, action }) => api.manage(intentId, action, signal)),
-        ...work.github.map(({ sourceId, input }) => github.manage(sourceId, input, signal)),
+        ...work.manual.map(({ provider, sourceId, action }) =>
+          apis[provider].manage(sourceId, { commandId: crypto.randomUUID(), action }, signal),
+        ),
       ]),
-    () => change({ keys: [defaultKnowledgeKeys, [...githubSourceKeys, 'list']] }),
-    [defaultKnowledgeKeys, [...githubSourceKeys, 'list']],
+    () => change({ keys: [defaultKnowledgeKeys, ...listKeys] }),
+    [defaultKnowledgeKeys, ...listKeys],
   );
-  const sources = useMemo(() => sourcesOf(items, githubSources ?? []), [items, githubSources]);
+  const sources = useMemo(
+    () => sourcesOf(items, { github, google, slack, atlassian }),
+    [items, github, google, slack, atlassian],
+  );
   const manage = (action: Action) => (source: KnowledgeBaseSource) => {
     const work = workFor(source as Source, action);
-    if (!command.locked && (work.intents.length || work.github.length)) void command.send(work);
+    if (!command.locked && (work.intents.length || work.manual.length)) void command.send(work);
   };
   const open = (source: KnowledgeBaseSource) =>
     void navigate({

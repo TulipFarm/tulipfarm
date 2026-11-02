@@ -93,6 +93,26 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     githubSource(2, 'acme/repo-0 and 9 more', 10),
     githubSource(3, 'acme/old', 1, { state: 'removed' }),
   ];
+  // Hand-picked sources from other products join their product's row.
+  const manual = {
+    github,
+    google: [githubSource(4, 'Design folder', 0, { selection: { kind: 'drive-folder', folderId: 'f1' } })],
+    atlassian: [
+      githubSource(5, 'Docs and 1 more', 0, {
+        product: 'confluence',
+        counts: { total: 15, ready: 15, failed: 0 },
+        targets: ['S1', 'S2'].map(id => ({
+          kind: 'space',
+          id,
+          key: id,
+          title: id,
+          descendants: true,
+          state: 'active',
+          failure: null,
+        })),
+      }),
+    ],
+  };
   const writes = [],
     errors = [];
   const context = await browser.newContext({
@@ -142,12 +162,14 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
         action === 'opt-out' ? { state: 'opted-out' } : { state: 'active', syncState: 'queued', failure: null },
       );
       json = target;
-    } else if (path === `${base}/knowledge/github/sources`) json = { items: github };
-    else if (path.startsWith(`${base}/knowledge/github/sources/`) && path.endsWith('/manage')) {
-      const id = path.split('/sources/')[1].split('/')[0],
+    } else if (/^\/knowledge\/(github|google|atlassian)\/sources$/.test(path.slice(base.length)))
+      json = { items: manual[path.split('/')[5]] };
+    else if (/^\/knowledge\/(github|google|atlassian)\/sources\/[^/]+\/manage$/.test(path.slice(base.length))) {
+      const provider = path.split('/')[5],
+        id = path.split('/sources/')[1].split('/')[0],
         { action } = request.postDataJSON();
-      writes.push([`github-${id.slice(-1)}`, action]);
-      const target = github.find(source => source.sourceId === id);
+      writes.push([`${provider}-${id.slice(-1)}`, action]);
+      const target = manual[provider].find(source => source.sourceId === id);
       target.state = action === 'pause' ? 'paused' : 'active';
       json = target;
     } else if (path.endsWith('/bud'))
@@ -174,31 +196,42 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     await main.getByText('78%', { exact: true }).waitFor();
     assert.equal(await main.getByRole('button', { name: 'Actions for GitHub' }).count(), 1);
     assert.equal(await main.getByText('acme/', { exact: false }).count(), 0);
-    await main.getByText('ada@example.test · 3 drives', { exact: true }).waitFor();
+    await main.getByText('ada@example.test · 4 drives', { exact: true }).waitFor();
+    await main.getByText('29 chunks', { exact: true }).waitFor();
+    await main.getByText('2 spaces', { exact: true }).waitFor();
+    await main.getByText('15 chunks', { exact: true }).waitFor();
     await main.getByText('ada@example.test · 1 mailbox', { exact: true }).waitFor();
-    for (const product of ['Slack', 'Confluence'])
-      await main.getByRole('button', { name: `Connect ${product}` }).waitFor();
+    await main.getByRole('button', { name: 'Connect Slack' }).waitFor();
+    assert.equal(await main.getByRole('button', { name: 'Connect Confluence' }).count(), 0);
     await page.getByRole('link', { name: 'Knowledge', exact: true }).waitFor();
     await page.screenshot({ path: `${screenshots}/sources.png`, fullPage: true });
 
+    const settle = async count => {
+      for (let tries = 0; writes.length < count && tries < 50; tries++) await page.waitForTimeout(100);
+      await page.waitForTimeout(200);
+    };
     await main.getByRole('button', { name: 'Retry Jira' }).click();
     await main.getByRole('button', { name: 'Retry Jira' }).waitFor({ state: 'detached' });
     await main.getByRole('button', { name: 'Actions for Google Drive' }).click();
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    await settle(3);
     await main.getByRole('button', { name: 'Actions for Gmail' }).click();
     await page.getByRole('menuitem', { name: 'Resume syncing' }).click();
-    for (let tries = 0; writes.length < 3 && tries < 50; tries++) await page.waitForTimeout(100);
+    await settle(4);
     await main.getByRole('button', { name: 'Actions for GitHub' }).click();
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
-    for (let tries = 0; writes.length < 5 && tries < 50; tries++) await page.waitForTimeout(100);
-    assert.deepEqual(writes.slice(0, 3), [
-      ['5', 'retry'],
-      ['3', 'opt-out'],
-      ['2', 'resume'],
-    ]);
-    assert.deepEqual(writes.slice(3).sort(), [
+    await settle(6);
+    await main.getByRole('button', { name: 'Actions for Confluence' }).click();
+    await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    await settle(7);
+    assert.deepEqual(writes.toSorted(), [
       ['1', 'opt-out'],
+      ['2', 'resume'],
+      ['3', 'opt-out'],
+      ['5', 'retry'],
+      ['atlassian-5', 'pause'],
       ['github-2', 'pause'],
+      ['google-4', 'pause'],
     ]);
 
     await main.getByRole('button', { name: 'Connect Slack' }).click();
