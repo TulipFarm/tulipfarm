@@ -11,7 +11,7 @@ import {
 } from '@tulipfarm/access';
 import type { WorkspaceMcpOptions } from '@tulipfarm/workspace-mcp';
 import { sourceDependenciesSchema, mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
-import { turnRequester } from '@tulipfarm/conversations/turn-requester';
+import { standaloneTurn, turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { requireDraftSources, requireTaskDefinitionSources } from './draft-sources.ts';
 import { agentDefinitionSchema, toolCallSchema, toolResultSchema } from './contracts.ts';
 import { relation } from './store.ts';
@@ -113,10 +113,12 @@ async function selectedSources(
 
 async function chatSources(tx: AuthorizationTransaction, conversationId: string, turnId: string) {
   const result: SourceDependency[] = [{ kind: 'private-conversation', conversationId }];
-  const prior = await tx.client.query(
-    `SELECT r.sources FROM ${relation(tx, 'tf_conversation_results')} r JOIN ${relation(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence<(SELECT accepted_sequence FROM ${relation(tx, 'tf_conversation_turns')} WHERE id=$2) LIMIT 1001`,
-    [conversationId, turnId],
-  );
+  const prior = (await standaloneTurn(tx, conversationId, turnId))
+    ? { rows: [] }
+    : await tx.client.query(
+        `SELECT r.sources FROM ${relation(tx, 'tf_conversation_results')} r JOIN ${relation(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence<(SELECT accepted_sequence FROM ${relation(tx, 'tf_conversation_turns')} WHERE id=$2) LIMIT 1001`,
+        [conversationId, turnId],
+      );
   if (prior.rows.length > 1000) throw new AccessDenied();
   for (const row of prior.rows) result.push(...sourceDependenciesSchema.parse(row.sources));
   const models = await tx.client.query(

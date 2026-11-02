@@ -41,7 +41,7 @@ export const scheduleFollowUpCallSchema = z.strictObject({
     .min(1)
     .max(2000)
     .describe(
-      'What to do when it is due, written as a standalone instruction for a later turn, e.g. "Post a short coding quote in #tech" or "Check whether workflow run X finished and report the result".',
+      'What to do when it is due, written as a standalone instruction for a later turn. In a TulipFarm chat that turn sees only this instruction, not earlier messages, so include every name, ID, channel and detail it needs, e.g. "Post a short coding quote in #tech" or "Check whether workflow run X finished and report the result".',
     ),
   // The range is checked by followups.schedule so an out-of-range delay gets the same refusal as an out-of-range time.
   delayMinutes: z

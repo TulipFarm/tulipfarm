@@ -5,6 +5,7 @@ import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspac
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createConversations } from '../../conversations/src/index.ts';
+import { standaloneTurn } from '../../conversations/src/turn-requester.ts';
 import { followUpChainLimit } from '../src/follow-up-contracts.ts';
 import { cancelReactionFollowUp, createFollowUps, createReactionFollowUp } from '../src/follow-ups.ts';
 
@@ -98,6 +99,15 @@ test('follow-ups run later in the chat they were asked in, once, as the requeste
     assert.equal(fired[0].turn.status, 'queued');
     assert.equal((await followUps.readInChat(w.id, w.userId, chatId, quote.id)).status, 'fired');
   });
+
+  await t.test(
+    'only the fired turn runs standalone, so earlier private messages cannot block its Slack post',
+    async () => {
+      const standalone = turnId =>
+        runtime.transaction(w.id, commonCompatibility, tx => standaloneTurn(tx, chatId, turnId));
+      assert.deepEqual([await standalone(await firedTurn(quote.id)), await standalone(asked.turnId)], [true, false]);
+    },
+  );
 
   await t.test('a fired turn can chain another follow-up until the chain limit', async () => {
     const turnId = await firedTurn(quote.id);

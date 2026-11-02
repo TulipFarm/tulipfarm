@@ -85,6 +85,7 @@ import {
   type ImageOutputStore,
 } from '@tulipfarm/conversations/image-outputs';
 import { readConversationMessage } from '@tulipfarm/conversations/compaction';
+import { standaloneTurn } from '@tulipfarm/conversations/turn-requester';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
 import { authoredDefinitionSchema } from '@tulipfarm/workflows/contracts';
@@ -1698,8 +1699,10 @@ export function createChatTools(
   ) {
     const origin = context.origin;
     if (!origin) throw new AccessDenied();
-    const output = await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
-      readConversationMessage(tx, context.actor, origin.conversationId, call.messageId, call.offset),
+    const output = await withHuman(runtime, context.workspaceId, context.actor, 'read', async tx =>
+      (await standaloneTurn(tx, origin.conversationId, origin.turnId))
+        ? null
+        : readConversationMessage(tx, context.actor, origin.conversationId, call.messageId, call.offset),
     );
     return (
       output ?? {
