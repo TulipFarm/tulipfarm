@@ -52,6 +52,7 @@ import {
   runCondition,
   ConditionIncomparable,
   nextStep,
+  slackTextFromUnverifiedSource,
   runHistoryCursorSchema,
   runHistoryPageSize,
   runHistoryQuerySchema,
@@ -299,14 +300,7 @@ export function createWorkflows(
       !rows.some(row => row.step_id === stepId && row.status === 'waiting')
     )
       throw new AccessDenied();
-    const checkSource = (value: typeof next.step.text): void => {
-      if (value.kind !== 'step') return;
-      const source = definition.steps.find(step => step.id === value.step);
-      if (!source || source.kind === 'agent' || source.kind === 'http') throw new AccessDenied();
-      if (source.kind === 'transform') for (const dependency of Object.values(source.fields)) checkSource(dependency);
-      if (source.kind === 'code') checkSource(source.input);
-    };
-    checkSource(next.step.text);
+    if (slackTextFromUnverifiedSource(definition.steps, next.step.text)) throw new AccessDenied();
     const text = z
       .string()
       .min(1)
