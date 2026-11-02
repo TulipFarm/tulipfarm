@@ -105,10 +105,16 @@ function localTime(row: Pick<FollowUpRow, 'due_at' | 'timezone'>) {
 }
 
 /** The first line a fired follow-up's turn reads, so the model knows nobody is waiting live for questions. */
-export function followUpPrompt(row: Pick<FollowUpRow, 'instruction' | 'created_at' | 'chain_depth'>) {
+export function followUpPrompt(
+  row: Pick<FollowUpRow, 'instruction' | 'created_at' | 'chain_depth'>,
+  standalone = false,
+) {
   return [
     `Scheduled follow-up, requested at ${row.created_at.toISOString()} (follow-up ${row.chain_depth} of at most ${followUpChainLimit} in its chain).`,
     'The requester is not watching live. Do the instruction now with fresh data, using your normal tools and their access, and report the result. Do not ask questions first; if something blocks you, say what and stop.',
+    ...(standalone
+      ? ['Earlier messages in this chat are not available to you; the instruction is all the context you have.']
+      : []),
     `Instruction: ${row.instruction}`,
   ].join('\n');
 }
@@ -497,7 +503,7 @@ export function createFollowUps(runtime: AgentStorage) {
           commandId: row.id,
           messageId: row.id,
           ...(row.timezone ? { timeZone: row.timezone } : {}),
-          parts: [{ kind: 'text', text: followUpPrompt(row) }],
+          parts: [{ kind: 'text', text: followUpPrompt(row, true) }],
         });
         await finish(workspaceId, row.id, { status: 'fired', messageId: sent.messageId });
         fired.push(z.uuid().parse(row.conversation_id));

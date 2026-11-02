@@ -35,7 +35,7 @@ import { resultSources } from './tool-sources.ts';
 import { toolCallSchema, toolResultSchema } from './contracts.ts';
 import { taskRun } from './task-approval-gate.ts';
 import { requireCurrentConversationSources } from '@tulipfarm/conversations/source-access';
-import { turnRequester } from '@tulipfarm/conversations/turn-requester';
+import { standaloneTurn, turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { canAccessSlackInstallation, SlackChannelAccessError, slackResolveSchema } from '@tulipfarm/slack';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
@@ -270,7 +270,7 @@ export function createSlackActions(options: Options) {
               [draft.conversation_id, draft.turn_id],
             )
           ).rowCount;
-          if (!prior)
+          if (!prior || (await standaloneTurn(tx, draft.conversation_id, draft.turn_id)))
             dependencies = dependencies.filter(
               source => source.kind !== 'private-conversation' || source.conversationId !== draft.conversation_id,
             );
@@ -1117,7 +1117,7 @@ export function createSlackActions(options: Options) {
           [context.origin.conversationId, context.origin.turnId],
         )
       ).rowCount;
-      if (!prior)
+      if (!prior || (await standaloneTurn(tx, context.origin.conversationId, context.origin.turnId)))
         sources = sources.filter(
           source => source.kind !== 'private-conversation' || source.conversationId !== context.origin.conversationId,
         );

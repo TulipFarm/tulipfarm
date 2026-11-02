@@ -14,7 +14,7 @@ import { requireReadableFile } from '@tulipfarm/files';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { sourceDependencySchema } from './results.ts';
-import { turnRequester } from './turn-requester.ts';
+import { standaloneTurn, turnRequester } from './turn-requester.ts';
 
 const sourceDependenciesSchema = z.array(sourceDependencySchema);
 const slackRootSchema = z.object({ installation_id: z.uuid() }).optional();
@@ -225,12 +225,14 @@ export async function requireCurrentConversationSources(
   const actor = await turnRequester(tx, conversationId, turnId);
   await currentMember(tx, actor);
   await requireConversationMcpSources(tx, actor, conversationId);
+  // A standalone follow-up holds no earlier turn of its chat, so only that turn's own sources apply.
+  const standalone = await standaloneTurn(tx, conversationId, turnId);
   const googleResults = await tx.client.query(
     `SELECT r.sources FROM ${qualified(tx.schema, 'tf_conversation_results')} r JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${qualified(tx.schema, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id=$2)`,
     [conversationId, turnId],
   );
-  for (const row of googleResults.rows) await requireGoogleSources(tx, actor, row.sources);
-  {
+  if (!standalone) for (const row of googleResults.rows) await requireGoogleSources(tx, actor, row.sources);
+  if (!standalone) {
     const retained = await tx.client.query(
       `SELECT r.sources FROM ${qualified(tx.schema, 'tf_conversation_results')} r JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${qualified(tx.schema, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id=$2)`,
       [conversationId, turnId],
@@ -242,7 +244,7 @@ export async function requireCurrentConversationSources(
       `SELECT r.sources FROM ${qualified(tx.schema, 'tf_conversation_results')} r JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence<(SELECT accepted_sequence FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id=$2)`,
       [conversationId, turnId],
     );
-    for (const row of rows.rows) await requireResultSources(tx, actor, conversationId, row.sources);
+    if (!standalone) for (const row of rows.rows) await requireResultSources(tx, actor, conversationId, row.sources);
     return actor;
   }
   return null;
