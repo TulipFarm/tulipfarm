@@ -14,6 +14,27 @@ const counts = (ready, queued = 0) => ({
   skipped: 0,
   quotaLimited: 0,
 });
+const githubSource = (n, title, repositories, rest = {}) => ({
+  sourceId: `00000000-0000-4000-9000-${String(n).padStart(12, '0')}`,
+  selection: null,
+  memberIds: [],
+  title,
+  state: 'active',
+  syncState: 'ready',
+  failure: null,
+  nextAttemptAt: new Date(Date.now() + 240_000).toISOString(),
+  repositories: Array.from({ length: repositories }, (_, i) => ({
+    repositoryId: String(i + 1),
+    fullName: `acme/repo-${i}`,
+    visibility: 'private',
+    title: `acme/repo-${i}`,
+    state: 'active',
+    failure: null,
+  })),
+  counts: { total: 21, ready: 21, failed: 0 },
+  canManage: true,
+  ...rest,
+});
 const intent = (n, product, accountLabel, included, rest = {}) => ({
   intentId: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
   product,
@@ -49,12 +70,28 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
   const { workspace, session } = createWorkspaceFixture({ slug: 'knowledge-qa', name: 'Knowledge QA' });
   const items = [
     intent(1, 'github', 'ada-dev', 1, {
+      sources: [
+        {
+          sourceId: '00000000-0000-4000-9000-000000000001',
+          state: 'created',
+          failure: null,
+          sourceState: 'active',
+          syncState: 'ready',
+          syncFailure: null,
+        },
+      ],
       counts: counts(5, 7),
       ingestion: { state: 'pending', pending: 7, failed: 0, failure: null },
     }),
     intent(2, 'gmail', 'ada@example.test', 1, { state: 'opted-out' }),
     intent(3, 'google-drive', 'ada@example.test', 3, { counts: counts(8) }),
     intent(5, 'jira', 'Ada Lovelace', 2, { syncState: 'failed', failure: 'provider', counts: counts(3) }),
+  ];
+  // The automatic source is already counted by its intent, and removed sources stay hidden.
+  const github = [
+    githubSource(1, 'All repositories', 0, { repositories: null }),
+    githubSource(2, 'acme/repo-0 and 9 more', 10),
+    githubSource(3, 'acme/old', 1, { state: 'removed' }),
   ];
   const writes = [],
     errors = [];
@@ -105,6 +142,14 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
         action === 'opt-out' ? { state: 'opted-out' } : { state: 'active', syncState: 'queued', failure: null },
       );
       json = target;
+    } else if (path === `${base}/knowledge/github/sources`) json = { items: github };
+    else if (path.startsWith(`${base}/knowledge/github/sources/`) && path.endsWith('/manage')) {
+      const id = path.split('/sources/')[1].split('/')[0],
+        { action } = request.postDataJSON();
+      writes.push([`github-${id.slice(-1)}`, action]);
+      const target = github.find(source => source.sourceId === id);
+      target.state = action === 'pause' ? 'paused' : 'active';
+      json = target;
     } else if (path.endsWith('/bud'))
       json = {
         conversationId: null,
@@ -124,7 +169,11 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
   try {
     await page.goto(`${origin}/${workspace.slug}/knowledge`);
     const main = page.getByRole('main');
-    await main.getByText('ada-dev · 1 repository', { exact: true }).waitFor();
+    await main.getByText('ada-dev · all repositories', { exact: true }).waitFor();
+    await main.getByText('acme/repo-0 and 9 more · 10 repositories', { exact: true }).waitFor();
+    await main.getByText('21 chunks', { exact: true }).waitFor();
+    assert.equal(await main.getByText('acme/old', { exact: false }).count(), 0);
+    assert.equal(await main.getByText('All repositories', { exact: true }).count(), 0);
     await main.getByText('ada@example.test · 3 drives', { exact: true }).waitFor();
     await main.getByText('ada@example.test · 1 mailbox', { exact: true }).waitFor();
     for (const product of ['Slack', 'Confluence'])
@@ -138,11 +187,14 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
     await main.getByRole('button', { name: 'Actions for Gmail' }).click();
     await page.getByRole('menuitem', { name: 'Resume syncing' }).click();
-    for (let tries = 0; writes.length < 3 && tries < 50; tries++) await page.waitForTimeout(100);
+    await main.getByRole('button', { name: 'Actions for GitHub' }).last().click();
+    await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    for (let tries = 0; writes.length < 4 && tries < 50; tries++) await page.waitForTimeout(100);
     assert.deepEqual(writes, [
       ['5', 'retry'],
       ['3', 'opt-out'],
       ['2', 'resume'],
+      ['github-2', 'pause'],
     ]);
 
     await main.getByRole('button', { name: 'Connect Slack' }).click();
@@ -153,7 +205,7 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
       ingestion: { state: 'ready', pending: 0, failed: 0, failure: null },
     });
     await page.goto(`${origin}/${workspace.slug}/knowledge`);
-    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
+    await main.getByRole('button', { name: 'Actions for GitHub' }).first().click();
     await page.getByRole('menuitem', { name: 'Settings' }).click();
     await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
     await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();

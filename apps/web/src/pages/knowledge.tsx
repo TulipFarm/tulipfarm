@@ -26,8 +26,15 @@ import {
 } from '@/features/integrations/default-knowledge-api';
 import { disclosures, indexing, problem, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
 import { searchablePercent } from '@/features/integrations/knowledge-meter';
+import {
+  githubKnowledgeApi,
+  githubKnowledgeErrorMessages,
+  githubSourceKeys,
+  type GitHubSource,
+  type ManageGitHub,
+} from '@/features/integrations/github-knowledge-api';
 import { CommandFeedback, useCommand } from '@/features/integrations/slack-knowledge-shared';
-import { useFeatureChanges } from '@/lib/query';
+import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
 
 const units: Record<DefaultKnowledgeProduct, [string, string]> = {
@@ -39,7 +46,7 @@ const units: Record<DefaultKnowledgeProduct, [string, string]> = {
   confluence: ['space', 'spaces'],
 };
 
-type Source = KnowledgeBaseSource & { product: DefaultKnowledgeProduct; intentId?: string };
+type Source = KnowledgeBaseSource & { product: DefaultKnowledgeProduct; intentId?: string; githubSourceId?: string };
 
 function status(intent: DefaultKnowledgeIntent, failed: boolean): KnowledgeBaseSource['status'] {
   if (intent.state === 'opted-out') return 'paused';
@@ -60,7 +67,11 @@ function toSource(intent: DefaultKnowledgeIntent): Source {
     product: intent.product,
     name: disclosure.name,
     ...(app ? { brand: app.brand } : {}),
-    detail: `${intent.accountLabel} · ${included} ${units[intent.product][included === 1 ? 0 : 1]}`,
+    // GitHub's automatic source always covers every repository, so its single scope is not a repository count.
+    detail:
+      intent.product === 'github'
+        ? `${intent.accountLabel} · all repositories`
+        : `${intent.accountLabel} · ${included} ${units[intent.product][included === 1 ? 0 : 1]}`,
     status: value,
     progress: value === 'syncing' || value === 'error' ? searchablePercent(intent.counts) : null,
     chunks: intent.counts.ready,
@@ -80,10 +91,44 @@ function available(product: DefaultKnowledgeProduct): Source {
   };
 }
 
-export function sourcesOf(items: readonly DefaultKnowledgeIntent[]): Source[] {
+function githubStatus(source: GitHubSource): KnowledgeBaseSource['status'] {
+  if (source.state === 'paused') return 'paused';
+  if (source.state === 'disconnected' || source.syncState === 'failed') return 'error';
+  return source.syncState === 'ready' ? 'connected' : source.syncState;
+}
+
+function fromGitHub(source: GitHubSource): Source {
+  const value = githubStatus(source);
+  const repositories = source.repositories?.length ?? 0;
+  return {
+    id: source.sourceId,
+    githubSourceId: source.sourceId,
+    product: 'github',
+    name: 'GitHub',
+    brand: 'github',
+    detail: repositories
+      ? `${source.title} · ${repositories} ${units.github[repositories === 1 ? 0 : 1]}`
+      : source.title,
+    status: value,
+    progress: value === 'syncing' && source.counts?.total ? (source.counts.ready / source.counts.total) * 100 : null,
+    chunks: source.counts?.ready ?? 0,
+    ...(value === 'error'
+      ? {
+          error:
+            githubKnowledgeErrorMessages[source.failure ?? ''] ?? 'GitHub stopped syncing. Open Settings to fix it.',
+        }
+      : {}),
+  };
+}
+
+function sourcesOf(items: readonly DefaultKnowledgeIntent[], github: readonly GitHubSource[]): Source[] {
   const connected = items.map(toSource);
-  const missing = defaultKnowledgeProducts.filter(product => !items.some(item => item.product === product));
-  return [...connected, ...missing.map(available)];
+  const automatic = new Set(items.flatMap(item => item.sources.map(source => source.sourceId)));
+  const added = github.filter(source => source.state !== 'removed' && !automatic.has(source.sourceId)).map(fromGitHub);
+  const missing = defaultKnowledgeProducts.filter(
+    product => !items.some(item => item.product === product) && !added.some(source => source.product === product),
+  );
+  return [...connected, ...added, ...missing.map(available)];
 }
 
 function KnowledgePanel({
@@ -104,10 +149,32 @@ function KnowledgePanel({
     () => change({ keys: [defaultKnowledgeKeys] }),
     [defaultKnowledgeKeys],
   );
-  const sources = useMemo(() => sourcesOf(items), [items]);
+  const github = useMemo(() => githubKnowledgeApi(workspaceId), [workspaceId]);
+  const githubRead = useFeatureRead({
+    key: [...githubSourceKeys, 'list'],
+    load: github.list,
+    staleTime: 0,
+    pollWhile: data =>
+      data.items.some(source => source.state === 'active' && ['queued', 'syncing'].includes(source.syncState)),
+    maxChecks: 15,
+  });
+  const githubSources = githubRead.state.kind === 'ready' ? githubRead.state.data.items : null;
+  const githubCommand = useCommand(
+    ({ sourceId, input }: { sourceId: string; input: ManageGitHub }, signal: AbortSignal) =>
+      github.manage(sourceId, input, signal),
+    () => change({ keys: [[...githubSourceKeys, 'list']] }),
+    [githubSourceKeys],
+  );
+  const sources = useMemo(() => sourcesOf(items, githubSources ?? []), [items, githubSources]);
+  const githubActions = { 'opt-out': 'pause', resume: 'resume', retry: 'retry' } as const;
   const manage = (action: DefaultKnowledgeAction) => (source: KnowledgeBaseSource) => {
-    const intentId = (source as Source).intentId;
+    const { intentId, githubSourceId } = source as Source;
     if (intentId && !command.locked) void command.send({ intentId, action });
+    if (githubSourceId && !githubCommand.locked)
+      void githubCommand.send({
+        sourceId: githubSourceId,
+        input: { commandId: crypto.randomUUID(), action: githubActions[action] },
+      });
   };
   const open = (source: KnowledgeBaseSource) =>
     void navigate({
@@ -118,6 +185,7 @@ function KnowledgePanel({
   return (
     <div className="space-y-4">
       <CommandFeedback state={command.state} retry={command.retry} />
+      <CommandFeedback state={githubCommand.state} retry={githubCommand.retry} />
       <KnowledgeBase sources={sources}>
         <KnowledgeBaseHeader subtitle="Your automatic Knowledge" />
         <KnowledgeBaseDiagram>
