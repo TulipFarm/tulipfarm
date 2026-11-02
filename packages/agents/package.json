@@ -195,6 +195,10 @@
       "types": "./dist/workspace-skill-contracts.d.ts",
       "default": "./dist/workspace-skill-contracts.js"
     },
+    "./connections": {
+      "types": "./dist/connections.d.ts",
+      "default": "./dist/connections.js"
+    },
     "./tools": {
       "types": "./dist/tools.d.ts",
       "default": "./dist/tools.js"

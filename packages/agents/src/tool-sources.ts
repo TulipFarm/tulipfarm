@@ -274,6 +274,9 @@ export async function resultSources(
     case 'knowledge.add':
     case 'knowledge.update':
     case 'knowledge.remove':
+    case 'integrations.list':
+    case 'integrations.connect':
+    case 'integrations.disconnect':
     case 'conversation.messages.read':
     case 'files.read':
       return [];

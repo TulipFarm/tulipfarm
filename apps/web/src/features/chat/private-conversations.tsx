@@ -105,6 +105,7 @@ import { TableHandoffNotice, useTableHandoff } from './table-handoff';
 import { SlackAction } from '@/features/agents/slack-action';
 import { PendingGoogleActions } from './pending-google-actions';
 import { CalendarReadCard, ChatGoogleProposal } from './calendar-canvas';
+import { IntegrationCard } from './integration-card';
 import { GitHubAccountCard } from './github-account-card';
 import { GitHubInvestigationCard } from './github-investigation-card';
 import { GitHubBatches } from './github-batches';
@@ -1910,6 +1911,11 @@ function ConversationTools({
         )
         .map(tool => (
           <AuthoringDraftCard key={tool.id} api={api} chatId={chatId} id={tool.id} />
+        ))}
+      {message.tools
+        .filter(tool => tool.status === 'completed' && tool.integration)
+        .map(tool => (
+          <IntegrationCard key={tool.id} workspaceId={workspace.id} card={tool.integration!} />
         ))}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.importId)

@@ -284,6 +284,16 @@ export const imageReceiptSchema = z.array(
 );
 /** One card per image of an `images.generate` call in a chat. */
 export type ImageReceipt = z.infer<typeof imageReceiptSchema>;
+/** The card an `integrations.connect` or `integrations.disconnect` call shows; the card reads the account live. */
+export const integrationCardSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('connect'), app: z.string().regex(/^[a-z][a-z-]{0,39}$/) }),
+  z.strictObject({
+    action: z.literal('disconnect'),
+    connectionId: z
+      .string()
+      .regex(/^(google|(github|atlassian):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+  }),
+]);
 export const toolReceiptSchema = z.object({
   id: uuidSchema,
   tool: z.string(),
@@ -301,6 +311,7 @@ export const toolReceiptSchema = z.object({
   /** The follow-up a `followups.schedule` call saved. */
   followUpId: uuidSchema.optional(),
   googleProposalId: uuidSchema.optional(),
+  integration: integrationCardSchema.optional(),
   rowDraftId: uuidSchema.optional(),
   rowView: rowViewSchema.optional(),
   rowChange: rowChangeSchema.optional(),

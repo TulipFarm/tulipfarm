@@ -68,6 +68,7 @@ import {
   deleteChatSchema,
   destinationQuerySchema,
   fileAudienceQuerySchema,
+  integrationCardSchema,
   ConversationConflict,
   createChatSchema,
   moveChatSchema,
@@ -120,6 +121,26 @@ function followUpOutput(row: { tool: string; status: string; output?: unknown })
   if (row.status !== 'completed' || row.tool !== 'followups.schedule') return {};
   const output = z.object({ result: z.object({ followUp: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
   return output.success ? { followUpId: output.data.result.followUp.id } : {};
+}
+function integrationCard(row: { tool: string; status: string; output?: unknown }) {
+  if (row.status !== 'completed') return {};
+  const output = z
+    .object({
+      result: z.union([
+        z.object({ status: z.literal('connect-card'), app: z.string() }),
+        z.object({ status: z.literal('review-required'), connection: z.object({ connectionId: z.string() }) }),
+      ]),
+    })
+    .safeParse(row.output);
+  if (!output.success) return {};
+  const card = integrationCardSchema.safeParse(
+    row.tool === 'integrations.connect' && 'app' in output.data.result
+      ? { action: 'connect', app: output.data.result.app }
+      : row.tool === 'integrations.disconnect' && 'connection' in output.data.result
+        ? { action: 'disconnect', connectionId: output.data.result.connection.connectionId }
+        : null,
+  );
+  return card.success ? { integration: card.data } : {};
 }
 function skillImportOutput(row: { tool: string; status: string; output?: unknown }) {
   if (
@@ -792,7 +813,14 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   output: row.output,
                   sources: row.sources,
                 }),
-                ...(hidden.size ? {} : { ...createdFile(row), ...skillImportOutput(row), ...followUpOutput(row) }),
+                ...(hidden.size
+                  ? {}
+                  : {
+                      ...createdFile(row),
+                      ...skillImportOutput(row),
+                      ...followUpOutput(row),
+                      ...integrationCard(row),
+                    }),
                 ...(!hidden.size && row.tool === 'images.generate'
                   ? {
                       images: await imageReceipt(

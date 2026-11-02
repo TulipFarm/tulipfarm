@@ -38,6 +38,7 @@ import { atlassianChatOperations } from './atlassian-composition.ts';
 import { githubChatReads } from './github-composition.ts';
 import { mergeSources } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
+import { chatConnections } from './connection-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import {
   chatFallbackModel,
@@ -290,6 +291,7 @@ export function meteredReply(
           : undefined,
       atlassian: tool === undefined || tool.startsWith('atlassian.') ? atlassianChatOperations(toolRuntime) : undefined,
       google: googleOperations,
+      connections: tool === undefined || tool.startsWith('integrations.') ? chatConnections(toolRuntime) : undefined,
       slack,
       github:
         tool === undefined || tool.startsWith('github.personal.') || tool.startsWith('github.investigation.')
