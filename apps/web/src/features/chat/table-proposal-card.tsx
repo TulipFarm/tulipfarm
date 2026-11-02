@@ -54,7 +54,7 @@ function planOutcome({ receipt, importProgress }: ProposalView['plans'][number])
 
 function applicationNote(plans: readonly ReviewedPlan[]) {
   const notes = [];
-  if (plans.some(plan => plan.input.kind !== 'import'))
+  if (plans.some(plan => plan.input.kind === 'schema' || plan.input.kind === 'records'))
     notes.push(
       'Schema and row changes apply atomically for each table, and completed tables stay applied if later work stops.',
     );
@@ -170,17 +170,23 @@ function proposalTitle(plans: readonly ReviewedPlan[]) {
   const [plan] = plans;
   if (plans.length !== 1 || !plan) return `Change ${plans.length} tables`;
   const label = plan.after.label;
-  return plan.input.kind === 'import'
-    ? `Import rows into ${label}`
-    : plan.input.kind === 'records'
-      ? `Change rows in ${label}`
-      : plan.before
-        ? `Change ${label} table`
-        : `Create ${label} table`;
+  return plan.input.kind === 'archive'
+    ? `Archive ${label} table`
+    : plan.input.kind === 'restore'
+      ? `Restore ${label} table`
+      : plan.input.kind === 'import'
+        ? `Import rows into ${label}`
+        : plan.input.kind === 'records'
+          ? `Change rows in ${label}`
+          : plan.before
+            ? `Change ${label} table`
+            : `Create ${label} table`;
 }
 
 function planSummary(plan: ReviewedPlan) {
   const rows = `${plan.effectCount.toLocaleString()} ${plan.effectCount === 1 ? 'row' : 'rows'}`;
+  if (plan.input.kind === 'archive') return 'Archive · rows are kept, and the table can be restored';
+  if (plan.input.kind === 'restore') return 'Restore · the table and its rows are available again';
   if (plan.input.kind === 'import') return `Import · ${rows}`;
   if (plan.input.kind === 'records') return `Row changes · ${rows}`;
   if (!plan.before)
@@ -356,7 +362,11 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
               : done
                 ? onlyPlan?.input.kind === 'schema' && !onlyPlan.before
                   ? `${onlyPlan.after.label} table created`
-                  : 'Changes applied'
+                  : onlyPlan?.input.kind === 'archive'
+                    ? `${onlyPlan.after.label} table archived`
+                    : onlyPlan?.input.kind === 'restore'
+                      ? `${onlyPlan.after.label} table restored`
+                      : 'Changes applied'
                 : view.status === 'pending'
                   ? 'Ready for your approval'
                   : view.status === 'approved'
@@ -587,7 +597,11 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                           ? 'Approving...'
                           : createsTables
                             ? 'Approve & create'
-                            : 'Approve exact changes'}
+                            : view.manifest.plans.every(plan => plan.input.kind === 'archive')
+                              ? 'Approve & archive'
+                              : view.manifest.plans.every(plan => plan.input.kind === 'restore')
+                                ? 'Approve & restore'
+                                : 'Approve exact changes'}
                       </Button>
                     </>
                   )}

@@ -100,6 +100,8 @@ const planSchema = z.discriminatedUnion('kind', [
     matchFieldIds: z.array(z.uuid()),
     mappings: z.array(z.object({ sourceColumn: z.string(), fieldId: z.uuid() })),
   }),
+  z.object({ ...planBase, kind: z.literal('archive'), expectedRevision: z.string() }),
+  z.object({ ...planBase, kind: z.literal('restore'), expectedRevision: z.string() }),
 ]);
 export const reviewedPlanSchema = z.object({
   input: planSchema,
@@ -177,7 +179,7 @@ export const proposalViewSchema = z.discriminatedUnion('content', [
       requester: z.object({ kind: z.literal('human'), userId: z.string(), membershipId: z.uuid() }),
       plans: z.array(
         z.object({
-          input: z.object({ tableId: z.uuid(), kind: z.enum(['schema', 'records', 'import']) }),
+          input: z.object({ tableId: z.uuid(), kind: z.enum(['schema', 'records', 'import', 'archive', 'restore']) }),
           fieldIds: z.array(z.uuid()),
           effectCount: z.int(),
         }),

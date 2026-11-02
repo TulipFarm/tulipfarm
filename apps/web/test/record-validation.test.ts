@@ -7,6 +7,7 @@ import {
   rowFieldsChanged,
   validateRowDraft,
 } from '../src/features/tables/record-validation.ts';
+import { reviewedPlanSchema } from '../src/features/tables/review-contracts.ts';
 import type { TableDefinition, TableField, TableValue } from '../src/features/tables/review-contracts.ts';
 import {
   workspaceMembersDefinition,
@@ -212,4 +213,20 @@ test('schema review never rebinds a link or truncates multi-value input', () => 
     compatibleRowValues(definition({ ...base, kind: 'file', cardinality: 'many', access: 'independent' }), files),
     files,
   );
+});
+
+test('table reviews accept archive and restore plans, so chat can show those cards', () => {
+  const table = definition(numeric);
+  for (const kind of ['archive', 'restore'] as const)
+    assert.equal(
+      reviewedPlanSchema.parse({
+        input: { kind, tableId: table.id, dependsOn: [], expectedRevision: 'a'.repeat(40) },
+        before: table,
+        after: table,
+        effectCount: 0,
+        effectsDigest: 'b'.repeat(64),
+        audience: null,
+      }).input.kind,
+      kind,
+    );
 });
