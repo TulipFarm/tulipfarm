@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createFiles, FileError, fileRole, requireFileManager } from '@tulipfarm/files';
+import { fileNameSchema } from '@tulipfarm/files/contracts';
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
 import { presentChoiceSchema } from '@tulipfarm/conversations/request-contracts';
 import { budPreferenceAskSchema, budPreferenceProposeSchema } from '@tulipfarm/conversations/bud-contracts';
@@ -101,7 +103,7 @@ import {
   planClaimSchema,
   planSubmitReportSchema,
 } from './plan-contracts.ts';
-import { agentDraftInputSchema } from './draft-contracts.ts';
+import { agentDraftInputSchema, type FilesProposal } from './draft-contracts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { createAgentSchedules, previewAgentTaskSchedule } from './schedules.ts';
@@ -235,6 +237,31 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     instructions: z.string().max(65536).optional().describe('The full replacement instructions, not a diff.'),
     archived: z.boolean().optional().describe('true archives, false restores; only with projectId.'),
   }),
+  z.strictObject({
+    tool: z.literal('files.list'),
+    query: z.string().max(255).optional().describe('Part of the name to search for.'),
+    folderId: z
+      .uuid()
+      .nullable()
+      .optional()
+      .describe('Only items directly in this folder; null for the top level. Omit to search everywhere.'),
+    trash: z.boolean().optional().describe('List items in Trash instead.'),
+    after: z.uuid().optional().describe('The next value from the previous page.'),
+  }),
+  z.strictObject({ tool: z.literal('files.rename'), fileId: z.uuid(), name: z.string().trim().min(1).max(255) }),
+  z.strictObject({
+    tool: z.literal('files.move'),
+    fileIds: z.array(z.uuid()).min(1).max(20).describe('IDs from files.list.'),
+    folderId: z.uuid().nullable().describe('The destination folder from files.list; null for the top level.'),
+  }),
+  z.strictObject({
+    tool: z.literal('files.trash'),
+    fileIds: z.array(z.uuid()).min(1).max(20).describe('IDs from files.list.'),
+  }),
+  z.strictObject({
+    tool: z.literal('files.restore'),
+    fileIds: z.array(z.uuid()).min(1).max(20).describe('IDs from files.list.'),
+  }),
   z.strictObject({ tool: z.literal('agents.archive'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('agents.restore'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('skills.archive'), skillIds: z.array(z.uuid()).min(1).max(20) }),
@@ -279,6 +306,13 @@ export const chatCallSchema = z.discriminatedUnion('tool', [firstCall, ...otherC
 export type ToolName = FrameworkCall['tool'];
 // A tool result over 96,000 characters of JSON is dropped whole; a fetched file's result is cut below that instead.
 const fetchedFileChars = 90_000;
+const chatFileTools: ReadonlySet<string> = new Set([
+  'files.list',
+  'files.rename',
+  'files.move',
+  'files.trash',
+  'files.restore',
+]);
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'packages.inspect',
   'github.investigation.account',
@@ -328,6 +362,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'agents.read',
   'projects.list',
   'projects.read',
+  'files.list',
   'plans.read',
   'followups.list',
 ]);
@@ -561,8 +596,18 @@ const descriptions: Record<ToolName, string> = {
     'Create and save one user-requested output file in Files; set folderId only when the user named an accessible folder. For docx, xlsx, or pptx, content is a JSON spec; read the word-document, excel-workbook, or powerpoint-deck skill first. Returns the created-file record, not a hidden local download or approval. This changes storage and is idempotent only for the same tool call—do not retry an uncertain new call.',
   'images.generate':
     'Generate up to four images from a description, or edit and combine up to four source images by their attachment-id or file-id, and save them in Files. Pick aspect, or a preset for a named destination such as instagram-feed; for a social post also set channel (such as instagram), which picks its preset by default and checks each image against the network’s media rules, and offer only images it reports usable; set folderId only when the user named an accessible folder. Returns one entry per image (saved, refused, failed or cancelled); saved images show as cards under the reply. Costs credits per image and changes storage; a repeat of the same call in this turn returns the same images.',
+  'files.list':
+    "List or search the files and folders the human can open in Files, with each ID, kind, name, folder ID, role and Trash state, 100 at a time. Give query to match part of a name, folderId for one folder's contents (null for the top level), or trash=true for items in Trash. Read a file's contents with files.read and its ID. Changes nothing.",
+  'files.rename':
+    'Prepare a review card to rename one file or folder by its ID from files.list. Only someone who manages the item can rename it. Changes nothing until the human approves it. Never treat chat text as approval.',
+  'files.move':
+    'Prepare a review card to move up to 20 files or folders, by their IDs from files.list, into one folder or the top level (folderId null). Moving can change who can open an item; the card shows when it does. Needs manage access to each item and edit access to the folder. Changes nothing until the human approves it. Never treat chat text as approval.',
+  'files.trash':
+    'Prepare a review card to move up to 20 files or folders, by their IDs from files.list, to Trash. Items in Trash can be restored; this never deletes forever. Only someone who manages an item can move it to Trash. Changes nothing until the human approves it. Never treat chat text as approval.',
+  'files.restore':
+    'Prepare a review card to restore up to 20 items from Trash, by their IDs from files.list with trash=true, to their original folders. If an original folder is gone or not editable, use files.move instead. Changes nothing until the human approves it. Never treat chat text as approval.',
   'files.read':
-    'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
+    'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, or any file in Files by its ID from files.list, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'followups.schedule':
     'Schedule a follow-up: one saved instruction that runs once, later, as a new turn in this same chat or Slack thread, as this person with the same tools and access. Use it whenever the person asks to do something later, after a delay, at a time, or to check back (e.g. "in 10 minutes send a quote to #tech", "remind @asha here at 5pm", "check in 5 minutes whether the run finished"). Never do the deferred action now, and never create a workflow or agent schedule for one-off timed work. Give delayMinutes (1 to 1440) or an absolute at time within 24 hours. A follow-up turn may schedule the next check, up to 12 in a chain and 24 hours from the first request; when it is refused for the limit, report back instead. Repeating work belongs in an agent schedule or a workflow.',
   'followups.list':
@@ -600,6 +645,8 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
       .filter(schema => !schema.shape.tool.value.startsWith('projects.') || access.kind === 'chat')
+      // Files management acts for the person in this chat, through a card they approve.
+      .filter(schema => !chatFileTools.has(schema.shape.tool.value) || access.kind === 'chat')
       .filter(schema =>
         isMcpTool(schema.shape.tool.value)
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
@@ -1335,6 +1382,118 @@ export function createChatTools(
           }),
         );
       }
+      case 'files.list': {
+        const page = await libraryFiles(runtime).list(workspaceId, actor.userId, {
+          ...(call.folderId !== undefined ? { parentId: call.folderId } : {}),
+          query: call.query ?? '',
+          trash: call.trash ?? false,
+          ...(call.after ? { after: call.after } : {}),
+        });
+        return {
+          items: page.items
+            .filter(item => item.deletion === null)
+            .map(({ id, kind, name, parentId, mediaType, size, trashed, role }) => ({
+              id,
+              kind,
+              name,
+              parentId,
+              mediaType,
+              size,
+              trashed,
+              role,
+            })),
+          next: page.next,
+        };
+      }
+      case 'files.rename':
+      case 'files.move':
+      case 'files.trash':
+      case 'files.restore': {
+        if (!context.origin) throw new AccessDenied();
+        const ids = call.tool === 'files.rename' ? [call.fileId] : call.fileIds;
+        if (new Set(ids).size !== ids.length)
+          return {
+            error: 'invalid-arguments',
+            issues: [{ path: ['fileIds'], code: 'duplicate' }],
+            instruction: 'List each item once.',
+          };
+        const restoring = call.tool === 'files.restore';
+        const found = await fileDraftItems(runtime, workspaceId, actor, ids);
+        if ('error' in found) return found;
+        const wrongPlace = found.find(item => item.trashed !== restoring);
+        if (wrongPlace)
+          return restoring
+            ? {
+                error: 'file-not-trashed',
+                instruction: `No draft was created. “${wrongPlace.name}” is not in Trash, so it needs no restore.`,
+              }
+            : {
+                error: 'file-trashed',
+                instruction: `No draft was created. “${wrongPlace.name}” is in Trash. Restore it first.`,
+              };
+        let change: FilesProposal['input']['change'];
+        let items: FilesProposal['input']['items'] = found;
+        if (call.tool === 'files.rename') {
+          const name = fileNameSchema.safeParse(call.name);
+          if (!name.success)
+            return {
+              error: 'invalid-name',
+              instruction: 'No draft was created. A name cannot contain / or \\ or control characters.',
+            };
+          if (name.data === found[0]!.name)
+            return { error: 'no-change', instruction: 'No draft was created. The item already has that name.' };
+          change = { kind: 'rename', name: name.data };
+        } else if (call.tool === 'files.move') {
+          const files = libraryFiles(runtime);
+          let parentName: string | null = null;
+          items = [];
+          try {
+            for (const item of found) {
+              if (item.parentId === call.folderId)
+                return {
+                  error: 'no-change',
+                  instruction: `No draft was created. “${item.name}” is already there.`,
+                };
+              const preview = await files.previewMove(workspaceId, actor.userId, item.id, call.folderId);
+              if (preview.destination.kind === 'folder') parentName = preview.destination.item.name;
+              items.push({
+                ...item,
+                fingerprint: preview.fingerprint,
+                accessChanges: preview.subtree.some(
+                  entry => JSON.stringify(entry.before) !== JSON.stringify(entry.after),
+                ),
+              });
+            }
+          } catch (error) {
+            if (error instanceof FileError && (error.code === 'invalid-move' || error.code === 'graph-limit'))
+              return {
+                error: 'invalid-move',
+                instruction:
+                  'No draft was created. The destination must be a folder the human can edit, and a folder cannot move into itself or its own subfolder.',
+              };
+            if (error instanceof AccessDenied)
+              return {
+                error: 'folder-unavailable',
+                instruction: 'No draft was created. The human cannot add to that folder. Pick another from files.list.',
+              };
+            throw error;
+          }
+          change = { kind: 'move', parentId: call.folderId, parentName };
+        } else change = { kind: restoring ? 'restore' : 'trash' };
+        try {
+          return await createAuthoringDrafts(runtime).propose(workspaceId, actor, callId, context.origin, {
+            kind: 'files',
+            targetId: randomUUID(),
+            input: { change, items },
+          });
+        } catch (error) {
+          if (!(error instanceof AgentError) || error.code !== 'draft-stale') throw error;
+          return {
+            error: 'draft-stale',
+            instruction: 'No draft was created. The items changed while drafting. Call files.list and try again.',
+          };
+        }
+      }
       case 'agents.archive':
       case 'agents.restore': {
         if (!context.origin) throw new AccessDenied();
@@ -2038,7 +2197,7 @@ export function createChatTools(
         sources.push(...(await providerSources(tx, context.actor, { tool: 'atlassian.proposal', proposalId: id })));
       }
       if (call.tool.startsWith('google.') && !sources.length) throw new AccessDenied();
-      sources.push(...(await resultSources(tx, call, result)));
+      sources.push(...(await resultSources(tx, call, result, context.actor)));
       sources.push(...(await personalDefinitionSources(tx, sources)));
       await requireDraftSources(tx, context.actor, sources);
       return { result, sources };
@@ -2264,6 +2423,81 @@ function rowWriteFailure(error: unknown) {
       instruction: 'Nothing changed. The table is under maintenance. Tell the user and do not retry in this reply.',
     };
   return null;
+}
+
+const unavailableBytes = () => Promise.reject(new Error('Chat file management reads no file bytes'));
+function libraryFiles(runtime: Runtime) {
+  return createFiles(runtime, { putIfAbsent: unavailableBytes, read: unavailableBytes, remove: unavailableBytes });
+}
+
+/**
+ * Each item as the review card shows it, once the human manages it. An item they cannot open reads as not found, so a
+ * refusal never names it.
+ */
+async function fileDraftItems(runtime: Runtime, workspaceId: string, actor: HumanActor, ids: readonly string[]) {
+  return withHuman(runtime, workspaceId, actor, 'read', async (tx, human) => {
+    const items: FilesProposal['input']['items'] = [];
+    for (const id of ids) {
+      const row = z
+        .object({
+          kind: z.enum(['file', 'folder']),
+          name: z.string(),
+          parent_id: z.uuid().nullable(),
+          trashed: z.boolean(),
+          parent_name: z.string().nullable(),
+        })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT f.kind,f.name,f.parent_id,f.trashed_at IS NOT NULL AS trashed,p.name AS parent_name FROM ${relation(tx, 'tf_files')} f LEFT JOIN ${relation(tx, 'tf_files')} p ON p.id=f.parent_id WHERE f.id=$1 AND f.ready AND f.deleting_at IS NULL`,
+              [id],
+            )
+          ).rows[0],
+        );
+      const notFound = {
+        error: 'file-not-found',
+        instruction: `No draft was created. ${id} is not a file or folder the human can open. Call files.list for current IDs.`,
+      };
+      if (!row) return notFound;
+      try {
+        await requireFileManager(tx, human, id);
+      } catch (error) {
+        if (!(error instanceof AccessDenied)) throw error;
+        const readable = await fileRole(tx, human, id).then(
+          () => true,
+          (denied: unknown) => {
+            if (denied instanceof AccessDenied) return false;
+            throw denied;
+          },
+        );
+        return readable
+          ? {
+              error: 'file-manager-required',
+              instruction: `No draft was created. Only someone who manages “${row.name}” can change it. Ask its owner.`,
+            }
+          : notFound;
+      }
+      const parentReadable =
+        row.parent_id !== null &&
+        (await fileRole(tx, human, row.parent_id).then(
+          () => true,
+          (denied: unknown) => {
+            if (denied instanceof AccessDenied) return false;
+            throw denied;
+          },
+        ));
+      items.push({
+        id,
+        kind: row.kind,
+        name: row.name,
+        parentId: row.parent_id,
+        parentName: parentReadable ? row.parent_name : null,
+        trashed: row.trashed,
+      });
+    }
+    return items;
+  });
 }
 
 async function workflowStale<T>(proposal: Promise<T>) {

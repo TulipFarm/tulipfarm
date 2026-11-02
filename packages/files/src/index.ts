@@ -232,7 +232,7 @@ async function access(
     trash = false,
     stranded = false,
     traversal = 'ordinary',
-  }: { trash?: boolean; stranded?: boolean; traversal?: AccessTraversal } = {},
+  }: { trash?: boolean | 'lineage'; stranded?: boolean; traversal?: AccessTraversal } = {},
 ) {
   const chain = await lineage(tx, id, traversal);
   const item = chain.find(entry => entry.id === id);
@@ -241,7 +241,8 @@ async function access(
     stranded &&
     item.creator_membership_id === actor.membershipId &&
     chain.some(entry => entry.id !== id && entry.trashed_at);
-  if (!rescue && chain.some(entry => entry.trashed_at && !(trash && entry.id === id))) throw new AccessDenied();
+  if (!rescue && chain.some(entry => entry.trashed_at && trash !== 'lineage' && !(trash && entry.id === id)))
+    throw new AccessDenied();
   const authority =
     traversal === 'sharing'
       ? `WITH ancestors AS (SELECT * FROM ${table(tx, 'tf_files')} WHERE id = ANY($1::uuid[]))`
@@ -400,6 +401,33 @@ async function recommendationChanges(tx: AuthorizationTransaction, id: string, b
 export async function fileRole(tx: AuthorizationTransaction, actor: HumanActor, id: string): Promise<FileRole> {
   await currentMember(tx, actor);
   return (await access(tx, actor, uuidSchema.parse(id))).role;
+}
+
+/** Throws `AccessDenied` unless the actor manages the item. The item itself may be in Trash, so a restore can be checked. */
+export async function requireFileManager(tx: AuthorizationTransaction, actor: HumanActor, id: string) {
+  await currentMember(tx, actor);
+  await access(tx, actor, uuidSchema.parse(id), 'manager', { trash: true });
+}
+
+/**
+ * Rechecks a library item a chat already cited: readable now, or in Trash, alone or inside a trashed folder, for someone
+ * who manages it there. Trashing a cited item must not lock its manager out of the chat that trashed it. `content`
+ * also requires a file with stored bytes.
+ */
+export async function requireCitedLibraryFile(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  id: string,
+  content: boolean,
+) {
+  await currentMember(tx, actor);
+  id = uuidSchema.parse(id);
+  const { item } = await access(tx, actor, id).catch(async error => {
+    if (!(error instanceof AccessDenied)) throw error;
+    return access(tx, actor, id, 'manager', { trash: 'lineage' });
+  });
+  if (content && (item.kind !== 'file' || !item.object_key || !item.sha256 || item.size === null))
+    throw new AccessDenied();
 }
 
 /** Records an explicit successful use inside a caller-held authorization write transaction. */

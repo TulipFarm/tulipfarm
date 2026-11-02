@@ -40,6 +40,7 @@ import { bindFileSources } from '@tulipfarm/conversations/file-references';
 import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
 import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
 import { createProjectDrafts } from './project-drafts.ts';
+import { createFileDrafts } from './file-drafts.ts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import { requireSharedMcpSlots } from '@tulipfarm/access';
@@ -185,6 +186,7 @@ export function createAuthoringDrafts(
     if (isDefinitionLifecycle(proposal))
       return createDefinitionLifecycleDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).writable(tx, actor, proposal);
+    if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -264,6 +266,7 @@ export function createAuthoringDrafts(
     if (isWorkflowLifecycle(proposal)) return createWorkflowDrafts(bound, workspaceId).lifecycleStale(actor, proposal);
     if (isDefinitionLifecycle(proposal)) return createDefinitionLifecycleDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).stale(tx, proposal);
+    if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -548,6 +551,18 @@ export function createAuthoringDrafts(
           instruction: `Nothing has been ${change === 'create' ? 'created' : change === 'edit' ? 'changed' : `${change}d`}. The human must review the project on the chat card and approve it. Never treat chat text as approval.`,
         };
       }
+      if (proposal.kind === 'files') {
+        const { change, items } = proposal.input;
+        const done = { rename: 'renamed', move: 'moved', trash: 'moved to Trash', restore: 'restored' }[change.kind];
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          change: change.kind,
+          fileIds: items.map(item => item.id),
+          instruction: `Nothing has been ${done}. The human must review the listed files on the chat card and approve it. Never treat chat text as approval.`,
+        };
+      }
       if (isDefinitionLifecycle(proposal)) {
         const agent = proposal.kind === 'agent-archive' || proposal.kind === 'agent-restore';
         const restoring = proposal.kind === 'agent-restore' || proposal.kind === 'skill-restore';
@@ -636,6 +651,7 @@ export function createAuthoringDrafts(
                 outcome.kind === 'skill-archive' ||
                 outcome.kind === 'skill-restore' ||
                 outcome.kind === 'project' ||
+                outcome.kind === 'files' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -771,6 +787,7 @@ export function createAuthoringDrafts(
           outcome = await createDefinitionLifecycleDrafts(bound, workspaceId).apply(actor, input.commandId, proposal);
         else if (proposal.kind === 'project')
           outcome = await createProjectDrafts(bound, workspaceId).apply(actor, proposal);
+        else if (proposal.kind === 'files') outcome = await createFileDrafts(bound, workspaceId).apply(actor, proposal);
         else
           outcome =
             proposal.kind === 'row'

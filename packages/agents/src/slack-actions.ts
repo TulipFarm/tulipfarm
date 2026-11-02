@@ -366,7 +366,14 @@ export function createSlackActions(options: Options) {
       if (row.call.tool === 'github.issue.read' || row.call.tool.startsWith('google.')) throw new AccessDenied();
       if ('tableId' in row.call && !(await canAccessAsset(tx, actor, row.call.tableId, 'table.row.read')))
         throw new AccessDenied();
-      await requireDraftSources(tx, actor, await resultSources(tx, row.call, row.result), new Set(), undefined, true);
+      await requireDraftSources(
+        tx,
+        actor,
+        await resultSources(tx, row.call, row.result, actor),
+        new Set(),
+        undefined,
+        true,
+      );
     }
   }
   async function fresh(tx: AgentTransaction, workspaceId: string, row: Row) {

@@ -99,6 +99,7 @@ async function sourceClosure(
     switch (source.kind) {
       case 'file':
       case 'tulipfarm-file':
+      case 'library-file':
         if (await has('tf_file_skill_sources')) {
           const row = (
             await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_file_skill_sources')} WHERE file_id=$1`, [

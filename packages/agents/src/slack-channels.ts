@@ -209,7 +209,14 @@ export function createSlackChannelAgents(options: {
       );
     for (const { id, call, result, status } of calls) {
       if (status === 'completed')
-        await requireDraftSources(tx, actor, await resultSources(tx, call, result), new Set(), undefined, publicOnly);
+        await requireDraftSources(
+          tx,
+          actor,
+          await resultSources(tx, call, result, actor),
+          new Set(),
+          undefined,
+          publicOnly,
+        );
       if ('tableId' in call) {
         if (!(await canAccessTable(tx, actor, call.tableId, 'table.row.read'))) throw new AccessDenied();
       } else if (call.tool === 'tables.list') {
@@ -864,7 +871,7 @@ export function createSlackChannelAgents(options: {
         ).rows,
       );
     for (const { id, call, result, status } of calls) {
-      if (status === 'completed') await requireDraftSources(tx, actor, await resultSources(tx, call, result));
+      if (status === 'completed') await requireDraftSources(tx, actor, await resultSources(tx, call, result, actor));
       if ('tableId' in call) {
         for (const principal of [actor, { kind: 'agent' as const, runId }])
           if (!(await canAccessTable(tx, principal, call.tableId, 'table.row.read'))) throw new AccessDenied();

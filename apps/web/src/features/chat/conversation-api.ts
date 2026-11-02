@@ -293,6 +293,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
         );
+      if (code === 'file-restore-destination')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'An original folder is gone or you can no longer add to it, so nothing was restored. Ask chat to move the items to another folder instead.',
+        );
       if (code === 'limit-reached')
         throw new TableRequestError(
           response.status,

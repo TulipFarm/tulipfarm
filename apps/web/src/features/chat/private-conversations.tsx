@@ -1898,6 +1898,10 @@ function ConversationTools({
               'skills.archive',
               'skills.restore',
               'projects.draft',
+              'files.rename',
+              'files.move',
+              'files.trash',
+              'files.restore',
             ].includes(tool.tool) ||
               tool.rowDraftId === tool.id),
         )

@@ -4,6 +4,7 @@ import { saveAgentSchema, agentCommandStatusSchema } from './saved-contracts.ts'
 import { saveWorkspaceSkillSchema, workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
 import { agentDefinitionSchema, taskMutationSchema } from './contracts.ts';
 import { agentRecordValueSchema } from './record-contracts.ts';
+import { fileNameSchema, moveFingerprintSchema } from '@tulipfarm/files/contracts';
 import { authoredDefinitionSchema, definitionSchema } from '@tulipfarm/workflows/contracts';
 import { agentSetupConsentSchema, agentSetupDetailsSchema, agentSetupReceiptSchema } from './setup-contracts.ts';
 
@@ -44,6 +45,34 @@ const projectDraftInput = z.strictObject({
   settings: projectSettings,
   current: projectSettings.nullable(),
 });
+const fileDraftItem = z.strictObject({
+  id: uuidSchema,
+  kind: z.enum(['file', 'folder']),
+  name: z.string(),
+  parentId: uuidSchema.nullable(),
+  /** The folder's name when the reader can open it; null for the top level or a folder they cannot see. */
+  parentName: z.string().nullable(),
+  trashed: z.boolean(),
+  /** A move's preview fingerprint: the move is refused if who can open the item would change differently. */
+  fingerprint: moveFingerprintSchema.optional(),
+  /** Whether moving changes who can open the item or anything inside it. */
+  accessChanges: z.boolean().optional(),
+});
+const fileDraftInput = z
+  .strictObject({
+    change: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('rename'), name: fileNameSchema }),
+      z.strictObject({ kind: z.literal('move'), parentId: uuidSchema.nullable(), parentName: z.string().nullable() }),
+      z.strictObject({ kind: z.literal('trash') }),
+      z.strictObject({ kind: z.literal('restore') }),
+    ]),
+    items: z.array(fileDraftItem).min(1).max(20).refine(distinct, 'Files must be distinct'),
+  })
+  .refine(input => input.change.kind !== 'rename' || input.items.length === 1, 'Rename one item at a time')
+  .refine(
+    input => input.change.kind !== 'move' || input.items.every(item => item.fingerprint),
+    'A move needs the access check for each item',
+  );
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -72,6 +101,7 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('skill-archive'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('skill-restore'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('project'), targetId: uuidSchema, input: projectDraftInput }),
+  z.strictObject({ kind: z.literal('files'), targetId: uuidSchema, input: fileDraftInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -111,6 +141,11 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('skill-archive'), skillIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('skill-restore'), skillIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('project'), projectId: z.uuid(), revision: z.number().int() }),
+  z.object({
+    kind: z.literal('files'),
+    change: z.enum(['rename', 'move', 'trash', 'restore']),
+    fileIds: z.array(z.uuid()),
+  }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -171,6 +206,7 @@ export type DefinitionLifecycleProposal = Extract<
 export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is DefinitionLifecycleProposal =>
   ['agent-archive', 'agent-restore', 'skill-archive', 'skill-restore'].includes(proposal.kind);
 export type ProjectProposal = Extract<AuthoringProposal, { kind: 'project' }>;
+export type FilesProposal = Extract<AuthoringProposal, { kind: 'files' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;
