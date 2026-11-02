@@ -396,20 +396,6 @@ try {
       assert.equal(await page.getByRole('heading', { name: 'Saved fields', exact: true }).isVisible(), false);
       if (process.env.P1_SCREENSHOT_DIR)
         await page.screenshot({ path: `${process.env.P1_SCREENSHOT_DIR}/tables-${mobile ? 'mobile' : 'desktop'}.png` });
-      await page.goto(`${origin}/acme/integrations#github-integrations`);
-      await page.getByRole('button', { name: 'Open Billing GitHub', exact: true }).waitFor();
-      assert.equal(await page.getByLabel('GitHub token', { exact: true }).isVisible(), false);
-      // Team creation grants for integrations are no longer offered; IntegrationCreationGrants is unrendered since cloud e445ed86 (#478), features/integrations/setup.tsx:82.
-      assert.equal(
-        await page.getByRole('button', { name: 'Who can create GitHub integrations', exact: true }).count(),
-        0,
-      );
-      assert.equal(await page.getByRole('heading', { name: 'Integration creation access', exact: true }).count(), 0);
-      if (process.env.P1_SCREENSHOT_DIR)
-        await page.screenshot({
-          path: `${process.env.P1_SCREENSHOT_DIR}/permissions-${mobile ? 'mobile' : 'desktop'}.png`,
-          fullPage: true,
-        });
       // On mobile Bud's launcher is fixed bottom-right over the last form footer; move it as a user would (cloud features/chat/bud-position.ts:3-12).
       if (mobile) await page.evaluate(() => localStorage.setItem('tulipfarm:bud-corner', 'bottom-left'));
       await page.goto(`${origin}/acme/agents/${agentId}`);

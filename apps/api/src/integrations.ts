@@ -85,6 +85,7 @@ export function registerIntegrations(
           'provider-failed': 502,
           'provider-retryable': 503,
           'credential-unavailable': 503,
+          retired: 410,
         };
         return reply.code(statuses[error.code]).send({ error: error.code });
       }
@@ -155,12 +156,10 @@ export function registerIntegrations(
         logLevel: 'silent',
         schema: schema('createIntegrationV1', workspaceParams, integrationMetadataSchema, createIntegrationSchema),
       },
-      request =>
-        service.create(
-          workspaceParams.parse(request.params).workspaceId,
-          user(request),
-          createIntegrationSchema.parse(request.body),
-        ),
+      // Team integrations are retired; members connect GitHub with their own sign-in.
+      () => {
+        throw new IntegrationError('retired');
+      },
     );
     routes.get(
       `${base}/:integrationId`,

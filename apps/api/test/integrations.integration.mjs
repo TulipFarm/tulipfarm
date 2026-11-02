@@ -98,20 +98,10 @@ test('integrations HTTP boundary with restricted workspace PostgreSQL', async t 
       assert.equal(f.calls.length, 0);
     });
 
-    await t.test('creation persists encrypted credentials and HTTP only returns metadata', async () => {
-      await request({ method: 'POST', url: base, headers: admin, payload: f.input }, 404, denied);
-      await request(
-        { method: 'POST', url: base, headers: owner, payload: { ...f.input, credential: 'injected-ciphertext' } },
-        400,
-        { error: 'invalid-request' },
-      );
-      await request({ method: 'POST', url: base, headers: owner, payload: f.input }, 200, metadata);
-      await request({ method: 'POST', url: base, headers: owner, payload: f.input }, 200, metadata);
-      await request(
-        { method: 'POST', url: base, headers: owner, payload: { ...f.input, token: 'conflicting-token' } },
-        409,
-        { error: 'conflict' },
-      );
+    await t.test('HTTP refuses new team integrations; an existing one only returns metadata', async () => {
+      await request({ method: 'POST', url: base, headers: owner, payload: f.input }, 410, { error: 'retired' });
+      await request({ url: base, headers: owner }, 200, { integrations: [] });
+      await f.service.create(f.workspaceId, f.creator, f.input);
       await request({ url: base, headers: owner }, 200, { integrations: [metadata] });
       await request({ url: item, headers: owner }, 200, {
         ...metadata,

@@ -2,7 +2,7 @@ import { createAgentAuthoring } from '@tulipfarm/agents/authoring';
 import { createSavedAgentService } from '@tulipfarm/agents/saved-service';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { createWorkspaceSkills } from '@tulipfarm/agents/workspace-skills';
-import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
+import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { createFiles } from '@tulipfarm/files';
 import { createLocalKnowledge } from '@tulipfarm/knowledge';
@@ -293,34 +293,6 @@ async function ensureKnowledge(context: SeedContext, target: Target, count: numb
   for (const work of await knowledge.due(workspace.id)) await knowledge.process(work);
 }
 
-async function ensureIntegrations(context: SeedContext, target: Target) {
-  const { workspace, owner } = target;
-  const service = createIntegrationService({ runtime: context.runtime, keyring: integrationCredentialKeyring() });
-  const items = [
-    { key: 'active', name: 'GitHub: tulipfarm/demo-shop', enabled: true },
-    { key: 'disabled', name: 'GitHub: tulipfarm/old-site (disabled)', enabled: false },
-  ];
-  for (const item of items) {
-    const id = stableId(workspace.id, 'integration', item.key);
-    // The token is a placeholder, so any provider call through this integration fails; it exists for list and settings UI.
-    await service.create(workspace.id, owner.id, {
-      id,
-      name: item.name,
-      owningTeamId: primaryTeam(target),
-      token: `seed_placeholder_${item.key}`,
-      repositories: [
-        { id: stableId(id, 'repository'), owner: 'tulipfarm', repo: item.key === 'active' ? 'demo-shop' : 'old-site' },
-      ],
-    });
-    if (!item.enabled) await service.update(workspace.id, owner.id, id, { enabled: false });
-    recordEntity(workspace, 'integrations', {
-      id,
-      label: item.name,
-      url: workspaceUrl(workspace.slug, 'integrations'),
-    });
-  }
-}
-
 export const extraGenerators: Generator[] = [
   {
     name: 'skill',
@@ -367,13 +339,6 @@ export const extraGenerators: Generator[] = [
     requires: ['workspace'],
     options: {},
     run: (context, target) => ensureDefaultKnowledge(context, target),
-  },
-  {
-    name: 'integrations',
-    description: 'Create GitHub token integrations with placeholder credentials: one enabled, one disabled.',
-    requires: ['team'],
-    options: {},
-    run: (context, target) => ensureIntegrations(context, target),
   },
   {
     name: 'files',
