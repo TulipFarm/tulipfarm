@@ -73,6 +73,8 @@ export const ownMembershipSchema = z.object({
   membershipId: z.uuid(),
   role: memberRoleSchema,
   teams: z.array(z.object({ id: z.uuid(), name: z.string(), role: teamRoleSchema.default('member') })),
+  // The internal team of workspace admins; set only when the caller belongs to it.
+  adminTeamId: z.uuid().nullable().default(null),
   capabilities: z.object({ manageGovernance: z.boolean(), canLeave: z.boolean() }),
 });
 export type OwnMembership = z.infer<typeof ownMembershipSchema>;
