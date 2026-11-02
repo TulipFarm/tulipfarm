@@ -12,7 +12,7 @@ test('a GitHub intent left on a removed account row follows its GitHub user', { 
   const db = await fixture();
   try {
     const stream = await workspaceTableMigrations();
-    const ws = await db.create(stream.slice(0, 27));
+    const ws = await db.create(stream.slice(0, 28));
     const t = name => qualified(ws.names.schema, name);
     const q = (sql, params) => db.platform.query(sql, params);
     const member = async () => {

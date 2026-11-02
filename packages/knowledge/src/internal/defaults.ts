@@ -92,7 +92,7 @@ export async function recordDefaultKnowledgeIntent(tx: Tx, value: DefaultKnowled
 }
 
 /** The first common storage version whose intents record the GitHub user. */
-const githubIntentUserVersion = 28;
+const githubIntentUserVersion = 29;
 async function githubUsers(tx: Tx & { commonVersion?: number }) {
   if (typeof tx.commonVersion === 'number') return tx.commonVersion >= githubIntentUserVersion;
   return z
