@@ -169,11 +169,11 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
   try {
     await page.goto(`${origin}/${workspace.slug}/knowledge`);
     const main = page.getByRole('main');
+    // The automatic GitHub source and the hand-picked one share one row: 26 of 33 items are searchable.
     await main.getByText('ada-dev · all repositories', { exact: true }).waitFor();
-    await main.getByText('acme/repo-0 and 9 more · 10 repositories', { exact: true }).waitFor();
-    await main.getByText('21 chunks', { exact: true }).waitFor();
-    assert.equal(await main.getByText('acme/old', { exact: false }).count(), 0);
-    assert.equal(await main.getByText('All repositories', { exact: true }).count(), 0);
+    await main.getByText('78%', { exact: true }).waitFor();
+    assert.equal(await main.getByRole('button', { name: 'Actions for GitHub' }).count(), 1);
+    assert.equal(await main.getByText('acme/', { exact: false }).count(), 0);
     await main.getByText('ada@example.test · 3 drives', { exact: true }).waitFor();
     await main.getByText('ada@example.test · 1 mailbox', { exact: true }).waitFor();
     for (const product of ['Slack', 'Confluence'])
@@ -187,13 +187,17 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
     await main.getByRole('button', { name: 'Actions for Gmail' }).click();
     await page.getByRole('menuitem', { name: 'Resume syncing' }).click();
-    await main.getByRole('button', { name: 'Actions for GitHub' }).last().click();
+    for (let tries = 0; writes.length < 3 && tries < 50; tries++) await page.waitForTimeout(100);
+    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
-    for (let tries = 0; writes.length < 4 && tries < 50; tries++) await page.waitForTimeout(100);
-    assert.deepEqual(writes, [
+    for (let tries = 0; writes.length < 5 && tries < 50; tries++) await page.waitForTimeout(100);
+    assert.deepEqual(writes.slice(0, 3), [
       ['5', 'retry'],
       ['3', 'opt-out'],
       ['2', 'resume'],
+    ]);
+    assert.deepEqual(writes.slice(3).sort(), [
+      ['1', 'opt-out'],
       ['github-2', 'pause'],
     ]);
 
@@ -205,7 +209,7 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
       ingestion: { state: 'ready', pending: 0, failed: 0, failure: null },
     });
     await page.goto(`${origin}/${workspace.slug}/knowledge`);
-    await main.getByRole('button', { name: 'Actions for GitHub' }).first().click();
+    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
     await page.getByRole('menuitem', { name: 'Settings' }).click();
     await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
     await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();

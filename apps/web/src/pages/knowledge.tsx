@@ -25,7 +25,6 @@ import {
   type DefaultKnowledgeProduct,
 } from '@/features/integrations/default-knowledge-api';
 import { disclosures, indexing, problem, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
-import { searchablePercent } from '@/features/integrations/knowledge-meter';
 import {
   githubKnowledgeApi,
   githubKnowledgeErrorMessages,
@@ -46,89 +45,140 @@ const units: Record<DefaultKnowledgeProduct, [string, string]> = {
   confluence: ['space', 'spaces'],
 };
 
-type Source = KnowledgeBaseSource & { product: DefaultKnowledgeProduct; intentId?: string; githubSourceId?: string };
+type Status = KnowledgeBaseSource['status'];
+type Part = {
+  product: DefaultKnowledgeProduct;
+  account: string | null;
+  scope: number | 'all';
+  status: Status;
+  ready: number;
+  total: number;
+  error: string | null;
+  intentId?: string;
+  githubSourceId?: string;
+};
+type Source = KnowledgeBaseSource & { product: DefaultKnowledgeProduct; parts: Part[] };
+type Action = 'pause' | 'resume' | 'retry';
+type Work = {
+  intents: { intentId: string; action: DefaultKnowledgeAction }[];
+  github: { sourceId: string; input: ManageGitHub }[];
+};
 
-function status(intent: DefaultKnowledgeIntent, failed: boolean): KnowledgeBaseSource['status'] {
+const worst: Status[] = ['error', 'syncing', 'queued', 'paused', 'connected'];
+
+function status(intent: DefaultKnowledgeIntent, failed: boolean): Status {
   if (intent.state === 'opted-out') return 'paused';
   if (failed) return 'error';
   if (intent.syncState === 'queued' && intent.counts.total === 0) return 'queued';
   return indexing(intent) ? 'syncing' : 'connected';
 }
 
-function toSource(intent: DefaultKnowledgeIntent): Source {
-  const app = integrations.find(item => item.id === intent.product);
+function fromIntent(intent: DefaultKnowledgeIntent): Part {
   const disclosure = disclosures[intent.product];
   const issue = intent.state === 'active' ? problem(intent, disclosure.name, disclosure.scopes) : null;
-  const included = intent.scopes.included;
   const value = status(intent, issue !== null);
   return {
-    id: intent.intentId,
-    intentId: intent.intentId,
     product: intent.product,
-    name: disclosure.name,
-    ...(app ? { brand: app.brand } : {}),
+    account: intent.accountLabel,
     // GitHub's automatic source always covers every repository, so its single scope is not a repository count.
-    detail:
-      intent.product === 'github'
-        ? `${intent.accountLabel} · all repositories`
-        : `${intent.accountLabel} · ${included} ${units[intent.product][included === 1 ? 0 : 1]}`,
+    scope: intent.product === 'github' ? 'all' : intent.scopes.included,
     status: value,
-    progress: value === 'syncing' || value === 'error' ? searchablePercent(intent.counts) : null,
-    chunks: intent.counts.ready,
-    ...(issue && value === 'error' ? { error: issue.message } : {}),
+    ready: intent.counts.ready,
+    total: Math.max(
+      intent.counts.total,
+      intent.counts.ready +
+        intent.counts.queued +
+        intent.counts.failed +
+        intent.counts.skipped +
+        intent.counts.quotaLimited,
+    ),
+    error: issue && value === 'error' ? issue.message : null,
+    intentId: intent.intentId,
   };
 }
 
-function available(product: DefaultKnowledgeProduct): Source {
-  const app = integrations.find(item => item.id === product);
+function fromGitHub(source: GitHubSource): Part {
+  const value: Status =
+    source.state === 'paused'
+      ? 'paused'
+      : source.state === 'disconnected' || source.syncState === 'failed'
+        ? 'error'
+        : source.syncState === 'ready'
+          ? 'connected'
+          : source.syncState;
   return {
-    id: `available-${product}`,
-    product,
-    name: disclosures[product].name,
-    ...(app ? { brand: app.brand } : {}),
-    detail: disclosures[product].scope,
-    status: 'available',
-  };
-}
-
-function githubStatus(source: GitHubSource): KnowledgeBaseSource['status'] {
-  if (source.state === 'paused') return 'paused';
-  if (source.state === 'disconnected' || source.syncState === 'failed') return 'error';
-  return source.syncState === 'ready' ? 'connected' : source.syncState;
-}
-
-function fromGitHub(source: GitHubSource): Source {
-  const value = githubStatus(source);
-  const repositories = source.repositories?.length ?? 0;
-  return {
-    id: source.sourceId,
-    githubSourceId: source.sourceId,
     product: 'github',
-    name: 'GitHub',
-    brand: 'github',
-    detail: repositories
-      ? `${source.title} · ${repositories} ${units.github[repositories === 1 ? 0 : 1]}`
-      : source.title,
+    account: null,
+    scope: source.repositories?.length ?? 0,
     status: value,
-    progress: value === 'syncing' && source.counts?.total ? (source.counts.ready / source.counts.total) * 100 : null,
-    chunks: source.counts?.ready ?? 0,
-    ...(value === 'error'
-      ? {
-          error:
-            githubKnowledgeErrorMessages[source.failure ?? ''] ?? 'GitHub stopped syncing. Open Settings to fix it.',
-        }
-      : {}),
+    ready: source.counts?.ready ?? 0,
+    total: source.counts?.total ?? 0,
+    error:
+      value === 'error'
+        ? (githubKnowledgeErrorMessages[source.failure ?? ''] ?? 'GitHub stopped syncing. Open Settings to fix it.')
+        : null,
+    githubSourceId: source.sourceId,
+  };
+}
+
+function row(product: DefaultKnowledgeProduct, parts: Part[]): Source {
+  const app = integrations.find(item => item.id === product);
+  const disclosure = disclosures[product];
+  const base = { id: product, product, name: disclosure.name, ...(app ? { brand: app.brand } : {}), parts };
+  if (!parts.length) return { ...base, detail: disclosure.scope, status: 'available' };
+  const value = worst.find(state => parts.some(part => part.status === state)) ?? 'connected';
+  const live = parts.filter(part => part.status !== 'paused');
+  const counted = live.length ? live : parts;
+  const included = counted.some(part => part.scope === 'all')
+    ? 'all'
+    : counted.reduce((sum, part) => sum + (part.scope as number), 0);
+  const scope =
+    included === 'all' ? `all ${units[product][1]}` : `${included} ${units[product][included === 1 ? 0 : 1]}`;
+  const accounts = [...new Set(parts.flatMap(part => (part.account ? [part.account] : [])))].join(', ');
+  const ready = parts.reduce((sum, part) => sum + part.ready, 0);
+  const total = parts.reduce((sum, part) => sum + part.total, 0);
+  const error = parts.find(part => part.error)?.error;
+  return {
+    ...base,
+    detail: accounts ? `${accounts} · ${scope}` : scope,
+    status: value,
+    progress: value === 'syncing' || value === 'error' ? (total ? Math.floor((ready / total) * 100) : 0) : null,
+    chunks: ready,
+    ...(error && value === 'error' ? { error } : {}),
   };
 }
 
 function sourcesOf(items: readonly DefaultKnowledgeIntent[], github: readonly GitHubSource[]): Source[] {
-  const connected = items.map(toSource);
   const automatic = new Set(items.flatMap(item => item.sources.map(source => source.sourceId)));
-  const added = github.filter(source => source.state !== 'removed' && !automatic.has(source.sourceId)).map(fromGitHub);
-  const missing = defaultKnowledgeProducts.filter(
-    product => !items.some(item => item.product === product) && !added.some(source => source.product === product),
+  const parts = [
+    ...items.map(fromIntent),
+    ...github.filter(source => source.state !== 'removed' && !automatic.has(source.sourceId)).map(fromGitHub),
+  ];
+  const rows = defaultKnowledgeProducts.map(product =>
+    row(
+      product,
+      parts.filter(part => part.product === product),
+    ),
   );
-  return [...connected, ...added, ...missing.map(available)];
+  return [...rows.filter(item => item.status !== 'available'), ...rows.filter(item => item.status === 'available')];
+}
+
+// Each action only touches the sources it applies to, so resuming a row leaves its running sources alone.
+function workFor(source: Source, action: Action): Work {
+  const parts = source.parts.filter(part =>
+    action === 'pause'
+      ? part.status !== 'paused'
+      : action === 'resume'
+        ? part.status === 'paused'
+        : part.status === 'error',
+  );
+  const intentAction = ({ pause: 'opt-out', resume: 'resume', retry: 'retry' } as const)[action];
+  return {
+    intents: parts.flatMap(part => (part.intentId ? [{ intentId: part.intentId, action: intentAction }] : [])),
+    github: parts.flatMap(part =>
+      part.githubSourceId ? [{ sourceId: part.githubSourceId, input: { commandId: crypto.randomUUID(), action } }] : [],
+    ),
+  };
 }
 
 function KnowledgePanel({
@@ -142,14 +192,8 @@ function KnowledgePanel({
 }) {
   const navigate = useNavigate();
   const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
-  const { change } = useFeatureChanges();
-  const command = useCommand(
-    ({ intentId, action }: { intentId: string; action: DefaultKnowledgeAction }, signal: AbortSignal) =>
-      api.manage(intentId, action, signal),
-    () => change({ keys: [defaultKnowledgeKeys] }),
-    [defaultKnowledgeKeys],
-  );
   const github = useMemo(() => githubKnowledgeApi(workspaceId), [workspaceId]);
+  const { change } = useFeatureChanges();
   const githubRead = useFeatureRead({
     key: [...githubSourceKeys, 'list'],
     load: github.list,
@@ -159,22 +203,19 @@ function KnowledgePanel({
     maxChecks: 15,
   });
   const githubSources = githubRead.state.kind === 'ready' ? githubRead.state.data.items : null;
-  const githubCommand = useCommand(
-    ({ sourceId, input }: { sourceId: string; input: ManageGitHub }, signal: AbortSignal) =>
-      github.manage(sourceId, input, signal),
-    () => change({ keys: [[...githubSourceKeys, 'list']] }),
-    [githubSourceKeys],
+  const command = useCommand(
+    (work: Work, signal: AbortSignal) =>
+      Promise.all([
+        ...work.intents.map(({ intentId, action }) => api.manage(intentId, action, signal)),
+        ...work.github.map(({ sourceId, input }) => github.manage(sourceId, input, signal)),
+      ]),
+    () => change({ keys: [defaultKnowledgeKeys, [...githubSourceKeys, 'list']] }),
+    [defaultKnowledgeKeys, [...githubSourceKeys, 'list']],
   );
   const sources = useMemo(() => sourcesOf(items, githubSources ?? []), [items, githubSources]);
-  const githubActions = { 'opt-out': 'pause', resume: 'resume', retry: 'retry' } as const;
-  const manage = (action: DefaultKnowledgeAction) => (source: KnowledgeBaseSource) => {
-    const { intentId, githubSourceId } = source as Source;
-    if (intentId && !command.locked) void command.send({ intentId, action });
-    if (githubSourceId && !githubCommand.locked)
-      void githubCommand.send({
-        sourceId: githubSourceId,
-        input: { commandId: crypto.randomUUID(), action: githubActions[action] },
-      });
+  const manage = (action: Action) => (source: KnowledgeBaseSource) => {
+    const work = workFor(source as Source, action);
+    if (!command.locked && (work.intents.length || work.github.length)) void command.send(work);
   };
   const open = (source: KnowledgeBaseSource) =>
     void navigate({
@@ -185,7 +226,6 @@ function KnowledgePanel({
   return (
     <div className="space-y-4">
       <CommandFeedback state={command.state} retry={command.retry} />
-      <CommandFeedback state={githubCommand.state} retry={githubCommand.retry} />
       <KnowledgeBase sources={sources}>
         <KnowledgeBaseHeader subtitle="Your automatic Knowledge" />
         <KnowledgeBaseDiagram>
@@ -204,7 +244,7 @@ function KnowledgePanel({
           onConnect={open}
           onSettings={open}
           onRetry={manage('retry')}
-          onPauseSync={manage('opt-out')}
+          onPauseSync={manage('pause')}
           onResumeSync={manage('resume')}
         />
       </KnowledgeBase>
