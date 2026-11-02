@@ -453,7 +453,7 @@ const descriptions: Record<ToolName, string> = {
   'rows.page':
     'Read typed rows from one active table revision when a compact page is sufficient. Returns rows ordered by ID, at most 1–100 (default 25), and a cursor; pass after for the next page. Results omit inaccessible rows and do not search or sort—use rows.list for the applied-revision query interface. To find a person or linked row by name, use rows.resolveReference instead of paging.',
   'tables.propose':
-    'Prepare a table/schema review from JSON; it never creates or changes tables. First read skills.read(table-authoring), then submit its exact proposal shape. The result is a human-review draft; correct invalid arguments and submit a new draft rather than treating it as a safe retry of a write.',
+    'Prepare a table/schema review from JSON, including archiving or restoring a table; it never creates or changes tables. First read skills.read(table-authoring), then submit its exact proposal shape. The result is a human-review draft; correct invalid arguments and submit a new draft rather than treating it as a safe retry of a write.',
   'slack.resolve':
     'Resolve a Slack person, channel, or conversation name before any Slack action; use exact returned destination IDs. Results contain matches or ambiguity, not message content and not a send permission. It has no paging; ask the human to choose when more than one destination matches.',
   'slack.message.send':
