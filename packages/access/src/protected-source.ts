@@ -400,7 +400,7 @@ export async function requireProtectedSource(
       break;
     case 'public-web':
       break;
-    // Saved definitions and shared artifacts never carry personal memory; row drafts bind it with requirePersonalMemorySource.
+    // Saved definitions and shared artifacts never carry personal memory; chat drafts bind it with requirePersonalMemorySource.
     case 'shared-slack-turn':
     case 'personal-memory':
     case 'unknown':
