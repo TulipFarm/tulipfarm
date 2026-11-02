@@ -8,6 +8,7 @@ import { WorkspaceSkillError } from '@tulipfarm/agents/workspace-skill-contracts
 import { WorkflowConflict } from '@tulipfarm/workflows';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
+import type { FileBytes } from '@tulipfarm/files';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { authConfig, type registerAuth } from './auth.ts';
@@ -25,6 +26,7 @@ export function registerAuthoringDrafts(
     wake?: ((work: Work) => Promise<void>) | undefined;
     agentSetup?: AgentSetupOptions | undefined;
     githubSubscriptions?: GitHubSubscriptions | undefined;
+    fileBytes?: FileBytes | undefined;
   },
 ) {
   const service = createAuthoringDrafts(
@@ -34,6 +36,7 @@ export function registerAuthoringDrafts(
     dependencies.agentSetup,
     undefined,
     dependencies.githubSubscriptions,
+    dependencies.fileBytes,
   );
   const params = z.strictObject({ workspaceId: z.uuid(), chatId: z.uuid(), draftId: z.uuid() });
   const validation = routeValidation({

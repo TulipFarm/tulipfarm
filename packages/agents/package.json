@@ -312,6 +312,7 @@
     "@tulipfarm/github": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/slack": "workspace:*",

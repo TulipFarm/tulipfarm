@@ -270,6 +270,10 @@ export async function resultSources(
     case 'knowledge.search':
     case 'knowledge.read':
     case 'knowledge.retrieve':
+    case 'knowledge.list':
+    case 'knowledge.add':
+    case 'knowledge.update':
+    case 'knowledge.remove':
     case 'conversation.messages.read':
     case 'files.read':
       return [];

@@ -293,6 +293,18 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
         );
+      if (code === 'knowledge-quota')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'This is too large for Knowledge, so nothing was added. Ask chat for a shorter note or a smaller file.',
+        );
+      if (code === 'knowledge-file-unavailable')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'Files can’t be read right now, so nothing changed in Knowledge. Try again later.',
+        );
       if (code === 'file-restore-destination')
         throw new TableRequestError(
           response.status,

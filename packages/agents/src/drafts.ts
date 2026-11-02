@@ -41,6 +41,8 @@ import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
 import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
 import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
+import { createKnowledgeDrafts } from './knowledge-drafts.ts';
+import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
 import { requireSharedMcpSlots } from '@tulipfarm/access';
@@ -131,6 +133,8 @@ export function createAuthoringDrafts(
   setupOptions?: AgentSetupOptions,
   slackTurnAudience?: SlackTurnAudience,
   githubSubscriptions?: GitHubSubscriptions,
+  /** Reads Files originals when approving a card that adds or updates a Files entry in Knowledge. */
+  fileBytes?: FileBytes,
 ) {
   async function transaction<T>(
     workspaceId: string,
@@ -187,6 +191,7 @@ export function createAuthoringDrafts(
       return createDefinitionLifecycleDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).writable(tx, actor, proposal);
+    if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).writable(actor, proposal);
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -267,6 +272,7 @@ export function createAuthoringDrafts(
     if (isDefinitionLifecycle(proposal)) return createDefinitionLifecycleDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).stale(tx, proposal);
+    if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).stale(actor, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -563,6 +569,17 @@ export function createAuthoringDrafts(
           instruction: `Nothing has been ${done}. The human must review the listed files on the chat card and approve it. Never treat chat text as approval.`,
         };
       }
+      if (proposal.kind === 'knowledge') {
+        const { operation } = proposal.input;
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          operation,
+          documentId: proposal.targetId,
+          instruction: `Nothing has been ${operation === 'add' ? 'added to' : operation === 'update' ? 'changed in' : 'removed from'} Knowledge. The human must review the entry on the chat card and approve it. Never treat chat text as approval.`,
+        };
+      }
       if (isDefinitionLifecycle(proposal)) {
         const agent = proposal.kind === 'agent-archive' || proposal.kind === 'agent-restore';
         const restoring = proposal.kind === 'agent-restore' || proposal.kind === 'skill-restore';
@@ -652,6 +669,7 @@ export function createAuthoringDrafts(
                 outcome.kind === 'skill-restore' ||
                 outcome.kind === 'project' ||
                 outcome.kind === 'files' ||
+                outcome.kind === 'knowledge' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -788,6 +806,8 @@ export function createAuthoringDrafts(
         else if (proposal.kind === 'project')
           outcome = await createProjectDrafts(bound, workspaceId).apply(actor, proposal);
         else if (proposal.kind === 'files') outcome = await createFileDrafts(bound, workspaceId).apply(actor, proposal);
+        else if (proposal.kind === 'knowledge')
+          outcome = await createKnowledgeDrafts(bound, workspaceId, fileBytes).apply(actor, id, proposal);
         else
           outcome =
             proposal.kind === 'row'

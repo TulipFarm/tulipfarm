@@ -73,6 +73,27 @@ const fileDraftInput = z
     input => input.change.kind !== 'move' || input.items.every(item => item.fingerprint),
     'A move needs the access check for each item',
   );
+const knowledgeTitle = z.string().trim().min(1).max(512);
+const knowledgeContent = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('note'), text: z.string().min(1).max(100_000) }),
+  z.strictObject({ kind: z.literal('file'), fileId: uuidSchema, fileName: z.string() }),
+]);
+const knowledgeDraftInput = z.discriminatedUnion('operation', [
+  z.strictObject({ operation: z.literal('add'), title: knowledgeTitle, content: knowledgeContent }),
+  z.strictObject({
+    operation: z.literal('update'),
+    expectedRevisionId: uuidSchema,
+    previousTitle: z.string(),
+    title: knowledgeTitle,
+    content: knowledgeContent,
+  }),
+  z.strictObject({
+    operation: z.literal('remove'),
+    expectedRevisionId: uuidSchema,
+    title: z.string(),
+    entry: z.enum(['note', 'file']),
+  }),
+]);
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -102,6 +123,8 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('skill-restore'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('project'), targetId: uuidSchema, input: projectDraftInput }),
   z.strictObject({ kind: z.literal('files'), targetId: uuidSchema, input: fileDraftInput }),
+  /** targetId is the Knowledge document: a new ID when adding. */
+  z.strictObject({ kind: z.literal('knowledge'), targetId: uuidSchema, input: knowledgeDraftInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -145,6 +168,11 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     kind: z.literal('files'),
     change: z.enum(['rename', 'move', 'trash', 'restore']),
     fileIds: z.array(z.uuid()),
+  }),
+  z.object({
+    kind: z.literal('knowledge'),
+    operation: z.enum(['add', 'update', 'remove']),
+    documentId: z.uuid(),
   }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
@@ -207,6 +235,7 @@ export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is 
   ['agent-archive', 'agent-restore', 'skill-archive', 'skill-restore'].includes(proposal.kind);
 export type ProjectProposal = Extract<AuthoringProposal, { kind: 'project' }>;
 export type FilesProposal = Extract<AuthoringProposal, { kind: 'files' }>;
+export type KnowledgeProposal = Extract<AuthoringProposal, { kind: 'knowledge' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;
