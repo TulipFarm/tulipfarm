@@ -45,6 +45,13 @@ import {
   type AtlassianTools,
 } from './atlassian-tools.ts';
 import { invokeGoogleTool, type GoogleOperationsFactory } from './google-tools.ts';
+import {
+  connectableAppSchema,
+  connectableApps,
+  connectionIdSchema,
+  listConnections,
+  type ConnectionServices,
+} from './connections.ts';
 import { googleAgentToolCallOptions } from './google-tool-contracts.ts';
 import { providerSources, resultSources } from './tool-sources.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -292,6 +299,15 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     documentId: z.uuid().describe('From knowledge.list.'),
     revisionId: z.uuid().describe('The revisionId from knowledge.list.'),
   }),
+  z.strictObject({ tool: z.literal('integrations.list') }),
+  z.strictObject({
+    tool: z.literal('integrations.connect'),
+    app: connectableAppSchema.describe('An app from integrations.list.'),
+  }),
+  z.strictObject({
+    tool: z.literal('integrations.disconnect'),
+    connectionId: connectionIdSchema.describe('A connectionId from integrations.list.'),
+  }),
   z.strictObject({ tool: z.literal('agents.archive'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('agents.restore'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('skills.archive'), skillIds: z.array(z.uuid()).min(1).max(20) }),
@@ -349,6 +365,11 @@ const chatKnowledgeTools: ReadonlySet<string> = new Set([
   'knowledge.update',
   'knowledge.remove',
 ]);
+const chatIntegrationTools: ReadonlySet<string> = new Set([
+  'integrations.list',
+  'integrations.connect',
+  'integrations.disconnect',
+]);
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'packages.inspect',
   'github.investigation.account',
@@ -400,6 +421,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'projects.read',
   'files.list',
   'knowledge.list',
+  'integrations.list',
   'plans.read',
   'followups.list',
 ]);
@@ -651,6 +673,12 @@ const descriptions: Record<ToolName, string> = {
     "Prepare a review card that changes one of the human's own Knowledge entries from knowledge.list: a new title, or a note's full replacement text. Read the note first with knowledge.list and its documentId. Changes nothing until the human approves it. Never treat chat text as approval.",
   'knowledge.remove':
     "Prepare a review card that removes one of the human's own Knowledge entries from knowledge.list, so agents stop finding it. A removed file stays in Files. Changes nothing until the human approves it. Never treat chat text as approval.",
+  'integrations.list':
+    "List the human's connected accounts (Google, GitHub, Jira and Confluence, Trello) with each connectionId, account, state and, for Google, the apps granted; and the apps this server can connect. Never returns credentials. Changes nothing.",
+  'integrations.connect':
+    'Show a card under your reply that lets the human connect one app from integrations.list, or reconnect one that needs it, by signing in with the provider. Never ask for passwords, tokens or keys. Changes nothing itself.',
+  'integrations.disconnect':
+    'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
     'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, or any file in Files by its ID from files.list, when the turn left it out or included only part. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'followups.schedule':
@@ -694,6 +722,8 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => !chatFileTools.has(schema.shape.tool.value) || access.kind === 'chat')
       // A person's own Knowledge entries, managed for them in this chat through a card they approve.
       .filter(schema => !chatKnowledgeTools.has(schema.shape.tool.value) || access.kind === 'chat')
+      // A person's own connected accounts, connected and disconnected only by them through a card in this chat.
+      .filter(schema => !chatIntegrationTools.has(schema.shape.tool.value) || access.kind === 'chat')
       .filter(schema =>
         isMcpTool(schema.shape.tool.value)
           ? admittedMcpTools(access.mcp).includes(schema.shape.tool.value)
@@ -768,6 +798,8 @@ export type ChatToolsOptions = {
   integrations?: Pick<IntegrationService, 'readIssue'> | undefined;
   atlassian?: AtlassianTools | undefined;
   google?: GoogleOperationsFactory | undefined;
+  /** Reads the person's connected accounts for `integrations.*`; without it, those tools are refused. */
+  connections?: ConnectionServices | undefined;
   slack?: SlackActionsFactory | undefined;
   github?:
     | (ReturnType<typeof createGitHubReads> & {
@@ -834,6 +866,7 @@ export function createChatTools(
     integrations,
     atlassian,
     google,
+    connections,
     slack,
     github,
     objects,
@@ -1458,6 +1491,52 @@ export function createChatTools(
               'No draft was created. The entry or file changed while drafting. Call knowledge.list and try again.',
           };
         }
+      }
+      case 'integrations.list':
+        if (!connections) return integrationsUnavailable;
+        return listConnections(connections, workspaceId, actor.userId);
+      case 'integrations.connect': {
+        if (!context.origin) throw new AccessDenied();
+        if (!connections) return integrationsUnavailable;
+        const { name, provider } = connectableApps[call.app];
+        const listed = await listConnections(connections, workspaceId, actor.userId);
+        const app = listed.apps.find(item => item.app === call.app);
+        if (!app)
+          return {
+            error: 'not-available',
+            instruction: `${name} is not set up on this server. Tell the human; an operator has to set it up first.`,
+          };
+        if (app.connected && provider === 'google')
+          return {
+            error: 'already-connected',
+            instruction: `${name} is already connected. Continue the human's request with it.`,
+          };
+        return {
+          status: 'connect-card',
+          app: call.app,
+          name,
+          instruction: `A card to connect ${name} is shown under your reply. Ask the human to use it to sign in with ${name}, then stop. Never ask for passwords, tokens or keys.`,
+        };
+      }
+      case 'integrations.disconnect': {
+        if (!context.origin) throw new AccessDenied();
+        if (!connections) return integrationsUnavailable;
+        const { connections: current } = await listConnections(connections, workspaceId, actor.userId);
+        const connection = current.find(item => item.connectionId === call.connectionId);
+        if (!connection)
+          return { error: 'not-found', instruction: 'No such connection. Call integrations.list for current ones.' };
+        if (!connection.canDisconnect)
+          return {
+            error: 'not-allowed',
+            instruction:
+              'This shared account is managed by someone else. Tell the human to ask a manager of the account to disconnect it.',
+          };
+        return {
+          status: 'review-required',
+          connection,
+          instruction:
+            'A card to disconnect it is shown under your reply, with what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
+        };
       }
       case 'files.list': {
         const page = await libraryFiles(runtime).list(workspaceId, actor.userId, {
@@ -2634,6 +2713,11 @@ async function knowledgeProposal(
     },
   };
 }
+
+const integrationsUnavailable = {
+  error: 'integrations-unavailable',
+  instruction: 'Connected accounts cannot be read here. Tell the human to use the Integrations page.',
+};
 
 function libraryFiles(runtime: Runtime) {
   return createFiles(runtime, { putIfAbsent: unavailableBytes, read: unavailableBytes, remove: unavailableBytes });

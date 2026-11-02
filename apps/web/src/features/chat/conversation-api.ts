@@ -86,6 +86,12 @@ const imageReceiptSchema = z.array(
   }),
 );
 export type ImageReceipt = z.infer<typeof imageReceiptSchema>[number];
+/** Mirrors `integrationCardSchema` in @tulipfarm/conversations/contracts. */
+const integrationCardSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('connect'), app: z.string() }),
+  z.object({ action: z.literal('disconnect'), connectionId: z.string() }),
+]);
+export type IntegrationCardView = z.infer<typeof integrationCardSchema>;
 const messageSchema = z.object({
   id: z.uuid(),
   sequence: z.number().int().positive(),
@@ -110,6 +116,7 @@ const messageSchema = z.object({
         importId: z.uuid().optional(),
         followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
+        integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),
         rowChange: rowChangeSchema.optional(),
