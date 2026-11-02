@@ -165,7 +165,7 @@ try {
     await screenshot(page, 'availability', theme);
 
     items = catalogFixture([]);
-    const setupGuide = 'https://docs.tulipfarm.ai/self-hosting/models/';
+    const setupGuide = 'https://tulipfarm.ai/docs/self-hosting/models/';
     await page.goto(`${origin}/acme`);
     await page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }).waitFor();
     await notifyChange(page, workspace.id, 'ada', 'catalog');

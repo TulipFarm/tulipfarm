@@ -188,7 +188,7 @@ try {
         .waitFor();
       assert.equal(
         await page.getByRole('link', { name: 'Model setup guide' }).getAttribute('href'),
-        'https://docs.tulipfarm.ai/self-hosting/models/',
+        'https://tulipfarm.ai/docs/self-hosting/models/',
       );
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.close();
