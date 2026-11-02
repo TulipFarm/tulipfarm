@@ -50,7 +50,7 @@ export const selfHostSections = {
   infrastructure: ['Infrastructure credentials you choose. Use URL-safe values: openssl rand -hex 32'],
   models: [
     'Models. Set the API key of at least one provider; the shipped model catalog serves every model whose provider key is set.',
-    'Providers, custom catalogs and endpoints: https://docs.tulipfarm.ai/self-hosting/models/',
+    'Providers, custom catalogs and endpoints: https://tulipfarm.ai/docs/self-hosting/models/',
   ],
   turnstile: [
     'Optional Cloudflare Turnstile challenge for sign-in. Unset disables it; set both keys for your hostname.',
@@ -61,7 +61,7 @@ export const selfHostSections = {
   ],
   embeddings: [
     'Semantic knowledge search. Disabled unless set. The provider must serve',
-    'text-embedding-3-large at 1536 dimensions. See https://docs.tulipfarm.ai/self-hosting/models/#embedding-providers',
+    'text-embedding-3-large at 1536 dimensions. See https://tulipfarm.ai/docs/self-hosting/models/#embedding-providers',
   ],
   temporal: [
     'Temporal. COMPOSE_PROFILES=temporal runs Temporal (server, UI, schema and namespace jobs) in this stack.',
@@ -1106,7 +1106,7 @@ export const settings: readonly Setting[] = [
     secret: false,
     default: 'azure-foundry',
     description:
-      '`azure-foundry` or `openai-compatible`. Either must serve `text-embedding-3-large` at 1536 dimensions. See [embedding providers](https://docs.tulipfarm.ai/self-hosting/models/#embedding-providers).',
+      '`azure-foundry` or `openai-compatible`. Either must serve `text-embedding-3-large` at 1536 dimensions. See [embedding providers](https://tulipfarm.ai/docs/self-hosting/models/#embedding-providers).',
     selfHost: { section: 'embeddings', example: 'openai-compatible', commented: true },
   },
   {
@@ -1201,7 +1201,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Comma-separated sign-in methods to allow: `password`, `magic-link`, `google`. Unset allows `magic-link` when an email transport is configured and `google` when its client ID and secret are set; `password` must be listed. A listed method without its credentials logs a warning and stays off. Without email, an admin runs `pnpm auth:reset-password <email>` for a password reset link. See [sign-in methods](https://docs.tulipfarm.ai/self-hosting/sign-in/).',
+      'Comma-separated sign-in methods to allow: `password`, `magic-link`, `google`. Unset allows `magic-link` when an email transport is configured and `google` when its client ID and secret are set; `password` must be listed. A listed method without its credentials logs a warning and stays off. Without email, an admin runs `pnpm auth:reset-password <email>` for a password reset link. See [sign-in methods](https://tulipfarm.ai/docs/self-hosting/sign-in/).',
     selfHost: {
       section: 'sign-in',
       example: 'password,magic-link,google',
@@ -1238,13 +1238,13 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      '`acs` or `smtp`. Unset uses ACS when `ACS_CONNECTION_STRING` is set, otherwise SMTP when `SMTP_HOST` is set. Any email setting disables local dev sign-in. See [email transports](https://docs.tulipfarm.ai/self-hosting/email/#choose-a-transport).',
+      '`acs` or `smtp`. Unset uses ACS when `ACS_CONNECTION_STRING` is set, otherwise SMTP when `SMTP_HOST` is set. Any email setting disables local dev sign-in. See [email transports](https://tulipfarm.ai/docs/self-hosting/email/#choose-a-transport).',
     selfHost: {
       section: 'sign-in',
       example: 'smtp',
       commented: true,
       comment:
-        'Email through any SMTP server instead of ACS. See https://docs.tulipfarm.ai/self-hosting/email/#choose-a-transport',
+        'Email through any SMTP server instead of ACS. See https://tulipfarm.ai/docs/self-hosting/email/#choose-a-transport',
     },
   },
   {

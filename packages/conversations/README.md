@@ -52,7 +52,7 @@ The executor calls the injected `ConversationReply` outside the transaction, the
 rechecks authorization, head identity, lease, epoch, and generation before publishing.
 The worker's [metered reply](../../apps/worker/src/conversation-activities.ts) connects
 model routing, tools, source checks, and credit accounting. Inspect that composition
-and [model configuration](https://docs.tulipfarm.ai/self-hosting/models/) for supported
+and [model configuration](https://tulipfarm.ai/docs/self-hosting/models/) for supported
 families and limits rather than the original deterministic responder behavior.
 
 `createConversationExecutor` takes the same `ChatSkills` port as its last argument.

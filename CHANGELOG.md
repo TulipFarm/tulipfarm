@@ -315,7 +315,7 @@ One version identifies all apps and images of a release.
   models from the catalog's vendor and name, so operator catalog families show
   their own name and a neutral logo for vendors without one, and an empty
   catalog shows "No models configured" with a link to the model setup guide.
-- Self-hosted model guide at https://docs.tulipfarm.ai/self-hosting/models/:
+- Self-hosted model guide at https://tulipfarm.ai/docs/self-hosting/models/:
   the five providers and their credentials, a full operator catalog example,
   capabilities, roles, custom and `openai-compatible` endpoints with
   `MODEL_ENDPOINT_HOSTS`, operator prices and credits, embeddings, and what

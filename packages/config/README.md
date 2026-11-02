@@ -242,7 +242,7 @@ An `api` the provider does not serve is rejected. Capabilities do not change
 mapping or price revisions. `"pricing": "unmetered"` marks a model whose usage
 costs zero.
 
-The [self-hosted models guide](https://docs.tulipfarm.ai/self-hosting/models/) is
+The [self-hosted models guide](https://tulipfarm.ai/docs/self-hosting/models/) is
 the operator reference. The web app does not load the catalog; it reads the
 server's `/model-catalog` route.
 

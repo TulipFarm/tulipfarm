@@ -1,7 +1,7 @@
 # Self-hosted stack
 
 [`compose.yaml`](compose.yaml) runs TulipFarm on one machine with Docker Compose 2.20
-or later. Full guides live at [docs.tulipfarm.ai](https://docs.tulipfarm.ai).
+or later. Full guides live at [tulipfarm.ai/docs](https://tulipfarm.ai/docs/).
 
 ```sh
 cp self-host/.env.example self-host/.env   # then fill in the values
