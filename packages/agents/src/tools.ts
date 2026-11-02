@@ -299,6 +299,23 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     documentId: z.uuid().describe('From knowledge.list.'),
     revisionId: z.uuid().describe('The revisionId from knowledge.list.'),
   }),
+  z.strictObject({ tool: z.literal('memory.read') }),
+  z.strictObject({
+    tool: z.literal('memory.edit'),
+    revision: z.number().int().min(0).describe('The revision from memory.read.'),
+    content: z
+      .string()
+      .max(10_000)
+      .describe('The whole new memory document, not a diff. Keep every line the human did not ask to change.'),
+  }),
+  z.strictObject({
+    tool: z.literal('memory.forget'),
+    text: z
+      .string()
+      .min(1)
+      .max(10_000)
+      .describe('Text copied exactly from memory.read, such as one whole line. Every occurrence is removed.'),
+  }),
   z.strictObject({ tool: z.literal('integrations.list') }),
   z.strictObject({
     tool: z.literal('integrations.connect'),
@@ -365,6 +382,7 @@ const chatKnowledgeTools: ReadonlySet<string> = new Set([
   'knowledge.update',
   'knowledge.remove',
 ]);
+const chatMemoryTools: ReadonlySet<string> = new Set(['memory.read', 'memory.edit', 'memory.forget']);
 const chatIntegrationTools: ReadonlySet<string> = new Set([
   'integrations.list',
   'integrations.connect',
@@ -421,6 +439,7 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'projects.read',
   'files.list',
   'knowledge.list',
+  'memory.read',
   'integrations.list',
   'plans.read',
   'followups.list',
@@ -677,6 +696,12 @@ const descriptions: Record<ToolName, string> = {
     "List the human's connected accounts (Google, GitHub, Jira and Confluence, Trello) with each connectionId, account, state and, for Google, the apps granted; and the apps this server can connect. Never returns credentials. Changes nothing.",
   'integrations.connect':
     'Show a card under your reply that lets the human connect one app from integrations.list, or reconnect one that needs it, by signing in with the provider. Never ask for passwords, tokens or keys. Changes nothing itself.',
+  'memory.read':
+    "Read the human's own personal memory: the preferences they saved for how you reply, with its revision. Works only in their private chats outside projects and Slack. Changes nothing.",
+  'memory.edit':
+    "Prepare a review card that replaces the human's own personal memory with new full text, for example to add, reword or reorder preferences. Call memory.read first and pass its revision. The card shows the change; nothing changes until the human approves it. Never treat chat text as approval. To remove something, use memory.forget.",
+  'memory.forget':
+    "Remove exact text from the human's own personal memory at once, when they ask you to forget something. Copy the text exactly from memory.read. The card under your reply lets them undo it. Don't repeat the removed text.",
   'integrations.disconnect':
     'Show a card under your reply that lets the human disconnect one connection from integrations.list. The card shows what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
   'files.read':
@@ -722,6 +747,8 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => !chatFileTools.has(schema.shape.tool.value) || access.kind === 'chat')
       // A person's own Knowledge entries, managed for them in this chat through a card they approve.
       .filter(schema => !chatKnowledgeTools.has(schema.shape.tool.value) || access.kind === 'chat')
+      // A person's own personal memory, read and changed only by them in their private chat.
+      .filter(schema => !chatMemoryTools.has(schema.shape.tool.value) || access.kind === 'chat')
       // A person's own connected accounts, connected and disconnected only by them through a card in this chat.
       .filter(schema => !chatIntegrationTools.has(schema.shape.tool.value) || access.kind === 'chat')
       .filter(schema =>
@@ -1490,6 +1517,28 @@ export function createChatTools(
             instruction:
               'No draft was created. The entry or file changed while drafting. Call knowledge.list and try again.',
           };
+        }
+      }
+      case 'memory.read':
+      case 'memory.edit':
+      case 'memory.forget': {
+        if (!context.origin) throw new AccessDenied();
+        try {
+          return await invokeMemory(runtime, workspaceId, actor, callId, context.origin, call);
+        } catch (error) {
+          if (!(error instanceof AgentError)) throw error;
+          if (error.code === 'memory-unavailable')
+            return {
+              error: 'memory-unavailable',
+              instruction:
+                'Personal memory is not used in project or Slack chats, so it was not read or changed. Tell the human to ask in a private chat outside projects, or to edit it in Settings.',
+            };
+          if (error.code === 'draft-stale')
+            return {
+              error: 'draft-stale',
+              instruction: 'No draft was created. Memory changed since memory.read. Call memory.read and try again.',
+            };
+          throw error;
         }
       }
       case 'integrations.list':
@@ -2617,6 +2666,45 @@ const noKnowledgeDraft = (error: string, instruction: string) => ({
   instruction: `No draft was created. ${instruction}`,
 });
 
+async function invokeMemory(
+  runtime: AgentStorage,
+  workspaceId: string,
+  actor: HumanActor,
+  callId: string,
+  origin: Parameters<ReturnType<typeof createAuthoringDrafts>['propose']>[3],
+  call: Extract<FrameworkCall, { tool: 'memory.read' | 'memory.edit' | 'memory.forget' }>,
+) {
+  const drafts = createAuthoringDrafts(runtime);
+  if (call.tool === 'memory.read') return drafts.readMemory(workspaceId, actor, origin.conversationId);
+  if (call.tool === 'memory.forget') {
+    const forgotten = await drafts.forgetMemory(workspaceId, actor, callId, origin, call.text);
+    return forgotten
+      ? {
+          status: 'forgotten',
+          ...forgotten,
+          instruction:
+            'Removed from memory. The card under your reply lets the human undo it. Confirm briefly without repeating the removed text.',
+        }
+      : {
+          error: 'not-found',
+          instruction:
+            'Nothing was removed: memory does not contain that exact text. Call memory.read and copy it exactly.',
+        };
+  }
+  const current = await drafts.readMemory(workspaceId, actor, origin.conversationId);
+  if (current.revision !== call.revision) throw new AgentError('draft-stale');
+  if (current.content === call.content)
+    return { error: 'no-change', instruction: 'No draft was created. Memory already says exactly this.' };
+  return drafts.propose(workspaceId, actor, callId, origin, {
+    kind: 'memory',
+    input: {
+      operation: 'edit',
+      expectedRevision: call.revision,
+      previousContent: current.content,
+      content: call.content,
+    },
+  });
+}
 async function knowledgeProposal(
   knowledge: KnowledgeDrafts,
   workspaceId: string,

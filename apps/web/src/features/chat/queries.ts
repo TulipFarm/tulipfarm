@@ -77,7 +77,9 @@ export function useConversationChanges() {
                         ? 'files'
                         : kind === 'knowledge'
                           ? 'knowledge'
-                          : 'workflows',
+                          : kind === 'memory'
+                            ? 'memory'
+                            : 'workflows',
             ],
           ],
         }),

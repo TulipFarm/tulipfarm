@@ -1906,6 +1906,8 @@ function ConversationTools({
               'knowledge.add',
               'knowledge.update',
               'knowledge.remove',
+              'memory.edit',
+              'memory.forget',
             ].includes(tool.tool) ||
               tool.rowDraftId === tool.id),
         )

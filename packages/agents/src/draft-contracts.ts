@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { savePersonalMemorySchema } from '@tulipfarm/conversations/personal-memory-contracts';
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { saveAgentSchema, agentCommandStatusSchema } from './saved-contracts.ts';
 import { saveWorkspaceSkillSchema, workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
@@ -94,6 +95,24 @@ const knowledgeDraftInput = z.discriminatedUnion('operation', [
     entry: z.enum(['note', 'file']),
   }),
 ]);
+const memoryContent = savePersonalMemorySchema.shape.content;
+const memoryRevision = savePersonalMemorySchema.shape.expectedRevision;
+/** The requester's own personal memory. A restore card undoes a chat forget: `forgotten` is the text it removed. */
+const memoryDraftInput = z.discriminatedUnion('operation', [
+  z.strictObject({
+    operation: z.literal('edit'),
+    expectedRevision: memoryRevision,
+    previousContent: z.string(),
+    content: memoryContent,
+  }),
+  z.strictObject({
+    operation: z.literal('restore'),
+    expectedRevision: memoryRevision,
+    previousContent: z.string(),
+    content: memoryContent,
+    forgotten: z.string(),
+  }),
+]);
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -125,6 +144,7 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('files'), targetId: uuidSchema, input: fileDraftInput }),
   /** targetId is the Knowledge document: a new ID when adding. */
   z.strictObject({ kind: z.literal('knowledge'), targetId: uuidSchema, input: knowledgeDraftInput }),
+  z.strictObject({ kind: z.literal('memory'), input: memoryDraftInput }),
   z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -174,6 +194,7 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     operation: z.enum(['add', 'update', 'remove']),
     documentId: z.uuid(),
   }),
+  z.object({ kind: z.literal('memory'), operation: z.enum(['edit', 'restore']), revision: z.number().int() }),
 ]);
 export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('create') }),
@@ -236,6 +257,7 @@ export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is 
 export type ProjectProposal = Extract<AuthoringProposal, { kind: 'project' }>;
 export type FilesProposal = Extract<AuthoringProposal, { kind: 'files' }>;
 export type KnowledgeProposal = Extract<AuthoringProposal, { kind: 'knowledge' }>;
+export type MemoryProposal = Extract<AuthoringProposal, { kind: 'memory' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;
 export type DraftView = z.infer<typeof draftViewSchema>;
 export type AgentDraftChange = z.infer<typeof agentDraftChangeSchema>;
