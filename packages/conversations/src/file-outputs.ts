@@ -186,7 +186,9 @@ export async function createFileOutput(
         parentId: file.parentId,
       },
       derivedFrom: [
-        ...inputs.map(source => ({ fileId: source.fileId, sha256: source.read.sha256, readAt: source.read.readAt })),
+        ...inputs.flatMap(source =>
+          source.read ? [{ fileId: source.fileId, sha256: source.read.sha256, readAt: source.read.readAt }] : [],
+        ),
         ...images
           .filter(image => !inputs.some(source => source.fileId === image.fileId))
           .map(({ fileId, sha256, readAt }) => ({ fileId, sha256, readAt })),

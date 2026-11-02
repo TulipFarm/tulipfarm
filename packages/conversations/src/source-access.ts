@@ -10,7 +10,7 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from '@tulipfarm/access';
-import { requireReadableFile } from '@tulipfarm/files';
+import { requireCitedLibraryFile, requireReadableFile } from '@tulipfarm/files';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { sourceDependencySchema } from './results.ts';
@@ -67,6 +67,9 @@ export async function requireResultSources(
         break;
       case 'tulipfarm-file':
         await requireReadableFile(tx, actor, source.fileId);
+        break;
+      case 'library-file':
+        await requireCitedLibraryFile(tx, actor, source.fileId, source.read !== null);
         break;
       case 'workflow-definition':
       case 'workflow-provider':
@@ -185,7 +188,7 @@ export async function requireRetainedToolSources(tx: AuthorizationTransaction, a
 /** Files read for a turn stay readable by its requester through delivery. */
 export async function requireFileSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
   for (const source of sourceDependenciesSchema.parse(sources))
-    if (source.kind === 'tulipfarm-file' || source.kind === 'google-file')
+    if (source.kind === 'tulipfarm-file' || source.kind === 'library-file' || source.kind === 'google-file')
       await requireProtectedSource(tx, actor, source);
 }
 

@@ -207,10 +207,12 @@ export async function providerSources(
 
 const ids = z.array(z.object({ id: z.uuid() }));
 type McpProvenanceCall = { tool: 'mcp.call' | 'mcp.search' | 'mcp.describe' };
+/** `actor` is who ran the call; a result listing Files items cites them as that member's, so it needs one. */
 export async function resultSources(
   tx: AgentTransaction,
   call: FrameworkCall | McpProvenanceCall,
   result: unknown,
+  actor?: HumanActor,
 ): Promise<SourceDependency[]> {
   switch (call.tool) {
     case 'mcp.call':
@@ -361,6 +363,14 @@ export async function resultSources(
         .object({ projects: z.array(z.object({ id: z.uuid(), revision: z.number().int() })) })
         .parse(result)
         .projects.map(item => ({ kind: 'project', projectId: item.id, revision: item.revision }));
+    case 'files.list':
+      if (!actor) throw new AccessDenied();
+      return z
+        .object({ items: z.array(z.object({ id: z.uuid() })) })
+        .parse(result)
+        .items.map(
+          item => ({ kind: 'library-file', fileId: item.id, membershipId: actor.membershipId, read: null }) as const,
+        );
     case 'projects.read':
       return [
         {
@@ -422,6 +432,10 @@ export async function resultSources(
     case 'workflows.archive':
     case 'workflows.restore':
     case 'projects.draft':
+    case 'files.rename':
+    case 'files.move':
+    case 'files.trash':
+    case 'files.restore':
     case 'agents.archive':
     case 'agents.restore':
     case 'skills.archive':

@@ -219,6 +219,7 @@ export async function recordConversationResultProvenance(
       case 'workflow-provider':
       case 'knowledge-document':
       case 'tulipfarm-file':
+      case 'library-file':
       case 'google-file':
       case 'private-task':
       case 'mcp-integration':
