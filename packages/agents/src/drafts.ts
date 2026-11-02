@@ -418,7 +418,7 @@ export function createAuthoringDrafts(
     }
   }
   /**
-   * Only row drafts may carry personal memory, and only the requester's own; every other draft refuses it.
+   * A draft may carry only the requester's own personal memory: they review the exact change before it is saved.
    * Only row drafts may carry the Slack thread they were asked from, checked against its current audience.
    */
   async function requireSources(
@@ -436,7 +436,7 @@ export function createAuthoringDrafts(
       new Set(),
       undefined,
       false,
-      proposal.kind === 'row',
+      true,
       audience && (eventId => audience(tx, workspaceId, actor, eventId)),
     );
   }

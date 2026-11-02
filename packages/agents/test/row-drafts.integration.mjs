@@ -397,7 +397,7 @@ test('chat row writes after untrusted content become member-approved review draf
   );
 
   await t.test(
-    "another member's personal memory is refused and no other draft kind accepts personal memory",
+    "another member's personal memory is refused and other drafts accept only the requester's own",
     async () => {
       const before = await live();
       const foreign = await chatTool(createCall('foreign memory'), [
@@ -420,11 +420,19 @@ test('chat row writes after untrusted content become member-approved review draf
         { tool: 'skills.draft' },
         [{ kind: 'personal-memory', membershipId: owner.membershipId }],
         {
-          invoke: context =>
-            createAuthoringDrafts(context.runtime).propose(w.id, context.actor, randomUUID(), context.origin, skill),
+          invoke: async context => ({
+            result: await createAuthoringDrafts(context.runtime).propose(
+              w.id,
+              context.actor,
+              context.callId,
+              context.origin,
+              skill,
+            ),
+            sources: [],
+          }),
         },
       );
-      assert.equal(own.result.error, 'access-denied');
+      assert.equal(own.result.status, 'review-required');
       assert.deepEqual(await live(), before);
       assert.equal(
         Number(
@@ -435,7 +443,7 @@ test('chat row writes after untrusted content become member-approved review draf
             )
           ).rows[0].count,
         ),
-        0,
+        1,
       );
     },
   );
