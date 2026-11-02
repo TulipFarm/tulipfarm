@@ -6,7 +6,7 @@ import type { IntegrationCardView } from './conversation-api';
 import { googleApi, googleError } from '@/lib/google-workspace';
 import { githubApi, githubError } from '@/lib/github';
 import { atlassianApi, atlassianError } from '@/lib/atlassian';
-import { integrations, makerOf, providers, type Integration } from '@/features/integrations/catalog';
+import { integrationById, makerOf, providers, type Integration } from '@/features/integrations/catalog';
 import { connector } from '@/features/integrations/connect';
 import { statusOf, useIntegrationStatus } from '@/features/integrations/status';
 import {
@@ -29,7 +29,7 @@ const connectable = (app: Integration | undefined): app is Connectable =>
   !!app && app.provider !== 'soon' && app.provider !== 'workflow' && app.provider !== 'github';
 
 function ConnectCard({ workspaceId, appId }: { workspaceId: string; appId: string }) {
-  const app = integrations.find(item => item.id === appId);
+  const app = integrationById(appId);
   if (!connectable(app)) return null;
   return <Connect workspaceId={workspaceId} app={app} />;
 }

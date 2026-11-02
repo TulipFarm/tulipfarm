@@ -147,6 +147,19 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
 
     await main.getByRole('button', { name: 'Connect Slack' }).click();
     await page.waitForURL(`${origin}/${workspace.slug}/integrations/slack?tab=knowledge`);
+
+    Object.assign(items[0], {
+      counts: counts(12),
+      ingestion: { state: 'ready', pending: 0, failed: 0, failure: null },
+    });
+    await page.goto(`${origin}/${workspace.slug}/knowledge`);
+    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+    await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
+    await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
+    await page.goto(`${origin}/${workspace.slug}/integrations/github-personal?tab=knowledge`);
+    await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
+    await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

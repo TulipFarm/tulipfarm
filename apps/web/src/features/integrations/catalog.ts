@@ -148,7 +148,7 @@ export const integrations: Integration[] = [
     ],
   },
   {
-    id: 'github-personal',
+    id: 'github',
     name: 'GitHub',
     brand: 'github',
     category: 'Code',
@@ -379,8 +379,9 @@ export type IntegrationTab = (typeof integrationTabs)[number];
 const legacyHashes: Record<string, { id: string; tab: IntegrationTab }> = {
   'google-workspace': { id: 'gmail', tab: 'accounts' },
   'google-proposals-heading': { id: 'gmail', tab: 'accounts' },
-  'github-integrations': { id: 'github-personal', tab: 'accounts' },
-  'github-accounts': { id: 'github-personal', tab: 'accounts' },
+  'github-integrations': { id: 'github', tab: 'accounts' },
+  'github-accounts': { id: 'github', tab: 'accounts' },
+  'github-personal': { id: 'github', tab: 'overview' },
   'slack-account': { id: 'slack', tab: 'accounts' },
   'atlassian-heading': { id: 'jira', tab: 'accounts' },
   'trello-accounts': { id: 'trello', tab: 'accounts' },
@@ -391,4 +392,7 @@ export function integrationFromHash(hash: string) {
   const app = integrations.find(item => item.id === (legacy?.id ?? hash));
   return app ? { app, tab: legacy?.tab ?? ('overview' as const) } : null;
 }
-export const integrationById = (id: string) => integrations.find(item => item.id === id);
+// Old links and stored chat cards still name the integration by its former id.
+const formerIds: Record<string, string> = { 'github-personal': 'github' };
+export const currentIntegrationId = (id: string) => formerIds[id] ?? id;
+export const integrationById = (id: string) => integrations.find(item => item.id === currentIntegrationId(id));
