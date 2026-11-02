@@ -42,6 +42,8 @@ import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.t
 import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
+import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
+import { readPersonalMemory, replaceOwnPersonalMemory } from '@tulipfarm/conversations/personal-memory';
 import type { FileBytes } from '@tulipfarm/files';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { Work } from '@tulipfarm/workflows/contracts';
@@ -192,6 +194,8 @@ export function createAuthoringDrafts(
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).writable(actor, proposal);
+    // Only the requester's own document is ever read or replaced.
+    if (proposal.kind === 'memory') return;
     if (proposal.kind === 'row') {
       await requireTablePermission(tx, actor, proposal.input.tableId, 'table.row.read');
       return requireTablePermission(tx, actor, proposal.input.tableId, `table.row.${rowOperation(proposal)}`);
@@ -273,6 +277,7 @@ export function createAuthoringDrafts(
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).stale(actor, proposal);
+    if (proposal.kind === 'memory') return memoryStale(tx, actor, proposal);
     if (proposal.kind === 'row') {
       const { tableId, expectedAppliedRevision } = proposal.input;
       if (
@@ -469,6 +474,7 @@ export function createAuthoringDrafts(
     ]);
     return transaction(workspaceId, actor, parsed.kind.startsWith('workflow'), async (tx, _actor, bound) => {
       await owned(tx, actor, origin.conversationId);
+      if (parsed.kind === 'memory') await requireMemoryChat(tx, actor, origin.conversationId);
       const proposal =
         parsed.kind === 'workflow'
           ? await chatWorkflow(tx, bound, workspaceId, actor, origin.conversationId, parsed)
@@ -569,6 +575,14 @@ export function createAuthoringDrafts(
           instruction: `Nothing has been ${done}. The human must review the listed files on the chat card and approve it. Never treat chat text as approval.`,
         };
       }
+      if (proposal.kind === 'memory')
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          instruction:
+            'Your memory has not changed. The human must review the change on the chat card and approve it. Never treat chat text as approval.',
+        };
       if (proposal.kind === 'knowledge') {
         const { operation } = proposal.input;
         return {
@@ -670,6 +684,7 @@ export function createAuthoringDrafts(
                 outcome.kind === 'project' ||
                 outcome.kind === 'files' ||
                 outcome.kind === 'knowledge' ||
+                outcome.kind === 'memory' ||
                 outcome.kind === 'row'
               ? 'saved'
               : outcome.receipt.status === 'accepted'
@@ -808,7 +823,11 @@ export function createAuthoringDrafts(
         else if (proposal.kind === 'files') outcome = await createFileDrafts(bound, workspaceId).apply(actor, proposal);
         else if (proposal.kind === 'knowledge')
           outcome = await createKnowledgeDrafts(bound, workspaceId, fileBytes).apply(actor, id, proposal);
-        else
+        else if (proposal.kind === 'memory') {
+          // The chat may have moved into a project since the card was drafted.
+          await requireMemoryChat(tx, actor, chatId);
+          outcome = await applyMemory(tx, actor, proposal);
+        } else
           outcome =
             proposal.kind === 'row'
               ? { kind: 'row', operation: rowOperation(proposal), recordId: rowRecordId(id, proposal) }
@@ -839,5 +858,58 @@ export function createAuthoringDrafts(
     if (wake) await Promise.all(woken.map(wake));
     return decided;
   }
-  return { propose, read, decide };
+  /** The requester's own memory, read only in a chat it joins. */
+  async function readMemory(workspaceId: string, actor: HumanActor, chatId: string) {
+    return transaction(workspaceId, actor, false, async tx => {
+      await owned(tx, actor, chatId);
+      await requireMemoryChat(tx, actor, chatId);
+      return readPersonalMemory(tx, actor);
+    });
+  }
+  /**
+   * Removes the exact text from the requester's memory now, and keeps the previous document on an Undo card under
+   * this draft ID. The card holds the removed content, so the model never receives it again.
+   */
+  async function forgetMemory(workspaceId: string, actor: HumanActor, id: string, origin: Origin, text: string) {
+    id = uuidSchema.parse(id);
+    const sources = sourcesSchema.parse(origin.sources);
+    return transaction(workspaceId, actor, true, async tx => {
+      await owned(tx, actor, origin.conversationId);
+      await requireMemoryChat(tx, actor, origin.conversationId);
+      await requireNoMcpDerived(tx, [
+        { kind: 'private-conversation', conversationId: origin.conversationId },
+        ...sources,
+      ]);
+      const current = await readPersonalMemory(tx, actor);
+      const next = forgetMemoryText(current.content, text);
+      if (next === undefined) return undefined;
+      const saved = await replaceOwnPersonalMemory(tx, actor, next, current.revision);
+      const proposal = authoringProposalSchema.parse({
+        kind: 'memory',
+        input: {
+          operation: 'restore',
+          expectedRevision: saved.revision,
+          previousContent: saved.content,
+          content: current.content,
+          forgotten: text,
+        },
+      });
+      await requireSources(tx, workspaceId, actor, proposal, sources);
+      await tx.client.query(
+        `INSERT INTO ${relation(tx, 'tf_chat_authoring_drafts')} (id,conversation_id,turn_id,membership_id,user_id,proposal,digest,sources) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          id,
+          origin.conversationId,
+          origin.turnId,
+          actor.membershipId,
+          actor.userId,
+          proposal,
+          createHash('sha256').update(canonicalJson(proposal)).digest('hex'),
+          JSON.stringify(sources),
+        ],
+      );
+      return { draftId: id, revision: saved.revision };
+    });
+  }
+  return { propose, read, decide, readMemory, forgetMemory };
 }

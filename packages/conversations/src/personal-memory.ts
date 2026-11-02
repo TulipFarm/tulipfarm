@@ -44,6 +44,26 @@ export const personalMemory = createPersonalMemory<AuthorizationTransaction & { 
 export const readPersonalMemory = personalMemory.read;
 export const replacePersonalMemory = personalMemory.replace;
 
+/** A change the member made themselves: it also drops their Bud preference records, so a later Bud Undo cannot bring back replaced content. */
+export async function replaceOwnPersonalMemory(
+  tx: AuthorizationTransaction & { commonVersion?: number },
+  actor: HumanActor,
+  nextContent: string,
+  expectedRevision: number,
+) {
+  const result = await replacePersonalMemory(tx, actor, nextContent, expectedRevision);
+  const installed = (
+    await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
+      qualified(tx.schema, 'tf_bud_preferences'),
+    ])
+  ).rows[0]?.installed;
+  if (installed)
+    await tx.client.query(`DELETE FROM ${qualified(tx.schema, 'tf_bud_preferences')} WHERE membership_id=$1`, [
+      actor.membershipId,
+    ]);
+  return result;
+}
+
 export function createPersonalMemoryService(runtime: ConversationRuntime) {
   async function human<T>(
     workspaceId: string,
@@ -60,19 +80,9 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
     });
   }
   async function replace(workspaceId: string, userId: string, nextContent: string, expectedRevision: number) {
-    return human(workspaceId, userId, true, async (tx, actor) => {
-      const result = await replacePersonalMemory(tx, actor, nextContent, expectedRevision);
-      const installed = (
-        await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
-          qualified(tx.schema, 'tf_bud_preferences'),
-        ])
-      ).rows[0]?.installed;
-      if (installed)
-        await tx.client.query(`DELETE FROM ${qualified(tx.schema, 'tf_bud_preferences')} WHERE membership_id=$1`, [
-          actor.membershipId,
-        ]);
-      return result;
-    });
+    return human(workspaceId, userId, true, (tx, actor) =>
+      replaceOwnPersonalMemory(tx, actor, nextContent, expectedRevision),
+    );
   }
   return {
     read: (workspaceId: string, userId: string) => human(workspaceId, userId, false, readPersonalMemory),

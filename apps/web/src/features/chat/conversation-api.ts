@@ -300,6 +300,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
         );
+      if (code === 'memory-unavailable')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'This chat is now in a project, where your memory isn’t used, so nothing changed. You can edit your memory in Settings.',
+        );
       if (code === 'knowledge-quota')
         throw new TableRequestError(
           response.status,

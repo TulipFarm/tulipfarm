@@ -274,6 +274,9 @@ export async function resultSources(
     case 'knowledge.add':
     case 'knowledge.update':
     case 'knowledge.remove':
+    case 'memory.read':
+    case 'memory.edit':
+    case 'memory.forget':
     case 'integrations.list':
     case 'integrations.connect':
     case 'integrations.disconnect':
