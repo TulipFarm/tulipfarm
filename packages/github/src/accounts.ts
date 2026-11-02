@@ -319,6 +319,7 @@ export function createGitHubAccounts(options: {
               membershipId: actor.membershipId,
               accountKey: row.id,
               accountLabel: who.login,
+              githubUserId: who.id,
             });
             if (recorded.created) intent = recorded.intentId;
           }
