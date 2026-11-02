@@ -240,6 +240,7 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
                       app={app}
                       status={status}
                       workspaceId={workspaceId}
+                      slug={slug}
                       onChanged={() => void refresh()}
                       primary={primary}
                     />
@@ -534,12 +535,14 @@ function Accounts({
   app,
   status,
   workspaceId,
+  slug,
   onChanged,
   primary,
 }: {
   app: Integration;
   status: Status | null;
   workspaceId: string;
+  slug: string;
   onChanged: () => void;
   primary: ReactNode;
 }) {
@@ -570,7 +573,8 @@ function Accounts({
       </div>
     );
   if (app.provider === 'slack') return <SlackAccount workspaceId={workspaceId} knowledge={false} />;
-  if (app.provider === 'github-personal') return <GitHubAccounts workspaceId={workspaceId} onChanged={onChanged} />;
+  if (app.provider === 'github-personal')
+    return <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />;
   if (app.provider === 'atlassian' || app.provider === 'trello')
     return (
       <AtlassianIntegrations

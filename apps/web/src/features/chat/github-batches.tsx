@@ -9,6 +9,7 @@ import { githubOperationLabel } from '@tulipfarm/conversations/tool-activity';
 import { ResultCard, type ResultAppAction } from '@tulipfarm/sprout/result-card';
 import { useOptionalCanvas } from './canvas-state';
 import { Disclosure } from '@/components/disclosure';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 
 const evidenceMessages = {
   preparatory: 'Preparatory Git objects were saved. They do not confirm the branch update.',
@@ -40,6 +41,7 @@ export function GitHubBatches({
   const changes = useIntegrationChanges();
   const [localBusy, setBusy] = useState<string | null>(null);
   const [localError, setError] = useState(false);
+  const [authors, setAuthors] = useState<Record<string, 'member' | 'bot'>>({});
   const lock = useRef(false);
   const previousRevision = useRef(revision);
   const base = `${apiOrigin}/v1/workspaces/${workspaceId}/github/${task ? 'tasks' : 'chats'}/${chatId}/batches`;
@@ -63,7 +65,13 @@ export function GitHubBatches({
         method: 'POST',
         credentials: 'include',
         headers: decision ? { 'Content-Type': 'application/json' } : {},
-        body: decision ? JSON.stringify({ digest: batch.digest, decision: action }) : null,
+        body: decision
+          ? JSON.stringify({
+              digest: batch.digest,
+              decision: action,
+              ...(action === 'approve' && batch.bot ? { author: authors[batch.snapshot.id] ?? 'member' } : {}),
+            })
+          : null,
         signal: AbortSignal.timeout(120000),
       });
       if (!response.ok) throw new Error('unconfirmed');
@@ -291,7 +299,9 @@ export function GitHubBatches({
                 {batch.expired ? 'Approval expired' : `Expires ${new Date(batch.snapshot.expiresAt).toLocaleString()}`}{' '}
                 ·{' '}
                 {batch.decision === 'approve'
-                  ? 'Approved'
+                  ? batch.author === 'bot'
+                    ? 'Approved · Posts as the TulipFarm bot'
+                    : 'Approved'
                   : batch.decision === 'reject'
                     ? 'Rejected'
                     : 'Awaiting your approval'}
@@ -531,6 +541,27 @@ export function GitHubBatches({
                 Actions run in this order and stop on failure or uncertainty. Recovery markers are part of the exact
                 approved body or commit message. An approval cannot be edited.
               </p>
+              {batch.bot && !batch.decision && !batch.expired && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm" id={`post-as-${batch.snapshot.id}`}>
+                    Post as
+                  </span>
+                  <ToggleGroup
+                    aria-labelledby={`post-as-${batch.snapshot.id}`}
+                    variant="outline"
+                    spacing={0}
+                    value={[authors[batch.snapshot.id] ?? 'member']}
+                    onValueChange={value => {
+                      const next = value[0];
+                      if (next === 'member' || next === 'bot')
+                        setAuthors(current => ({ ...current, [batch.snapshot.id]: next }));
+                    }}
+                  >
+                    <ToggleGroupItem value="member">You</ToggleGroupItem>
+                    <ToggleGroupItem value="bot">TulipFarm bot</ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 {!batch.decision && !batch.expired && (
                   <>

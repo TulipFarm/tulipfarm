@@ -122,3 +122,27 @@ test('reviewed output schema is validated by the shared session before response 
     }
   }
 });
+
+test('bot credentials skip the MCP binding and use the REST API', async () => {
+  const item = mcpWriteCases.find(item => item.operation.kind === 'issue.create');
+  const f = await mcpWriteFixture({ item });
+  const rest = [];
+  try {
+    const result = await dispatchGitHubWrite({
+      operation: item.operation,
+      credential: { ...credential, accessToken: 'bot-token', app: true },
+      bindings: f.bindings,
+      fetcher: async (url, init) => {
+        rest.push([String(url), new Headers(init.headers).get('authorization')]);
+        return Response.json({ id: 10, number: 1, user: { id: 123 } }, { status: 201 });
+      },
+      authorize: async () => true,
+    });
+    assert.equal(result.status, 'succeeded');
+    assert.deepEqual(f.calls, []);
+    assert.match(rest[0][0], /^https:\/\/api\.github\.com\/repos\//);
+    assert.match(rest[0][1], /bot-token/);
+  } finally {
+    await f.close();
+  }
+});

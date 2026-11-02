@@ -19,6 +19,7 @@ type Props = {
   onChange: (id: string) => void;
   disabled: boolean;
   error?: string | undefined;
+  helper?: string | undefined;
 };
 
 export function WorkspaceMemberPicker(props: Props) {
@@ -33,6 +34,7 @@ export function WorkspaceMemberPicker(props: Props) {
           value={props.value}
           onChange={props.onChange}
           error={props.error}
+          helper={props.helper}
           disabled={props.disabled || read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing}
           table={{ id: data.tableId, revision: data.revision }}
         />
@@ -49,6 +51,7 @@ function MemberChoices({
   onChange,
   disabled,
   error,
+  helper = 'Choose the person this invitation grants access to. Email alone never links a member.',
   table,
 }: Props & { table: Pick<TableDefinition, 'id' | 'revision'> }) {
   const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
@@ -79,14 +82,7 @@ function MemberChoices({
   const locked = disabled || !data || read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
   return (
     <div className="space-y-2">
-      <Field
-        id={id}
-        label="Workspace member"
-        required
-        disabled={disabled}
-        error={error}
-        helper="Choose the person this invitation grants access to. Email alone never links a member."
-      >
+      <Field id={id} label="Workspace member" required disabled={disabled} error={error} helper={helper}>
         <Select value={value} disabled={locked} onValueChange={next => onChange(next ?? '')}>
           <SelectTrigger width="full">
             <SelectValue>{label}</SelectValue>

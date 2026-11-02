@@ -35,6 +35,11 @@ const tokenSchema = z.object({
   }),
   repositories: z.array(z.object({ id: providerId })).length(1),
 });
+const writeTokenSchema = z.object({
+  token: tokenSchema.shape.token,
+  expires_at: z.iso.datetime(),
+  repositories: z.array(z.object({ full_name: z.string().max(200) })).length(1),
+});
 const bodyLimit = 131072;
 
 export function createGitHubAppProvider(options: {
@@ -67,7 +72,12 @@ export function createGitHubAppProvider(options: {
     const input = `${header}.${payload}`;
     return `${input}.${sign('RSA-SHA256', Buffer.from(input), privateKey).toString('base64url')}`;
   }
-  async function request(path: string, method: 'GET' | 'POST', body?: object): Promise<unknown> {
+  async function request(
+    path: string,
+    method: 'GET' | 'POST',
+    body?: object,
+    authorization = `Bearer ${jwt()}`,
+  ): Promise<unknown> {
     try {
       const response = await observeFetch(
         'github',
@@ -78,7 +88,7 @@ export function createGitHubAppProvider(options: {
         redirect: 'error',
         signal: AbortSignal.timeout(10000),
         headers: {
-          Authorization: `Bearer ${jwt()}`,
+          Authorization: authorization,
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2026-03-10',
           'User-Agent': 'TulipFarm',
@@ -164,5 +174,30 @@ export function createGitHubAppProvider(options: {
     if (expiry <= now || expiry > now + 3660000) throw new GitHubAppError('invalid-response');
     return operation(token.token);
   }
-  return { installation, withRepositoryToken };
+  /** A token for one repository with every permission the installation holds there; callers limit what it may do. */
+  async function repositoryWriteToken(owner: string, repo: string) {
+    const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const found = installationSchema.safeParse(await request(`${path}/installation`, 'GET'));
+    if (!found.success) throw new GitHubAppError('invalid-response');
+    if (found.data.app_id !== appId) throw new GitHubAppError('identity-mismatch');
+    if (found.data.suspended_at) throw new GitHubAppError('access-denied');
+    const result = writeTokenSchema.safeParse(
+      await request(`/app/installations/${found.data.id}/access_tokens`, 'POST', { repositories: [repo] }),
+    );
+    if (!result.success) throw new GitHubAppError('invalid-response');
+    const expiry = Date.parse(result.data.expires_at),
+      now = Date.now();
+    if (result.data.repositories[0]?.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase())
+      throw new GitHubAppError('identity-mismatch');
+    if (expiry <= now || expiry > now + 3660000) throw new GitHubAppError('invalid-response');
+    return result.data.token;
+  }
+  async function botUser(slug: string, token: string) {
+    const result = z
+      .object({ id: providerId, login: z.literal(`${slug}[bot]`), type: z.literal('Bot') })
+      .safeParse(await request(`/users/${encodeURIComponent(`${slug}[bot]`)}`, 'GET', undefined, `Bearer ${token}`));
+    if (!result.success) throw new GitHubAppError('invalid-response');
+    return { id: result.data.id, login: result.data.login };
+  }
+  return { installation, withRepositoryToken, repositoryWriteToken, botUser };
 }

@@ -118,6 +118,8 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/workspaces/{workspaceId}/github/accounts/{accountId}',
         '/v1/workspaces/{workspaceId}/github/accounts/{accountId}/disconnect',
         '/v1/workspaces/{workspaceId}/github/accounts/{accountId}/reconnect',
+        '/v1/workspaces/{workspaceId}/github/bot-grants',
+        '/v1/workspaces/{workspaceId}/github/bot-grants/remove',
         '/v1/workspaces/{workspaceId}/github/chats/{conversationId}/downloads/{downloadId}',
         '/v1/workspaces/{workspaceId}/github/chats/{conversationId}/selection',
         '/v1/workspaces/{workspaceId}/slack/channel-settings',

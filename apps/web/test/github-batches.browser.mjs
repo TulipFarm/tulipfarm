@@ -19,7 +19,14 @@ process.env.WEB_ORIGIN = origin;
 const f = await githubChatFixture(),
   app = Fastify();
 const auth = { api: { getSession: async () => ({ user: { id: f.member.userId }, session: { id: 'browser' } }) } };
-const options = { runtime: f.runtime, accounts: f.service, requireSources: requireDraftSources };
+const botAuthors = [];
+const bot = {
+  credential: async (member, owner, repo) => {
+    botAuthors.push(`${owner}/${repo}`);
+    return { ...member, identity: { id: '999', login: 'tulipfarm[bot]' }, scopes: [], app: true };
+  },
+};
+const options = { runtime: f.runtime, accounts: f.service, requireSources: requireDraftSources, bot };
 const batches = createGitHubBatches(options);
 await app.register(
   async routes => {
@@ -147,6 +154,7 @@ try {
   await sendProposal();
   await page.getByRole('button', { name: 'Approve exact batch' }).waitFor();
   assert.equal(effects.length, 0);
+  assert.equal(await page.getByText('Post as', { exact: true }).count(), 0);
   await page.screenshot({
     path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-batches-desktop.png',
     fullPage: true,
@@ -202,6 +210,24 @@ try {
   await page.getByText(/· Rejected$/).waitFor();
   assert.equal(effects.length, 2);
   loseResponse = false;
+  process.env.GITHUB_APP_PRIVATE_KEY = 'browser';
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_github_bot_grants')} (membership_id,repository,granted_by) VALUES ($1,'octocat/private',$1)`,
+    [f.member.membershipId],
+  );
+  f.decide(
+    [{ tool: 'github.personal.propose', actions: [{ ...action, title: 'Bot issue' }] }],
+    'Review the bot batch.',
+  );
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Post this issue as the bot.');
+  await sendProposal();
+  await page.getByRole('button', { name: 'TulipFarm bot', exact: true }).click();
+  await page.getByRole('button', { name: 'Approve exact batch' }).click();
+  await page.getByText(/Posts as the TulipFarm bot/).waitFor();
+  await page.getByRole('heading', { name: '1. issue.create · succeeded', exact: true }).last().waitFor();
+  assert.equal(effects.length, 3);
+  assert.deepEqual(botAuthors, ['octocat/private']);
+  delete process.env.GITHUB_APP_PRIVATE_KEY;
   const headSha = 'a'.repeat(40);
   const mergeEffects = [];
   let merged = false;

@@ -61,12 +61,16 @@ import { isActionsWrite } from './actions-writes.ts';
 import { isDiscussionWrite } from './discussion-writes.ts';
 import { checkDeletedProjectOwner, checkProjectContent, isProjectWrite } from './project-writes.ts';
 import { projectReader } from './write-provider.ts';
+import { botRepository, githubBot, type GitHubBot } from './bot.ts';
+import { type GitHubWrite } from './batch-contracts.ts';
 
 export type BatchOptions = {
   runtime: AccountRuntime;
   accounts: ReturnType<typeof createGitHubAccounts>;
   bindings?: readonly WriteBinding[];
   fetcher?: typeof fetch;
+  /** Defaults to the App configured in the environment. */
+  bot?: GitHubBot | null;
   requireSources: (
     tx: AuthorizationTransaction,
     actor: HumanActor,
@@ -83,6 +87,17 @@ export function createGitHubBatches(options: BatchOptions) {
   const access = batchAccess(options.runtime);
   const bindings = writeBindingsSchema.parse(options.bindings ?? []);
   const fetcher = observeFetch('github', 'request', options.fetcher ?? fetch);
+  const bot = options.bot === undefined ? githubBot() : options.bot;
+  async function author(credential: GitHubCredential, who: 'member' | 'bot' | null, operation: GitHubWrite) {
+    if (who !== 'bot') return credential;
+    if (!bot || !botRepository(operation) || !('owner' in operation) || !('repo' in operation))
+      throw new GitHubBatchError('batch-unavailable');
+    try {
+      return await bot.credential(credential, operation.owner, operation.repo);
+    } catch {
+      throw new GitHubBatchError('batch-unavailable');
+    }
+  }
   const executionFetch =
     (tx: AuthorizationTransaction, actor: HumanActor, snapshot: BatchSnapshot): typeof fetch =>
     async (url, init) => {
@@ -435,6 +450,7 @@ export function createGitHubBatches(options: BatchOptions) {
           if (row.snapshot.configurationDigest !== writeConfiguration(bindings))
             throw new GitHubBatchError('batch-conflict');
           if (view.decision !== 'approve') throw new GitHubBatchError('batch-approval-required');
+          if (view.author === 'bot' && !view.bot) throw new GitHubBatchError('batch-conflict');
           if (row.snapshot.origin.kind === 'task') {
             const taskId = row.snapshot.origin.taskId;
             const budget = await tx.client.query(
@@ -464,7 +480,9 @@ export function createGitHubBatches(options: BatchOptions) {
               `UPDATE ${batchTable(tx, 'action_receipts')} SET status='rejected' WHERE batch_id=$1 AND ordinal=$2 AND status='unknown'`,
               [id, ordinal],
             );
-          return operation ? { kind: 'claimed' as const, actor, row, operation } : { kind: 'stop' as const };
+          return operation
+            ? { kind: 'claimed' as const, actor, row, operation, author: view.author }
+            : { kind: 'stop' as const };
         });
         if (claimed.kind === 'completed') continue;
         if (claimed.kind === 'stop') break;
@@ -538,10 +556,11 @@ export function createGitHubBatches(options: BatchOptions) {
                 ).rowCount
               )
                 throw new GitHubBatchError('batch-conflict');
+              const writer = await author(credential, claimed.author, operation);
               attempted = !isFileWrite(operation);
               return dispatchGitHubWrite({
                 operation,
-                credential,
+                credential: writer,
                 bindings,
                 fetcher,
                 ...(preparedFile ? { preparedFile } : {}),
@@ -566,7 +585,8 @@ export function createGitHubBatches(options: BatchOptions) {
         } catch {
           if (
             !attempted &&
-            (isProjectWrite(operation) ||
+            (claimed.author === 'bot' ||
+              isProjectWrite(operation) ||
               isDiscussionWrite(operation) ||
               isActionsWrite(operation) ||
               isReleaseWrite(operation) ||
@@ -603,7 +623,7 @@ export function createGitHubBatches(options: BatchOptions) {
           if (!current) throw new GitHubBatchError('batch-conflict');
           const evidence = await reconcileGitHubWrite({
             operation: current,
-            credential,
+            credential: await author(credential, view.author, current),
             fetcher,
             marker: `<!-- tulipfarm:${id}:${action.ordinal} -->`,
             previousEvidence: action.reconciliation,
@@ -646,7 +666,7 @@ export function createGitHubBatches(options: BatchOptions) {
             if (!current) throw new GitHubBatchError('batch-conflict');
             const evidence = await reconcileGitHubWrite({
               operation: current,
-              credential,
+              credential: await author(credential, prepared.view.author, current),
               fetcher,
               marker: `<!-- tulipfarm:${id}:${action.ordinal} -->`,
               previousEvidence: action.reconciliation,

@@ -21,6 +21,7 @@ import { batchDigest } from './write-provider.ts';
 import { requireGitHubTaskExecution } from '@tulipfarm/access';
 import { contextColumn, contextId, requireGitHubOrigin, type GitHubContext } from './origin.ts';
 import { githubSelection } from './selection.ts';
+import { botGranted } from './bot.ts';
 
 export const batchRange = commonCompatibility;
 export const batchTable = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_github_${name}`);
@@ -71,15 +72,15 @@ export async function loadBatch(tx: AuthorizationTransaction, actor: HumanActor,
   return row;
 }
 export async function batchView(tx: AuthorizationTransaction, row: z.infer<typeof rowSchema>) {
-  const decision = z
-    .enum(['approve', 'reject'])
-    .nullable()
+  const decided = z
+    .object({ decision: z.enum(['approve', 'reject']), author: z.enum(['member', 'bot']) })
+    .optional()
     .parse(
       (
-        await tx.client.query(`SELECT decision FROM ${batchTable(tx, 'batch_decisions')} WHERE batch_id=$1`, [
+        await tx.client.query(`SELECT decision,author FROM ${batchTable(tx, 'batch_decisions')} WHERE batch_id=$1`, [
           row.snapshot.id,
         ])
-      ).rows[0]?.decision ?? null,
+      ).rows[0],
     );
   const receipts = z
     .array(actionOutcomeSchema)
@@ -93,7 +94,11 @@ export async function batchView(tx: AuthorizationTransaction, row: z.infer<typeo
     );
   return batchViewSchema.parse({
     ...row,
-    decision,
+    decision: decided?.decision ?? null,
+    author: decided?.author ?? null,
+    bot:
+      Boolean(process.env.GITHUB_APP_PRIVATE_KEY) &&
+      (await botGranted(tx, row.snapshot.membershipId, row.snapshot.actions)),
     actions: row.snapshot.actions.map(
       (_, ordinal) =>
         receipts.find(receipt => receipt.ordinal === ordinal) ?? {

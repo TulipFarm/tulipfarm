@@ -1318,16 +1318,25 @@ export const settings: readonly Setting[] = [
   {
     name: 'GITHUB_APP_SLUG',
     group: 'GitHub',
-    services: ['api'],
+    services: ['api', 'worker'],
     requirement: 'optional',
     secret: false,
     description:
       'URL name of the GitHub App, for example `tulipfarm-app` in `github.com/apps/tulipfarm-app`. When set, the GitHub Knowledge sheet shows an "Install the App" link so members can give the App access to private repositories.',
   },
   {
+    name: 'GITHUB_APP_PRIVATE_KEY',
+    group: 'GitHub',
+    services: ['api', 'worker'],
+    requirement: 'optional',
+    secret: true,
+    description:
+      'PEM private key of the GitHub App; `\\n` escapes are read as newlines. Requires `GITHUB_WEBHOOK_APP_ID`, `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_APP_SLUG`. When set, workspace admins can let members post approved GitHub changes as the App bot, one repository at a time. Unset hides the bot.',
+  },
+  {
     name: 'GITHUB_WEBHOOK_APP_ID',
     group: 'GitHub',
-    services: ['api'],
+    services: ['api', 'worker'],
     requirement: 'optional',
     secret: false,
     description:
