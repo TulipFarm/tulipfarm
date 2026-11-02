@@ -173,7 +173,9 @@ function PackageInput({
       {read.state.kind === 'loading' && <p role="status">Loading choices…</p>}
       {read.state.kind === 'ready' && choices.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No available {kind === 'integration' ? 'connections' : 'choices'}. Complete the workspace setup first.
+          {kind === 'team'
+            ? 'You’re not in a team that can own these resources. Ask a workspace admin to add you to one.'
+            : `No available ${kind === 'integration' ? 'connections' : 'choices'}. Complete the workspace setup first.`}
         </p>
       )}
       {(read.state.kind === 'error' || read.state.kind === 'unavailable') && (
@@ -212,6 +214,23 @@ export function PackageOffer({
   const [checking, setChecking] = useState(false);
   const sourceVersion = useRef(0);
   const allowNavigation = useRef(false);
+  const needsTeam = document.inputs.some(input => input.kind === 'team');
+  const teamDefault = useFeatureRead({
+    key: ['system-package-default-team'],
+    load: signal => api.defaultTeam(signal),
+    enabled: needsTeam,
+  });
+  const resolvingTeam = needsTeam && teamDefault.state.kind === 'loading';
+  const defaultTeam = needsTeam && teamDefault.state.kind === 'ready' ? teamDefault.state.data : null;
+  const implied = (input: SystemPackage['inputs'][number]) => !!defaultTeam && input.kind === 'team';
+  const questions = document.inputs.filter(input => !implied(input));
+  const allBindings: PackageBindings = { ...bindings };
+  const allLabels: Record<string, string> = { ...labels };
+  if (defaultTeam)
+    for (const input of document.inputs.filter(implied)) {
+      allBindings[input.key] = { kind: 'team', id: defaultTeam.id };
+      allLabels[input.key] = defaultTeam.label;
+    }
   const write = useTableWrite(
     async (input: PackageImport) => {
       const bytes = new Uint8Array(
@@ -241,7 +260,7 @@ export function PackageOffer({
     setChecking(true);
     setError('');
     try {
-      const result = await api.validate({ package: document, bindings });
+      const result = await api.validate({ package: document, bindings: allBindings });
       if (version === sourceVersion.current) setValidation(result);
     } catch (failure) {
       if (version === sourceVersion.current)
@@ -250,8 +269,8 @@ export function PackageOffer({
       setChecking(false);
     }
   }
-  const missing = document.inputs.find(input => !answered.includes(input.key));
-  const currentInput = document.inputs.find(input => input.key === editing) ?? missing;
+  const missing = questions.find(input => !answered.includes(input.key));
+  const currentInput = questions.find(input => input.key === editing) ?? missing;
   const currentBinding = currentInput && bindings[currentInput.key];
   const answerValid =
     !!currentInput &&
@@ -263,7 +282,7 @@ export function PackageOffer({
     const next = answered.includes(currentInput.key) ? answered : [...answered, currentInput.key];
     setAnswered(next);
     setEditing(null);
-    if (document.inputs.every(input => next.includes(input.key))) {
+    if (questions.every(input => next.includes(input.key))) {
       setStage('review');
       void check();
     }
@@ -317,12 +336,12 @@ export function PackageOffer({
       { id: 'start', component: 'PackageAction', action: 'start' },
     );
     actions.start = {
-      label: document.inputs.length ? 'Continue' : 'Review installation',
-      disabled: busy,
+      label: questions.length ? 'Continue' : 'Review installation',
+      disabled: busy || resolvingTeam,
       run: () => {
-        if (busy) return;
-        setStage(document.inputs.length ? 'questions' : 'review');
-        if (!document.inputs.length) void check();
+        if (busy || resolvingTeam) return;
+        setStage(questions.length ? 'questions' : 'review');
+        if (!questions.length) void check();
       },
     };
   }
@@ -333,7 +352,7 @@ export function PackageOffer({
         id: 'question-count',
         component: 'Text',
         variant: 'caption',
-        text: editing ? 'Update your answer' : `Question ${answered.length + 1} of ${document.inputs.length}`,
+        text: editing ? 'Update your answer' : `Question ${answered.length + 1} of ${questions.length}`,
       },
       { id: 'question', component: 'PackageQuestion' },
       { id: 'next', component: 'PackageAction', action: 'next' },
@@ -362,11 +381,17 @@ export function PackageOffer({
       { id: 'install', component: 'PackageAction', action: 'install' },
     );
     document.inputs.forEach((input, index) => {
+      const fixed = implied(input);
       components.push(
-        { id: `answer-${index}`, component: 'Row', children: [`answer-text-${index}`, `edit-${index}`] },
-        { id: `answer-text-${index}`, component: 'Text', text: `${input.title}: ${labels[input.key] ?? ''}` },
-        { id: `edit-${index}`, component: 'PackageAction', action: `edit-${input.key}` },
+        {
+          id: `answer-${index}`,
+          component: 'Row',
+          children: fixed ? [`answer-text-${index}`] : [`answer-text-${index}`, `edit-${index}`],
+        },
+        { id: `answer-text-${index}`, component: 'Text', text: `${input.title}: ${allLabels[input.key] ?? ''}` },
       );
+      if (fixed) return;
+      components.push({ id: `edit-${index}`, component: 'PackageAction', action: `edit-${input.key}` });
       actions[`edit-${input.key}`] = {
         label: `Change ${input.title}`,
         secondary: true,
@@ -388,7 +413,7 @@ export function PackageOffer({
             requestId: chatId,
             chatId,
             package: document,
-            bindings,
+            bindings: allBindings,
             approval: { packageDigest: validation.packageDigest, inputDigest: validation.inputDigest },
           });
       },
