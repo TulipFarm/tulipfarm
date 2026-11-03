@@ -56,6 +56,7 @@ import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
+import { createSecretsSweep } from './secrets-sweep.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
@@ -149,7 +150,9 @@ async function run() {
         if (!workspaces.length) namesCursor = null;
         if (failures.length) throw new AggregateError(failures, 'Table name conversion sweep failed');
       };
-      sweepTelemetry.push(searchJob, namesJob, ...(cleanupJob ? [cleanupJob] : []));
+      const secretsJob = createBackgroundJob('secrets-expiry', 60);
+      const secretsSweep = createSecretsSweep(coreResources.runtime, coreResources.readyTaskWorkspaces);
+      sweepTelemetry.push(searchJob, namesJob, secretsJob, ...(cleanupJob ? [cleanupJob] : []));
       const sweep = () => {
         importSweep ??= (async () => {
           await cleanupJob
@@ -159,6 +162,13 @@ async function run() {
           await namesJob
             .run(nameSweep)
             .catch(() => Runtime.instance().logger.error('Table name conversion sweep failed'));
+          await secretsJob
+            .run(() =>
+              secretsSweep((workspaceId, error) =>
+                Runtime.instance().logger.error('Secrets sweep failed', { workspaceId, ...errorAttributes(error) }),
+              ),
+            )
+            .catch(() => Runtime.instance().logger.error('Secrets sweep failed'));
         })().finally(() => {
           importSweep = undefined;
         });

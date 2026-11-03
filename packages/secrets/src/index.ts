@@ -11,3 +11,4 @@ export {
   type SecretsRuntime,
   type SecretTransaction,
 } from './service.ts';
+export * from './requests.ts';

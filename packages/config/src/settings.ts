@@ -36,6 +36,7 @@ export const settingGroups = [
   'Social publishing',
   'Slack',
   'Workspace MCP',
+  'Secrets',
   'Skills and code steps',
   'Recommendations',
   'Telemetry and flags',
@@ -1486,6 +1487,15 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description: '`true` dispatches tool calls to workspace MCP servers.',
+  },
+  {
+    name: 'SECRETS_ENABLED',
+    group: 'Secrets',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: false,
+    description:
+      '`true` lets members save secrets and agents ask for them. Secrets are encrypted with the `INTEGRATION_CREDENTIAL_KEY` keyring.',
   },
 
   {

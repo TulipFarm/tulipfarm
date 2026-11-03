@@ -22,6 +22,7 @@ import {
   requestInputSchema,
   requestOutcomeSchema,
   requestViewSchema,
+  secretsAnswerSchema,
 } from './request-contracts.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
 import {
@@ -298,6 +299,8 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       const row = await request(tx, chatId, requestId);
       await requireRequestSources(tx, actor, row);
       if (row.membership_id !== actor.membershipId) throw new AccessDenied();
+      // A secrets form is answered or declined only through the secrets service, which stores the values.
+      if (row.answer_schema.kind === 'secrets') throw new ConversationConflict('request-conflict');
       if (row.revision !== input.expectedRevision || row.status !== 'pending')
         throw new ConversationConflict('request-conflict');
       const status = row.expired ? 'expired' : operation === 'answer' ? 'answered' : 'cancelled';
@@ -426,9 +429,62 @@ export function createConversationRequests(runtime: ConversationRuntime) {
     });
   }
 
+  /**
+   * Settles a secrets form in the secrets service's transaction. Submitting or declining answers as the member;
+   * expiry settles without an answer. Does nothing when the request is no longer pending.
+   */
+  async function settleSecretRequest(
+    tx: AuthorizationTransaction,
+    input: {
+      workspaceId: string;
+      conversationId: string;
+      requestId: string;
+      secretRequestId: string;
+      membershipId: string;
+      outcome: { status: 'expired' | 'cancelled' } | z.input<typeof secretsAnswerSchema>;
+      actor?: HumanActor;
+      commandId?: string;
+    },
+  ) {
+    const row = await request(tx, uuidSchema.parse(input.conversationId), uuidSchema.parse(input.requestId));
+    if (
+      row.answer_schema.kind !== 'secrets' ||
+      row.answer_schema.secretRequestId !== input.secretRequestId ||
+      row.membership_id !== input.membershipId
+    )
+      throw new AccessDenied();
+    if (row.status !== 'pending') return;
+    if (!('kind' in input.outcome)) {
+      await settle(tx, row, input.outcome.status);
+    } else {
+      const answer = secretsAnswerSchema.parse(input.outcome);
+      const { actor } = input;
+      const commandId = uuidSchema.parse(input.commandId);
+      if (!actor || actor.membershipId !== row.membership_id) throw new AccessDenied();
+      const responseId = randomUUID();
+      const outcome = { requestId: row.id, revision: row.revision, status: 'answered', responseId };
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_conversation_commands')} (membership_id,command_id,operation,conversation_id,input_digest,outcome) VALUES ($1,$2,'answer',$3,$4,$5)`,
+        [actor.membershipId, commandId, row.conversation_id, digest({ requestId: row.id, answer }), outcome],
+      );
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_conversation_responses')} (id,conversation_id,request_id,request_revision,membership_id,command_id,answer) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [responseId, row.conversation_id, row.id, row.revision, actor.membershipId, commandId, answer],
+      );
+      await publish(tx, row.conversation_id, { kind: 'response', id: responseId }, actor);
+      await settle(tx, row, 'answered');
+    }
+    await notifyConversationChange(tx, {
+      workspaceId: uuidSchema.parse(input.workspaceId),
+      conversationId: row.conversation_id,
+      turnId: row.turn_id,
+    });
+  }
+
   return {
     create,
     createForChat,
+    settleSecretRequest,
     read,
     expire,
     readForRuntime,
@@ -442,5 +498,48 @@ export function createConversationRequests(runtime: ConversationRuntime) {
     ) => resolve(workspaceId, userId, chatId, requestId, 'answer', value, responseId),
     cancel: (workspaceId: string, userId: string, chatId: string, requestId: string, value: unknown) =>
       resolve(workspaceId, userId, chatId, requestId, 'cancel-request', value),
+  };
+}
+
+type SecretSettlement =
+  | { status: 'provided'; references: z.input<typeof secretsAnswerSchema>['references'] }
+  | { status: 'declined'; reason: string | null }
+  | { status: 'expired' | 'cancelled' };
+
+/**
+ * Resumes the chat turn waiting on a secrets form. Structurally matches `SettleRequest` from
+ * `@tulipfarm/secrets`, so this package does not depend on it.
+ */
+export function secretRequestSettlement(
+  requests: Pick<ReturnType<typeof createConversationRequests>, 'settleSecretRequest'>,
+) {
+  return async (
+    tx: AuthorizationTransaction,
+    request: {
+      workspaceId: string;
+      id: string;
+      membershipId: string;
+      origin: { kind: 'chat'; conversationId: string; conversationRequestId: string } | { kind: 'task' };
+    },
+    settlement: SecretSettlement,
+    context: { actor?: HumanActor; commandId?: string },
+  ) => {
+    // Only chats can create secret requests so far; a task origin here is a programming error.
+    if (request.origin.kind !== 'chat') throw new Error('Task secret requests are not supported');
+    const outcome =
+      settlement.status === 'provided'
+        ? { kind: 'secrets' as const, status: 'provided' as const, references: settlement.references, reason: null }
+        : settlement.status === 'declined'
+          ? { kind: 'secrets' as const, status: 'declined' as const, references: [], reason: settlement.reason }
+          : { status: settlement.status };
+    await requests.settleSecretRequest(tx, {
+      workspaceId: request.workspaceId,
+      conversationId: request.origin.conversationId,
+      requestId: request.origin.conversationRequestId,
+      secretRequestId: request.id,
+      membershipId: request.membershipId,
+      outcome,
+      ...context,
+    });
   };
 }

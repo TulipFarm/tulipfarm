@@ -46,6 +46,7 @@
     "@tulipfarm/memory-core": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
+    "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
     "@tulipfarm/social": "workspace:*",
     "@tulipfarm/tables": "workspace:*",

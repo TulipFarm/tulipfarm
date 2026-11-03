@@ -1252,6 +1252,7 @@ export const backgroundJobs = [
   'object-cleanup',
   'table-search',
   'table-names',
+  'secrets-expiry',
   'invitation-expiry',
   'table-cleanup',
   'email-dispatch',

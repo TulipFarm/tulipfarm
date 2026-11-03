@@ -697,7 +697,12 @@ export function createSecrets(options: SecretsOptions) {
       workspaceId: string,
       principal: SecretsPrincipal,
       id: string,
-      input: { requestId: string; expectedPolicyVersion: number; name?: string; expiresAt?: string | null },
+      input: {
+        requestId: string;
+        expectedPolicyVersion: number;
+        name?: string | undefined;
+        expiresAt?: string | null | undefined;
+      },
     ) {
       return authorized(workspaceId, principal, async (tx, actor) =>
         command(tx, actor, input.requestId, 'save', { id, ...input }, summarySchema, async () => {
