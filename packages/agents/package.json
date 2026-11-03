@@ -319,6 +319,7 @@
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
     "@tulipfarm/slack-presentation": "workspace:*",
     "@tulipfarm/tables": "workspace:*",

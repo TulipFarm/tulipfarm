@@ -59,6 +59,7 @@ import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
+import { secretsListCallSchema, secretsRequestCallSchema } from '@tulipfarm/secrets/contracts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubAccountError } from '@tulipfarm/github';
 import type { createGitHubReads } from '@tulipfarm/github/reads';
@@ -135,6 +136,8 @@ const tableProposalInput = z
 export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('packages.inspect'), url: z.url().max(2048) }),
   presentChoiceSchema,
+  secretsRequestCallSchema,
+  secretsListCallSchema,
   budPreferenceAskSchema,
   budPreferenceProposeSchema,
   ...toolCallSchema.options,
@@ -511,6 +514,10 @@ const descriptions: Record<ToolName, string> = {
     'Propose a preference inferred from this current private chat. Shows the exact proposed value for human acceptance; saves nothing until accepted. Do not scan other chats or include business records, secrets, or sensitive personal facts. Ask only this question and stop.',
   'present.choice':
     'Ask one question with selectable options immediately above the chat input. Required whenever you ask the human to choose between options; do not list options only in prose. Put the recommended option first and mark its label (Recommended). The human can also type an answer or skip. This pauses the reply until they respond. A choice is information, never permission, account selection, or approval to execute an action.',
+  'secrets.request':
+    'Ask the person in this chat for an API key, token, password or other secret through a private form, when a call needs one they have not given. You never see the value; you get references to use. Ask once for everything the task needs, then stop. Set a field placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise leave it out and the person chooses. Never ask for a secret in chat text. After a call is refused with a secret, make at most one new request rather than retrying the same secret.',
+  'secrets.list':
+    'List the secret references this chat holds: name, kind, placement, allowed destinations and status, never values. Check it before asking for a secret again.',
   'github.personal.propose':
     'Prepare exact private GitHub writes for the review card; use only IDs, heads, blobs, timestamps, and project node IDs from reads. It returns a batch and changes nothing until human approval. Files/uploads: 8 KiB each, eight total, 16 KiB/batch; binary needs base64, SHA-256, size. Releases start as drafts. Never replace an uncertain batch.',
   'mcp.call':
@@ -737,6 +744,12 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => slack || !schema.shape.tool.value.startsWith('slack.'))
       .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
       .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
+      // Secret forms are addressed to the person in this chat, and only when this deployment turns secrets on.
+      .filter(
+        schema =>
+          !schema.shape.tool.value.startsWith('secrets.') ||
+          (access.kind === 'chat' && process.env.SECRETS_ENABLED === 'true'),
+      )
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
@@ -948,6 +961,8 @@ export function createChatTools(
       case 'bud.preference.propose':
         throw new AccessDenied();
       case 'present.choice':
+      case 'secrets.request':
+      case 'secrets.list':
         throw new AccessDenied();
       case 'mcp.call':
       case 'mcp.search':

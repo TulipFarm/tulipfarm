@@ -22,6 +22,8 @@ export const toolActivityLabels = {
   'bud.preference.ask': 'Asking about your preferences',
   'bud.preference.propose': 'Preparing a preference for review',
   'present.choice': 'Asking you to choose',
+  'secrets.request': 'Asking you for a secret',
+  'secrets.list': 'Checking secrets in this chat',
   'tables.list': 'Listing business tables',
   'tables.definitions': 'Listing business tables',
   'tables.propose': 'Preparing table changes for review',
@@ -478,7 +480,11 @@ export function toolOutcomeStatus(output: unknown): z.infer<typeof activityStatu
   if (statuses.includes('cancelled')) return 'cancelled';
   if (
     statuses.some(
-      status => status === 'waiting-approval' || status === 'awaiting-approval' || status === 'selection-required',
+      status =>
+        status === 'waiting-approval' ||
+        status === 'awaiting-approval' ||
+        status === 'awaiting-input' ||
+        status === 'selection-required',
     )
   )
     return 'waiting';

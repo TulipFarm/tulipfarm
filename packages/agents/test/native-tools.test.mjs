@@ -68,12 +68,14 @@ for (const [label, args] of Object.entries(catalogs))
   });
 
 test('native tool names and descriptions follow the registered chat tools', t => {
-  const previous = process.env.SLACK_OUTBOUND_ENABLED;
-  process.env.SLACK_OUTBOUND_ENABLED = 'true';
-  t.after(() => {
-    if (previous === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
-    else process.env.SLACK_OUTBOUND_ENABLED = previous;
-  });
+  for (const name of ['SLACK_OUTBOUND_ENABLED', 'SECRETS_ENABLED']) {
+    const previous = process.env[name];
+    process.env[name] = 'true';
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
   const { tools } = nativeChatTools(undefined, true, undefined, true);
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)
@@ -89,6 +91,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
 
 test('optional tools appear only when their context admits them', () => {
   const names = (...args) => nativeChatTools(...args).tools.map(tool => tool.name);
+  assert.equal(names().includes('secrets_request'), false);
   assert.equal(names().includes('conversation_messages_read'), false);
   assert.ok(names(undefined, true).includes('conversation_messages_read'));
   assert.equal(names().includes('files_read'), false);

@@ -660,6 +660,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
+      '@tulipfarm/secrets':
+        specifier: workspace:*
+        version: link:../secrets
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../slack
