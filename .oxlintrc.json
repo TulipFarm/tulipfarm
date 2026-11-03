@@ -13,6 +13,28 @@
       }
     },
     {
+      "files": ["apps/api/**/*.{js,ts,mjs}", "apps/web/**/*.{js,jsx,ts,tsx,mjs}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "@tulipfarm/secrets/send",
+                "message": "Only the worker may decrypt secrets. The API encrypts but never decrypts."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["**/secrets/src/send*", "**/secrets/dist/send*"],
+                "message": "Only the worker may decrypt secrets. The API encrypts but never decrypts."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["apps/**/*.{js,jsx,ts,tsx,mjs}", "packages/**/*.{js,jsx,ts,tsx,mjs}"],
       "rules": {
         "tulipfarm/product-copy": "error"
