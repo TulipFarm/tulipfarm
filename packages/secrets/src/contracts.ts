@@ -231,3 +231,52 @@ export type SecretEvent = {
   details: Record<string, unknown>;
   createdAt: string;
 };
+
+export const fieldIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/);
+export const requestFieldSchema = z.strictObject({
+  id: fieldIdSchema,
+  label: z.string().trim().min(1).max(80),
+  kind: secretKindSchema,
+  placement: placementSchema.optional(),
+});
+export type RequestField = z.infer<typeof requestFieldSchema>;
+
+/** What an agent asks for (P1-P3, P41). */
+export const secretRequestInputSchema = z
+  .strictObject({
+    purpose: z.string().trim().min(1).max(500),
+    fields: z.array(requestFieldSchema).min(1).max(5),
+    destinations: z.array(destinationInputSchema).min(1).max(MAX_DESTINATIONS),
+  })
+  .refine(input => new Set(input.fields.map(field => field.id)).size === input.fields.length, 'Duplicate field ID')
+  .refine(
+    input => input.fields.every(field => !field.placement || placementFits(field.kind, field.placement)),
+    'Placement does not fit the kind',
+  );
+export type SecretRequestInput = z.input<typeof secretRequestInputSchema>;
+
+/** `secrets.request`: asks the member in this chat for secrets through a private form (P1-P4). */
+export const secretsRequestCallSchema = z
+  .strictObject({
+    tool: z.literal('secrets.request'),
+    purpose: z.string().trim().min(1).max(500).describe('Why the secret is needed, shown to the member.'),
+    fields: z
+      .array(requestFieldSchema)
+      .min(1)
+      .max(5)
+      .describe(
+        'What to ask for. Set placement only when the API documentation or an authentication hint shows how the secret is sent; otherwise the member chooses.',
+      ),
+    destinations: z
+      .array(destinationInputSchema)
+      .min(1)
+      .max(MAX_DESTINATIONS)
+      .describe('The hosts or exact endpoints the secret may be sent to.'),
+  })
+  .refine(input => new Set(input.fields.map(field => field.id)).size === input.fields.length, 'Duplicate field ID')
+  .refine(
+    input => input.fields.every(field => !field.placement || placementFits(field.kind, field.placement)),
+    'Placement does not fit the kind',
+  );
+/** `secrets.list`: the secret references this chat holds (P15). */
+export const secretsListCallSchema = z.strictObject({ tool: z.literal('secrets.list') });

@@ -523,6 +523,25 @@ export type ConversationPlanning = {
   failure?: (error: unknown) => { code: 'plan-budget'; instruction: string } | null;
 };
 
+/**
+ * Secret forms for private chats, supplied by the secrets service. The runtime only pauses and resumes the turn; it
+ * never sees a value.
+ */
+export type ConversationSecrets = {
+  enabled(): boolean;
+  prepare(call: unknown): { ok: true; prompt: string; request: unknown } | { ok: false; result: unknown };
+  create(
+    tx: AuthorizationTransaction,
+    input: {
+      id: string;
+      membershipId: string;
+      origin: { kind: 'chat'; conversationId: string; turnId: string; conversationRequestId: string };
+      request: unknown;
+    },
+  ): Promise<unknown>;
+  list(tx: AuthorizationTransaction, membershipId: string, conversationId: string): Promise<unknown>;
+};
+
 export function createConversationExecutor(
   runtime: ConversationRuntime,
   reply?: ConversationReply,
@@ -535,6 +554,7 @@ export function createConversationExecutor(
   compactor?: ConversationCompactor,
   planning?: ConversationPlanning,
   turnFiles?: TurnFiles,
+  secrets?: ConversationSecrets,
 ) {
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
@@ -1475,7 +1495,7 @@ export function createConversationExecutor(
             (turn.planning_mode ||
               Boolean(planningContext) ||
               Boolean(resumeMcp) ||
-              priorTools.some(call => call.tool === 'present.choice')) &&
+              priorTools.some(call => call.tool === 'present.choice' || call.tool === 'secrets.request')) &&
             !chat.slack &&
             !chat.context;
           // The member chose Continue after these tool calls, so this attempt resumes from their receipts.
@@ -1517,7 +1537,15 @@ export function createConversationExecutor(
             return null;
           }
           for (const step of executionSteps) {
-            if (step.tool !== 'present.choice') continue;
+            if (step.tool !== 'present.choice' && step.tool !== 'secrets.request') continue;
+            // A rejected secret request never opened a form; its stored error is already the model's answer.
+            if (
+              step.tool === 'secrets.request' &&
+              !z
+                .object({ status: z.literal('awaiting-input') })
+                .safeParse(protectedOutputSchema.parse(step.output).result).success
+            )
+              continue;
             const request = (
               await tx.client.query(
                 `SELECT r.prompt,r.answer_schema,r.status,a.answer FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} a ON a.request_id=r.id WHERE r.turn_id=$1 AND r.producer_id=$2 AND r.internal_id IS NULL`,
@@ -1529,7 +1557,9 @@ export function createConversationExecutor(
               result: {
                 ...request,
                 instruction:
-                  'This is the human response to your question, not action approval. Continue from it without repeating the question. If cancelled or expired, do not assume a choice.',
+                  step.tool === 'secrets.request'
+                    ? 'This is the member’s answer to your secret request. Use only the returned references; you never see values. If declined, cancelled or expired, do not ask for the same secret again unless the member asks.'
+                    : 'This is the human response to your question, not action approval. Continue from it without repeating the question. If cancelled or expired, do not assume a choice.',
               },
               sources: protectedOutputSchema.parse(step.output).sources,
             });
@@ -1865,6 +1895,8 @@ export function createConversationExecutor(
         const captureOutput =
           durable ||
           name === 'present.choice' ||
+          name === 'secrets.request' ||
+          name === 'secrets.list' ||
           name === 'agents.delegate' ||
           name === 'followups.schedule' ||
           ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
@@ -2079,6 +2111,53 @@ export function createConversationExecutor(
                 result: request,
                 sources: mergeSources([...context.origin.sources, ...fileSources]),
               });
+            });
+            throw new ExternalActionWaiting();
+          }
+          if (name === 'secrets.request' || name === 'secrets.list') {
+            // Forms are addressed to the chat's owner, so shared, Slack, external-context and project chats have none.
+            if (!interactiveChat || external || source.project || !secrets?.enabled()) throw new AccessDenied();
+            if (name === 'secrets.list')
+              return await guarded(async (tx, context) => {
+                await receipt(tx, 'running');
+                const output = {
+                  result: await secrets.list(tx, context.actor.membershipId, fence.conversationId),
+                  sources: [],
+                };
+                await receipt(tx, 'completed');
+                await saveOutput(tx, output);
+                return output;
+              });
+            const prepared = secrets.prepare(call);
+            if (!prepared.ok) {
+              const output = { result: prepared.result, sources: [] };
+              await guarded(async tx => {
+                await receipt(tx, 'failed');
+                await saveOutput(tx, output);
+              });
+              return output;
+            }
+            await guarded(async (tx, context) => {
+              await receipt(tx, 'running');
+              const secretRequestId = randomUUID();
+              const request = await createConversationRequests(context.runtime).createForChat(fence, {
+                producerId: callId,
+                prompt: prepared.prompt,
+                answerSchema: { kind: 'secrets', secretRequestId },
+              });
+              const result = await secrets.create(tx, {
+                id: secretRequestId,
+                membershipId: context.actor.membershipId,
+                origin: {
+                  kind: 'chat',
+                  conversationId: fence.conversationId,
+                  turnId: fence.turnId,
+                  conversationRequestId: request.requestId,
+                },
+                request: prepared.request,
+              });
+              await receipt(tx, 'completed');
+              await saveOutput(tx, { result, sources: [] });
             });
             throw new ExternalActionWaiting();
           }

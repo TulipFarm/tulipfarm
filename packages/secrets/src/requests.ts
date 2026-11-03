@@ -2,11 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AccessDenied, type AuthorizationTransaction, type HumanActor } from '@tulipfarm/access';
 import {
-  MAX_DESTINATIONS,
   SecretError,
-  destinationInputSchema,
   normalizeDestinations,
-  placementFits,
   placementSchema,
   sameOrigin,
   secretKindSchema,
@@ -16,33 +13,18 @@ import {
   type SecretKind,
   type SecretOrigin,
 } from './contracts.ts';
+import {
+  fieldIdSchema,
+  requestFieldSchema,
+  secretRequestInputSchema,
+  type RequestField,
+  type SecretRequestInput,
+} from './contracts.ts';
+import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { table, type Secrets, type SecretsPrincipal, type SecretTransaction } from './service.ts';
 
 /** How long an unanswered request stays open, matching a conversation request. */
 export const REQUEST_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
-
-const fieldIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/);
-export const requestFieldSchema = z.strictObject({
-  id: fieldIdSchema,
-  label: z.string().trim().min(1).max(80),
-  kind: secretKindSchema,
-  placement: placementSchema.optional(),
-});
-export type RequestField = z.infer<typeof requestFieldSchema>;
-
-/** What an agent asks for (P1-P3, P41). */
-export const secretRequestInputSchema = z
-  .strictObject({
-    purpose: z.string().trim().min(1).max(500),
-    fields: z.array(requestFieldSchema).min(1).max(5),
-    destinations: z.array(destinationInputSchema).min(1).max(MAX_DESTINATIONS),
-  })
-  .refine(input => new Set(input.fields.map(field => field.id)).size === input.fields.length, 'Duplicate field ID')
-  .refine(
-    input => input.fields.every(field => !field.placement || placementFits(field.kind, field.placement)),
-    'Placement does not fit the kind',
-  );
-export type SecretRequestInput = z.input<typeof secretRequestInputSchema>;
 
 /** Where a request came from. A chat request also names the conversation request that pauses the turn. */
 export const requestOriginSchema = z.discriminatedUnion('kind', [
@@ -270,6 +252,29 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
     } satisfies SecretReference;
   }
 
+  async function endOrigin(tx: SecretTransaction, origin: SecretOrigin) {
+    const rows = z.array(requestRowSchema).parse(
+      (
+        await tx.client.query(
+          `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(tx, 'requests')}
+           WHERE status = 'waiting' AND origin @> $1::jsonb ORDER BY id FOR UPDATE`,
+          [JSON.stringify(origin)],
+        )
+      ).rows,
+    );
+    let cancelled = 0;
+    for (const row of rows)
+      if (sameOrigin(secretOriginOf(row.origin), origin)) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'requests')} SET status = 'cancelled', revision = revision + 1,
+             settled_at = clock_timestamp() WHERE id = $1`,
+          [row.id],
+        );
+        cancelled++;
+      }
+    return { cancelled, deleted: await secrets.deleteOrigin(tx, origin) };
+  }
+
   return {
     /**
      * Records a request in the caller's transaction, which also pauses the chat turn or task run. The caller
@@ -442,30 +447,12 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
      * Cancels the open requests of a chat or task run and deletes its temporary secrets, in the caller's
      * transaction (P11, P46). The caller has already stopped the turn or run, so nothing is resumed.
      */
-    async endOrigin(tx: SecretTransaction, origin: SecretOrigin) {
-      const rows = z.array(requestRowSchema).parse(
-        (
-          await tx.client.query(
-            `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(tx, 'requests')}
-             WHERE status = 'waiting' AND origin @> $1::jsonb ORDER BY id FOR UPDATE`,
-            [JSON.stringify(origin)],
-          )
-        ).rows,
-      );
-      let cancelled = 0;
-      for (const row of rows)
-        if (sameOrigin(secretOriginOf(row.origin), origin)) {
-          await tx.client.query(
-            `UPDATE ${table(tx, 'requests')} SET status = 'cancelled', revision = revision + 1,
-               settled_at = clock_timestamp() WHERE id = $1`,
-            [row.id],
-          );
-          cancelled++;
-        }
-      return { cancelled, deleted: await secrets.deleteOrigin(tx, origin) };
-    },
+    endOrigin,
 
-    /** Expires overdue requests and deletes expired secrets. Run by the worker sweep (P11, P47). */
+    /**
+     * Expires overdue requests, ends the forms and temporary secrets of deleted chats, and deletes expired secrets.
+     * Run by the worker sweep (P11, P46, P47).
+     */
     async sweep(workspaceId: string) {
       const expired = await secrets.transaction(workspaceId, async tx => {
         const rows = z.array(requestRowSchema).parse(
@@ -480,7 +467,24 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
         for (const row of rows) if (await finish(tx, workspaceId, row, { status: 'expired' })) count++;
         return count;
       });
-      return { expiredRequests: expired, deletedSecrets: await secrets.sweepExpired(workspaceId) };
+      const endedChats = await secrets.transaction(workspaceId, async tx => {
+        const chats = z.array(z.object({ id: z.uuid() })).parse(
+          (
+            await tx.client.query(
+              `SELECT DISTINCT o.id FROM (
+                 SELECT (origin->>'conversationId')::uuid AS id FROM ${table(tx, 'requests')}
+                 WHERE status = 'waiting' AND origin->>'kind' = 'chat'
+                 UNION SELECT (origin->>'conversationId')::uuid FROM ${table(tx, 'secrets')}
+                 WHERE status = 'active' AND lifetime = 'conversation' AND origin->>'kind' = 'chat'
+               ) o JOIN ${qualified(tx.schema, 'tf_conversations')} c ON c.id = o.id
+               WHERE c.deleted_at IS NOT NULL ORDER BY o.id LIMIT 100`,
+            )
+          ).rows,
+        );
+        for (const chat of chats) await endOrigin(tx, { kind: 'chat', conversationId: chat.id });
+        return chats.length;
+      });
+      return { expiredRequests: expired, endedChats, deletedSecrets: await secrets.sweepExpired(workspaceId) };
     },
 
     /** The references a member holds in this chat or task run, for `secrets.list` (P15). */

@@ -12,3 +12,4 @@ export {
   type SecretTransaction,
 } from './service.ts';
 export * from './requests.ts';
+export { chatSecretTools, type ChatSecretTools } from './chat-tools.ts';

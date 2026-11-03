@@ -77,6 +77,7 @@ import { beginReplySession } from './reply-session.ts';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
+import { secretsServices } from './secrets-composition.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -490,6 +491,7 @@ export function createConversationActivities(
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
+  const secrets = secretsServices(storage).chat;
   let google: ReturnType<typeof googleOperations> | undefined;
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
@@ -548,6 +550,7 @@ export function createConversationActivities(
         effectiveCompactor,
         conversationPlanning,
         turnFiles,
+        secrets,
       );
       return process(executor, parsed);
     });
