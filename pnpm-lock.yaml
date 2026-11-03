@@ -104,6 +104,9 @@ importers:
       '@tulipfarm/recommendations':
         specifier: workspace:*
         version: link:../../packages/recommendations
+      '@tulipfarm/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../../packages/slack
@@ -541,6 +544,9 @@ importers:
       '@tulipfarm/recommendations':
         specifier: workspace:*
         version: link:../../packages/recommendations
+      '@tulipfarm/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       '@tulipfarm/slack':
         specifier: workspace:*
         version: link:../../packages/slack

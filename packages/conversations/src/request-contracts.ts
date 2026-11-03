@@ -4,6 +4,24 @@ import { textPartSchema } from './contracts.ts';
 
 const text = textPartSchema.shape.text;
 const choiceId = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
+/** What the agent learns from a secrets form: references, never values. Only the secrets service writes it. */
+export const secretsAnswerSchema = z.strictObject({
+  kind: z.literal('secrets'),
+  status: z.enum(['provided', 'declined']),
+  references: z
+    .array(
+      z.strictObject({
+        referenceId: uuidSchema,
+        fieldId: z.string().max(32),
+        name: z.string().max(80),
+        kind: z.string().max(32),
+        placement: z.record(z.string(), z.unknown()),
+        destinations: z.array(z.strictObject({ kind: z.enum(['host', 'endpoint']), value: z.string().max(4096) })),
+      }),
+    )
+    .max(5),
+  reason: z.string().max(500).nullable(),
+});
 export const answerSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('text'), text }),
   z.strictObject({
@@ -14,9 +32,11 @@ export const answerSchema = z.discriminatedUnion('kind', [
       .max(32)
       .refine(ids => new Set(ids).size === ids.length),
   }),
+  secretsAnswerSchema,
 ]);
 export const answerDefinitionSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('text') }),
+  z.strictObject({ kind: z.literal('secrets'), secretRequestId: uuidSchema }),
   z
     .strictObject({
       kind: z.literal('choices'),

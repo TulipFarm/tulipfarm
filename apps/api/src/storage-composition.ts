@@ -81,6 +81,8 @@ import { registerKnowledgeComposition } from './knowledge-composition.ts';
 import { registerKnowledgeDispatch } from './knowledge-dispatch.ts';
 import type { defaultKnowledgeStarter } from './knowledge-defaults-dispatch.ts';
 import { workspaceMcpApi } from './workspace-mcp-composition.ts';
+import { registerSecrets } from './secrets.ts';
+import { secretsServices } from './secrets-composition.ts';
 import { registerWorkspaceMcp } from './workspace-mcp.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentSetupOptions } from '@tulipfarm/agents/setup';
@@ -202,6 +204,7 @@ export function registerStorageComposition(
   });
   const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
+  registerSecrets(app, dependencies.auth, secretsServices(runtime));
   const github = githubAccounts(runtime);
   if (github) {
     const batchOptions = {
