@@ -36,12 +36,16 @@ body {
   font-size: 10.5pt; line-height: 1.6; font-kerning: normal; text-rendering: optimizeLegibility;
   counter-reset: section;
 }
+@media print {
+  body { background: none; }
+}
 @media screen {
   body { background: var(--canvas); padding: 32px 16px; }
   .page { max-width: 210mm; margin: 0 auto; background: var(--surface); padding: 18mm 16mm;
     border: 1px solid var(--line); border-radius: var(--radius-panel); box-shadow: 0 2px 6px -4px rgb(0 0 0 / 0.1); }
 }
 p { margin: 0 0 0.7em; }
+.lead-in { margin-top: 1em; }
 p:last-child { margin-bottom: 0; }
 ul, ol { margin: 0 0 0.7em; padding-left: 1.25em; }
 li + li { margin-top: 0.25em; }
@@ -196,7 +200,6 @@ function groupPath(task: PlanDocumentTask, byKey: Map<string, PlanDocumentTask>)
 
 function tasksByGroup(model: PlanDocumentModel): string {
   const byKey = new Map(model.tasks.map(task => [task.key, task]));
-  const work = (parent: string | null) => model.tasks.filter(task => task.kind === 'work' && task.parent === parent);
   const card = (task: PlanDocumentTask) => {
     const waits = task.dependsOn.map(key => byKey.get(key)?.title ?? key);
     return `<article class="task card">
@@ -206,23 +209,33 @@ ${task.criteria.length ? `<h4>Done when</h4><ul class="criteria">${task.criteria
 ${waits.length ? `<h4>Waits for</h4><p class="waits">${waits.map(escapeHtml).join(', ')}</p>` : ''}
 </article>`;
   };
-  const groups = model.tasks.filter(task => task.kind === 'group');
+  const children = (parent: string | null) => model.tasks.filter(task => task.parent === parent);
   const blocks: string[] = [];
-  const loose = work(null);
-  if (loose.length)
-    blocks.push(
-      `<div class="group">${groups.length ? '<div class="group-head"><h3>Other tasks</h3></div>' : ''}<div class="tasks">${loose.map(card).join('\n')}</div></div>`,
-    );
-  for (const group of groups) {
-    const items = work(group.key);
-    if (!items.length) continue;
-    blocks.push(`<div class="group">
+  const groupBlock = (group: PlanDocumentTask) => {
+    const items = children(group.key).filter(task => task.kind === 'work');
+    if (items.length)
+      blocks.push(`<div class="group">
 <div class="group-head"><h3>${escapeHtml(groupPath(group, byKey))}</h3><span class="order">${group.order === 'serial' ? 'One after another' : 'In parallel'}</span></div>
 ${group.brief ? `<div class="group-brief">${renderMarkdown(group.brief)}</div>` : ''}
 ${group.dependsOn.length ? `<p class="waits">Waits for ${group.dependsOn.map(key => escapeHtml(byKey.get(key)?.title ?? key)).join(', ')}</p>` : ''}
 <div class="tasks">${items.map(card).join('\n')}</div>
 </div>`);
+    for (const nested of children(group.key)) if (nested.kind === 'group') groupBlock(nested);
+  };
+  // Top-level tasks and groups keep the plan's order, so the list reads in the order the work runs.
+  let loose: PlanDocumentTask[] = [];
+  const flush = () => {
+    if (loose.length) blocks.push(`<div class="group"><div class="tasks">${loose.map(card).join('\n')}</div></div>`);
+    loose = [];
+  };
+  for (const task of children(null)) {
+    if (task.kind === 'work') loose.push(task);
+    else {
+      flush();
+      groupBlock(task);
+    }
   }
+  flush();
   return blocks.join('\n');
 }
 

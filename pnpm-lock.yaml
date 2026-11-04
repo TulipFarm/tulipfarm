@@ -217,6 +217,12 @@ importers:
 
   apps/dev-seed:
     dependencies:
+      '@temporalio/client':
+        specifier: 1.24.0
+        version: 1.24.0
+      '@tulipfarm/access':
+        specifier: workspace:*
+        version: link:../../packages/access
       '@tulipfarm/agents':
         specifier: workspace:*
         version: link:../../packages/agents

@@ -20,7 +20,7 @@ function inline(escaped: string): string {
   return emphasis(text).replace(/\uE000(\d+)\uE000/g, (_, slot: string) => held[Number(slot)] ?? '');
 }
 
-type Block = { kind: 'p' | 'ul' | 'ol'; lines: string[] };
+type Block = { kind: 'p' | 'ul' | 'ol' | 'h'; lines: string[] };
 
 /**
  * Renders the small Markdown subset section text may use. All input is escaped before any markup is added, so the
@@ -30,6 +30,12 @@ export function renderMarkdown(source: string): string {
   const blocks: Block[] = [];
   for (const raw of escapeHtml(source.replace(/\uE000/g, '')).split(/\r?\n/)) {
     const line = raw.trim();
+    // Headings would compete with the document's own sections, so they become a bold lead-in line.
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+    if (heading) {
+      blocks.push({ kind: 'h', lines: [heading[1] ?? ''] }, { kind: 'p', lines: [] });
+      continue;
+    }
     const bullet = /^[-*]\s+(.*)$/.exec(line);
     const numbered = /^\d{1,3}[.)]\s+(.*)$/.exec(line);
     const kind = !line ? null : bullet ? 'ul' : numbered ? 'ol' : 'p';
@@ -48,9 +54,11 @@ export function renderMarkdown(source: string): string {
   return blocks
     .filter(block => block.lines.length)
     .map(block =>
-      block.kind === 'p'
-        ? `<p>${block.lines.map(inline).join(' ')}</p>`
-        : `<${block.kind}>${block.lines.map(line => `<li>${inline(line)}</li>`).join('')}</${block.kind}>`,
+      block.kind === 'h'
+        ? `<p class="lead-in"><strong>${inline(block.lines.join(' '))}</strong></p>`
+        : block.kind === 'p'
+          ? `<p>${block.lines.map(inline).join(' ')}</p>`
+          : `<${block.kind}>${block.lines.map(line => `<li>${inline(line)}</li>`).join('')}</${block.kind}>`,
     )
     .join('\n');
 }

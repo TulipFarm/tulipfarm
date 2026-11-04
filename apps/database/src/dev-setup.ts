@@ -22,6 +22,7 @@ const objectStorage = {
   accessKeyId: 'local-object-storage',
   secretAccessKey: 'local-object-storage-secret',
   soulBucket: 'tulipfarm-cloud-soul-local',
+  filesBucket: 'tulipfarm-files-local',
 };
 
 type State = { keys: SetupKeys; passwords: Record<string, string> };

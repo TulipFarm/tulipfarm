@@ -597,17 +597,18 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
             (
               await tx.client.query(
                 `SELECT revision, snapshot, change_kind AS "changeKind", to_json(created_at)#>>'{}' AS "createdAt"
-                FROM ${relation(tx, 'tf_agent_plan_revisions')} WHERE plan_id=$1 AND revision IN ($2, $2 - 1) ORDER BY revision DESC`,
-                [planId, at.revision],
+                FROM ${relation(tx, 'tf_agent_plan_revisions')} WHERE plan_id=$1 AND revision BETWEEN $2 AND $3 ORDER BY revision DESC`,
+                // The change list runs from the latest approved revision; a plan never approved has none.
+                [planId, Math.min(latest?.revision ?? at.revision, at.revision), at.revision],
               )
             ).rows,
           );
-        const [current, previous] = revisions;
+        const [current] = revisions;
         if (!current || current.revision !== at.revision) throw new AgentPlanError('document-unavailable');
-        return { plan, at, current, previous: previous ?? null, approval: latest };
+        return { plan, at, current, history: [...revisions].reverse(), approval: latest };
       });
       if (!source) return null;
-      const { plan, at, current, previous, approval } = source;
+      const { plan, at, current, history, approval } = source;
       const people = await names(
         [plan.starterUserId, ...(approval?.userId ? [approval.userId] : [])].filter(
           (id, index, all) => all.indexOf(id) === index,
@@ -617,22 +618,16 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
       const approverName = (approval?.userId && people.get(approval.userId)) || 'Unknown member';
       const timeZone = approval?.timeZone ?? 'UTC';
       const input = documentInput(snapshotSchema.parse(current.snapshot), at.revision, current.createdAt, starterName);
-      const base = planDocumentModel(input);
-      const changes =
-        previous && previous.revision === at.revision - 1
-          ? changeList(
-              planDocumentModel(
-                documentInput(
-                  snapshotSchema.parse(previous.snapshot),
-                  previous.revision,
-                  current.createdAt,
-                  starterName,
-                ),
-              ),
-              base,
-              current.changeKind,
-            )
-          : [];
+      const revisionModel = (revision: (typeof history)[number]) =>
+        planDocumentModel(
+          documentInput(snapshotSchema.parse(revision.snapshot), revision.revision, current.createdAt, starterName),
+        );
+      // Each step since the approved revision is listed with who made it: the starter, or the plan while running.
+      const changes = history
+        .slice(1)
+        .flatMap((revision, index) =>
+          changeList(revisionModel(history[index]!), revisionModel(revision), revision.changeKind),
+        );
       const model = planDocumentModel({
         ...input,
         approval: approval ? { approverName, approvedAt: approval.approvedAt, revision: approval.revision } : null,
