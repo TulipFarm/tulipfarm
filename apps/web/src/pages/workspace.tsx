@@ -80,6 +80,7 @@ import { overrides } from '@/extensions';
 import { PageChromeContext } from '@tulipfarm/sprout/page-header';
 import { ChatHeaderContext } from '@/features/chat/header-context';
 import { InviteMembersPrompt } from '@/features/governance/invite-members-prompt';
+import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
@@ -138,6 +139,7 @@ const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
 const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
+const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: People };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
@@ -175,7 +177,7 @@ const usage: Page[] = overrides.get('usage')
 const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
 const administrationPages: Page[] = [
   members,
-  { label: 'Teams', to: '/$workspaceSlug/teams', icon: People },
+  teams,
   { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser },
 ];
 const settingsPages: Page[] = [
@@ -506,6 +508,26 @@ function SettingsNavigation() {
   );
 }
 
+function PeopleNavigation() {
+  const { workspace, membershipId } = workspaceRoute.useRouteContext();
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>People</SidebarGroupLabel>
+      <SidebarMenu>
+        {membershipId && workspace.status === 'ready' && <AdminMembersNavItem key={workspace.id} />}
+        <NavItem page={teams} />
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+}
+
+function AdminMembersNavItem() {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const membership = useOwnMembership(workspace.id);
+  const admin = membership.state.kind === 'ready' && membership.state.data.capabilities.manageGovernance;
+  return admin ? <NavItem page={members} /> : null;
+}
+
 function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
@@ -555,6 +577,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                     </SidebarMenu>
                   </SidebarGroup>
                 ))}
+                <PeopleNavigation />
               </nav>
             </SidebarContent>
           </>
@@ -708,7 +731,7 @@ function WorkspaceShellContent() {
               </SidebarTrigger>
               <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
               <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
-              {membershipId && workspace.status === 'ready' && (
+              {membershipId && workspace.status === 'ready' && currentPage !== members && (
                 <InviteMembersPrompt
                   key={workspace.id}
                   userId={user.id}

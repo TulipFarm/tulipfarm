@@ -183,25 +183,24 @@ export function GovernanceContent({
               ? 'Group members so you can grant access once per team.'
               : 'Choose what each team can do with each table.'
         }
-        actions={
-          section === 'members' ? (
-            <InviteMembersDialog
-              workspaceId={workspaceId}
-              authorized={state.kind === 'admin'}
-              onAccessLost={onInvitationAccessLost}
-              invitations={invitations}
-              open={inviteOpen}
-              onOpenChange={setInviteOpen}
-              onViewInvitations={() => {
-                setInviteOpen(false);
-                setTab('invitations');
-              }}
-              members={state.kind === 'admin' ? state.data.directory : []}
-              initialInput={inviteMock ? 'jessica@example.test\njustin@example.test\njenny@example.test' : ''}
-            />
-          ) : undefined
-        }
       />
+      {section === 'members' && (
+        <InviteMembersDialog
+          workspaceId={workspaceId}
+          authorized={state.kind === 'admin'}
+          onAccessLost={onInvitationAccessLost}
+          invitations={invitations}
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          onViewInvitations={() => {
+            setInviteOpen(false);
+            setTab('invitations');
+          }}
+          members={state.kind === 'admin' ? state.data.directory : []}
+          initialInput={inviteMock ? 'jessica@example.test\njustin@example.test\njenny@example.test' : ''}
+          trigger={false}
+        />
+      )}
       {state.kind === 'loading' && (
         <div role="status" className="flex flex-col gap-4">
           <span className="sr-only">Loading workspace access…</span>
@@ -312,6 +311,12 @@ export function GovernanceContent({
                       busy={busy || refreshing || stale}
                       change={change}
                       recovery={recovery}
+                      invite={
+                        <Button onClick={() => setInviteOpen(true)}>
+                          <Add size={16} aria-hidden="true" />
+                          Invite members
+                        </Button>
+                      }
                     />
                   </TabsContent>
                   <TabsContent value="invitations" keepMounted>
