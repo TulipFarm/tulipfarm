@@ -788,7 +788,7 @@ export function createAgentExecutor(options: Options) {
                       break;
                     case 'web.fetch':
                       try {
-                        result = await fetchPublicText(row.call.url);
+                        result = await fetchPublicText(row.call.url, { scope: ids.runId });
                       } catch {
                         throw new TableError('web-fetch-failed', 400);
                       }
