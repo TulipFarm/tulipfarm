@@ -8,6 +8,7 @@ import {
   requireMcpPrivateConversation,
   requirePersonalGitHubSource,
   type AuthorizationTransaction,
+  type ConversationSourcePrefetch,
   type HumanActor,
 } from '@tulipfarm/access';
 import { requireCitedLibraryFile, requireReadableFile } from '@tulipfarm/files';
@@ -203,9 +204,10 @@ export async function requireMcpSources(
   actor: HumanActor,
   conversationId: string,
   sources: unknown,
+  prefetch?: ConversationSourcePrefetch,
 ) {
   await requireWorkflowSources(tx, actor, sources);
-  const retained = await protectedSourceClosure(tx, sources);
+  const retained = await protectedSourceClosure(tx, sources, prefetch);
   if (!retained.some(source => source.kind === 'mcp-integration')) return;
   await currentMember(tx, actor);
   await requireMcpPrivateConversation(tx, actor, conversationId);
@@ -216,8 +218,9 @@ export async function requireConversationMcpSources(
   tx: AuthorizationTransaction,
   actor: HumanActor,
   conversationId: string,
+  prefetch?: ConversationSourcePrefetch,
 ) {
-  await requireMcpSources(tx, actor, conversationId, [{ kind: 'private-conversation', conversationId }]);
+  await requireMcpSources(tx, actor, conversationId, [{ kind: 'private-conversation', conversationId }], prefetch);
 }
 
 export async function requireCurrentConversationSources(
