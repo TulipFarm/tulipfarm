@@ -309,3 +309,44 @@ test('the document is self-contained, ordered, escaped and omits empty sections'
   for (const id of ['approach', 'changes']) assert.ok(!html.includes(`id="${id}"`), id);
   assert.ok(html.includes('tone-draft'));
 });
+
+test('tasks keep the plan order, with loose tasks between groups in their own block', () => {
+  const model = planDocumentModel(
+    snapshot({
+      tasks: [
+        task('first', { title: 'Task first' }),
+        task('build', { kind: 'group', title: 'Group build' }),
+        task('code', { parent: 'build', title: 'Task code' }),
+        task('between', { title: 'Task between' }),
+        task('check', { kind: 'group', title: 'Group check' }),
+        task('verify', { parent: 'check', title: 'Task verify' }),
+        task('last', { title: 'Task last' }),
+      ],
+    }),
+  );
+  const html = renderPlanDocumentHtml(model, { diagramSvgs: { plan: null }, stamp: { tone: 'draft', text: '' } });
+  const tasks = html.slice(html.indexOf('id="tasks"'), html.indexOf('id="prerequisites"'));
+  const order = ['first', 'build', 'code', 'between', 'check', 'verify', 'last'].map(key =>
+    tasks.indexOf(key === 'build' || key === 'check' ? `Group ${key}` : `Task ${key}`),
+  );
+  assert.ok(
+    order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
+    String(order),
+  );
+  assert.equal(tasks.match(/class="group-head"/g).length, 2, 'loose tasks get no heading of their own');
+  assert.equal(tasks.match(/class="group"/g).length, 5);
+});
+
+test('markdown headings become bold lead-in lines rather than competing headings', () => {
+  const html = renderMarkdown('## Rollout *plan*\nShip in two steps.');
+  assert.ok(!/<h\d/.test(html));
+  assert.equal(html, '<p class="lead-in"><strong>Rollout <em>plan</em></strong></p>\n<p>Ship in two steps.</p>');
+});
+
+test('the printed document has no page background', () => {
+  const html = renderPlanDocumentHtml(planDocumentModel(snapshot()), {
+    diagramSvgs: { plan: null },
+    stamp: { tone: 'draft', text: '' },
+  });
+  assert.match(html, /@media print\s*\{\s*body\s*\{\s*background:\s*none;/);
+});
