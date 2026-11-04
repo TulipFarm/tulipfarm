@@ -377,15 +377,14 @@ export const googleCallbackRoute = createRoute({
 function preloadRouteCode(pathname: string): void {
   for (const route of router.getMatchedRoutes(pathname)[0]) void route.options.component?.preload?.();
 }
-let pageReadModule: typeof import('@/features/chat/early-reads') | null = null;
+type PageReadModule = typeof import('@/features/chat/early-reads');
+let pageReadModule: Promise<PageReadModule> | null = null;
 function loadPageReads() {
-  if (!pageReadModule)
-    void import('@/features/chat/early-reads').then(
-      module => {
-        pageReadModule = module;
-      },
-      () => {},
-    );
+  pageReadModule ??= import('@/features/chat/early-reads').catch(error => {
+    pageReadModule = null;
+    throw error;
+  });
+  return pageReadModule;
 }
 function cachedRead(identity: SessionIdentity, workspaceId: string, key: QueryKey) {
   const scope = ['user', identity.userId, 'workspace', workspaceId];
@@ -399,6 +398,8 @@ function cachedRead(identity: SessionIdentity, workspaceId: string, key: QueryKe
  * Starts the reads the destination page makes first, once the workspace id is known, so they
  * overlap membership admission instead of waiting for the frame to mount. Reads the cache already
  * holds are skipped, and the page only uses a response after admission binds it to the membership.
+ * Reads still waiting for their code when admission settles never start, so they cannot race the
+ * page's own reads.
  */
 function startPageReads(
   identity: SessionIdentity,
@@ -406,11 +407,29 @@ function startPageReads(
   slug: string,
   location: { pathname: string; search: Record<string, unknown> },
 ) {
-  if (!pageReadModule) return null;
-  const reads = pageReadModule
-    .workspacePageReads(workspaceId, slug, location.pathname, location.search)
-    .filter(read => !cachedRead(identity, workspaceId, read.key));
-  return reads.length ? { workspaceId, reads: startEarlyReads(identity, workspaceId, reads) } : null;
+  let settled = false;
+  let reads: ReturnType<typeof startEarlyReads> | null = null;
+  void loadPageReads().then(
+    module => {
+      if (settled) return;
+      const pending = module
+        .workspacePageReads(workspaceId, slug, location.pathname, location.search)
+        .filter(read => !cachedRead(identity, workspaceId, read.key));
+      if (pending.length) reads = startEarlyReads(identity, workspaceId, pending);
+    },
+    () => {},
+  );
+  return {
+    workspaceId,
+    admit(membershipId: string) {
+      settled = true;
+      reads?.admit(membershipId);
+    },
+    discard() {
+      settled = true;
+      reads?.discard();
+    },
+  };
 }
 async function requireProfile(destination: string) {
   const session = await loadSession();
@@ -605,7 +624,7 @@ export const workspaceRoute = createRoute({
     measureWorkspaceAdmission(async () => {
       if (workspaceSlugError(params.workspaceSlug)) throw notFound();
       preloadRouteCode(location.pathname);
-      loadPageReads();
+      void loadPageReads().catch(() => {});
       const snapshot = context.workspaceAccess.getSnapshot();
       const previousWorkspace =
         snapshot.kind === 'admitted' && snapshot.read.workspace.slug === params.workspaceSlug
@@ -659,7 +678,7 @@ export const workspaceRoute = createRoute({
         throw error;
       };
       const identity = { userId: session.user.id, sessionId: session.session.id };
-      let pageReads: ReturnType<typeof startPageReads> = null;
+      let pageReads: ReturnType<typeof startPageReads> | null = null;
       try {
         const reads =
           earlyReads?.userId === session.user.id && earlyReads.sessionId === session.session.id ? earlyReads : null;
@@ -673,7 +692,7 @@ export const workspaceRoute = createRoute({
         const membershipRequest = workspaceRequest.then(workspace => {
           if (workspace.status !== 'ready') return null;
           if (!reads && pageReads?.workspaceId !== workspace.id) {
-            pageReads?.reads.discard();
+            pageReads?.discard();
             pageReads = startPageReads(identity, workspace.id, params.workspaceSlug, location);
           }
           return (
@@ -710,8 +729,8 @@ export const workspaceRoute = createRoute({
         if (!abortController.signal.aborted)
           access.admit({ pathname: location.pathname, workspace, workspaces, membership });
         if (membership && !abortController.signal.aborted && pageReads?.workspaceId === workspace.id)
-          pageReads.reads.admit(membership.membershipId);
-        else pageReads?.reads.discard();
+          pageReads.admit(membership.membershipId);
+        else pageReads?.discard();
         if (workspace.status === 'ready') rememberWorkspaceId(session.user.id, params.workspaceSlug, workspace.id);
         return {
           user: session.user,
@@ -724,7 +743,7 @@ export const workspaceRoute = createRoute({
           workspaceStale: false,
         };
       } catch (error) {
-        pageReads?.reads.discard();
+        pageReads?.discard();
         if (
           (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
           [403, 404].includes(error.status)

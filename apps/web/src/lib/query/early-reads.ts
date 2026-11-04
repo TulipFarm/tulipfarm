@@ -83,7 +83,8 @@ export function takeEarlyRead<T>(
   const hash = entryHash(scope.userId, scope.workspaceId, key);
   const entry = entries.get(hash);
   if (!entry) return null;
-  remove(hash, entry);
+  // Handed over, not removed: a pending read keeps running for the query that took it.
+  entries.delete(hash);
   if (
     entry.identity.userId !== identity.userId ||
     entry.identity.sessionId !== identity.sessionId ||
@@ -94,8 +95,11 @@ export function takeEarlyRead<T>(
     return null;
   }
   return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const abort = () => reject(signal.reason);
+    const abort = () => {
+      if (entry.settledAt === null) entry.controller.abort();
+      reject(signal.reason);
+    };
+    if (signal.aborted) return abort();
     signal.addEventListener('abort', abort, { once: true });
     void entry.outcome.then(outcome => {
       signal.removeEventListener('abort', abort);
