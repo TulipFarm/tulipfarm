@@ -83,6 +83,7 @@ const stepSchema = z.object({
 // Attached skills are readable without a separate grant, matching what the model is offered.
 const taskReadAdmitted = (definition: z.infer<typeof agentDefinitionSchema>, call: z.infer<typeof toolCallSchema>) =>
   call.tool === 'api.request' ||
+  call.tool === 'files.read' ||
   (taskReadTools.has(call.tool) &&
     (isMcpCall(call)
       ? Boolean(definition.mcp?.length)
@@ -779,6 +780,7 @@ export function createTaskRuntime(
         ...(catalog ? { mcp: catalog.model } : {}),
         ...(materializing?.content ? { files: materializing.content } : {}),
         ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
+        ...(reading?.links && (await reading.enabled(workspaceId)) ? { taskFiles: true as const } : {}),
       });
       const timeoutMs = Math.min(47000, task.limits.activeMilliseconds - Number(task.activeMilliseconds));
       const claim = await claimAttempt(tx, model, workspaceId, generation, input, {
@@ -824,6 +826,7 @@ export function createTaskRuntime(
           knowledge,
           skills,
           images,
+          reading,
           telemetryRuntime: 'task',
         }).execute({ workspaceId, runId: tool.runId, callId: tool.callId });
         if (tool.step !== null)
@@ -842,7 +845,7 @@ export function createTaskRuntime(
       }
       if (claim?.kind === 'tools') {
         const tools = claim;
-        const executor = createAgentExecutor({ runtime, slack, mcp, github, knowledge, images });
+        const executor = createAgentExecutor({ runtime, slack, mcp, github, knowledge, images, reading });
         const executions = tools.callIds.map(callId => ({ workspaceId, runId: tools.runId, callId }));
         const statuses =
           executions.length === 1 ? [await executor.execute(executions[0]!)] : await executor.executeBatch(executions);

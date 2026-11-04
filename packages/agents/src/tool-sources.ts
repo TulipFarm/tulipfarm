@@ -9,6 +9,7 @@ import { blockedTableProposalSchema } from '@tulipfarm/tables/proposal-contracts
 import { referencedRecordIds } from '@tulipfarm/tables/query';
 import { activeGeneration } from '@tulipfarm/tables/store';
 import type { FrameworkCall } from './tools.ts';
+import { taskFileReadResultSchema } from './contracts.ts';
 import { documentUpload } from './google-tools.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import {
@@ -218,8 +219,12 @@ export function apiCallSources(result: unknown, conversationId: string | null): 
   if (parsed.status !== 'sent') return [];
   if (parsed.secrets.length)
     return conversationId ? [{ kind: 'private-conversation', conversationId }] : [{ kind: 'unavailable' }];
-  const url = new URL(parsed.url);
-  return [{ kind: 'public-web', url: parsed.url.length <= 2048 ? parsed.url : `${url.origin}/` }];
+  return [{ kind: 'public-web', url: publicSourceUrl(parsed.url) }];
+}
+
+/** A called URL as a `public-web` source, cut to its origin past 2048 characters. */
+export function publicSourceUrl(url: string) {
+  return url.length <= 2048 ? url : `${new URL(url).origin}/`;
 }
 
 export async function resultSources(
@@ -295,8 +300,14 @@ export async function resultSources(
     case 'integrations.connect':
     case 'integrations.disconnect':
     case 'conversation.messages.read':
-    case 'files.read':
       return [];
+    case 'files.read': {
+      // Only a task's read of a response file it kept reaches here with a source; it carries its call's sources.
+      const read = taskFileReadResultSchema.safeParse(result);
+      if (!read.success || !('source' in read.data)) return [];
+      if (read.data.private) return [{ kind: 'unavailable' }];
+      return read.data.url ? [{ kind: 'public-web', url: publicSourceUrl(read.data.url) }] : [];
+    }
     case 'web.fetch':
       return [{ kind: 'public-web', url: call.url }];
     case 'api.request':

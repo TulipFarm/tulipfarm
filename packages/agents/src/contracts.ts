@@ -159,6 +159,16 @@ export const publicWebCallSchema = z.discriminatedUnion('tool', [
 ]);
 export const toolCallSchema = z.discriminatedUnion('tool', [
   apiRequestCallSchema,
+  z.strictObject({
+    tool: z.literal('files.read'),
+    source: z.string().trim().min(1).max(256),
+    pages: z
+      .strictObject({ from: z.number().int().min(1), to: z.number().int().min(1) })
+      .refine(pages => pages.to >= pages.from, 'to must not be before from')
+      .optional(),
+    sheet: z.string().min(1).max(256).optional(),
+    range: z.strictObject({ start: z.number().int().min(0), end: z.number().int().min(1).optional() }).optional(),
+  }),
   generateImagesCallSchema,
   skillExecutionCallSchema,
   skillFileCallSchema,
@@ -230,8 +240,14 @@ export const recordConflict = {
     'The row changed after your last read or no read token was supplied. Read it again with rows.get, then retry with the new token.',
 } as const;
 const recordConflictSchema = z.strictObject({ error: z.literal(recordConflict.error), instruction: z.string() });
+/** `files.read` in a task: one response file the task kept, as a labelled untrusted block, or why there is none. */
+export const taskFileReadResultSchema = z.union([
+  z.strictObject({ source: uuidSchema, file: z.string(), url: z.string().nullable(), private: z.boolean() }),
+  z.strictObject({ error: z.literal('file-not-found'), instruction: z.string() }),
+]);
 export const toolResultSchema = z.union([
   imageOutputResultSchema,
+  taskFileReadResultSchema,
   z.strictObject({
     taskId: uuidSchema,
     status: z.enum(['pending', 'completed', 'waiting-clarification', 'waiting-approval', 'paused', 'failed']),

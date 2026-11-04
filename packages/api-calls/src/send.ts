@@ -31,6 +31,20 @@ export type ApiCallSecrets = {
   recordUse(secretId: string, url: string): Promise<void>;
 };
 
+/**
+ * Saves a response body as a file of the chat or task, returning the `source` that `files.read` reads it by, or null
+ * when storage is full. `private` is true when the call sent a secret, so only the member who made it may read it.
+ */
+export type ApiCallFiles = {
+  save(file: {
+    name: string;
+    mediaType: string;
+    bytes: Uint8Array;
+    url: string;
+    private: boolean;
+  }): Promise<{ source: string } | null>;
+};
+
 export type SendApiCallOptions = {
   workspaceId: string;
   /** The chat turn or task run the call belongs to, for the per-turn limit. */
@@ -38,6 +52,8 @@ export type SendApiCallOptions = {
   /** Absent when secrets are not available here; a call that names one then fails with `disabled`. */
   secrets?: ApiCallSecrets | undefined;
   signal?: AbortSignal | undefined;
+  /** Saves bodies over 64 KiB or binary ones; absent, they are omitted from the result. */
+  files?: ApiCallFiles | undefined;
   dependencies?: PinnedRequestPolicy['dependencies'];
 };
 
@@ -165,7 +181,8 @@ function parse(input: unknown): ApiRequestCall {
 
 /**
  * Sends one `api.request` call. Expected failures are returned as `{ status: 'failed' }`, never thrown. Only `GET`
- * and `HEAD` are sent; every other method needs an approval, which is not available yet.
+ * and `HEAD` are sent; every other method needs an approval, which is not available yet. With `files`, a body over
+ * 64 KiB and up to 10 MiB, or a binary one, is saved and the result names it.
  */
 export async function sendApiCall(input: unknown, options: SendApiCallOptions): Promise<ApiCallResult> {
   let call: ApiRequestCall;
@@ -238,24 +255,42 @@ export async function sendApiCall(input: unknown, options: SendApiCallOptions): 
       },
     );
     requestSent = true;
-    const read = await readResponse(response, { url, placements, sent });
+    const read = await readResponse(response, { url, placements, sent, files: Boolean(options.files) });
+    const redacted = redactUrl(url.href, placements);
+    let body = read.body;
+    let note: string | undefined;
+    if (read.file && body.kind === 'omitted') {
+      const saved = await options.files!.save({ ...read.file, url: redacted, private: used.length > 0 });
+      if (saved) {
+        body = {
+          kind: 'file',
+          source: saved.source,
+          name: read.file.name,
+          contentType: body.contentType,
+          bytes: read.file.bytes.byteLength,
+        };
+        note = `The body was saved as a file. Read it with files.read and source ${saved.source}.`;
+      } else {
+        body = { ...body, reason: 'too-large' };
+        note = 'Storage is full, so the body was not saved or returned. Tell the member.';
+      }
+    } else if (body.kind === 'omitted')
+      note =
+        body.reason === 'binary'
+          ? 'The body is not text or JSON, so it was not returned.'
+          : options.files
+            ? 'The body is over 10 MiB, so it was not saved or returned. Narrow the request, for example with paging or filters.'
+            : 'The body is over 64 KiB, so it was not returned. Narrow the request, for example with paging or filters.';
     const durationMs = Math.round(performance.now() - started);
     return {
       status: 'sent',
       method: call.method,
-      url: redactUrl(url.href, placements),
-      response: { status: read.status, durationMs, headers: read.headers, body: read.body },
+      url: redacted,
+      response: { status: read.status, durationMs, headers: read.headers, body },
       ...(read.authentication ? { authentication: read.authentication } : {}),
       secrets: used.map(({ name, placement }) => ({ name, placement })),
       untrusted: true,
-      ...(read.body.kind === 'omitted'
-        ? {
-            note:
-              read.body.reason === 'binary'
-                ? 'The body is not text or JSON, so it was not returned. Saving responses as files is not available yet.'
-                : 'The body is over 64 KiB, so it was not returned. Narrow the request, for example with paging or filters.',
-          }
-        : {}),
+      ...(note ? { note } : {}),
     };
   } catch (error) {
     if (error instanceof McpNetworkError) {

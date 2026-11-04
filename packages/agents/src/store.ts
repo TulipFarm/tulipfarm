@@ -469,7 +469,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       if (
         isMcpCall(value.call)
           ? !run.task_id || run.kind !== 'delegated' || !definition.mcp?.length
-          : value.call.tool === 'api.request'
+          : value.call.tool === 'api.request' || value.call.tool === 'files.read'
             ? !run.task_id || run.kind !== 'delegated'
             : !withKnowledgeRetrieveGrant(definition.tools).includes(value.call.tool) && !automaticSkillRead
       )

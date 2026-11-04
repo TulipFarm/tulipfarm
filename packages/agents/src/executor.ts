@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
 import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
 import { sendApiCall } from '@tulipfarm/api-calls';
+import { keepTaskApiFile, readTaskApiFile, taskFileResultChars, type TaskFileReading } from './task-files.ts';
 import {
   AccessDenied,
   canAccessAsset,
@@ -112,6 +113,8 @@ type Options = {
   knowledge?: KnowledgeToolsFactory | undefined;
   /** Generates images for `images.generate` in runs; without it, the call is refused. */
   images?: RunImages | undefined;
+  /** Keeps task `api.request` response bodies for `files.read`; without it, or with the flag off, they are omitted. */
+  reading?: TaskFileReading | undefined;
 };
 /** What runs generate images with. The model is the one pinned on the run at admission. */
 export type RunImages = {
@@ -163,6 +166,10 @@ async function requireIssueAccess(
 export function createAgentExecutor(options: Options) {
   const runtime = withTaskTelemetry(options.runtime);
   const store = createAgentStore(runtime, options.externalGuard);
+  async function taskFileLinks(workspaceId: string) {
+    const reading = options.reading;
+    return reading?.links && (await reading.enabled(workspaceId)) ? reading.links : undefined;
+  }
   async function captureExternalSources(tx: Transaction, ids: ExecutionIds, actor: HumanActor, call: ToolCall) {
     if (
       !(await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_slack_agent_turns')} WHERE run_id=$1`, [ids.runId]))
@@ -404,7 +411,7 @@ export function createAgentExecutor(options: Options) {
                       )
                   : null;
                 const automaticSkillRead = row.call.tool === 'skills.read' && (definition.skills?.length ?? 0) > 0;
-                if (row.call.tool === 'api.request') {
+                if (row.call.tool === 'api.request' || row.call.tool === 'files.read') {
                   if (!binding) throw new AccessDenied();
                 } else if (isMcpCall(row.call)) {
                   if (!definition.mcp?.length || delegationTools !== null) throw new AccessDenied();
@@ -754,7 +761,8 @@ export function createAgentExecutor(options: Options) {
                   row.call.tool === 'skills.read' ||
                   row.call.tool === 'web.fetch' ||
                   row.call.tool === 'web.search' ||
-                  row.call.tool === 'api.request'
+                  row.call.tool === 'api.request' ||
+                  row.call.tool === 'files.read'
                 ) {
                   if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
                     return row.status;
@@ -800,10 +808,32 @@ export function createAgentExecutor(options: Options) {
                     case 'web.search':
                       result = await searchPublicWeb(row.call);
                       break;
-                    case 'api.request':
+                    case 'api.request': {
                       denyMcpEgress();
+                      const links = await taskFileLinks(ids.workspaceId);
+                      const task = { workspaceId: ids.workspaceId, taskId: binding!.task_id, callId: ids.callId };
                       // Tasks hold no secrets yet, so a call that names one fails with `disabled`.
-                      result = await sendApiCall(row.call, { workspaceId: ids.workspaceId, scope: ids.runId });
+                      result = await sendApiCall(row.call, {
+                        workspaceId: ids.workspaceId,
+                        scope: ids.runId,
+                        ...(links
+                          ? {
+                              files: {
+                                save: async file =>
+                                  (await keepTaskApiFile(links, task, file)) ? { source: ids.callId } : null,
+                              },
+                            }
+                          : {}),
+                      });
+                      break;
+                    }
+                    case 'files.read':
+                      result = await readTaskApiFile(
+                        (await taskFileLinks(ids.workspaceId))?.objects,
+                        { workspaceId: ids.workspaceId, taskId: binding!.task_id },
+                        row.call,
+                        taskFileResultChars,
+                      );
                       break;
                   }
                   await transaction.client.query(
@@ -1704,7 +1734,8 @@ export function createAgentExecutor(options: Options) {
         row.call.tool === 'skills.read' ||
         row.call.tool === 'web.fetch' ||
         row.call.tool === 'web.search' ||
-        row.call.tool === 'api.request'
+        row.call.tool === 'api.request' ||
+        row.call.tool === 'files.read'
       ) {
         if (row.call.tool === 'tables.list') {
           const local: Runtime = { transaction: async (_workspace, _range, action) => action(transaction) };
