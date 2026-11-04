@@ -27,30 +27,18 @@ const ignored = new Set<SourceDependency['kind']>([
   'creation-team',
 ]);
 
-async function columnExists(tx: AgentTransaction, tableName: string, column: string) {
-  return (
-    (
-      await tx.client.query(
-        `SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 AND column_name=$3`,
-        [tx.schema, tableName, column],
-      )
-    ).rowCount !== 0
-  );
-}
-
 /**
  * The plan whose document PDF is this file, or null for any other file. Plans record their PDF in
- * `tf_agent_plans.document_file_id`, and each rendered revision in `tf_agent_plan_documents.pdf_file_id`; both arrive with
- * the plan document migration, so before it every file reads as not a plan's.
+ * `tf_agent_plans.document_file_id`, and each rendered revision in `tf_agent_plan_documents.pdf_file_id`.
  */
 export async function planForDocumentFile(tx: AgentTransaction, fileId: string): Promise<string | null> {
-  const clauses: string[] = [];
-  if (await columnExists(tx, 'tf_agent_plans', 'document_file_id'))
-    clauses.push(`SELECT id FROM ${relation(tx, 'tf_agent_plans')} WHERE document_file_id=$1`);
-  if (await columnExists(tx, 'tf_agent_plan_documents', 'pdf_file_id'))
-    clauses.push(`SELECT plan_id AS id FROM ${relation(tx, 'tf_agent_plan_documents')} WHERE pdf_file_id=$1`);
-  if (!clauses.length) return null;
-  const row = (await tx.client.query(`${clauses.join(' UNION ')} LIMIT 1`, [fileId])).rows[0];
+  const row = (
+    await tx.client.query(
+      `SELECT id FROM ${relation(tx, 'tf_agent_plans')} WHERE document_file_id=$1
+       UNION SELECT plan_id AS id FROM ${relation(tx, 'tf_agent_plan_documents')} WHERE pdf_file_id=$1 LIMIT 1`,
+      [fileId],
+    )
+  ).rows[0];
   return row ? z.uuid().parse(row.id) : null;
 }
 

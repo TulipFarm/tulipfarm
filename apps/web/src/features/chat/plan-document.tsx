@@ -72,21 +72,16 @@ export function PlanDocument({
   view: PlanDetail;
 }) {
   const render = view.documentRender ?? null;
-  const [ready, setReady] = useState<number | null>(null);
-  if (render?.status === 'ready' && render.revision !== ready) setReady(render.revision);
-  // Before a revision has been seen ready, an in-progress or failed one has its predecessor behind it.
-  const shown =
-    render?.status === 'ready'
-      ? render.revision
-      : (ready ?? (render && render.revision > 1 ? render.revision - 1 : null));
+  // A failed or in-progress revision leaves the newest ready page in place.
+  const shown = render?.pageRevision ?? null;
   const updating =
     !!render &&
     (render.status === 'pending' ||
       render.status === 'rendering' ||
       (render.status === 'ready' && render.revision < view.contentRevision));
   const failed = render?.status === 'failed';
-  const detached = render?.error === 'file-detached';
-  const tooLarge = render?.error === 'pdf-too-large';
+  const detached = !!render?.fileDetached;
+  const tooLarge = render?.error === 'too-large';
   const quota = render?.error === 'quota';
   const fileId = detached ? null : (render?.fileId ?? null);
 

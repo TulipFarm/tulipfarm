@@ -47,18 +47,7 @@ import { resultActivityApps } from './result-activity';
 
 export type PlanSummary = z.infer<typeof planListItemSchema>;
 
-/** The latest attempt to produce a revision's document; a failed attempt leaves the previous revision's page. */
-export const planDocumentRenderSchema = z.object({
-  revision: z.number().int().positive(),
-  status: z.enum(['pending', 'rendering', 'ready', 'failed']),
-  fileId: z.string().nullish(),
-  fileVersion: z.number().int().positive().nullish(),
-  error: z.string().nullish(),
-});
-export type PlanDocumentRender = z.infer<typeof planDocumentRenderSchema>;
-// The web reads the render state beside the shared projection until the shared PlanView carries it.
-const planDetailSchema = planViewSchema.extend({ documentRender: planDocumentRenderSchema.nullish() });
-export type PlanDetail = z.infer<typeof planDetailSchema>;
+export type PlanDetail = PlanView;
 type PlanTask = PlanView['tasks'][number];
 type PlanControl =
   | { action: 'start' }
@@ -110,7 +99,7 @@ export function planApi(workspaceId: string) {
       z.object({ plans: z.array(planListItemSchema) }).parse(await request(`/conversations/${chatId}/plans`, signal))
         .plans,
     read: async (planId: string, signal: AbortSignal) =>
-      planDetailSchema.parse(await request(`/agent-plans/${planId}`, signal)),
+      planViewSchema.parse(await request(`/agent-plans/${planId}`, signal)),
     /** One revision's document page. Revisions never change, so the HTML can be kept. */
     document: async (planId: string, revision: number, signal: AbortSignal) => {
       const response = await jsonResponse(`${base}${plan(planId)}/document/${revision}`, { signal });

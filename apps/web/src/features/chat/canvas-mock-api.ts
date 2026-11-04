@@ -63,7 +63,19 @@ const planKeys = ['records', 'agent', 'intake', 'activation', 'verify'];
 function planDocumentFixture(plan: z.infer<typeof planViewSchema>) {
   const fileId = '66666666-6666-4666-8666-666666666666';
   if (scenario === 'plan-blocked')
-    return { ...plan, contentRevision: 2, documentRender: { revision: 2, status: 'failed', fileId, fileVersion: 1 } };
+    return {
+      ...plan,
+      contentRevision: 2,
+      documentRender: {
+        revision: 2,
+        status: 'failed',
+        error: 'render',
+        pageRevision: 1,
+        fileId,
+        fileVersion: 1,
+        fileDetached: false,
+      },
+    };
   if (scenario === 'plan-verified')
     return {
       ...plan,
@@ -75,9 +87,28 @@ function planDocumentFixture(plan: z.infer<typeof planViewSchema>) {
         approvedAt: '2026-11-04T04:12:00Z',
         timeZone: 'Asia/Kolkata',
       },
-      documentRender: { revision: 2, status: 'ready', fileId, fileVersion: 3 },
+      documentRender: {
+        revision: 2,
+        status: 'ready',
+        error: null,
+        pageRevision: 2,
+        fileId,
+        fileVersion: 3,
+        fileDetached: false,
+      },
     };
-  return { ...plan, documentRender: { revision: 1, status: 'ready', fileId, fileVersion: 1 } };
+  return {
+    ...plan,
+    documentRender: {
+      revision: 1,
+      status: 'ready',
+      error: null,
+      pageRevision: 1,
+      fileId,
+      fileVersion: 1,
+      fileDetached: false,
+    },
+  };
 }
 function planDocumentHtml(plan: z.infer<typeof planViewSchema>, revision: number) {
   const escape = (text: string) => text.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`);
