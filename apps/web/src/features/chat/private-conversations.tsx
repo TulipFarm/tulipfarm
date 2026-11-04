@@ -1920,6 +1920,7 @@ function ConversationTools({
               'files.move',
               'files.trash',
               'files.restore',
+              'files.share',
               'knowledge.add',
               'knowledge.update',
               'knowledge.remove',

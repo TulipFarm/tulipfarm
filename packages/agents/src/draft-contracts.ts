@@ -5,7 +5,7 @@ import { saveAgentSchema, agentCommandStatusSchema } from './saved-contracts.ts'
 import { saveWorkspaceSkillSchema, workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
 import { agentDefinitionSchema, taskMutationSchema } from './contracts.ts';
 import { agentRecordValueSchema } from './record-contracts.ts';
-import { fileNameSchema, moveFingerprintSchema } from '@tulipfarm/files/contracts';
+import { fileNameSchema, moveFingerprintSchema, shareFingerprintSchema } from '@tulipfarm/files/contracts';
 import { authoredDefinitionSchema, definitionSchema } from '@tulipfarm/workflows/contracts';
 import { agentSetupConsentSchema, agentSetupDetailsSchema, agentSetupReceiptSchema } from './setup-contracts.ts';
 
@@ -113,6 +113,28 @@ const memoryDraftInput = z.discriminatedUnion('operation', [
     forgotten: z.string(),
   }),
 ]);
+const shareSubject = { kind: z.enum(['individual', 'team']), id: uuidSchema, name: z.string() };
+/** Names shown for one side of who can open the item, capped so a large audience stays readable. */
+const shareAudience = z.strictObject({ names: z.array(z.string()).max(100), count: z.number().int().nonnegative() });
+const fileShareDraftInput = z.strictObject({
+  file: z.strictObject({ id: uuidSchema, name: z.string(), kind: z.enum(['file', 'folder']) }),
+  /** The plan whose document this file is; its sources decide who may be shared with. */
+  planId: uuidSchema.nullable(),
+  role: z.enum(['viewer', 'editor']),
+  /** Who gets the grant, with the direct role each has now. */
+  subjects: z
+    .array(z.strictObject({ ...shareSubject, current: z.enum(['viewer', 'editor', 'manager']).nullable() }))
+    .min(1)
+    .max(20)
+    .refine(distinct, 'People and teams must be distinct'),
+  /** Who was left off because they cannot read every source of the plan. */
+  excluded: z.array(z.strictObject(shareSubject)).max(20),
+  before: shareAudience,
+  /** People who can open the item only once the grants are added. */
+  added: shareAudience,
+  /** The share is refused if the item's sharing changed since this preview. */
+  fingerprint: shareFingerprintSchema,
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -142,6 +164,7 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('skill-restore'), targetId: uuidSchema, input: skillLifecycleInput }),
   z.strictObject({ kind: z.literal('project'), targetId: uuidSchema, input: projectDraftInput }),
   z.strictObject({ kind: z.literal('files'), targetId: uuidSchema, input: fileDraftInput }),
+  z.strictObject({ kind: z.literal('file-share'), targetId: uuidSchema, input: fileShareDraftInput }),
   /** targetId is the Knowledge document: a new ID when adding. */
   z.strictObject({ kind: z.literal('knowledge'), targetId: uuidSchema, input: knowledgeDraftInput }),
   z.strictObject({ kind: z.literal('memory'), input: memoryDraftInput }),
@@ -188,6 +211,12 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     kind: z.literal('files'),
     change: z.enum(['rename', 'move', 'trash', 'restore']),
     fileIds: z.array(z.uuid()),
+  }),
+  z.object({
+    kind: z.literal('file-share'),
+    fileId: z.uuid(),
+    role: z.enum(['viewer', 'editor']),
+    subjects: z.array(z.object({ kind: z.enum(['individual', 'team']), id: z.uuid() })),
   }),
   z.object({
     kind: z.literal('knowledge'),
@@ -256,6 +285,7 @@ export const isDefinitionLifecycle = (proposal: AuthoringProposal): proposal is 
   ['agent-archive', 'agent-restore', 'skill-archive', 'skill-restore'].includes(proposal.kind);
 export type ProjectProposal = Extract<AuthoringProposal, { kind: 'project' }>;
 export type FilesProposal = Extract<AuthoringProposal, { kind: 'files' }>;
+export type FileShareProposal = Extract<AuthoringProposal, { kind: 'file-share' }>;
 export type KnowledgeProposal = Extract<AuthoringProposal, { kind: 'knowledge' }>;
 export type MemoryProposal = Extract<AuthoringProposal, { kind: 'memory' }>;
 export type DraftOutcome = z.infer<typeof draftOutcomeSchema>;

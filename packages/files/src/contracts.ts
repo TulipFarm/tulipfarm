@@ -274,6 +274,18 @@ export const movePreviewSchema = z.object({
   fingerprint: moveFingerprintSchema,
 });
 export type MovePreview = z.infer<typeof movePreviewSchema>;
+export const shareFingerprintSchema = z.string().regex(/^files-share-v1:[a-f0-9]{64}$/);
+/** Who can open an item now and after the reviewed grants, with each subject's current direct grant. */
+export const sharePreviewSchema = z.object({
+  item: readableFileReferenceSchema.extend({ itemKind: z.enum(['file', 'folder']) }),
+  creatorMembershipId: uuidSchema,
+  role: fileRoleSchema,
+  subjects: z.array(z.object({ subject: fileSubjectSchema, direct: fileRoleSchema.nullable() })),
+  before: fileAudienceSchema,
+  after: fileAudienceSchema,
+  fingerprint: shareFingerprintSchema,
+});
+export type SharePreview = z.infer<typeof sharePreviewSchema>;
 
 export const fileStorageUsageSchema = z.object({
   usedBytes: z.number().int().nonnegative(),
