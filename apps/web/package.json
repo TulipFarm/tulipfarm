@@ -15,6 +15,7 @@
     "test:interactions": "node test/interactions.browser.mjs",
     "test:models": "node --test test/models.browser.mjs",
     "test:recommendations": "node test/recommendations.browser.mjs",
+    "test:api-calls": "node --test test/api-calls.browser.mjs",
     "test:secrets": "node test/secrets.browser.mjs",
     "test:settings": "node --test test/settings.browser.mjs",
     "test:shell": "node test/shell.browser.mjs",
