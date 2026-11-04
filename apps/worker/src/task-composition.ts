@@ -26,6 +26,7 @@ import type { KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
+import { secretsServices, taskSecretsAccess } from './secrets-composition.ts';
 
 export function createTaskComposition(
   storage: Parameters<typeof createTaskRuntime>[0],
@@ -83,6 +84,7 @@ export function createTaskComposition(
       links: objects && attachments ? { fetch: fetchPublicFile, objects, hasRoom: attachments.hasRoom } : undefined,
     },
     files ? { files, choose: runImageChoice } : undefined,
+    taskSecretsAccess(secretsServices(runtime)),
   );
   const progress = createTaskProgress(runtime);
   async function processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress> {

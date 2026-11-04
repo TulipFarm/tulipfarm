@@ -63,6 +63,17 @@ export function createTaskProgress(runtime: AgentStorage) {
           ).rows[0],
         );
       if (slack) return { kind: slack.runnable ? 'runnable' : 'waiting' };
+      const secret = z
+        .object({ runnable: z.boolean().nullable() })
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT bool_or(r.status<>'waiting' OR r.expires_at<=clock_timestamp()) AS runnable FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id JOIN ${relation(tx, 'tf_secret_requests')} r ON r.id=c.id WHERE b.task_id=$1 AND b.generation=$2 AND c.status='waiting' AND c.call->>'tool'='secrets.request'`,
+              [taskId, task.generation],
+            )
+          ).rows[0],
+        );
+      if (secret.runnable) return { kind: 'runnable' };
       const step = z
         .object({ proposal_id: z.uuid().nullable() })
         .optional()

@@ -7,6 +7,7 @@ import {
   secretHistorySchema,
   secretListSchema,
   secretRequestViewSchema,
+  taskSecretRequestsSchema,
   type DestinationInput,
   type Placement,
   type SecretGrant,
@@ -94,6 +95,10 @@ export function secretsApi(workspaceId: string) {
     save: (id: string, expectedPolicyVersion: number, input: { name?: string; expiresAt?: string | null }) =>
       write(`${secret(id)}/save`, 'POST', { expectedPolicyVersion, ...input }),
     remove: (id: string, expectedVersion: number) => write(secret(id), 'DELETE', { expectedVersion }),
+    forTask: async (taskId: string, signal: AbortSignal) =>
+      taskSecretRequestsSchema.parse(
+        await request(`${workspace}/agent-tasks/${encodeURIComponent(taskId)}/secret-requests`, signal),
+      ).requests,
     requestView: async (id: string, signal: AbortSignal) =>
       secretRequestViewSchema.parse(await request(`${workspace}/secret-requests/${encodeURIComponent(id)}`, signal)),
     /** One request ID per form attempt, so a retry after a lost response replays instead of storing twice. */

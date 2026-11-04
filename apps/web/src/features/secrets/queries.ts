@@ -9,6 +9,7 @@ export const secretsKeys = {
   list: ['secrets', 'list'] as const,
   history: (id: string) => ['secrets', 'history', id] as const,
   request: (id: string) => ['secrets', 'request', id] as const,
+  task: (taskId: string) => ['secrets', 'task', taskId] as const,
   directory: ['secrets', 'directory'] as const,
 };
 
@@ -34,6 +35,15 @@ export function useSecretHistory(workspaceId: string, id: string) {
 export function useSecretRequest(workspaceId: string, id: string, enabled: boolean) {
   const api = useSecretsApi(workspaceId);
   return useFeatureRead({ key: secretsKeys.request(id), load: signal => api.requestView(id, signal), enabled });
+}
+
+export function useTaskSecretRequests(workspaceId: string, taskId: string, revision: unknown) {
+  const api = useSecretsApi(workspaceId);
+  return useFeatureRead({
+    key: [...secretsKeys.task(taskId), revision],
+    load: signal => api.forTask(taskId, signal),
+    enabled: !!workspaceId,
+  });
 }
 
 export function useMemberDirectory(workspaceId: string) {

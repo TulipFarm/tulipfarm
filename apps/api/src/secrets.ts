@@ -28,6 +28,8 @@ import {
   secretsWorkspaceParams,
   secretSummarySchema,
   submitSecretRequestBody,
+  taskSecretRequestParams,
+  taskSecretRequestsSchema,
 } from './secrets-contracts.ts';
 
 export type SecretsHttpAuth = { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
@@ -67,6 +69,7 @@ export function registerSecrets(
   app: FastifyInstance,
   auth: SecretsHttpAuth,
   service: { secrets: Secrets; requests: SecretRequests },
+  wakeTask?: (workspaceId: string, taskId: string) => Promise<void>,
 ) {
   app.register(async routes => {
     const validation = routeValidation({
@@ -224,7 +227,21 @@ export function registerSecrets(
     );
 
     const requests = '/workspaces/:workspaceId/secret-requests/:requestId';
+    // A task waiting on the form continues once its owner answers; worker recovery covers a missed wake.
+    const wake = async (workspaceId: string, user: string, requestId: string) => {
+      if (!wakeTask) return;
+      const origin = await service.requests.origin(workspaceId, user, requestId);
+      if (origin.kind === 'task') await wakeTask(workspaceId, origin.taskId);
+    };
     const form = (request: FastifyRequest) => secretRequestParams.parse(request.params);
+    routes.get(
+      '/workspaces/:workspaceId/agent-tasks/:taskId/secret-requests',
+      options('listTaskSecretRequestsV1', taskSecretRequestsSchema, taskSecretRequestParams),
+      async request => {
+        const { workspaceId, taskId } = taskSecretRequestParams.parse(request.params);
+        return { requests: await service.requests.forTask(workspaceId, userId(request), taskId) };
+      },
+    );
     routes.get(requests, options('getSecretRequestV1', secretRequestViewSchema, secretRequestParams), request => {
       const { workspaceId, requestId } = form(request);
       return service.requests.view(workspaceId, userId(request), requestId);
@@ -232,27 +249,31 @@ export function registerSecrets(
     routes.post(
       `${requests}/submit`,
       options('submitSecretRequestV1', secretRequestResultSchema, secretRequestParams, submitSecretRequestBody),
-      request => {
+      async request => {
         const { workspaceId, requestId } = form(request);
-        return service.requests.submit(
+        const result = await service.requests.submit(
           workspaceId,
           userId(request),
           requestId,
           submitSecretRequestBody.parse(request.body),
         );
+        await wake(workspaceId, userId(request), requestId);
+        return result;
       },
     );
     routes.post(
       `${requests}/decline`,
       options('declineSecretRequestV1', secretRequestResultSchema, secretRequestParams, declineSecretRequestBody),
-      request => {
+      async request => {
         const { workspaceId, requestId } = form(request);
-        return service.requests.decline(
+        const result = await service.requests.decline(
           workspaceId,
           userId(request),
           requestId,
           declineSecretRequestBody.parse(request.body),
         );
+        await wake(workspaceId, userId(request), requestId);
+        return result;
       },
     );
   });

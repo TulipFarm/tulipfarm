@@ -1544,6 +1544,16 @@ export const settings: readonly Setting[] = [
     description:
       '`true` lets members save secrets and agents ask for them. Secrets are encrypted with the `INTEGRATION_CREDENTIAL_KEY` keyring.',
   },
+  {
+    name: 'API_CALL_PRIVATE_HOSTS',
+    group: 'Secrets',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Private hosts that agent API calls and secret destinations may reach: comma-separated `host[:port][;http]` entries of exact lower-case host names, such as `billing.internal:8443,metrics.lan;http`. Without a port only the default port is allowed; `;http` also allows plain HTTP. A listed host may resolve to any address, including loopback, and every workspace on this server can reach it. IP addresses and wildcards fail startup. Unset allows public hosts only.',
+    selfHost: { section: 'optional', example: 'billing.internal:8443,metrics.lan;http', commented: true },
+  },
 
   {
     name: 'SKILL_SCRIPTS_ENABLED',

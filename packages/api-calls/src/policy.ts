@@ -1,5 +1,10 @@
 import { headerNameSchema } from '@tulipfarm/secrets';
-import { McpNetworkError, normalizeDestination } from '@tulipfarm/workspace-mcp-transport';
+import {
+  McpNetworkError,
+  normalizeDestination,
+  parsePrivateHosts,
+  type PrivateHost,
+} from '@tulipfarm/workspace-mcp-transport';
 import { API_CALL_LIMITS, ApiCallError, type ApiRequestBody, type ApiRequestCall } from './contracts.ts';
 
 export const API_CALL_USER_AGENT = 'TulipFarm-ApiCall/1';
@@ -15,17 +20,40 @@ export function isCredentialName(name: string): boolean {
 const credentialMessage = (name: string) =>
   `"${name}" carries a credential. Remove it and send the credential through a secret instead; use secrets.request if the chat holds none.`;
 
-/** The URL with the agent's query pairs added, checked as secrets and workspace MCP check destinations. */
-export function normalizeApiUrl(input: string, query: ApiRequestCall['query'] = []): URL {
+/**
+ * The operator's private hosts from `API_CALL_PRIVATE_HOSTS`: `host[:port][;http]` entries separated by commas. An
+ * invalid entry throws, so the api and worker stop at startup.
+ */
+export function apiCallPrivateHosts(env: NodeJS.ProcessEnv = process.env): PrivateHost[] {
+  try {
+    return parsePrivateHosts(env.API_CALL_PRIVATE_HOSTS ?? '');
+  } catch (error) {
+    throw new Error(
+      `API_CALL_PRIVATE_HOSTS must list lower-case host names as host[:port][;http], separated by commas, without IP addresses or wildcards: ${(error as Error).message}`,
+    );
+  }
+}
+
+/**
+ * The URL with the agent's query pairs added, checked as secrets and workspace MCP check destinations. A host on
+ * `privateHosts` may use its listed port and, if listed so, `http:`.
+ */
+export function normalizeApiUrl(
+  input: string,
+  query: ApiRequestCall['query'] = [],
+  privateHosts: readonly PrivateHost[] = [],
+): URL {
   if (!URL.canParse(input)) throw new ApiCallError('invalid-request', 'url is not a valid absolute URL.');
   let url: URL;
   try {
-    url = normalizeDestination(input, 'public');
+    url = normalizeDestination(input, privateHosts.length ? { privateHosts } : 'public');
   } catch (error) {
     if (!(error instanceof McpNetworkError)) throw error;
     throw new ApiCallError(
       'address-denied',
-      'url must be https on a public host name and the default port, without user name, fragment or IP address.',
+      privateHosts.length
+        ? 'url must be https on a public host name and the default port, or use a private host as the operator listed it, without user name, fragment or IP address.'
+        : 'url must be https on a public host name and the default port, without user name, fragment or IP address.',
     );
   }
   if (/[{}]|%7b|%7d/i.test(url.href))

@@ -8,7 +8,10 @@ import {
   readMethods,
   resumeApiCall,
   sendApiCall,
+  type ApiCallSecrets,
+  type SendApiCallOptions,
 } from '@tulipfarm/api-calls';
+import type { TaskSecretTools } from '@tulipfarm/secrets';
 import { keepTaskApiFile, readTaskApiFile, taskFileResultChars, type TaskFileReading } from './task-files.ts';
 import {
   AccessDenied,
@@ -122,7 +125,17 @@ type Options = {
   images?: RunImages | undefined;
   /** Keeps task `api.request` response bodies for `files.read`; without it, or with the flag off, they are omitted. */
   reading?: TaskFileReading | undefined;
+  /** Task `secrets.*` tools and what task `api.request` may reach; without it, both are refused or public only. */
+  taskSecrets?: TaskSecretsAccess | undefined;
 };
+/** A task run's secret forms, the secrets it holds and the operator's private hosts. */
+export type TaskSecretsAccess = {
+  tools: TaskSecretTools;
+  privateHosts: SendApiCallOptions['privateHosts'];
+  /** Absent while secrets are turned off. */
+  held?: (holder: { workspaceId: string; actor: HumanActor; origin: TaskSecretOrigin }) => ApiCallSecrets;
+};
+type TaskSecretOrigin = { kind: 'task'; taskId: string; runId: string };
 /** What runs generate images with. The model is the one pinned on the run at admission. */
 export type RunImages = {
   files: ImageOutputStore;
@@ -418,7 +431,12 @@ export function createAgentExecutor(options: Options) {
                       )
                   : null;
                 const automaticSkillRead = row.call.tool === 'skills.read' && (definition.skills?.length ?? 0) > 0;
-                if (row.call.tool === 'api.request' || row.call.tool === 'files.read') {
+                if (
+                  row.call.tool === 'api.request' ||
+                  row.call.tool === 'files.read' ||
+                  row.call.tool === 'secrets.request' ||
+                  row.call.tool === 'secrets.list'
+                ) {
                   if (!binding) throw new AccessDenied();
                 } else if (isMcpCall(row.call)) {
                   if (!definition.mcp?.length || delegationTools !== null) throw new AccessDenied();
@@ -788,6 +806,32 @@ export function createAgentExecutor(options: Options) {
                     apiCall: { taskId: binding.task_id },
                   };
                 }
+                if (row.call.tool === 'secrets.request' || row.call.tool === 'secrets.list') {
+                  const binding = await taskRun(transaction, ids.runId);
+                  if (!binding || !run.user_id || !run.membership_id) throw new AccessDenied();
+                  if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
+                    return row.status;
+                  if (
+                    !batch &&
+                    !taskAssociated &&
+                    (
+                      await transaction.client.query(
+                        `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id = $1 AND sequence < $2 AND status <> 'completed'`,
+                        [ids.runId, row.sequence],
+                      )
+                    ).rowCount
+                  )
+                    return 'waiting';
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status='waiting' WHERE id=$1`,
+                    [ids.callId],
+                  );
+                  return {
+                    call: row.call,
+                    actor: { kind: 'human' as const, userId: run.user_id, membershipId: run.membership_id },
+                    secretTask: { taskId: binding.task_id },
+                  };
+                }
                 if (
                   row.call.tool === 'tables.list' ||
                   row.call.tool === 'skills.list' ||
@@ -1120,6 +1164,9 @@ export function createAgentExecutor(options: Options) {
             denyMcpEgress();
             const origin = { kind: 'task' as const, taskId: outcome.apiCall.taskId, runId: ids.runId };
             const membershipId = outcome.actor.membershipId;
+            const access = options.taskSecrets;
+            const held = access?.held?.({ workspaceId: ids.workspaceId, actor: outcome.actor, origin });
+            const reach = { secrets: held, privateHosts: access?.privateHosts };
             const links = await taskFileLinks(ids.workspaceId);
             const task = { workspaceId: ids.workspaceId, taskId: origin.taskId, callId: ids.callId };
             const files = links
@@ -1132,11 +1179,11 @@ export function createAgentExecutor(options: Options) {
               : {};
             let response: unknown;
             if (readMethods.has(outcome.call.method))
-              // Tasks hold no secrets yet, so a call that names one fails with `disabled`.
               response = await sendApiCall(outcome.call, {
                 workspaceId: ids.workspaceId,
                 calls: apiCallLedger(runtime, { workspaceId: ids.workspaceId, membershipId, origin }),
                 ...files,
+                ...reach,
               });
             else {
               const proposed = await proposeApiCall(runtime, {
@@ -1145,9 +1192,10 @@ export function createAgentExecutor(options: Options) {
                 origin,
                 callId: ids.callId,
                 call: outcome.call,
+                ...reach,
               });
               if ('provider' in proposed) {
-                const resumed = await resumeApiCall(runtime, ids.workspaceId, ids.callId, files);
+                const resumed = await resumeApiCall(runtime, ids.workspaceId, ids.callId, { ...files, ...reach });
                 response = resumed.state === 'waiting' ? proposed : resumed.result;
               } else response = proposed;
             }
@@ -1164,6 +1212,52 @@ export function createAgentExecutor(options: Options) {
               ]);
             });
             return status;
+          }
+          if (outcome.call.tool === 'secrets.request' || outcome.call.tool === 'secrets.list') {
+            if (!('secretTask' in outcome) || outcome.actor.kind !== 'human') throw new AccessDenied();
+            const call = outcome.call;
+            const membershipId = outcome.actor.membershipId;
+            const origin = { kind: 'task' as const, taskId: outcome.secretTask.taskId, runId: ids.runId };
+            const tools = options.taskSecrets?.tools;
+            return executionTransaction(ids, async tx => {
+              await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
+              let result: unknown;
+              let status: 'completed' | 'waiting' = 'completed';
+              if (!tools?.enabled())
+                result = {
+                  error: 'secrets-unavailable',
+                  instruction:
+                    'Secrets are turned off in this workspace. Tell the owner, and do not ask for the secret in a message.',
+                };
+              else if (call.tool === 'secrets.list') result = await tools.list(tx, membershipId, origin);
+              else {
+                const answered = await tools.outcome(tx, ids.workspaceId, ids.callId);
+                if (answered?.status === 'waiting') return 'waiting';
+                if (answered) result = answered;
+                else {
+                  const prepared = tools.prepare(call);
+                  if (!prepared.ok) result = prepared.result;
+                  else {
+                    result = await tools.create(tx, {
+                      id: ids.callId,
+                      membershipId,
+                      origin,
+                      request: prepared.request,
+                    });
+                    status = 'waiting';
+                  }
+                }
+              }
+              await tx.client.query(
+                `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status=$2,result=$3 WHERE id=$1 AND status='waiting'`,
+                [ids.callId, status, JSON.stringify(toolResultSchema.parse(result))],
+              );
+              await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_runs')} SET status=$2 WHERE id=$1`, [
+                ids.runId,
+                status === 'waiting' ? 'waiting' : 'running',
+              ]);
+              return status;
+            });
           }
           if (outcome.call.tool === 'images.generate') {
             const call = outcome.call,
@@ -1786,6 +1880,20 @@ export function createAgentExecutor(options: Options) {
         return { status: row.status, result: row.result };
       }
       if (row.call.tool === 'images.generate') return { status: row.status, result: row.result };
+      if (row.call.tool === 'secrets.request' || row.call.tool === 'secrets.list') {
+        const owner = z
+          .object({ membership_id: z.uuid().nullable() })
+          .safeParse(
+            (
+              await transaction.client.query(
+                `SELECT membership_id FROM ${relation(transaction, 'tf_agent_runs')} WHERE id=$1`,
+                [ids.runId],
+              )
+            ).rows[0],
+          );
+        if (!owner.success || owner.data.membership_id !== human.membershipId) throw new AccessDenied();
+        return { status: row.status, result: row.result };
+      }
       if (row.call.tool === 'skills.execute' || row.call.tool === 'skills.files.read') {
         const output = skillExecutionResultSchema.safeParse(row.result);
         if (output.success) await requireDraftSources(transaction, human, output.data.sources);

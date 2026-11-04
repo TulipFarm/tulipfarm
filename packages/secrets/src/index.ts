@@ -12,4 +12,4 @@ export {
   type SecretTransaction,
 } from './service.ts';
 export * from './requests.ts';
-export { chatSecretTools, type ChatSecretTools } from './chat-tools.ts';
+export { chatSecretTools, taskSecretTools, type ChatSecretTools, type TaskSecretTools } from './chat-tools.ts';

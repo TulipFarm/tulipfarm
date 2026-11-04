@@ -85,6 +85,16 @@ const referenceSchema = z.object({
 });
 
 export type RequestStatus = 'waiting' | 'provided' | 'declined' | 'expired' | 'cancelled';
+/** A form a task sent its owner, as the task page shows it. */
+export type TaskSecretRequest = {
+  id: string;
+  status: RequestStatus;
+  revision: number;
+  expiresAt: string;
+  purpose: string;
+  declineReason: string | null;
+  references: { referenceId: string; fieldId: string; name: string; kind: SecretKind }[];
+};
 export type RequestSettlement =
   | { status: 'provided'; references: SecretReference[] }
   | { status: 'declined'; reason: string | null }
@@ -115,7 +125,8 @@ export type SecretRequestView = {
   revision: number;
   expiresAt: string;
   purpose: string;
-  destinations: Destination[];
+  /** `plainHttp` marks a destination the value may reach without encryption (API calls P13). */
+  destinations: (Destination & { plainHttp: boolean })[];
   fields: (Omit<RequestField, 'placement'> & { placement: Placement | null; options: SecretOption[] })[];
   declineReason: string | null;
 };
@@ -225,31 +236,13 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
   }
 
   async function reference(tx: SecretTransaction, row: RequestRow, fieldId: string, secretId: string) {
-    const secret = await internal.load(tx, secretId, 'none');
-    const destinations = z
-      .array(z.object({ kind: z.enum(['host', 'endpoint']), value: z.string() }))
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT kind, value FROM ${table(tx, 'destinations')} WHERE secret_id = $1 ORDER BY kind, value`,
-            [secretId],
-          )
-        ).rows,
-      );
     const id = randomUUID();
     await tx.client.query(
       `INSERT INTO ${table(tx, 'references')} (id, request_id, field_id, secret_id, membership_id, origin)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, row.id, fieldId, secretId, row.membership_id, JSON.stringify(secretOriginOf(row.origin))],
     );
-    return {
-      referenceId: id,
-      fieldId,
-      name: secret.name,
-      kind: secret.kind,
-      placement: secret.placement,
-      destinations,
-    } satisfies SecretReference;
+    return describe(tx, id, fieldId, secretId);
   }
 
   async function endOrigin(tx: SecretTransaction, origin: SecretOrigin) {
@@ -275,6 +268,28 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
     return { cancelled, deleted: await secrets.deleteOrigin(tx, origin) };
   }
 
+  async function describe(tx: SecretTransaction, id: string, fieldId: string, secretId: string) {
+    const secret = await internal.load(tx, secretId, 'none');
+    const destinations = z
+      .array(z.object({ kind: z.enum(['host', 'endpoint']), value: z.string() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT kind, value FROM ${table(tx, 'destinations')} WHERE secret_id = $1 ORDER BY kind, value`,
+            [secretId],
+          )
+        ).rows,
+      );
+    return {
+      referenceId: id,
+      fieldId,
+      name: secret.name,
+      kind: secret.kind,
+      placement: secret.placement,
+      destinations,
+    } satisfies SecretReference;
+  }
+
   return {
     /**
      * Records a request in the caller's transaction, which also pauses the chat turn or task run. The caller
@@ -292,7 +307,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
     ) {
       if (!secrets.capabilities().enabled) throw new SecretError('disabled');
       const request = secretRequestInputSchema.parse(input.request);
-      const destinations = normalizeDestinations(request.destinations);
+      const destinations = normalizeDestinations(request.destinations, secrets.privateHosts);
       const id = input.id ?? randomUUID();
       const expiresAt = input.expiresAt ?? new Date(Date.now() + REQUEST_LIFETIME_MS);
       await tx.client.query(
@@ -333,7 +348,13 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
           revision: row.revision,
           expiresAt: row.expires_at,
           purpose: row.purpose,
-          destinations: row.destinations,
+          destinations: row.destinations.map(destination => ({
+            ...destination,
+            plainHttp:
+              destination.kind === 'endpoint'
+                ? destination.value.startsWith('http:')
+                : secrets.privateHosts.some(entry => entry.host === destination.value && entry.http),
+          })),
           fields,
           declineReason: row.decline_reason,
         };
@@ -444,13 +465,117 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
     },
 
     /**
+     * How a task's request ended, for the run that waits on it, in the caller's transaction. An overdue request is
+     * expired here; `waiting` means the owner has not answered yet.
+     */
+    async outcome(
+      tx: AuthorizationTransaction,
+      workspaceId: string,
+      id: string,
+    ): Promise<{ status: 'waiting' } | RequestSettlement | undefined> {
+      const found = await tx.client.query(`SELECT 1 FROM ${table(tx, 'requests')} WHERE id = $1`, [z.uuid().parse(id)]);
+      if (!found.rowCount) return undefined;
+      let row = await loadRequest(tx, id);
+      if (row.status === 'waiting' && row.expired) {
+        await finish(tx, workspaceId, row, { status: 'expired' });
+        row = await loadRequest(tx, id);
+      }
+      if (row.status === 'waiting') return { status: 'waiting' };
+      if (row.status === 'declined') return { status: 'declined', reason: row.decline_reason };
+      if (row.status !== 'provided') return { status: row.status };
+      const linked = z
+        .array(z.object({ id: z.uuid(), field_id: z.string(), secret_id: z.uuid() }))
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT id, field_id, secret_id FROM ${table(tx, 'references')} WHERE request_id = $1 ORDER BY created_at, id`,
+              [row.id],
+            )
+          ).rows,
+        );
+      const references: SecretReference[] = [];
+      for (const reference of linked)
+        references.push(await describe(tx, reference.id, reference.field_id, reference.secret_id));
+      return { status: 'provided', references };
+    },
+
+    /**
+     * The forms a task's current run sent to this member, newest first, for the task page. Other members see none,
+     * since only the owner may answer them.
+     */
+    async forTask(workspaceId: string, principal: SecretsPrincipal, taskId: string): Promise<TaskSecretRequest[]> {
+      return internal.authorized(workspaceId, principal, async (tx, actor) => {
+        const ids = z.array(z.object({ id: z.uuid() })).parse(
+          (
+            await tx.client.query(
+              `SELECT q.id FROM ${table(tx, 'requests')} q
+               JOIN ${qualified(tx.schema, 'tf_agent_task_runs')} b ON b.run_id = (q.origin->>'runId')::uuid
+               JOIN ${qualified(tx.schema, 'tf_agent_tasks')} t ON t.id = b.task_id AND t.generation = b.generation
+               WHERE q.membership_id = $1 AND q.origin->>'kind' = 'task' AND q.origin->>'taskId' = $2::text AND b.task_id = $2::uuid
+               ORDER BY q.created_at DESC, q.id LIMIT 10`,
+              [actor.membershipId, z.uuid().parse(taskId)],
+            )
+          ).rows,
+        );
+        const result: TaskSecretRequest[] = [];
+        for (const { id } of ids) {
+          let row = await loadRequest(tx, id);
+          if (row.status === 'waiting' && row.expired) {
+            await finish(tx, workspaceId, row, { status: 'expired' });
+            row = await loadRequest(tx, id);
+          }
+          const linked = z
+            .array(z.object({ id: z.uuid(), field_id: z.string(), secret_id: z.uuid() }))
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT id, field_id, secret_id FROM ${table(tx, 'references')} WHERE request_id = $1 ORDER BY created_at, id`,
+                  [row.id],
+                )
+              ).rows,
+            );
+          const references = [];
+          for (const reference of linked) {
+            const described = await describe(tx, reference.id, reference.field_id, reference.secret_id);
+            references.push({
+              referenceId: described.referenceId,
+              fieldId: described.fieldId,
+              name: described.name,
+              kind: described.kind,
+            });
+          }
+          result.push({
+            id: row.id,
+            status: row.status,
+            revision: row.revision,
+            expiresAt: row.expires_at,
+            purpose: row.purpose,
+            declineReason: row.decline_reason,
+            references,
+          });
+        }
+        return result;
+      });
+    },
+
+    /** Where a request a member may answer came from, so a task waiting on it can be woken. */
+    async origin(workspaceId: string, principal: SecretsPrincipal, id: string): Promise<RequestOrigin> {
+      return internal.authorized(workspaceId, principal, async (tx, actor) => {
+        const row = await loadRequest(tx, id, false);
+        if (row.membership_id !== actor.membershipId) throw new AccessDenied();
+        return row.origin;
+      });
+    },
+
+    /**
      * Cancels the open requests of a chat or task run and deletes its temporary secrets, in the caller's
      * transaction (P11, P46). The caller has already stopped the turn or run, so nothing is resumed.
      */
     endOrigin,
 
     /**
-     * Expires overdue requests, ends the forms and temporary secrets of deleted chats, and deletes expired secrets.
+     * Expires overdue requests, ends the forms and temporary secrets of deleted chats and ended task runs, and
+     * deletes expired secrets.
      * Run by the worker sweep (P11, P46, P47).
      */
     async sweep(workspaceId: string) {
@@ -484,7 +609,33 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
         for (const chat of chats) await endOrigin(tx, { kind: 'chat', conversationId: chat.id });
         return chats.length;
       });
-      return { expiredRequests: expired, endedChats, deletedSecrets: await secrets.sweepExpired(workspaceId) };
+      const endedRuns = await secrets.transaction(workspaceId, async tx => {
+        const runs = z.array(z.object({ task_id: z.uuid(), run_id: z.uuid() })).parse(
+          (
+            await tx.client.query(
+              `SELECT DISTINCT o.task_id, o.run_id FROM (
+                 SELECT (origin->>'taskId')::uuid AS task_id, (origin->>'runId')::uuid AS run_id FROM ${table(tx, 'requests')}
+                 WHERE status = 'waiting' AND origin->>'kind' = 'task'
+                 UNION SELECT (origin->>'taskId')::uuid, (origin->>'runId')::uuid FROM ${table(tx, 'secrets')}
+                 WHERE status = 'active' AND lifetime = 'conversation' AND origin->>'kind' = 'task'
+               ) o LEFT JOIN ${qualified(tx.schema, 'tf_agent_runs')} r ON r.id = o.run_id
+               LEFT JOIN ${qualified(tx.schema, 'tf_agent_task_runs')} b ON b.run_id = o.run_id AND b.task_id = o.task_id
+               LEFT JOIN ${qualified(tx.schema, 'tf_agent_tasks')} t ON t.id = b.task_id
+               WHERE r.id IS NULL OR r.status NOT IN ('ready', 'running', 'waiting') OR t.id IS NULL
+                 OR t.generation <> b.generation OR t.status IN ('completed', 'failed')
+               ORDER BY o.run_id LIMIT 100`,
+            )
+          ).rows,
+        );
+        for (const run of runs) await endOrigin(tx, { kind: 'task', taskId: run.task_id, runId: run.run_id });
+        return runs.length;
+      });
+      return {
+        expiredRequests: expired,
+        endedChats,
+        endedRuns,
+        deletedSecrets: await secrets.sweepExpired(workspaceId),
+      };
     },
 
     /** The references a member holds in this chat or task run, for `secrets.list` and `api.request` (P15). */

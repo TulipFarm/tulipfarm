@@ -22,6 +22,7 @@ const destination = z.strictObject({ kind: z.enum(['host', 'endpoint']), value: 
 export const secretsWorkspaceParams = z.strictObject({ workspaceId: id });
 export const secretParams = secretsWorkspaceParams.extend({ secretId: id });
 export const secretRequestParams = secretsWorkspaceParams.extend({ requestId: id });
+export const taskSecretRequestParams = secretsWorkspaceParams.extend({ taskId: id });
 
 export const secretsCapabilitiesSchema = z.strictObject({ enabled: z.boolean() });
 
@@ -88,7 +89,7 @@ export const secretRequestViewSchema = z.strictObject({
   revision: z.number().int(),
   expiresAt: z.string(),
   purpose: z.string(),
-  destinations: z.array(destination),
+  destinations: z.array(destination.extend({ plainHttp: z.boolean() })),
   fields: z.array(
     requestFieldSchema.omit({ placement: true }).extend({
       placement: placementSchema.nullable(),
@@ -121,4 +122,19 @@ export const secretRequestResultSchema = z.strictObject({
       }),
     )
     .optional(),
+});
+export const taskSecretRequestsSchema = z.strictObject({
+  requests: z.array(
+    z.strictObject({
+      id: z.uuid(),
+      status: z.enum(['waiting', 'provided', 'declined', 'expired', 'cancelled']),
+      revision: z.number().int(),
+      expiresAt: z.string(),
+      purpose: z.string(),
+      declineReason: z.string().nullable(),
+      references: z.array(
+        z.strictObject({ referenceId: z.uuid(), fieldId: z.string(), name: z.string(), kind: secretKindSchema }),
+      ),
+    }),
+  ),
 });

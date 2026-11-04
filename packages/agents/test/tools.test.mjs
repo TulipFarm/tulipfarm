@@ -628,6 +628,9 @@ test('api.request results without a secret are public web, and with one stay in 
   const secret = { ...sent, secrets: [{ name: 'Key', placement: { kind: 'bearer' } }] };
   assert.deepEqual(apiCallSources(secret, conversationId), [{ kind: 'private-conversation', conversationId }]);
   assert.deepEqual(apiCallSources(secret, null), [{ kind: 'unavailable' }]);
+  const privateHost = { ...sent, url: 'https://billing.internal/v1/invoices', privateHost: true };
+  assert.deepEqual(apiCallSources(privateHost, conversationId), [{ kind: 'private-conversation', conversationId }]);
+  assert.deepEqual(apiCallSources(privateHost, null), [{ kind: 'unavailable' }]);
   assert.deepEqual(apiCallSources({ status: 'failed', code: 'timeout', message: 'Timed out.' }, conversationId), []);
 });
 

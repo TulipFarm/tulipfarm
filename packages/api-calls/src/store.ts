@@ -21,6 +21,7 @@ import {
   failedResult,
   parseApiCall,
   prepareApiCall,
+  requirePrivateResults,
   transmitApiCall,
   type ApiCallLedger,
   type ApiCallOutcome,
@@ -280,6 +281,8 @@ export type ProposeInput = {
   callId: string;
   call: unknown;
   secrets?: ApiCallSecrets | undefined;
+  privateHosts?: SendApiCallOptions['privateHosts'];
+  privateResults?: SendApiCallOptions['privateResults'];
 };
 
 /**
@@ -294,7 +297,8 @@ export async function proposeApiCall(
   try {
     const call = parseApiCall(input.call);
     if (readMethods.has(call.method)) throw new ApiCallError('invalid-request', 'Reads are sent without approval.');
-    prepared = await prepareApiCall(call, input.secrets);
+    prepared = await prepareApiCall(call, input.secrets, undefined, input.privateHosts);
+    await requirePrivateResults(prepared, input.privateResults);
   } catch (error) {
     if (error instanceof ApiCallError) return failedResult(error);
     throw error;
@@ -339,7 +343,10 @@ export async function proposeApiCall(
   return { provider: 'api-call', kind: 'waiting', callId: input.callId };
 }
 
-export type ResumeOptions = Pick<SendApiCallOptions, 'secrets' | 'signal' | 'files' | 'dependencies'>;
+export type ResumeOptions = Pick<
+  SendApiCallOptions,
+  'secrets' | 'signal' | 'files' | 'privateHosts' | 'privateResults' | 'dependencies'
+>;
 
 /**
  * Continues a change after its decision: sends it once if it is approved and nothing it binds changed, or returns
@@ -397,9 +404,10 @@ export async function resumeApiCall(
   try {
     let prepared: PreparedApiCall | undefined;
     try {
-      prepared = await prepareApiCall(call, options.secrets, row.secrets as UsedSecret[]);
+      prepared = await prepareApiCall(call, options.secrets, row.secrets as UsedSecret[], options.privateHosts);
       if (apiCallDigest(rowOrigin(row), row.membership_id, prepared) !== row.digest)
         throw new ApiCallError('conflict', finalMessages.conflict!);
+      await requirePrivateResults(prepared, options.privateResults);
     } catch (error) {
       if (!(error instanceof ApiCallError)) throw error;
       result =

@@ -205,7 +205,7 @@ export function registerStorageComposition(
   });
   const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
-  registerSecrets(app, dependencies.auth, secretsServices(runtime));
+  registerSecrets(app, dependencies.auth, secretsServices(runtime), wakeTask);
   const github = githubAccounts(runtime);
   if (github) {
     const batchOptions = {
