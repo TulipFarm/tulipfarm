@@ -1,16 +1,20 @@
-import './features/chat/approval-mock-api';
-import './features/soul-explorer/mock-api';
-import './features/settings/memory-mock-api';
-import './features/chat/canvas-mock-api';
-import './features/chat/bud-mock-api';
-import './features/workflows/workflow-mock-api';
-import './features/governance/invite-members-mock-api';
-import './features/navigation/sidebar-mock-api';
-import './features/agents/builder-mock-api';
-import './features/integrations/github-mock-api';
-import './features/integrations/default-knowledge-mock-api';
-import './features/integrations/slack-channel-settings-mock-api';
-import './features/chat/github-investigation-mock-api';
+if (import.meta.env.DEV) {
+  await Promise.all([
+    import('./features/chat/approval-mock-api'),
+    import('./features/soul-explorer/mock-api'),
+    import('./features/settings/memory-mock-api'),
+    import('./features/chat/canvas-mock-api'),
+    import('./features/chat/bud-mock-api'),
+    import('./features/workflows/workflow-mock-api'),
+    import('./features/governance/invite-members-mock-api'),
+    import('./features/navigation/sidebar-mock-api'),
+    import('./features/agents/builder-mock-api'),
+    import('./features/integrations/github-mock-api'),
+    import('./features/integrations/default-knowledge-mock-api'),
+    import('./features/integrations/slack-channel-settings-mock-api'),
+    import('./features/chat/github-investigation-mock-api'),
+  ]);
+}
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { RouterProvider } from '@tanstack/react-router';
