@@ -2,11 +2,18 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, request } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { authenticationHeaders, normalizeEndpoint, publicAddress } from '../dist/index.js';
+import {
+  authenticationHeaders,
+  normalizeEndpoint,
+  parsePrivateHosts,
+  pinnedRequest,
+  publicAddress,
+} from '../dist/index.js';
 import { createPublicHttpsFetch } from '../dist/public-https.js';
 import { createCustomMcpSession } from '@tulipfarm/provider-mcp';
 
@@ -297,4 +304,221 @@ test('abort after DNS resolves fences the request continuation', async () => {
   });
   await assert.rejects(fetcher('https://mcp.example.test', { signal: controller.signal }), { code: 'network-failed' });
   assert.equal(sockets, 0);
+});
+
+function certificate(t) {
+  const directory = mkdtempSync(join(tmpdir(), 'pinned-tls-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const keyPath = join(directory, 'key.pem'),
+    certPath = join(directory, 'cert.pem');
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      keyPath,
+      '-out',
+      certPath,
+      '-days',
+      '1',
+      '-subj',
+      '/CN=api.example.test',
+      '-addext',
+      'subjectAltName=DNS:api.example.test',
+    ],
+    { stdio: 'ignore' },
+  );
+  return { key: readFileSync(keyPath), cert: readFileSync(certPath) };
+}
+
+async function listen(t, server) {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return server.address().port;
+}
+
+test('pinnedRequest returns the response head before the body, bounds and times out each call', async t => {
+  const { key, cert } = certificate(t);
+  const received = [];
+  const server = createServer({ key, cert }, (req, res) => {
+    received.push({ url: req.url, method: req.method, encoding: req.headers['accept-encoding'] });
+    if (req.url === '/large') res.writeHead(200, { 'content-length': '2048' }).end('x'.repeat(2048));
+    else if (req.url === '/redirect')
+      res.writeHead(302, { location: 'https://other.example/next', 'x-request-id': 'r1', 'set-cookie': 'a=b' }).end();
+    else if (req.url === '/gzip') res.writeHead(200, { 'content-encoding': 'gzip' }).end('bad');
+    else if (req.url === '/hang') return;
+    else if (req.url === '/slow-body') res.writeHead(200).write('part');
+    else res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': 'a=b' }).end('{"ok":true}');
+  });
+  const port = await listen(t, server);
+  let resolutions = 0;
+  const dependencies = {
+    lookup: async () => {
+      resolutions++;
+      return [{ address: '8.8.8.8', family: 4 }];
+    },
+    request: (url, options, callback) =>
+      request(
+        url,
+        {
+          ...options,
+          port,
+          ca: cert,
+          lookup: (_hostname, _options, callback) => callback(null, [{ address: '127.0.0.1', family: 4 }]),
+        },
+        callback,
+      ),
+  };
+  const send = (path, init = {}, policy = {}) =>
+    pinnedRequest(`https://api.example.test${path}`, init, { dependencies, ...policy });
+
+  const ok = await send('/ok?api_key=placed', { headers: { 'accept-encoding': 'gzip' } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('set-cookie'), null);
+  assert.equal(await new Response(ok.body).text(), '{"ok":true}');
+  assert.deepEqual(received.at(-1), { url: '/ok?api_key=placed', method: 'GET', encoding: 'identity' });
+  assert.equal(resolutions, 1);
+
+  const head = await send('/ok', { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.body, null);
+
+  const large = await send('/large', {}, { maximumBytes: 1024 });
+  assert.equal(large.status, 200);
+  assert.equal(large.headers.get('content-length'), '2048');
+  await assert.rejects(new Response(large.body).arrayBuffer(), { code: 'response-limit', requestSent: true });
+
+  const redirect = await send('/redirect', {}, { redirects: 'manual' });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.body, null);
+  assert.equal(redirect.headers.get('location'), 'https://other.example/next');
+  assert.equal(redirect.headers.get('x-request-id'), 'r1');
+  assert.equal(redirect.headers.get('set-cookie'), null);
+  await assert.rejects(send('/redirect'), { code: 'redirect-denied' });
+
+  const encoded = await send('/gzip');
+  assert.equal(encoded.status, 200);
+  await assert.rejects(new Response(encoded.body).text(), { code: 'network-failed', detail: 'encoded-response' });
+
+  await assert.rejects(send('/hang', {}, { timeoutMs: 200 }), {
+    code: 'network-failed',
+    detail: 'timeout',
+    requestSent: true,
+  });
+  const slow = await send('/slow-body', {}, { timeoutMs: 300 });
+  assert.equal(slow.status, 200);
+  await assert.rejects(new Response(slow.body).text(), { code: 'network-failed', detail: 'timeout' });
+
+  const controller = new AbortController();
+  const aborted = send('/hang', { signal: controller.signal });
+  setTimeout(() => controller.abort(), 50);
+  await assert.rejects(aborted, { code: 'network-failed', detail: 'aborted' });
+  await assert.rejects(send('/ok', {}, { timeoutMs: 0 }), { code: 'network-failed' });
+});
+
+test('pinnedRequest reaches listed private hosts on their port and plain HTTP only', async t => {
+  const server = createHttpServer((req, res) => res.writeHead(200).end(req.url));
+  const port = await listen(t, server);
+  const closed = createHttpServer();
+  const closedPort = await listen(t, closed);
+  closed.close();
+  const lookups = [];
+  const dependencies = {
+    lookup: async hostname => {
+      lookups.push(hostname);
+      return [{ address: '127.0.0.1', family: 4 }];
+    },
+    request,
+  };
+  const privateHosts = parsePrivateHosts(`billing.internal:${port};http, metrics`);
+  const addresses = { privateHosts };
+  const response = await pinnedRequest(`http://billing.internal:${port}/v1?token=x`, {}, { addresses, dependencies });
+  assert.equal(response.status, 200);
+  assert.equal(await new Response(response.body).text(), '/v1?token=x');
+  assert.deepEqual(lookups, ['billing.internal']);
+
+  for (const [url, policy] of [
+    [`http://billing.internal:${port}/`, { dependencies }],
+    [
+      `http://billing.internal:${port}/`,
+      { dependencies, addresses: { privateHosts: [{ host: 'billing.internal', port, http: false }] } },
+    ],
+    [`http://billing.internal/`, { dependencies, addresses }],
+    [`https://billing.internal:${port + 1}/`, { dependencies, addresses }],
+    ['http://metrics/', { dependencies, addresses }],
+    [
+      'https://127.0.0.1/',
+      { dependencies, addresses: { privateHosts: [{ host: '127.0.0.1', port: null, http: true }] } },
+    ],
+  ])
+    await assert.rejects(pinnedRequest(url, {}, policy), { code: 'endpoint-denied' }, url);
+  assert.equal(lookups.length, 1);
+
+  await assert.rejects(pinnedRequest('https://api.example.test/', {}, { dependencies, addresses }), {
+    code: 'address-denied',
+  });
+  await assert.rejects(
+    pinnedRequest(
+      `http://billing.internal:${closedPort}/`,
+      {},
+      { dependencies, addresses: { privateHosts: [{ host: 'billing.internal', port: closedPort, http: true }] } },
+    ),
+    { code: 'network-failed', requestSent: false },
+  );
+});
+
+test('pinnedRequest reports DNS failures and lookup timeouts before any connection', async () => {
+  let sockets = 0;
+  const failing = {
+    lookup: async () => {
+      throw Object.assign(new Error('not found'), { code: 'ENOTFOUND' });
+    },
+    request: () => {
+      sockets++;
+      throw new Error('must not connect');
+    },
+  };
+  await assert.rejects(pinnedRequest('https://api.example.test', {}, { dependencies: failing }), {
+    code: 'network-failed',
+    detail: 'dns-failed',
+    requestSent: false,
+  });
+  const hanging = { ...failing, lookup: () => new Promise(() => undefined) };
+  await assert.rejects(pinnedRequest('https://api.example.test', {}, { dependencies: hanging, timeoutMs: 50 }), {
+    code: 'network-failed',
+    detail: 'timeout',
+    requestSent: false,
+  });
+  assert.equal(sockets, 0);
+});
+
+test('private host lists accept exact DNS names with an optional port and plain HTTP', () => {
+  assert.deepEqual(parsePrivateHosts(' billing.internal:8443, metrics.lan;http ,,api;http'), [
+    { host: 'billing.internal', port: 8443, http: false },
+    { host: 'metrics.lan', port: null, http: true },
+    { host: 'api', port: null, http: true },
+  ]);
+  assert.deepEqual(parsePrivateHosts(''), []);
+  for (const entry of [
+    '*.internal',
+    '10.0.0.1',
+    '1.2.3',
+    '[::1]',
+    'Billing.internal',
+    'billing.internal:0',
+    'billing.internal:65536',
+    'billing.internal;https',
+    'billing.internal.',
+    'https://billing.internal',
+    '-billing.internal',
+  ])
+    assert.throws(() => parsePrivateHosts(entry), /invalid private host entry/, entry);
 });

@@ -23,12 +23,18 @@ export type McpNetworkErrorCode =
   | 'catalog-invalid-schema'
   | 'catalog-invalid-timestamp'
   | 'catalog-cursor-loop';
+export type McpNetworkErrorDetail = 'dns-failed' | 'timeout' | 'aborted' | 'encoded-response';
 export class McpNetworkError extends Error {
   readonly code: McpNetworkErrorCode;
-  constructor(code: McpNetworkErrorCode) {
+  readonly detail: McpNetworkErrorDetail | undefined;
+  /** True once a connection to the destination was established, so the request may have reached it. */
+  readonly requestSent: boolean;
+  constructor(code: McpNetworkErrorCode, options: { detail?: McpNetworkErrorDetail; requestSent?: boolean } = {}) {
     super(`mcp-${code}`);
     this.name = 'McpNetworkError';
     this.code = code;
+    this.detail = options.detail;
+    this.requestSent = options.requestSent ?? false;
   }
 }
 export type McpAuthentication =
@@ -36,7 +42,45 @@ export type McpAuthentication =
   | { kind: 'bearer'; token: string }
   | { kind: 'headers'; headers: Readonly<Record<string, string>> };
 
-export function normalizeEndpoint(input: string): string {
+export type PrivateHost = { host: string; port: number | null; http: boolean };
+export type DestinationAddresses = 'public' | { privateHosts: readonly PrivateHost[] };
+
+const publicHostname = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
+const privateHostname = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+export function parsePrivateHosts(input: string): PrivateHost[] {
+  const hosts: PrivateHost[] = [];
+  for (const entry of input.split(',').map(item => item.trim())) {
+    if (!entry) continue;
+    const match = /^([^:;]+)(?::(\d{1,5}))?(;http)?$/.exec(entry);
+    const host = match?.[1] ?? '';
+    const port = match?.[2] === undefined ? null : Number(match[2]);
+    if (
+      !match ||
+      host.length > 253 ||
+      !privateHostname.test(host) ||
+      /^\d+$/.test(host.split('.').at(-1) ?? '') ||
+      (port !== null && (port < 1 || port > 65535))
+    )
+      throw new Error(`invalid private host entry: ${entry}`);
+    hosts.push({ host, port, http: match[3] !== undefined });
+  }
+  return hosts;
+}
+
+export function listedPrivateHost(url: URL, addresses: DestinationAddresses): boolean {
+  return (
+    addresses !== 'public' &&
+    addresses.privateHosts.some(
+      entry =>
+        entry.host === url.hostname &&
+        (url.protocol === 'https:' || (url.protocol === 'http:' && entry.http)) &&
+        (entry.port === null ? !url.port : Number(url.port || (url.protocol === 'https:' ? 443 : 80)) === entry.port),
+    )
+  );
+}
+
+export function normalizeDestination(input: string, addresses: DestinationAddresses = 'public'): URL {
   try {
     if (
       input.length > 4096 ||
@@ -46,27 +90,34 @@ export function normalizeEndpoint(input: string): string {
       throw new Error();
     const url = new URL(input);
     if (
-      url.protocol !== 'https:' ||
       url.username ||
       url.password ||
-      url.port ||
       url.hash ||
       input.includes('#') ||
       isIP(url.hostname) ||
       url.hostname.startsWith('[') ||
-      url.hostname.endsWith('.') ||
-      !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(url.hostname)
+      url.hostname.endsWith('.')
     )
       throw new Error();
-    for (const key of url.searchParams.keys()) {
-      if (/(?:token|secret|password|passwd|credential|authorization|api.?key|signature|^key$|^code$|^sig$)/i.test(key))
-        throw new Error();
-    }
-    if (/\{[^}]*\}|%7b|%7d/i.test(url.href)) throw new Error();
-    return url.href;
+    if (
+      !listedPrivateHost(url, addresses) &&
+      (url.protocol !== 'https:' || url.port || !publicHostname.test(url.hostname))
+    )
+      throw new Error();
+    return url;
   } catch {
     throw new McpNetworkError('endpoint-denied');
   }
+}
+
+export function normalizeEndpoint(input: string): string {
+  const url = normalizeDestination(input);
+  for (const key of url.searchParams.keys()) {
+    if (/(?:token|secret|password|passwd|credential|authorization|api.?key|signature|^key$|^code$|^sig$)/i.test(key))
+      throw new McpNetworkError('endpoint-denied');
+  }
+  if (/\{[^}]*\}|%7b|%7d/i.test(url.href)) throw new McpNetworkError('endpoint-denied');
+  return url.href;
 }
 
 const deniedHeaders = new Set([
