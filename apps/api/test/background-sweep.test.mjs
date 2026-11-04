@@ -6,7 +6,7 @@ import { errorAttributes } from '@tulipfarm/observability';
 import { randomUUID } from 'node:crypto';
 import { taskActionWake, taskWake } from '../src/task-dispatch.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
-import { apiRole } from '../src/api-role.ts';
+import { apiRole, apiTelemetryService } from '../src/api-role.ts';
 
 test('workspace discovery retains the original error and safe stage without changing the query', async () => {
   const failure = Object.freeze(
@@ -39,12 +39,15 @@ test('workspace discovery retains the original error and safe stage without chan
   assert.deepEqual(await readyWorkspaces({ query: async () => ({ rows }) }, null, 100), rows);
 });
 
-test('api role defaults to all, accepts requests and jobs, and rejects anything else', () => {
+test('api role defaults to all, accepts requests and jobs, rejects anything else, and names the jobs service', () => {
   assert.equal(apiRole({}), 'all');
   assert.equal(apiRole({ TULIPFARM_API_ROLE: ' ' }), 'all');
   assert.equal(apiRole({ TULIPFARM_API_ROLE: 'requests' }), 'requests');
   assert.equal(apiRole({ TULIPFARM_API_ROLE: 'jobs' }), 'jobs');
   assert.throws(() => apiRole({ TULIPFARM_API_ROLE: 'Jobs' }), /must be all, requests or jobs/);
+  assert.equal(apiTelemetryService('jobs'), 'tulipfarm-api-jobs');
+  assert.equal(apiTelemetryService('requests'), undefined);
+  assert.equal(apiTelemetryService('all'), undefined);
 });
 
 test('the requests role starts no sweeps while all and jobs run them', async t => {

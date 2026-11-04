@@ -10,3 +10,7 @@ export function apiRole(env: NodeJS.ProcessEnv = process.env): ApiRole {
   if (value === 'all' || value === 'requests' || value === 'jobs') return value;
   throw new Error('TULIPFARM_API_ROLE must be all, requests or jobs');
 }
+
+export function apiTelemetryService(role: ApiRole) {
+  return role === 'jobs' ? 'tulipfarm-api-jobs' : undefined;
+}

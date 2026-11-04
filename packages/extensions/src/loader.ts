@@ -32,6 +32,8 @@ export type LoadOptions = {
   readonly cwd?: string;
 };
 
+export type StartOptions = LoadOptions & Pick<ExtensionContext, 'service'>;
+
 function moduleUrl(specifier: string, options: LoadOptions) {
   if (specifier.startsWith('file:')) return specifier;
   if (isAbsolute(specifier) || specifier.startsWith('./') || specifier.startsWith('../'))
@@ -85,17 +87,21 @@ export async function loadExtensions(
 /** Loads the extensions listed in TULIPFARM_EXTENSIONS for one app. */
 export async function loadConfiguredExtensions(
   app: ExtensionApp,
-  options: LoadOptions & { readonly env?: NodeJS.ProcessEnv } = {},
+  options: StartOptions & { readonly env?: NodeJS.ProcessEnv } = {},
 ) {
   const env = options.env ?? process.env;
-  return loadExtensions(parseExtensionSpecifiers(env.TULIPFARM_EXTENSIONS), { app, env }, options);
+  return loadExtensions(
+    parseExtensionSpecifiers(env.TULIPFARM_EXTENSIONS),
+    { app, env, ...(options.service ? { service: options.service } : {}) },
+    options,
+  );
 }
 
 /**
  * App startup: loads configured extensions, or writes one JSON error line and exits 1.
  * Writes nothing when no extensions are configured.
  */
-export async function startExtensions(app: ExtensionApp, options: LoadOptions = {}) {
+export async function startExtensions(app: ExtensionApp, options: StartOptions = {}) {
   try {
     const names = await loadConfiguredExtensions(app, options);
     if (names.length)
