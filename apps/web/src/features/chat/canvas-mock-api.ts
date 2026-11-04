@@ -326,11 +326,12 @@ if (import.meta.env.DEV && window.location.pathname.startsWith('/canvas-mock/'))
           hasGitHubProposals: false,
         });
       if (scenario === 'api') {
-        const call = (index: number, method: string, url: string, status: string) => ({
+        const call = (index: number, method: string, url: string, status: string, api: object) => ({
           id: `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`,
           tool: 'api.request',
           status,
           presentation: toolPresentation('api.request', { tool: 'api.request', method, url }),
+          api,
         });
         return Response.json({
           messages: [
@@ -344,8 +345,12 @@ if (import.meta.env.DEV && window.location.pathname.startsWith('/canvas-mock/'))
               ],
               turn: { id, status: 'completed', generation: 0 },
               tools: [
-                call(1, 'GET', 'https://api.github.com/repos/microsoft/playwright/releases?per_page=5', 'completed'),
-                call(2, 'HEAD', 'https://status.example.com/health', 'failed'),
+                call(1, 'GET', 'https://api.github.com/repos/microsoft/playwright/releases?per_page=5', 'completed', {
+                  httpStatus: 200,
+                }),
+                call(2, 'GET', 'https://api.github.com/repos/microsoft/no-such-repo', 'completed', { httpStatus: 404 }),
+                call(3, 'HEAD', 'https://status.example.com/health', 'failed', { error: 'network-failed' }),
+                call(4, 'POST', 'https://api.example.com/v1/issues', 'failed', { error: 'approval-unavailable' }),
               ],
             },
           ],

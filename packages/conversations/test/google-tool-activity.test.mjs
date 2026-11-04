@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
-import { toolPresentation } from '../src/tool-activity.ts';
+import { apiCallProblem, apiCallReceipt, toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
   assert.equal(
@@ -80,4 +80,19 @@ test('API call activity names the method, host and path but never the query', ()
     'GET api.example.com/v1/events',
   );
   assert.equal(toolPresentation('api.request').label, 'Calling an API');
+});
+
+test('API call receipts keep only the HTTP status or error code, and every failure has a short message', () => {
+  const sent = { status: 'sent', response: { status: 404, headers: { 'x-key': 'never-shown' } } };
+  assert.deepEqual(apiCallReceipt('api.request', { result: sent, sources: [] }), { httpStatus: 404 });
+  assert.deepEqual(
+    apiCallReceipt('api.request', { result: { status: 'failed', code: 'approval-unavailable', message: 'x' } }),
+    { error: 'approval-unavailable' },
+  );
+  assert.equal(apiCallReceipt('web.fetch', { result: sent }), null);
+  assert.equal(apiCallReceipt('api.request', { result: { error: 'plan-only' } }), null);
+  assert.equal(apiCallProblem('approval-unavailable'), 'Changes need your approval, which isn’t available yet.');
+  assert.equal(apiCallProblem('secret-reflected'), 'The response repeated the secret, so it was hidden.');
+  assert.equal(apiCallProblem(undefined), 'The API call failed.');
+  assert.equal(apiCallProblem('toString'), 'The API call failed.');
 });

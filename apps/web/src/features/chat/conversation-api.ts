@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   activityStatusSchema,
+  apiCallReceiptSchema,
   toolPresentationSchema,
   workflowReferenceSchema,
 } from '@tulipfarm/conversations/tool-activity';
@@ -110,6 +111,7 @@ const messageSchema = z.object({
         narration: z.string().nullable().optional(),
         presentation: toolPresentationSchema.optional(),
         web: publicWebReceiptSchema.nullable().optional(),
+        api: apiCallReceiptSchema.nullable().optional(),
         knowledge: knowledgeActivitySchema.nullable().optional(),
         fileId: z.uuid().optional(),
         fileIds: z.array(z.uuid()).max(64).optional(),
