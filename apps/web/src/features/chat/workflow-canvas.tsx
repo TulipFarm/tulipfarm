@@ -11,7 +11,8 @@ import {
   type WorkflowReference,
 } from '@/features/workflows/workflow-detail';
 import { NamedWorkflowViewer } from '@/features/workflows/named-viewer';
-import { conversationApi } from './conversation-api';
+import { conversationApi, type ConversationMessage } from './conversation-api';
+import { succeeded } from './live-tools';
 import { useAuthoringDraft } from './queries';
 import { useCanvas, type CanvasItem } from './canvas-state';
 import { workspaceRoute } from '@/router';
@@ -25,14 +26,12 @@ export function NewWorkflowDrafts({
 }: {
   workspaceId: string;
   chatId: string;
-  tools: { id: string; tool: string; status: string; activityStatus?: string | undefined }[];
+  tools: ConversationMessage['tools'];
   foreground: boolean;
 }) {
   const canvas = useCanvas();
   const observed = useRef<{ chatId: string; ids: Set<string> } | null>(null);
-  const ids = tools
-    .filter(tool => tool.tool === 'workflows.draft' && tool.status === 'completed' && tool.activityStatus !== 'failed')
-    .map(tool => tool.id);
+  const ids = tools.filter(tool => tool.tool === 'workflows.draft' && succeeded(tool)).map(tool => tool.id);
   const key = ids.join(',');
   useEffect(() => {
     const previous = observed.current;

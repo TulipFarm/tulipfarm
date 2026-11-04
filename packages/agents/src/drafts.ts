@@ -709,6 +709,10 @@ export function createAuthoringDrafts(
                 : outcome.receipt.status === 'conflict'
                   ? 'stale'
                   : outcome.receipt.status;
+      const replaced =
+        status === 'stale' && !outcome && isWorkflow(row.proposal)
+          ? await superseded(tx, id, row.proposal.targetId)
+          : false;
       const workflowNextRunAt =
         row.proposal.kind === 'workflow' || (row.proposal.kind === 'workflow-activation' && row.proposal.input.enabled)
           ? previewWorkflowRun(row.proposal.input.definition.trigger)
@@ -726,6 +730,7 @@ export function createAuthoringDrafts(
         proposal: row.proposal,
         status,
         outcome,
+        replaced,
         agentChange: await agentChange(tx, actor, row.proposal),
         workflowNextRunAt,
         workflowRecordSource: recordSource && !('error' in recordSource) ? recordSource : null,

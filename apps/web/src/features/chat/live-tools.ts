@@ -1,6 +1,16 @@
 import type { ConversationMessage } from './conversation-api';
 import type { StreamTool } from '@tulipfarm/conversations/events';
 
+type Tool = ConversationMessage['tools'][number];
+// A live `completed` update says the tool returned, not that it worked: a result with an error also completes. Until the
+// saved receipt arrives with the outcome, such a tool shows its activity but no card that reads its result.
+const unsavedOutcomes = new WeakSet<Tool>();
+
+/** Whether the tool's saved receipt shows a completed call whose result was not an error. */
+export function succeeded(tool: Tool) {
+  return tool.status === 'completed' && tool.activityStatus !== 'failed' && !unsavedOutcomes.has(tool);
+}
+
 export function reconcileLiveTools(
   messages: ConversationMessage[],
   updates?: ReadonlyMap<string, StreamTool>,
@@ -18,14 +28,16 @@ export function reconcileLiveTools(
         continue;
       const saved = tools.get(update.id);
       if (saved && saved.status !== 'running') continue;
-      tools.set(update.id, {
+      const live: Tool = {
         ...saved,
         id: update.id,
         tool: update.tool,
         status: update.status,
         ...(saved?.presentation ? {} : { presentation: update.presentation }),
         activityStatus: update.status,
-      });
+      };
+      if (update.status === 'completed') unsavedOutcomes.add(live);
+      tools.set(update.id, live);
     }
     return { ...message, tools: [...tools.values()] };
   });
