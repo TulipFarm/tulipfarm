@@ -6,7 +6,6 @@ import { secretsServices } from '../src/secrets-composition.ts';
 import { createSecretsSweep } from '../src/secrets-sweep.ts';
 
 const env = {
-  SECRETS_ENABLED: 'true',
   INTEGRATION_CREDENTIAL_KEY_ID: 'test',
   INTEGRATION_CREDENTIAL_KEY: '33'.repeat(32),
 };

@@ -10,7 +10,6 @@ import { anthropicTools, anthropicText } from './native-chat-fixture.mjs';
 import { selectReply } from '../../../packages/agents/test/native-fixture.mjs';
 
 const env = {
-  SECRETS_ENABLED: 'true',
   INTEGRATION_CREDENTIAL_KEY_ID: 'test',
   INTEGRATION_CREDENTIAL_KEY: '33'.repeat(32),
 };
@@ -26,11 +25,11 @@ test(
   'secrets.request pauses the chat on a private form and resumes it with references only',
   { timeout: 60000 },
   async t => {
-    const previous = process.env.SECRETS_ENABLED;
-    process.env.SECRETS_ENABLED = 'true';
-    t.after(() =>
-      previous === undefined ? delete process.env.SECRETS_ENABLED : (process.env.SECRETS_ENABLED = previous),
-    );
+    for (const [name, value] of Object.entries(env)) {
+      const previous = process.env[name];
+      process.env[name] = value;
+      t.after(() => (previous === undefined ? delete process.env[name] : (process.env[name] = previous)));
+    }
     const f = await conversationFixture();
     t.after(() => f.close());
     const w = f.workspace;

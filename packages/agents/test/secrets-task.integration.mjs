@@ -50,13 +50,15 @@ test(
   'a task asks its owner for a secret, waits, and keeps a temporary value only for the run',
   { timeout: 240000 },
   async t => {
-    const previous = process.env.SECRETS_ENABLED;
-    process.env.SECRETS_ENABLED = 'true';
+    const key = { INTEGRATION_CREDENTIAL_KEY_ID: 'test', INTEGRATION_CREDENTIAL_KEY: 'ab'.repeat(32) };
+    const previous = Object.fromEntries(Object.keys(key).map(name => [name, process.env[name]]));
+    Object.assign(process.env, key);
     const db = await fixture();
     let runtime;
     t.after(async () => {
-      if (previous === undefined) delete process.env.SECRETS_ENABLED;
-      else process.env.SECRETS_ENABLED = previous;
+      for (const [name, value] of Object.entries(previous))
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
       await runtime?.close();
       await db.close();
     });
@@ -285,7 +287,7 @@ test(
     });
 
     await t.test('without secrets a task is not offered the secret tools', async () => {
-      const off = createSecrets({ runtime, keyring: { activeKeyId: 'test', keys: {} }, enabled: false });
+      const off = createSecrets({ runtime, keyring: { activeKeyId: 'test', keys: {} } });
       const offEngine = createTaskRuntime(
         runtime,
         model,

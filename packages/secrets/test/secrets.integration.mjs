@@ -340,7 +340,7 @@ test('secrets', async t => {
 
   await t.test('a listed private host may be a destination and is refused once delisted', async () => {
     const listed = [{ host: 'billing', port: 8443, http: false }];
-    const withHosts = createSecrets({ runtime: f.runtime, keyring, enabled: true, privateHosts: listed });
+    const withHosts = createSecrets({ runtime: f.runtime, keyring, privateHosts: listed });
     const destinations = [{ kind: 'host', host: 'billing' }];
     await assert.rejects(f.secrets.create(ws, ana, f.input({ destinations })), code('destination-denied'));
     const secret = await withHosts.create(ws, ana, f.input({ destinations }));
@@ -376,18 +376,15 @@ test('secrets', async t => {
     );
   });
 
-  await t.test('without a key or the switch, secrets are unavailable', async () => {
-    const off = createSecrets({ runtime: f.runtime, keyring, enabled: false });
-    assert.deepEqual(off.capabilities(), { enabled: false });
-    await assert.rejects(off.create(ws, ana, f.input()), code('disabled'));
+  await t.test('without a key, secrets are unavailable', async () => {
     const keyless = createSecrets({
       runtime: f.runtime,
       keyring: () => {
         throw new Error('missing');
       },
-      enabled: true,
     });
     assert.deepEqual(keyless.capabilities(), { enabled: false });
+    await assert.rejects(keyless.create(ws, ana, f.input()), code('disabled'));
     const secret = await f.secrets.create(ws, ana, f.input());
     await assert.rejects(
       f.runtime.transaction(ws, commonCompatibility, tx =>

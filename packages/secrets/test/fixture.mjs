@@ -39,7 +39,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   }
   const admin = { kind: 'human', userId: workspace.userId, membershipId: workspace.membershipId };
   let clock = new Date();
-  const secrets = createSecrets({ runtime, keyring, enabled: true, now: () => clock });
+  const secrets = createSecrets({ runtime, keyring, now: () => clock });
   const input = (overrides = {}) => ({
     requestId: randomUUID(),
     name: 'PostHog',

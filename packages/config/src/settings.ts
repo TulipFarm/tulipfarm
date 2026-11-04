@@ -1536,15 +1536,6 @@ export const settings: readonly Setting[] = [
     description: '`true` dispatches tool calls to workspace MCP servers.',
   },
   {
-    name: 'SECRETS_ENABLED',
-    group: 'Secrets',
-    services: apiWorker,
-    requirement: 'optional',
-    secret: false,
-    description:
-      '`true` lets members save secrets and agents ask for them. Secrets are encrypted with the `INTEGRATION_CREDENTIAL_KEY` keyring.',
-  },
-  {
     name: 'API_CALL_PRIVATE_HOSTS',
     group: 'Secrets',
     services: apiWorker,

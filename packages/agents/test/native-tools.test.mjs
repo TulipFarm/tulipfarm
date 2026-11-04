@@ -68,9 +68,13 @@ for (const [label, args] of Object.entries(catalogs))
   });
 
 test('native tool names and descriptions follow the registered chat tools', t => {
-  for (const name of ['SLACK_OUTBOUND_ENABLED', 'SECRETS_ENABLED']) {
+  for (const [name, value] of [
+    ['SLACK_OUTBOUND_ENABLED', 'true'],
+    ['INTEGRATION_CREDENTIAL_KEY_ID', 'test'],
+    ['INTEGRATION_CREDENTIAL_KEY', '33'.repeat(32)],
+  ]) {
     const previous = process.env[name];
-    process.env[name] = 'true';
+    process.env[name] = value;
     t.after(() => {
       if (previous === undefined) delete process.env[name];
       else process.env[name] = previous;
