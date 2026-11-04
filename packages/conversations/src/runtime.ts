@@ -1904,6 +1904,7 @@ export function createConversationExecutor(
             (isCalendarReadCall(name, call) ||
               name === 'web.fetch' ||
               name === 'web.search' ||
+              name === 'api.request' ||
               name === 'files.create'));
         const currentSources = conversationResultSchema.shape.sources.parse(dependencies);
         if (++calls > chatToolCallLimit || !conversationToolNameAllowed(name))
@@ -2031,7 +2032,7 @@ export function createConversationExecutor(
             tool: name,
             sequence,
             status,
-            presentation: toolPresentation(name),
+            presentation: toolPresentation(name, name === 'api.request' ? call : undefined),
           });
           await changed(tx, fence);
           if ((captureOutput || interactiveChat) && call !== undefined)

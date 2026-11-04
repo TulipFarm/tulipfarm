@@ -7,9 +7,12 @@ import {
   discoverToolNames,
   discoverTools,
   parseToolCall,
+  readOnlyCall,
   toolObservation,
   toolOutcome,
 } from '../src/tools.ts';
+import { createChatToolGuard } from '../src/chat-tool-guard.ts';
+import { apiCallSources } from '../src/tool-sources.ts';
 import { createAgentExecutor } from '../src/executor.ts';
 import { randomUUID } from 'node:crypto';
 import { fetchPublicText, publicIPv4 } from '../src/web-fetch.ts';
@@ -589,3 +592,40 @@ for (const format of formats)
     const [result] = toolResults(format, received[1]);
     assert.match(result.output, /^Untrusted tool result for tables\.definitions: .*Invoices/);
   });
+
+test('api.request is offered in every chat and task, never to other agent runs, and only reads are repeatable', () => {
+  assert.ok(discoverToolNames({ kind: 'chat' }).includes('api.request'));
+  assert.ok(discoverToolNames({ kind: 'agent', tools: [], task: true }).includes('api.request'));
+  assert.ok(!discoverToolNames({ kind: 'agent', tools: ['web.fetch'] }).includes('api.request'));
+  const read = parseToolCall(
+    { tool: 'api.request', method: 'GET', url: 'https://api.example.com/v1' },
+    { kind: 'chat' },
+  );
+  const change = { ...read, method: 'POST', body: { kind: 'json', value: {} } };
+  assert.equal(readOnlyCall(read), true);
+  assert.equal(readOnlyCall({ ...read, method: 'HEAD' }), true);
+  assert.equal(readOnlyCall(change), false);
+  const guard = createChatToolGuard([change]);
+  guard.record(read, '{}');
+  assert.equal(guard.duplicate(read), false);
+  assert.equal(guard.duplicate(change), true);
+});
+
+test('api.request results without a secret are public web, and with one stay in their chat', () => {
+  const conversationId = randomUUID();
+  const sent = {
+    status: 'sent',
+    method: 'GET',
+    url: 'https://api.example.com/v1?key=%5Bredacted%5D',
+    response: { status: 200, durationMs: 1, headers: {}, body: { kind: 'none' } },
+    secrets: [],
+    untrusted: true,
+  };
+  assert.deepEqual(apiCallSources(sent, conversationId), [{ kind: 'public-web', url: sent.url }]);
+  const long = { ...sent, url: `https://api.example.com/${'a'.repeat(2100)}` };
+  assert.deepEqual(apiCallSources(long, null), [{ kind: 'public-web', url: 'https://api.example.com/' }]);
+  const secret = { ...sent, secrets: [{ name: 'Key', placement: { kind: 'bearer' } }] };
+  assert.deepEqual(apiCallSources(secret, conversationId), [{ kind: 'private-conversation', conversationId }]);
+  assert.deepEqual(apiCallSources(secret, null), [{ kind: 'unavailable' }]);
+  assert.deepEqual(apiCallSources({ status: 'failed', code: 'timeout', message: 'Timed out.' }, conversationId), []);
+});

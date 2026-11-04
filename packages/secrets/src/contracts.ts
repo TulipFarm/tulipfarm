@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
+import {
+  normalizeDestination as normalizeTransportDestination,
+  normalizeEndpoint,
+} from '@tulipfarm/workspace-mcp-transport';
 
 export type SecretErrorCode =
   | 'disabled'
@@ -152,15 +155,21 @@ export function normalizeDestinations(inputs: readonly DestinationInput[]): Dest
 
 /** True when a secret with these destinations may be sent to `url`. */
 export function destinationAllows(destinations: readonly Destination[], url: string): boolean {
-  let normalized: string;
+  let host: string;
   try {
-    normalized = normalizeEndpoint(url);
+    host = normalizeTransportDestination(url).hostname;
   } catch {
     return false;
   }
-  const host = new URL(normalized).hostname;
+  let endpoint: string | null;
+  try {
+    endpoint = normalizeEndpoint(url);
+  } catch {
+    // A request may carry query keys, such as `code`, that an endpoint destination cannot name.
+    endpoint = null;
+  }
   return destinations.some(destination =>
-    destination.kind === 'host' ? destination.value === host : destination.value === normalized,
+    destination.kind === 'host' ? destination.value === host : destination.value === endpoint,
   );
 }
 

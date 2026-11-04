@@ -78,6 +78,7 @@ import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 import { secretsServices } from './secrets-composition.ts';
+import { heldSecrets } from '@tulipfarm/secrets/send';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -151,6 +152,7 @@ export function meteredReply(
     chatFiles,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
+  const secretServices = secretsServices(runtime);
   return async ({
     model,
     messages,
@@ -307,6 +309,18 @@ export function meteredReply(
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
       chatFiles: chatFiles && { ...chatFiles, imageInput: routeCapabilities(validatedRoute).imageInput },
+      // Secrets are given only to the member in their own chat in the app, never in Slack or a project chat.
+      apiSecrets:
+        requester && !externalContext && !project && secretServices.secrets.capabilities().enabled
+          ? holder => {
+              const held = heldSecrets(secretServices.secrets, secretServices.requests, {
+                workspaceId: holder.workspaceId,
+                actor: holder.actor,
+                origin: { kind: 'chat', conversationId: holder.conversationId },
+              });
+              return { resolve: held.resolve, recordUse: (id, url) => held.recordUse(id, url, 'api.request') };
+            }
+          : undefined,
       images:
         outputs?.read && chatFiles
           ? {
