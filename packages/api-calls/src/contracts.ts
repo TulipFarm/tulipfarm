@@ -127,6 +127,14 @@ export type ApiCallFailed = {
 };
 export type ApiCallResult = ApiCallSent | ApiCallFailed;
 
+/** What a tool returns while a change waits for its member's decision. */
+export type ApiCallWaiting = { provider: 'api-call'; kind: 'waiting'; callId: string };
+export const apiCallWaitingSchema = z.strictObject({
+  provider: z.literal('api-call'),
+  kind: z.literal('waiting'),
+  callId: z.uuid(),
+});
+
 const placementResultSchema = z.looseObject({ kind: z.string() });
 export const apiCallResultSchema = z.discriminatedUnion('status', [
   z.strictObject({
@@ -171,3 +179,47 @@ export const apiCallResultSchema = z.discriminatedUnion('status', [
     secret: z.string().optional(),
   }),
 ]);
+
+export const apiCallStatuses = [
+  'awaiting-approval',
+  'sending',
+  'sent',
+  'failed',
+  'rejected',
+  'expired',
+  'conflict',
+  'outcome-unknown',
+] as const;
+export type ApiCallStatus = (typeof apiCallStatuses)[number];
+
+export const apiCallViewSchema = z.strictObject({
+  id: z.uuid(),
+  status: z.enum(apiCallStatuses),
+  method: z.enum(apiMethods),
+  url: z.string(),
+  host: z.string(),
+  headers: z.record(z.string(), z.string()),
+  body: z
+    .strictObject({ contentType: z.string(), preview: z.string(), bytes: z.number().int(), truncated: z.boolean() })
+    .nullable(),
+  secrets: z.array(z.strictObject({ name: z.string(), placement: z.looseObject({ kind: z.string() }) })),
+  purpose: z.string().nullable(),
+  digest: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  responseStatus: z.number().int().nullable(),
+  errorCode: z.string().nullable(),
+  origin: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('chat'), conversationId: z.uuid() }),
+    z.strictObject({ kind: z.literal('task'), taskId: z.uuid() }),
+  ]),
+});
+/** `sending` also covers an approved change that has not been claimed yet; `rejected` and `expired` cover undecided ones. */
+export type ApiCallView = z.infer<typeof apiCallViewSchema>;
+
+export const apiCallDecisionSchema = z.strictObject({
+  commandId: z.uuid(),
+  digest: z.string().regex(/^[a-f0-9]{64}$/),
+  decision: z.enum(['approve', 'reject']),
+  reason: z.string().max(500).optional(),
+});
+export type ApiCallDecision = z.infer<typeof apiCallDecisionSchema>;

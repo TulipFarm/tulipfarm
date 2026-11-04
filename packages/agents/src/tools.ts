@@ -16,7 +16,15 @@ import {
   type HumanActor,
   type SourceDependency,
 } from '@tulipfarm/access';
-import { sendApiCall, type ApiCallFiles, type ApiCallSecrets } from '@tulipfarm/api-calls';
+import {
+  apiCallLedger,
+  proposeApiCall,
+  readMethods,
+  sendApiCall,
+  type ApiCallFiles,
+  type ApiCallOrigin,
+  type ApiCallSecrets,
+} from '@tulipfarm/api-calls';
 import { createAgentRecordTools } from './record-tools.ts';
 import { workspaceMembersInstruction } from './record-contracts.ts';
 import { createRecordBatchSchema, recordConflict, rowsListModelSchema, toolCallSchema } from './contracts.ts';
@@ -131,6 +139,7 @@ import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
+export { apiCallSources, publicSourceUrl } from './tool-sources.ts';
 
 const page = { after: z.uuid().optional(), limit: z.number().int().min(1).max(100).default(25) };
 const tableAuthoringConstraints = [
@@ -907,6 +916,8 @@ export type ChatToolsOptions = {
   apiSecrets?:
     | ((holder: { workspaceId: string; actor: HumanActor; conversationId: string }) => ApiCallSecrets)
     | undefined;
+  /** Whether a member can approve an `api.request` change here; without it, a change fails with `approval-unavailable`. */
+  apiApprovals?: boolean | undefined;
 };
 /** What a chat turn or plan specialist generates images with. The model is the one pinned when the work was admitted. */
 export type ChatImages = {
@@ -967,6 +978,7 @@ export function createChatTools(
     chatFiles,
     images,
     apiSecrets,
+    apiApprovals,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -2351,6 +2363,28 @@ export function createChatTools(
   ) {
     denyMcpEgress();
     const origin = context.origin;
+    const chat: ApiCallOrigin | undefined =
+      origin?.generation !== undefined
+        ? {
+            kind: 'chat',
+            conversationId: origin.conversationId,
+            turnId: origin.turnId,
+            generation: origin.generation,
+          }
+        : undefined;
+    const secrets =
+      origin && apiSecrets
+        ? apiSecrets({ workspaceId: context.workspaceId, actor: context.actor, conversationId: origin.conversationId })
+        : undefined;
+    if (chat && apiApprovals && !readMethods.has(call.method))
+      return proposeApiCall(runtime, {
+        workspaceId: context.workspaceId,
+        membershipId: context.actor.membershipId,
+        origin: chat,
+        callId: context.callId,
+        call,
+        secrets,
+      });
     const keep = chatFiles?.turnFiles.apiFiles?.keep;
     // Bodies are kept only where files.read can read them back: an app chat with the images reader on.
     const files: ApiCallFiles | undefined =
@@ -2374,15 +2408,14 @@ export function createChatTools(
     return sendApiCall(call, {
       files,
       workspaceId: context.workspaceId,
-      scope: origin?.turnId ?? images?.run?.runId ?? context.callId,
-      secrets:
-        origin && apiSecrets
-          ? apiSecrets({
-              workspaceId: context.workspaceId,
-              actor: context.actor,
-              conversationId: origin.conversationId,
-            })
-          : undefined,
+      secrets,
+      calls: chat
+        ? apiCallLedger(runtime, {
+            workspaceId: context.workspaceId,
+            membershipId: context.actor.membershipId,
+            origin: chat,
+          })
+        : undefined,
       signal: context.signal,
     });
   }
@@ -2469,6 +2502,7 @@ export function createChatTools(
     if (call.tool === 'conversation.messages.read') return readEarlierMessage(context, call);
     if (call.tool === 'api.request') {
       const result = await requestApi(context, call);
+      if ('provider' in result) return { result, sources: [] };
       const sources = apiCallSources(result, context.origin?.conversationId ?? null);
       await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
         requireDraftSources(tx, context.actor, sources),

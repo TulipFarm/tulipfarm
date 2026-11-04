@@ -1,3 +1,4 @@
+import { ApiCallReviewCard } from '@/features/api-calls/review-card';
 import { emptyChatIntro } from './bud-state';
 import {
   lazy,
@@ -1983,6 +1984,11 @@ function ConversationTools({
             disabled={githubLocked}
             picked={pickGitHub}
           />
+        ))}
+      {message.tools
+        .filter(tool => tool.tool === 'api.request' && tool.api?.review)
+        .map(tool => (
+          <ApiCallReviewCard key={`api:${tool.id}`} workspaceId={workspace.id} callId={tool.id} />
         ))}
       {message.tools
         .filter(tool => tool.images?.length)

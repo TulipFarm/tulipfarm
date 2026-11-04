@@ -32,6 +32,7 @@
     "@temporalio/workflow": "1.24.0",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/agents": "workspace:*",
+    "@tulipfarm/api-calls": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
     "@tulipfarm/build-info": "workspace:*",
     "@tulipfarm/config": "workspace:*",

@@ -107,7 +107,9 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
           : status === 'unknown'
             ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
             : status === 'waiting'
-              ? 'Waiting for approval or another action. Review the action details below.'
+              ? tool.tool === 'api.request'
+                ? 'Waiting for your approval.'
+                : 'Waiting for approval or another action. Review the action details below.'
               : undefined,
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }

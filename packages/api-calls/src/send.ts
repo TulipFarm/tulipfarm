@@ -15,7 +15,9 @@ import {
   apiRequestCallSchema,
   readMethods,
   type ApiCallErrorCode,
+  type ApiCallFailed,
   type ApiCallResult,
+  type ApiMethod,
   type ApiRequestCall,
   type SecretHandle,
 } from './contracts.ts';
@@ -24,11 +26,40 @@ import { readResponse } from './response.ts';
 
 /** How the caller finds and records the secrets a call names. It throws `ApiCallError` or `SecretError`. */
 export type ApiCallSecrets = {
+  /** With `expected`, a secret whose value or policy changed since the approval fails with `conflict`. */
   resolve(
     handle: SecretHandle,
     url: string,
-  ): Promise<{ secretId: string; name: string; placement: Placement; value: SecretValue }>;
+    expected?: { version: number; policyVersion: number },
+  ): Promise<{
+    secretId: string;
+    name: string;
+    placement: Placement;
+    value: SecretValue;
+    version: number;
+    policyVersion: number;
+  }>;
   recordUse(secretId: string, url: string): Promise<void>;
+};
+
+/** What a call sent or how it ended, kept without the request or response body. */
+export type ApiCallOutcome = {
+  status: 'sent' | 'failed' | 'conflict' | 'outcome-unknown';
+  responseStatus?: number;
+  durationMs?: number;
+  errorCode?: string;
+};
+
+/**
+ * Durable records and limits for calls: `start` records a read once its turn or run is under its call limit and a
+ * workspace slot is free, waiting for a slot until `deadline`. It throws `ApiCallError` with `call-limit` or `timeout`.
+ */
+export type ApiCallLedger = {
+  start(
+    call: { method: ApiMethod; redactedUrl: string; host: string; timeoutMs: number },
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<{ finish(outcome: ApiCallOutcome): Promise<void> }>;
 };
 
 /**
@@ -47,66 +78,24 @@ export type ApiCallFiles = {
 
 export type SendApiCallOptions = {
   workspaceId: string;
-  /** The chat turn or task run the call belongs to, for the per-turn limit. */
-  scope: string;
   /** Absent when secrets are not available here; a call that names one then fails with `disabled`. */
   secrets?: ApiCallSecrets | undefined;
+  /** Records the call and applies the per-turn and per-workspace limits. */
+  calls?: ApiCallLedger | undefined;
   signal?: AbortSignal | undefined;
   /** Saves bodies over 64 KiB or binary ones; absent, they are omitted from the result. */
   files?: ApiCallFiles | undefined;
   dependencies?: PinnedRequestPolicy['dependencies'];
 };
 
-const failed = (error: ApiCallError): ApiCallResult => ({
+export const failedResult = (error: ApiCallError): ApiCallFailed => ({
   status: 'failed',
   code: error.code,
   message: error.message,
   ...(error.httpStatus !== undefined ? { httpStatus: error.httpStatus } : {}),
   ...(error.secret !== undefined ? { secret: error.secret } : {}),
 });
-
-const scopes = new Map<string, number>();
-function countCall(scope: string) {
-  const count = (scopes.get(scope) ?? 0) + 1;
-  scopes.delete(scope);
-  scopes.set(scope, count);
-  if (scopes.size > 10_000) scopes.delete(scopes.keys().next().value!);
-  if (count > API_CALL_LIMITS.callsPerScope)
-    throw new ApiCallError(
-      'call-limit',
-      `This turn already made ${API_CALL_LIMITS.callsPerScope} API calls. Answer with what you have.`,
-    );
-}
-
-type Slots = { active: number; waiting: (() => void)[] };
-const workspaces = new Map<string, Slots>();
-async function acquire(workspaceId: string, deadline: number, signal?: AbortSignal) {
-  let slots = workspaces.get(workspaceId);
-  if (!slots) workspaces.set(workspaceId, (slots = { active: 0, waiting: [] }));
-  const current = slots;
-  if (current.active < API_CALL_LIMITS.inFlightPerWorkspace) current.active++;
-  else
-    await new Promise<void>((resolve, reject) => {
-      const give = () => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abandon);
-        resolve();
-      };
-      const abandon = () => {
-        clearTimeout(timer);
-        current.waiting.splice(current.waiting.indexOf(give), 1);
-        reject(new ApiCallError('timeout', 'Too many API calls are running in this workspace. Try again shortly.'));
-      };
-      const timer = setTimeout(abandon, Math.max(0, deadline - Date.now()));
-      signal?.addEventListener('abort', abandon, { once: true });
-      current.waiting.push(give);
-    });
-  return () => {
-    const next = current.waiting.shift();
-    if (next) next();
-    else if (--current.active === 0) workspaces.delete(workspaceId);
-  };
-}
+const failed = failedResult;
 
 const secretCodes: Partial<Record<SecretError['code'], ApiCallErrorCode>> = {
   disabled: 'disabled',
@@ -164,7 +153,7 @@ function networkFailure(error: McpNetworkError, timeoutSeconds: number): ApiCall
   );
 }
 
-function parse(input: unknown): ApiRequestCall {
+export function parseApiCall(input: unknown): ApiRequestCall {
   const parsed = apiRequestCallSchema.safeParse(input);
   if (!parsed.success)
     throw new ApiCallError(
@@ -179,77 +168,128 @@ function parse(input: unknown): ApiRequestCall {
   return parsed.data;
 }
 
+export type UsedSecret = {
+  secretId: string;
+  name: string;
+  placement: Placement;
+  version: number;
+  policyVersion: number;
+};
+
+/** A call checked and ready to send: the request with secrets placed, and what was used, without values. */
+export type PreparedApiCall = {
+  call: ApiRequestCall;
+  /** The URL with the agent's query but no secret placements. */
+  unplaced: string;
+  /** The headers and body the agent set, before secrets are placed. */
+  headers: Record<string, string>;
+  body: string | undefined;
+  contentType: string | null;
+  request: OutgoingRequest;
+  used: UsedSecret[];
+  sent: string[];
+  redactedUrl: string;
+  host: string;
+  timeoutMs: number;
+};
+
 /**
- * Sends one `api.request` call. Expected failures are returned as `{ status: 'failed' }`, never thrown. Only `GET`
- * and `HEAD` are sent; every other method needs an approval, which is not available yet. With `files`, a body over
- * 64 KiB and up to 10 MiB, or a binary one, is saved and the result names it.
+ * Validates a call, finds each secret and places it, without sending (P9). `expected` gives the versions an approval
+ * was made with, by position; a different secret or placement then fails with `conflict`.
  */
-export async function sendApiCall(input: unknown, options: SendApiCallOptions): Promise<ApiCallResult> {
-  let call: ApiRequestCall;
-  let request: OutgoingRequest;
-  try {
-    call = parse(input);
-    const url = normalizeApiUrl(call.url, call.query);
-    const encoded = call.body ? encodeBody(call.body) : undefined;
-    request = {
-      url: url.href,
-      headers: { ...requestHeaders(call.headers), ...(encoded ? { 'content-type': encoded.contentType } : {}) },
-      ...(encoded ? { body: encoded.body } : {}),
-    };
-    if (!readMethods.has(call.method))
-      throw new ApiCallError(
-        'approval-unavailable',
-        `${call.method} changes data and needs the member's approval, which is not available yet. Nothing was sent. Tell the member.`,
-      );
-    countCall(options.scope);
-  } catch (error) {
-    if (error instanceof ApiCallError) return failed(error);
-    throw error;
-  }
-
+export async function prepareApiCall(
+  call: ApiRequestCall,
+  secrets: ApiCallSecrets | undefined,
+  expected?: readonly UsedSecret[],
+): Promise<PreparedApiCall> {
+  const url = normalizeApiUrl(call.url, call.query);
+  const encoded = call.body ? encodeBody(call.body) : undefined;
+  const headers = { ...requestHeaders(call.headers), ...(encoded ? { 'content-type': encoded.contentType } : {}) };
+  let request: OutgoingRequest = { url: url.href, headers, ...(encoded ? { body: encoded.body } : {}) };
   const handles = call.secrets ?? [];
-  const used: { secretId: string; name: string; placement: Placement }[] = [];
+  const used: UsedSecret[] = [];
   const sent: string[] = [];
-  try {
-    if (handles.length && !options.secrets)
-      throw new ApiCallError('disabled', secretMessages.disabled, {
-        secret: 'reference' in handles[0]! ? handles[0].reference : handles[0]!.variable,
-      });
-    const unplaced = request.url;
-    for (const handle of handles) {
-      const label = 'reference' in handle ? handle.reference : handle.variable;
-      let secret: Awaited<ReturnType<ApiCallSecrets['resolve']>>;
-      try {
-        secret = await options.secrets!.resolve(handle, unplaced);
-        if (secret.placement.kind === 'body' && (readMethods.has(call.method) || call.body?.kind === 'text'))
-          throw new SecretError('placement-unsupported');
-        request = applyPlacement(request, secret.placement, secret.value, placementKinds);
-      } catch (error) {
-        throw secretFailure(error, label);
-      }
-      used.push({ secretId: secret.secretId, name: secret.name, placement: secret.placement });
-      sent.push(...valueParts(secret.value));
+  if (handles.length && !secrets)
+    throw new ApiCallError('disabled', secretMessages.disabled, {
+      secret: 'reference' in handles[0]! ? handles[0].reference : handles[0]!.variable,
+    });
+  if (expected && expected.length !== handles.length)
+    throw new ApiCallError('conflict', 'The approved secrets changed. Nothing was sent.');
+  for (const [index, handle] of handles.entries()) {
+    const label = 'reference' in handle ? handle.reference : handle.variable;
+    const approved = expected?.[index];
+    let secret: Awaited<ReturnType<ApiCallSecrets['resolve']>>;
+    try {
+      secret = await secrets!.resolve(
+        handle,
+        url.href,
+        approved ? { version: approved.version, policyVersion: approved.policyVersion } : undefined,
+      );
+      if (
+        approved &&
+        (secret.secretId !== approved.secretId ||
+          JSON.stringify(secret.placement) !== JSON.stringify(approved.placement))
+      )
+        throw new SecretError('conflict');
+      if (secret.placement.kind === 'body' && (readMethods.has(call.method) || call.body?.kind === 'text'))
+        throw new SecretError('placement-unsupported');
+      request = applyPlacement(request, secret.placement, secret.value, placementKinds);
+    } catch (error) {
+      throw secretFailure(error, label);
     }
-  } catch (error) {
-    if (error instanceof ApiCallError) return failed(error);
-    throw error;
+    used.push({
+      secretId: secret.secretId,
+      name: secret.name,
+      placement: secret.placement,
+      version: secret.version,
+      policyVersion: secret.policyVersion,
+    });
+    sent.push(...valueParts(secret.value));
   }
-
-  const placements = used.map(secret => secret.placement);
   const timeoutSeconds = call.timeoutSeconds ?? API_CALL_LIMITS.timeoutSeconds.default;
-  const deadline = Date.now() + timeoutSeconds * 1000;
+  return {
+    call,
+    unplaced: url.href,
+    headers,
+    body: encoded?.body,
+    contentType: encoded?.contentType ?? null,
+    request,
+    used,
+    sent,
+    redactedUrl: redactUrl(
+      request.url,
+      used.map(secret => secret.placement),
+    ),
+    host: url.host,
+    timeoutMs: timeoutSeconds * 1000,
+  };
+}
+
+/**
+ * Sends a prepared call once. A change whose request may have reached the server but gave no response is
+ * `outcome-unknown`, never retried (P28).
+ */
+export async function transmitApiCall(
+  prepared: PreparedApiCall,
+  options: Pick<SendApiCallOptions, 'secrets' | 'signal' | 'files' | 'dependencies'> & {
+    deadline: number;
+    started?: () => void;
+  },
+): Promise<ApiCallResult> {
+  const { call, request, used, sent } = prepared;
+  const change = !readMethods.has(call.method);
+  const placements = used.map(secret => secret.placement);
+  const timeoutSeconds = prepared.timeoutMs / 1000;
   const url = new URL(request.url);
   let requestSent = false;
-  let release: (() => void) | undefined;
   try {
-    release = await acquire(options.workspaceId, deadline, options.signal);
     const started = performance.now();
     const response = await pinnedRequest(
       url,
       { method: call.method, headers: request.headers, body: request.body ?? null, signal: options.signal ?? null },
       {
         redirects: 'manual',
-        timeoutMs: Math.max(1, deadline - Date.now()),
+        timeoutMs: Math.max(1, options.deadline - Date.now()),
         maximumBytes: API_CALL_LIMITS.fileBytes,
         ...(options.dependencies ? { dependencies: options.dependencies } : {}),
       },
@@ -294,14 +334,80 @@ export async function sendApiCall(input: unknown, options: SendApiCallOptions): 
     };
   } catch (error) {
     if (error instanceof McpNetworkError) {
-      requestSent ||= error.requestSent;
+      const reached = error.requestSent;
+      requestSent ||= reached;
+      if (change && reached)
+        return failed(
+          new ApiCallError(
+            'outcome-unknown',
+            'The request may have reached the server, but no response came back. It was not sent again. Tell the member to check the service before trying again.',
+          ),
+        );
       return failed(networkFailure(error, timeoutSeconds));
     }
     if (error instanceof ApiCallError) return failed(error);
     throw error;
   } finally {
-    release?.();
     if (requestSent)
       for (const secret of used) await options.secrets!.recordUse(secret.secretId, redactUrl(url.href, placements));
+  }
+}
+
+/** The status a stored call ends with for a result. */
+export function callOutcome(result: ApiCallResult): ApiCallOutcome {
+  if (result.status === 'sent')
+    return { status: 'sent', responseStatus: result.response.status, durationMs: result.response.durationMs };
+  if (result.httpStatus !== undefined)
+    return { status: 'sent', responseStatus: result.httpStatus, errorCode: result.code };
+  if (result.code === 'outcome-unknown' || result.code === 'conflict')
+    return { status: result.code, errorCode: result.code };
+  return { status: 'failed', errorCode: result.code };
+}
+
+/**
+ * Sends one `GET` or `HEAD` call. Expected failures are returned as `{ status: 'failed' }`, never thrown. Every other
+ * method needs the member's approval first, through the approval store; here it fails with `approval-unavailable`.
+ * With `files`, a body over 64 KiB and up to 10 MiB, or a binary one, is saved and the result names it.
+ */
+export async function sendApiCall(input: unknown, options: SendApiCallOptions): Promise<ApiCallResult> {
+  let prepared: PreparedApiCall;
+  try {
+    const call = parseApiCall(input);
+    if (!readMethods.has(call.method))
+      throw new ApiCallError(
+        'approval-unavailable',
+        `${call.method} changes data and needs the member's approval, which is not available here. Nothing was sent. Tell the member.`,
+      );
+    prepared = await prepareApiCall(call, options.secrets);
+  } catch (error) {
+    if (error instanceof ApiCallError) return failed(error);
+    throw error;
+  }
+  const deadline = Date.now() + prepared.timeoutMs;
+  let record: Awaited<ReturnType<ApiCallLedger['start']>> | undefined;
+  try {
+    record = await options.calls?.start(
+      {
+        method: prepared.call.method,
+        redactedUrl: prepared.redactedUrl,
+        host: prepared.host,
+        timeoutMs: prepared.timeoutMs,
+      },
+      deadline,
+      options.signal,
+    );
+  } catch (error) {
+    if (error instanceof ApiCallError) return failed(error);
+    throw error;
+  }
+  let result: ApiCallResult | undefined;
+  try {
+    result = await transmitApiCall(prepared, { ...options, deadline });
+    return result;
+  } finally {
+    // A failed record leaves the row `sending`; its slot frees itself at the deadline.
+    await record
+      ?.finish(result ? callOutcome(result) : { status: 'failed', errorCode: 'network-failed' })
+      .catch(() => undefined);
   }
 }

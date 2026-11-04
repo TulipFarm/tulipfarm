@@ -1,4 +1,4 @@
-import { apiCallResultSchema, apiRequestCallSchema } from '@tulipfarm/api-calls/contracts';
+import { apiCallResultSchema, apiCallWaitingSchema, apiRequestCallSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
 import { skillIdSchema, skillResourceSchema } from './skill-ids.ts';
 import { publicWebResultSchema } from '@tulipfarm/conversations/public-web';
@@ -258,6 +258,7 @@ export const toolResultSchema = z.union([
   knowledgeToolResultSchema,
   githubTaskResultSchema,
   apiCallResultSchema,
+  apiCallWaitingSchema,
   publicWebResultSchema,
   mcpExecutionResultSchema,
   slackActionViewSchema,

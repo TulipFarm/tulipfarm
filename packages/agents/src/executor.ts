@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
 import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
-import { sendApiCall } from '@tulipfarm/api-calls';
+import {
+  apiCallLedger,
+  apiCallWaitingSchema,
+  proposeApiCall,
+  readMethods,
+  resumeApiCall,
+  sendApiCall,
+} from '@tulipfarm/api-calls';
 import { keepTaskApiFile, readTaskApiFile, taskFileResultChars, type TaskFileReading } from './task-files.ts';
 import {
   AccessDenied,
@@ -755,13 +762,38 @@ export function createAgentExecutor(options: Options) {
                   );
                   return { call: row.call, actor: owner };
                 }
+                if (row.call.tool === 'api.request') {
+                  const binding = await taskRun(transaction, ids.runId);
+                  if (!binding || !run.user_id || !run.membership_id) throw new AccessDenied();
+                  if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
+                    return row.status;
+                  if (
+                    !batch &&
+                    !taskAssociated &&
+                    (
+                      await transaction.client.query(
+                        `SELECT 1 FROM ${relation(transaction, 'tf_agent_tool_calls')} WHERE run_id = $1 AND sequence < $2 AND status <> 'completed'`,
+                        [ids.runId, row.sequence],
+                      )
+                    ).rowCount
+                  )
+                    return 'waiting';
+                  await transaction.client.query(
+                    `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status='waiting' WHERE id=$1`,
+                    [ids.callId],
+                  );
+                  return {
+                    call: row.call,
+                    actor: { kind: 'human' as const, userId: run.user_id, membershipId: run.membership_id },
+                    apiCall: { taskId: binding.task_id },
+                  };
+                }
                 if (
                   row.call.tool === 'tables.list' ||
                   row.call.tool === 'skills.list' ||
                   row.call.tool === 'skills.read' ||
                   row.call.tool === 'web.fetch' ||
                   row.call.tool === 'web.search' ||
-                  row.call.tool === 'api.request' ||
                   row.call.tool === 'files.read'
                 ) {
                   if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
@@ -808,25 +840,6 @@ export function createAgentExecutor(options: Options) {
                     case 'web.search':
                       result = await searchPublicWeb(row.call);
                       break;
-                    case 'api.request': {
-                      denyMcpEgress();
-                      const links = await taskFileLinks(ids.workspaceId);
-                      const task = { workspaceId: ids.workspaceId, taskId: binding!.task_id, callId: ids.callId };
-                      // Tasks hold no secrets yet, so a call that names one fails with `disabled`.
-                      result = await sendApiCall(row.call, {
-                        workspaceId: ids.workspaceId,
-                        scope: ids.runId,
-                        ...(links
-                          ? {
-                              files: {
-                                save: async file =>
-                                  (await keepTaskApiFile(links, task, file)) ? { source: ids.callId } : null,
-                              },
-                            }
-                          : {}),
-                      });
-                      break;
-                    }
                     case 'files.read':
                       result = await readTaskApiFile(
                         (await taskFileLinks(ids.workspaceId))?.objects,
@@ -1099,6 +1112,56 @@ export function createAgentExecutor(options: Options) {
                   `INSERT INTO ${relation(tx, 'tf_agent_task_action_receipts')} (call_id,status) VALUES ($1,'completed') ON CONFLICT DO NOTHING`,
                   [ids.callId],
                 );
+            });
+            return status;
+          }
+          if (outcome.call.tool === 'api.request') {
+            if (!('apiCall' in outcome) || outcome.actor.kind !== 'human') throw new AccessDenied();
+            denyMcpEgress();
+            const origin = { kind: 'task' as const, taskId: outcome.apiCall.taskId, runId: ids.runId };
+            const membershipId = outcome.actor.membershipId;
+            const links = await taskFileLinks(ids.workspaceId);
+            const task = { workspaceId: ids.workspaceId, taskId: origin.taskId, callId: ids.callId };
+            const files = links
+              ? {
+                  files: {
+                    save: async (file: Parameters<typeof keepTaskApiFile>[2]) =>
+                      (await keepTaskApiFile(links, task, file)) ? { source: ids.callId } : null,
+                  },
+                }
+              : {};
+            let response: unknown;
+            if (readMethods.has(outcome.call.method))
+              // Tasks hold no secrets yet, so a call that names one fails with `disabled`.
+              response = await sendApiCall(outcome.call, {
+                workspaceId: ids.workspaceId,
+                calls: apiCallLedger(runtime, { workspaceId: ids.workspaceId, membershipId, origin }),
+                ...files,
+              });
+            else {
+              const proposed = await proposeApiCall(runtime, {
+                workspaceId: ids.workspaceId,
+                membershipId,
+                origin,
+                callId: ids.callId,
+                call: outcome.call,
+              });
+              if ('provider' in proposed) {
+                const resumed = await resumeApiCall(runtime, ids.workspaceId, ids.callId, files);
+                response = resumed.state === 'waiting' ? proposed : resumed.result;
+              } else response = proposed;
+            }
+            const status = apiCallWaitingSchema.safeParse(response).success ? 'waiting' : 'completed';
+            await executionTransaction(ids, async tx => {
+              await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
+              await tx.client.query(
+                `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status=$2,result=$3 WHERE id=$1 AND status='waiting'`,
+                [ids.callId, status, JSON.stringify(toolResultSchema.parse(response))],
+              );
+              await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_runs')} SET status=$2 WHERE id=$1`, [
+                ids.runId,
+                status === 'waiting' ? 'waiting' : 'running',
+              ]);
             });
             return status;
           }

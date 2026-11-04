@@ -15,11 +15,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/*.integration.mjs"
   },
   "dependencies": {
+    "@tulipfarm/access": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/workspace-mcp-transport": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
     "zod": "4.6.6"
   },
   "devDependencies": {

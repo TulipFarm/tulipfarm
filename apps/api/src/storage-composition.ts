@@ -13,6 +13,7 @@ import { registerRecommendationEvents } from './recommendation-events.ts';
 import { recommendationEligibility } from '@tulipfarm/recommendations/configuration';
 import { registerTableDispatch } from './table-dispatch.ts';
 import { createReplyDispatch, registerConversationDispatch } from './conversation-dispatch.ts';
+import { createApiCallReviews, registerApiCalls } from './api-calls.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -286,6 +287,16 @@ export function registerStorageComposition(
     events.close();
   });
   const replies = createReplyDispatch({ runtime, temporal });
+  registerApiCalls(
+    app,
+    dependencies.auth,
+    createApiCallReviews({
+      runtime,
+      resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+      wakeChat: replies.sent,
+      wakeTask,
+    }),
+  );
   const conversations = createConversations(runtime, chatSkills, {
     pinTurn: async (tx, workspaceId, familyId) =>
       (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,

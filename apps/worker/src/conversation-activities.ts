@@ -18,10 +18,12 @@ import { chatTurnFiles } from './turn-files-composition.ts';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { respondToConversation } from './conversation-responder.ts';
 import {
+  apiCallSources,
   conversationPlanning,
   createChatTools,
   discoverToolNames,
   isExternalTool,
+  publicSourceUrl,
   toolObservation,
 } from '@tulipfarm/agents/tools';
 import { createSubagentPool, resultCapBytes } from '@tulipfarm/agents/subagents';
@@ -79,6 +81,7 @@ import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 import { secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
+import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -321,6 +324,7 @@ export function meteredReply(
               return { resolve: held.resolve, recordUse: (id, url) => held.recordUse(id, url, 'api.request') };
             }
           : undefined,
+      apiApprovals: Boolean(requester) && !externalContext,
       images:
         outputs?.read && chatFiles
           ? {
@@ -505,7 +509,8 @@ export function createConversationActivities(
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
-  const secrets = secretsServices(storage).chat;
+  const secretServices = secretsServices(storage);
+  const secrets = secretServices.chat;
   let google: ReturnType<typeof googleOperations> | undefined;
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
@@ -565,6 +570,43 @@ export function createConversationActivities(
         conversationPlanning,
         turnFiles,
         secrets,
+        async context => {
+          const held = secretServices.secrets.capabilities().enabled
+            ? heldSecrets(secretServices.secrets, secretServices.requests, {
+                workspaceId: context.workspaceId,
+                actor: context.actor,
+                origin: { kind: 'chat', conversationId: context.conversationId },
+              })
+            : undefined;
+          const keep = turnFiles?.apiFiles?.keep;
+          const files =
+            keep && (await turnFiles.enabled(context.workspaceId))
+              ? {
+                  save: async (file: Parameters<ApiCallFiles['save']>[0]) =>
+                    (await keep(context.workspaceId, {
+                      conversationId: context.conversationId,
+                      turnId: context.turnId,
+                      callId: context.callId,
+                      membershipId: context.actor.membershipId,
+                      filename: file.name,
+                      mediaType: file.mediaType,
+                      bytes: file.bytes,
+                      sourceUrl: file.private ? null : publicSourceUrl(file.url),
+                    }))
+                      ? { source: context.callId }
+                      : null,
+                }
+              : undefined;
+          const resumed = await resumeApiCall(context.runtime, context.workspaceId, context.callId, {
+            secrets: held && {
+              resolve: held.resolve,
+              recordUse: (id, url) => held.recordUse(id, url, 'api.request'),
+            },
+            files,
+          });
+          if (resumed.state === 'waiting') return resumed;
+          return { ...resumed, sources: apiCallSources(resumed.result, context.conversationId) };
+        },
       );
       return process(executor, parsed);
     });

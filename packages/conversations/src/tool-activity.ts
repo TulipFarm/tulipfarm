@@ -467,9 +467,11 @@ function apiCallLabel(call: unknown) {
   return `${parsed.data.method} ${url.host}${url.pathname === '/' ? '' : url.pathname}`;
 }
 
+/** `review` marks a change that waited for its member's approval, which the chat shows as a review card. */
 export const apiCallReceiptSchema = z.union([
-  z.object({ httpStatus: z.int().min(100).max(599) }),
-  z.object({ error: z.string().max(64) }),
+  z.object({ httpStatus: z.int().min(100).max(599), review: z.literal(true).optional() }),
+  z.object({ error: z.string().max(64), review: z.literal(true).optional() }),
+  z.object({ review: z.literal(true) }),
 ]);
 const apiCallOutputSchema = z.object({
   result: z.union([
@@ -478,18 +480,25 @@ const apiCallOutputSchema = z.object({
   ]),
 });
 /** The HTTP status of a sent API call, or the error code of a failed one; never the body, headers or URL. */
-export function apiCallReceipt(tool: string, output: unknown): z.infer<typeof apiCallReceiptSchema> | null {
+export function apiCallReceipt(
+  tool: string,
+  output: unknown,
+  review = false,
+): z.infer<typeof apiCallReceiptSchema> | null {
   if (tool !== 'api.request') return null;
   const parsed = apiCallOutputSchema.safeParse(output);
-  if (!parsed.success) return null;
+  const marked = review ? { review: true as const } : {};
+  if (!parsed.success) return review ? { review: true } : null;
   const result = parsed.data.result;
-  return result.status === 'sent' ? { httpStatus: result.response.status } : { error: result.code };
+  return result.status === 'sent'
+    ? { httpStatus: result.response.status, ...marked }
+    : { error: result.code, ...marked };
 }
 
 const apiCallProblems = new Map(
   Object.entries({
-    'approval-unavailable': 'Changes need your approval, which isn’t available yet.',
-    rejected: 'The change was rejected.',
+    'approval-unavailable': 'Changes need your approval, which isn’t available here.',
+    rejected: 'You chose not to send this request.',
     expired: 'The approval expired.',
     conflict: 'The approval no longer matches this request.',
     'outcome-unknown': 'The request may have been sent. Check the service before retrying.',

@@ -459,17 +459,23 @@ export function createTaskRuntime(
       if (step?.decision?.kind === 'tools') {
         const callIds = step.decision.calls.map(item => z.uuid().parse(item.id));
         const pending = z
-          .array(z.object({ id: z.uuid() }))
+          .array(z.object({ id: z.uuid(), api: z.boolean() }))
           .parse(
             (
               await tx.client.query(
-                `SELECT id FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
+                `SELECT id, call->>'tool'='api.request' AS api FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
                 [runId, callIds],
               )
             ).rows,
           );
         if (pending.length)
-          return { kind: 'tools' as const, runId, callIds: pending.map(row => row.id), step: step.step };
+          return {
+            kind: 'tools' as const,
+            runId,
+            callIds: pending.map(row => row.id),
+            apiCalls: pending.filter(row => row.api).map(row => row.id),
+            step: step.step,
+          };
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET completed=true WHERE run_id=$1 AND step=$2`,
           [runId, step.step],
@@ -837,7 +843,7 @@ export function createTaskRuntime(
                 [tool.runId, tool.step],
               );
             await tx.client.query(
-              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%'))`,
+              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%' OR c.call->>'tool'='api.request'))`,
               [taskId, tool.runId, result === 'waiting' ? 'waiting-approval' : 'pending', tool.callId],
             );
           });
@@ -849,13 +855,20 @@ export function createTaskRuntime(
         const executions = tools.callIds.map(callId => ({ workspaceId, runId: tools.runId, callId }));
         const statuses =
           executions.length === 1 ? [await executor.execute(executions[0]!)] : await executor.executeBatch(executions);
-        if (statuses.every(status => status !== 'waiting'))
-          await locked(workspaceId, taskId, tx =>
-            tx.client.query(
+        await locked(workspaceId, taskId, async tx => {
+          if (statuses.every(status => status !== 'waiting'))
+            await tx.client.query(
               `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET completed=true WHERE run_id=$1 AND step=$2`,
               [tools.runId, tools.step],
-            ),
+            );
+          const approving = statuses.some(
+            (status, index) => status === 'waiting' && tools.apiCalls.includes(tools.callIds[index]!),
           );
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2 WHERE id=$1 AND status IN ('pending','waiting-approval') AND status<>$2`,
+            [taskId, approving ? 'waiting-approval' : 'pending'],
+          );
+        });
         return;
       }
       if (claim?.kind === 'files') {
