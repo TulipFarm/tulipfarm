@@ -30,6 +30,7 @@ import {
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { StatusState } from '@tulipfarm/sprout/status';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { TaskTree, type TaskTreeTask } from '@tulipfarm/sprout/task-tree';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
@@ -39,11 +40,25 @@ import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
 import { useCanvas, useResultAttention, type CanvasItem } from './canvas-state';
 import { conversationKeys } from './queries';
+import { PlanDocument } from './plan-document';
 import type { ConversationMessage } from './conversation-api';
 import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { resultActivityApps } from './result-activity';
 
 export type PlanSummary = z.infer<typeof planListItemSchema>;
+
+/** The latest attempt to produce a revision's document; a failed attempt leaves the previous revision's page. */
+export const planDocumentRenderSchema = z.object({
+  revision: z.number().int().positive(),
+  status: z.enum(['pending', 'rendering', 'ready', 'failed']),
+  fileId: z.string().nullish(),
+  fileVersion: z.number().int().positive().nullish(),
+  error: z.string().nullish(),
+});
+export type PlanDocumentRender = z.infer<typeof planDocumentRenderSchema>;
+// The web reads the render state beside the shared projection until the shared PlanView carries it.
+const planDetailSchema = planViewSchema.extend({ documentRender: planDocumentRenderSchema.nullish() });
+export type PlanDetail = z.infer<typeof planDetailSchema>;
 type PlanTask = PlanView['tasks'][number];
 type PlanControl =
   | { action: 'start' }
@@ -89,12 +104,34 @@ export function planApi(workspaceId: string) {
     }
     return value;
   }
+  const plan = (planId: string) => `/agent-plans/${encodeURIComponent(planId)}`;
   return {
     list: async (chatId: string, signal: AbortSignal) =>
       z.object({ plans: z.array(planListItemSchema) }).parse(await request(`/conversations/${chatId}/plans`, signal))
         .plans,
     read: async (planId: string, signal: AbortSignal) =>
-      planViewSchema.parse(await request(`/agent-plans/${planId}`, signal)),
+      planDetailSchema.parse(await request(`/agent-plans/${planId}`, signal)),
+    /** One revision's document page. Revisions never change, so the HTML can be kept. */
+    document: async (planId: string, revision: number, signal: AbortSignal) => {
+      const response = await jsonResponse(`${base}${plan(planId)}/document/${revision}`, { signal });
+      if (!response.ok) {
+        const code =
+          z.object({ error: z.string() }).safeParse(await readJson(response, true)).data?.error ??
+          'plan-document-unavailable';
+        throw new TableRequestError(
+          response.status,
+          code,
+          failures[code] ?? 'The document could not be loaded. Check your connection and try again.',
+        );
+      }
+      return response.text();
+    },
+    retryDocument: async (planId: string) => {
+      await request(`${plan(planId)}/document/retry`, AbortSignal.timeout(15_000), {});
+    },
+    recreateDocument: async (planId: string) => {
+      await request(`${plan(planId)}/document/recreate`, AbortSignal.timeout(15_000), {});
+    },
     control: async (planId: string, input: PlanControl & { requestId: string; expectedVersion: number }) =>
       planReceiptSchema.parse(await request(`/agent-plans/${planId}/control`, AbortSignal.timeout(15_000), input)),
   };
@@ -103,6 +140,13 @@ export type PlanApi = ReturnType<typeof planApi>;
 
 const open = (plan: Pick<PlanView, 'lifecycle'>) =>
   plan.lifecycle === 'draft' || plan.lifecycle === 'active' || plan.lifecycle === 'paused';
+
+/** A document still being produced for the plan's latest content revision. */
+export const documentPending = (plan: Pick<PlanDetail, 'contentRevision' | 'documentRender'>) =>
+  !!plan.documentRender &&
+  (plan.documentRender.status === 'pending' ||
+    plan.documentRender.status === 'rendering' ||
+    (plan.documentRender.status === 'ready' && plan.documentRender.revision < plan.contentRevision));
 
 export function usePlans(api: PlanApi, chatId: string, enabled: boolean) {
   return useFeatureRead({ key: conversationKeys.planList(chatId), load: signal => api.list(chatId, signal), enabled });
@@ -113,7 +157,7 @@ export function usePlan(api: PlanApi, chatId: string, planId: string) {
   return useFeatureRead({
     key: conversationKeys.plan(chatId, planId),
     load: signal => api.read(planId, signal),
-    pollWhile: open,
+    pollWhile: (plan: PlanDetail) => open(plan) || documentPending(plan),
     interval: 15_000,
     maxChecks: Infinity,
   });
@@ -427,6 +471,7 @@ export function PlanCanvas({
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => planApi(workspaceId), [workspaceId]);
   const read = usePlan(api, chatId, planId);
+  const documents = useFlag('plan-documents');
   const state = read.state;
   if (state.kind === 'loading')
     return (
@@ -525,20 +570,8 @@ export function PlanCanvas({
       )}
     </div>
   );
-  return (
-    <CanvasSection>
-      <PlanNotice view={view} />
-      {state.error && (
-        <Alert>
-          <AlertTitle>Showing the last loaded plan</AlertTitle>
-          <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
-          <div className="mt-2">
-            <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
-              {state.refreshing ? 'Checking…' : 'Check again'}
-            </Button>
-          </div>
-        </Alert>
-      )}
+  const outline = (
+    <>
       <TaskTree title={view.title} tasks={planTree(view)} summary={planProgress(view.counts)} />
       <Collapsible>
         <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
@@ -556,6 +589,40 @@ export function PlanCanvas({
           />
         </CollapsibleContent>
       </Collapsible>
+    </>
+  );
+  return (
+    <CanvasSection>
+      <PlanNotice view={view} />
+      {state.error && (
+        <Alert>
+          <AlertTitle>Showing the last loaded plan</AlertTitle>
+          <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
+          <div className="mt-2">
+            <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
+              {state.refreshing ? 'Checking…' : 'Check again'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+      {documents ? (
+        <Tabs defaultValue="outline">
+          <TabsList variant="line" aria-label="Plan views">
+            <TabsTrigger value="outline">Outline</TabsTrigger>
+            <TabsTrigger value="document">Document</TabsTrigger>
+          </TabsList>
+          <TabsContent value="outline">
+            <div className="flex flex-col gap-4 pt-4">{outline}</div>
+          </TabsContent>
+          <TabsContent value="document">
+            <div className="pt-4">
+              <PlanDocument api={api} workspaceSlug={workspaceSlug} chatId={chatId} view={view} />
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        outline
+      )}
     </CanvasSection>
   );
 }
