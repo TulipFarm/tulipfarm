@@ -7,6 +7,7 @@ import {
   disconnectionSchema,
 } from '@tulipfarm/github/contracts';
 import { apiOrigin } from './auth';
+import { rememberGitHubReturn } from './github-return';
 import { jsonResponse, readJson, requestSignal, responseError } from './http';
 import { selectionSchema } from '@tulipfarm/github/read-contracts';
 import { batchDisplaySchema, botGrantListSchema } from '@tulipfarm/github/batch-contracts';
@@ -136,5 +137,7 @@ export function githubConsent(url: string) {
     parsed.password
   )
     throw new Error('Unexpected consent destination');
+  const workspaceId = z.uuid().safeParse(parsed.searchParams.get('state')?.slice(0, 36));
+  if (workspaceId.success) rememberGitHubReturn(workspaceId.data);
   window.location.assign(parsed.href);
 }

@@ -12,7 +12,7 @@ async function startGoogle(workspaceId: string, app: Integration['googleApp']) {
   window.location.assign(url.href);
 }
 
-async function startGitHub(workspaceId: string) {
+export async function startGitHub(workspaceId: string) {
   const unfinished = (await githubApi.list(workspaceId)).accounts.find(
     account => account.state !== 'active' && account.state !== 'disconnected',
   );

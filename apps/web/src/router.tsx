@@ -353,6 +353,12 @@ const githubCallbackRoute = createRoute({
   path: '/github/callback',
   component: GitHubCallbackPage,
 });
+// The GitHub App's setup URL: GitHub sends people here after they install or update the App.
+const githubSetupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/integrations/github',
+  component: GitHubCallbackPage,
+});
 export const atlassianCallbackRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/atlassian/callback',
@@ -1162,6 +1168,7 @@ export const router = createRouter({
     chatRedirectRoute,
     googleCallbackRoute,
     githubCallbackRoute,
+    githubSetupRoute,
     atlassianCallbackRoute,
     slackLinkRoute,
     createWorkspaceRoute,
