@@ -88,7 +88,7 @@ export async function resolveForSend(
       (await tx.client.query(`SELECT kind, value FROM ${table(tx, 'destinations')} WHERE secret_id = $1`, [row.id]))
         .rows,
     );
-  if (!destinationAllows(destinations, redactUrl(input.url, [row.placement])))
+  if (!destinationAllows(destinations, redactUrl(input.url, [row.placement]), secrets.privateHosts))
     throw new SecretError('destination-denied');
   if (input.expected && (input.expected.version !== row.version || input.expected.policyVersion !== row.policy_version))
     throw new SecretError('conflict');

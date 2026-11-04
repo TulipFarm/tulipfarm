@@ -338,6 +338,30 @@ test('secrets', async t => {
     assert.equal(saved.variableName, 'STRIPE_KEY_2');
   });
 
+  await t.test('a listed private host may be a destination and is refused once delisted', async () => {
+    const listed = [{ host: 'billing', port: 8443, http: false }];
+    const withHosts = createSecrets({ runtime: f.runtime, keyring, enabled: true, privateHosts: listed });
+    const destinations = [{ kind: 'host', host: 'billing' }];
+    await assert.rejects(f.secrets.create(ws, ana, f.input({ destinations })), code('destination-denied'));
+    const secret = await withHosts.create(ws, ana, f.input({ destinations }));
+    assert.deepEqual(secret.destinations, [{ kind: 'host', value: 'billing' }]);
+    const send = (service, url) =>
+      f.runtime.transaction(ws, commonCompatibility, tx =>
+        resolveForSend(service, tx, {
+          workspaceId: ws,
+          membershipId: ana.membershipId,
+          secret: { kind: 'secret', secretId: secret.id },
+          url,
+        }),
+      );
+    assert.deepEqual((await send(withHosts, 'https://billing:8443/v1/invoices')).value, {
+      value: 'phx-synthetic-secret-value',
+    });
+    await assert.rejects(send(withHosts, 'https://billing/v1/invoices'), code('destination-denied'));
+    await assert.rejects(send(f.secrets, 'https://billing:8443/v1/invoices'), code('destination-denied'));
+    assert.equal((await f.secrets.get(ws, ana, secret.id)).status, 'active');
+  });
+
   await t.test('deleting makes every send fail at once', async () => {
     const secret = await f.secrets.create(ws, ana, f.input());
     await f.secrets.delete(ws, ana, secret.id, { requestId: randomUUID(), expectedVersion: 1 });

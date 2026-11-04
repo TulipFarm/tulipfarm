@@ -524,8 +524,8 @@ export function secretRequestSettlement(
     settlement: SecretSettlement,
     context: { actor?: HumanActor; commandId?: string },
   ) => {
-    // Only chats can create secret requests so far; a task origin here is a programming error.
-    if (request.origin.kind !== 'chat') throw new Error('Task secret requests are not supported');
+    // A task run reads its request's outcome itself when it is woken.
+    if (request.origin.kind !== 'chat') return;
     const outcome =
       settlement.status === 'provided'
         ? { kind: 'secrets' as const, status: 'provided' as const, references: settlement.references, reason: null }

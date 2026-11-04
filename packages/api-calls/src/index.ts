@@ -1,5 +1,12 @@
 export * from './contracts.ts';
-export { API_CALL_USER_AGENT, encodeBody, isCredentialName, normalizeApiUrl, requestHeaders } from './policy.ts';
+export {
+  API_CALL_USER_AGENT,
+  apiCallPrivateHosts,
+  encodeBody,
+  isCredentialName,
+  normalizeApiUrl,
+  requestHeaders,
+} from './policy.ts';
 export { keptHeaders, readResponse, responseFilename, type ReadResponse } from './response.ts';
 export {
   callOutcome,

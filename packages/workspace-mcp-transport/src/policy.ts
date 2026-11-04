@@ -110,8 +110,8 @@ export function normalizeDestination(input: string, addresses: DestinationAddres
   }
 }
 
-export function normalizeEndpoint(input: string): string {
-  const url = normalizeDestination(input);
+export function normalizeEndpoint(input: string, addresses: DestinationAddresses = 'public'): string {
+  const url = normalizeDestination(input, addresses);
   for (const key of url.searchParams.keys()) {
     if (/(?:token|secret|password|passwd|credential|authorization|api.?key|signature|^key$|^code$|^sig$)/i.test(key))
       throw new McpNetworkError('endpoint-denied');

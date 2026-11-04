@@ -3,6 +3,7 @@ import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { integrationDetailSchema, integrationGrantsSchema } from '@tulipfarm/integrations/contracts';
 import { catalogFixture } from '@/features/models/catalog-fixture';
 import { apiReviewMock } from '@/features/api-calls/review-mock';
+import { taskSecretMock } from '@/features/secrets/task-mock';
 
 if (
   import.meta.env.DEV &&
@@ -51,8 +52,11 @@ if (
   let failures = 0;
   let investigationReads = 0;
   let generation = 0;
-  let taskStatus = scenario === 'api-approval' ? 'waiting-approval' : 'waiting-clarification';
+  let taskStatus = ['api-approval', 'secret-request'].includes(scenario) ? 'waiting-approval' : 'waiting-clarification';
   const apiReview = apiReviewMock({ kind: 'task', taskId: id });
+  const taskSecrets = taskSecretMock(() => {
+    taskStatus = 'pending';
+  });
   const metadata = {
     id: teamId,
     owningTeamId: id,
@@ -97,6 +101,10 @@ if (
       const answer = apiReview.respond(path, method, init ?? undefined);
       if (answer) return answer;
     } else if (path.endsWith('/api-calls')) return Response.json({ calls: [] });
+    if (scenario === 'secret-request') {
+      const answer = taskSecrets.respond(path, method);
+      if (answer) return answer;
+    } else if (path.endsWith('/secret-requests')) return Response.json({ requests: [] });
     if (path === '/v1/auth/get-session')
       return Response.json({
         session: { id: 'github-investigation-mock', userId: 'demo' },

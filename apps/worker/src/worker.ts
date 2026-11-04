@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
+import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 import {
   captureException,
   createBackgroundJob,
@@ -76,8 +77,9 @@ async function run() {
   }
   // Fails startup on an invalid model catalog or provider environment.
   for (const warning of loadModelCatalog().warnings) console.warn(JSON.stringify({ level: 'warn', msg: warning }));
-  // Fails startup on removed Firecrawl settings or an invalid public web endpoint.
+  // Fails startup on removed Firecrawl settings, an invalid public web endpoint or private host list.
   publicWebConfiguration();
+  apiCallPrivateHosts();
   const emailEnabled = emailDeliveryEnabled();
   for (const key of [
     'WORKSPACE_PROVISIONING_DATABASE_URL',

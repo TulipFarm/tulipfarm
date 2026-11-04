@@ -10,6 +10,7 @@ import { createPublicHttpsFetch } from './public-https.ts';
 
 export {
   authenticationHeaders,
+  listedPrivateHost,
   normalizeDestination,
   normalizeEndpoint,
   parsePrivateHosts,

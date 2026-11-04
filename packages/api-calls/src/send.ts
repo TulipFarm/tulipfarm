@@ -8,7 +8,13 @@ import {
   type Placement,
   type SecretValue,
 } from '@tulipfarm/secrets';
-import { McpNetworkError, pinnedRequest, type PinnedRequestPolicy } from '@tulipfarm/workspace-mcp-transport';
+import {
+  McpNetworkError,
+  listedPrivateHost,
+  pinnedRequest,
+  type PinnedRequestPolicy,
+  type PrivateHost,
+} from '@tulipfarm/workspace-mcp-transport';
 import {
   API_CALL_LIMITS,
   ApiCallError,
@@ -85,6 +91,8 @@ export type SendApiCallOptions = {
   signal?: AbortSignal | undefined;
   /** Saves bodies over 64 KiB or binary ones; absent, they are omitted from the result. */
   files?: ApiCallFiles | undefined;
+  /** The operator's private hosts this call may reach; empty or absent outside a member's private chat or task. */
+  privateHosts?: readonly PrivateHost[] | undefined;
   dependencies?: PinnedRequestPolicy['dependencies'];
 };
 
@@ -191,6 +199,9 @@ export type PreparedApiCall = {
   redactedUrl: string;
   host: string;
   timeoutMs: number;
+  /** The private hosts the call was checked against; `privateHost` is true when it goes to one of them. */
+  privateHosts: readonly PrivateHost[];
+  privateHost: boolean;
 };
 
 /**
@@ -201,8 +212,9 @@ export async function prepareApiCall(
   call: ApiRequestCall,
   secrets: ApiCallSecrets | undefined,
   expected?: readonly UsedSecret[],
+  privateHosts: readonly PrivateHost[] = [],
 ): Promise<PreparedApiCall> {
-  const url = normalizeApiUrl(call.url, call.query);
+  const url = normalizeApiUrl(call.url, call.query, privateHosts);
   const encoded = call.body ? encodeBody(call.body) : undefined;
   const headers = { ...requestHeaders(call.headers), ...(encoded ? { 'content-type': encoded.contentType } : {}) };
   let request: OutgoingRequest = { url: url.href, headers, ...(encoded ? { body: encoded.body } : {}) };
@@ -262,6 +274,8 @@ export async function prepareApiCall(
     ),
     host: url.host,
     timeoutMs: timeoutSeconds * 1000,
+    privateHosts,
+    privateHost: listedPrivateHost(url, privateHosts.length ? { privateHosts } : 'public'),
   };
 }
 
@@ -291,6 +305,7 @@ export async function transmitApiCall(
         redirects: 'manual',
         timeoutMs: Math.max(1, options.deadline - Date.now()),
         maximumBytes: API_CALL_LIMITS.fileBytes,
+        ...(prepared.privateHost ? { addresses: { privateHosts: prepared.privateHosts } } : {}),
         ...(options.dependencies ? { dependencies: options.dependencies } : {}),
       },
     );
@@ -300,7 +315,11 @@ export async function transmitApiCall(
     let body = read.body;
     let note: string | undefined;
     if (read.file && body.kind === 'omitted') {
-      const saved = await options.files!.save({ ...read.file, url: redacted, private: used.length > 0 });
+      const saved = await options.files!.save({
+        ...read.file,
+        url: redacted,
+        private: used.length > 0 || prepared.privateHost,
+      });
       if (saved) {
         body = {
           kind: 'file',
@@ -329,6 +348,7 @@ export async function transmitApiCall(
       response: { status: read.status, durationMs, headers: read.headers, body },
       ...(read.authentication ? { authentication: read.authentication } : {}),
       secrets: used.map(({ name, placement }) => ({ name, placement })),
+      ...(prepared.privateHost ? { privateHost: true as const } : {}),
       untrusted: true,
       ...(note ? { note } : {}),
     };
@@ -378,7 +398,7 @@ export async function sendApiCall(input: unknown, options: SendApiCallOptions): 
         'approval-unavailable',
         `${call.method} changes data and needs the member's approval, which is not available here. Nothing was sent. Tell the member.`,
       );
-    prepared = await prepareApiCall(call, options.secrets);
+    prepared = await prepareApiCall(call, options.secrets, undefined, options.privateHosts);
   } catch (error) {
     if (error instanceof ApiCallError) return failed(error);
     throw error;

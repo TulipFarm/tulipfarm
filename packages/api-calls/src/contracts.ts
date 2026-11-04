@@ -115,6 +115,8 @@ export type ApiCallSent = {
   response: { status: number; durationMs: number; headers: Record<string, string>; body: ResponseBody };
   authentication?: AuthHint;
   secrets: { name: string; placement: Placement }[];
+  /** The host is on the operator's private host list, so only the member who made the call may see the response. */
+  privateHost?: true;
   untrusted: true;
   note?: string;
 };
@@ -168,6 +170,7 @@ export const apiCallResultSchema = z.discriminatedUnion('status', [
       .strictObject({ status: z.int(), challenge: z.string().nullable(), excerpt: z.string().nullable() })
       .optional(),
     secrets: z.array(z.strictObject({ name: z.string(), placement: placementResultSchema })),
+    privateHost: z.literal(true).optional(),
     untrusted: z.literal(true),
     note: z.string().optional(),
   }),

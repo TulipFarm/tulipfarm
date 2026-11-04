@@ -217,7 +217,8 @@ type McpProvenanceCall = { tool: 'mcp.call' | 'mcp.search' | 'mcp.describe' };
 export function apiCallSources(result: unknown, conversationId: string | null): SourceDependency[] {
   const parsed = apiCallResultSchema.parse(result);
   if (parsed.status !== 'sent') return [];
-  if (parsed.secrets.length)
+  // Authenticated and private-host responses stay with the member who made the call.
+  if (parsed.secrets.length || parsed.privateHost)
     return conversationId ? [{ kind: 'private-conversation', conversationId }] : [{ kind: 'unavailable' }];
   return [{ kind: 'public-web', url: publicSourceUrl(parsed.url) }];
 }

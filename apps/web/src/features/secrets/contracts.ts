@@ -145,6 +145,20 @@ export const secretRequestViewSchema = z.object({
   declineReason: z.string().nullable(),
 });
 export type SecretRequestView = z.infer<typeof secretRequestViewSchema>;
+export const taskSecretRequestsSchema = z.object({
+  requests: z.array(
+    z.object({
+      id: z.uuid(),
+      status: z.enum(['waiting', 'provided', 'declined', 'expired', 'cancelled']),
+      revision: z.number().int(),
+      expiresAt: z.string(),
+      purpose: z.string(),
+      declineReason: z.string().nullable(),
+      references: z.array(z.object({ referenceId: z.uuid(), fieldId: z.string(), name: z.string(), kind: z.string() })),
+    }),
+  ),
+});
+export type TaskSecretRequest = z.infer<typeof taskSecretRequestsSchema>['requests'][number];
 export type SecretRequestField = SecretRequestView['fields'][number];
 
 export type SecretValue = { value: string } | { username: string; password: string };

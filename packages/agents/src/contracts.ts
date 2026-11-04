@@ -1,5 +1,11 @@
 import { apiCallResultSchema, apiCallWaitingSchema, apiRequestCallSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
+import {
+  placementSchema,
+  secretKindSchema,
+  secretsListCallSchema,
+  secretsRequestCallSchema,
+} from '@tulipfarm/secrets/tool-contracts';
 import { skillIdSchema, skillResourceSchema } from './skill-ids.ts';
 import { publicWebResultSchema } from '@tulipfarm/conversations/public-web';
 import { generateImagesCallSchema, imageOutputResultSchema } from '@tulipfarm/conversations/image-contracts';
@@ -159,6 +165,8 @@ export const publicWebCallSchema = z.discriminatedUnion('tool', [
 ]);
 export const toolCallSchema = z.discriminatedUnion('tool', [
   apiRequestCallSchema,
+  secretsRequestCallSchema,
+  secretsListCallSchema,
   z.strictObject({
     tool: z.literal('files.read'),
     source: z.string().trim().min(1).max(256),
@@ -245,7 +253,37 @@ export const taskFileReadResultSchema = z.union([
   z.strictObject({ source: uuidSchema, file: z.string(), url: z.string().nullable(), private: z.boolean() }),
   z.strictObject({ error: z.literal('file-not-found'), instruction: z.string() }),
 ]);
+const secretReferenceResultSchema = z.strictObject({
+  referenceId: uuidSchema,
+  fieldId: z.string(),
+  name: z.string(),
+  kind: secretKindSchema,
+  placement: placementSchema,
+  destinations: z.array(z.strictObject({ kind: z.enum(['host', 'endpoint']), value: z.string() })),
+});
+/** What a task's `secrets.request` and `secrets.list` calls return: references and states, never values. */
+const taskSecretResultSchema = z.union([
+  z.strictObject({ error: z.string(), instruction: z.string() }),
+  z.strictObject({ status: z.literal('awaiting-input'), secretRequestId: uuidSchema }),
+  z.strictObject({
+    status: z.literal('provided'),
+    references: z.array(secretReferenceResultSchema),
+    instruction: z.string(),
+  }),
+  z.strictObject({ status: z.literal('declined'), reason: z.string().nullable(), instruction: z.string() }),
+  z.strictObject({ status: z.enum(['expired', 'cancelled']), instruction: z.string() }),
+  z.strictObject({
+    references: z.array(
+      secretReferenceResultSchema.extend({
+        variableName: z.string(),
+        status: z.enum(['active', 'expired', 'suspended']),
+      }),
+    ),
+    instruction: z.string(),
+  }),
+]);
 export const toolResultSchema = z.union([
+  taskSecretResultSchema,
   imageOutputResultSchema,
   taskFileReadResultSchema,
   z.strictObject({

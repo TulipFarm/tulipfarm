@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { routes, secretPort, server } from './https-fixture.mjs';
-import { encodeBody, isCredentialName, normalizeApiUrl, requestHeaders, sendApiCall } from '../dist/index.js';
+import {
+  apiCallPrivateHosts,
+  encodeBody,
+  isCredentialName,
+  normalizeApiUrl,
+  requestHeaders,
+  sendApiCall,
+} from '../dist/index.js';
 
 const failsWith = code => error => error.code === code;
 
@@ -282,6 +289,63 @@ test('invalid calls and changes are refused before any lookup', async t => {
     assert.equal(result.code, code, JSON.stringify(call));
   }
   assert.equal(api.received.length, 0);
+});
+
+test('the private host list parses exact names and fails clearly on anything else', () => {
+  assert.deepEqual(apiCallPrivateHosts({}), []);
+  assert.deepEqual(apiCallPrivateHosts({ API_CALL_PRIVATE_HOSTS: ' billing.internal:8443, metrics.lan;http ' }), [
+    { host: 'billing.internal', port: 8443, http: false },
+    { host: 'metrics.lan', port: null, http: true },
+  ]);
+  for (const value of [
+    '10.0.0.1',
+    '*.internal',
+    'Billing.internal',
+    'billing.internal:0',
+    'billing.internal;ftp',
+    '[::1]',
+  ])
+    assert.throws(
+      () => apiCallPrivateHosts({ API_CALL_PRIVATE_HOSTS: value }),
+      /API_CALL_PRIVATE_HOSTS must list/,
+      value,
+    );
+});
+
+test('a private host is reachable only on the host, port and scheme it is listed with', async t => {
+  const api = await server(t, routes);
+  api.resolveTo('10.0.0.5');
+  const send = (url, privateHosts) =>
+    sendApiCall({ tool: 'api.request', method: 'GET', url }, api.options({ privateHosts }));
+  const listed = [{ host: 'api.example.test', port: null, http: false }];
+
+  const sent = await send('https://api.example.test/json', listed);
+  assert.equal(sent.status, 'sent');
+  assert.equal(sent.privateHost, true);
+  assert.equal((await send('https://api.example.test/json', [])).code, 'address-denied');
+  assert.equal((await send('https://api.example.test:8443/json', listed)).code, 'address-denied');
+  assert.equal(
+    (await send('https://api.example.test:8443/json', [{ host: 'api.example.test', port: 8443, http: false }])).status,
+    'sent',
+  );
+  assert.equal((await send('https://other.example.test/json', listed)).code, 'address-denied');
+  assert.equal(api.received.length, 2);
+
+  assert.throws(() => normalizeApiUrl('http://metrics.lan/q', [], listed), failsWith('address-denied'));
+  assert.throws(
+    () => normalizeApiUrl('http://metrics.lan/q', [], [{ host: 'metrics.lan', port: null, http: false }]),
+    failsWith('address-denied'),
+  );
+  const http = [{ host: 'metrics.lan', port: null, http: true }];
+  assert.equal(normalizeApiUrl('http://metrics.lan/q', [], http).href, 'http://metrics.lan/q');
+  assert.equal(normalizeApiUrl('https://metrics.lan/q', [], http).href, 'https://metrics.lan/q');
+  assert.throws(() => normalizeApiUrl('http://metrics.lan:8080/q', [], http), failsWith('address-denied'));
+  assert.throws(() => normalizeApiUrl('http://10.0.0.5/q', [], http), failsWith('address-denied'));
+
+  api.resolveTo('8.8.8.8');
+  const publicCall = await send('https://api.example.test/json', []);
+  assert.equal(publicCall.status, 'sent');
+  assert.equal(publicCall.privateHost, undefined);
 });
 
 test('network failures map to their codes', async t => {

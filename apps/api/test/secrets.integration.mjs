@@ -191,3 +191,70 @@ test('secrets routes report disabled without the setting', { timeout: 60000 }, a
     await f.close();
   }
 });
+
+test('answering a task’s secrets form wakes the task, and only its owner can', { timeout: 60000 }, async () => {
+  let authenticated;
+  const f = await requestFixture(undefined, async db => {
+      authenticated = await authenticatedFixture(db);
+      return { userId: authenticated.owner.id, close: () => authenticated.identity.end() };
+    }),
+    app = Fastify();
+  try {
+    const { workspace: w } = f;
+    await authenticated.addAdmin(w);
+    const { auth, owner, admin } = authenticated;
+    const services = secretsServices(f.runtime, env);
+    const woken = [];
+    registerSecrets(app, auth, services, async (workspaceId, taskId) => void woken.push([workspaceId, taskId]));
+    const url = await app.listen({ host: '127.0.0.1', port: 0 });
+    const http = (path, method = 'GET', body, human = owner) =>
+      fetch(`${url}/workspaces/${w.id}${path}`, {
+        method,
+        headers: {
+          cookie: human.cookie,
+          origin: 'http://localhost:5173',
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      }).then(async response => ({ status: response.status, body: await response.json() }));
+    const taskId = randomUUID(),
+      ids = [randomUUID(), randomUUID()];
+    for (const id of ids)
+      await services.secrets.transaction(w.id, tx =>
+        services.requests.create(tx, {
+          id,
+          membershipId: w.membershipId,
+          origin: { kind: 'task', taskId, runId: randomUUID() },
+          request: {
+            purpose: 'Read the billing invoices',
+            fields: [{ id: 'key', label: 'Billing token', kind: 'token', placement: { kind: 'bearer' } }],
+            destinations: [{ kind: 'host', host: 'billing.example' }],
+          },
+        }),
+      );
+    assert.deepEqual(await http(`/agent-tasks/${taskId}/secret-requests`), { status: 200, body: { requests: [] } });
+
+    const submit = {
+      requestId: randomUUID(),
+      expectedRevision: 1,
+      fields: [{ fieldId: 'key', value: { value: 'billing-token-0123' }, lifetime: 'conversation' }],
+    };
+    assert.equal((await http(`/secret-requests/${ids[0]}/submit`, 'POST', submit, admin)).status, 404);
+    assert.deepEqual(woken, []);
+    const provided = await http(`/secret-requests/${ids[0]}/submit`, 'POST', submit);
+    assert.equal(provided.status, 200, JSON.stringify(provided.body));
+    assert.deepEqual(woken, [[w.id, taskId]]);
+    const declined = await http(`/secret-requests/${ids[1]}/decline`, 'POST', {
+      requestId: randomUUID(),
+      expectedRevision: 1,
+    });
+    assert.equal(declined.status, 200, JSON.stringify(declined.body));
+    assert.deepEqual(woken, [
+      [w.id, taskId],
+      [w.id, taskId],
+    ]);
+  } finally {
+    await app.close();
+    await f.close();
+  }
+});

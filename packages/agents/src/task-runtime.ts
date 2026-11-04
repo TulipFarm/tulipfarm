@@ -16,7 +16,8 @@ import { agentDefinitionSchema, recordConflict, toolCallSchema, toolResultSchema
 import { agentModelInputSchema, modelDecisionSchema, parseModelDecision, taskReadTools } from './model.ts';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 import type { InferenceResult } from './inference.ts';
-import { createAgentExecutor, type RunImages } from './executor.ts';
+import { createAgentExecutor, type RunImages, type TaskSecretsAccess } from './executor.ts';
+export type { TaskSecretsAccess } from './executor.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createTaskApprovals } from './task-approvals.ts';
@@ -84,6 +85,8 @@ const stepSchema = z.object({
 const taskReadAdmitted = (definition: z.infer<typeof agentDefinitionSchema>, call: z.infer<typeof toolCallSchema>) =>
   call.tool === 'api.request' ||
   call.tool === 'files.read' ||
+  call.tool === 'secrets.request' ||
+  call.tool === 'secrets.list' ||
   (taskReadTools.has(call.tool) &&
     (isMcpCall(call)
       ? Boolean(definition.mcp?.length)
@@ -209,6 +212,7 @@ export function createTaskRuntime(
   skills?: SkillExecutionFactory,
   reading?: TaskFileReading,
   images?: RunImages,
+  secrets?: TaskSecretsAccess,
 ) {
   runtime = withTaskTelemetry(runtime);
   async function locked<T>(workspaceId: string, taskId: string, operation: (tx: Transaction) => Promise<T>) {
@@ -463,7 +467,7 @@ export function createTaskRuntime(
           .parse(
             (
               await tx.client.query(
-                `SELECT id, call->>'tool'='api.request' AS api FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
+                `SELECT id, call->>'tool' IN ('api.request','secrets.request') AS api FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status NOT IN ('completed','failed','blocked') ORDER BY sequence`,
                 [runId, callIds],
               )
             ).rows,
@@ -787,6 +791,7 @@ export function createTaskRuntime(
         ...(materializing?.content ? { files: materializing.content } : {}),
         ...((await imageGenerationOffered(workspaceId, c.definition.tools)) ? { images: true as const } : {}),
         ...(reading?.links && (await reading.enabled(workspaceId)) ? { taskFiles: true as const } : {}),
+        ...(secrets?.tools.enabled() ? { taskSecrets: true as const } : {}),
       });
       const timeoutMs = Math.min(47000, task.limits.activeMilliseconds - Number(task.activeMilliseconds));
       const claim = await claimAttempt(tx, model, workspaceId, generation, input, {
@@ -833,6 +838,7 @@ export function createTaskRuntime(
           skills,
           images,
           reading,
+          taskSecrets: secrets,
           telemetryRuntime: 'task',
         }).execute({ workspaceId, runId: tool.runId, callId: tool.callId });
         if (tool.step !== null)
@@ -843,7 +849,7 @@ export function createTaskRuntime(
                 [tool.runId, tool.step],
               );
             await tx.client.query(
-              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%' OR c.call->>'tool'='api.request'))`,
+              `UPDATE ${relation(tx, 'tf_agent_tasks')} t SET status=$3 WHERE t.id=$1 AND t.status IN ('pending','waiting-approval') AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_tool_calls')} c ON c.run_id=b.run_id WHERE b.task_id=t.id AND b.generation=t.generation AND b.run_id=$2 AND c.id=$4 AND (c.call->>'tool' LIKE 'slack.%' OR c.call->>'tool' LIKE 'mcp.%' OR c.call->>'tool' LIKE 'github.personal.%' OR c.call->>'tool' IN ('api.request','secrets.request')))`,
               [taskId, tool.runId, result === 'waiting' ? 'waiting-approval' : 'pending', tool.callId],
             );
           });
@@ -851,7 +857,16 @@ export function createTaskRuntime(
       }
       if (claim?.kind === 'tools') {
         const tools = claim;
-        const executor = createAgentExecutor({ runtime, slack, mcp, github, knowledge, images, reading });
+        const executor = createAgentExecutor({
+          runtime,
+          slack,
+          mcp,
+          github,
+          knowledge,
+          images,
+          reading,
+          taskSecrets: secrets,
+        });
         const executions = tools.callIds.map(callId => ({ workspaceId, runId: tools.runId, callId }));
         const statuses =
           executions.length === 1 ? [await executor.execute(executions[0]!)] : await executor.executeBatch(executions);
@@ -1235,7 +1250,10 @@ export function createTaskRuntime(
               `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2 WHERE id=$1 AND status IS DISTINCT FROM $2`,
               [taskId, status],
             );
-            if (status === 'completed') completedRows = changed.rowCount;
+            if (status === 'completed') {
+              completedRows = changed.rowCount;
+              await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId: c.runId });
+            }
           }
           // A conflicted proposal produced nothing for the owner to review; the agent reads the conflict result next step.
           if (!conflicted) await message(tx, taskId, c.task.generation, decision.text, claim.reads);
@@ -1265,6 +1283,7 @@ export function createTaskRuntime(
             `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed' WHERE id=$1 AND status IS DISTINCT FROM 'failed'`,
             [taskId],
           );
+          await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId: claim.runId });
           taskTransition(tx, 'failed', changed.rowCount, taskId);
         }
       });

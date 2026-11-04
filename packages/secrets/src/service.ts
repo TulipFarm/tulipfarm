@@ -9,6 +9,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import type { PrivateHost } from '@tulipfarm/workspace-mcp-transport';
 import {
   SecretError,
   TEMPORARY_LIFETIME_MS,
@@ -47,6 +48,8 @@ export type SecretsOptions = {
   keyring: SecretKeyring | (() => SecretKeyring);
   enabled?: boolean;
   now?: () => Date;
+  /** The operator's private hosts that destinations may name (`API_CALL_PRIVATE_HOSTS`). */
+  privateHosts?: readonly PrivateHost[];
 };
 export type SecretTransaction = Pick<AuthorizationTransaction, 'client' | 'schema'>;
 
@@ -102,6 +105,7 @@ function statusOf(row: Row): SecretStatus {
 export function createSecrets(options: SecretsOptions) {
   const cipher = secretCipher(options.keyring);
   const now = options.now ?? (() => new Date());
+  const privateHosts = options.privateHosts ?? [];
 
   function capabilities() {
     if (!options.enabled) return { enabled: false };
@@ -441,7 +445,7 @@ export function createSecrets(options: SecretsOptions) {
     const input = createSecretInputSchema.parse(raw);
     if (!placementFits(input.kind, input.placement)) throw new SecretError('invalid-input');
     const value = parseValue(input.kind, input.value);
-    const list = normalizeDestinations(input.destinations);
+    const list = normalizeDestinations(input.destinations, privateHosts);
     const origin = input.lifetime.kind === 'conversation' ? input.lifetime.origin : null;
     const temporary = origin !== null;
     if (temporary && input.grants.length) throw new SecretError('invalid-input');
@@ -518,6 +522,7 @@ export function createSecrets(options: SecretsOptions) {
 
   return {
     capabilities,
+    privateHosts,
     transaction,
     deleteOrigin,
 
@@ -673,7 +678,7 @@ export function createSecrets(options: SecretsOptions) {
         command(tx, actor, input.requestId, 'destinations', { id, ...input }, summarySchema, async () => {
           const { row } = await managed(tx, actor, id);
           checkVersion(row.policy_version, input.expectedPolicyVersion);
-          const list = normalizeDestinations(z.array(destinationInputSchema).parse(input.destinations));
+          const list = normalizeDestinations(z.array(destinationInputSchema).parse(input.destinations), privateHosts);
           await writeDestinations(tx, row.id, list);
           await bumpPolicy(tx, row.id);
           await event(tx, row.id, actor.membershipId, 'destinations-changed', { destinations: list });

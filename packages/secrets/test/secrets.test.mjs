@@ -136,6 +136,31 @@ test('destinations are public HTTPS hosts or exact endpoints', () => {
   assert.equal(destinationAllows(list, 'http://api.example.com/'), false);
 });
 
+test('a private host destination needs the host on the current list, with its port and scheme', () => {
+  const hosts = [
+    { host: 'billing', port: 8443, http: false },
+    { host: 'metrics', port: null, http: true },
+  ];
+  assert.throws(() => normalizeDestinations([{ kind: 'host', host: 'billing' }]), code('destination-denied'));
+  const list = normalizeDestinations(
+    [
+      { kind: 'host', host: 'billing' },
+      { kind: 'endpoint', url: 'http://metrics/api/query' },
+    ],
+    hosts,
+  );
+  assert.deepEqual(list, [
+    { kind: 'endpoint', value: 'http://metrics/api/query' },
+    { kind: 'host', value: 'billing' },
+  ]);
+  assert.equal(destinationAllows(list, 'https://billing:8443/v1', hosts), true);
+  assert.equal(destinationAllows(list, 'https://billing/v1', hosts), false);
+  assert.equal(destinationAllows(list, 'http://billing:8443/v1', hosts), false);
+  assert.equal(destinationAllows(list, 'http://metrics/api/query', hosts), true);
+  assert.equal(destinationAllows(list, 'https://billing:8443/v1'), false);
+  assert.equal(destinationAllows(list, 'http://metrics/api/query', [hosts[0]]), false);
+});
+
 test('reflection finds encoded and layered values, including in errors', () => {
   const secret = 'sk-live-a/b+c=';
   assert.equal(containsSecret({ body: `token: ${secret}` }, [secret]), true);

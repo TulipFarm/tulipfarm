@@ -76,6 +76,29 @@ the model is told web access is off. Before turning the flag on, run
 `pnpm db workspace-rollout` so every workspace has common migration
 `0014_conversation_links.sql`; a workspace without it reads no links.
 
+## Private API hosts
+
+Agent API calls (`api.request`) and secret destinations reach public `https`
+hosts only. To let agents call services on your own network, list them in
+`API_CALL_PRIVATE_HOSTS`, set on both api and worker, as comma-separated
+`host[:port][;http]` entries:
+
+```sh
+API_CALL_PRIVATE_HOSTS=billing.internal:8443,metrics.lan;http
+```
+
+- Names are exact and lower case. IP addresses, wildcards and upper case stop
+  the api and worker at startup with an error naming the entry.
+- Without a port, only the scheme's default port is allowed.
+- `;http` also allows plain `http`; `https` always works.
+- A listed name may resolve to any address, including loopback, so list only
+  services every workspace on this server may reach.
+
+A secret may name a listed host as a destination. Remove the host from the list
+and that secret is no longer sent there. Responses from a private host, like
+responses from calls that use a secret, are visible only to the member who ran
+the agent.
+
 ## Separate knowledge worker
 
 By default one worker process runs every task queue. A large knowledge sync
