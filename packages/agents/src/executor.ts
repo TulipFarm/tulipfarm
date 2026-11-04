@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
-import { requireAgentRunHistory } from '@tulipfarm/access';
+import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
+import { sendApiCall } from '@tulipfarm/api-calls';
 import {
   AccessDenied,
   canAccessAsset,
@@ -75,7 +76,7 @@ import {
   knowledgeToolResultSchema,
   knowledgeToolsUnavailable,
 } from './knowledge-tool-contracts.ts';
-import { readOnlyTools, toolObservation, type KnowledgeToolsFactory } from './tools.ts';
+import { readOnlyCall, toolObservation, type KnowledgeToolsFactory } from './tools.ts';
 import { invokeBoundedKnowledge, withKnowledgeRetrieveGrant } from './knowledge-retrieval.ts';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
 import { createAgentTasks } from './tasks.ts';
@@ -403,7 +404,9 @@ export function createAgentExecutor(options: Options) {
                       )
                   : null;
                 const automaticSkillRead = row.call.tool === 'skills.read' && (definition.skills?.length ?? 0) > 0;
-                if (isMcpCall(row.call)) {
+                if (row.call.tool === 'api.request') {
+                  if (!binding) throw new AccessDenied();
+                } else if (isMcpCall(row.call)) {
                   if (!definition.mcp?.length || delegationTools !== null) throw new AccessDenied();
                 } else if (
                   !withKnowledgeRetrieveGrant(
@@ -750,7 +753,8 @@ export function createAgentExecutor(options: Options) {
                   row.call.tool === 'skills.list' ||
                   row.call.tool === 'skills.read' ||
                   row.call.tool === 'web.fetch' ||
-                  row.call.tool === 'web.search'
+                  row.call.tool === 'web.search' ||
+                  row.call.tool === 'api.request'
                 ) {
                   if (row.status === 'completed' || row.status === 'blocked' || row.status === 'failed')
                     return row.status;
@@ -795,6 +799,11 @@ export function createAgentExecutor(options: Options) {
                       break;
                     case 'web.search':
                       result = await searchPublicWeb(row.call);
+                      break;
+                    case 'api.request':
+                      denyMcpEgress();
+                      // Tasks hold no secrets yet, so a call that names one fails with `disabled`.
+                      result = await sendApiCall(row.call, { workspaceId: ids.workspaceId, scope: ids.runId });
                       break;
                   }
                   await transaction.client.query(
@@ -932,6 +941,7 @@ export function createAgentExecutor(options: Options) {
                 !isMcpCall(persisted.call) &&
                 sources.some(source => String(source.kind) === 'mcp-integration') &&
                 (persisted.call.tool.startsWith('web.') ||
+                  persisted.call.tool === 'api.request' ||
                   ((persisted.call.tool === 'knowledge.search' || persisted.call.tool === 'knowledge.retrieve') &&
                     knowledgeCallUsesQuery(persisted.call)) ||
                   persisted.call.tool.startsWith('slack.') ||
@@ -1530,7 +1540,7 @@ export function createAgentExecutor(options: Options) {
             )
           ).rows,
         );
-      if (rows.length !== ids.length || rows.some(row => !readOnlyTools.has(row.call.tool))) throw new AccessDenied();
+      if (rows.length !== ids.length || rows.some(row => !readOnlyCall(row.call))) throw new AccessDenied();
       const binding = await taskRun(tx, runId);
       if (!binding) return { activity: null };
       await lockTask(tx, binding.task_id);
@@ -1693,7 +1703,8 @@ export function createAgentExecutor(options: Options) {
         row.call.tool === 'skills.list' ||
         row.call.tool === 'skills.read' ||
         row.call.tool === 'web.fetch' ||
-        row.call.tool === 'web.search'
+        row.call.tool === 'web.search' ||
+        row.call.tool === 'api.request'
       ) {
         if (row.call.tool === 'tables.list') {
           const local: Runtime = { transaction: async (_workspace, _range, action) => action(transaction) };

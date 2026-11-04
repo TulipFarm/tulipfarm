@@ -33,7 +33,7 @@ import {
   parseNativeAgentDecision,
   type AgentModel,
 } from './model.ts';
-import { readOnlyTools, type FrameworkCall } from './tools.ts';
+import { readOnlyCall, readOnlyTools, type FrameworkCall } from './tools.ts';
 import { toolNameSchema } from './tool-capabilities.ts';
 import { providerFetch } from './provider-fetch.ts';
 import {
@@ -3024,11 +3024,11 @@ export async function inferWithTools(
     const valid = resolved.flatMap(({ native, resolved }) =>
       resolved.ok ? [{ native, call: resolved.call, activity: resolved.activity }] : [],
     );
-    if (valid.length > 1 && valid.some(({ call }) => !readOnlyTools.has(call.tool))) {
+    if (valid.length > 1 && valid.some(({ call }) => !readOnlyCall(call))) {
       reject(
-        valid.map(({ native, call }) => result(native, readOnlyTools.has(call.tool) ? notRun : writeAlone, true)),
+        valid.map(({ native, call }) => result(native, readOnlyCall(call) ? notRun : writeAlone, true)),
         'write-batch',
-        valid.flatMap(({ call }) => (readOnlyTools.has(call.tool) ? [] : [call.tool])),
+        valid.flatMap(({ call }) => (readOnlyCall(call) ? [] : [call.tool])),
       );
       continue;
     }

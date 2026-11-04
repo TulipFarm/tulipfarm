@@ -1,3 +1,4 @@
+import { apiCallResultSchema, apiRequestCallSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
 import { skillIdSchema, skillResourceSchema } from './skill-ids.ts';
 import { publicWebResultSchema } from '@tulipfarm/conversations/public-web';
@@ -157,6 +158,7 @@ export const publicWebCallSchema = z.discriminatedUnion('tool', [
   }),
 ]);
 export const toolCallSchema = z.discriminatedUnion('tool', [
+  apiRequestCallSchema,
   generateImagesCallSchema,
   skillExecutionCallSchema,
   skillFileCallSchema,
@@ -239,6 +241,7 @@ export const toolResultSchema = z.union([
   skillFileResultSchema,
   knowledgeToolResultSchema,
   githubTaskResultSchema,
+  apiCallResultSchema,
   publicWebResultSchema,
   mcpExecutionResultSchema,
   slackActionViewSchema,

@@ -37,7 +37,7 @@ export function toolVisual(tool: string, brand?: Brand | null) {
   if (tool.startsWith('knowledge.')) return <BookOpen size={14} />;
   if (tool.startsWith('agents.')) return <Users size={14} />;
   if (tool === 'web.fetch' || tool === 'files.read') return <BookOpen size={14} />;
-  if (tool.startsWith('web.')) return <Globe size={14} />;
+  if (tool.startsWith('web.') || tool === 'api.request') return <Globe size={14} />;
   if (tool.startsWith('mcp.')) return <Plug size={14} />;
   return <Sparkle size={14} />;
 }

@@ -131,6 +131,9 @@ test('destinations are public HTTPS hosts or exact endpoints', () => {
   assert.equal(destinationAllows(list, 'https://sub.api.example.com/'), false);
   assert.equal(destinationAllows(list, 'https://mcp.example.com/mcp'), true);
   assert.equal(destinationAllows(list, 'https://mcp.example.com/other'), false);
+  assert.equal(destinationAllows(list, 'https://api.example.com/oauth?code=1&sig=2&api_key=3'), true);
+  assert.equal(destinationAllows(list, 'https://mcp.example.com/mcp?code=1'), false);
+  assert.equal(destinationAllows(list, 'http://api.example.com/'), false);
 });
 
 test('reflection finds encoded and layered values, including in errors', () => {

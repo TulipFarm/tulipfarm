@@ -796,7 +796,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   ? toolPresentation(row.tool)
                   : await storedToolPresentation(tx, actor, row.tool, row.call, row.stored_activity, row.id),
                 activity:
-                  hidden.size || row.tool.startsWith('web.')
+                  hidden.size || row.tool.startsWith('web.') || row.tool === 'api.request'
                     ? null
                     : (googleToolActivity(row.tool, row.call, row.stored_activity) ?? row.activity),
                 web: await publicWebReceiptForHistory(tx, actor, {

@@ -115,6 +115,7 @@ const coreChatTools = new Set(
     'knowledge.read',
     'web.search',
     'web.fetch',
+    'api.request',
     'files.read',
     'agents.delegate',
     'followups.schedule',

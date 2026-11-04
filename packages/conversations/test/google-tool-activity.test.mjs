@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
+import { toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
   assert.equal(
@@ -67,4 +68,16 @@ test('every Google service has a read label even when operation arguments are in
     assert.equal(googleToolActivity('google.read', { tool: 'google.read', operation: { kind } }), label);
     assert.equal(googleToolActivity('google.read', null, label), label);
   }
+});
+
+test('API call activity names the method, host and path but never the query', () => {
+  assert.equal(
+    toolPresentation('api.request', {
+      tool: 'api.request',
+      method: 'GET',
+      url: 'https://api.example.com/v1/events?api_key=never-shown',
+    }).label,
+    'GET api.example.com/v1/events',
+  );
+  assert.equal(toolPresentation('api.request').label, 'Calling an API');
 });

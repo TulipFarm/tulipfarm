@@ -95,6 +95,7 @@ export const toolActivityLabels = {
   'integrations.connect': 'Preparing a card to connect an app',
   'integrations.disconnect': 'Preparing a card to disconnect an account',
   'web.fetch': 'Reading a web page',
+  'api.request': 'Calling an API',
   'packages.inspect': 'Inspecting a system package',
   'conversation.messages.read': 'Rereading an earlier message',
   'files.read': 'Reading a file',
@@ -171,6 +172,7 @@ const toolAreaNames: Record<string, string> = {
   schema: 'Tables',
   knowledge: 'Knowledge',
   web: 'Web search',
+  api: 'APIs',
   files: 'Files',
   images: 'Images',
   skills: 'Skills',
@@ -450,7 +452,17 @@ export function toolPresentation(storedTool: string, call?: unknown, storedActiv
     if (actions.length === 1) label = `Preparing: ${actions[0]}`;
     else if (actions.length > 1) label = `Preparing ${parsed.data.actions.length} GitHub changes for review`;
   }
+  if (tool === 'api.request') label = apiCallLabel(call) ?? label;
   return { label: [...label].slice(0, 240).join(''), brand };
+}
+
+const apiCallShape = z.object({ method: z.string().regex(/^[A-Z]{3,7}$/), url: z.string() });
+/** "GET host/path" without the query, which may carry a secret placement. */
+function apiCallLabel(call: unknown) {
+  const parsed = apiCallShape.safeParse(call);
+  if (!parsed.success || !URL.canParse(parsed.data.url)) return null;
+  const url = new URL(parsed.data.url);
+  return `${parsed.data.method} ${url.host}${url.pathname === '/' ? '' : url.pathname}`;
 }
 
 const outputSchema = z.object({

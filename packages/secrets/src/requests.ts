@@ -487,7 +487,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
       return { expiredRequests: expired, endedChats, deletedSecrets: await secrets.sweepExpired(workspaceId) };
     },
 
-    /** The references a member holds in this chat or task run, for `secrets.list` (P15). */
+    /** The references a member holds in this chat or task run, for `secrets.list` and `api.request` (P15). */
     async references(tx: SecretTransaction, membershipId: string, origin: SecretOrigin) {
       const rows = z
         .array(z.object({ id: z.uuid(), field_id: z.string(), secret_id: z.uuid(), origin: z.unknown() }))
@@ -501,7 +501,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
             )
           ).rows,
         );
-      const result: (SecretReference & { status: 'active' | 'expired' | 'suspended' })[] = [];
+      const result: (SecretReference & { variableName: string; status: 'active' | 'expired' | 'suspended' })[] = [];
       for (const row of rows) {
         const secret = await internal.load(tx, row.secret_id, 'none');
         const rights = await internal.access(tx, membershipId, secret);
@@ -521,6 +521,7 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
           referenceId: row.id,
           fieldId: row.field_id,
           name: secret.name,
+          variableName: secret.variable_name,
           kind: secret.kind,
           placement: secret.placement,
           destinations,

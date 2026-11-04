@@ -630,6 +630,9 @@ importers:
       '@tulipfarm/access':
         specifier: workspace:*
         version: link:../access
+      '@tulipfarm/api-calls':
+        specifier: workspace:*
+        version: link:../api-calls
       '@tulipfarm/atlassian':
         specifier: workspace:*
         version: link:../atlassian
@@ -748,6 +751,25 @@ importers:
       '@types/yauzl':
         specifier: 3.4.0
         version: 3.4.0
+
+  packages/api-calls:
+    dependencies:
+      '@tulipfarm/secrets':
+        specifier: workspace:*
+        version: link:../secrets
+      '@tulipfarm/workspace-mcp-transport':
+        specifier: workspace:*
+        version: link:../workspace-mcp-transport
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
 
   packages/atlassian:
     dependencies:

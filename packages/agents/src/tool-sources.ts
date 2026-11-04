@@ -1,3 +1,4 @@
+import { apiCallResultSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
 import { publicWebResultSchema } from '@tulipfarm/conversations/contracts';
 import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
@@ -208,6 +209,19 @@ export async function providerSources(
 const ids = z.array(z.object({ id: z.uuid() }));
 type McpProvenanceCall = { tool: 'mcp.call' | 'mcp.search' | 'mcp.describe' };
 /** `actor` is who ran the call; a result listing Files items cites them as that member's, so it needs one. */
+/**
+ * A read that sent no secret is public web content; one that sent a secret stays private to the chat it ran in, and
+ * outside a chat it has no source that can carry it.
+ */
+export function apiCallSources(result: unknown, conversationId: string | null): SourceDependency[] {
+  const parsed = apiCallResultSchema.parse(result);
+  if (parsed.status !== 'sent') return [];
+  if (parsed.secrets.length)
+    return conversationId ? [{ kind: 'private-conversation', conversationId }] : [{ kind: 'unavailable' }];
+  const url = new URL(parsed.url);
+  return [{ kind: 'public-web', url: parsed.url.length <= 2048 ? parsed.url : `${url.origin}/` }];
+}
+
 export async function resultSources(
   tx: AgentTransaction,
   call: FrameworkCall | McpProvenanceCall,
@@ -285,6 +299,8 @@ export async function resultSources(
       return [];
     case 'web.fetch':
       return [{ kind: 'public-web', url: call.url }];
+    case 'api.request':
+      return apiCallSources(result, null);
     case 'web.search':
       return publicWebResultSchema.parse(result).sources.map(source => ({ kind: 'public-web', url: source.url }));
     case 'tables.list':
