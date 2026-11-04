@@ -154,13 +154,16 @@ test(
       const timestamp = copyUser.locator('xpath=..').locator('time');
       await timestamp.waitFor();
       assert.equal(await timestamp.getAttribute('datetime'), history[0].createdAt);
-      assert.equal(
-        await timestamp.getAttribute('title'),
-        await page.evaluate(
-          createdAt => new Date(createdAt).toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' }),
-          history[0].createdAt,
-        ),
+      const fullDate = await page.evaluate(
+        createdAt => new Date(createdAt).toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' }),
+        history[0].createdAt,
       );
+      await timestamp.hover();
+      const dateHint = page.getByText(fullDate, { exact: true });
+      await dateHint.waitFor();
+      assert.equal(await dateHint.textContent(), fullDate);
+      await timestamp.focus();
+      assert.equal(await timestamp.evaluate(element => element === document.activeElement), true);
       if (shots) await page.screenshot({ path: `${shots}/message-actions-user-hover.png` });
       await copyUser.click();
       await page.getByRole('button', { name: 'Message copied' }).waitFor();
@@ -186,9 +189,10 @@ test(
       assert.match(html, /href="https:\/\/example\.com\/api"/);
 
       await page.mouse.move(0, 0);
-      const copiedReply = page.getByRole('button', { name: 'Response copied' });
-      await copiedReply.focus();
-      assert.ok(!(await hidden(copiedReply)), 'keyboard focus reveals the actions');
+      await copyReply.waitFor({ state: 'attached' });
+      assert.equal(await page.getByRole('button', { name: 'Response copied' }).count(), 0, 'copy feedback resets');
+      await copyReply.focus();
+      assert.ok(!(await hidden(copyReply)), 'keyboard focus reveals the actions');
       assert.deepEqual(errors, []);
     } finally {
       await context.close();
