@@ -128,6 +128,23 @@ test('a submitted secrets form answers the chat request without exposing the val
     assert.equal(created.body.lifetime, 'saved');
     assert.equal('credential' in created.body, false);
     assert.equal((await http(`/secrets/${created.body.id}/history`, 'GET', undefined, admin)).status, 404);
+    assert.equal(listed.body.secrets[0].variableName, 'API_KEY');
+    assert.equal(created.body.variableName, 'BILLING_KEY');
+    const names = `/secrets/${created.body.id}/names`;
+    assert.deepEqual(await http(names, 'PUT', { variableName: 'api_key' }), {
+      status: 409,
+      body: { error: 'secret-variable-name-taken' },
+    });
+    assert.deepEqual(await http(names, 'PUT', {}), { status: 400, body: { error: 'invalid-secret' } });
+    assert.deepEqual(await http(names, 'PUT', { variableName: '1-key' }), {
+      status: 400,
+      body: { error: 'invalid-secret' },
+    });
+    assert.equal((await http(names, 'PUT', { name: 'Mine' }, admin)).status, 404);
+    const renamed = await http(names, 'PUT', { name: 'Billing live', variableName: 'billing_live_key' });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.name, 'Billing live');
+    assert.equal(renamed.body.variableName, 'BILLING_LIVE_KEY');
     const deleted = await http(`/secrets/${created.body.id}`, 'DELETE', {
       requestId: randomUUID(),
       expectedVersion: 1,

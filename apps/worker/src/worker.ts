@@ -60,11 +60,12 @@ import { createSocialPublisherComposition } from './social-publisher-composition
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 
-// Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
-await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier) });
 const role = workerRole();
+const service = workerTelemetryService(role);
+// Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
+await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 const telemetry = startTelemetry(readBuildInfo('worker', new URL('../version.json', import.meta.url)), {
-  serviceName: workerTelemetryService(role),
+  serviceName: service,
 });
 
 async function run() {

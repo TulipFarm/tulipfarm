@@ -128,6 +128,29 @@ change kind, and key prefixes. They contain no response data. Receivers validate
 and deduplicate events without rebroadcast. Old-session logout cannot revoke a
 replacement session. Unsupported channels fall back to per-tab operation.
 
+## Early reads during admission
+
+Workspace admission can start a page's first reads before the provider exists
+(`early-reads.ts`). `startEarlyReads(identity, workspaceId, reads)` runs each
+`{ key, load }` and registers the result under the user, workspace and feature
+key. The router binds the entries to the membership with `admit(membershipId)`
+once admission succeeds, and calls `discard()` on denial, failure or abort.
+
+`featureReadOptions` takes a matching entry before calling `load`. An entry is
+used once, only for the same session, workspace and admitted membership, and only
+within ten seconds of settling. A failed early read is never handed over: the
+query reads again with its own loader, so denial handling stays with the query.
+The data still passes the query's authority fence. `applyChange` discards
+entries under the changed keys, and `revoke`, `suspend` and `stop` discard every
+entry for their scope.
+
+Early reads must use the same key and loader inputs as the page's first query.
+`features/chat/early-reads.ts` lists them for the chat list, an opened chat and
+the project list. The router skips any read the session cache already holds.
+On a fresh load it also starts the membership read from the workspace id the
+slug had at the last admission (`workspaceIdHint`). It uses that result only when
+the workspace read returns the same id, and forgets the hint on 403 or 404.
+
 ## Provider admission
 
 `SessionQueryProvider` accepts explicit `identity: SessionIdentity | null`,

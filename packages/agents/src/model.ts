@@ -10,7 +10,7 @@ import { validateMcpCall } from './mcp-catalog.ts';
 import { agentRuntimeToolNames, taskDirectToolNames } from './tool-capabilities.ts';
 import { skillDefinitionRevision } from './skill-packages.ts';
 import { nativeAgentTools, type NativeCall } from './native-tools.ts';
-import { readOnlyTools, type ToolName } from './tools.ts';
+import { readOnlyCall, type ToolName } from './tools.ts';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 
 export const chatToolSchema = toolCallSchema;
@@ -70,9 +70,11 @@ export const agentModelInputSchema = z
       .optional(),
     mcp: mcpModelCatalogSchema.optional(),
     files: taskFileContentSchema.optional(),
+    /** Offers `files.read` for the response files the task's `api.request` calls keep; set only while they are kept. */
+    taskFiles: z.literal(true).optional(),
   })
   .superRefine((input, ctx) => {
-    if (input.files && !input.task)
+    if ((input.files || input.taskFiles) && !input.task)
       ctx.addIssue({ code: 'custom', message: 'File content requires a member-owned private task' });
     if (input.task && input.runtime)
       ctx.addIssue({ code: 'custom', message: 'Task inputs cannot select a Slack channel runtime' });
@@ -137,6 +139,9 @@ export function modelNativeTools(input: ModelInput) {
     (!runtimeTools || runtimeTools.has('skills.read'))
   )
     allowed.push('skills.read');
+  // Every task may call APIs, whatever its definition lists.
+  if (input.task) allowed.push('api.request');
+  if (input.task && input.taskFiles) allowed.push('files.read');
   return nativeAgentTools(allowed, input.mcp, input.task === true);
 }
 
@@ -150,7 +155,7 @@ export function parseNativeAgentDecision(
   const resolved = value.calls.map(call => catalog.resolve(call));
   if (resolved.some(result => !result.ok)) throw new Error('invalid-tool-call');
   const calls = resolved.flatMap(result => (result.ok ? [{ activity: result.activity, call: result.call }] : []));
-  if (calls.length > 1 && calls.some(item => !readOnlyTools.has(item.call.tool))) throw new Error('parallel-write');
+  if (calls.length > 1 && calls.some(item => !readOnlyCall(item.call))) throw new Error('parallel-write');
   const text = value.text.trim() || calls.map(item => item.activity).join('\n');
   if (input.task && calls.every(item => taskMutationTools.has(item.call.tool))) {
     return parseModelDecision({ kind: 'propose', text, calls: calls.map(item => item.call) }, input);
@@ -176,6 +181,10 @@ export function parseModelDecision(value: unknown, input: Parameters<AgentModel>
         : input.runtime
           ? new Set<string>(agentRuntimeToolNames[input.runtime])
           : null;
+      if (call.tool === 'api.request' || call.tool === 'files.read') {
+        if (!input.task || (call.tool === 'files.read' && !input.taskFiles)) throw new Error('tool-not-admitted');
+        continue;
+      }
       const automaticSkillRead = call.tool === 'skills.read' && (input.definition.skills?.length ?? 0) > 0;
       // An attached skill is pinned, so a read that omits the revision means the pinned one.
       if (automaticSkillRead && call.revision === undefined)

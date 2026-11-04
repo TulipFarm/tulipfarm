@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createSecretRequests } from '../dist/index.js';
+import { heldSecrets } from '../dist/send.js';
 import { code, denied, setup } from './fixture.mjs';
 
 const chat = () => ({
@@ -107,10 +108,10 @@ test('secret requests', async t => {
       },
     ]);
     const stored = await f.db.platform.query(
-      `SELECT s.placement_source FROM ${f.table('tf_secret_references')} r JOIN ${f.table('tf_secrets')} s ON s.id = r.secret_id WHERE r.id = $1`,
+      `SELECT s.placement_source, s.variable_name FROM ${f.table('tf_secret_references')} r JOIN ${f.table('tf_secrets')} s ON s.id = r.secret_id WHERE r.id = $1`,
       [result.references[0].referenceId],
     );
-    assert.equal(stored.rows[0].placement_source, 'member');
+    assert.deepEqual(stored.rows[0], { placement_source: 'member', variable_name: 'KEY' });
     assert.deepEqual(result.references[0].placement, { kind: 'query', name: 'api_key' });
   });
 
@@ -152,6 +153,41 @@ test('secret requests', async t => {
       [first.references[0].referenceId],
     );
     assert.equal(held[0].status, 'active');
+    assert.match(held[0].variableName, /^POSTHOG_API_KEY/);
+  });
+
+  await t.test('a held reference or variable name resolves only in its own chat and for its member', async () => {
+    const origin = chat();
+    const { secretRequestId } = await create(ana, origin);
+    const { references } = await submit(ana, secretRequestId, [
+      { fieldId: 'key', value: { value: 'phx-held-secret' }, lifetime: 'conversation' },
+    ]);
+    const holder = (member, conversationId = origin.conversationId) =>
+      heldSecrets(f.secrets, requests, { workspaceId: ws, actor: member, origin: { kind: 'chat', conversationId } });
+    const url = 'https://api.posthog.com/v1/events?code=1';
+    const byReference = await holder(ana).resolve({ reference: references[0].referenceId }, url);
+    assert.equal(byReference.value.value, 'phx-held-secret');
+    assert.equal(byReference.name, references[0].name);
+    const [{ variableName }] = await f.runtime.transaction(ws, commonCompatibility, tx =>
+      requests.references(tx, ana.membershipId, { kind: 'chat', conversationId: origin.conversationId }),
+    );
+    const byVariable = await holder(ana).resolve({ variable: variableName.toLowerCase() }, url);
+    assert.equal(byVariable.secretId, byReference.secretId);
+    await assert.rejects(holder(ben).resolve({ reference: references[0].referenceId }, url), code('not-found'));
+    await assert.rejects(
+      holder(ana, randomUUID()).resolve({ reference: references[0].referenceId }, url),
+      code('not-found'),
+    );
+    await assert.rejects(
+      holder(ana).resolve({ reference: references[0].referenceId }, 'https://eu.posthog.com/'),
+      code('destination-denied'),
+    );
+    await holder(ana).recordUse(byReference.secretId, url, 'api.request');
+    const used = await f.db.platform.query(
+      `SELECT details FROM ${f.table('tf_secret_events')} WHERE secret_id = $1 AND operation = 'used'`,
+      [byReference.secretId],
+    );
+    assert.equal(used.rows[0].details.tool, 'api.request');
   });
 
   await t.test('declines with a reason', async () => {

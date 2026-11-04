@@ -6,6 +6,8 @@ export type ExtensionApp = 'api' | 'worker' | 'storage-worker' | 'database';
 export type ExtensionContext = {
   readonly app: ExtensionApp;
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** Telemetry service name when a role of the app reports as its own service; unset means `tulipfarm-<app>`. */
+  readonly service?: string | undefined;
 };
 
 /** A transaction in one workspace schema, as used by the credit meter in @tulipfarm/workspace-storage. */

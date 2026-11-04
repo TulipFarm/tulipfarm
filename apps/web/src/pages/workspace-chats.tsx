@@ -43,7 +43,7 @@ import {
 import { TableRequestError } from '@/features/tables/request-state';
 import { requestSignal } from '@/lib/http';
 import { ConversationRead } from '@/features/chat/conversation-feedback';
-import { useConversationList } from '@/features/chat/queries';
+import { useConversationList, useConversationPrefetch } from '@/features/chat/queries';
 import { ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { startNavigationMeasure } from '@/lib/navigation-performance';
 
@@ -91,6 +91,14 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
     void navigate({ to: '/$workspaceSlug/chat/$chatId', params: { workspaceSlug, chatId: id } });
   };
   const list = useConversationList(api, archived, search, pages, projectId);
+  const prefetch = useConversationPrefetch(workspace.id);
+  const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(intent.current), []);
+  // A short pause skips chats the pointer only passes over.
+  const hover = (id: string | null) => {
+    clearTimeout(intent.current);
+    if (id) intent.current = setTimeout(() => prefetch(id), 100);
+  };
   const [editing, setEditing] = useState<Chat | null>(null);
   const [title, setTitle] = useState('');
   const [deleting, setDeleting] = useState<Chat | null>(null);
@@ -460,6 +468,9 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
                               <DataListButton
                                 weight="strong"
                                 onClick={() => open(chat.id)}
+                                onPointerEnter={() => hover(chat.id)}
+                                onPointerLeave={() => hover(null)}
+                                onFocus={() => prefetch(chat.id)}
                                 aria-label={chat.title}
                                 title={chat.title}
                               >

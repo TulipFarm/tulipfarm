@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/rea
 import { Add } from 'reicon-react/icons/Add';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { Check } from 'reicon-react/icons/Check';
+import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
 import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
 import { BookOpen } from 'reicon-react/icons/BookOpen';
@@ -84,6 +85,7 @@ import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
 import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
+import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
@@ -104,6 +106,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/workflows'
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
+  | '/$workspaceSlug/settings/secrets'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
   | '/$workspaceSlug/teams'
@@ -133,6 +136,7 @@ function preloadChatsCode() {
 const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: Inbox };
 const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: Setting2 };
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
+const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
@@ -186,6 +190,7 @@ const pages = [
   chats,
   inbox,
   account,
+  secrets,
   models,
   ...usage,
   soul,
@@ -443,7 +448,7 @@ function ProfileMenu() {
 
 function useSettingsMode() {
   const current = useCurrentPage();
-  return current === account || settingsPages.some(page => page.to === current.to);
+  return current === account || current === secrets || settingsPages.some(page => page.to === current.to);
 }
 
 function SettingsNavigation() {
@@ -456,6 +461,8 @@ function SettingsNavigation() {
     !settings.state.error &&
     settings.state.data.settings.canManage &&
     settings.state.data.membership.role === 'admin';
+  const capabilities = useSecretsCapabilities(workspace.id);
+  const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
   const { setOpenMobile } = useSidebar();
   return (
     <>
@@ -480,6 +487,7 @@ function SettingsNavigation() {
             <SidebarGroupLabel>Personal</SidebarGroupLabel>
             <SidebarMenu>
               <NavItem page={account} />
+              {secretsVisible && <NavItem page={secrets} />}
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>

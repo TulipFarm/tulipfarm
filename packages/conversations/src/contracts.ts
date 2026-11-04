@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { toolPresentationSchema, activityStatusSchema, workflowReferenceSchema } from './tool-activity.ts';
+import {
+  apiCallReceiptSchema,
+  toolPresentationSchema,
+  activityStatusSchema,
+  workflowReferenceSchema,
+} from './tool-activity.ts';
 export { workflowReferenceSchema } from './tool-activity.ts';
 import { publicWebReceiptSchema } from './public-web.ts';
 import { knowledgeActivitySchema } from './knowledge-activity.ts';
@@ -304,6 +309,8 @@ export const toolReceiptSchema = z.object({
   narration: z.string().nullable().default(null),
   presentation: toolPresentationSchema.optional(),
   web: publicWebReceiptSchema.nullable().default(null),
+  /** The HTTP status or error code of an `api.request` call. */
+  api: apiCallReceiptSchema.nullable().optional(),
   knowledge: knowledgeActivitySchema.nullable().optional(),
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),

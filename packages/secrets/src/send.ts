@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
   SecretError,
@@ -13,6 +13,7 @@ import {
   type SecretValue,
 } from './contracts.ts';
 import { redactUrl } from './placement.ts';
+import type { SecretRequests } from './requests.ts';
 import { table, type Secrets, type SecretTransaction } from './service.ts';
 
 export type SecretHandle =
@@ -120,4 +121,49 @@ export async function recordUse(
     url: redactUrl(input.url, [row.placement]),
     origin: input.origin ?? null,
   });
+}
+
+/**
+ * Finds a secret by the reference or variable name a member holds in one chat or task run, checks it for `url` and
+ * decrypts it in its own transaction. A reference the member does not hold here reads as `not-found`.
+ */
+export function heldSecrets(
+  secrets: Secrets,
+  requests: Pick<SecretRequests, 'references'>,
+  holder: { workspaceId: string; actor: HumanActor; origin: SecretOrigin },
+) {
+  return {
+    resolve: (handle: { reference: string } | { variable: string }, url: string) =>
+      secrets.internal.authorized(holder.workspaceId, holder.actor, async tx => {
+        const held = await requests.references(tx, holder.actor.membershipId, holder.origin);
+        const match = held.find(reference =>
+          'reference' in handle
+            ? reference.referenceId === handle.reference
+            : reference.variableName === handle.variable.toUpperCase(),
+        );
+        if (!match) throw new SecretError('not-found');
+        try {
+          const resolved = await resolveForSend(secrets, tx, {
+            workspaceId: holder.workspaceId,
+            membershipId: holder.actor.membershipId,
+            secret: { kind: 'reference', referenceId: match.referenceId, origin: holder.origin },
+            url,
+          });
+          return { ...resolved, name: match.name };
+        } catch (error) {
+          if (error instanceof AccessDenied) throw new SecretError('not-found');
+          throw error;
+        }
+      }),
+    recordUse: (secretId: string, url: string, tool: string) =>
+      secrets.internal.authorized(holder.workspaceId, holder.actor, tx =>
+        recordUse(secrets, tx, {
+          secretId,
+          membershipId: holder.actor.membershipId,
+          tool,
+          url,
+          origin: holder.origin,
+        }),
+      ),
+  };
 }

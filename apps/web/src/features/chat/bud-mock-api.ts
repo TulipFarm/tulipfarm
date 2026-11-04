@@ -1,6 +1,7 @@
 import { budCommandSchema, type BudState } from '@tulipfarm/conversations/bud-contracts';
 import { createChatsMock } from './chats-mock-api';
 import { createWorkflowChatMock } from './workflow-chat-mock-api';
+import { createSecretsMock } from '@/features/secrets/secrets-mock-api';
 import { createGoogleResultsMock } from './google-results-mock-api';
 import { createConnectorResultsMock } from './connector-results-mock-api';
 import type { ConversationMessage } from './conversation-api';
@@ -10,6 +11,7 @@ function installBudMock() {
   const start = new URLSearchParams(window.location.search).get('start');
   const chatsMock = start?.startsWith('chats') ? createChatsMock(start) : null;
   const workflowMock = start?.startsWith('workflow') ? createWorkflowChatMock(start) : null;
+  const secretsMock = start?.startsWith('secrets') ? createSecretsMock(start) : null;
   const googleMock = start?.startsWith('connector-results')
     ? createConnectorResultsMock(start)
     : start?.startsWith('slides')
@@ -183,6 +185,8 @@ function installBudMock() {
     if (chatsResponse) return chatsResponse;
     const workflowResponse = await workflowMock?.(url, method, input, init);
     if (workflowResponse) return workflowResponse;
+    const secretsResponse = await secretsMock?.(url, method, input, init);
+    if (secretsResponse) return secretsResponse;
     const googleResponse = await googleMock?.(url, method, input, init);
     if (googleResponse) return googleResponse;
     if (path === '/v1/user/visit') return Response.json({ firstSession: false });

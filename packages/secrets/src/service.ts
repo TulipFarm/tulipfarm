@@ -16,12 +16,16 @@ import {
   grantSchema,
   destinationInputSchema,
   normalizeDestinations,
+  numberedVariableName,
   parseValue,
   placementFits,
   placementSchema,
   originSchema,
   sameOrigin,
   secretKindSchema,
+  secretNameSchema,
+  secretNamesInputSchema,
+  suggestVariableName,
   type CreateSecretInput,
   type Destination,
   type DestinationInput,
@@ -29,6 +33,7 @@ import {
   type SecretEvent,
   type SecretGrant,
   type SecretKind,
+  type SecretNamesInput,
   type SecretOrigin,
   type SecretStatus,
   type SecretSummary,
@@ -53,6 +58,7 @@ const rowSchema = z.object({
   id: z.uuid(),
   owner_membership_id: z.uuid(),
   name: z.string(),
+  variable_name: z.string(),
   kind: secretKindSchema,
   placement: placementSchema,
   placement_source: z.enum(['agent', 'member']),
@@ -230,6 +236,7 @@ export function createSecrets(options: SecretsOptions) {
       result.push({
         id: row.id,
         name: row.name,
+        variableName: row.variable_name,
         kind: row.kind,
         placement: row.placement,
         placementSource: row.placement_source,
@@ -390,6 +397,40 @@ export function createSecrets(options: SecretsOptions) {
     if (actual !== expected) throw new SecretError('conflict');
   }
 
+  /**
+   * A variable name unique among the owner's active secrets, other than `except`. A requested name must be free;
+   * otherwise `base` gets `_2`, `_3` and so on until it is.
+   */
+  async function variableNameFor(
+    tx: SecretTransaction,
+    owner: string,
+    name: { requested: string } | { base: string },
+    except: string | null = null,
+  ) {
+    const taken = new Set(
+      z
+        .array(z.object({ variable_name: z.string() }))
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT variable_name FROM ${table(tx, 'secrets')}
+               WHERE owner_membership_id = $1 AND status = 'active' AND id IS DISTINCT FROM $2`,
+              [owner, except],
+            )
+          ).rows,
+        )
+        .map(row => row.variable_name),
+    );
+    if ('requested' in name) {
+      if (taken.has(name.requested)) throw new SecretError('variable-name-taken');
+      return name.requested;
+    }
+    for (let number = 1; ; number++) {
+      const candidate = numberedVariableName(name.base, number);
+      if (!taken.has(candidate)) return candidate;
+    }
+  }
+
   const summarySchema = z.custom<SecretSummary>(value => !!value && typeof value === 'object');
 
   /**
@@ -408,12 +449,17 @@ export function createSecrets(options: SecretsOptions) {
       futureExpiry(input.expiresAt) ??
       (temporary ? new Date(now().getTime() + TEMPORARY_LIFETIME_MS).toISOString() : null);
     const entries = await validateGrants(tx, actor.membershipId, input.grants);
+    const variableName = await variableNameFor(
+      tx,
+      actor.membershipId,
+      input.variableName ? { requested: input.variableName } : { base: suggestVariableName(input.name, input.kind) },
+    );
     const id = randomUUID();
     const credential = cipher.encrypt({ workspaceId, secretId: id, version: 1, placement: input.placement }, value);
     await tx.client.query(
       `INSERT INTO ${table(tx, 'secrets')} (id, owner_membership_id, name, kind, placement, placement_source, lifetime,
-         origin, expires_at, credential, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active')`,
+         origin, expires_at, credential, status, variable_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11)`,
       [
         id,
         actor.membershipId,
@@ -425,11 +471,13 @@ export function createSecrets(options: SecretsOptions) {
         origin ? JSON.stringify(origin) : null,
         expiresAt,
         JSON.stringify(credential),
+        variableName,
       ],
     );
     await writeDestinations(tx, id, list);
     await writeGrants(tx, id, actor.membershipId, entries);
     await event(tx, id, actor.membershipId, 'created', {
+      variableName,
       placement: input.placement,
       placementSource: input.placementSource,
       lifetime: input.lifetime.kind,
@@ -597,7 +645,9 @@ export function createSecrets(options: SecretsOptions) {
             const { row, rights } = await managed(tx, actor, id);
             if (rights.status !== 'suspended') throw new SecretError('conflict');
             checkVersion(row.version, input.expectedVersion);
-            await reencrypt(tx, workspaceId, row, input.value, actor.membershipId);
+            // The secret joins the new owner's variable names, so it takes a free one if its own is taken there.
+            const variableName = await variableNameFor(tx, actor.membershipId, { base: row.variable_name }, row.id);
+            await reencrypt(tx, workspaceId, row, input.value, actor.membershipId, variableName);
             await tx.client.query(`DELETE FROM ${table(tx, 'grants')} WHERE secret_id = $1 AND membership_id = $2`, [
               row.id,
               actor.membershipId,
@@ -605,6 +655,7 @@ export function createSecrets(options: SecretsOptions) {
             await event(tx, row.id, actor.membershipId, 'ownership-taken', {
               previousOwnerMembershipId: row.owner_membership_id,
               version: row.version + 1,
+              ...(variableName !== row.variable_name ? { variableName } : {}),
             });
             return one(tx, actor, row.id);
           },
@@ -692,6 +743,30 @@ export function createSecrets(options: SecretsOptions) {
       );
     },
 
+    /** Changes the friendly name, the variable name or both. Code that uses the old variable name stops finding it. */
+    async rename(workspaceId: string, principal: SecretsPrincipal, id: string, raw: SecretNamesInput) {
+      const input = secretNamesInputSchema.parse(raw);
+      return authorized(workspaceId, principal, async (tx, actor) => {
+        const { row } = await managed(tx, actor, id);
+        const name = input.name ?? row.name;
+        const variableName =
+          input.variableName === undefined || input.variableName === row.variable_name
+            ? row.variable_name
+            : await variableNameFor(tx, row.owner_membership_id, { requested: input.variableName }, row.id);
+        if (name === row.name && variableName === row.variable_name) return one(tx, actor, row.id);
+        await tx.client.query(`UPDATE ${table(tx, 'secrets')} SET name = $2, variable_name = $3 WHERE id = $1`, [
+          row.id,
+          name,
+          variableName,
+        ]);
+        await event(tx, row.id, actor.membershipId, 'renamed', {
+          ...(name !== row.name ? { name } : {}),
+          ...(variableName !== row.variable_name ? { variableName } : {}),
+        });
+        return one(tx, actor, row.id);
+      });
+    },
+
     /** Turns a temporary secret into a saved one without re-entering the value (P48). */
     async save(
       workspaceId: string,
@@ -710,13 +785,27 @@ export function createSecrets(options: SecretsOptions) {
           if (!rights.owner || row.lifetime !== 'conversation') throw new SecretError('invalid-input');
           checkVersion(row.policy_version, input.expectedPolicyVersion);
           const expiresAt = futureExpiry(input.expiresAt);
-          const name = input.name === undefined ? row.name : z.string().trim().min(1).max(80).parse(input.name);
+          const name = input.name === undefined ? row.name : secretNameSchema.parse(input.name);
+          // A new name brings a new variable name, since the old one came from the request's label.
+          const variableName =
+            name === row.name
+              ? row.variable_name
+              : await variableNameFor(
+                  tx,
+                  row.owner_membership_id,
+                  { base: suggestVariableName(name, row.kind) },
+                  row.id,
+                );
           await tx.client.query(
-            `UPDATE ${table(tx, 'secrets')} SET lifetime = 'saved', origin = NULL, expires_at = $2, name = $3 WHERE id = $1`,
-            [row.id, expiresAt, name],
+            `UPDATE ${table(tx, 'secrets')} SET lifetime = 'saved', origin = NULL, expires_at = $2, name = $3,
+               variable_name = $4 WHERE id = $1`,
+            [row.id, expiresAt, name, variableName],
           );
           await bumpPolicy(tx, row.id);
-          await event(tx, row.id, actor.membershipId, 'saved', { expiresAt });
+          await event(tx, row.id, actor.membershipId, 'saved', {
+            expiresAt,
+            ...(variableName !== row.variable_name ? { variableName } : {}),
+          });
           return one(tx, actor, row.id);
         }),
       );
@@ -774,14 +863,21 @@ export function createSecrets(options: SecretsOptions) {
     await tx.client.query(`UPDATE ${table(tx, 'secrets')} SET policy_version = policy_version + 1 WHERE id = $1`, [id]);
   }
 
-  async function reencrypt(tx: SecretTransaction, workspaceId: string, row: Row, raw: unknown, owner: string) {
+  async function reencrypt(
+    tx: SecretTransaction,
+    workspaceId: string,
+    row: Row,
+    raw: unknown,
+    owner: string,
+    variableName = row.variable_name,
+  ) {
     const value = parseValue(row.kind, raw);
     const version = row.version + 1;
     const credential = cipher.encrypt({ workspaceId, secretId: row.id, version, placement: row.placement }, value);
     const updated = await tx.client.query(
       `UPDATE ${table(tx, 'secrets')} SET credential = $3, version = $2, owner_membership_id = $4,
-         replaced_at = clock_timestamp() WHERE id = $1 AND version = $5 AND status = 'active'`,
-      [row.id, version, JSON.stringify(credential), owner, row.version],
+         variable_name = $6, replaced_at = clock_timestamp() WHERE id = $1 AND version = $5 AND status = 'active'`,
+      [row.id, version, JSON.stringify(credential), owner, row.version, variableName],
     );
     if (updated.rowCount !== 1) throw new SecretError('conflict');
   }

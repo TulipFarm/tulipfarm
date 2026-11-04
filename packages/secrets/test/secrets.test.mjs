@@ -11,6 +11,8 @@ import {
   placementFits,
   placementSchema,
   redactUrl,
+  suggestVariableName,
+  variableNameSchema,
 } from '../dist/index.js';
 import { secretCipher } from '../dist/cipher.js';
 
@@ -129,6 +131,9 @@ test('destinations are public HTTPS hosts or exact endpoints', () => {
   assert.equal(destinationAllows(list, 'https://sub.api.example.com/'), false);
   assert.equal(destinationAllows(list, 'https://mcp.example.com/mcp'), true);
   assert.equal(destinationAllows(list, 'https://mcp.example.com/other'), false);
+  assert.equal(destinationAllows(list, 'https://api.example.com/oauth?code=1&sig=2&api_key=3'), true);
+  assert.equal(destinationAllows(list, 'https://mcp.example.com/mcp?code=1'), false);
+  assert.equal(destinationAllows(list, 'http://api.example.com/'), false);
 });
 
 test('reflection finds encoded and layered values, including in errors', () => {
@@ -185,4 +190,22 @@ test('the cipher binds values to workspace, secret, version and placement', () =
   const rotated = secretCipher({ activeKeyId: 'two', keys: { two: 'cd'.repeat(32), one: 'ab'.repeat(32) } });
   assert.deepEqual(rotated.decrypt(binding, 'api-key', envelope), { value: 'sk-live-123' });
   assert.throws(() => secretCipher({ activeKeyId: 'x', keys: {} }).check(), code('credential-unavailable'));
+});
+
+test('variable names come from the name and kind, and accept lowercase input', () => {
+  assert.equal(suggestVariableName('Stripe', 'api-key'), 'STRIPE_KEY');
+  assert.equal(suggestVariableName('Stripe API key', 'api-key'), 'STRIPE_API_KEY');
+  assert.equal(suggestVariableName('GitHub token', 'token'), 'GITHUB_TOKEN');
+  assert.equal(suggestVariableName('Staging sign-in', 'username-password'), 'STAGING_SIGN_IN_LOGIN');
+  assert.equal(suggestVariableName('Café crème', 'password'), 'CAFE_CREME_PASSWORD');
+  assert.equal(suggestVariableName('Monkey', 'api-key'), 'MONKEY_KEY');
+  assert.equal(suggestVariableName('Webhook secret', 'header'), 'WEBHOOK_SECRET');
+  assert.equal(suggestVariableName('1Password', 'token'), 'SECRET_1PASSWORD_TOKEN');
+  assert.equal(suggestVariableName('!!!', 'api-key'), 'SECRET');
+  const long = suggestVariableName('a'.repeat(100), 'token');
+  assert.equal(long.length, 64);
+  assert.ok(long.endsWith('A_TOKEN'));
+  assert.equal(variableNameSchema.parse(' stripe_key '), 'STRIPE_KEY');
+  for (const bad of ['', '1KEY', '_KEY', 'STRIPE-KEY', 'A'.repeat(65)])
+    assert.equal(variableNameSchema.safeParse(bad).success, false, bad);
 });

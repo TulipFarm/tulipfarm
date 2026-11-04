@@ -13,6 +13,7 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { UnsavedChanges } from '@/features/tables/feedback';
+import { SecretRequestCard } from '@/features/secrets/request-card';
 import { textError, type ConversationApi } from './conversation-api';
 import { useConversationCommand } from './conversation-state';
 import { useConversationInteraction, useConversationChanges } from './queries';
@@ -20,7 +21,8 @@ import {
   approvalDetails,
   effectSchema,
   interactionPending,
-  type InformationRequest,
+  isQuestion,
+  type QuestionRequest,
   type InteractionCommand,
   type InteractionReference,
 } from './interaction-contracts';
@@ -47,7 +49,10 @@ export function InteractionCard({
   const result = useRef<HTMLDivElement>(null);
   const submittedHere = useRef(false);
   const pending = read.state.kind === 'ready' && interactionPending(read.state.data);
-  useRegisterPendingQuestion(kind === 'request' && pending && !writeDenied);
+  // A secrets form is private to one member and stays in the transcript, so it doesn't take over the composer.
+  const secrets =
+    read.state.kind === 'ready' && read.state.data.kind === 'information' && !isQuestion(read.state.data.request);
+  useRegisterPendingQuestion(kind === 'request' && pending && !writeDenied && !secrets);
   useResultAttention(
     `interaction:${kind}:${requestId}`,
     pending,
@@ -168,32 +173,41 @@ export function InteractionCard({
         <>
           <div ref={result} tabIndex={-1}>
             {interaction.kind === 'information' ? (
-              <InformationCard
-                request={interaction.request}
-                locked={locked}
-                blockedReason={blockedReason}
-                sending={write.state.kind === 'sending'}
-                submit={answer =>
-                  submit({
-                    kind: 'answer',
-                    chatId,
-                    requestId,
-                    commandId: crypto.randomUUID(),
-                    responseId: crypto.randomUUID(),
-                    expectedRevision: interaction.request.revision,
-                    answer,
-                  })
-                }
-                cancel={() =>
-                  submit({
-                    kind: 'cancel-request',
-                    chatId,
-                    requestId,
-                    commandId: crypto.randomUUID(),
-                    expectedRevision: interaction.request.revision,
-                  })
-                }
-              />
+              isQuestion(interaction.request) ? (
+                <InformationCard
+                  request={interaction.request}
+                  locked={locked}
+                  blockedReason={blockedReason}
+                  sending={write.state.kind === 'sending'}
+                  submit={answer =>
+                    submit({
+                      kind: 'answer',
+                      chatId,
+                      requestId,
+                      commandId: crypto.randomUUID(),
+                      responseId: crypto.randomUUID(),
+                      expectedRevision: interaction.request.revision,
+                      answer,
+                    })
+                  }
+                  cancel={() =>
+                    submit({
+                      kind: 'cancel-request',
+                      chatId,
+                      requestId,
+                      commandId: crypto.randomUUID(),
+                      expectedRevision: interaction.request.revision,
+                    })
+                  }
+                />
+              ) : (
+                <SecretRequestCard
+                  request={interaction.request}
+                  onSettled={async () => {
+                    await read.refresh();
+                  }}
+                />
+              )
             ) : (
               <ChatConfirmation
                 title={interaction.request.prompt}
@@ -272,7 +286,7 @@ export function InteractionCard({
       {metadata}
     </div>
   );
-  return kind === 'request' && dock && (!interaction || pending) ? createPortal(card, dock) : card;
+  return kind === 'request' && dock && !secrets && (!interaction || pending) ? createPortal(card, dock) : card;
 }
 
 function confirmationState(
@@ -293,11 +307,11 @@ function InformationCard({
   submit,
   cancel,
 }: {
-  request: InformationRequest;
+  request: QuestionRequest;
   locked: boolean;
   blockedReason: string;
   sending: boolean;
-  submit: (answer: NonNullable<InformationRequest['response']>['answer']) => void;
+  submit: (answer: Extract<InteractionCommand, { kind: 'answer' }>['answer']) => void;
   cancel: () => void;
 }) {
   const id = useId();
@@ -328,7 +342,9 @@ function InformationCard({
             answer
               ? answer.kind === 'text'
                 ? answer.text
-                : answer.choiceIds.map(id => labels.get(id) ?? 'Unavailable choice').join(', ')
+                : answer.kind === 'secrets'
+                  ? undefined
+                  : answer.choiceIds.map(id => labels.get(id) ?? 'Unavailable choice').join(', ')
               : undefined
           }
         />

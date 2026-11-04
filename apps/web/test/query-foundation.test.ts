@@ -24,6 +24,7 @@ const { freshness, readState, retryDelay, retryRead } = await import('../src/lib
 const { createCatalogPersistence, parseCatalogSnapshot, catalogMaxAge } =
   await import('../src/lib/query/catalog-persistence.ts');
 const { replyBackoff } = await import('../src/lib/query/polling.ts');
+const { startEarlyReads } = await import('../src/lib/query/early-reads.ts');
 hooks.deregister();
 
 const scope: WorkspaceScope = { kind: 'workspace', userId: 'alice', workspaceId: 'workspace', membershipId: 'member' };
@@ -353,6 +354,72 @@ test('navigation suspension fences late responses but preserves fresh data and r
   assert.equal(before(), false);
   assert.equal(runtime.fence(scope)(), true);
   runtime.stop();
+});
+
+test('an admitted early read serves its first query once; another membership or a failure reads again', async () => {
+  const runtime = createFeatureClient(identity);
+  runtime.start();
+  const read = (name: string, early: () => Promise<string>, membershipId = scope.membershipId) => {
+    const key = ['chat', name];
+    startEarlyReads(identity, scope.workspaceId, [{ key, load: early }]).admit(membershipId);
+    let own = 0;
+    const options = featureReadOptions(runtime, scope, { key, load: async () => `own ${++own}` });
+    return () => runtime.client.fetchQuery({ ...options, staleTime: 0 });
+  };
+  try {
+    const early = Promise.withResolvers<string>();
+    const admitted = read('admitted', () => early.promise);
+    const first = admitted();
+    await flush();
+    early.resolve('early');
+    assert.equal(await first, 'early', 'a read still in flight is handed over, not cancelled');
+    assert.equal(await admitted(), 'own 1');
+    assert.equal(await read('previous member', async () => 'early', 'previous')(), 'own 1');
+    const failed = read('failed', async () => {
+      throw Object.assign(new Error('denied'), { status: 404 });
+    });
+    assert.equal(await failed(), 'own 1');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('denial, a change, revocation and sign-out abort early reads and leave queries to read for themselves', async () => {
+  const runtime = createFeatureClient(identity);
+  runtime.start();
+  const read = (name: string) => {
+    const key = ['chat', name];
+    const signal = Promise.withResolvers<AbortSignal>();
+    const reads = startEarlyReads(identity, scope.workspaceId, [
+      { key, load: started => (signal.resolve(started), new Promise(() => {})) },
+    ]);
+    reads.admit(scope.membershipId);
+    const options = featureReadOptions(runtime, scope, { key, load: async () => 'own' });
+    return { reads, signal: signal.promise, fetch: () => runtime.client.fetchQuery(options) };
+  };
+  try {
+    const denied = read('denied');
+    denied.reads.discard();
+    assert.equal((await denied.signal).aborted, true);
+    assert.equal(await denied.fetch(), 'own');
+
+    const changed = read('changed');
+    const unrelated = read('unrelated');
+    await runtime.change(scope, { keys: [['chat', 'changed']] });
+    assert.equal((await changed.signal).aborted, true);
+    assert.equal((await unrelated.signal).aborted, false);
+    assert.equal(await changed.fetch(), 'own');
+
+    runtime.revoke(scope);
+    assert.equal((await unrelated.signal).aborted, true);
+    runtime.admit(scope);
+
+    const signedOut = read('signed out');
+    runtime.stop();
+    assert.equal((await signedOut.signal).aborted, true);
+  } finally {
+    runtime.stop();
+  }
 });
 
 test('concealment resumes idle readers once, respects admission, and does not reset exhausted progress budgets', async t => {

@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
-import { readOnlyTools, type FrameworkCall } from './tools.ts';
+import { readOnlyCall, type FrameworkCall } from './tools.ts';
 
 // These reads are serialized by the dispatcher, but can still be refreshed safely.
-const repeatable = new Set<string>([
-  ...readOnlyTools,
+const repeatableTools = new Set<string>([
   'agents.context',
   'agents.status',
   'slack.resolve',
@@ -13,13 +12,14 @@ const repeatable = new Set<string>([
   'workflows.read',
   'workflows.providers',
 ]);
+const repeatable = (call: { tool: string; method?: unknown }) => repeatableTools.has(call.tool) || readOnlyCall(call);
 const fingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
 export function createChatToolGuard(priorCalls: readonly unknown[] = []) {
   const writes = new Set(
     priorCalls.flatMap(value => {
       const call = z.object({ tool: z.string() }).passthrough().parse(value);
-      return repeatable.has(call.tool) ? [] : [fingerprint(call)];
+      return repeatable(call) ? [] : [fingerprint(call)];
     }),
   );
   const reads = new Set<string>();
@@ -35,10 +35,10 @@ export function createChatToolGuard(priorCalls: readonly unknown[] = []) {
       idleRounds = 0;
     },
     duplicate(call: FrameworkCall) {
-      return !repeatable.has(call.tool) && writes.has(fingerprint(call));
+      return !repeatable(call) && writes.has(fingerprint(call));
     },
     record(call: FrameworkCall, output: string) {
-      if (!repeatable.has(call.tool)) {
+      if (!repeatable(call)) {
         writes.add(fingerprint(call));
         reads.clear();
         idleRounds = 0;
