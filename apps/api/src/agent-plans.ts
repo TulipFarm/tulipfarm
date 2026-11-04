@@ -17,8 +17,8 @@ import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
 /**
- * Read-only plan outlines for people who can read the chat, and pause, resume and stop for the person who started
- * the plan. People never edit the outline itself; the chat's agents do that through plan tools.
+ * Read-only plan outlines for people who can read the chat, and approve, pause, resume and stop for the person who
+ * started the plan. People never edit the outline itself; the chat's agents do that through plan tools.
  */
 export function registerAgentPlans(
   app: FastifyInstance,
@@ -51,7 +51,16 @@ export function registerAgentPlans(
       tags: ['Agent plans'],
       params: json(params),
       ...(body ? { body: json(body) } : {}),
-      response: { 200: json(output), ...errors },
+      response: {
+        200: json(output),
+        ...errors,
+        // A revision conflict returns the plan as it is now, so the person reviews the revision they would approve.
+        409: {
+          type: 'object',
+          properties: { error: { type: 'string' }, plan: json(planViewSchema) },
+          required: ['error'],
+        },
+      },
     });
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
@@ -98,17 +107,23 @@ export function registerAgentPlans(
         logLevel: 'silent',
         schema: schema(
           'controlAgentPlanV1',
-          'Pause, resume or stop a plan you started',
+          'Approve, start, pause, resume or stop a plan you started',
           plan,
           planReceiptSchema,
           planControlSchema,
         ),
       },
-      async request => {
+      async (request, reply) => {
         const p = plan.parse(request.params);
-        const receipt = await service.control(p.workspaceId, user(request), p.planId, request.body);
-        await dependencies.wake?.(p.workspaceId, p.planId);
-        return receipt;
+        try {
+          const receipt = await service.control(p.workspaceId, user(request), p.planId, request.body);
+          await dependencies.wake?.(p.workspaceId, p.planId);
+          return receipt;
+        } catch (error) {
+          if (!(error instanceof AgentPlanError) || error.code !== 'revision-conflict') throw error;
+          const current = await service.read(p.workspaceId, user(request), p.planId);
+          return reply.code(409).send({ error: error.code, plan: current });
+        }
       },
     );
   });

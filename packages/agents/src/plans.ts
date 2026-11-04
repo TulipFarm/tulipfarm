@@ -13,6 +13,7 @@ import { sourceDependencySchema } from '@tulipfarm/access/source-dependencies';
 import { authorizeChat, type ChatAccessRule } from '@tulipfarm/conversations/chat-access';
 import { notifyConversationChange } from '@tulipfarm/conversations/event-publisher';
 import { createConversations } from '@tulipfarm/conversations';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { boundRuntime } from './task-approval-gate.ts';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -31,6 +32,7 @@ import {
   planPauseSchema,
   planLimits,
   planListItemSchema,
+  planDocumentSchema,
   planReceiptSchema,
   planTaskStateSchema,
   planViewSchema,
@@ -47,7 +49,9 @@ import {
   validatePlanning,
   type PlanActor,
   type PlanNode,
+  type PlanSpecification,
   type PlanView,
+  type PlanMutation,
 } from './plan-contracts.ts';
 
 /**
@@ -55,6 +59,12 @@ import {
  * Older workspaces report storage as incompatible for plan operations, and chat skips plan work there.
  */
 export const planCompatibility = Object.freeze({ minimum: 19, maximum: commonCompatibility.maximum });
+/** Content revisions, document sections and approvals need `*_plan_approval.sql`; older storage keeps plans as before. */
+export const planApprovalVersion = 33;
+type PlanTransaction = AgentTransaction & { commonVersion: number };
+/** Whether plans carry documents and need the starter's approval of an exact revision in this workspace. */
+export const planDocumentsEnabled = (workspaceId: string) =>
+  isFeatureEnabled('plan-documents', null, { id: workspaceId }).catch(() => false);
 
 const planRowSchema = z.object({
   id: uuidSchema,
@@ -68,10 +78,17 @@ const planRowSchema = z.object({
   planning: planSpecificationSchema.nullable(),
   version: z.number().int().nonnegative(),
   budget: planBudgetSchema,
+  contentRevision: z.number().int().positive(),
+  document: planDocumentSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-const planColumns = `id, conversation_id AS "chatId", starter_user_id AS "starterUserId", starter_membership_id AS "starterMembershipId", title, brief, lifecycle, execution, planning, version, budget, created_at::text AS "createdAt", updated_at::text AS "updatedAt"`;
+const planColumns = (tx: PlanTransaction) =>
+  `id, conversation_id AS "chatId", starter_user_id AS "starterUserId", starter_membership_id AS "starterMembershipId", title, brief, lifecycle, execution, planning, version, budget, ${
+    tx.commonVersion >= planApprovalVersion
+      ? 'content_revision AS "contentRevision", content_sections AS document'
+      : '1 AS "contentRevision", NULL::jsonb AS document'
+  }, created_at::text AS "createdAt", updated_at::text AS "updatedAt"`;
 const stoppedReason = 'Stopped by the person who started the plan.';
 const taskRowSchema = z.object({
   id: uuidSchema,
@@ -296,6 +313,68 @@ export async function persist(
   }
   return changes;
 }
+/**
+ * Runtime changes carry on approved work without the starter's review: a worker's subtasks inside its own task, and
+ * the main agent's repair of failed work (retries, new tasks, their dependencies and their requirement coverage).
+ * Every other content change by the main agent is the starter's.
+ */
+function changeKind(
+  actor: PlanActor,
+  lifecycle: PlanRow['lifecycle'],
+  before: readonly PlanNode[],
+  command: { specialists: readonly unknown[]; document?: unknown; mutations: readonly PlanMutation[] },
+  previous: PlanSpecification | undefined,
+  next: PlanSpecification | undefined,
+): 'starter' | 'runtime' {
+  if (actor.kind === 'worker') return 'runtime';
+  if (lifecycle === 'draft' || command.specialists.length || command.document !== undefined) return 'starter';
+  const added = new Set(command.mutations.flatMap(mutation => (mutation.op === 'add' ? [mutation.task.key] : [])));
+  const planning = planningChange(previous, next, added);
+  if (planning === 'starter') return 'starter';
+  if (!command.mutations.length) return 'runtime';
+  const failed = new Set(before.filter(node => node.kind === 'work' && node.state === 'failed').map(node => node.key));
+  if (!failed.size) return 'starter';
+  return command.mutations.every(
+    mutation =>
+      mutation.op === 'add' ||
+      (mutation.op === 'retry' && failed.has(mutation.key)) ||
+      (mutation.op === 'depend' && (added.has(mutation.key) || added.has(mutation.on))),
+  )
+    ? 'runtime'
+    : 'starter';
+}
+
+/**
+ * Resolving a prerequisite (its status, reason or evidence) is progress. Requirements may only gain tasks this
+ * update adds; any other change to requirements, prerequisites or the verification task is the starter's.
+ */
+function planningChange(
+  previous: PlanSpecification | undefined,
+  next: PlanSpecification | undefined,
+  added: ReadonlySet<string>,
+): 'runtime' | 'starter' {
+  if (!previous || !next) return previous === next ? 'runtime' : 'starter';
+  const structure = (check: PlanSpecification['prerequisites'][number]) =>
+    canonicalJson({ key: check.key, title: check.title, tasks: check.tasks, optional: check.optional ?? false });
+  if (
+    previous.verificationTask !== next.verificationTask ||
+    previous.prerequisites.length !== next.prerequisites.length ||
+    previous.requirements.length !== next.requirements.length ||
+    previous.prerequisites.some((check, index) => structure(check) !== structure(next.prerequisites[index]!))
+  )
+    return 'starter';
+  return previous.requirements.every((requirement, index) => {
+    const updated = next.requirements[index]!;
+    return (
+      updated.key === requirement.key &&
+      updated.description === requirement.description &&
+      requirement.tasks.every(task => updated.tasks.includes(task)) &&
+      updated.tasks.every(task => requirement.tasks.includes(task) || added.has(task))
+    );
+  })
+    ? 'runtime'
+    : 'starter';
+}
 export function createAgentPlans(runtime: AgentStorage) {
   async function transaction<T>(
     workspaceId: string,
@@ -325,12 +404,12 @@ export function createAgentPlans(runtime: AgentStorage) {
     if (!chat) throw new AccessDenied();
     await authorizeChat(tx, actor, chat, rule);
   }
-  async function loadPlan(tx: AgentTransaction, actor: HumanActor, planId: string, lock: boolean) {
+  async function loadPlan(tx: PlanTransaction, actor: HumanActor, planId: string, lock: boolean) {
     const plan = planRowSchema
       .optional()
       .parse(
         (
-          await tx.client.query(`SELECT ${planColumns} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1`, [
+          await tx.client.query(`SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1`, [
             uuidSchema.parse(planId),
           ])
         ).rows[0],
@@ -341,7 +420,7 @@ export function createAgentPlans(runtime: AgentStorage) {
       ? planRowSchema.parse(
           (
             await tx.client.query(
-              `SELECT ${planColumns} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1 FOR UPDATE`,
+              `SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1 FOR UPDATE`,
               [planId],
             )
           ).rows[0],
@@ -416,6 +495,133 @@ export function createAgentPlans(runtime: AgentStorage) {
     ).rows[0]?.reason;
     return planPauseSchema.catch('starter').parse(reason);
   }
+  /**
+   * The reviewable content of a plan, read back from storage. It is an allowlist: never results, evidence, links or
+   * specialist instructions, so approving a revision approves exactly what the starter could read.
+   */
+  async function contentDigest(tx: PlanTransaction, planId: string) {
+    const plan = planRowSchema.parse(
+      (await tx.client.query(`SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1`, [planId]))
+        .rows[0],
+    );
+    const tasks = await loadTasks(tx, planId);
+    const specialists = await loadSpecialists(tx, planId);
+    const names = new Map(specialists.map(item => [item.key, item.name]));
+    const snapshot = {
+      title: plan.title,
+      brief: plan.brief,
+      requirements: plan.planning?.requirements ?? [],
+      prerequisites: (plan.planning?.prerequisites ?? []).map(({ key, title, status, reason, optional, tasks }) => ({
+        key,
+        title,
+        status,
+        reason: reason ?? null,
+        optional: optional ?? false,
+        tasks,
+      })),
+      verificationTask: plan.planning?.verificationTask ?? null,
+      tasks: tasks.map(task => ({
+        key: task.key,
+        parent: task.parent,
+        position: task.position,
+        kind: task.kind,
+        order: task.order,
+        title: task.title,
+        brief: task.brief,
+        criteria: task.criteria,
+        dependsOn: task.dependsOn,
+        assignee: task.coordinator
+          ? 'Main agent'
+          : task.agentId
+            ? (task.agentName ?? 'Saved agent')
+            : task.specialist
+              ? (names.get(task.specialist) ?? task.specialist)
+              : null,
+      })),
+      specialists: specialists.map(({ key, name, role }) => ({ key, name, role })),
+      budget: plan.budget,
+      document: plan.document,
+    };
+    return { snapshot, digest: digest(snapshot), revision: plan.contentRevision };
+  }
+  /** The digest of the plan's current revision. A plan saved before revisions gets its snapshot row now. */
+  async function currentRevision(tx: PlanTransaction, planId: string, membershipId: string | null = null) {
+    const content = await contentDigest(tx, planId);
+    const stored = (
+      await tx.client.query(
+        `SELECT digest FROM ${relation(tx, 'tf_agent_plan_revisions')} WHERE plan_id=$1 AND revision=$2`,
+        [planId, content.revision],
+      )
+    ).rows[0]?.digest;
+    if (typeof stored === 'string') return stored;
+    await tx.client.query(
+      `INSERT INTO ${relation(tx, 'tf_agent_plan_revisions')} (plan_id,revision,snapshot,digest,change_kind,created_by_membership_id) VALUES ($1,$2,$3,$4,'starter',$5)`,
+      [planId, content.revision, content.snapshot, content.digest, membershipId],
+    );
+    return content.digest;
+  }
+  /** Saves a new content revision when the content differs from `previous`. Returns the new revision, if any. */
+  async function recordRevision(
+    tx: PlanTransaction,
+    planId: string,
+    previous: string,
+    changeKind: 'starter' | 'runtime',
+    membershipId: string,
+  ) {
+    const content = await contentDigest(tx, planId);
+    if (content.digest === previous) return null;
+    const revision = content.revision + 1;
+    await tx.client.query(
+      `INSERT INTO ${relation(tx, 'tf_agent_plan_revisions')} (plan_id,revision,snapshot,digest,change_kind,created_by_membership_id) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [planId, revision, content.snapshot, content.digest, changeKind, membershipId],
+    );
+    await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET content_revision=$2 WHERE id=$1`, [
+      planId,
+      revision,
+    ]);
+    return revision;
+  }
+  /** The latest approval and the content revisions saved after it. */
+  async function approvalState(tx: PlanTransaction, plan: PlanRow) {
+    if (tx.commonVersion < planApprovalVersion) return { approval: null, changesSinceApproval: [] };
+    const approval = z
+      .object({
+        revision: z.number().int().positive(),
+        approvedByMembershipId: uuidSchema,
+        approvedAt: z.string(),
+        timeZone: z.string(),
+      })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT revision, approved_by_membership_id AS "approvedByMembershipId", to_json(approved_at)#>>'{}' AS "approvedAt", time_zone AS "timeZone"
+        FROM ${relation(tx, 'tf_agent_plan_approvals')} WHERE plan_id=$1 ORDER BY approved_at DESC, revision DESC LIMIT 1`,
+            [plan.id],
+          )
+        ).rows[0],
+      );
+    if (!approval) return { approval: null, changesSinceApproval: [] };
+    const changesSinceApproval = z
+      .array(
+        z.object({
+          revision: z.number().int().positive(),
+          changeKind: z.enum(['starter', 'runtime']),
+          createdAt: z.string(),
+        }),
+      )
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT revision, change_kind AS "changeKind", to_json(created_at)#>>'{}' AS "createdAt" FROM ${relation(tx, 'tf_agent_plan_revisions')}
+        WHERE plan_id=$1 AND revision>$2 ORDER BY revision LIMIT 20`,
+            [plan.id, approval.revision],
+          )
+        ).rows,
+      );
+    // Names live outside workspace storage; the API or the reader's own session supplies them.
+    return { approval: { ...approval, approvedBy: null }, changesSinceApproval };
+  }
   /** Saved tasks where the starter answers a waiting plan task, by task key. */
   async function waitingTasks(tx: AgentTransaction, plan: PlanRow, actor: HumanActor) {
     if (plan.starterUserId !== actor.userId || plan.starterMembershipId !== actor.membershipId)
@@ -438,6 +644,7 @@ export function createAgentPlans(runtime: AgentStorage) {
     actor: HumanActor,
     pause: z.infer<typeof planPauseSchema> | null = null,
     waiting: ReadonlyMap<string, string> = new Map(),
+    approval: Awaited<ReturnType<typeof approvalState>> = { approval: null, changesSinceApproval: [] },
   ): PlanView {
     const nodes = applyPlanningPrerequisites(tasks.map(toNode), plan.planning ?? undefined);
     const summary = summarizePlan(nodes, plan.planning ?? undefined);
@@ -460,6 +667,11 @@ export function createAgentPlans(runtime: AgentStorage) {
       outcome: summary.outcome,
       pause,
       budget: plan.budget,
+      contentRevision: plan.contentRevision,
+      document: plan.document,
+      approval: approval.approval,
+      awaitingApproval: pause === 'awaiting-approval',
+      changesSinceApproval: approval.changesSinceApproval,
       specialists: specialists.map(({ key, name, role }) => ({ key, name, role })),
       tasks: tasks.map(task => ({
         id: task.id,
@@ -501,8 +713,10 @@ export function createAgentPlans(runtime: AgentStorage) {
       sourceTurnId: string | null = null,
     ) {
       const command = createPlanSchema.parse(input);
+      const documents = command.document !== undefined && (await planDocumentsEnabled(workspaceId));
       return transaction(workspaceId, user, true, async (tx, actor) => {
         await requireChat(tx, actor, chatId, 'turn');
+        const revisions = tx.commonVersion >= planApprovalVersion;
         const inputDigest = digest({ chatId, command });
         const prior = z
           .object({ input_digest: z.string(), plan_id: uuidSchema })
@@ -542,6 +756,7 @@ export function createAgentPlans(runtime: AgentStorage) {
           ).rowCount
         )
           throw new AgentPlanError('plan-open');
+        if (command.document && !(documents && revisions)) throw new AgentPlanError('document-unavailable');
         const built = buildInitialPlan(command);
         if (
           sourceTurnId &&
@@ -583,6 +798,14 @@ export function createAgentPlans(runtime: AgentStorage) {
         );
         await insertSpecialists(tx, id, 0, command.specialists);
         const changes = await persist(tx, id, 0, new Map(), built.nodes);
+        if (revisions) {
+          if (command.document)
+            await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET content_sections=$2 WHERE id=$1`, [
+              id,
+              command.document,
+            ]);
+          await currentRevision(tx, id, actor.membershipId);
+        }
         await event(tx, id, 0, { kind: 'coordinator' }, 'created', changes);
         await tx.client.query(
           `INSERT INTO ${relation(tx, 'tf_agent_plan_creations')} (membership_id,request_id,input_digest,plan_id) VALUES ($1,$2,$3,$4)`,
@@ -602,9 +825,11 @@ export function createAgentPlans(runtime: AgentStorage) {
       planActor: PlanActor = { kind: 'coordinator' },
     ) {
       const command = updatePlanSchema.parse(input);
+      const documents = await planDocumentsEnabled(workspaceId);
       return transaction(workspaceId, user, true, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
+        const revisions = tx.commonVersion >= planApprovalVersion;
         const inputDigest = digest({ planActor, command });
         const prior = z
           .object({ input_digest: z.string(), receipt: planReceiptSchema })
@@ -624,8 +849,17 @@ export function createAgentPlans(runtime: AgentStorage) {
         if (plan.lifecycle !== 'draft' && plan.lifecycle !== 'active' && plan.lifecycle !== 'paused')
           throw new AgentPlanError('plan-closed');
         if (plan.version !== command.expectedVersion) throw new AgentPlanError('version-conflict');
-        if (planActor.kind === 'worker' && (command.specialists.length > 0 || command.planning))
+        if (planActor.kind === 'worker' && (command.specialists.length > 0 || command.planning || command.document))
           throw new PlanGraphError('outside-scope');
+        if (command.document && !(documents && revisions)) throw new AgentPlanError('document-unavailable');
+        let document = plan.document;
+        if (command.document) {
+          const given = Object.entries(command.document).filter(([, value]) => value !== undefined);
+          const merged = planDocumentSchema.safeParse({ ...plan.document, ...Object.fromEntries(given) });
+          if (!merged.success) throw new PlanGraphError('document-summary');
+          document = merged.data;
+        }
+        const previous = revisions ? await currentRevision(tx, plan.id) : null;
         const tasks = await loadTasks(tx, plan.id);
         const existing = await loadSpecialists(tx, plan.id);
         const keys = new Set([...existing.map(item => item.key), ...tasks.map(task => task.key)]);
@@ -677,6 +911,41 @@ export function createAgentPlans(runtime: AgentStorage) {
           `UPDATE ${relation(tx, 'tf_agent_plans')} SET version=$2, planning=$3, updated_at=clock_timestamp() WHERE id=$1`,
           [plan.id, version, planning ?? null],
         );
+        if (command.document)
+          await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET content_sections=$2 WHERE id=$1`, [
+            plan.id,
+            document,
+          ]);
+        if (previous !== null) {
+          const kind = changeKind(planActor, plan.lifecycle, before, command, plan.planning ?? undefined, planning);
+          const revision = await recordRevision(tx, plan.id, previous, kind, actor.membershipId);
+          // A starter change to approved, unfinished work waits for approval of the new revision before more starts.
+          if (
+            revision !== null &&
+            kind === 'starter' &&
+            documents &&
+            (plan.lifecycle === 'active' || plan.lifecycle === 'paused') &&
+            (
+              await tx.client.query(
+                `SELECT 1 FROM ${relation(tx, 'tf_agent_plan_approvals')} WHERE plan_id=$1 LIMIT 1`,
+                [plan.id],
+              )
+            ).rowCount
+          ) {
+            if (plan.lifecycle === 'active') {
+              const paused = nodes.map(node => ({ ...node }));
+              await pausePlanWork(tx, plan.id, paused);
+              changes.push(
+                ...(await persist(tx, plan.id, version, new Map(nodes.map(node => [node.key, node])), paused)),
+              );
+              await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET lifecycle='paused' WHERE id=$1`, [
+                plan.id,
+              ]);
+              await wakePlanWait(tx, plan);
+            }
+            changes.push({ op: 'lifecycle', to: 'paused', reason: 'awaiting-approval' });
+          }
+        }
         await event(tx, plan.id, version, planActor, 'updated', changes);
         const receipt = planReceiptSchema.parse({ id: plan.id, version, added: result.added, yielded: result.yielded });
         await tx.client.query(
@@ -694,6 +963,7 @@ export function createAgentPlans(runtime: AgentStorage) {
      */
     async control(workspaceId: string, user: string, planId: string, input: unknown, sourceTurnId?: string) {
       const { requestId, ...command } = planControlSchema.parse(input);
+      const documents = command.action === 'start' && (await planDocumentsEnabled(workspaceId));
       return transaction(workspaceId, user, true, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
@@ -716,25 +986,55 @@ export function createAgentPlans(runtime: AgentStorage) {
         if (plan.lifecycle !== 'draft' && plan.lifecycle !== 'active' && plan.lifecycle !== 'paused')
           throw new AgentPlanError('plan-closed');
         if (plan.version !== command.expectedVersion) throw new AgentPlanError('version-conflict');
-        if ((command.action === 'start') !== (plan.lifecycle === 'draft') && command.action !== 'stop')
+        const revisions = tx.commonVersion >= planApprovalVersion;
+        const pause = await pauseReason(tx, plan);
+        // Approval starts a draft, resumes a paused plan, or only records the approval of a running plan.
+        const action =
+          command.action !== 'approve'
+            ? command.action
+            : plan.lifecycle === 'draft'
+              ? 'start'
+              : plan.lifecycle === 'paused'
+                ? 'resume'
+                : 'approve';
+        if (command.action === 'approve') {
+          if (!revisions) throw new PlanGraphError('invalid-transition');
+          if (command.contentRevision !== plan.contentRevision) throw new AgentPlanError('revision-conflict');
+        } else if (
+          (command.action === 'start' && documents && revisions) ||
+          (command.action === 'resume' && pause === 'awaiting-approval')
+        )
+          throw new AgentPlanError('approval-required');
+        if ((action === 'start') !== (plan.lifecycle === 'draft') && action !== 'stop')
           throw new PlanGraphError('invalid-transition');
+        const previous = revisions ? await currentRevision(tx, plan.id) : null;
+        if (command.action === 'approve') {
+          await tx.client.query(
+            `INSERT INTO ${relation(tx, 'tf_agent_plan_approvals')} (plan_id,revision,approved_by_membership_id,time_zone,request_id) VALUES ($1,$2,$3,$4,$5)`,
+            [plan.id, plan.contentRevision, actor.membershipId, command.timeZone, requestId],
+          );
+        }
         const rows = await loadTasks(tx, plan.id);
         const before = new Map(rows.map(row => [row.key, toNode(row)]));
         const after = rows.map(row => ({ ...toNode(row) }));
         const lifecycleChanges: unknown[] = [];
         let lifecycle: PlanRow['lifecycle'] = plan.lifecycle;
-        if (command.action === 'pause') {
+        if (command.action === 'approve')
+          lifecycleChanges.push({ op: 'approval', revision: plan.contentRevision, timeZone: command.timeZone });
+        if (action === 'approve') {
+          // The plan is already running; approval only records the reviewed revision.
+        } else if (action === 'pause') {
           lifecycle = 'paused';
           await pausePlanWork(tx, plan.id, after);
           lifecycleChanges.push({ op: 'lifecycle', to: 'paused', reason: 'starter' });
-        } else if (command.action === 'resume' || command.action === 'start') {
+        } else if (action === 'resume' || action === 'start') {
           lifecycle = 'active';
           // Resuming rereads saved agents' tasks at once, even those waiting for their sources to be checked again.
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_agent_plan_attempts')} SET source_check_after=NULL, sources_unavailable_since=NULL WHERE plan_id=$1 AND settled_at IS NULL AND source_check_after IS NOT NULL`,
             [plan.id],
           );
-          if (command.action === 'start')
+          if (action === 'start')
             await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_plans')} SET execution='execute' WHERE id=$1`, [
               plan.id,
             ]);
@@ -752,6 +1052,8 @@ export function createAgentPlans(runtime: AgentStorage) {
                 budget,
               ]);
               lifecycleChanges.push({ op: 'budget', from: plan.budget, to: budget });
+              // The starter raises the budget themselves, so this revision needs no further approval.
+              if (previous !== null) await recordRevision(tx, plan.id, previous, 'starter', actor.membershipId);
             }
           }
           lifecycleChanges.push({ op: 'lifecycle', to: 'active' });
@@ -767,7 +1069,7 @@ export function createAgentPlans(runtime: AgentStorage) {
                     {
                       kind: 'text',
                       text:
-                        command.action === 'start'
+                        action === 'start'
                           ? `Start the saved plan: ${plan.title}.`
                           : `Resume the saved plan: ${plan.title}.`,
                     },
@@ -855,6 +1157,7 @@ export function createAgentPlans(runtime: AgentStorage) {
             actor,
             await pauseReason(tx, plan),
             await waitingTasks(tx, plan, actor),
+            await approvalState(tx, plan),
           );
           const reports = z.array(z.object({ key: planKeySchema, report: planReportSchema })).parse(
             (
@@ -930,7 +1233,7 @@ export function createAgentPlans(runtime: AgentStorage) {
             .parse(
               (
                 await tx.client.query(
-                  `SELECT ${planColumns} FROM ${relation(tx, 'tf_agent_plans')} WHERE conversation_id=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
+                  `SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE conversation_id=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
                   [chatId],
                 )
               ).rows,
