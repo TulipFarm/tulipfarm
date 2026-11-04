@@ -1,6 +1,7 @@
 import { QueryCache, QueryClient, hashKey, type QueryKey } from '@tanstack/react-query';
 import { modelCatalogSchema } from '@tulipfarm/config/model-catalog';
 import { createCatalogPersistence } from './catalog-persistence';
+import { discardEarlyReads } from './early-reads';
 import { queryNotifications, type QueryNotice } from './notifications';
 import { createPolling } from './polling';
 import { deniedStatus, freshness, retryDelay, retryRead } from './policy';
@@ -75,6 +76,7 @@ export function createFeatureClient(
 
   function applyChange(scope: FeatureScope, input: FeatureChange) {
     if (!isCurrent(scope)) return Promise.resolve();
+    if (scope.kind === 'workspace') discardEarlyReads(scope.userId, scope.workspaceId, input.keys);
     const keys = input.keys.map(key => featureKey(scope, key));
     if (input.kind === 'conceal') {
       const queries = new Set(keys.flatMap(queryKey => client.getQueryCache().findAll({ queryKey })));
@@ -117,6 +119,7 @@ export function createFeatureClient(
     const hash = hashKey(scopeKey(scope));
     if (denied.has(hash)) return;
     denied.add(hash);
+    discardEarlyReads(scope.userId, scope.kind === 'workspace' ? scope.workspaceId : undefined);
     revisions.set(hash, (revisions.get(hash) ?? 0) + 1);
     const key = scopeKey(scope);
     void client.cancelQueries({ queryKey: key });
@@ -175,6 +178,7 @@ export function createFeatureClient(
       const key = scopeKey(scope),
         hash = hashKey(key);
       revisions.set(hash, (revisions.get(hash) ?? 0) + 1);
+      discardEarlyReads(scope.userId, scope.kind === 'workspace' ? scope.workspaceId : undefined);
       void client.cancelQueries({ queryKey: key });
     },
     subscribeAuthority(listener: () => void) {
@@ -265,6 +269,7 @@ export function createFeatureClient(
     stop() {
       active = false;
       generation++;
+      discardEarlyReads(identity.userId);
       pending.clear();
       detach?.();
       detach = undefined;

@@ -27,13 +27,19 @@ import {
   safeAuthRedirect,
   sessionIdentity,
 } from '@/lib/auth';
-import { forgetWorkspace, workspaceDestination } from '@/lib/last-workspace';
+import {
+  forgetWorkspace,
+  forgetWorkspaceId,
+  rememberWorkspaceId,
+  workspaceDestination,
+  workspaceIdHint,
+} from '@/lib/last-workspace';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceSlugError } from '@/lib/workspace-slug';
 import { currentIntegrationId } from '@/features/integrations/catalog';
 import { getWorkspace, listWorkspaces, WorkspaceRequestError } from '@/lib/workspaces';
-import { readWorkspaceList, WorkspaceListQueryBridge } from '@/features/workspaces/queries';
+import { readWorkspaceList, sessionRuntime, WorkspaceListQueryBridge } from '@/features/workspaces/queries';
 import { reconcileMembership } from '@/features/governance/queries';
 import { invitationTokenSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { RecoveryNotice, WorkspaceRecoveryPage } from '@/pages/workspace-recovery';
@@ -45,7 +51,9 @@ import { calendarSearchSchema } from '@/features/calendar/model';
 import { agentTabValues } from '@/features/agents/tab-values';
 import { createWorkspaceAccess } from '@/lib/workspace-access';
 import { loadOwnMembership, GovernanceRequestError } from '@/lib/governance';
-import { SessionQueryProvider, type FeatureScope } from '@/lib/query';
+import { hashKey } from '@tanstack/react-query';
+import { SessionQueryProvider, type FeatureScope, type QueryKey, type SessionIdentity } from '@/lib/query';
+import { startEarlyReads } from '@/lib/query/early-reads';
 import { measureWorkspaceAdmission } from '@/lib/navigation-performance';
 import { UserVisitProvider } from '@/lib/user-visit';
 import { analytics, overrides } from '@/extensions';
@@ -369,6 +377,41 @@ export const googleCallbackRoute = createRoute({
 function preloadRouteCode(pathname: string): void {
   for (const route of router.getMatchedRoutes(pathname)[0]) void route.options.component?.preload?.();
 }
+let pageReadModule: typeof import('@/features/chat/early-reads') | null = null;
+function loadPageReads() {
+  if (!pageReadModule)
+    void import('@/features/chat/early-reads').then(
+      module => {
+        pageReadModule = module;
+      },
+      () => {},
+    );
+}
+function cachedRead(identity: SessionIdentity, workspaceId: string, key: QueryKey) {
+  const scope = ['user', identity.userId, 'workspace', workspaceId];
+  const hash = hashKey(key);
+  return !!sessionRuntime(identity)
+    ?.client.getQueryCache()
+    .findAll({ queryKey: scope })
+    .some(query => query.state.data !== undefined && hashKey(query.queryKey.slice(scope.length + 2)) === hash);
+}
+/**
+ * Starts the reads the destination page makes first, once the workspace id is known, so they
+ * overlap membership admission instead of waiting for the frame to mount. Reads the cache already
+ * holds are skipped, and the page only uses a response after admission binds it to the membership.
+ */
+function startPageReads(
+  identity: SessionIdentity,
+  workspaceId: string,
+  slug: string,
+  location: { pathname: string; search: Record<string, unknown> },
+) {
+  if (!pageReadModule) return null;
+  const reads = pageReadModule
+    .workspacePageReads(workspaceId, slug, location.pathname, location.search)
+    .filter(read => !cachedRead(identity, workspaceId, read.key));
+  return reads.length ? { workspaceId, reads: startEarlyReads(identity, workspaceId, reads) } : null;
+}
 async function requireProfile(destination: string) {
   const session = await loadSession();
   if (!session) throw redirect({ to: '/login', search: { redirect: destination }, replace: true });
@@ -562,6 +605,7 @@ export const workspaceRoute = createRoute({
     measureWorkspaceAdmission(async () => {
       if (workspaceSlugError(params.workspaceSlug)) throw notFound();
       preloadRouteCode(location.pathname);
+      loadPageReads();
       const snapshot = context.workspaceAccess.getSnapshot();
       const previousWorkspace =
         snapshot.kind === 'admitted' && snapshot.read.workspace.slug === params.workspaceSlug
@@ -614,18 +658,32 @@ export const workspaceRoute = createRoute({
           access.deny(error.status);
         throw error;
       };
+      const identity = { userId: session.user.id, sessionId: session.session.id };
+      let pageReads: ReturnType<typeof startPageReads> = null;
       try {
         const reads =
           earlyReads?.userId === session.user.id && earlyReads.sessionId === session.session.id ? earlyReads : null;
+        // On a fresh load, the id this slug had last time lets membership and page reads start
+        // alongside the workspace read. Neither is used unless the workspace read returns that id.
+        const hintedId = reads ? null : workspaceIdHint(session.user.id, params.workspaceSlug);
+        const hintedMembership = hintedId ? loadOwnMembership(hintedId, abortController.signal) : null;
+        void hintedMembership?.catch(() => {});
+        if (hintedId) pageReads = startPageReads(identity, hintedId, params.workspaceSlug, location);
         const workspaceRequest = (reads?.workspace ?? getWorkspace(params.workspaceSlug)).catch(denied);
-        const membershipRequest = workspaceRequest.then(workspace =>
-          workspace.status === 'ready'
-            ? (reads?.membership && previousWorkspace?.id === workspace.id
-                ? reads.membership
+        const membershipRequest = workspaceRequest.then(workspace => {
+          if (workspace.status !== 'ready') return null;
+          if (!reads && pageReads?.workspaceId !== workspace.id) {
+            pageReads?.reads.discard();
+            pageReads = startPageReads(identity, workspace.id, params.workspaceSlug, location);
+          }
+          return (
+            reads?.membership && previousWorkspace?.id === workspace.id
+              ? reads.membership
+              : hintedMembership && hintedId === workspace.id
+                ? hintedMembership
                 : loadOwnMembership(workspace.id, abortController.signal)
-              ).catch(denied)
-            : null,
-        );
+          ).catch(denied);
+        });
         void membershipRequest.catch(() => {});
         const [workspaceRead, listRead] = await Promise.allSettled([
           workspaceRequest,
@@ -651,6 +709,10 @@ export const workspaceRoute = createRoute({
         const membership = await membershipRequest;
         if (!abortController.signal.aborted)
           access.admit({ pathname: location.pathname, workspace, workspaces, membership });
+        if (membership && !abortController.signal.aborted && pageReads?.workspaceId === workspace.id)
+          pageReads.reads.admit(membership.membershipId);
+        else pageReads?.reads.discard();
+        if (workspace.status === 'ready') rememberWorkspaceId(session.user.id, params.workspaceSlug, workspace.id);
         return {
           user: session.user,
           sessionId: session.session.id,
@@ -662,11 +724,13 @@ export const workspaceRoute = createRoute({
           workspaceStale: false,
         };
       } catch (error) {
+        pageReads?.reads.discard();
         if (
           (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
           [403, 404].includes(error.status)
         ) {
           forgetWorkspace(session.user.id);
+          forgetWorkspaceId(session.user.id, params.workspaceSlug);
           if (cause === 'stay') throw redirect({ to: '/', replace: true });
           throw notFound();
         }
