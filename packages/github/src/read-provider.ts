@@ -80,6 +80,48 @@ function compactIssueSearch(value: unknown) {
   };
 }
 
+const repositoryItem = z.object({
+  url: z.string(),
+  html_url: z.string(),
+  full_name: z.string(),
+  name: z.string(),
+  owner: login,
+  private: z.boolean(),
+  visibility: z.string().optional(),
+  description: z.string().nullish(),
+  fork: z.boolean(),
+  archived: z.boolean().optional(),
+  default_branch: z.string().optional(),
+  language: z.string().nullish(),
+  stargazers_count: z.number().optional(),
+  open_issues_count: z.number().optional(),
+  updated_at: z.string().nullish(),
+  pushed_at: z.string().nullish(),
+  permissions: z.record(z.string(), z.boolean()).optional(),
+});
+// A full repository object is about 5 KiB of URL templates, so a 30-item page exceeds the result limit.
+// Keep what identifies and describes each repository; `url` stays so access to each result can be rechecked.
+function compactRepository({ owner, ...repository }: z.infer<typeof repositoryItem>) {
+  return { ...repository, owner: owner?.login ?? null };
+}
+function compactRepositorySearch(value: unknown) {
+  const page = z
+    .object({ total_count: z.number(), incomplete_results: z.boolean(), items: z.array(repositoryItem).max(30) })
+    .parse(value);
+  return {
+    total_count: page.total_count,
+    incomplete_results: page.incomplete_results,
+    items: page.items.map(compactRepository),
+  };
+}
+function compactRepositoryList(value: unknown, operation: { page: number }, link: string | null) {
+  const items = z.array(repositoryItem).max(30).parse(value);
+  return {
+    items: items.map(compactRepository),
+    nextPage: link?.split(',').some(part => /rel="next"/.test(part)) ? operation.page + 1 : null,
+  };
+}
+
 function checkedResult(value: unknown, token: string) {
   const text = JSON.stringify(value);
   if (!text || Buffer.byteLength(text) > 131072) throw new GitHubReadError('read-limit');
@@ -127,6 +169,8 @@ function status(response: Response) {
   if (response.status === 401) throw new GitHubCredentialRejected();
   if (githubRateLimited(response)) throw new GitHubReadError('read-rate-limited');
   if (response.status === 403 || response.status === 404) throw new GitHubReadError('read-forbidden');
+  // GitHub validated the request and rejected its arguments, for example a search qualifier naming an unknown or unsearchable account.
+  if (response.status === 422) throw new GitHubReadError('read-invalid');
   if (!response.ok) throw new GitHubReadError('read-unavailable');
 }
 const directoryEntry = z.object({
@@ -305,6 +349,9 @@ export async function dispatchGitHubRead(input: {
       data = { headSha: pull.head.sha, result: await jsonBody(result) };
     } else if (operation.kind === 'issue.search' || operation.kind === 'pull.search')
       data = compactIssueSearch(await jsonBody(response, 8388608));
+    else if (operation.kind === 'repository.search') data = compactRepositorySearch(await jsonBody(response, 1048576));
+    else if (operation.kind === 'repository.list')
+      data = compactRepositoryList(await jsonBody(response, 1048576), operation, response.headers.get('link'));
     else data = await jsonBody(response);
     return { transport: 'rest' as const, data: checkedResult(data, token) };
   } catch (error) {

@@ -258,12 +258,14 @@ export function createGitHubInvestigation(
       const selected = await binding(workspaceId, actor, origin, 'github.investigation.repositories');
       if (selected.missing) throw new GitHubReadError('selection-required');
       if (selected.team) return team().repositories(workspaceId, actor, selected.team, query);
-      if (!query.query) throw new GitHubReadError('read-unqualified');
+      // Without a query, list the selected account's own repositories rather than searching all of GitHub.
       return personal.read(
         workspaceId,
         actor,
         origin,
-        { kind: 'repository.search', ...query },
+        query.query
+          ? { kind: 'repository.search', ...query }
+          : { kind: 'repository.list', page: query.page, perPage: query.perPage },
         'github.investigation.repositories',
       );
     },

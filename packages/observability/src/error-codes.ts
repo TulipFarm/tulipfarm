@@ -100,6 +100,7 @@ const codes = new Set<string>([
   'read-forbidden',
   'read-limit',
   'read-unqualified',
+  'read-invalid',
   'batch-conflict',
   'batch-approval-required',
   'batch-unresolved',

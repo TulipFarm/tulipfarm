@@ -18,6 +18,7 @@ export class GitHubReadError extends Error {
     | 'read-forbidden'
     | 'read-limit'
     | 'read-unqualified'
+    | 'read-invalid'
     | 'read-rate-limited';
   constructor(code: GitHubReadError['code']) {
     super(code);
