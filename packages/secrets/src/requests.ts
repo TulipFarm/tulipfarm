@@ -125,7 +125,8 @@ export type SecretRequestView = {
   revision: number;
   expiresAt: string;
   purpose: string;
-  destinations: Destination[];
+  /** `plainHttp` marks a destination the value may reach without encryption (API calls P13). */
+  destinations: (Destination & { plainHttp: boolean })[];
   fields: (Omit<RequestField, 'placement'> & { placement: Placement | null; options: SecretOption[] })[];
   declineReason: string | null;
 };
@@ -347,7 +348,13 @@ export function createSecretRequests(secrets: Secrets, config: { settle?: Settle
           revision: row.revision,
           expiresAt: row.expires_at,
           purpose: row.purpose,
-          destinations: row.destinations,
+          destinations: row.destinations.map(destination => ({
+            ...destination,
+            plainHttp:
+              destination.kind === 'endpoint'
+                ? destination.value.startsWith('http:')
+                : secrets.privateHosts.some(entry => entry.host === destination.value && entry.http),
+          })),
           fields,
           declineReason: row.decline_reason,
         };

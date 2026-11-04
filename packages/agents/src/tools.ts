@@ -12,6 +12,7 @@ import { observeTool, type ToolObservation, type ToolOutcome, type ToolRuntime }
 import {
   AccessDenied,
   denyMcpEgress,
+  requireProtectedSource,
   type AuthorizationTransaction,
   type HumanActor,
   type SourceDependency,
@@ -958,6 +959,24 @@ export type SubagentDelegation = (
   context: SubagentToolContext,
   call: DelegateCall,
 ) => Promise<{ result: unknown; sources: SourceDependency[] }>;
+/** Whether this chat is the member's own private chat, the only place an `api.request` response private to them can go. */
+export function privateChatResults(
+  runtime: AgentStorage,
+  workspaceId: string,
+  actor: HumanActor,
+  conversationId: string,
+) {
+  return withHuman(runtime, workspaceId, actor, 'read', tx =>
+    requireProtectedSource(tx, actor, { kind: 'private-conversation', conversationId }),
+  ).then(
+    () => true,
+    error => {
+      if (error instanceof AccessDenied) return false;
+      throw error;
+    },
+  );
+}
+
 export function createChatTools(
   runtime: Runtime,
   {
@@ -2378,6 +2397,9 @@ export function createChatTools(
       origin && apiSecrets
         ? apiSecrets({ workspaceId: context.workspaceId, actor: context.actor, conversationId: origin.conversationId })
         : undefined;
+    const privateResults = origin
+      ? () => privateChatResults(runtime, context.workspaceId, context.actor, origin.conversationId)
+      : undefined;
     if (chat && apiApprovals && !readMethods.has(call.method))
       return proposeApiCall(runtime, {
         workspaceId: context.workspaceId,
@@ -2387,6 +2409,7 @@ export function createChatTools(
         call,
         secrets,
         privateHosts: apiPrivateHosts,
+        privateResults,
       });
     const keep = chatFiles?.turnFiles.apiFiles?.keep;
     // Bodies are kept only where files.read can read them back: an app chat with the images reader on.
@@ -2413,6 +2436,7 @@ export function createChatTools(
       workspaceId: context.workspaceId,
       secrets,
       privateHosts: apiPrivateHosts,
+      privateResults,
       calls: chat
         ? apiCallLedger(runtime, {
             workspaceId: context.workspaceId,

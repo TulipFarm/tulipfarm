@@ -56,7 +56,12 @@ export function TaskSecretRequests({
   return (
     <div className="space-y-2">
       {read.state.data.map(request => (
-        <SecretRequestCard key={request.id} request={taskInformationRequest(taskId, request)} onSettled={settled} />
+        <SecretRequestCard
+          key={request.id}
+          context="task"
+          request={taskInformationRequest(taskId, request)}
+          onSettled={settled}
+        />
       ))}
     </div>
   );

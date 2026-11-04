@@ -439,3 +439,62 @@ test('secrets are placed, redacted, recorded and never reflected back', async t 
   assert.equal(dropped.code, 'network-failed');
   assert.equal(uses.length, 1);
 });
+
+test('outside a private chat, calls with secrets or to private hosts are refused before sending', async t => {
+  const api = await server(t, routes);
+  const uses = [];
+  const secrets = secretPort(
+    { BEARER: { name: 'Stripe', placement: { kind: 'bearer' }, value: { value: 'sk-live-0123456789' } } },
+    uses,
+  );
+  const listed = [{ host: 'api.example.test', port: null, http: false }];
+  let asked = 0;
+  const shared = async () => {
+    asked += 1;
+    return false;
+  };
+  const send = (extra, options) =>
+    sendApiCall(
+      { tool: 'api.request', method: 'GET', url: 'https://api.example.test/json', ...extra },
+      api.options(options),
+    );
+
+  const withSecret = await send({ secrets: [{ variable: 'BEARER' }] }, { secrets, privateResults: shared });
+  assert.equal(withSecret.code, 'unavailable');
+  assert.equal(withSecret.secret, 'Stripe');
+  api.resolveTo('10.0.0.5');
+  assert.equal((await send({}, { privateHosts: listed, privateResults: shared })).code, 'unavailable');
+  assert.equal(api.received.length, 0);
+  assert.equal(uses.length, 0);
+  assert.equal(asked, 2);
+
+  assert.equal((await send({}, { privateHosts: listed, privateResults: async () => true })).status, 'sent');
+  api.resolveTo('8.8.8.8');
+  assert.equal((await send({}, { privateResults: shared })).status, 'sent');
+  assert.equal(asked, 2);
+});
+
+test('a secret sent to a host that resolves privately and is not listed fails as destination-denied', async t => {
+  const api = await server(t, routes);
+  const secrets = secretPort(
+    { BEARER: { name: 'Metrics', placement: { kind: 'bearer' }, value: { value: 'metrics-0123456' } } },
+    [],
+  );
+  const send = privateHosts =>
+    sendApiCall(
+      { tool: 'api.request', method: 'GET', url: 'https://api.example.test/json', secrets: [{ variable: 'BEARER' }] },
+      api.options({ secrets, privateHosts }),
+    );
+  api.resolveTo('10.0.0.5');
+  assert.equal((await send([{ host: 'api.example.test', port: null, http: false }])).status, 'sent');
+  const delisted = await send([]);
+  assert.equal(delisted.code, 'destination-denied');
+  assert.equal(delisted.secret, 'Metrics');
+  assert.match(delisted.message, /Nothing was sent/);
+  assert.equal(api.received.length, 1);
+  const plain = await sendApiCall(
+    { tool: 'api.request', method: 'GET', url: 'https://api.example.test/json' },
+    api.options(),
+  );
+  assert.equal(plain.code, 'address-denied');
+});

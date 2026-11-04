@@ -51,6 +51,8 @@ import { GitHubTaskSourceCard } from '@/features/chat/github-investigation-card'
 import { GitHubBatches } from '@/features/chat/github-batches';
 import { TaskApiCalls } from '@/features/api-calls/review-card';
 import { TaskSecretRequests } from '@/features/secrets/task-requests';
+import { useTaskSecretRequests } from '@/features/secrets/queries';
+import { useTaskApiCalls } from '@/features/api-calls/queries';
 import { apiOrigin } from '@/lib/auth';
 import { GitHubChatResponse } from '@/features/chat/github-download';
 import { ActivityResultCard } from '@/features/chat/activity-result-card';
@@ -429,8 +431,22 @@ function TaskSlackActions({
   );
 }
 
+/** What a task waiting for its owner waits on: a secret form, an API call review, or a row-change batch. */
+function useTaskWait(workspaceId: string, task: TaskSummary) {
+  const revision = `${task.status}/${task.toolCalls}/${task.activeMilliseconds}`;
+  const secrets = useTaskSecretRequests(workspaceId, task.id, revision);
+  const calls = useTaskApiCalls(workspaceId, task.id, revision);
+  if (task.status !== 'waiting-approval') return { label: taskStatusLabel(task), next: taskNextStep(task) };
+  if (secrets.state.kind === 'ready' && secrets.state.data.some(request => request.status === 'waiting'))
+    return { label: 'Needs a secret', next: 'Provide or decline the secret request below.' };
+  if (calls.state.kind === 'ready' && calls.state.data.some(call => call.status === 'awaiting-approval'))
+    return { label: taskStatusLabel(task), next: "Review the request below before it's sent." };
+  return { label: taskStatusLabel(task), next: taskNextStep(task) };
+}
+
 function TaskHeading({ workspaceId, task }: { workspaceId: string; task: TaskSummary }) {
   const identity = useTaskIdentity(workspaceId, task.id, task.agentId);
+  const wait = useTaskWait(workspaceId, task);
   return (
     <header className="space-y-3">
       <h1 className="break-words text-2xl font-medium">
@@ -450,9 +466,9 @@ function TaskHeading({ workspaceId, task }: { workspaceId: string; task: TaskSum
         </div>
       )}
       <p role="status" className="font-medium">
-        {taskStatusLabel(task)}
+        {wait.label}
       </p>
-      <p>{taskNextStep(task)}</p>
+      <p>{wait.next}</p>
     </header>
   );
 }

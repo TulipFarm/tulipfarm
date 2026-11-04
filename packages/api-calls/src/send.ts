@@ -93,8 +93,28 @@ export type SendApiCallOptions = {
   files?: ApiCallFiles | undefined;
   /** The operator's private hosts this call may reach; empty or absent outside a member's private chat or task. */
   privateHosts?: readonly PrivateHost[] | undefined;
+  /**
+   * Whether a response only its member may see can be kept here. When it answers false, a call with a secret or to a
+   * private host fails with `unavailable` before anything is sent.
+   */
+  privateResults?: (() => Promise<boolean>) | undefined;
   dependencies?: PinnedRequestPolicy['dependencies'];
 };
+
+/** Refuses, before sending, a call whose response must stay private where it could not. */
+export async function requirePrivateResults(
+  prepared: Pick<PreparedApiCall, 'used' | 'privateHost'>,
+  privateResults: SendApiCallOptions['privateResults'],
+) {
+  if (!privateResults || (!prepared.used.length && !prepared.privateHost) || (await privateResults())) return;
+  throw new ApiCallError(
+    'unavailable',
+    prepared.used.length
+      ? `A call with a secret can be made only in the member's own private chat, where its response stays private. Nothing was sent.`
+      : `A private host can be called only in the member's own private chat, where its response stays private. Nothing was sent.`,
+    prepared.used.length ? { secret: prepared.used[0]!.name } : {},
+  );
+}
 
 export const failedResult = (error: ApiCallError): ApiCallFailed => ({
   status: 'failed',
@@ -142,7 +162,18 @@ function secretFailure(error: unknown, name: string): ApiCallError {
   throw error;
 }
 
-function networkFailure(error: McpNetworkError, timeoutSeconds: number): ApiCallError {
+function networkFailure(error: McpNetworkError, timeoutSeconds: number, secret?: string): ApiCallError {
+  // A secret bound to a host that is not, or no longer, on the private host list is refused like any other destination.
+  if (
+    (error.code === 'address-denied' || error.code === 'endpoint-denied') &&
+    secret !== undefined &&
+    !error.requestSent
+  )
+    return new ApiCallError(
+      'destination-denied',
+      `The host is not a public host or a listed private host, so secret ${secret} cannot be sent there. Nothing was sent.`,
+      { secret },
+    );
   if (error.code === 'address-denied' || error.code === 'endpoint-denied')
     return new ApiCallError('address-denied', 'The host resolves to an address that is not allowed. Nothing was sent.');
   if (error.detail === 'dns-failed') return new ApiCallError('dns-failed', 'The host name did not resolve.');
@@ -363,7 +394,7 @@ export async function transmitApiCall(
             'The request may have reached the server, but no response came back. It was not sent again. Tell the member to check the service before trying again.',
           ),
         );
-      return failed(networkFailure(error, timeoutSeconds));
+      return failed(networkFailure(error, timeoutSeconds, prepared.privateHost ? undefined : used[0]?.name));
     }
     if (error instanceof ApiCallError) return failed(error);
     throw error;
@@ -399,6 +430,7 @@ export async function sendApiCall(input: unknown, options: SendApiCallOptions): 
         `${call.method} changes data and needs the member's approval, which is not available here. Nothing was sent. Tell the member.`,
       );
     prepared = await prepareApiCall(call, options.secrets, undefined, options.privateHosts);
+    await requirePrivateResults(prepared, options.privateResults);
   } catch (error) {
     if (error instanceof ApiCallError) return failed(error);
     throw error;

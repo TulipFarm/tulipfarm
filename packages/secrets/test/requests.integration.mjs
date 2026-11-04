@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { createSecretRequests } from '../dist/index.js';
+import { createSecretRequests, createSecrets } from '../dist/index.js';
 import { heldSecrets } from '../dist/send.js';
-import { code, denied, setup } from './fixture.mjs';
+import { code, denied, keyring, setup } from './fixture.mjs';
 
 const chat = () => ({
   kind: 'chat',
@@ -79,13 +79,39 @@ test('secret requests', async t => {
     await assert.rejects(requests.view(ws, ben, secretRequestId), denied);
     const view = await requests.view(ws, ana, secretRequestId);
     assert.equal(view.status, 'waiting');
-    assert.deepEqual(view.destinations, [{ kind: 'host', value: 'api.posthog.com' }]);
+    assert.deepEqual(view.destinations, [{ kind: 'host', value: 'api.posthog.com', plainHttp: false }]);
     // Another chat's temporary secret, another host and another placement are not offered (P8).
     assert.deepEqual(
       view.fields[0].options.map(option => option.name),
       ['Exact'],
     );
     await assert.rejects(submit(ben, secretRequestId, [{ fieldId: 'key', secretId: exact.id }]), denied);
+  });
+
+  await t.test('marks destinations the value may reach without encryption', async () => {
+    const privateHosts = [
+      { host: 'metrics', port: null, http: true },
+      { host: 'billing', port: null, http: false },
+    ];
+    const listed = createSecretRequests(createSecrets({ runtime: f.runtime, keyring, enabled: true, privateHosts }));
+    const destinations = [
+      { kind: 'host', host: 'metrics' },
+      { kind: 'endpoint', url: 'http://metrics/q' },
+      { kind: 'host', host: 'billing' },
+      { kind: 'endpoint', url: 'https://metrics/q' },
+    ];
+    const { secretRequestId } = await f.runtime.transaction(ws, commonCompatibility, tx =>
+      listed.create(tx, { membershipId: ana.membershipId, origin: chat(), request: ask({ destinations }) }),
+    );
+    assert.deepEqual(
+      (await listed.view(ws, ana, secretRequestId)).destinations.map(({ value, plainHttp }) => [value, plainHttp]),
+      [
+        ['http://metrics/q', true],
+        ['https://metrics/q', false],
+        ['billing', false],
+        ['metrics', true],
+      ],
+    );
   });
 
   await t.test('needs a placement for a new value and records a member-chosen one', async () => {

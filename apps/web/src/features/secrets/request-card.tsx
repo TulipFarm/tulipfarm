@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
+import { LockKeyholeOpen } from 'reicon-react/icons/LockKeyholeOpen';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField, Field } from '@tulipfarm/sprout/field';
@@ -39,6 +40,7 @@ import {
 } from './fields';
 import { useSecretRequest, useSecretsApi, useSecretsCapabilities, useSecretsChanges } from './queries';
 
+type RequestContext = 'chat' | 'task';
 type SecretsAnswer = Extract<NonNullable<InformationRequest['response']>['answer'], { kind: 'secrets' }>;
 
 /**
@@ -49,9 +51,12 @@ type SecretsAnswer = Extract<NonNullable<InformationRequest['response']>['answer
 export function SecretRequestCard({
   request,
   onSettled,
+  context = 'chat',
 }: {
   request: InformationRequest;
   onSettled: () => Promise<void>;
+  /** Where the request was made; a temporary value lasts for that chat or task run. */
+  context?: RequestContext;
 }) {
   const { status, expiresAt } = request;
   const secretRequestId = request.answerSchema.kind === 'secrets' ? request.answerSchema.secretRequestId : '';
@@ -121,6 +126,7 @@ export function SecretRequestCard({
       key={`${view.state.data.id}:${view.state.data.revision}`}
       workspaceId={workspaceId}
       view={view.state.data}
+      context={context}
       expiresAt={expiresAt}
       refresh={async () => {
         await view.refresh();
@@ -204,12 +210,14 @@ function samePlacement(a: Placement | null, b: Placement | null) {
 function SecretRequestForm({
   workspaceId,
   view,
+  context,
   expiresAt,
   refresh,
   onSettled,
 }: {
   workspaceId: string;
   view: SecretRequestView;
+  context: RequestContext;
   expiresAt: string;
   refresh: () => Promise<void>;
   onSettled: () => Promise<void>;
@@ -339,6 +347,12 @@ function SecretRequestForm({
         </h4>
         <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{view.purpose}</p>
         {!single && <p className="text-xs text-muted-foreground">Sent only to {hosts}</p>}
+        {view.destinations.some(destination => destination.plainHttp) && (
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            <LockKeyholeOpen size={14} aria-hidden="true" />
+            Sent without encryption
+          </p>
+        )}
       </div>
       {declining ? (
         <form
@@ -375,6 +389,7 @@ function SecretRequestForm({
               key={field.id}
               field={field}
               view={view}
+              context={context}
               draft={drafts[field.id] ?? draftFor(field)}
               problems={attempted ? problems[field.id] : undefined}
               disabled={locked}
@@ -403,7 +418,9 @@ function SecretRequestForm({
                   <>
                     {save
                       ? `Reuse it in other chats and share it from settings. ${deleted ? `Deleted ${deleted}.` : 'Kept until you delete it.'}`
-                      : `Used only in this chat, deleted ${deleted ?? 'in 1 day'}.`}{' '}
+                      : context === 'task'
+                        ? `Used only for this task run, deleted when the run ends or ${deleted ?? 'in 1 day'}, whichever is first.`
+                        : `Used only in this chat, deleted ${deleted ?? 'in 1 day'}.`}{' '}
                     <Button
                       variant="link"
                       size="sm"
@@ -465,6 +482,7 @@ function SecretRequestForm({
 function RequestField({
   field,
   view,
+  context,
   draft,
   problems,
   disabled,
@@ -472,6 +490,7 @@ function RequestField({
 }: {
   field: SecretRequestField;
   view: SecretRequestView;
+  context: RequestContext;
   draft: FieldDraft;
   problems: ReturnType<typeof fieldProblems> | undefined;
   disabled: boolean;
@@ -509,7 +528,9 @@ function RequestField({
             <SelectContent>
               {field.options.map(option => (
                 <SelectItem key={option.secretId} value={option.secretId}>
-                  {option.lifetime === 'conversation' ? `${option.name} (this chat only)` : option.name}
+                  {option.lifetime === 'conversation'
+                    ? `${option.name} (${context === 'task' ? 'this run only' : 'this chat only'})`
+                    : option.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -602,6 +623,7 @@ function RequestField({
                   {view.destinations.map(destination => (
                     <li key={`${destination.kind}:${destination.value}`} className="break-all">
                       {destinationLabel(destination)}
+                      {destination.plainHttp && ' · sent without encryption'}
                     </li>
                   ))}
                 </ul>

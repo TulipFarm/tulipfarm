@@ -89,7 +89,7 @@ export const secretRequestViewSchema = z.strictObject({
   revision: z.number().int(),
   expiresAt: z.string(),
   purpose: z.string(),
-  destinations: z.array(destination),
+  destinations: z.array(destination.extend({ plainHttp: z.boolean() })),
   fields: z.array(
     requestFieldSchema.omit({ placement: true }).extend({
       placement: placementSchema.nullable(),

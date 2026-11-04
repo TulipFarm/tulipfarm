@@ -15,8 +15,8 @@ export function taskSecretMock(settled: () => void) {
     expiresAt: at(23 * hour),
     purpose: 'I need read access to the billing service to compare last week’s failed invoices with checkout errors.',
     destinations: [
-      { kind: 'endpoint', value: 'http://billing.internal:8080/api/invoices' },
-      { kind: 'host', value: 'api.stripe.com' },
+      { kind: 'endpoint', value: 'http://billing.internal:8080/api/invoices', plainHttp: true },
+      { kind: 'host', value: 'api.stripe.com', plainHttp: false },
     ],
     fields: [
       { id: 'billing', label: 'Billing service token', kind: 'token', placement: { kind: 'bearer' }, options: [] },

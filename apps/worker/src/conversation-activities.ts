@@ -23,6 +23,7 @@ import {
   createChatTools,
   discoverToolNames,
   isExternalTool,
+  privateChatResults,
   publicSourceUrl,
   toolObservation,
 } from '@tulipfarm/agents/tools';
@@ -605,6 +606,8 @@ export function createConversationActivities(
             },
             files,
             privateHosts: secretServices.secrets.privateHosts,
+            privateResults: () =>
+              privateChatResults(context.runtime, context.workspaceId, context.actor, context.conversationId),
           });
           if (resumed.state === 'waiting') return resumed;
           return { ...resumed, sources: apiCallSources(resumed.result, context.conversationId) };

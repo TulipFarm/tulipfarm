@@ -36,7 +36,11 @@ export const placementOptions: Record<PlacementKind, { label: string; hint: stri
   body: { label: 'In the request body', hint: 'A JSON or form field' },
 };
 
-const destinationSchema = z.object({ kind: z.enum(['host', 'endpoint']), value: z.string() });
+const destinationSchema = z.object({
+  kind: z.enum(['host', 'endpoint']),
+  value: z.string(),
+  plainHttp: z.boolean().optional(),
+});
 export type Destination = z.infer<typeof destinationSchema>;
 export type DestinationInput = { kind: 'host'; host: string } | { kind: 'endpoint'; url: string };
 
