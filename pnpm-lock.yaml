@@ -1226,6 +1226,19 @@ importers:
         specifier: 26.6.3
         version: 26.6.3
 
+  packages/plan-documents:
+    dependencies:
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
+
   packages/provider-mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
