@@ -16,6 +16,7 @@ const root = join(import.meta.dirname, '..');
 const sourceRoots = [
   'apps/api/src',
   'apps/worker/src',
+  'apps/render-worker/src',
   'apps/database/src',
   'apps/snippet-broker/src',
   ...readdirSync(join(root, 'packages'))

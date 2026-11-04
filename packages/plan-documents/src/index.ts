@@ -6,3 +6,4 @@ export * from './sections.ts';
 export * from './stamp.ts';
 export * from './template.ts';
 export * from './theme.ts';
+export * from './render-job.ts';

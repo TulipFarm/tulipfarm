@@ -51,6 +51,8 @@ import {
   type PlanActor,
   type PlanNode,
   type PlanSpecification,
+  planDocumentRenderSchema,
+  type PlanDocumentRender,
   type PlanView,
   type PlanMutation,
 } from './plan-contracts.ts';
@@ -62,7 +64,9 @@ import {
 export const planCompatibility = Object.freeze({ minimum: 19, maximum: commonCompatibility.maximum });
 /** Content revisions, document sections and approvals need `*_plan_approval.sql`; older storage keeps plans as before. */
 export const planApprovalVersion = 33;
-type PlanTransaction = AgentTransaction & { commonVersion: number };
+/** Rendered plan documents and their PDF in Files need `*_plan_documents.sql`. */
+export const planDocumentsVersion = 34;
+export type PlanTransaction = AgentTransaction & { commonVersion: number };
 /** Whether plans carry documents and need the starter's approval of an exact revision in this workspace. */
 export const planDocumentsEnabled = (workspaceId: string) =>
   isFeatureEnabled('plan-documents', null, { id: workspaceId }).catch(() => false);
@@ -376,7 +380,137 @@ function planningChange(
     ? 'runtime'
     : 'starter';
 }
-export function createAgentPlans(runtime: AgentStorage) {
+export async function loadSpecialists(tx: AgentTransaction, planId: string) {
+  return z
+    .array(specialistRowSchema)
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT key, definition FROM ${relation(tx, 'tf_agent_plan_specialists')} WHERE plan_id=$1 ORDER BY key`,
+          [planId],
+        )
+      ).rows,
+    )
+    .map(row => row.definition);
+}
+/**
+ * The reviewable content of a plan, read back from storage. It is an allowlist: never results, evidence, links or
+ * specialist instructions, so approving a revision approves exactly what the starter could read.
+ */
+export async function contentDigest(tx: PlanTransaction, planId: string) {
+  const plan = planRowSchema.parse(
+    (await tx.client.query(`SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1`, [planId]))
+      .rows[0],
+  );
+  const tasks = await loadTasks(tx, planId);
+  const specialists = await loadSpecialists(tx, planId);
+  const names = new Map(specialists.map(item => [item.key, item.name]));
+  const snapshot = {
+    title: plan.title,
+    brief: plan.brief,
+    requirements: plan.planning?.requirements ?? [],
+    prerequisites: (plan.planning?.prerequisites ?? []).map(({ key, title, status, reason, optional, tasks }) => ({
+      key,
+      title,
+      status,
+      reason: reason ?? null,
+      optional: optional ?? false,
+      tasks,
+    })),
+    verificationTask: plan.planning?.verificationTask ?? null,
+    tasks: tasks.map(task => ({
+      key: task.key,
+      parent: task.parent,
+      position: task.position,
+      kind: task.kind,
+      order: task.order,
+      title: task.title,
+      brief: task.brief,
+      criteria: task.criteria,
+      dependsOn: task.dependsOn,
+      assignee: task.coordinator
+        ? 'Main agent'
+        : task.agentId
+          ? (task.agentName ?? 'Saved agent')
+          : task.specialist
+            ? (names.get(task.specialist) ?? task.specialist)
+            : null,
+    })),
+    specialists: specialists.map(({ key, name, role }) => ({ key, name, role })),
+    budget: plan.budget,
+    document: plan.document,
+  };
+  return { snapshot, digest: digest(snapshot), revision: plan.contentRevision };
+}
+/** The digest of the plan's current revision. A plan saved before revisions gets its snapshot row now. */
+export async function currentRevision(tx: PlanTransaction, planId: string, membershipId: string | null = null) {
+  const content = await contentDigest(tx, planId);
+  const stored = (
+    await tx.client.query(
+      `SELECT digest FROM ${relation(tx, 'tf_agent_plan_revisions')} WHERE plan_id=$1 AND revision=$2`,
+      [planId, content.revision],
+    )
+  ).rows[0]?.digest;
+  if (typeof stored === 'string') return stored;
+  await tx.client.query(
+    `INSERT INTO ${relation(tx, 'tf_agent_plan_revisions')} (plan_id,revision,snapshot,digest,change_kind,created_by_membership_id) VALUES ($1,$2,$3,$4,'starter',$5)`,
+    [planId, content.revision, content.snapshot, content.digest, membershipId],
+  );
+  return content.digest;
+}
+/**
+ * The plan document of the plan's current revision and the newest revision with a page. Null before any rendering, or
+ * on storage without plan documents.
+ */
+export async function documentRenderState(tx: PlanTransaction, planId: string): Promise<PlanDocumentRender | null> {
+  if (tx.commonVersion < planDocumentsVersion) return null;
+  const row = z
+    .object({
+      currentRevision: z.number().int().positive(),
+      fileId: uuidSchema.nullable(),
+      fileDetached: z.boolean(),
+      revision: z.number().int().positive().nullable(),
+      status: z.string().nullable(),
+      error: z.string().nullable(),
+      pageRevision: z.number().int().positive().nullable(),
+      fileVersion: z.number().int().positive().nullable(),
+    })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT p.content_revision AS "currentRevision", p.document_file_id AS "fileId", p.document_file_detached AS "fileDetached",
+            latest.revision, latest.status, latest.error,
+            (SELECT max(h.revision) FROM ${relation(tx, 'tf_agent_plan_documents')} h WHERE h.plan_id=p.id AND h.html_object_key IS NOT NULL AND h.revision<=p.content_revision) AS "pageRevision",
+            (SELECT v.pdf_file_version FROM ${relation(tx, 'tf_agent_plan_documents')} v WHERE v.plan_id=p.id AND v.pdf_file_id=p.document_file_id
+              ORDER BY v.revision DESC, v.generation DESC LIMIT 1) AS "fileVersion"
+          FROM ${relation(tx, 'tf_agent_plans')} p
+          LEFT JOIN LATERAL (SELECT d.revision, d.status, d.error FROM ${relation(tx, 'tf_agent_plan_documents')} d
+            WHERE d.plan_id=p.id ORDER BY d.revision DESC, d.generation DESC LIMIT 1) latest ON true
+          WHERE p.id=$1`,
+          [planId],
+        )
+      ).rows[0],
+    );
+  if (!row || row.revision === null) return null;
+  const current = row.revision === row.currentRevision;
+  return planDocumentRenderSchema.parse({
+    revision: row.currentRevision,
+    status: current ? row.status : 'pending',
+    error: current ? row.error : null,
+    pageRevision: row.pageRevision,
+    fileId: row.fileDetached ? null : row.fileId,
+    fileVersion: row.fileDetached || !row.fileId ? null : row.fileVersion,
+    fileDetached: row.fileDetached,
+  });
+}
+export function createAgentPlans(
+  runtime: AgentStorage,
+  options: {
+    /** Display names by user ID, which live outside workspace storage. Without it, approvers stay unnamed. */
+    names?: (userIds: string[]) => Promise<ReadonlyMap<string, string>>;
+  } = {},
+) {
   async function transaction<T>(
     workspaceId: string,
     user: string,
@@ -432,19 +566,6 @@ export function createAgentPlans(runtime: AgentStorage) {
     if (plan.starterUserId !== actor.userId || plan.starterMembershipId !== actor.membershipId)
       throw new AgentPlanError('not-starter');
   }
-  async function loadSpecialists(tx: AgentTransaction, planId: string) {
-    return z
-      .array(specialistRowSchema)
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT key, definition FROM ${relation(tx, 'tf_agent_plan_specialists')} WHERE plan_id=$1 ORDER BY key`,
-            [planId],
-          )
-        ).rows,
-      )
-      .map(row => row.definition);
-  }
   /** The starter must be allowed to invoke every saved agent a plan names; specialists are checked by schema. */
   async function requireAssignable(tx: AgentTransaction, actor: HumanActor, nodes: readonly PlanNode[]) {
     const agents = new Set(nodes.flatMap(node => (node.assignee?.kind === 'agent' ? [node.assignee.agentId] : [])));
@@ -495,71 +616,6 @@ export function createAgentPlans(runtime: AgentStorage) {
       )
     ).rows[0]?.reason;
     return planPauseSchema.catch('starter').parse(reason);
-  }
-  /**
-   * The reviewable content of a plan, read back from storage. It is an allowlist: never results, evidence, links or
-   * specialist instructions, so approving a revision approves exactly what the starter could read.
-   */
-  async function contentDigest(tx: PlanTransaction, planId: string) {
-    const plan = planRowSchema.parse(
-      (await tx.client.query(`SELECT ${planColumns(tx)} FROM ${relation(tx, 'tf_agent_plans')} WHERE id=$1`, [planId]))
-        .rows[0],
-    );
-    const tasks = await loadTasks(tx, planId);
-    const specialists = await loadSpecialists(tx, planId);
-    const names = new Map(specialists.map(item => [item.key, item.name]));
-    const snapshot = {
-      title: plan.title,
-      brief: plan.brief,
-      requirements: plan.planning?.requirements ?? [],
-      prerequisites: (plan.planning?.prerequisites ?? []).map(({ key, title, status, reason, optional, tasks }) => ({
-        key,
-        title,
-        status,
-        reason: reason ?? null,
-        optional: optional ?? false,
-        tasks,
-      })),
-      verificationTask: plan.planning?.verificationTask ?? null,
-      tasks: tasks.map(task => ({
-        key: task.key,
-        parent: task.parent,
-        position: task.position,
-        kind: task.kind,
-        order: task.order,
-        title: task.title,
-        brief: task.brief,
-        criteria: task.criteria,
-        dependsOn: task.dependsOn,
-        assignee: task.coordinator
-          ? 'Main agent'
-          : task.agentId
-            ? (task.agentName ?? 'Saved agent')
-            : task.specialist
-              ? (names.get(task.specialist) ?? task.specialist)
-              : null,
-      })),
-      specialists: specialists.map(({ key, name, role }) => ({ key, name, role })),
-      budget: plan.budget,
-      document: plan.document,
-    };
-    return { snapshot, digest: digest(snapshot), revision: plan.contentRevision };
-  }
-  /** The digest of the plan's current revision. A plan saved before revisions gets its snapshot row now. */
-  async function currentRevision(tx: PlanTransaction, planId: string, membershipId: string | null = null) {
-    const content = await contentDigest(tx, planId);
-    const stored = (
-      await tx.client.query(
-        `SELECT digest FROM ${relation(tx, 'tf_agent_plan_revisions')} WHERE plan_id=$1 AND revision=$2`,
-        [planId, content.revision],
-      )
-    ).rows[0]?.digest;
-    if (typeof stored === 'string') return stored;
-    await tx.client.query(
-      `INSERT INTO ${relation(tx, 'tf_agent_plan_revisions')} (plan_id,revision,snapshot,digest,change_kind,created_by_membership_id) VALUES ($1,$2,$3,$4,'starter',$5)`,
-      [planId, content.revision, content.snapshot, content.digest, membershipId],
-    );
-    return content.digest;
   }
   /** Saves a new content revision when the content differs from `previous`. Returns the new revision, if any. */
   async function recordRevision(
@@ -646,6 +702,7 @@ export function createAgentPlans(runtime: AgentStorage) {
     pause: z.infer<typeof planPauseSchema> | null = null,
     waiting: ReadonlyMap<string, string> = new Map(),
     approval: Awaited<ReturnType<typeof approvalState>> = { approval: null, changesSinceApproval: [] },
+    documentRender: PlanDocumentRender | null = null,
   ): PlanView {
     const nodes = applyPlanningPrerequisites(tasks.map(toNode), plan.planning ?? undefined);
     const summary = summarizePlan(nodes, plan.planning ?? undefined);
@@ -673,6 +730,7 @@ export function createAgentPlans(runtime: AgentStorage) {
       approval: approval.approval,
       awaitingApproval: pause === 'awaiting-approval',
       changesSinceApproval: approval.changesSinceApproval,
+      documentRender,
       specialists: specialists.map(({ key, name, role }) => ({ key, name, role })),
       tasks: tasks.map(task => ({
         id: task.id,
@@ -1146,8 +1204,9 @@ export function createAgentPlans(runtime: AgentStorage) {
     },
     /** Returns the read-only projection to anyone who can read the chat; only the starter receives `canControl`. */
     async read(workspaceId: string, user: string, planId: string) {
+      let approverUserId: string | undefined;
       // Reading is repeatable, so remote source checks run between its transactions instead of holding them open.
-      return deferRemoteSourceChecks(() =>
+      const projection = await deferRemoteSourceChecks(() =>
         transaction(workspaceId, user, false, async (tx, actor) => {
           const plan = await loadPlan(tx, actor, planId, false);
           for (const check of plan.planning?.prerequisites ?? [])
@@ -1160,6 +1219,7 @@ export function createAgentPlans(runtime: AgentStorage) {
             await pauseReason(tx, plan),
             await waitingTasks(tx, plan, actor),
             await approvalState(tx, plan),
+            await documentRenderState(tx, plan.id),
           );
           const reports = z.array(z.object({ key: planKeySchema, report: planReportSchema })).parse(
             (
@@ -1181,9 +1241,25 @@ export function createAgentPlans(runtime: AgentStorage) {
             const task = projection.tasks.find(task => task.key === key);
             if (task) task.report = report;
           }
+          if (projection.approval && options.names)
+            approverUserId = z
+              .object({ userId: z.string() })
+              .optional()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT user_id AS "userId" FROM ${relation(tx, 'tf_memberships')} WHERE id=$1`,
+                    [projection.approval.approvedByMembershipId],
+                  )
+                ).rows[0],
+              )?.userId;
           return projection;
         }),
       );
+      if (projection.approval && approverUserId && options.names)
+        projection.approval.approvedBy =
+          (await options.names([approverUserId]).catch(() => undefined))?.get(approverUserId) ?? null;
+      return projection;
     },
     /**
      * Returns the latest completed result of each task, with the sources it depends on. Workers ran with the starter's

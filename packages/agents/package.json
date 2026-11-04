@@ -131,6 +131,10 @@
       "types": "./dist/model-bundles.d.ts",
       "default": "./dist/model-bundles.js"
     },
+    "./plan-document-store": {
+      "types": "./dist/plan-document-store.d.ts",
+      "default": "./dist/plan-document-store.js"
+    },
     "./plans": {
       "types": "./dist/plans.d.ts",
       "default": "./dist/plans.js"

@@ -962,6 +962,25 @@ const countsSchema = z.object({
 });
 const outcomeSchema = z.enum(['empty', 'active', 'waiting', 'completed', 'failed']);
 /** The read-only projection shown in chat and the canvas. It never carries specialist instructions. */
+export const planDocumentStatusSchema = z.enum(['pending', 'rendering', 'ready', 'failed']);
+/**
+ * `quota` and `too-large` failures still have a page; `render` and `files` failures leave the previous one. A detached
+ * file was moved to Trash or deleted by the starter, so later versions are not saved until they recreate it.
+ */
+export const planDocumentErrorSchema = z.enum(['render', 'too-large', 'quota', 'files']);
+export const planDocumentRenderSchema = z.object({
+  /** The content revision the latest rendering is for. */
+  revision: z.number().int().positive(),
+  status: planDocumentStatusSchema,
+  error: planDocumentErrorSchema.nullable(),
+  /** The newest revision whose page `GET .../document/:revision` serves, which may be older than `revision`. */
+  pageRevision: z.number().int().positive().nullable(),
+  fileId: uuidSchema.nullable(),
+  fileVersion: z.number().int().positive().nullable(),
+  fileDetached: z.boolean(),
+});
+export type PlanDocumentRender = z.infer<typeof planDocumentRenderSchema>;
+
 export const planViewSchema = z.object({
   id: uuidSchema,
   chatId: uuidSchema,
@@ -1012,6 +1031,8 @@ export const planViewSchema = z.object({
       }),
     )
     .default([]),
+  /** The plan document of the current content revision, and the newest one with a page to show. Null without documents. */
+  documentRender: planDocumentRenderSchema.nullable().default(null),
   specialists: z.array(z.object({ key: planKeySchema, name: z.string(), role: z.string() })),
   tasks: z.array(
     z.object({

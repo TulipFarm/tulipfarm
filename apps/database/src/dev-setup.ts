@@ -97,6 +97,10 @@ async function main() {
     ...env.worker,
     ...connections,
   });
+  await write('apps/render-worker/.env.local', {
+    ...env.renderWorker,
+    ...Object.fromEntries(Object.entries(connections).filter(([name]) => name.startsWith('TEMPORAL_'))),
+  });
   await write('apps/worker/.env.storage.local', {
     ...env.storageWorker,
     ...Object.fromEntries(Object.entries(connections).filter(([name]) => name.startsWith('TEMPORAL_'))),

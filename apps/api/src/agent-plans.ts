@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
-import { createAgentPlans } from '@tulipfarm/agents/plans';
+import { createPlanDocumentStore, type PlanDocumentMode } from '@tulipfarm/agents/plan-document-store';
+import { createAgentPlans, planDocumentsEnabled } from '@tulipfarm/agents/plans';
+import { planDocumentContentSecurityPolicy, planDocumentObjectPath } from '@tulipfarm/plan-documents';
 import {
   AgentPlanError,
   planControlSchema,
@@ -26,9 +30,35 @@ export function registerAgentPlans(
     runtime: WorkspaceRuntime;
     auth: Parameters<typeof authenticateRoutes>[1];
     wake?: (workspaceId: string, planId: string) => Promise<void>;
+    /** Resolves approver names. */
+    identity?: Pick<Pool, 'query'>;
+    /** Serves rendered plan documents and starts renderings again. Without it, the document routes are absent. */
+    documents?: {
+      objects: { read: (key: string, maximumBytes: number) => Promise<Uint8Array> };
+      start: (workspaceId: string, planId: string, mode: PlanDocumentMode) => Promise<void>;
+    };
   },
 ) {
-  const service = createAgentPlans(dependencies.runtime);
+  const { identity } = dependencies;
+  const service = createAgentPlans(
+    dependencies.runtime,
+    identity
+      ? {
+          names: async (userIds: string[]) => {
+            const rows = z
+              .array(z.object({ id: z.string(), name: z.string() }))
+              .parse((await identity.query('SELECT id, name FROM app.users WHERE id = ANY($1)', [userIds])).rows);
+            return new Map(rows.map(row => [row.id, row.name.trim() || 'Unnamed member']));
+          },
+        }
+      : {},
+  );
+  const documents = createPlanDocumentStore(dependencies.runtime);
+  const page = z.strictObject({
+    workspaceId: uuidSchema,
+    planId: uuidSchema,
+    revision: z.coerce.number().int().positive().max(2147483647),
+  });
   const chat = z.strictObject({ workspaceId: uuidSchema, chatId: uuidSchema });
   const plan = z.strictObject({ workspaceId: uuidSchema, planId: uuidSchema });
   const errors = Object.fromEntries(
@@ -62,7 +92,7 @@ export function registerAgentPlans(
         },
       },
     });
-    routes.setErrorHandler((error, _request, reply) => {
+    routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       // A source that cannot be checked right now, say while GitHub is rate limited, is not a removed plan.
       if (error instanceof SourceAuthorizationUnavailable)
@@ -73,7 +103,15 @@ export function registerAgentPlans(
           .code(error.code === 'disabled' ? 404 : 503)
           .send({ error: error.code === 'disabled' ? 'plan-not-found' : 'plan-operation-unavailable' });
       if (error instanceof AgentPlanError)
-        return reply.code(error.code === 'not-starter' ? 403 : 409).send({ error: error.code });
+        return reply
+          .code(
+            error.code === 'not-starter'
+              ? 403
+              : error.code === 'document-unavailable' && request.method === 'GET'
+                ? 404
+                : 409,
+          )
+          .send({ error: error.code });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
       return reply.code(503).send({ error: 'plan-operation-unavailable' });
@@ -126,5 +164,67 @@ export function registerAgentPlans(
         }
       },
     );
+    const renderer = dependencies.documents;
+    if (!renderer) return;
+    routes.get(
+      '/workspaces/:workspaceId/agent-plans/:planId/document/:revision',
+      {
+        schema: {
+          operationId: 'readAgentPlanDocumentV1',
+          summary: 'Read the rendered page of a plan revision as sandboxed HTML',
+          tags: ['Agent plans'],
+          params: json(page),
+          response: { 200: { type: 'string' }, ...errors },
+        },
+      },
+      async (request, reply) => {
+        const p = page.parse(request.params);
+        if (!(await planDocumentsEnabled(p.workspaceId))) throw new AccessDenied();
+        const stored = await documents.page(p.workspaceId, user(request), p.planId, p.revision);
+        const body = await renderer.objects.read(planDocumentObjectPath(p.workspaceId, stored.key), stored.size);
+        if (createHash('sha256').update(body).digest('hex') !== stored.sha256)
+          throw new Error('plan-document-integrity');
+        return reply
+          .header('content-type', 'text/html; charset=utf-8')
+          .header(
+            'content-security-policy',
+            `${planDocumentContentSecurityPolicy}; sandbox; frame-ancestors 'self' ${authConfig().webOrigin}`,
+          )
+          .header('x-content-type-options', 'nosniff')
+          .header('cross-origin-resource-policy', 'same-site')
+          .header('referrer-policy', 'no-referrer')
+          .header('cache-control', 'private, no-store')
+          .send(Buffer.from(body));
+      },
+    );
+    const started = z.object({ status: z.literal('pending') });
+    for (const [action, operationId, summary] of [
+      ['retry', 'retryAgentPlanDocumentV1', 'Render the document of a plan you started again after it failed'],
+      ['recreate', 'recreateAgentPlanDocumentV1', 'Save a new PDF of a plan you started after its PDF was deleted'],
+    ] as const)
+      routes.post(
+        `/workspaces/:workspaceId/agent-plans/:planId/document/${action}`,
+        {
+          schema: {
+            operationId,
+            summary,
+            tags: ['Agent plans'],
+            params: json(plan),
+            response: { 202: json(started), ...errors },
+          },
+        },
+        async (request, reply) => {
+          const p = plan.parse(request.params);
+          if (!(await planDocumentsEnabled(p.workspaceId))) throw new AccessDenied();
+          const mode =
+            action === 'retry'
+              ? await documents.retry(p.workspaceId, user(request), p.planId)
+              : await documents.recreate(p.workspaceId, user(request), p.planId);
+          if (!mode) throw new AgentPlanError('document-unavailable');
+          // A start that fails is retried by plan recovery, since the rendering is already marked as due.
+          await renderer.start(p.workspaceId, p.planId, mode);
+          return reply.code(202).send({ status: 'pending' });
+        },
+      );
   });
 }

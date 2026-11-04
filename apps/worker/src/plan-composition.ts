@@ -83,6 +83,11 @@ export function createPlanComposition(options: {
   knowledge?: KnowledgeToolsFactory;
   /** Saves the images of specialists that hold `images.generate`; without it, that tool is refused. */
   files?: ImageOutputStore | undefined;
+  /** Renders plan documents after a revision or approval, and starts lost renderings again. */
+  documents?: {
+    dispatch(workspaceId: string, planId: string): Promise<void>;
+    recover(workspaceId: string): Promise<void>;
+  };
   env?: NodeJS.ProcessEnv;
 }) {
   const { runtime } = options;
@@ -420,7 +425,15 @@ export function createPlanComposition(options: {
     plans,
     activities: {
       async advanceAgentPlan(workspaceId: string, planId: string) {
-        return plans.step(workspaceId, planId, options.wakeTask);
+        const progress = await plans.step(workspaceId, planId, options.wakeTask);
+        // Every edit and approval wakes the plan, so its step starts the document; recovery retries a lost start.
+        await options.documents?.dispatch(workspaceId, planId).catch(error => {
+          log('warn', 'activity', 'dispatch_failed', {
+            ...errorAttributes(error),
+            operation: 'plan-document.dispatch',
+          });
+        });
+        return progress;
       },
       async runPlanSpecialist(workspaceId: string, attemptId: string) {
         const claimed = await plans.claimSpecialist(workspaceId, attemptId);
@@ -456,6 +469,7 @@ export function createPlanComposition(options: {
         try {
           // Image holds of a specialist whose worker died settle here, without waiting for a chat reply.
           if (!after) await runtime.transaction(workspaceId, commonCompatibility, tx => recoverImageHolds(tx));
+          if (!after) await options.documents?.recover(workspaceId);
           let page;
           try {
             page = await plans.due(workspaceId, after);
