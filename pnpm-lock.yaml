@@ -660,6 +660,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../observability
+      '@tulipfarm/plan-documents':
+        specifier: workspace:*
+        version: link:../plan-documents
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../secrets

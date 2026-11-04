@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { applySectionsUpdate } from '@tulipfarm/plan-documents';
 import {
   deferRemoteSourceChecks,
   lockAuthorization,
@@ -854,8 +855,9 @@ export function createAgentPlans(runtime: AgentStorage) {
         if (command.document && !(documents && revisions)) throw new AgentPlanError('document-unavailable');
         let document = plan.document;
         if (command.document) {
-          const given = Object.entries(command.document).filter(([, value]) => value !== undefined);
-          const merged = planDocumentSchema.safeParse({ ...plan.document, ...Object.fromEntries(given) });
+          const merged = plan.document
+            ? planDocumentSchema.safeParse(applySectionsUpdate(plan.document, command.document))
+            : planDocumentSchema.safeParse(command.document);
           if (!merged.success) throw new PlanGraphError('document-summary');
           document = merged.data;
         }

@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { uuidSchema } from '@tulipfarm/access/contracts';
+import {
+  planDocumentSectionsSchema,
+  planDocumentSectionsUpdateSchema,
+  type PlanDocumentSections,
+  type PlanDocumentSectionsUpdate,
+} from '@tulipfarm/plan-documents';
 import { maximumTaskLimits } from './contracts.ts';
 
 /** Structural ceilings shared by tools, storage and the canvas. Inputs over a ceiling are refused, never truncated. */
@@ -249,66 +255,12 @@ export const planBudgetSchema = z.strictObject({
 });
 export type PlanBudget = z.infer<typeof planBudgetSchema>;
 
-const mermaidTypes = /^(?:flowchart|graph|sequenceDiagram|stateDiagram-v2|timeline)\b/;
-/** Why a Mermaid source is refused, or null when it is a supported diagram without links, scripts or markup. */
-export function mermaidProblem(source: string): string | null {
-  const first = source
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .find(line => line && !line.startsWith('%%'));
-  if (!first || !mermaidTypes.test(first))
-    return 'Start the diagram with flowchart, graph, sequenceDiagram, stateDiagram-v2 or timeline.';
-  if (source.includes('%%{')) return 'Remove the %%{ }%% directive; diagrams use the default theme and settings.';
-  if (/^\s*click\b/im.test(source)) return 'Remove click interactions; plan diagrams cannot link or run code.';
-  if (/\bhref\b/i.test(source)) return 'Remove href links; plan diagrams cannot link.';
-  if (/javascript\s*:/i.test(source)) return 'Remove javascript: URLs.';
-  if (/(?<!<)<\/?[a-z][^<>]*>(?!>)/i.test(source)) return 'Remove HTML tags from labels; use plain text.';
-  return null;
-}
-const sectionText = (maximum: number) => z.string().trim().min(1).max(maximum);
-const planDiagramSchema = z.strictObject({
-  key: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]{0,47}$/)
-    .describe('Stable lowercase key, unique in this plan.'),
-  title: sectionText(120),
-  caption: z.string().trim().max(400).optional(),
-  mermaid: z
-    .string()
-    .max(4000)
-    .superRefine((source, context) => {
-      const problem = mermaidProblem(source);
-      if (problem) context.addIssue({ code: 'custom', message: problem });
-    })
-    .describe('Mermaid source: flowchart (or graph), sequenceDiagram, stateDiagram-v2 or timeline.'),
-});
-const planDiagramsSchema = z
-  .array(planDiagramSchema)
-  .max(4)
-  .refine(
-    diagrams => new Set(diagrams.map(diagram => diagram.key)).size === diagrams.length,
-    'Use unique diagram keys.',
-  );
-const planRisksSchema = z.array(z.strictObject({ risk: sectionText(400), mitigation: sectionText(400) })).max(8);
-/**
- * The written sections of a plan document, shown with its tasks. It mirrors the document schema of the
- * plan-documents package: summary, optional approach, risks with mitigations, and up to four Mermaid diagrams.
- */
-export const planDocumentSchema = z.strictObject({
-  summary: sectionText(1500),
-  approach: z.string().trim().max(6000).optional(),
-  risks: planRisksSchema.default([]),
-  diagrams: planDiagramsSchema.default([]),
-});
-export type PlanDocument = z.infer<typeof planDocumentSchema>;
+/** The written sections of a plan document; the plan-documents package owns their limits and Mermaid checks. */
+export const planDocumentSchema = planDocumentSectionsSchema;
+export type PlanDocument = PlanDocumentSections;
 /** A document change on update: each given section replaces the saved one. */
-export const planDocumentPatchSchema = z.strictObject({
-  summary: sectionText(1500).optional(),
-  approach: z.string().trim().max(6000).optional(),
-  risks: planRisksSchema.optional(),
-  diagrams: planDiagramsSchema.optional(),
-});
-export type PlanDocumentPatch = z.infer<typeof planDocumentPatchSchema>;
+export const planDocumentPatchSchema = planDocumentSectionsUpdateSchema;
+export type PlanDocumentPatch = PlanDocumentSectionsUpdate;
 
 export const createPlanSchema = z.strictObject({
   title,
