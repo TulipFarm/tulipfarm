@@ -10,6 +10,7 @@ import {
   requestFieldSchema,
   secretKindSchema,
   secretNameSchema,
+  secretNamesInputSchema,
   submitRequestSchema,
 } from '@tulipfarm/secrets';
 
@@ -27,6 +28,7 @@ export const secretsCapabilitiesSchema = z.strictObject({ enabled: z.boolean() }
 export const secretSummarySchema = z.strictObject({
   id: z.uuid(),
   name: z.string(),
+  variableName: z.string(),
   kind: secretKindSchema,
   placement: placementSchema,
   placementSource: z.enum(['agent', 'member']),
@@ -70,6 +72,7 @@ export const secretGrantsBody = z.strictObject({
   expectedPolicyVersion: version,
   grants: z.array(grantSchema).max(50),
 });
+export const secretNamesBody = secretNamesInputSchema;
 export const secretExpiryBody = z.strictObject({ requestId: z.uuid(), expectedPolicyVersion: version, expiresAt });
 export const saveSecretBody = z.strictObject({
   requestId: z.uuid(),

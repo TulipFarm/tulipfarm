@@ -11,10 +11,17 @@ export const answerSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string() }),
   z.object({ kind: z.literal('choices'), choiceIds: z.array(z.string()) }),
 ]);
+const secretsAnswerSchema = z.object({
+  kind: z.literal('secrets'),
+  status: z.enum(['provided', 'declined']),
+  references: z.array(z.object({ referenceId: z.uuid(), fieldId: z.string(), name: z.string(), kind: z.string() })),
+  reason: z.string().nullable(),
+});
 export const informationSchema = z.object({
   ...identity,
   answerSchema: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('text') }),
+    z.object({ kind: z.literal('secrets'), secretRequestId: z.uuid() }),
     z.object({
       kind: z.literal('choices'),
       multiple: z.boolean(),
@@ -26,7 +33,13 @@ export const informationSchema = z.object({
     }),
   ]),
   status: z.enum(['pending', 'answered', 'expired', 'cancelled']),
-  response: z.object({ id: z.uuid(), answer: answerSchema, createdAt: z.string() }).nullable(),
+  response: z
+    .object({
+      id: z.uuid(),
+      answer: z.discriminatedUnion('kind', [...answerSchema.options, secretsAnswerSchema]),
+      createdAt: z.string(),
+    })
+    .nullable(),
 });
 export const requestOutcomeSchema = z.object({
   requestId: z.uuid(),
@@ -53,6 +66,13 @@ export const approvalSchema = z.object({
   resolution: approvalOutcomeSchema.nullable(),
 });
 export type InformationRequest = z.infer<typeof informationSchema>;
+/** A question the member answers in the chat itself, as opposed to a secrets request with its own form. */
+export type QuestionRequest = Omit<InformationRequest, 'answerSchema'> & {
+  answerSchema: Exclude<InformationRequest['answerSchema'], { kind: 'secrets' }>;
+};
+export function isQuestion(request: InformationRequest): request is QuestionRequest {
+  return request.answerSchema.kind !== 'secrets';
+}
 export type ApprovalRequest = z.infer<typeof approvalSchema>;
 export type Interaction =
   | { kind: 'information'; request: InformationRequest }

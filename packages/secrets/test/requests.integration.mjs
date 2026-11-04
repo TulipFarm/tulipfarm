@@ -107,10 +107,10 @@ test('secret requests', async t => {
       },
     ]);
     const stored = await f.db.platform.query(
-      `SELECT s.placement_source FROM ${f.table('tf_secret_references')} r JOIN ${f.table('tf_secrets')} s ON s.id = r.secret_id WHERE r.id = $1`,
+      `SELECT s.placement_source, s.variable_name FROM ${f.table('tf_secret_references')} r JOIN ${f.table('tf_secrets')} s ON s.id = r.secret_id WHERE r.id = $1`,
       [result.references[0].referenceId],
     );
-    assert.equal(stored.rows[0].placement_source, 'member');
+    assert.deepEqual(stored.rows[0], { placement_source: 'member', variable_name: 'KEY' });
     assert.deepEqual(result.references[0].placement, { kind: 'query', name: 'api_key' });
   });
 

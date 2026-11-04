@@ -278,12 +278,14 @@ test('secrets', async t => {
       f.secrets.delete(ws, f.admin, managed.id, { requestId: randomUUID(), expectedVersion: 1 }),
       denied,
     );
+    const own = await f.secrets.create(ws, ben, f.input({ variableName: managed.variableName }));
     const taken = await f.secrets.takeOwnership(ws, ben, managed.id, {
       requestId: randomUUID(),
       expectedVersion: 1,
       value: { value: 'phx-taken-over' },
     });
     assert.equal(taken.ownerMembershipId, ben.membershipId);
+    assert.equal(taken.variableName, `${own.variableName}_2`);
     assert.equal(taken.status, 'active');
     assert.deepEqual((await f.send(cy, managed.id)).value, { value: 'phx-taken-over' });
 
@@ -291,6 +293,49 @@ test('secrets', async t => {
     await assert.rejects(f.send(f.admin, orphan.id), code('unavailable'));
     await f.secrets.delete(ws, f.admin, orphan.id, { requestId: randomUUID(), expectedVersion: 1 });
     await assert.rejects(f.send(ana, orphan.id), code('unavailable'));
+  });
+
+  await t.test('variable names are generated, numbered when taken, and renamed only when free', async () => {
+    const stripe = await f.secrets.create(ws, cy, f.input({ name: 'Stripe' }));
+    assert.equal(stripe.variableName, 'STRIPE_KEY');
+    const again = await f.secrets.create(ws, cy, f.input({ name: 'Stripe' }));
+    assert.equal(again.variableName, 'STRIPE_KEY_2');
+    assert.equal((await f.secrets.create(ws, ben, f.input({ name: 'Stripe' }))).variableName, 'STRIPE_KEY');
+    await assert.rejects(
+      f.secrets.create(ws, cy, f.input({ name: 'Other', variableName: 'stripe_key' })),
+      code('variable-name-taken'),
+    );
+    const chosen = await f.secrets.create(ws, cy, f.input({ name: 'Other', variableName: ' billing_key ' }));
+    assert.equal(chosen.variableName, 'BILLING_KEY');
+
+    await assert.rejects(
+      f.secrets.rename(ws, cy, again.id, { variableName: 'BILLING_KEY' }),
+      code('variable-name-taken'),
+    );
+    const renamed = await f.secrets.rename(ws, cy, again.id, { name: 'Stripe test', variableName: 'stripe_test_key' });
+    assert.equal(renamed.name, 'Stripe test');
+    assert.equal(renamed.variableName, 'STRIPE_TEST_KEY');
+    const renaming = (await f.secrets.history(ws, cy, again.id)).at(-1);
+    assert.equal(renaming.operation, 'renamed');
+    assert.deepEqual(renaming.details, { name: 'Stripe test', variableName: 'STRIPE_TEST_KEY' });
+    await assert.rejects(f.secrets.rename(ws, ana, again.id, { name: 'Mine' }), denied);
+
+    await f.secrets.delete(ws, cy, stripe.id, { requestId: randomUUID(), expectedVersion: 1 });
+    assert.equal((await f.secrets.create(ws, cy, f.input({ name: 'Stripe' }))).variableName, 'STRIPE_KEY');
+
+    const chat = { kind: 'chat', conversationId: randomUUID() };
+    const temporary = await f.secrets.create(
+      ws,
+      cy,
+      f.input({ name: 'API key', lifetime: { kind: 'conversation', origin: chat } }),
+    );
+    assert.equal(temporary.variableName, 'API_KEY');
+    const saved = await f.secrets.save(ws, cy, temporary.id, {
+      requestId: randomUUID(),
+      expectedPolicyVersion: 1,
+      name: 'Stripe',
+    });
+    assert.equal(saved.variableName, 'STRIPE_KEY_2');
   });
 
   await t.test('deleting makes every send fail at once', async () => {

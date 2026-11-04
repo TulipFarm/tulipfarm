@@ -110,6 +110,7 @@ const IntegrationDetailPage = lazyRouteComponent(() => import('@/pages/integrati
 const ModelsPage = lazyRouteComponent(() => import('@/pages/models'), 'ModelsPage');
 const SettingsPage = lazyRouteComponent(() => import('@/pages/settings'), 'SettingsPage');
 const AccountSettingsPage = lazyRouteComponent(() => import('@/pages/account-settings'), 'AccountSettingsPage');
+const SecretsSettingsPage = lazyRouteComponent(() => import('@/pages/secrets-settings'), 'SecretsSettingsPage');
 
 function NotFoundPanel() {
   return (
@@ -985,6 +986,11 @@ const workspaceAccountRoute = createRoute({
   path: 'settings/account',
   component: AccountSettingsPage,
 });
+const workspaceSecretsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'settings/secrets',
+  component: SecretsSettingsPage,
+});
 // A web extension supplies the Usage page; without one the route does not exist.
 const UsagePage = overrides.get('usage');
 const workspaceUsageRoute = createRoute({
@@ -1119,6 +1125,7 @@ export const router = createRouter({
       workspaceSettingsRoute,
       workspaceSoulRoute,
       workspaceAccountRoute,
+      workspaceSecretsRoute,
       workspaceModelsRoute,
       workspaceUsageRoute,
       workspaceMembersRoute,
