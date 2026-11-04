@@ -61,7 +61,11 @@ unavailable). `error`, `result_error` and `blocked` also count in
 
 `web-fetch.ts` reads the public web. `fetchPublicText` reads a page through
 Huntsman (`POST /v1/scrape`) and `searchPublicWeb` searches through SearXNG
-(`GET /search?format=json`, with `time_range` for the day and week windows). `fetchPublicFile(url, signal)` fetches one link directly for
+(`GET /search?format=json`, with `time_range` for the day and week windows).
+The first `fetchPublicText` read of a site in a turn or run (its `scope`) also
+fetches the site's `/llms.txt` with `fetchPublicFile` and, when it is a text
+file, returns it as a second page so the agent can pick the next pages to read.
+`fetchPublicFile(url, signal)` fetches one link directly for
 reading as a file: it checks every hop's IPv4 addresses are public, connects
 through an undici `Agent` whose `connect.lookup` returns only those addresses,
 follows at most 5 redirects, sends no credentials, and streams under 10 MiB within

@@ -325,28 +325,88 @@ async function readPage(url: string, signal: AbortSignal): Promise<z.infer<typeo
   }
 }
 
-export async function fetchPublicText(input: string): Promise<WebResult> {
+/**
+ * Sites whose `/llms.txt` was already tried in a turn or run, keyed by scope and origin, so reading several pages of one
+ * site returns the guide once. Entries expire after an hour and the map stays bounded.
+ */
+const siteGuidesTried = new Map<string, number>();
+const siteGuideMemory = { ttlMs: 60 * 60 * 1000, maxEntries: 5000 };
+
+function firstSiteGuideRead(scope: string | undefined, origin: string) {
+  if (!scope) return true;
+  const now = Date.now();
+  const key = `${scope}\n${origin}`;
+  if ((siteGuidesTried.get(key) ?? 0) > now) return false;
+  if (siteGuidesTried.size >= siteGuideMemory.maxEntries)
+    for (const [entry, expiresAt] of siteGuidesTried)
+      if (expiresAt <= now || siteGuidesTried.size >= siteGuideMemory.maxEntries) siteGuidesTried.delete(entry);
+  siteGuidesTried.set(key, now + siteGuideMemory.ttlMs);
+  return true;
+}
+
+/**
+ * Reads the site's `/llms.txt`, the plain-text guide a site publishes for AI agents (https://llmstxt.org). Only a text
+ * file counts: a missing file, an HTML fallback page or any failure is no guide.
+ */
+async function readSiteGuide(url: string, signal: AbortSignal): Promise<z.infer<typeof webPageSchema> | null> {
+  const { origin, pathname } = new URL(url);
+  if (pathname === '/llms.txt' || pathname === '/llms-full.txt') return null;
+  const guideUrl = `${origin}/llms.txt`;
+  try {
+    const file = await fetchPublicFile(guideUrl, signal);
+    if (file.kind !== 'file' || !/^text\/(plain|markdown|x-markdown)$/.test(file.mediaType)) return null;
+    const text = boundedText(new TextDecoder('utf-8', { fatal: false }).decode(file.bytes), 20000).trim();
+    if (!text) return null;
+    return {
+      status: 'read',
+      url: guideUrl,
+      text,
+      title: 'llms.txt',
+      description: 'The site’s guide for AI agents.',
+      publishedAt: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const siteGuideInstruction =
+  ' The last page is the site’s llms.txt, its guide for AI agents: use it to choose which pages of this site to fetch next.';
+
+/**
+ * Reads one public page. The first read of a site within `options.scope` (a turn or run) also reads the site's
+ * `/llms.txt` and returns it as a second page; without a scope every read tries it.
+ */
+export async function fetchPublicText(input: string, options: { scope?: string | undefined } = {}): Promise<WebResult> {
   denyMcpEgress();
   const parsed = publicWebUrlSchema.safeParse(input);
   if (!parsed.success) throw new Error('web-url-denied');
   const url = parsed.data;
-  const page = await readPage(url, AbortSignal.timeout(25000));
+  const signal = AbortSignal.timeout(25000);
+  const [page, guide] = await Promise.all([
+    readPage(url, signal),
+    firstSiteGuideRead(options.scope, new URL(url).origin) ? readSiteGuide(url, signal) : null,
+  ]);
+  const pages = guide ? [page, guide] : [page];
   return {
     kind: 'public-web',
-    status: page.status === 'read' ? 'success' : 'failed',
-    sources:
-      page.status === 'read'
-        ? [{ url: page.url, title: page.title, description: page.description, publishedAt: page.publishedAt }]
+    status: page.status === 'read' ? 'success' : guide ? 'partial' : 'failed',
+    sources: pages.flatMap(item =>
+      item.status === 'read'
+        ? [{ url: item.url, title: item.title, description: item.description, publishedAt: item.publishedAt }]
         : [],
-    pages: [page],
+    ),
+    pages,
     window: 'any',
     widened: false,
     retrievedAt: new Date().toISOString(),
     untrusted: true,
     instruction:
       page.status === 'read'
-        ? 'For news, include only items dated within the requested window. If sparse, search window week explicitly. Exclude older stories even if the page was updated today.'
-        : 'No page content or HTTP status was obtained. Report only that the page was unavailable. Do not infer a status code or failure cause from its URL. Offer retry or pasted text.',
+        ? `For news, include only items dated within the requested window. If sparse, search window week explicitly. Exclude older stories even if the page was updated today.${guide ? siteGuideInstruction : ''}`
+        : guide
+          ? `The requested page was unavailable; do not infer why. Offer retry or pasted text.${siteGuideInstruction}`
+          : 'No page content or HTTP status was obtained. Report only that the page was unavailable. Do not infer a status code or failure cause from its URL. Offer retry or pasted text.',
   };
 }
 
