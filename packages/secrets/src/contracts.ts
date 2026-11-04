@@ -5,6 +5,7 @@ export type SecretErrorCode =
   | 'disabled'
   | 'invalid-input'
   | 'conflict'
+  | 'variable-name-taken'
   | 'not-found'
   | 'unavailable'
   | 'expired'
@@ -189,9 +190,45 @@ export type SecretGrant = z.infer<typeof grantSchema>;
 
 export const secretNameSchema = z.string().trim().min(1).max(80);
 
+export const MAX_VARIABLE_NAME_LENGTH = 64;
+/** The environment-variable style name a secret is handed to code under, such as `STRIPE_KEY`. */
+export const variableNameSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z][A-Z0-9_]{0,63}$/, 'Use letters, digits and underscores, starting with a letter');
+
+const variableNameSuffixes: Record<SecretKind, string> = {
+  'api-key': '_KEY',
+  token: '_TOKEN',
+  password: '_PASSWORD',
+  'username-password': '_LOGIN',
+  header: '_HEADER',
+};
+
+/** Suggests a variable name from a secret's name and kind: "Stripe" and `api-key` give `STRIPE_KEY`. */
+export function suggestVariableName(name: string, kind: SecretKind): string {
+  let slug = name
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  if (!slug || /^[0-9]/.test(slug)) slug = `SECRET_${slug}`.replace(/_+$/, '');
+  const suffix = /(?:^|_)(?:KEY|TOKEN|PASSWORD|LOGIN|SECRET|HEADER)$/.test(slug) ? '' : variableNameSuffixes[kind];
+  return slug.slice(0, MAX_VARIABLE_NAME_LENGTH - suffix.length).replace(/_+$/, '') + suffix;
+}
+
+/** `base` for 1, else `base_2`, `base_3` and so on, shortened to fit. */
+export function numberedVariableName(base: string, number: number): string {
+  const suffix = number > 1 ? `_${number}` : '';
+  return base.slice(0, MAX_VARIABLE_NAME_LENGTH - suffix.length).replace(/_+$/, '') + suffix;
+}
+
 export const createSecretInputSchema = z.strictObject({
   requestId: z.uuid(),
   name: secretNameSchema,
+  variableName: variableNameSchema.optional(),
   kind: secretKindSchema,
   value: z.unknown(),
   placement: placementSchema,
@@ -203,10 +240,17 @@ export const createSecretInputSchema = z.strictObject({
 });
 export type CreateSecretInput = z.input<typeof createSecretInputSchema>;
 
+/** Renames a secret, its friendly name, its variable name or both. */
+export const secretNamesInputSchema = z
+  .strictObject({ name: secretNameSchema.optional(), variableName: variableNameSchema.optional() })
+  .refine(input => input.name !== undefined || input.variableName !== undefined, 'Give a name or a variable name');
+export type SecretNamesInput = z.input<typeof secretNamesInputSchema>;
+
 export type SecretStatus = 'active' | 'suspended' | 'expired' | 'deleted';
 export type SecretSummary = {
   id: string;
   name: string;
+  variableName: string;
   kind: SecretKind;
   placement: Placement;
   placementSource: 'agent' | 'member';

@@ -15,6 +15,7 @@
     "test:interactions": "node test/interactions.browser.mjs",
     "test:models": "node --test test/models.browser.mjs",
     "test:recommendations": "node test/recommendations.browser.mjs",
+    "test:secrets": "node test/secrets.browser.mjs",
     "test:settings": "node --test test/settings.browser.mjs",
     "test:shell": "node test/shell.browser.mjs",
     "test:atlassian": "node test/atlassian.browser.mjs",
@@ -67,6 +68,7 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
+    "@tulipfarm/secrets": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
     "@tulipfarm/typescript-config": "workspace:*",
     "@types/node": "26.6.3",

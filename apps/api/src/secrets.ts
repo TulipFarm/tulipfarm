@@ -19,6 +19,7 @@ import {
   secretGrantsBody,
   secretHistorySchema,
   secretListSchema,
+  secretNamesBody,
   secretParams,
   secretRequestParams,
   secretRequestResultSchema,
@@ -49,6 +50,7 @@ function classify(error: unknown): [Status, string] {
         return [410, 'secret-expired'];
       case 'conflict':
       case 'unavailable':
+      case 'variable-name-taken':
         return [409, `secret-${error.code}`];
       case 'disabled':
       case 'credential-unavailable':
@@ -194,6 +196,14 @@ export function registerSecrets(
       request => {
         const { workspaceId, secretId } = secret(request);
         return service.secrets.setExpiry(workspaceId, userId(request), secretId, secretExpiryBody.parse(request.body));
+      },
+    );
+    routes.put(
+      `${base}/:secretId/names`,
+      options('renameSecretV1', secretSummarySchema, secretParams, secretNamesBody),
+      request => {
+        const { workspaceId, secretId } = secret(request);
+        return service.secrets.rename(workspaceId, userId(request), secretId, secretNamesBody.parse(request.body));
       },
     );
     routes.post(
