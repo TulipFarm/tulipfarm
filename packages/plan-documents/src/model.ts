@@ -150,7 +150,7 @@ const quote = (value: string) => `“${value}”`;
 const same = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((item, i) => item === b[i]);
 const statusLabel: Record<PlanPrerequisiteStatus, string> = {
-  verified: 'verified',
+  verified: 'checked',
   blocked: 'blocked',
   unknown: 'not checked',
 };

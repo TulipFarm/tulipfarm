@@ -159,9 +159,9 @@ const stampTone: Record<PlanStampTone, string> = {
   changed: 'tone-changed',
 };
 const prerequisiteTone: Record<PlanPrerequisiteStatus, [string, string]> = {
-  verified: ['tone-approved', 'Verified'],
+  verified: ['tone-approved', 'Checked'],
   blocked: ['tone-danger', 'Blocked'],
-  unknown: ['tone-draft', 'Not checked yet'],
+  unknown: ['tone-draft', 'Not checked'],
 };
 
 function section(id: string, title: string, body: string): string {
@@ -182,7 +182,7 @@ const number = (value: number) => new Intl.NumberFormat('en-GB').format(value);
 
 function drawing(svg: string | null | undefined, title: string, source: string | null): string {
   if (svg) return `<div class="drawing">${svg}</div>`;
-  return `<p class="not-drawn muted" role="note">This diagram couldn't be drawn.</p>${
+  return `<p class="not-drawn muted" role="note">This diagram couldn’t be drawn.</p>${
     source === null ? '' : `<pre aria-label="${escapeHtml(`Diagram source for ${title}`)}">${escapeHtml(source)}</pre>`
   }`;
 }
@@ -215,7 +215,7 @@ ${waits.length ? `<h4>Waits for</h4><p class="waits">${waits.map(escapeHtml).joi
     const items = children(group.key).filter(task => task.kind === 'work');
     if (items.length)
       blocks.push(`<div class="group">
-<div class="group-head"><h3>${escapeHtml(groupPath(group, byKey))}</h3><span class="order">${group.order === 'serial' ? 'One after another' : 'In parallel'}</span></div>
+<div class="group-head"><h3>${escapeHtml(groupPath(group, byKey))}</h3><span class="order">${group.order === 'serial' ? 'One after another' : 'At the same time'}</span></div>
 ${group.brief ? `<div class="group-brief">${renderMarkdown(group.brief)}</div>` : ''}
 ${group.dependsOn.length ? `<p class="waits">Waits for ${group.dependsOn.map(key => escapeHtml(byKey.get(key)?.title ?? key)).join(', ')}</p>` : ''}
 <div class="tasks">${items.map(card).join('\n')}</div>
@@ -241,8 +241,8 @@ ${group.dependsOn.length ? `<p class="waits">Waits for ${group.dependsOn.map(key
 
 function changeOrigin(origin: PlanChangeOrigin, starter: string): string {
   return origin === 'starter'
-    ? `<span class="pill tone-neutral">By ${escapeHtml(starter || 'the starter')}</span>`
-    : '<span class="pill tone-changed">During the run</span>';
+    ? `<span class="pill tone-neutral">Changed by ${escapeHtml(starter || 'the starter')} in chat</span>`
+    : '<span class="pill tone-changed">Added by the plan while running</span>';
 }
 
 /**

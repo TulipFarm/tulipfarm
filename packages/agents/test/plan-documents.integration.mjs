@@ -131,6 +131,12 @@ test(
     assert.equal(view.documentRender.error, 'render');
     assert.equal(view.documentRender.pageRevision, null, 'no page was ever drawn');
     assert.equal((await documents.prepare(w.id, created.id, 'retry', names)).generation, 1);
+    await documents.fail(w.id, created.id, approved, 'too-large');
+    assert.equal(
+      await documents.retry(w.id, w.userId, created.id),
+      null,
+      'a revision too large to save is not rendered again',
+    );
 
     // Verifying a prerequisite while running is the plan's own progress: a revision, but no new approval.
     await plans.update(w.id, w.userId, created.id, randomUUID(), {

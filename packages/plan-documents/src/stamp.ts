@@ -66,11 +66,13 @@ export function planStamp(input: PlanStampInput): PlanStamp {
   if (approved !== input.contentRevision)
     return {
       tone: 'changed',
-      text: `Changed since approval: revision ${input.contentRevision}, approved revision ${approved}`,
+      text: `Revision ${input.contentRevision}, changed since revision ${approved} was approved`,
     };
+  const { approverName, approvedAt } = input.approval;
+  const known = !Number.isNaN(new Date(approvedAt).getTime());
   return {
     tone: 'approved',
-    text: `Approved by ${input.approval.approverName}, ${formatDateTime(input.approval.approvedAt, input.timeZone)}, revision ${approved}`,
+    text: `Revision ${approved} approved by ${approverName}${known ? `, ${formatDateTime(approvedAt, input.timeZone)}` : ''}`,
   };
 }
 

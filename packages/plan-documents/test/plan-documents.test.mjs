@@ -219,7 +219,7 @@ test('changeList describes task, requirement, prerequisite, budget and section c
       'Renamed task “Write code” to “Write the code”',
       'Added requirement “Docs updated”',
       'Removed requirement “Site is live”',
-      'Prerequisite “DNS access” is now verified',
+      'Prerequisite “DNS access” is now checked',
       'Changed the tool calls budget from 300 to 400',
       'Removed the credits budget',
       'Updated the summary',
@@ -235,19 +235,24 @@ test('stamps name the approval state in the reader time zone', () => {
   assert.equal(stampText({ contentRevision: 2, timeZone: 'UTC' }), 'Draft, not approved');
   assert.equal(
     stampText({ approval, contentRevision: 4, approvedRevision: 4, timeZone: 'Europe/London' }),
-    'Approved by Asha, 14 Sep 2026, 09:05 BST, revision 4',
+    'Revision 4 approved by Asha, 14 Sep 2026, 09:05 BST',
   );
   assert.equal(
     stampText({ approval, contentRevision: 4, timeZone: 'America/New_York' }),
-    'Approved by Asha, 14 Sep 2026, 04:05 EDT, revision 4',
+    'Revision 4 approved by Asha, 14 Sep 2026, 04:05 EDT',
   );
   assert.equal(
     stampText({ approval, contentRevision: 4, timeZone: 'Not/AZone' }),
-    'Approved by Asha, 14 Sep 2026, 08:05 UTC, revision 4',
+    'Revision 4 approved by Asha, 14 Sep 2026, 08:05 UTC',
+  );
+  assert.equal(
+    stampText({ approval: { ...approval, approvedAt: 'unknown' }, contentRevision: 4, timeZone: 'UTC' }),
+    'Revision 4 approved by Asha',
+    'an unknown approval time is left out',
   );
   assert.deepEqual(planStamp({ approval, contentRevision: 6, approvedRevision: 4, timeZone: 'UTC' }), {
     tone: 'changed',
-    text: 'Changed since approval: revision 6, approved revision 4',
+    text: 'Revision 6, changed since revision 4 was approved',
   });
 });
 
@@ -291,7 +296,7 @@ test('the document is self-contained, ordered, escaped and omits empty sections'
   assert.ok(!/<script|<link|@import|https?:\/\//i.test(html));
   assert.ok(html.includes('Launch &lt;script&gt;') && html.includes('Late &lt;b&gt;'));
   assert.ok(html.includes('<svg id="plan-svg"></svg>'));
-  assert.ok(html.includes("This diagram couldn't be drawn.") && html.includes('flowchart LR\n  a --&gt; b'));
+  assert.ok(html.includes('This diagram couldn’t be drawn.') && html.includes('flowchart LR\n  a --&gt; b'));
   const order = [
     'summary',
     'requirements',

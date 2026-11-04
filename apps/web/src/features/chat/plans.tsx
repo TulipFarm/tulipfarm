@@ -6,6 +6,7 @@ import { Play } from 'reicon-react/icons/Play';
 import { Tasks } from 'reicon-react/icons/Tasks';
 import { planListItemSchema, planReceiptSchema, planViewSchema, type PlanView } from '@tulipfarm/agents/plan-contracts';
 import { maximumTaskLimits } from '@tulipfarm/agents/contracts';
+import { formatDateTime } from '@tulipfarm/plan-documents/stamp';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -88,7 +89,7 @@ export function planApi(workspaceId: string) {
           failures[code] ??
           (response.status === 404
             ? 'This plan is unavailable to your current membership.'
-            : 'The plan could not be reached. Check your connection and try again.'),
+            : 'Couldn’t reach the plan. Check your connection and try again.'),
       );
     }
     return value;
@@ -110,7 +111,7 @@ export function planApi(workspaceId: string) {
         throw new TableRequestError(
           response.status,
           code,
-          failures[code] ?? 'The document could not be loaded. Check your connection and try again.',
+          failures[code] ?? 'Couldn’t load the document. Check your connection and try again.',
         );
       }
       return response.text();
@@ -779,11 +780,11 @@ function raised(budget: PlanView['budget']): PlanView['budget'] {
   };
 }
 
+/** The approval time as the plan document shows it, in the zone the starter approved from. */
 function formatApproval(approval: NonNullable<PlanView['approval']>) {
-  const date = new Date(approval.approvedAt);
-  return Number.isNaN(date.getTime())
-    ? approval.approvedAt
-    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(new Date(approval.approvedAt).getTime())
+    ? null
+    : formatDateTime(approval.approvedAt, approval.timeZone);
 }
 
 /** Starter-only controls. They live beside the reference in chat, never inside the read-only outline. */
@@ -803,6 +804,7 @@ function PlanControls({
   const approval = useFlag('plan-documents');
   const revision = view.contentRevision;
   const awaiting = view.lifecycle === 'paused' && view.awaitingApproval === true;
+  const approvedAt = view.approval ? formatApproval(view.approval) : null;
   const [busy, setBusy] = useState<PlanControl['action'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -833,9 +835,7 @@ function PlanControls({
       setConfirmStop(false);
     } catch (failure) {
       setError(
-        failure instanceof Error
-          ? failure.message
-          : 'The plan could not be reached. Check your connection and try again.',
+        failure instanceof Error ? failure.message : 'Couldn’t reach the plan. Check your connection and try again.',
       );
       if (failure instanceof TableRequestError) request.current = null;
     } finally {
@@ -855,18 +855,18 @@ function PlanControls({
       )}
       {approval && view.approval && (
         <p className="text-xs text-muted-foreground">
-          Approved by you · {formatApproval(view.approval)}
-          {revision && revision !== view.approval.revision ? ` · revision ${view.approval.revision}` : ''}
+          You approved revision {view.approval.revision}
+          {approvedAt && ` · ${approvedAt}`}
         </p>
       )}
       {awaiting && view.changesSinceApproval?.length ? (
         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-          <p>Changes since you approved it:</p>
+          <p>Changes since you approved revision {view.approval?.revision}:</p>
           <ul className="list-disc pl-4">
             {view.changesSinceApproval.map(item => (
               <li key={item.revision}>
                 Revision {item.revision}:{' '}
-                {item.changeKind === 'starter' ? 'plan changed in chat' : 'work added while running'}
+                {item.changeKind === 'starter' ? 'Changed by you in chat' : 'Added by the plan while running'}
               </li>
             ))}
           </ul>
@@ -878,9 +878,7 @@ function PlanControls({
             <Button size="sm" disabled={!!busy || !revision} aria-busy={busy === 'approve'} onClick={approve}>
               <Play size={14} aria-hidden="true" />
               {busy === 'approve'
-                ? view.lifecycle === 'draft'
-                  ? 'Starting…'
-                  : 'Resuming…'
+                ? 'Approving…'
                 : view.lifecycle === 'draft'
                   ? 'Approve and start'
                   : 'Approve and resume'}

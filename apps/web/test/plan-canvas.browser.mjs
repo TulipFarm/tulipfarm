@@ -602,6 +602,18 @@ test(
       assert.deepEqual(actions, ['retry']);
       assert.deepEqual([...new Set(pages)], [3], 'only the newest ready page is ever requested');
 
+      render({ revision: 4, status: 'failed', error: 'too-large' });
+      await open();
+      await canvas
+        .getByRole('alert')
+        .getByText('The PDF for revision 4 is larger than 10 MB, so it wasn’t saved to Files.', { exact: false })
+        .waitFor();
+      assert.equal(
+        await canvas.getByRole('alert').getByRole('button').count(),
+        0,
+        'a revision too large to save offers no retry',
+      );
+
       render({ fileId: null, fileVersion: null, fileDetached: true });
       plan.contentRevision = 3;
       await open();
@@ -624,8 +636,18 @@ test(
       assert.equal(await canvas.getByRole('alert').getByRole('button').count(), 0, 'only the starter retries');
 
       plan.canControl = true;
+      plan.approval = {
+        revision: 3,
+        approvedByMembershipId: chatId,
+        approvedBy: 'Priya Shah',
+        approvedAt: '2026-11-04T05:17:00Z',
+        timeZone: 'Asia/Kolkata',
+      };
       render();
       await open();
+      await canvas
+        .getByText('Revision 3 approved by Priya Shah, 4 Nov 2026, 10:47 GMT+5:30', { exact: true })
+        .waitFor();
       await share.click();
       const composer = await page.waitForFunction(() => {
         const editor = document.activeElement;

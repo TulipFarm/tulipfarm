@@ -188,12 +188,12 @@ async function target(tx: PlanTransaction, planId: string, revision: number): Pr
 }
 async function documentRow(tx: PlanTransaction, planId: string, at: PlanDocumentTarget) {
   return z
-    .object({ status: z.enum(['pending', 'rendering', 'ready', 'failed']) })
+    .object({ status: z.enum(['pending', 'rendering', 'ready', 'failed']), error: z.string().nullable() })
     .optional()
     .parse(
       (
         await tx.client.query(
-          `SELECT status FROM ${relation(tx, 'tf_agent_plan_documents')} WHERE plan_id=$1 AND revision=$2 AND generation=$3`,
+          `SELECT status, error FROM ${relation(tx, 'tf_agent_plan_documents')} WHERE plan_id=$1 AND revision=$2 AND generation=$3`,
           [planId, at.revision, at.generation],
         )
       ).rows[0],
@@ -696,7 +696,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
     },
     /**
      * Lets the starter render the current revision again after it failed. Returns the mode to start the workflow with,
-     * or null when it isn't failed.
+     * or null when it isn't failed or was too large, since the same revision renders to the same size.
      */
     async retry(workspaceId: string, user: string, planId: string): Promise<PlanDocumentMode | null> {
       return humanTransaction(workspaceId, user, true, async (tx, actor) => {
@@ -704,7 +704,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
         if (!isStarter(plan, actor)) throw new AgentPlanError('not-starter');
         const at = await target(tx, planId, plan.revision);
         const row = await documentRow(tx, planId, at);
-        if (row && row.status !== 'failed') return null;
+        if (row && (row.status !== 'failed' || row.error === 'too-large')) return null;
         await requeue(tx, workspaceId, planId, at);
         return 'retry' as const;
       });

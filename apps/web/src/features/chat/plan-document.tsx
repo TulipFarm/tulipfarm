@@ -7,9 +7,12 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
+import { planStamp } from '@tulipfarm/plan-documents/stamp';
 import { useCanvas } from './canvas-state';
 import { conversationKeys } from './queries';
 import type { PlanApi, PlanDetail } from './plans';
+
+const recreateLabel = 'Save a new PDF';
 
 // Matches the policy the API sends with the page; the frame also runs without scripts or same-origin access.
 const framePolicy = "default-src 'none'; img-src data:; style-src 'unsafe-inline'";
@@ -26,37 +29,17 @@ function framed(html: string) {
   return `<!doctype html>${page.documentElement.outerHTML}`;
 }
 
-function approvedAt(approval: NonNullable<PlanDetail['approval']>) {
-  const date = new Date(approval.approvedAt);
-  if (Number.isNaN(date.getTime())) return approval.approvedAt;
-  const options: Intl.DateTimeFormatOptions = {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  };
-  try {
-    return date.toLocaleString(undefined, { ...options, timeZone: approval.timeZone });
-  } catch {
-    return date.toLocaleString(undefined, options);
-  }
-}
-
 /** The stamp the PDF carries for the shown revision. */
 function stamp(view: PlanDetail, revision: number) {
   const approval = view.approval;
   if (!approval || revision < approval.revision) return { text: 'Draft, not approved', variant: 'outline' as const };
-  if (revision === approval.revision)
-    return {
-      text: `Approved by ${approval.approvedBy ?? 'a former member'}, ${approvedAt(approval)}, revision ${revision}`,
-      variant: 'success' as const,
-    };
-  return {
-    text: `Changed since approval: revision ${revision}, approved revision ${approval.revision}`,
-    variant: 'warning' as const,
-  };
+  const { tone, text } = planStamp({
+    approval: { approverName: approval.approvedBy ?? 'a former member', approvedAt: approval.approvedAt },
+    contentRevision: revision,
+    approvedRevision: approval.revision,
+    timeZone: approval.timeZone,
+  });
+  return { text, variant: tone === 'approved' ? ('success' as const) : ('warning' as const) };
 }
 
 /** The Document view: the latest produced revision as a page, with its PDF in Files. */
@@ -95,9 +78,7 @@ export function PlanDocument({
       await (action === 'retry' ? api.retryDocument(view.id) : api.recreateDocument(view.id));
     } catch (failure) {
       setError(
-        failure instanceof Error
-          ? failure.message
-          : 'The plan could not be reached. Check your connection and try again.',
+        failure instanceof Error ? failure.message : 'Couldn’t reach the plan. Check your connection and try again.',
       );
     } finally {
       setBusy(null);
@@ -120,12 +101,17 @@ export function PlanDocument({
         <Alert>
           <AlertTitle>This document is out of date</AlertTitle>
           <AlertDescription>
-            {quota
-              ? `Your Files storage is full, so revision ${render.revision} couldn’t be saved.`
-              : `Revision ${render.revision} couldn’t be produced.`}
+            {tooLarge
+              ? `The PDF for revision ${render.revision} is larger than 10 MB, so it wasn’t saved to Files.`
+              : quota
+                ? view.canControl
+                  ? `Your Files storage is full, so revision ${render.revision} wasn’t saved. Free up space in Files, then try again.`
+                  : `Revision ${render.revision} wasn’t saved to Files.`
+                : `Revision ${render.revision} couldn’t be created.`}
             {shown ? ` This shows revision ${shown}.` : ''}
           </AlertDescription>
-          {view.canControl && (
+          {/* The same revision always renders to the same size, so trying it again can't help. */}
+          {view.canControl && !tooLarge && (
             <div className="mt-2">
               <Button
                 size="sm"
@@ -143,7 +129,11 @@ export function PlanDocument({
       {detached && (
         <Alert>
           <AlertTitle>The PDF was removed from Files</AlertTitle>
-          <AlertDescription>TulipFarm won’t save this plan’s PDF again unless you ask.</AlertDescription>
+          <AlertDescription>
+            {view.canControl
+              ? `TulipFarm won’t save this plan’s PDF again unless you choose ${recreateLabel}.`
+              : 'The person who started this plan can save a new one.'}
+          </AlertDescription>
           {view.canControl && (
             <div className="mt-2">
               <Button
@@ -153,14 +143,11 @@ export function PlanDocument({
                 aria-busy={busy === 'recreate'}
                 onClick={() => void act('recreate')}
               >
-                {busy === 'recreate' ? 'Saving…' : 'Save a new PDF'}
+                {busy === 'recreate' ? 'Saving…' : recreateLabel}
               </Button>
             </div>
           )}
         </Alert>
-      )}
-      {tooLarge && !failed && (
-        <p className="text-xs text-muted-foreground">The PDF is larger than 10 MB, so it wasn’t saved to Files.</p>
       )}
       {error && (
         <p role="alert" className="text-xs text-destructive">

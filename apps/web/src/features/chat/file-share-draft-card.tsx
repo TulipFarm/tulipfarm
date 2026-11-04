@@ -109,7 +109,7 @@ export function FileShareDraftCard({
                 <span className="text-muted-foreground">
                   {' '}
                   · {subject.kind === 'team' ? 'Team' : 'Person'}
-                  {subject.current && `, now ${roles[subject.current].toLowerCase()}`}
+                  {subject.current && `, already ${roles[subject.current].toLowerCase()}`}
                 </span>
               </li>
             ))}
@@ -119,7 +119,7 @@ export function FileShareDraftCard({
         <ReviewRow label="Can open it now">
           <People names={before.names} count={before.count} empty="No one else" />
         </ReviewRow>
-        <ReviewRow label="Can open it after">
+        <ReviewRow label="Gets access">
           <People names={added.names} count={added.count} empty="No one new" />
         </ReviewRow>
         {excluded.length > 0 && (

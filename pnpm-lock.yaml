@@ -400,6 +400,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
+      '@tulipfarm/plan-documents':
+        specifier: workspace:*
+        version: link:../../packages/plan-documents
       '@tulipfarm/recommendations':
         specifier: workspace:*
         version: link:../../packages/recommendations
