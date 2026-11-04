@@ -8,14 +8,14 @@ import { workspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { apiOrigin, loadLocalEnv, SeedRefused, webOrigin } from './env.ts';
 import { readManifest } from './manifest.ts';
 
-const usage = `Usage: node apps/dev-seed/src/plan-document-demo.ts [--workspace seed-basic] [--revise]
+const usage = `Usage: node apps/dev-seed/src/plan-document-demo.ts [--workspace seed-basic] [--title TEXT] [--revise]
 
 Creates a plan with a document in an owner chat of a seeded workspace through the real plan service, wakes its
 workflow like a chat edit does, and waits until the worker and render worker have saved the document. Run again with
 --revise to save revision 2 of the document. Needs the stack from \`pnpm dev\` and a workspace from \`pnpm seed\`.`;
 
 // Section text supports only bold, italic, inline code, links and lists, so the approach has no headings.
-const title = 'Launch the Q1 customer onboarding revamp';
+const defaultTitle = 'Launch the Q1 customer onboarding revamp';
 
 const document = {
   summary:
@@ -168,6 +168,7 @@ async function main() {
   const { values } = parseArgs({
     options: {
       workspace: { type: 'string', default: 'seed-basic' },
+      title: { type: 'string', default: defaultTitle },
       revise: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -177,6 +178,7 @@ async function main() {
     return;
   }
   loadLocalEnv();
+  const title = values.title;
   const manifest = await readManifest(webOrigin(), apiOrigin());
   const workspace = manifest.workspaces[values.workspace];
   if (!workspace) throw new SeedRefused(`Workspace ${values.workspace} is not in .seed/manifest.json. Run pnpm seed.`);
