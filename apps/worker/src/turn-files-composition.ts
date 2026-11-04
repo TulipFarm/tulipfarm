@@ -83,6 +83,7 @@ export function chatTurnFiles(runtime: ConversationRuntime, objects: { attachmen
     attachments,
     pin: (tx, familyId) => pinTurnImageModels(tx, familyId),
     links: { fetch: fetchPublicFile, keep: attachments.keepLink },
+    apiFiles: { keep: attachments.keepCallFile },
   };
 }
 

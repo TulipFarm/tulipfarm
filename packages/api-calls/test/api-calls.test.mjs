@@ -225,6 +225,19 @@ const routes = (req, res) => {
     res.writeHead(401, { 'www-authenticate': 'Bearer realm="api"', 'content-type': 'text/plain' }).end('missing key');
   else if (path === '/echo')
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ seen: req.headers.authorization }));
+  else if (path === '/report')
+    res
+      .writeHead(200, {
+        'content-type': 'application/vnd.example+json',
+        'content-disposition': 'attachment; filename="q3/report.json"',
+      })
+      .end(JSON.stringify({ rows: 'x'.repeat(70 * 1024) }));
+  else if (path === '/huge') res.writeHead(200, { 'content-type': 'text/csv' }).end('x'.repeat(10 * 1024 * 1024 + 1));
+  else if (path === '/max') res.writeHead(200, { 'content-type': 'text/csv' }).end('x'.repeat(10 * 1024 * 1024));
+  else if (path === '/large-echo')
+    res
+      .writeHead(200, { 'content-type': 'application/octet-stream' })
+      .end(Buffer.concat([Buffer.alloc(70 * 1024), Buffer.from(String(req.headers.authorization))]));
   else if (path === '/gzip') res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' }).end('x');
   else if (path === '/hang') return;
   else if (path === '/drop') req.socket.destroy();
@@ -274,7 +287,7 @@ test('reads return status, safe headers and a bounded JSON or text body', async 
   assert.match(large.note, /64 KiB/);
   const binary = await send('/binary');
   assert.deepEqual(binary.response.body, { kind: 'omitted', reason: 'binary', bytes: 4, contentType: 'image/png' });
-  assert.match(binary.note, /not available yet/);
+  assert.match(binary.note, /not text or JSON/);
 
   const head = await send('/json', { method: 'HEAD' });
   assert.equal(head.response.status, 200);
@@ -294,6 +307,85 @@ test('reads return status, safe headers and a bounded JSON or text body', async 
   const gzip = await send('/gzip');
   assert.equal(gzip.status, 'failed');
   assert.equal(gzip.code, 'network-failed');
+});
+
+test('with files, large and binary bodies are saved up to 10 MiB and the result names them', async t => {
+  const api = await server(t, routes);
+  const saved = [];
+  let full = false;
+  const files = {
+    save: async file => {
+      if (full) return null;
+      saved.push(file);
+      return { source: `call-${saved.length}` };
+    },
+  };
+  const secrets = secretPort(
+    { BEARER: { name: 'Stripe', placement: { kind: 'bearer' }, value: { value: 'sk-live-0123456789' } } },
+    [],
+  );
+  const send = (path, extra = {}) =>
+    sendApiCall(
+      { tool: 'api.request', method: 'GET', url: `https://api.example.test${path}`, ...extra },
+      api.options({ files, secrets }),
+    );
+
+  assert.deepEqual((await send('/json')).response.body, { kind: 'json', value: { items: [1, 2] } });
+  assert.equal(saved.length, 0);
+
+  const report = await send('/report');
+  assert.deepEqual(report.response.body, {
+    kind: 'file',
+    source: 'call-1',
+    name: 'q3report.json',
+    contentType: 'application/vnd.example+json',
+    bytes: 70 * 1024 + 11,
+  });
+  assert.match(report.note, /files\.read and source call-1/);
+  assert.deepEqual(
+    { ...saved[0], bytes: saved[0].bytes.byteLength },
+    {
+      name: 'q3report.json',
+      mediaType: 'application/json',
+      bytes: 70 * 1024 + 11,
+      url: 'https://api.example.test/report',
+      private: false,
+    },
+  );
+
+  const binary = await send('/binary', { secrets: [{ variable: 'BEARER' }] });
+  assert.deepEqual(binary.response.body, {
+    kind: 'file',
+    source: 'call-2',
+    name: 'binary',
+    contentType: 'image/png',
+    bytes: 4,
+  });
+  assert.equal(saved[1].mediaType, 'image/png');
+  assert.equal(saved[1].private, true);
+
+  assert.equal((await send('/max')).response.body.bytes, 10 * 1024 * 1024);
+  assert.equal(saved[2].mediaType, 'text/csv');
+
+  const huge = await send('/huge');
+  assert.equal(huge.status, 'sent');
+  assert.deepEqual(huge.response.body, { kind: 'omitted', reason: 'too-large', bytes: null, contentType: 'text/csv' });
+  assert.match(huge.note, /over 10 MiB/);
+
+  const reflected = await send('/large-echo', { secrets: [{ variable: 'BEARER' }] });
+  assert.equal(reflected.code, 'secret-reflected');
+  assert.equal(saved.length, 3);
+
+  full = true;
+  const fullStorage = await send('/large');
+  assert.equal(fullStorage.status, 'sent');
+  assert.deepEqual(fullStorage.response.body, {
+    kind: 'omitted',
+    reason: 'too-large',
+    bytes: 64 * 1024 + 1,
+    contentType: 'text/plain',
+  });
+  assert.match(fullStorage.note, /Storage is full/);
 });
 
 test('invalid calls and changes are refused before any lookup', async t => {

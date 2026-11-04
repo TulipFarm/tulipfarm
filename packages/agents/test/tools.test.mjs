@@ -12,7 +12,8 @@ import {
   toolOutcome,
 } from '../src/tools.ts';
 import { createChatToolGuard } from '../src/chat-tool-guard.ts';
-import { apiCallSources } from '../src/tool-sources.ts';
+import { apiCallSources, resultSources } from '../src/tool-sources.ts';
+import { keepTaskApiFile, readTaskApiFile } from '../src/task-files.ts';
 import { createAgentExecutor } from '../src/executor.ts';
 import { randomUUID } from 'node:crypto';
 import { fetchPublicText, publicIPv4 } from '../src/web-fetch.ts';
@@ -628,4 +629,54 @@ test('api.request results without a secret are public web, and with one stay in 
   assert.deepEqual(apiCallSources(secret, conversationId), [{ kind: 'private-conversation', conversationId }]);
   assert.deepEqual(apiCallSources(secret, null), [{ kind: 'unavailable' }]);
   assert.deepEqual(apiCallSources({ status: 'failed', code: 'timeout', message: 'Timed out.' }, conversationId), []);
+});
+
+test('a task keeps an api.request response file that only its own later files.read calls find', async () => {
+  const stored = new Map();
+  const objects = {
+    putIfAbsent: async (key, bytes) => void (stored.has(key) || stored.set(key, Buffer.from(bytes))),
+    read: async (key, maximumBytes) => {
+      const bytes = stored.get(key);
+      if (!bytes || bytes.byteLength > maximumBytes) throw new Error('missing');
+      return bytes;
+    },
+    remove: async key => void stored.delete(key),
+  };
+  let room = true;
+  const links = { objects, hasRoom: async () => room };
+  const scope = { workspaceId: randomUUID(), taskId: randomUUID() };
+  const callId = randomUUID();
+  const file = {
+    name: 'report.csv',
+    mediaType: 'text/csv',
+    bytes: Buffer.from('fruit,count\napple,3\n'),
+    url: 'https://api.example.com/report',
+    private: true,
+  };
+  room = false;
+  assert.equal(await keepTaskApiFile(links, { ...scope, callId }, file), false);
+  assert.equal(stored.size, 0);
+  room = true;
+  assert.equal(await keepTaskApiFile(links, { ...scope, callId }, file), true);
+  const read = await readTaskApiFile(objects, scope, { source: callId }, 16_000);
+  assert.equal(read.private, true);
+  assert.equal(read.url, null);
+  assert.match(read.file, /apple,3/);
+  assert.ok(JSON.stringify(read).length <= 16_000);
+  for (const other of [
+    readTaskApiFile(objects, { ...scope, taskId: randomUUID() }, { source: callId }, 16_000),
+    readTaskApiFile(objects, scope, { source: randomUUID() }, 16_000),
+    readTaskApiFile(undefined, scope, { source: callId }, 16_000),
+  ])
+    assert.equal((await other).error, 'file-not-found');
+  const big = { ...file, private: false, bytes: Buffer.from('x'.repeat(100_000)) };
+  const bigId = randomUUID();
+  assert.equal(await keepTaskApiFile(links, { ...scope, callId: bigId }, big), true);
+  const cut = await readTaskApiFile(objects, scope, { source: bigId }, 16_000);
+  assert.equal(cut.url, file.url);
+  assert.ok(JSON.stringify(cut).length <= 16_000);
+  const call = { tool: 'files.read', source: callId };
+  assert.deepEqual(await resultSources({}, call, read), [{ kind: 'unavailable' }]);
+  assert.deepEqual(await resultSources({}, call, cut), [{ kind: 'public-web', url: file.url }]);
+  assert.deepEqual(await resultSources({}, call, await readTaskApiFile(undefined, scope, call, 16_000)), []);
 });

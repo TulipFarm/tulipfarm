@@ -104,7 +104,9 @@ export type ResponseBody =
   | { kind: 'json'; value: unknown }
   | { kind: 'text'; text: string }
   | { kind: 'none' }
-  | { kind: 'omitted'; reason: 'too-large' | 'binary'; bytes: number | null; contentType: string | null };
+  | { kind: 'omitted'; reason: 'too-large' | 'binary'; bytes: number | null; contentType: string | null }
+  /** A body saved as a file of the chat or task, read with `files.read` by `source`. */
+  | { kind: 'file'; source: string; name: string; contentType: string | null; bytes: number };
 
 export type ApiCallSent = {
   status: 'sent';
@@ -144,6 +146,13 @@ export const apiCallResultSchema = z.discriminatedUnion('status', [
           reason: z.enum(['too-large', 'binary']),
           bytes: z.number().nullable(),
           contentType: z.string().nullable(),
+        }),
+        z.strictObject({
+          kind: z.literal('file'),
+          source: z.string(),
+          name: z.string(),
+          contentType: z.string().nullable(),
+          bytes: z.int(),
         }),
       ]),
     }),

@@ -7,6 +7,7 @@ import {
   requireTulipFarmFileReference,
   type AuthorizationTransaction,
   type HumanActor,
+  type SourceDependency,
 } from '@tulipfarm/access';
 import { textTokens } from '@tulipfarm/content-budget';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -44,7 +45,7 @@ import {
   type GoogleUnavailable,
   storedReferenceSchema,
 } from './file-references.ts';
-import { AttachmentError } from './attachments.ts';
+import { AttachmentError, type KeepCallFile } from './attachments.ts';
 import { pinnedImageModels, type TurnImageModels } from './turn-image-models.ts';
 import { linkReadsInstalled, type LinkReader } from './links.ts';
 
@@ -121,6 +122,8 @@ export type TurnFiles = {
   pin(tx: AuthorizationTransaction, familyId: string): Promise<TurnImageModels>;
   /** Fetches and keeps files shared as links; absent, links in messages are left to `web.fetch`. */
   links?: LinkReader;
+  /** Keeps `api.request` response bodies for `files.read`; absent, large and binary bodies are left out of results. */
+  apiFiles?: { keep: KeepCallFile };
 };
 
 export type FileSegment =
@@ -1081,7 +1084,7 @@ export async function readChatFile(input: {
   turnFiles: TurnFiles;
   /** Whether the route answering this turn reads images; a paused family's replacement may not, though the pinned family does. */
   imageInput: boolean;
-}): Promise<{ result: unknown; sources: FileSource[]; images?: ChatFileImages }> {
+}): Promise<{ result: unknown; sources: SourceDependency[]; images?: ChatFileImages }> {
   const found = await input.transaction(async tx => {
     const part =
       (
@@ -1108,6 +1111,16 @@ export async function readChatFile(input: {
             )
           ).rows[0]
         : undefined) ??
+      // An API call's response file, read only by the member who made the call.
+      (
+        await tx.client.query(
+          `SELECT 'attachment' AS kind,a.message_id AS "messageId",a.id AS "attachmentId",a.source_url AS "sourceUrl",true AS api
+          FROM ${qualified(tx.schema, 'tf_conversation_attachments')} a
+          JOIN ${qualified(tx.schema, 'tf_conversation_tool_calls')} c ON c.id=a.id AND c.conversation_id=a.conversation_id
+          WHERE a.conversation_id=$1 AND a.id::text=$2 AND a.membership_id=$3 AND a.state='bound' AND c.tool='api.request'`,
+          [input.conversationId, input.call.source, input.actor.membershipId],
+        )
+      ).rows[0] ??
       (await libraryFile(tx, input.actor, input.call.source, input.turnId));
     if (!part) return null;
     const turn = z
@@ -1123,6 +1136,7 @@ export async function readChatFile(input: {
     const model = turn.responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : turn.responder;
     return {
       library: part.kind === 'library',
+      api: part.api === true ? { sourceUrl: z.string().nullable().parse(part.sourceUrl) } : null,
       part: turnFilePartSchema.parse(
         part.kind === 'attachment'
           ? {
@@ -1143,11 +1157,11 @@ export async function readChatFile(input: {
       result: {
         error: 'file-not-found',
         instruction:
-          'No file you may read has that id. Use an attachment-id, file-id or google-file-id from a file block of this chat, or a file ID from files.list.',
+          'No file you may read has that id. Use an attachment-id, file-id or google-file-id from a file block of this chat, the source of an api.request response file, or a file ID from files.list.',
       },
       sources: [],
     };
-  const { part, pinned, library } = found;
+  const { part, pinned, library, api } = found;
   const family = input.turnFiles.family(pinned.familyId);
   const recognitionModel = pinned.recognitionFamilyId;
   const read = await readTurnFile({
@@ -1198,7 +1212,16 @@ export async function readChatFile(input: {
   });
   return {
     result: { file: text },
-    sources: read.source ? [read.source] : [],
+    // A response file carries its call's sources: the public URL, or this chat when the call sent a secret.
+    sources: api
+      ? [
+          api.sourceUrl
+            ? { kind: 'public-web', url: api.sourceUrl }
+            : { kind: 'private-conversation', conversationId: input.conversationId },
+        ]
+      : read.source
+        ? [read.source]
+        : [],
     ...(images.length
       ? {
           images: {
@@ -1364,4 +1387,38 @@ export function taskFileContent(
     .join('\n\n');
   const [message] = withImages([{ role: 'user' as const, text }], context.images);
   return { content: message && 'content' in message ? message.content : [{ type: 'text', text }], omitted };
+}
+
+/**
+ * One file a task step reads with `files.read`, as a labelled untrusted block cut until it serialises as JSON within
+ * `maxChars`. A task's tool result is text, so any image is left out.
+ */
+export function taskFileBlock(
+  read: TaskFileRead,
+  family: Pick<ReadingFamily, 'imageInputTokens'>,
+  maxChars: number,
+): string {
+  const { reading } = read;
+  const entry: Entry = { ...read, messageId: 'task', result: { kind: 'reading', reading } };
+  const show = (budget: number) => {
+    const context = new TurnFileContext();
+    if (reading.kind === 'read') {
+      const fitted = fit(reading.segments, budget, family);
+      context.add(entry, {
+        segments: fitted.kept,
+        complete: fitted.complete && reading.complete,
+        notes: reading.notes,
+      });
+    } else context.add(entry);
+    let text = context.context('task');
+    for (const marker of context.images.keys()) text = text.replace(marker, '[image not shown]');
+    return text;
+  };
+  let budget = Math.ceil(maxChars / 2);
+  let text = show(budget);
+  while (JSON.stringify(text).length > maxChars && budget > 0) {
+    budget = Math.min(budget - 1, Math.floor((budget * maxChars) / JSON.stringify(text).length));
+    text = show(budget);
+  }
+  return text;
 }

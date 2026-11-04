@@ -233,11 +233,19 @@ export function createAttachments(
     const target = ids(workspaceId, conversationId, id);
     return bounded(async () => {
       async function authorize(tx: AuthorizationTransaction) {
-        await owned(tx, userId, target.conversationId);
+        const actor = await owned(tx, userId, target.conversationId);
         const current = await row(tx, target.conversationId, target.id);
         if (
           current.state !== 'bound' ||
           !(
+            // An API call's response file is its caller's alone, kept under the call's ID.
+            (current.membership_id === actor.membershipId &&
+              (
+                await tx.client.query(
+                  `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} WHERE id = $1 AND conversation_id = $2 AND tool = 'api.request'`,
+                  [target.id, target.conversationId],
+                )
+              ).rowCount) ||
             (
               await tx.client.query(
                 `SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} WHERE conversation_id = $1 AND message_id = $2 AND attachment_id = $3`,
@@ -423,6 +431,66 @@ export function createAttachments(
     }
   };
   /**
+   * Keeps an `api.request` response body as a bound attachment of the turn's request message, under the call's ID and
+   * from the member who made the call, charged like an upload. Only that member reads it, by the call ID, and it is
+   * never published to Files. `sourceUrl` is the URL of a call that sent no secret. Returns false when storage is full.
+   */
+  const keepCallFile: KeepCallFile = async (workspaceId, input) => {
+    const target = ids(workspaceId, input.conversationId, input.callId);
+    const file = reserveAttachmentSchema.parse({
+      filename: input.filename,
+      mediaType: input.mediaType,
+      size: input.bytes.byteLength,
+      sha256: digest(input.bytes),
+    });
+    const objectKey = randomUUID();
+    const key = `${target.workspaceId}/${objectKey}`;
+    await bytes.putIfAbsent(key, input.bytes);
+    let stored = false;
+    try {
+      return await transaction(target.workspaceId, async tx => {
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 209871))', [tx.schema]);
+        const message = (
+          await tx.client.query(
+            `SELECT t.source_message_id AS "messageId" FROM ${table(tx, 'tf_conversation_tool_calls')} c
+            JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id = c.turn_id AND t.conversation_id = c.conversation_id
+            WHERE c.id = $1 AND c.conversation_id = $2 AND c.turn_id = $3 AND c.tool = 'api.request'`,
+            [target.id, target.conversationId, uuidSchema.parse(input.turnId)],
+          )
+        ).rows[0];
+        if (!message) throw new AccessDenied();
+        if (
+          (
+            await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_conversation_attachments')} WHERE id = $1`, [
+              target.id,
+            ])
+          ).rowCount
+        )
+          return true;
+        if ((await chargedBytes(tx)) + file.size > quota) return false;
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_attachments')} (id,conversation_id,membership_id,object_key,filename,media_type,size,sha256,state,message_id,source_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'bound',$9,$10)`,
+          [
+            target.id,
+            target.conversationId,
+            uuidSchema.parse(input.membershipId),
+            objectKey,
+            file.filename,
+            file.mediaType,
+            file.size,
+            file.sha256,
+            uuidSchema.parse(message.messageId),
+            input.sourceUrl,
+          ],
+        );
+        stored = true;
+        return true;
+      });
+    } finally {
+      if (!stored) await bytes.remove(key).catch(() => {});
+    }
+  };
+  /**
    * Stores bytes received from outside chat, such as a file shared in a Slack direct message, before any transaction.
    * Each call stores under a new key, so runs that overlap for the same source never share an object. The type is taken
    * from the bytes, falling back to the type the source declared. `adoptShared` then makes them a ready attachment, and
@@ -501,12 +569,27 @@ export function createAttachments(
     cleanup,
     publishSent,
     keepLink,
+    keepCallFile,
     stageShared,
     adoptShared,
     discardShared,
     hasRoom,
   };
 }
+
+export type KeepCallFile = (
+  workspaceId: string,
+  input: {
+    conversationId: string;
+    turnId: string;
+    callId: string;
+    membershipId: string;
+    filename: string;
+    mediaType: string;
+    bytes: Uint8Array;
+    sourceUrl: string | null;
+  },
+) => Promise<boolean>;
 
 /** Bytes stored for a file received from outside chat, waiting to become an attachment. */
 export type SharedAttachment = z.infer<typeof reserveAttachmentSchema> & { objectKey: string };

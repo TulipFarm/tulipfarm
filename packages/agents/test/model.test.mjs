@@ -114,3 +114,23 @@ test('task runs may select summary and linked-name lookup reads when the agent g
   assert.equal(task.includes('rows_resolveReference'), true);
   assert.equal(names(['rows.list']).includes('rows_summarize'), false);
 });
+
+test('task runs are offered files.read only while their api.request response files are kept', () => {
+  const input = {
+    prompt: 'Do work.',
+    definition: { name: 'Agent', instructions: 'Do work.', tools: [] },
+    scope: [],
+    task: true,
+  };
+  const names = value => modelNativeTools(value).tools.map(tool => tool.name);
+  assert.equal(names(input).includes('files_read'), false);
+  assert.equal(names({ ...input, taskFiles: true }).includes('files_read'), true);
+  const read = {
+    id: randomUUID(),
+    name: 'files_read',
+    input: { activity: 'Reading the report', source: randomUUID() },
+    providerId: true,
+  };
+  assert.throws(() => parseNativeAgentDecision({ text: '', calls: [read] }, input));
+  assert.equal(parseNativeAgentDecision({ text: '', calls: [read] }, { ...input, taskFiles: true }).kind, 'tool');
+});

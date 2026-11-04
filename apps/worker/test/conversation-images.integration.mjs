@@ -160,7 +160,7 @@ async function setup(t, { answer, recognition } = {}) {
     assert.equal(status, 'completed');
     return requests.slice(from);
   };
-  return { ...f, w, files, chat, attach, turn, activities, requests, recognitions };
+  return { ...f, w, files, attachments, chat, attach, turn, activities, requests, recognitions };
 }
 
 /** Every content block the requester's side of the request carries, in order. */
@@ -508,6 +508,61 @@ test('files.read returns only the requested pages of an attached PDF', async t =
     history.messages[0].tools.map(({ tool, status }) => ({ tool, status })),
     [{ tool: 'files.read', status: 'completed' }],
   );
+});
+
+test('an api.request response file is kept for its call and read back with files.read as a private source', async t => {
+  let source;
+  let asked = false;
+  const f = await setup(t, {
+    answer: (_body, requests) => {
+      if (requests.length === 1)
+        return anthropicTools([{ tool: 'api.request', method: 'GET', url: 'https://127.0.0.1/report' }]);
+      if (source && !asked) {
+        asked = true;
+        return anthropicTools([{ tool: 'files.read', source }]);
+      }
+      return anthropicText('Done.');
+    },
+  });
+  const chatId = await f.chat();
+  await f.turn(chatId, [{ kind: 'text', text: 'Get the report' }], 'claude-sonnet');
+  const [call] = (
+    await f.db.platform.query(
+      `SELECT id,turn_id AS "turnId" FROM ${f.table('tf_conversation_tool_calls')} WHERE conversation_id=$1 AND tool='api.request'`,
+      [chatId],
+    )
+  ).rows;
+  const [{ id: membershipId }] = (
+    await f.db.platform.query(`SELECT id FROM ${f.table('tf_memberships')} WHERE user_id=$1`, [f.w.userId])
+  ).rows;
+  const file = {
+    conversationId: chatId,
+    turnId: call.turnId,
+    callId: call.id,
+    membershipId,
+    filename: 'report.csv',
+    mediaType: 'text/csv',
+    bytes: Buffer.from('fruit,count\napple,3\n'),
+    sourceUrl: null,
+  };
+  const full = createAttachments(f.runtime, memoryBytes(), { quotaBytes: 8 });
+  assert.equal(await full.keepCallFile(f.w.id, file), false, 'no room keeps nothing');
+  await assert.rejects(f.attachments.keepCallFile(f.w.id, { ...file, callId: randomUUID() }));
+  assert.equal(await f.attachments.keepCallFile(f.w.id, file), true);
+  assert.equal(await f.attachments.keepCallFile(f.w.id, file), true, 'keeping the same call again is a no-op');
+  const downloaded = await f.attachments.download(f.w.id, f.w.userId, chatId, call.id);
+  assert.equal(Buffer.from(downloaded.bytes).toString(), 'fruit,count\napple,3\n');
+  source = call.id;
+  const requests = await f.turn(chatId, [{ kind: 'text', text: 'What is in it?' }], 'claude-sonnet');
+  assert.match(JSON.stringify(toolResults(requests[1])), /apple,3/);
+  const [{ sources }] = (
+    await f.db.platform.query(
+      `SELECT r.sources FROM ${f.table('tf_conversation_results')} r JOIN ${f.table('tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 ORDER BY t.accepted_sequence DESC LIMIT 1`,
+      [chatId],
+    )
+  ).rows;
+  assert.ok(sources.some(item => item.kind === 'private-conversation' && item.conversationId === chatId));
+  assert.ok(!sources.some(item => item.kind === 'public-web'));
 });
 
 test('an image files.read returns reaches a family that reads images after the tool results', async t => {
