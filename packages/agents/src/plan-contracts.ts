@@ -249,6 +249,67 @@ export const planBudgetSchema = z.strictObject({
 });
 export type PlanBudget = z.infer<typeof planBudgetSchema>;
 
+const mermaidTypes = /^(?:flowchart|graph|sequenceDiagram|stateDiagram-v2|timeline)\b/;
+/** Why a Mermaid source is refused, or null when it is a supported diagram without links, scripts or markup. */
+export function mermaidProblem(source: string): string | null {
+  const first = source
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(line => line && !line.startsWith('%%'));
+  if (!first || !mermaidTypes.test(first))
+    return 'Start the diagram with flowchart, graph, sequenceDiagram, stateDiagram-v2 or timeline.';
+  if (source.includes('%%{')) return 'Remove the %%{ }%% directive; diagrams use the default theme and settings.';
+  if (/^\s*click\b/im.test(source)) return 'Remove click interactions; plan diagrams cannot link or run code.';
+  if (/\bhref\b/i.test(source)) return 'Remove href links; plan diagrams cannot link.';
+  if (/javascript\s*:/i.test(source)) return 'Remove javascript: URLs.';
+  if (/(?<!<)<\/?[a-z][^<>]*>(?!>)/i.test(source)) return 'Remove HTML tags from labels; use plain text.';
+  return null;
+}
+const sectionText = (maximum: number) => z.string().trim().min(1).max(maximum);
+const planDiagramSchema = z.strictObject({
+  key: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,47}$/)
+    .describe('Stable lowercase key, unique in this plan.'),
+  title: sectionText(120),
+  caption: z.string().trim().max(400).optional(),
+  mermaid: z
+    .string()
+    .max(4000)
+    .superRefine((source, context) => {
+      const problem = mermaidProblem(source);
+      if (problem) context.addIssue({ code: 'custom', message: problem });
+    })
+    .describe('Mermaid source: flowchart (or graph), sequenceDiagram, stateDiagram-v2 or timeline.'),
+});
+const planDiagramsSchema = z
+  .array(planDiagramSchema)
+  .max(4)
+  .refine(
+    diagrams => new Set(diagrams.map(diagram => diagram.key)).size === diagrams.length,
+    'Use unique diagram keys.',
+  );
+const planRisksSchema = z.array(z.strictObject({ risk: sectionText(400), mitigation: sectionText(400) })).max(8);
+/**
+ * The written sections of a plan document, shown with its tasks. It mirrors the document schema of the
+ * plan-documents package: summary, optional approach, risks with mitigations, and up to four Mermaid diagrams.
+ */
+export const planDocumentSchema = z.strictObject({
+  summary: sectionText(1500),
+  approach: z.string().trim().max(6000).optional(),
+  risks: planRisksSchema.default([]),
+  diagrams: planDiagramsSchema.default([]),
+});
+export type PlanDocument = z.infer<typeof planDocumentSchema>;
+/** A document change on update: each given section replaces the saved one. */
+export const planDocumentPatchSchema = z.strictObject({
+  summary: sectionText(1500).optional(),
+  approach: z.string().trim().max(6000).optional(),
+  risks: planRisksSchema.optional(),
+  diagrams: planDiagramsSchema.optional(),
+});
+export type PlanDocumentPatch = z.infer<typeof planDocumentPatchSchema>;
+
 export const createPlanSchema = z.strictObject({
   title,
   brief: brief.default(''),
@@ -257,6 +318,7 @@ export const createPlanSchema = z.strictObject({
   tasks: z.array(planTaskInputSchema).min(1).max(planLimits.tasks),
   specialists: z.array(specialistInputSchema).max(planLimits.specialists).default([]),
   budget: planBudgetSchema.default({ toolCalls: 300, activeMilliseconds: 1800000, credits: 300 }),
+  document: planDocumentSchema.optional(),
 });
 export const updatePlanSchema = z
   .strictObject({
@@ -264,10 +326,11 @@ export const updatePlanSchema = z
     planning: planSpecificationSchema.optional(),
     specialists: z.array(specialistInputSchema).max(planLimits.specialists).default([]),
     mutations: z.array(planMutationSchema).max(planLimits.mutations).default([]),
+    document: planDocumentPatchSchema.optional(),
   })
   .refine(
-    input => input.mutations.length > 0 || input.planning !== undefined,
-    'Provide mutations or updated planning checks.',
+    input => input.mutations.length > 0 || input.planning !== undefined || input.document !== undefined,
+    'Provide mutations, updated planning checks or document sections.',
   );
 /**
  * A person's control of their plan. Pause stops new work and cancels running specialists, which start again on resume.
@@ -291,13 +354,37 @@ export const planControlSchema = z.discriminatedUnion('action', [
     budget: planBudgetSchema.optional(),
   }),
   z.strictObject({ requestId: uuidSchema, action: z.literal('stop'), expectedVersion: z.number().int().nonnegative() }),
+  /** Approves one exact content revision, then starts a draft or resumes a plan paused awaiting approval. */
+  z.strictObject({
+    requestId: uuidSchema,
+    action: z.literal('approve'),
+    expectedVersion: z.number().int().nonnegative(),
+    contentRevision: z.number().int().positive(),
+    timeZone: z.string().min(1).max(64).refine(isTimeZone, 'Use an IANA time zone such as Europe/London.'),
+  }),
 ]);
 export type PlanControl = z.infer<typeof planControlSchema>;
+function isTimeZone(value: string) {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
 /**
  * Why a plan is paused: its starter paused it, it used its budget, its starter lost access to the chat, work stopped
- * before it was verified, or a saved agent's sources couldn't be checked for too long.
+ * before it was verified, a saved agent's sources couldn't be checked for too long, or its content changed after the
+ * starter approved it.
  */
-export const planPauseSchema = z.enum(['starter', 'budget', 'starter-access', 'progress', 'sources-unavailable']);
+export const planPauseSchema = z.enum([
+  'starter',
+  'budget',
+  'starter-access',
+  'progress',
+  'sources-unavailable',
+  'awaiting-approval',
+]);
 
 export type PlanGraphErrorCode =
   | 'duplicate-key'
@@ -323,7 +410,8 @@ export type PlanGraphErrorCode =
   | 'planning-prerequisite'
   | 'planning-evidence'
   | 'planning-budget'
-  | 'plan-only';
+  | 'plan-only'
+  | 'document-summary';
 const instructions: Record<PlanGraphErrorCode, string> = {
   'duplicate-key': 'Choose a key no other task or specialist in this plan uses.',
   'missing-task': 'Read the plan and refer only to existing task keys.',
@@ -357,6 +445,7 @@ const instructions: Record<PlanGraphErrorCode, string> = {
   'planning-budget': 'The plan has no available allowance. Pause work; only the starter can raise its budget.',
   'plan-only':
     'Plan mode permits research and a plan-only draft. It cannot start work or change a plan that is executing.',
+  'document-summary': 'This plan has no document yet. Include document.summary with the other sections.',
 };
 export class PlanGraphError extends Error {
   readonly code: PlanGraphErrorCode;
@@ -936,6 +1025,41 @@ export const planViewSchema = z.object({
   pause: planPauseSchema.nullable(),
   budget: planBudgetSchema,
   planning: planSpecificationSchema.nullable().default(null),
+  /** Increases only when reviewable content changes; `version` also moves with progress. */
+  contentRevision: z.number().int().positive().default(1),
+  document: z
+    .object({
+      summary: z.string(),
+      approach: z.string().optional(),
+      risks: z.array(z.object({ risk: z.string(), mitigation: z.string() })),
+      diagrams: z.array(
+        z.object({ key: z.string(), title: z.string(), caption: z.string().optional(), mermaid: z.string() }),
+      ),
+    })
+    .nullable()
+    .default(null),
+  /** The latest approval, which may be for an earlier revision. */
+  approval: z
+    .object({
+      revision: z.number().int().positive(),
+      approvedByMembershipId: uuidSchema,
+      approvedBy: z.string().nullable(),
+      approvedAt: z.string(),
+      timeZone: z.string(),
+    })
+    .nullable()
+    .default(null),
+  awaitingApproval: z.boolean().default(false),
+  /** Content revisions saved after the latest approval, oldest first. */
+  changesSinceApproval: z
+    .array(
+      z.object({
+        revision: z.number().int().positive(),
+        changeKind: z.enum(['starter', 'runtime']),
+        createdAt: z.string(),
+      }),
+    )
+    .default([]),
   specialists: z.array(z.object({ key: planKeySchema, name: z.string(), role: z.string() })),
   tasks: z.array(
     z.object({
@@ -977,6 +1101,7 @@ export const planListItemSchema = planViewSchema.pick({
   outcome: true,
   // Lets the starter pause or stop a plan whose full view can't be read right now.
   canControl: true,
+  contentRevision: true,
 });
 export const planReceiptSchema = z.object({
   id: uuidSchema,
@@ -991,7 +1116,10 @@ export class AgentPlanError extends Error {
     | 'plan-open'
     | 'plan-closed'
     | 'not-starter'
-    | 'budget-lowered';
+    | 'budget-lowered'
+    | 'approval-required'
+    | 'revision-conflict'
+    | 'document-unavailable';
   constructor(code: AgentPlanError['code']) {
     super(code);
     this.code = code;
