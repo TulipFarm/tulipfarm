@@ -74,6 +74,18 @@ test('loads a fixture extension from TULIPFARM_EXTENSIONS by relative path, file
   assert.deepEqual(resolved, ['@acme/recording']);
 });
 
+test('a role that reports as its own service passes that name to extensions', async () => {
+  resetExtensions();
+  const { received } = await import(fixture('recording-extension'));
+  received.services.length = 0;
+  const options = { env: { TULIPFARM_EXTENSIONS: './recording-extension.mjs' }, cwd: fixtures };
+  await loadConfiguredExtensions('api', { ...options, service: 'tulipfarm-api-jobs' });
+  resetExtensions();
+  await loadConfiguredExtensions('api', options);
+  resetExtensions();
+  assert.deepEqual(received.services, ['tulipfarm-api-jobs', undefined]);
+});
+
 test('bad modules fail with a clear error naming the specifier', async () => {
   const load = name => loadExtensions([`./${name}.mjs`], { app: 'api', env: {} }, { cwd: fixtures });
   await assert.rejects(

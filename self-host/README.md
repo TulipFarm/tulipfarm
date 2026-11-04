@@ -87,6 +87,19 @@ knowledge role needs isolated workspace storage, and its telemetry uses the
 service name `tulipfarm-knowledge-worker`. Unset or `all` keeps one process.
 Document parsers always run at the lowest CPU priority.
 
+## Separate API jobs
+
+By default the API also runs its scheduled background sweeps, which start chat
+replies, workflows, knowledge syncs and other queued work every 2 seconds. They
+share the API's workspace-storage connections with requests. To keep them
+apart, run the same API image twice: one with `TULIPFARM_API_ROLE=requests`,
+which receives all traffic and starts no sweeps, and one with
+`TULIPFARM_API_ROLE=jobs`, which runs them. Both need the API's environment,
+and the jobs role's telemetry uses the service name `tulipfarm-api-jobs`.
+The jobs API still serves every route, including `/v1/health`, but needs no
+public traffic. Keep a jobs API running: with only `requests`, queued and
+scheduled work is never started. Unset or `all` keeps one process.
+
 ## Health
 
 The API health route is **`/v1/health`**, not `/health`. It returns 200 only when

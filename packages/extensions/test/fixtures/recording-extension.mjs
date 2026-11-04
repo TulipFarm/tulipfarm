@@ -1,10 +1,11 @@
 // A fixture extension that fills every server slot and records what it receives.
-export const received = { events: [], errors: [], usage: [], hooks: [], contexts: [] };
+export const received = { events: [], errors: [], usage: [], hooks: [], contexts: [], services: [] };
 
 export default {
   name: 'fixture-recording',
   register(slots, context) {
     received.contexts.push(context.app);
+    received.services.push(context.service);
     slots.creditGate({
       available: async () => 0n,
       debit: async () => {
