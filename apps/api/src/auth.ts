@@ -7,6 +7,7 @@ import { turnstileConfig } from './turnstile.ts';
 import { createDevSessions, devSessionsAllowed, safeRedirectPath } from './dev-session.ts';
 import { authConfig, createAuth, emailTransportConfigured } from './better-auth.ts';
 import { registerAccountDetails } from './account-details.ts';
+import type { InvitationLinks } from './invitation-sign-in.ts';
 
 export { authConfig, createAuth } from './better-auth.ts';
 
@@ -30,6 +31,7 @@ export function registerAuth(app: FastifyInstance) {
     await pool.end();
   });
   const passwordResetEmail = config.emailPassword && emailTransportConfigured();
+  const invitationLinks: InvitationLinks = { current: null };
   const auth = createAuth(
     pool,
     async ({ email, url }) => {
@@ -48,6 +50,7 @@ export function registerAuth(app: FastifyInstance) {
           await createEmailDeliveryStore(pool, emailDeliveryKeys()).enqueuePasswordReset(email, url);
         }
       : undefined,
+    invitationLinks,
   );
   registerAccountDetails(app, { auth, identity: pool, googleEnabled: Boolean(config.google) });
 
@@ -117,5 +120,5 @@ export function registerAuth(app: FastifyInstance) {
       return reply.send(response.body ? await response.text() : null);
     },
   });
-  return { auth, pool };
+  return { auth, pool, invitationLinks };
 }
