@@ -93,7 +93,7 @@ test('secret requests', async t => {
       { host: 'metrics', port: null, http: true },
       { host: 'billing', port: null, http: false },
     ];
-    const listed = createSecretRequests(createSecrets({ runtime: f.runtime, keyring, enabled: true, privateHosts }));
+    const listed = createSecretRequests(createSecrets({ runtime: f.runtime, keyring, privateHosts }));
     const destinations = [
       { kind: 'host', host: 'metrics' },
       { kind: 'endpoint', url: 'http://metrics/q' },

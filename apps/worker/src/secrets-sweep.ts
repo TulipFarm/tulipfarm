@@ -5,7 +5,7 @@ const PAGES_PER_RUN = 20;
 
 /**
  * Expires overdue secret requests, resuming their chats, and deletes expired secrets (P11, P46). It runs even
- * when `SECRETS_ENABLED` is off, so turning the feature off never keeps an expired value.
+ * when the encryption key is missing, so losing the key never keeps an expired value.
  */
 export function createSecretsSweep(
   runtime: SecretsRuntime,

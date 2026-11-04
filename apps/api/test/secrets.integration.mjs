@@ -8,7 +8,6 @@ import { secretsServices } from '../src/secrets-composition.ts';
 import { requestFixture } from '../../../packages/conversations/test/request-fixture.mjs';
 
 const env = {
-  SECRETS_ENABLED: 'true',
   INTEGRATION_CREDENTIAL_KEY_ID: 'test',
   INTEGRATION_CREDENTIAL_KEY: '33'.repeat(32),
 };
@@ -156,7 +155,7 @@ test('a submitted secrets form answers the chat request without exposing the val
   }
 });
 
-test('secrets routes report disabled without the setting', { timeout: 60000 }, async () => {
+test('secrets routes report disabled without the encryption key', { timeout: 60000 }, async () => {
   let authenticated;
   const f = await requestFixture(undefined, async db => {
       authenticated = await authenticatedFixture(db);
@@ -164,7 +163,7 @@ test('secrets routes report disabled without the setting', { timeout: 60000 }, a
     }),
     app = Fastify();
   try {
-    registerSecrets(app, authenticated.auth, secretsServices(f.runtime, { ...env, SECRETS_ENABLED: 'false' }));
+    registerSecrets(app, authenticated.auth, secretsServices(f.runtime, {}));
     const url = await app.listen({ host: '127.0.0.1', port: 0 });
     const call = (path, method = 'GET', body) =>
       fetch(`${url}/workspaces/${f.workspace.id}${path}`, {

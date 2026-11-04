@@ -46,7 +46,6 @@ export type SecretsPrincipal = string | HumanActor;
 export type SecretsOptions = {
   runtime: SecretsRuntime;
   keyring: SecretKeyring | (() => SecretKeyring);
-  enabled?: boolean;
   now?: () => Date;
   /** The operator's private hosts that destinations may name (`API_CALL_PRIVATE_HOSTS`). */
   privateHosts?: readonly PrivateHost[];
@@ -108,7 +107,6 @@ export function createSecrets(options: SecretsOptions) {
   const privateHosts = options.privateHosts ?? [];
 
   function capabilities() {
-    if (!options.enabled) return { enabled: false };
     try {
       cipher.check();
       return { enabled: true };

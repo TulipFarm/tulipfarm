@@ -54,7 +54,7 @@ import { relation, type AgentStorage } from './store.ts';
 import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
 import { inspectMarketplacePackage } from './package-inspection.ts';
 import { listSkills, readSkill } from './skills.ts';
-import type { IntegrationService } from '@tulipfarm/integrations';
+import { integrationCredentialKeyring, type IntegrationService } from '@tulipfarm/integrations';
 import {
   atlassianCallSchema,
   atlassianDescriptions,
@@ -783,6 +783,14 @@ export type ToolAccess = (
     }
   | { kind: 'agent'; tools: readonly ToolName[]; selectedSkills?: boolean; task?: boolean }
 ) & { mcp?: McpModelCatalog | undefined };
+function secretsAvailable() {
+  try {
+    integrationCredentialKeyring();
+    return true;
+  } catch {
+    return false;
+  }
+}
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
   const slack = access.kind === 'chat' ? (access.slack ?? slackOutboundEnabled()) : true;
@@ -792,12 +800,11 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => slack || !schema.shape.tool.value.startsWith('slack.'))
       .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
       .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
-      // Secret forms go to the person in this chat or the task's owner, and only when this deployment turns secrets on.
+      // Secret forms go to the person in this chat or the task's owner, and only when this deployment can encrypt them.
       .filter(
         schema =>
           !schema.shape.tool.value.startsWith('secrets.') ||
-          ((access.kind === 'chat' || (access.kind === 'agent' && access.task === true)) &&
-            process.env.SECRETS_ENABLED === 'true'),
+          ((access.kind === 'chat' || (access.kind === 'agent' && access.task === true)) && secretsAvailable()),
       )
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
