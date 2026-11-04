@@ -806,7 +806,22 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   output: row.output,
                   sources: row.sources,
                 }),
-                api: hidden.size ? null : apiCallReceipt(row.tool, row.output),
+                api: hidden.size
+                  ? null
+                  : apiCallReceipt(
+                      row.tool,
+                      row.output,
+                      row.tool === 'api.request' &&
+                        tx.commonVersion >= 34 &&
+                        Boolean(
+                          (
+                            await tx.client.query(
+                              `SELECT 1 FROM ${qualified(tx.schema, 'tf_api_calls')} WHERE id=$1 AND digest IS NOT NULL`,
+                              [row.id],
+                            )
+                          ).rowCount,
+                        ),
+                    ),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   tool: row.tool,
                   status: row.status,

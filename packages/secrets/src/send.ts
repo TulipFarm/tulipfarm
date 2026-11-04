@@ -133,7 +133,11 @@ export function heldSecrets(
   holder: { workspaceId: string; actor: HumanActor; origin: SecretOrigin },
 ) {
   return {
-    resolve: (handle: { reference: string } | { variable: string }, url: string) =>
+    resolve: (
+      handle: { reference: string } | { variable: string },
+      url: string,
+      expected?: { version: number; policyVersion: number },
+    ) =>
       secrets.internal.authorized(holder.workspaceId, holder.actor, async tx => {
         const held = await requests.references(tx, holder.actor.membershipId, holder.origin);
         const match = held.find(reference =>
@@ -148,6 +152,7 @@ export function heldSecrets(
             membershipId: holder.actor.membershipId,
             secret: { kind: 'reference', referenceId: match.referenceId, origin: holder.origin },
             url,
+            ...(expected ? { expected } : {}),
           });
           return { ...resolved, name: match.name };
         } catch (error) {

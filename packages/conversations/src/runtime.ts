@@ -330,6 +330,15 @@ export type ResumeMcpAction = (
   context: ConversationToolContext,
   call: unknown,
 ) => Promise<{ result: { kind: string; actionId?: string; status?: string }; sources: SourceDependency[] }>;
+/** Continues an `api.request` change waiting for its member's decision; `waiting` means it is not decided yet. */
+export type ResumeApiCall = (context: {
+  runtime: ConversationRuntime;
+  workspaceId: string;
+  actor: HumanActor;
+  conversationId: string;
+  turnId: string;
+  callId: string;
+}) => Promise<{ state: 'waiting' } | { state: 'done'; result: unknown; sources: SourceDependency[] }>;
 const executionStepSchema = z.object({
   call_id: uuidSchema,
   call: z.json(),
@@ -340,6 +349,9 @@ const executionStepSchema = z.object({
 });
 const mcpWaitSchema = z.object({
   result: z.object({ provider: z.literal('workspace-mcp'), kind: z.literal('waiting'), actionId: uuidSchema }),
+});
+const apiCallWaitSchema = z.object({
+  result: z.object({ provider: z.literal('api-call'), kind: z.literal('waiting'), callId: uuidSchema }),
 });
 const protectedOutputSchema = z.object({ result: z.unknown(), sources: conversationResultSchema.shape.sources });
 class ExternalActionWaiting extends Error {}
@@ -555,6 +567,7 @@ export function createConversationExecutor(
   planning?: ConversationPlanning,
   turnFiles?: TurnFiles,
   secrets?: ConversationSecrets,
+  resumeApiCall?: ResumeApiCall,
 ) {
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
@@ -759,6 +772,22 @@ export function createConversationExecutor(
       ) {
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='mcp-action-waiting' WHERE id=$1`,
+          [turn.id],
+        );
+        await changed(tx, work, true);
+        return null;
+      }
+      if (
+        resumeApiCall &&
+        (
+          await tx.client.query(
+            `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_api_calls')} a ON a.id=c.id WHERE c.turn_id=$1 AND c.tool='api.request' AND c.status='running'`,
+            [turn.id],
+          )
+        ).rowCount
+      ) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='api-call-waiting' WHERE id=$1`,
           [turn.id],
         );
         await changed(tx, work, true);
@@ -1495,6 +1524,7 @@ export function createConversationExecutor(
             (turn.planning_mode ||
               Boolean(planningContext) ||
               Boolean(resumeMcp) ||
+              Boolean(resumeApiCall) ||
               priorTools.some(call => call.tool === 'present.choice' || call.tool === 'secrets.request')) &&
             !chat.slack &&
             !chat.context;
@@ -2229,6 +2259,19 @@ export function createConversationExecutor(
               });
               throw new ExternalActionWaiting();
             }
+            const apiCall = apiCallWaitSchema.safeParse(result);
+            if (apiCall.success) {
+              if (!source.durable || !resumeApiCall || apiCall.data.result.callId !== callId || name !== 'api.request')
+                throw new AccessDenied();
+              await guarded(async tx => {
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='api-call-waiting' WHERE id=$1`,
+                  [fence.turnId],
+                );
+                await changed(tx, fence, true);
+              });
+              throw new ExternalActionWaiting();
+            }
             const slack = z
               .object({ result: z.object({ provider: z.literal('slack'), status: z.string() }) })
               .safeParse(result);
@@ -2778,6 +2821,64 @@ export function createConversationExecutor(
                     });
                   }
                 }
+                if (resumeApiCall) {
+                  const pending = await transaction(work.workspaceId, async tx => {
+                    const chat = await root(tx, work);
+                    if (!chat || chat.slack || chat.context) return null;
+                    const turn = await head(tx, work.conversationId);
+                    if (
+                      !turn ||
+                      turn.id !== work.turnId ||
+                      turn.generation !== work.generation ||
+                      turn.status !== 'waiting'
+                    )
+                      return null;
+                    const row = (
+                      await tx.client.query(
+                        `SELECT c.id FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_api_calls')} a ON a.id=c.id WHERE c.turn_id=$1 AND c.tool='api.request' AND c.status='running'`,
+                        [work.turnId],
+                      )
+                    ).rows[0];
+                    if (!row) return null;
+                    return { callId: uuidSchema.parse(row.id), actor: chat.requester };
+                  });
+                  if (pending) {
+                    const response = await resumeApiCall({
+                      runtime,
+                      workspaceId: work.workspaceId,
+                      actor: pending.actor,
+                      conversationId: work.conversationId,
+                      turnId: work.turnId,
+                      callId: pending.callId,
+                    });
+                    if (response.state === 'waiting') return 'idle';
+                    await transaction(work.workspaceId, async tx => {
+                      const chat = await root(tx, work);
+                      const turn = await head(tx, work.conversationId);
+                      if (
+                        !chat ||
+                        !turn ||
+                        turn.id !== work.turnId ||
+                        turn.generation !== work.generation ||
+                        turn.status !== 'waiting'
+                      )
+                        throw new AccessDenied();
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                        [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                        [pending.callId],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                        [work.turnId],
+                      );
+                      await changed(tx, work);
+                    });
+                  }
+                }
                 const waiting = await transaction(work.workspaceId, async tx => {
                   if (!(await root(tx, work))) return false;
                   return Boolean(
@@ -2922,7 +3023,7 @@ export function createConversationExecutor(
 
   function dueTurns(tx: RuntimeTransaction) {
     return `FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
-          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting')))
+          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting','api-call-waiting')))
           AND o.next_attempt_at <= clock_timestamp()
           AND ($1::uuid IS NULL OR t.conversation_id = $1)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.turn_id=t.id)

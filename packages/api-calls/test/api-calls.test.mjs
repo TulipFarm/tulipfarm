@@ -1,13 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer, request } from 'node:https';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { SecretError } from '@tulipfarm/secrets';
+import { routes, secretPort, server } from './https-fixture.mjs';
 import { encodeBody, isCredentialName, normalizeApiUrl, requestHeaders, sendApiCall } from '../dist/index.js';
 
 const failsWith = code => error => error.code === code;
@@ -124,125 +117,6 @@ test('bodies are encoded with their content type and limited to 1 MiB', () => {
   );
   assert.throws(() => encodeBody({ kind: 'json', value: 'x'.repeat(1024 * 1024) }), failsWith('too-large'));
 });
-
-function certificate(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'api-calls-tls-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const keyPath = join(directory, 'key.pem'),
-    certPath = join(directory, 'cert.pem');
-  execFileSync(
-    'openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-keyout',
-      keyPath,
-      '-out',
-      certPath,
-      '-days',
-      '1',
-      '-subj',
-      '/CN=api.example.test',
-      '-addext',
-      'subjectAltName=DNS:api.example.test',
-    ],
-    { stdio: 'ignore' },
-  );
-  return { key: readFileSync(keyPath), cert: readFileSync(certPath) };
-}
-
-async function server(t, handler) {
-  const { key, cert } = certificate(t);
-  const received = [];
-  const instance = createServer({ key, cert }, (req, res) => {
-    let body = '';
-    req.on('data', chunk => (body += chunk));
-    req.on('end', () => {
-      received.push({ method: req.method, url: req.url, headers: req.headers, body });
-      handler(req, res);
-    });
-  });
-  instance.listen(0, '127.0.0.1');
-  await once(instance, 'listening');
-  t.after(() => {
-    instance.closeAllConnections();
-    instance.close();
-  });
-  const port = instance.address().port;
-  let address = '8.8.8.8';
-  const dependencies = {
-    lookup: async hostname => {
-      if (hostname === 'missing.example.test') throw new Error('ENOTFOUND');
-      return [{ address, family: 4 }];
-    },
-    request: (url, options, callback) =>
-      request(
-        url,
-        {
-          ...options,
-          port,
-          ca: cert,
-          lookup: (_hostname, _options, callback) => callback(null, [{ address: '127.0.0.1', family: 4 }]),
-        },
-        callback,
-      ),
-  };
-  const options = (extra = {}) => ({ workspaceId: randomUUID(), scope: randomUUID(), dependencies, ...extra });
-  return {
-    received,
-    options,
-    resolveTo: value => (address = value),
-  };
-}
-
-const routes = (req, res) => {
-  const path = new URL(req.url, 'https://api.example.test').pathname;
-  if (path === '/json')
-    res
-      .writeHead(200, {
-        'content-type': 'application/json',
-        'x-request-id': 'r1',
-        'x-ratelimit-remaining': '9',
-        'set-cookie': 'a=b',
-        server: 'test',
-      })
-      .end('{"items":[1,2]}');
-  else if (path === '/text') res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not here');
-  else if (path === '/latin1')
-    res.writeHead(200, { 'content-type': 'text/plain; charset=iso-8859-1' }).end(Buffer.from([0xe9]));
-  else if (path === '/bad-json') res.writeHead(200, { 'content-type': 'application/json' }).end('{oops');
-  else if (path === '/sniff') res.writeHead(200).end('{"sniffed":true}');
-  else if (path === '/binary')
-    res.writeHead(200, { 'content-type': 'image/png', 'content-length': '4' }).end('\x89PNG');
-  else if (path === '/large') res.writeHead(200, { 'content-type': 'text/plain' }).end('x'.repeat(64 * 1024 + 1));
-  else if (path === '/exact') res.writeHead(200, { 'content-type': 'text/plain' }).end('x'.repeat(64 * 1024));
-  else if (path === '/redirect')
-    res.writeHead(302, { location: '/next?key=s3cr3t-value&page=2', 'x-request-id': 'r2' }).end();
-  else if (path === '/challenge')
-    res.writeHead(401, { 'www-authenticate': 'Bearer realm="api"', 'content-type': 'text/plain' }).end('missing key');
-  else if (path === '/echo')
-    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ seen: req.headers.authorization }));
-  else if (path === '/report')
-    res
-      .writeHead(200, {
-        'content-type': 'application/vnd.example+json',
-        'content-disposition': 'attachment; filename="q3/report.json"',
-      })
-      .end(JSON.stringify({ rows: 'x'.repeat(70 * 1024) }));
-  else if (path === '/huge') res.writeHead(200, { 'content-type': 'text/csv' }).end('x'.repeat(10 * 1024 * 1024 + 1));
-  else if (path === '/max') res.writeHead(200, { 'content-type': 'text/csv' }).end('x'.repeat(10 * 1024 * 1024));
-  else if (path === '/large-echo')
-    res
-      .writeHead(200, { 'content-type': 'application/octet-stream' })
-      .end(Buffer.concat([Buffer.alloc(70 * 1024), Buffer.from(String(req.headers.authorization))]));
-  else if (path === '/gzip') res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' }).end('x');
-  else if (path === '/hang') return;
-  else if (path === '/drop') req.socket.destroy();
-  else res.writeHead(204).end();
-};
 
 test('reads return status, safe headers and a bounded JSON or text body', async t => {
   const api = await server(t, routes);
@@ -424,19 +298,6 @@ test('network failures map to their codes', async t => {
   assert.equal(dropped.code, 'network-failed');
 });
 
-function secretPort(secrets, uses) {
-  return {
-    resolve: async (handle, url) => {
-      const key = 'reference' in handle ? handle.reference : handle.variable;
-      const secret = secrets[key];
-      if (!secret) throw new SecretError('not-found');
-      if (secret.host && new URL(url).hostname !== secret.host) throw new SecretError('destination-denied');
-      return { secretId: key, name: secret.name, placement: secret.placement, value: secret.value };
-    },
-    recordUse: async (secretId, url) => uses.push({ secretId, url }),
-  };
-}
-
 test('secrets are placed, redacted, recorded and never reflected back', async t => {
   const api = await server(t, routes);
   const uses = [];
@@ -513,36 +374,4 @@ test('secrets are placed, redacted, recorded and never reflected back', async t 
   const dropped = await send('/drop', { secrets: [{ variable: 'BEARER' }] });
   assert.equal(dropped.code, 'network-failed');
   assert.equal(uses.length, 1);
-});
-
-test('a turn makes at most 50 calls', async t => {
-  const api = await server(t, routes);
-  const options = api.options();
-  const call = { tool: 'api.request', method: 'HEAD', url: 'https://api.example.test/json' };
-  for (let index = 0; index < 50; index++) assert.equal((await sendApiCall(call, options)).status, 'sent');
-  assert.equal((await sendApiCall(call, options)).code, 'call-limit');
-  assert.equal((await sendApiCall(call, { ...options, scope: randomUUID() })).status, 'sent');
-});
-
-test('a workspace has at most 10 calls in flight and later calls wait within their timeout', async t => {
-  const pending = [];
-  const api = await server(t, (req, res) => {
-    if (req.url === '/hold') pending.push(res);
-    else res.writeHead(204).end();
-  });
-  const workspaceId = randomUUID();
-  const send = (path, timeoutSeconds = 5) =>
-    sendApiCall(
-      { tool: 'api.request', method: 'GET', url: `https://api.example.test${path}`, timeoutSeconds },
-      { ...api.options(), workspaceId },
-    );
-  const held = Array.from({ length: 10 }, () => send('/hold'));
-  while (pending.length < 10) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal((await send('/quick', 1)).code, 'timeout');
-  const waiting = send('/quick');
-  await new Promise(resolve => setTimeout(resolve, 50));
-  pending.shift().writeHead(204).end();
-  assert.equal((await waiting).status, 'sent');
-  for (const res of pending) res.writeHead(204).end();
-  for (const result of await Promise.all(held)) assert.equal(result.status, 'sent');
 });

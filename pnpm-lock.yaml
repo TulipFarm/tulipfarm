@@ -68,6 +68,9 @@ importers:
       '@tulipfarm/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@tulipfarm/api-calls':
+        specifier: workspace:*
+        version: link:../../packages/api-calls
       '@tulipfarm/atlassian':
         specifier: workspace:*
         version: link:../../packages/atlassian
@@ -473,6 +476,9 @@ importers:
       '@tailwindcss/vite':
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      '@tulipfarm/api-calls':
+        specifier: workspace:*
+        version: link:../../packages/api-calls
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
@@ -554,6 +560,9 @@ importers:
       '@tulipfarm/agents':
         specifier: workspace:*
         version: link:../../packages/agents
+      '@tulipfarm/api-calls':
+        specifier: workspace:*
+        version: link:../../packages/api-calls
       '@tulipfarm/atlassian':
         specifier: workspace:*
         version: link:../../packages/atlassian
@@ -809,12 +818,18 @@ importers:
 
   packages/api-calls:
     dependencies:
+      '@tulipfarm/access':
+        specifier: workspace:*
+        version: link:../access
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../secrets
       '@tulipfarm/workspace-mcp-transport':
         specifier: workspace:*
         version: link:../workspace-mcp-transport
+      '@tulipfarm/workspace-storage':
+        specifier: workspace:*
+        version: link:../workspace-storage
       zod:
         specifier: 4.6.6
         version: 4.6.6

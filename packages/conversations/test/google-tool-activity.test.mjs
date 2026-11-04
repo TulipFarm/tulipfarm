@@ -91,7 +91,13 @@ test('API call receipts keep only the HTTP status or error code, and every failu
   );
   assert.equal(apiCallReceipt('web.fetch', { result: sent }), null);
   assert.equal(apiCallReceipt('api.request', { result: { error: 'plan-only' } }), null);
-  assert.equal(apiCallProblem('approval-unavailable'), 'Changes need your approval, which isn’t available yet.');
+  assert.deepEqual(apiCallReceipt('api.request', { result: sent, sources: [] }, true), {
+    httpStatus: 404,
+    review: true,
+  });
+  assert.deepEqual(apiCallReceipt('api.request', { provider: 'api-call', kind: 'waiting' }, true), { review: true });
+  assert.equal(apiCallProblem('approval-unavailable'), 'Changes need your approval, which isn’t available here.');
+  assert.equal(apiCallProblem('rejected'), 'You chose not to send this request.');
   assert.equal(apiCallProblem('secret-reflected'), 'The response repeated the secret, so it was hidden.');
   assert.equal(apiCallProblem(undefined), 'The API call failed.');
   assert.equal(apiCallProblem('toString'), 'The API call failed.');

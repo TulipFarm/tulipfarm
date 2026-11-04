@@ -49,6 +49,7 @@ import { McpPrivateContext } from '@/features/workspace-mcp/selection';
 import { useMcpAccessLoss } from '@/features/workspace-mcp/state';
 import { GitHubTaskSourceCard } from '@/features/chat/github-investigation-card';
 import { GitHubBatches } from '@/features/chat/github-batches';
+import { TaskApiCalls } from '@/features/api-calls/review-card';
 import { apiOrigin } from '@/lib/auth';
 import { GitHubChatResponse } from '@/features/chat/github-download';
 import { ActivityResultCard } from '@/features/chat/activity-result-card';
@@ -322,6 +323,11 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
               workspaceId={workspace.id}
               chatId={taskId}
               task
+              revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
+            />
+            <TaskApiCalls
+              workspaceId={workspace.id}
+              taskId={taskId}
               revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
             />
             <TaskHistory

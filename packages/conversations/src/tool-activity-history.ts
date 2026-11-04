@@ -138,6 +138,18 @@ export async function storedToolStatus(
     if (action && !action.deadline) return action.decision === 'approve' || action.permitted ? 'queued' : 'waiting';
   }
   if (
+    row.tool === 'api.request' &&
+    (await tx.client.query('SELECT to_regclass($1) AS name', [table('tf_api_calls')])).rows[0]?.name
+  ) {
+    const call = (
+      await tx.client.query(
+        `SELECT a.status,d.decision FROM ${table('tf_api_calls')} a LEFT JOIN ${table('tf_api_call_decisions')} d ON d.call_id=a.id WHERE a.id=$1`,
+        [row.id],
+      )
+    ).rows[0];
+    if (call?.status === 'awaiting-approval') return call.decision ? 'queued' : 'waiting';
+  }
+  if (
     row.status === 'waiting' &&
     [
       'google.read',

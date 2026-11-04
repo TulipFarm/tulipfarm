@@ -69,6 +69,7 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
+    "@tulipfarm/api-calls": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
     "@tulipfarm/typescript-config": "workspace:*",

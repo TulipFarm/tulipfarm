@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { planControlSchema, planViewSchema } from '@tulipfarm/agents/plan-contracts';
 import { knowledgeMockMessages, knowledgeScenarios } from './knowledge-mock';
 import { catalogFixture } from '@/features/models/catalog-fixture';
+import { apiReviewMock } from '@/features/api-calls/review-mock';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const tableId = '22222222-2222-4222-8222-222222222222';
@@ -30,6 +31,7 @@ export const canvasScenarios = {
   'plan-verified': 'Planning: verified result',
   web: 'Web search and page reads',
   api: 'API calls',
+  'api-approval': 'API call approval',
   timeline: 'Mixed activity timeline',
   'timeline-pages': 'Paged activity timeline',
   'timeline-pages-error': 'Paged activity retry',
@@ -251,7 +253,7 @@ export function completeCanvasMock() {
     });
   } else if (scenario === 'web') webCompleted = true;
   else if (scenario.startsWith('knowledge')) knowledgeCompleted = true;
-  else if (scenario !== 'history' && scenario !== 'api') scenario = 'completed';
+  else if (scenario !== 'history' && scenario !== 'api' && scenario !== 'api-approval') scenario = 'completed';
   const channel = new BroadcastChannel('tulipfarm:query:v1');
   channel.postMessage({
     version: 1,
@@ -294,11 +296,16 @@ if (import.meta.env.DEV && window.location.pathname.startsWith('/canvas-mock/'))
   };
   const planning = planningFixture();
   const planCommands = new Map<string, unknown>();
+  const apiReview = apiReviewMock({ kind: 'chat', conversationId: id });
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     if (!url.pathname.startsWith('/v1/')) return originalFetch(input, init);
     const path = url.pathname;
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    if (scenario === 'api-approval') {
+      const answer = apiReview.respond(path, method, init ?? undefined);
+      if (answer) return answer;
+    }
     if (path === '/v1/user/visit') return Response.json({ firstSession: false });
     if (scenario.startsWith('plan-')) {
       if (path.endsWith(`/agent-plans/${tableId}/control`) && method === 'POST') {
@@ -400,6 +407,24 @@ if (import.meta.env.DEV && window.location.pathname.startsWith('/canvas-mock/'))
       if (scenario.startsWith('knowledge'))
         return Response.json({
           messages: knowledgeMockMessages(scenario, knowledgeCompleted, started),
+          nextBefore: null,
+          hasGitHubProposals: false,
+        });
+      if (scenario === 'api-approval')
+        return Response.json({
+          messages: [
+            {
+              id,
+              sequence: 1,
+              author: 'human',
+              createdAt: started,
+              parts: [
+                { kind: 'text', text: 'File a Linear bug for the EUR checkout failures and tidy up the old ones.' },
+              ],
+              turn: { id, status: 'waiting', generation: 0 },
+              tools: apiReview.tools,
+            },
+          ],
           nextBefore: null,
           hasGitHubProposals: false,
         });
