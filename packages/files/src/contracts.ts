@@ -200,6 +200,34 @@ export const fileDetailsSchema = z.object({
   generation: fileGenerationSchema.nullable().optional(),
 });
 export type FileDetails = z.infer<typeof fileDetailsSchema>;
+/** Who added a version and why, as a short slug such as `original`, `upload`, `restore` or `plan`. */
+export const fileVersionSourceSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
+export const versionRowSchema = z.object({
+  file_id: uuidSchema,
+  version: z.number().int().positive(),
+  object_key: uuidSchema,
+  object_owner: z.enum(['files', 'attachment']),
+  size: z.number().int().positive(),
+  media_type: z.string(),
+  sha256: z.string(),
+  created_by_membership_id: uuidSchema,
+  source: fileVersionSourceSchema,
+  created_at: z.date(),
+});
+export type FileVersionRow = z.infer<typeof versionRowSchema>;
+export const fileVersionSchema = z.object({
+  version: z.number().int().positive(),
+  size: z.number().int().positive(),
+  mediaType: z.string(),
+  sha256: z.string(),
+  source: fileVersionSourceSchema,
+  createdAt: z.string(),
+  createdBy: filePersonSchema,
+  current: z.boolean(),
+});
+export type FileVersion = z.infer<typeof fileVersionSchema>;
+export const fileVersionsSchema = z.object({ role: fileRoleSchema, versions: z.array(fileVersionSchema) });
+export type FileVersions = z.infer<typeof fileVersionsSchema>;
 export const fileDirectorySchema = z.object({
   members: z.array(filePersonSchema.extend({ email: z.string() })),
   teams: z.array(z.object({ id: uuidSchema, name: z.string() })),
@@ -291,7 +319,8 @@ export class FileError extends Error {
     | 'not-owner'
     | 'owned-by-others'
     | 'not-trashed'
-    | 'restore-destination';
+    | 'restore-destination'
+    | 'media-type';
   constructor(code: FileError['code']) {
     super(`File ${code}`);
     this.code = code;

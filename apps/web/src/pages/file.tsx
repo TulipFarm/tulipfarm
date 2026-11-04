@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
 import { Download } from 'reicon-react/icons/Download';
+import { History } from 'reicon-react/icons/History';
 import { InfoCircle } from 'reicon-react/icons/InfoCircle';
 import { Link as LinkIcon } from 'reicon-react/icons/Link';
 import { MoreH } from 'reicon-react/icons/MoreH';
@@ -25,6 +26,7 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { fileKeys, useFilesApi, useFilesChanges, type FileSummary, type ViewerSearch } from '@/features/files/api';
 import { DetailsDialog } from '@/features/files/details';
+import { VersionsDialog } from '@/features/files/versions';
 import { GenerationDetails } from '@/features/files/generation';
 import { useFlag } from '@/lib/feature-flags';
 import { copyLink, SharingDialog } from '@/features/files/sharing';
@@ -76,7 +78,9 @@ function Viewer({
   const [recentUse, setRecentUse] = useState<'idle' | 'recording' | 'done' | 'failed'>('idle');
   const [download, setDownload] = useState<Download>({ kind: 'idle' });
   const saving = useRef<AbortController | null>(null);
-  const [dialog, setDialog] = useState<'details' | 'share' | 'chat' | 'knowledge' | 'project' | null>(null);
+  const [dialog, setDialog] = useState<'details' | 'versions' | 'share' | 'chat' | 'knowledge' | 'project' | null>(
+    null,
+  );
   const [copied, setCopied] = useState<Awaited<ReturnType<typeof copyLink>>>(null);
   const narrow = useIsMobile();
   const images = useFlag('images');
@@ -260,6 +264,10 @@ function Viewer({
                   <InfoCircle size={14} aria-hidden="true" />
                   Details
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDialog('versions')}>
+                  <History size={14} aria-hidden="true" />
+                  Versions
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void copyLink(workspaceSlug, item).then(setCopied)}>
                   <LinkIcon size={14} aria-hidden="true" />
                   Copy link
@@ -293,6 +301,15 @@ function Viewer({
           item={item}
           membershipId={membershipId}
           share={() => setDialog('share')}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === 'versions' && (
+        <VersionsDialog
+          api={api}
+          item={item}
+          membershipId={membershipId}
+          onRestored={() => setAttempt(value => value + 1)}
           onClose={() => setDialog(null)}
         />
       )}
