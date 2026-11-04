@@ -23,6 +23,7 @@ import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
   AccessDenied,
   lockAuthorization,
+  prefetchConversationSources,
   resolveHuman,
   uuidSchema,
   type HumanActor,
@@ -639,92 +640,43 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         messages.map(message => message.id),
       );
       for (const message of messages) message.calendarResults = calendar.get(message.id) ?? [];
-      for (const message of messages) {
-        const result = (
-          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=$1`, [
-            message.id,
-          ])
-        ).rows[0];
-        if (!result) continue;
-        try {
-          await requireGoogleSources(tx, actor, result.sources);
-          await requireGoogleFileSources(tx, actor, result.sources);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-          message.parts = [
-            {
-              kind: 'text',
-              text: 'This reply is unavailable because its Google account or access changed. Reconnect Google and make a new request.',
-            },
-          ];
-        }
-      }
-      for (const message of messages) {
-        const result = (
-          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=$1`, [
-            message.id,
-          ])
-        ).rows[0];
-        if (!result) continue;
-        try {
-          await requireKnowledgeSources(tx, actor, result.sources);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-          message.parts = [{ kind: 'text', text: knowledgeUnavailableReply }];
-        }
-      }
-      for (const message of messages) {
-        const result = (
-          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=$1`, [
-            message.id,
-          ])
-        ).rows[0];
-        if (!result) continue;
-        try {
-          await requireGitHubSources(tx, actor, result.sources);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-          message.parts = [
-            {
-              kind: 'text',
-              text: 'This reply is unavailable because its selected GitHub account or access changed. Select an active account to start fresh context.',
-            },
-          ];
-        }
-      }
+      const results = new Map<string, unknown>(
+        (
+          await tx.client.query(
+            `SELECT message_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=ANY($1::uuid[])`,
+            [messages.map(message => message.id)],
+          )
+        ).rows.map(row => [row.message_id, row.sources]),
+      );
       const hidden = new Set<string>();
-      for (const message of messages) {
-        const result = (
-          await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=$1`, [
-            message.id,
-          ])
-        ).rows[0];
-        if (!result) continue;
-        try {
-          await requireWorkflowSources(tx, actor, result.sources);
-        } catch (error) {
-          if (!(error instanceof AccessDenied)) throw error;
-          hidden.add(message.id);
-          message.parts = [{ kind: 'text', text: hiddenReply }];
-        }
-      }
-      if (chat.projectId) {
+      async function conceal(text: string, hide: boolean, check: (sources: unknown) => Promise<void>) {
         for (const message of messages) {
-          const result = (
-            await tx.client.query(`SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=$1`, [
-              message.id,
-            ])
-          ).rows[0];
-          if (!result) continue;
+          if (!results.has(message.id)) continue;
           try {
-            await requireResultSources(tx, actor, chatId, result.sources);
+            await check(results.get(message.id));
           } catch (error) {
             if (!(error instanceof AccessDenied)) throw error;
-            hidden.add(message.id);
-            message.parts = [{ kind: 'text', text: hiddenReply }];
+            if (hide) hidden.add(message.id);
+            message.parts = [{ kind: 'text', text }];
           }
         }
       }
+      await conceal(
+        'This reply is unavailable because its Google account or access changed. Reconnect Google and make a new request.',
+        false,
+        async sources => {
+          await requireGoogleSources(tx, actor, sources);
+          await requireGoogleFileSources(tx, actor, sources);
+        },
+      );
+      await conceal(knowledgeUnavailableReply, false, sources => requireKnowledgeSources(tx, actor, sources));
+      await conceal(
+        'This reply is unavailable because its selected GitHub account or access changed. Select an active account to start fresh context.',
+        false,
+        sources => requireGitHubSources(tx, actor, sources),
+      );
+      await conceal(hiddenReply, true, sources => requireWorkflowSources(tx, actor, sources));
+      if (chat.projectId) await conceal(hiddenReply, true, sources => requireResultSources(tx, actor, chatId, sources));
       let hasGitHubProposals = false;
       hasGitHubProposals = !!(
         await tx.client.query(
@@ -732,24 +684,45 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           [chatId],
         )
       ).rowCount;
+      const googleRead = `EXISTS (
+        SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} gc JOIN ${table(tx, 'tf_conversation_turns')} gt ON gt.id=gc.turn_id
+        WHERE gt.conversation_id=$2 AND gc.tool='google.read' AND gt.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=c.turn_id)
+       )`;
+      const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
+        tx.commonVersion >= 23 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
+      }`;
+      const turnIds = messages.flatMap(message => (message.turn ? [message.turn.id] : []));
+      const toolRows = turnIds.length
+        ? (
+            await tx.client.query(
+              `SELECT c.turn_id, c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
+        LEFT JOIN ${table(tx, 'tf_google_proposals')} g ON c.tool='google.propose' AND c.status='completed' AND g.command_id=c.id AND g.membership_id=$3 AND g.user_id=$4
+        LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.update','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
+        WHERE c.turn_id = ANY($1::uuid[]) AND c.conversation_id=$2 ORDER BY c.created_at, c.sequence, c.id`,
+              [turnIds, chatId, actor.membershipId, actor.userId],
+            )
+          ).rows
+        : [];
+      const toolsByTurn = new Map<string, typeof toolRows>();
+      for (const row of toolRows) {
+        const turn = toolsByTurn.get(row.turn_id);
+        if (turn) turn.push(row);
+        else toolsByTurn.set(row.turn_id, [row]);
+      }
+      const apiCallIds = toolRows.filter(row => row.tool === 'api.request').map(row => row.id);
+      const digestedApiCalls = new Set(
+        !hidden.size && tx.commonVersion >= 34 && apiCallIds.length
+          ? (
+              await tx.client.query(
+                `SELECT id FROM ${qualified(tx.schema, 'tf_api_calls')} WHERE id=ANY($1::uuid[]) AND digest IS NOT NULL`,
+                [apiCallIds],
+              )
+            ).rows.map(row => row.id)
+          : [],
+      );
       for (const message of messages)
         if (message.turn) {
-          const googleRead = `EXISTS (
-          SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=c.turn_id
-          WHERE t.conversation_id=$2 AND c.tool='google.read' AND t.accepted_sequence<=(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1)
-         )`;
-          const googleSafeActivity = `, CASE WHEN ${googleRead} THEN NULL ELSE c.activity END AS activity, c.activity AS stored_activity${
-            tx.commonVersion >= 23 ? `, CASE WHEN ${googleRead} THEN NULL ELSE c.narration END AS narration` : ''
-          }`;
-          const rows = (
-            await tx.client.query(
-              `SELECT c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
-          LEFT JOIN ${table(tx, 'tf_google_proposals')} g ON c.tool='google.propose' AND c.status='completed' AND g.command_id=c.id AND g.membership_id=$3 AND g.user_id=$4
-          LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.update','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
-          WHERE c.turn_id = $1 AND c.conversation_id=$2 ORDER BY c.created_at, c.sequence, c.id`,
-              [message.turn.id, chatId, actor.membershipId, actor.userId],
-            )
-          ).rows;
+          const rows = toolsByTurn.get(message.turn.id) ?? [];
           message.tools = [];
           for (const row of rows) {
             let rowView = hidden.size ? undefined : rowViewForReceipt(row);
@@ -808,20 +781,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 }),
                 api: hidden.size
                   ? null
-                  : apiCallReceipt(
-                      row.tool,
-                      row.output,
-                      row.tool === 'api.request' &&
-                        tx.commonVersion >= 34 &&
-                        Boolean(
-                          (
-                            await tx.client.query(
-                              `SELECT 1 FROM ${qualified(tx.schema, 'tf_api_calls')} WHERE id=$1 AND digest IS NOT NULL`,
-                              [row.id],
-                            )
-                          ).rowCount,
-                        ),
-                    ),
+                  : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   tool: row.tool,
                   status: row.status,
@@ -883,10 +843,14 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           )
         ).rows,
       );
+      const prefetch = await prefetchConversationSources(
+        tx,
+        rows.slice(0, 50).map(chat => chat.id),
+      );
       const chats = [];
       for (const chat of rows.slice(0, 50)) {
         try {
-          await requireConversationMcpSources(tx, actor, chat.id);
+          await requireConversationMcpSources(tx, actor, chat.id, prefetch);
           chats.push(chat);
         } catch (error) {
           if (!(error instanceof AccessDenied)) throw error;
