@@ -298,10 +298,21 @@ export function createAttachments(
           `UPDATE ${table(tx, 'tf_conversation_attachments')} SET state = 'abandoned', cleanup_after = clock_timestamp() + interval '1 hour' WHERE id = $1`,
           [current.id],
         );
-        // A published file that is not being deleted still reads this object; Files purge removes it when that file goes.
+        // A published file that is not being deleted still reads this object, as its current or an earlier version;
+        // Files purge removes it when that file goes.
+        const versions = z
+          .object({ relation: z.string().nullable() })
+          .parse(
+            (await tx.client.query('SELECT to_regclass($1)::text AS relation', [table(tx, 'tf_file_versions')]))
+              .rows[0],
+          ).relation;
         const borrowed = (
           await tx.client.query(
-            `SELECT 1 FROM ${table(tx, 'tf_files')} WHERE id = $1 AND object_owner = 'attachment' AND deleting_at IS NULL`,
+            `SELECT 1 FROM ${table(tx, 'tf_files')} f WHERE f.id = $1 AND f.deleting_at IS NULL AND (f.object_owner = 'attachment'${
+              versions
+                ? ` OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_file_versions')} v WHERE v.file_id = f.id AND v.object_owner = 'attachment')`
+                : ''
+            })`,
             [current.id],
           )
         ).rowCount;

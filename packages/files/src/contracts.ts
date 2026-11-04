@@ -200,6 +200,34 @@ export const fileDetailsSchema = z.object({
   generation: fileGenerationSchema.nullable().optional(),
 });
 export type FileDetails = z.infer<typeof fileDetailsSchema>;
+/** Who added a version and why, as a short slug such as `original`, `upload`, `restore` or `plan`. */
+export const fileVersionSourceSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
+export const versionRowSchema = z.object({
+  file_id: uuidSchema,
+  version: z.number().int().positive(),
+  object_key: uuidSchema,
+  object_owner: z.enum(['files', 'attachment']),
+  size: z.number().int().positive(),
+  media_type: z.string(),
+  sha256: z.string(),
+  created_by_membership_id: uuidSchema,
+  source: fileVersionSourceSchema,
+  created_at: z.date(),
+});
+export type FileVersionRow = z.infer<typeof versionRowSchema>;
+export const fileVersionSchema = z.object({
+  version: z.number().int().positive(),
+  size: z.number().int().positive(),
+  mediaType: z.string(),
+  sha256: z.string(),
+  source: fileVersionSourceSchema,
+  createdAt: z.string(),
+  createdBy: filePersonSchema,
+  current: z.boolean(),
+});
+export type FileVersion = z.infer<typeof fileVersionSchema>;
+export const fileVersionsSchema = z.object({ role: fileRoleSchema, versions: z.array(fileVersionSchema) });
+export type FileVersions = z.infer<typeof fileVersionsSchema>;
 export const fileDirectorySchema = z.object({
   members: z.array(filePersonSchema.extend({ email: z.string() })),
   teams: z.array(z.object({ id: uuidSchema, name: z.string() })),
@@ -246,6 +274,18 @@ export const movePreviewSchema = z.object({
   fingerprint: moveFingerprintSchema,
 });
 export type MovePreview = z.infer<typeof movePreviewSchema>;
+export const shareFingerprintSchema = z.string().regex(/^files-share-v1:[a-f0-9]{64}$/);
+/** Who can open an item now and after the reviewed grants, with each subject's current direct grant. */
+export const sharePreviewSchema = z.object({
+  item: readableFileReferenceSchema.extend({ itemKind: z.enum(['file', 'folder']) }),
+  creatorMembershipId: uuidSchema,
+  role: fileRoleSchema,
+  subjects: z.array(z.object({ subject: fileSubjectSchema, direct: fileRoleSchema.nullable() })),
+  before: fileAudienceSchema,
+  after: fileAudienceSchema,
+  fingerprint: shareFingerprintSchema,
+});
+export type SharePreview = z.infer<typeof sharePreviewSchema>;
 
 export const fileStorageUsageSchema = z.object({
   usedBytes: z.number().int().nonnegative(),
@@ -291,7 +331,8 @@ export class FileError extends Error {
     | 'not-owner'
     | 'owned-by-others'
     | 'not-trashed'
-    | 'restore-destination';
+    | 'restore-destination'
+    | 'media-type';
   constructor(code: FileError['code']) {
     super(`File ${code}`);
     this.code = code;

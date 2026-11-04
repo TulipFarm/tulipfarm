@@ -16,7 +16,7 @@ import { hostedCreditPricingExtension } from '../../workspace-storage/test/hoste
 await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
 test(
-  'Planning persists drafts, checks real receipts, keeps prerequisite waits and fences Start',
+  'Planning persists drafts, checks real receipts, keeps prerequisite waits and starts only on approval',
   { timeout: 60000 },
   async t => {
     const db = await fixture();
@@ -140,9 +140,31 @@ test(
     await plans.update(w.id, w.userId, created.id, randomUUID(), { expectedVersion: 0, planning: checked(good) });
     view = await plans.read(w.id, w.userId, created.id);
     assert.equal(view.tasks.find(task => task.key === 'agent').state, 'ready');
-    const start = { requestId: randomUUID(), expectedVersion: 1, action: 'start' };
+    assert.equal(view.contentRevision, 2, 'verifying a prerequisite is a new content revision of a draft');
+    await assert.rejects(
+      plans.control(w.id, w.userId, created.id, { requestId: randomUUID(), expectedVersion: 1, action: 'start' }),
+      /approval-required/,
+      'with plan documents on, a plan starts only by approving a revision',
+    );
+    const approve = { expectedVersion: 1, action: 'approve', timeZone: 'Europe/London' };
+    await assert.rejects(
+      plans.control(w.id, w.userId, created.id, { ...approve, requestId: randomUUID(), contentRevision: 1 }),
+      /revision-conflict/,
+      'approving a revision the plan has moved on from fails',
+    );
+    const start = { ...approve, requestId: randomUUID(), contentRevision: view.contentRevision };
     const started = await plans.control(w.id, w.userId, created.id, start);
     assert.deepEqual(await plans.control(w.id, w.userId, created.id, start), started);
+    assert.equal(
+      (
+        await db.platform.query(
+          `SELECT count(*)::integer AS n FROM ${table('tf_agent_plan_approvals')} WHERE plan_id=$1`,
+          [created.id],
+        )
+      ).rows[0].n,
+      1,
+      'approving twice records one approval',
+    );
     assert.equal(
       (
         await db.platform.query(
@@ -151,13 +173,18 @@ test(
         )
       ).rows[0].n,
       1,
-      'Start retries create one real user-action turn',
+      'approval retries create one real user-action turn',
     );
     await assert.rejects(
       plans.control(w.id, w.userId, created.id, { ...start, requestId: randomUUID() }),
       /version-conflict/,
     );
-    assert.equal((await plans.read(w.id, w.userId, created.id)).lifecycle, 'active');
+    const approved = await plans.read(w.id, w.userId, created.id);
+    assert.equal(approved.lifecycle, 'active');
+    assert.equal(approved.approval.revision, 2);
+    assert.equal(approved.approval.approvedByMembershipId, w.membershipId);
+    assert.equal(approved.approval.timeZone, 'Europe/London');
+    assert.deepEqual(approved.changesSinceApproval, []);
     await scheduler.step(w.id, created.id);
     assert.equal(
       (

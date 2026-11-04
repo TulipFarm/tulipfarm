@@ -529,12 +529,29 @@ function ConversationDetail({
             },
           ]
         : [];
-    setContent(current => ({
-      ...current,
-      doc: { ...current.doc, content: [...paragraphs, ...(current.doc.content ?? [])] },
-    }));
+    setContent(current => {
+      const existing = current.doc.content ?? [];
+      const blank = existing.every(node => node.type === 'paragraph' && !node.content?.length);
+      return {
+        ...current,
+        doc: { ...current.doc, content: [...paragraphs, ...(request.caretAtPrompt && blank ? [] : existing)] },
+      };
+    });
     if (window.matchMedia('(max-width: 767px)').matches) canvas.setOpen(false);
-    composerInput.current?.focus();
+    if (request.caretAtPrompt)
+      // The editor takes the new draft on its next render; place the caret after that.
+      requestAnimationFrame(() => {
+        const editor = composerInput.current?.editor();
+        const prompt = editor?.state.doc.firstChild;
+        if (editor && prompt)
+          editor
+            .chain()
+            .focus()
+            .setTextSelection(prompt.nodeSize - 1)
+            .run();
+        else composerInput.current?.focus();
+      });
+    else composerInput.current?.focus();
     canvas.consumeComposer(request.id);
   }, [canvas.composerRequest, canvas.consumeComposer]);
   const skills = useRichSkillPicker(workspace.id, composerInput, privateChat || (draft && !sharedChat));
@@ -1903,6 +1920,7 @@ function ConversationTools({
               'files.move',
               'files.trash',
               'files.restore',
+              'files.share',
               'knowledge.add',
               'knowledge.update',
               'knowledge.remove',

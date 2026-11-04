@@ -42,6 +42,7 @@
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/slack": "workspace:*",

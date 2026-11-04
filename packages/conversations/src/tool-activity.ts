@@ -104,6 +104,8 @@ export const toolActivityLabels = {
   'files.move': 'Preparing a move for review',
   'files.trash': 'Preparing files to move to Trash',
   'files.restore': 'Preparing files to restore from Trash',
+  'files.share': 'Preparing a share for review',
+  'members.find': 'Finding people and teams',
   'files.create': 'Saving a file to Files',
   'images.generate': 'Generating images',
   'slack.resolve': 'Finding a Slack channel or person',

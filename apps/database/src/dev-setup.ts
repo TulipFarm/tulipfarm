@@ -22,6 +22,7 @@ const objectStorage = {
   accessKeyId: 'local-object-storage',
   secretAccessKey: 'local-object-storage-secret',
   soulBucket: 'tulipfarm-cloud-soul-local',
+  filesBucket: 'tulipfarm-files-local',
 };
 
 type State = { keys: SetupKeys; passwords: Record<string, string> };
@@ -96,6 +97,10 @@ async function main() {
   await write('apps/worker/.env.local', {
     ...env.worker,
     ...connections,
+  });
+  await write('apps/render-worker/.env.local', {
+    ...env.renderWorker,
+    ...Object.fromEntries(Object.entries(connections).filter(([name]) => name.startsWith('TEMPORAL_'))),
   });
   await write('apps/worker/.env.storage.local', {
     ...env.storageWorker,

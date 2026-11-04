@@ -19,23 +19,36 @@ import {
   fileNameSchema,
   fileRoleSchema,
   fileSubjectSchema,
+  fileVersionSourceSchema,
   itemSchema,
   libraryQuerySchema,
   moveFingerprintSchema,
   newFileSchema,
   newFolderSchema,
   roleLevel,
+  shareFingerprintSchema,
+  versionRowSchema,
   type DeletionOutcome,
   type FileCopySource,
   type FileGeneration,
   type FileItem,
   type FileRole,
+  type FileSubject,
   type FileSummary,
   type FileSuggestionsPage,
+  type FileVersion,
+  type FileVersionRow,
   type LibraryPage,
   type LibrarySort,
 } from './contracts.ts';
-import { loadSharingGraph, movePreview, requireFileAccess, sharingGraphLimits, sharingSnapshot } from './sharing.ts';
+import {
+  loadSharingGraph,
+  movePreview,
+  requireFileAccess,
+  sharePreview,
+  sharingGraphLimits,
+  sharingSnapshot,
+} from './sharing.ts';
 import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm/workspace-storage/recommendations';
 
 export { FileError } from './contracts.ts';
@@ -52,6 +65,7 @@ export type {
   FileSharingSnapshot,
   MoveAudience,
   MovePreview,
+  SharePreview,
   FileSummary,
   FileSuggestionsPage,
   FileSuggestionsQuery,
@@ -68,9 +82,20 @@ export type {
   FileStorageUsage,
   DeletionPreview,
   DeletionOutcome,
+  FileVersion,
+  FileVersions,
 } from './contracts.ts';
 /** A membership and the identity user behind it. The HTTP layer resolves display names. */
 export type FileMember = { membershipId: string; userId: string };
+/** A reviewed share names each person or team once, up to 20 in one review. */
+const shareSubjectsSchema = z
+  .array(fileSubjectSchema)
+  .min(1)
+  .max(20)
+  .refine(
+    subjects => new Set(subjects.map(subject => `${subject.kind}:${subject.id}`)).size === subjects.length,
+    'Each person or team appears once.',
+  );
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type RecommendationAudience = Map<string, string[]>;
 /** `signal` is the caller going away; an adapter stops the transfer so the caller's transfer slot frees at once. */
@@ -101,7 +126,7 @@ const installed = async (tx: AuthorizationTransaction, name: string) =>
     .parse((await tx.client.query('SELECT to_regclass($1)::text AS relation', [table(tx, name)])).rows[0]).relation !==
   null;
 /**
- * Bytes charged to the workspace quota: every Files row plus every live chat attachment.
+ * Bytes charged to the workspace quota: every Files row, every earlier version of a file, and every live chat attachment.
  * A sent attachment published into Files shares its id with that file and is charged once, through the file.
  * Since 0110 the file borrows the attachment's object, so the charge matches storage. Files published earlier keep a
  * second copy that is still charged once. Deleting the file forever charges the attachment again, because its object remains.
@@ -111,10 +136,25 @@ export async function chargedBytes(tx: AuthorizationTransaction) {
   const files = await installed(tx, 'tf_files');
   const attachments = await installed(tx, 'tf_conversation_attachments');
   const packages = await installed(tx, 'tf_skill_package_objects');
+  const versions = files && (await installed(tx, 'tf_file_versions'));
   const total = async (sql: string) =>
     z.object({ total: z.coerce.number() }).parse((await tx.client.query(sql)).rows[0]).total;
   return (
     (files ? await total(`SELECT COALESCE(sum(size),0) AS total FROM ${table(tx, 'tf_files')}`) : 0) +
+    // The current version is charged through its file row. A version that borrows an attachment's object is charged once,
+    // through the attachment, whenever the attachment term below charges it.
+    (versions
+      ? await total(`SELECT COALESCE(sum(v.size),0) AS total FROM ${table(tx, 'tf_file_versions')} v
+      JOIN ${table(tx, 'tf_files')} f ON f.id = v.file_id
+      WHERE v.object_key IS DISTINCT FROM f.object_key
+      ${
+        attachments
+          ? `AND NOT (v.object_owner = 'attachment' AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_attachments')} a
+        WHERE a.id = v.file_id AND a.state <> 'abandoned'
+          AND NOT (a.state = 'bound' AND f.creator_membership_id = a.membership_id AND f.sha256 = a.sha256)))`
+          : ''
+      }`)
+      : 0) +
     (attachments
       ? await total(`SELECT COALESCE(sum(a.size),0) AS total FROM ${table(tx, 'tf_conversation_attachments')} a WHERE a.state <> 'abandoned'
       ${files ? `AND NOT (a.state = 'bound' AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_files')} f WHERE f.id = a.id AND f.creator_membership_id = a.membership_id AND f.sha256 = a.sha256))` : ''}`)
@@ -130,6 +170,8 @@ const lockStorage = (tx: AuthorizationTransaction) =>
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const maximumFileBytes = 10 * 1024 * 1024;
 const compatibility = commonCompatibility;
+/** File versions, system folders, and grant origins arrive with common migration 33. */
+export const fileVersionCompatibility = Object.freeze({ minimum: 33, maximum: commonCompatibility.maximum });
 /**
  * Copies made before provenance rows existed carry their command in the first 8 bytes of the object key.
  * Replay still recognizes them; new copies record a `tf_file_copy_sources` row instead.
@@ -444,6 +486,136 @@ export async function recordFileUse(tx: AuthorizationTransaction, actor: HumanAc
   return { id: item.id };
 }
 
+export const systemFolderPurposeSchema = z.enum(['plans']);
+export type SystemFolderPurpose = z.infer<typeof systemFolderPurposeSchema>;
+/**
+ * The id of the member's folder for `purpose`, such as where plan documents are filed. The member may rename or move it;
+ * it stays theirs while it is not in Trash or being deleted. Otherwise a new folder named after the purpose is created at
+ * the member's top level and recorded. Call it in a write transaction that holds the authorization write lock.
+ */
+export async function ensureSystemFolder(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  purpose: SystemFolderPurpose,
+): Promise<string> {
+  await currentMember(tx, actor);
+  purpose = systemFolderPurposeSchema.parse(purpose);
+  const recorded = z
+    .object({ file_id: uuidSchema })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT file_id FROM ${table(tx, 'tf_member_system_folders')} WHERE membership_id = $1 AND purpose = $2 FOR UPDATE`,
+          [actor.membershipId, purpose],
+        )
+      ).rows[0],
+    );
+  if (recorded) {
+    const chain = await lineage(tx, recorded.file_id, 'ordinary');
+    const folder = chain.find(entry => entry.id === recorded.file_id);
+    if (
+      folder?.kind === 'folder' &&
+      folder.creator_membership_id === actor.membershipId &&
+      chain.every(entry => entry.ready && entry.trashed_at === null && entry.deleting_at === null)
+    )
+      return folder.id;
+  }
+  const id = randomUUID();
+  await tx.client.query(
+    `INSERT INTO ${table(tx, 'tf_files')} (id,kind,creator_membership_id,parent_id,name,ready) VALUES ($1,'folder',$2,NULL,$3,true)`,
+    [id, actor.membershipId, purpose],
+  );
+  await tx.client.query(
+    `INSERT INTO ${table(tx, 'tf_member_system_folders')} (membership_id,purpose,file_id) VALUES ($1,$2,$3)
+    ON CONFLICT (membership_id,purpose) DO UPDATE SET file_id = EXCLUDED.file_id`,
+    [actor.membershipId, purpose, id],
+  );
+  return id;
+}
+
+const grantOriginSchema = z.string().min(1).max(200);
+export type OriginGrant = { subject: FileSubject; role: FileRole };
+/**
+ * Makes the grants on `itemId` that `origin` made, such as `plan-project:<planId>`, exactly `grants`. Grants a person made
+ * by sharing, or another origin made, are left alone, and a subject that already holds one keeps it. The caller decides
+ * who may change these grants. Call it in a write transaction that holds the authorization write lock.
+ */
+export async function syncFileGrantsForOrigin(
+  tx: AuthorizationTransaction,
+  itemId: string,
+  origin: string,
+  grants: readonly OriginGrant[],
+) {
+  itemId = uuidSchema.parse(itemId);
+  origin = grantOriginSchema.parse(origin);
+  const wanted = z
+    .array(z.object({ subject: fileSubjectSchema, role: fileRoleSchema }))
+    .parse(grants)
+    .filter(
+      (grant, index, all) =>
+        all.findIndex(other => other.subject.kind === grant.subject.kind && other.subject.id === grant.subject.id) ===
+        index,
+    );
+  const item = await tx.client.query(
+    `SELECT 1 FROM ${table(tx, 'tf_files')} WHERE id = $1 AND ready AND deleting_at IS NULL`,
+    [itemId],
+  );
+  if (!item.rowCount) throw new AccessDenied();
+  for (const { subject } of wanted) {
+    const exists = await tx.client.query(
+      subject.kind === 'individual'
+        ? `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`
+        : `SELECT 1 FROM ${table(tx, 'tf_teams')} WHERE id = $1`,
+      [subject.id],
+    );
+    if (!exists.rowCount) throw new AccessDenied();
+  }
+  const before = await recommendationAudience(tx, itemId);
+  await tx.client.query(
+    `DELETE FROM ${table(tx, 'tf_file_grants')} g WHERE g.item_id = $1 AND g.origin = $2
+      AND NOT EXISTS (SELECT 1 FROM unnest($3::text[], $4::uuid[]) AS w(kind, id) WHERE w.kind = g.subject_kind AND w.id = g.subject_id)`,
+    [itemId, origin, wanted.map(grant => grant.subject.kind), wanted.map(grant => grant.subject.id)],
+  );
+  for (const grant of wanted)
+    await tx.client.query(
+      `INSERT INTO ${table(tx, 'tf_file_grants')} AS g (item_id,subject_kind,subject_id,role,origin) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (item_id,subject_kind,subject_id) DO UPDATE SET role = EXCLUDED.role WHERE g.origin = EXCLUDED.origin`,
+      [itemId, grant.subject.kind, grant.subject.id, grant.role, origin],
+    );
+  await recommendationChanges(tx, itemId, before);
+}
+/** Removes every grant `origin` made on `itemId`, leaving grants from people and other origins. */
+export async function removeFileGrantsForOrigin(tx: AuthorizationTransaction, itemId: string, origin: string) {
+  await syncFileGrantsForOrigin(tx, itemId, origin, []);
+}
+
+const versionRows = async (tx: AuthorizationTransaction, fileId: string, version?: number) =>
+  z.array(versionRowSchema).parse(
+    (
+      await tx.client.query(
+        `SELECT * FROM ${table(tx, 'tf_file_versions')} WHERE file_id = $1 AND ($2::integer IS NULL OR version = $2)
+        ORDER BY version DESC`,
+        [fileId, version ?? null],
+      )
+    ).rows,
+  );
+/** A version as the service reports it. The HTTP layer resolves `createdByMembershipId` to a name. */
+export type FileVersionEntry = Omit<FileVersion, 'createdBy'> & { createdByMembershipId: string };
+const versionEntry = (row: FileVersionRow, current: number): FileVersionEntry => ({
+  version: row.version,
+  size: row.size,
+  mediaType: row.media_type,
+  sha256: row.sha256,
+  source: row.source,
+  createdAt: row.created_at.toISOString(),
+  createdByMembershipId: row.created_by_membership_id,
+  current: row.version === current,
+});
+
+/** Who adds a version: a signed-in person, or the file's owner when the product adds one on their behalf. */
+export type FileVersionCaller = { kind: 'user'; userId: string } | { kind: 'file-owner' };
+
 /** Pino's `warn(fields, message)` shape, so the API passes its request logger. */
 export type FilesLog = { warn: (fields: Record<string, unknown>, message: string) => void };
 const consoleLog: FilesLog = {
@@ -486,8 +658,9 @@ export function createFiles(
     userId: string,
     write: boolean,
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
+    range: { minimum: number; maximum: number } = compatibility,
   ) {
-    return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
+    return runtime.transaction(uuidSchema.parse(workspaceId), range, async tx => {
       await lockAuthorization(tx, write ? 'write' : 'read');
       return operation(tx, await resolveHuman(tx, userId));
     });
@@ -564,7 +737,10 @@ export function createFiles(
         workspaceId,
         compatibility,
         async tx =>
-          (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_files')} WHERE object_key = $1`, [key])).rowCount,
+          (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_files')} WHERE object_key = $1`, [key])).rowCount ||
+          ((await installed(tx, 'tf_file_versions')) &&
+            (await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_file_versions')} WHERE object_key = $1`, [key]))
+              .rowCount),
       );
       if (!referenced) await bytes.remove(`${workspaceId}/files/${key}`);
     } catch (error) {
@@ -1120,24 +1296,85 @@ export function createFiles(
     return transaction(workspaceId, userId, true, async (tx, actor) => {
       await access(tx, actor, id, 'manager');
       const before = await recommendationAudience(tx, id);
-      if (role !== null) {
-        const exists = await tx.client.query(
-          subject.kind === 'individual'
-            ? `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`
-            : `SELECT 1 FROM ${table(tx, 'tf_teams')} WHERE id = $1`,
-          [subject.id],
-        );
-        if (!exists.rowCount) throw new AccessDenied();
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_file_grants')} (item_id,subject_kind,subject_id,role) VALUES ($1,$2,$3,$4)
-          ON CONFLICT (item_id,subject_kind,subject_id) DO UPDATE SET role = EXCLUDED.role`,
-          [id, subject.kind, subject.id, role],
-        );
-      } else
+      if (role !== null) await grant(tx, id, subject, role);
+      else
         await tx.client.query(
           `DELETE FROM ${table(tx, 'tf_file_grants')} WHERE item_id = $1 AND subject_kind = $2 AND subject_id = $3`,
           [id, subject.kind, subject.id],
         );
+      await recommendationChanges(tx, id, before);
+      return { id };
+    });
+  }
+  async function grant(tx: AuthorizationTransaction, id: string, subject: FileSubject, role: FileRole) {
+    const exists = await tx.client.query(
+      subject.kind === 'individual'
+        ? `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`
+        : `SELECT 1 FROM ${table(tx, 'tf_teams')} WHERE id = $1`,
+      [subject.id],
+    );
+    if (!exists.rowCount) throw new AccessDenied();
+    // A person's grant replaces one an origin made, so the origin's later sync leaves it alone.
+    const origin = (await installed(tx, 'tf_file_versions')) ? ', origin = NULL' : '';
+    await tx.client.query(
+      `INSERT INTO ${table(tx, 'tf_file_grants')} (item_id,subject_kind,subject_id,role) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (item_id,subject_kind,subject_id) DO UPDATE SET role = EXCLUDED.role${origin}`,
+      [id, subject.kind, subject.id, role],
+    );
+  }
+  async function sharePreviewIn(
+    tx: AuthorizationTransaction,
+    actor: HumanActor,
+    workspaceId: string,
+    id: string,
+    subjects: FileSubject[],
+    role: FileRole,
+  ) {
+    await access(tx, actor, id, 'manager', { traversal: 'sharing' });
+    const graph = await loadSharingGraph(tx, id);
+    for (const subject of subjects)
+      if (
+        subject.kind === 'individual'
+          ? !graph.activeMemberships.has(subject.id)
+          : !graph.teams.some(team => team.id === subject.id)
+      )
+        throw new AccessDenied();
+    return sharePreview(graph, actor, workspaceId, id, subjects, role);
+  }
+  /** Who could open an item before and after granting `role` to each subject, for a share the user reviews first. */
+  async function previewShare(workspaceId: string, userId: string, id: string, value: unknown, role: FileRole) {
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    const subjects = shareSubjectsSchema.parse(value);
+    role = fileRoleSchema.parse(role);
+    return transaction(workspaceId, userId, false, (tx, actor) =>
+      sharePreviewIn(tx, actor, workspaceId, id, subjects, role),
+    );
+  }
+  /**
+   * Applies a reviewed share in one transaction, only while sharing still matches the preview's fingerprint. Grants
+   * already at or above `role` stay as they are.
+   */
+  async function shareReviewed(
+    workspaceId: string,
+    userId: string,
+    id: string,
+    value: unknown,
+    role: FileRole,
+    expectedFingerprint: string,
+  ) {
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    const subjects = shareSubjectsSchema.parse(value);
+    role = fileRoleSchema.parse(role);
+    expectedFingerprint = shareFingerprintSchema.parse(expectedFingerprint);
+    return transaction(workspaceId, userId, true, async (tx, actor) => {
+      const preview = await sharePreviewIn(tx, actor, workspaceId, id, subjects, role);
+      if (preview.fingerprint !== expectedFingerprint) throw new FileError('conflict');
+      const before = await recommendationAudience(tx, id);
+      for (const entry of preview.subjects)
+        if (entry.direct === null || roleLevel[entry.direct] < roleLevel[role])
+          await grant(tx, id, entry.subject, role);
       await recommendationChanges(tx, id, before);
       return { id };
     });
@@ -1248,7 +1485,12 @@ export function createFiles(
         (
           await tx.client.query(
             `${subtree(tx)}
-      SELECT count(*) FILTER (WHERE kind = 'file') AS files, COALESCE(sum(size), 0) AS bytes,
+      SELECT count(*) FILTER (WHERE kind = 'file') AS files, COALESCE(sum(size), 0)${
+        (await installed(tx, 'tf_file_versions'))
+          ? ` + (SELECT COALESCE(sum(v.size), 0) FROM ${table(tx, 'tf_file_versions')} v JOIN subtree s ON s.id = v.file_id
+          WHERE v.object_key IS DISTINCT FROM s.object_key)`
+          : ''
+      } AS bytes,
         count(*) FILTER (WHERE creator_membership_id <> $2) AS blockers FROM subtree`,
             [id, actor.membershipId],
           )
@@ -1303,11 +1545,21 @@ export function createFiles(
       // harmless because removing a missing object succeeds.
       const doomed = await runtime.transaction(workspaceId, compatibility, async tx => {
         await lockStorage(tx);
-        const rows = z.array(itemSchema).parse(
+        // Every version's object goes with the file, the current one included.
+        const objects = z.array(
+          z.object({ id: uuidSchema, object_key: uuidSchema, object_owner: z.enum(['files', 'attachment']) }),
+        );
+        const rows = objects.parse(
           (
             await tx.client.query(
               `${subtree(tx)}
-          SELECT * FROM subtree WHERE deleting_at IS NOT NULL AND object_key IS NOT NULL`,
+          SELECT id, object_key, object_owner FROM subtree WHERE deleting_at IS NOT NULL AND object_key IS NOT NULL${
+            (await installed(tx, 'tf_file_versions'))
+              ? `
+          UNION SELECT v.file_id, v.object_key, v.object_owner FROM ${table(tx, 'tf_file_versions')} v
+            JOIN subtree s ON s.id = v.file_id WHERE s.deleting_at IS NOT NULL`
+              : ''
+          }`,
               [id],
             )
           ).rows,
@@ -1329,7 +1581,7 @@ export function createFiles(
                 )
                 .map(row => row.id),
         );
-        return rows.filter(row => !kept.has(row.id));
+        return rows.filter(row => !(row.object_owner === 'attachment' && kept.has(row.id)));
       });
       for (const item of doomed) await bytes.remove(objectPath(workspaceId, item));
       await runtime.transaction(workspaceId, compatibility, async tx => {
@@ -1343,6 +1595,13 @@ export function createFiles(
         await tx.client.query(`DELETE FROM ${table(tx, 'tf_file_copy_sources')} WHERE file_id = ANY($1::uuid[])`, [
           ids,
         ]);
+        if (await installed(tx, 'tf_file_versions')) {
+          await tx.client.query(`DELETE FROM ${table(tx, 'tf_file_versions')} WHERE file_id = ANY($1::uuid[])`, [ids]);
+          await tx.client.query(
+            `DELETE FROM ${table(tx, 'tf_member_system_folders')} WHERE file_id = ANY($1::uuid[])`,
+            [ids],
+          );
+        }
         await tx.client.query(
           `DELETE FROM ${table(tx, 'tf_files')} WHERE id = ANY($1::uuid[]) AND deleting_at IS NOT NULL`,
           [ids],
@@ -1401,6 +1660,193 @@ export function createFiles(
     for (const root of roots) if ((await purge(workspaceId, root.id)) === 'failed') failed++;
     return { attempted: roots.length, failed };
   }
+  /** A version operation's actor: a signed-in person, or the file's owner when the product adds a version for them. */
+  async function versionTransaction<T>(
+    workspaceId: string,
+    caller: FileVersionCaller,
+    fileId: string,
+    write: boolean,
+    operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
+  ) {
+    if (caller.kind === 'user')
+      return transaction(workspaceId, caller.userId, write, operation, fileVersionCompatibility);
+    return runtime.transaction(workspaceId, fileVersionCompatibility, async tx => {
+      await lockAuthorization(tx, write ? 'write' : 'read');
+      const owner = z
+        .object({ id: uuidSchema, user_id: z.string() })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT m.id, m.user_id FROM ${table(tx, 'tf_files')} f
+              JOIN ${table(tx, 'tf_memberships')} m ON m.id = f.creator_membership_id AND m.removed_at IS NULL WHERE f.id = $1`,
+              [fileId],
+            )
+          ).rows[0],
+        );
+      if (!owner) throw new AccessDenied();
+      return operation(tx, { kind: 'human', membershipId: owner.id, userId: owner.user_id });
+    });
+  }
+  /** The file a manager may add a version to, and its current version. A new version keeps the file's media type. */
+  async function versionTarget(tx: AuthorizationTransaction, actor: HumanActor, id: string, mediaType: string) {
+    const { item } = await access(tx, actor, id, 'manager');
+    if (item.kind !== 'file' || !item.object_key || !item.sha256 || item.size === null) throw new AccessDenied();
+    if (item.media_type !== mediaType) throw new FileError('media-type');
+    const [current] = await versionRows(tx, id);
+    if (!current) throw new AccessDenied();
+    return current;
+  }
+  /** Stores verified bytes, then records them as the file's next version in one transaction. Same bytes add nothing. */
+  async function storeVersion(
+    workspaceId: string,
+    caller: FileVersionCaller,
+    id: string,
+    arrival: { mediaType: string; content: Uint8Array; signal?: AbortSignal | undefined },
+    source: string,
+  ): Promise<FileVersionEntry> {
+    const { content, signal } = arrival;
+    if (content.byteLength < 1 || content.byteLength > maximumFileBytes) throw new FileError('size');
+    const { mediaType } = newFileSchema.pick({ mediaType: true }).parse({ mediaType: arrival.mediaType });
+    const hash = digest(content),
+      size = content.byteLength;
+    const prior = await versionTransaction(workspaceId, caller, id, false, async (tx, actor) => {
+      const current = await versionTarget(tx, actor, id, mediaType);
+      if (current.sha256 === hash) return { unchanged: versionEntry(current, current.version) };
+      return { used: await chargedBytes(tx) };
+    });
+    if ('unchanged' in prior) return prior.unchanged;
+    if (prior.used + size > quota) throw new FileError('quota');
+    const key = randomUUID();
+    try {
+      signal?.throwIfAborted();
+      await bytes.putIfAbsent(`${workspaceId}/files/${key}`, content, signal);
+      const stored = await bytes.read(`${workspaceId}/files/${key}`, size, signal);
+      if (stored.byteLength !== size || digest(stored) !== hash) throw new FileError('integrity');
+      signal?.throwIfAborted();
+      const added = await versionTransaction(workspaceId, caller, id, true, async (tx, actor) => {
+        await lockStorage(tx);
+        const current = await versionTarget(tx, actor, id, mediaType);
+        if (current.sha256 === hash) return { key: null, entry: versionEntry(current, current.version) };
+        const before = await recommendationAudience(tx, id);
+        const row = versionRowSchema.parse(
+          (
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_file_versions')}
+              (file_id,version,object_key,object_owner,size,media_type,sha256,created_by_membership_id,source)
+              VALUES ($1,$2,$3,'files',$4,$5,$6,$7,$8) RETURNING *`,
+              [id, current.version + 1, key, size, mediaType, hash, actor.membershipId, source],
+            )
+          ).rows[0],
+        );
+        if ((await chargedBytes(tx)) > quota) throw new FileError('quota');
+        signal?.throwIfAborted();
+        await recommendationChanges(tx, id, before);
+        return { key, entry: versionEntry(row, row.version) };
+      });
+      if (added.key !== key) await discard(workspaceId, key);
+      return added.entry;
+    } catch (error) {
+      await discard(workspaceId, key);
+      throw error;
+    }
+  }
+  /**
+   * Adds new bytes as the file's current version. The actor must manage the file; `{ kind: 'file-owner' }` acts as the
+   * file's owner, for versions the product adds, such as a plan's updated document. The bytes count toward the quota and
+   * keep the file's media type. `source` is a short slug that records why the version was added.
+   */
+  async function addVersion(
+    workspaceId: string,
+    caller: FileVersionCaller,
+    id: string,
+    arrival: { mediaType: string; content: Uint8Array; signal?: AbortSignal | undefined },
+    source: string,
+  ) {
+    denyMcpEgress();
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    source = fileVersionSourceSchema.parse(source);
+    if (caller.kind === 'user') caller = { kind: 'user', userId: z.string().min(1).parse(caller.userId) };
+    return bounded(() => storeVersion(workspaceId, caller, id, arrival, source));
+  }
+  /** Every version of a file the reader can open, newest first. */
+  async function listVersions(workspaceId: string, userId: string, id: string) {
+    id = uuidSchema.parse(id);
+    return transaction(
+      workspaceId,
+      userId,
+      false,
+      async (tx, actor) => {
+        const { item, role } = await access(tx, actor, id);
+        if (item.kind !== 'file') throw new AccessDenied();
+        const rows = await versionRows(tx, id);
+        const current = rows[0]?.version ?? 0;
+        return {
+          role,
+          versions: rows.map(row => versionEntry(row, current)),
+          creators: await activeMembers(tx, [...new Set(rows.map(row => row.created_by_membership_id))]),
+        };
+      },
+      fileVersionCompatibility,
+    );
+  }
+  function readVersion(workspaceId: string, userId: string, id: string, version: number, signal?: AbortSignal) {
+    const authorize = (required: FileRole) =>
+      transaction(
+        workspaceId,
+        userId,
+        false,
+        async (tx, actor) => {
+          const { item, role } = await access(tx, actor, id, required);
+          if (item.kind !== 'file') throw new AccessDenied();
+          const [row] = await versionRows(tx, id, version);
+          if (!row) throw new AccessDenied();
+          return { item, role, row };
+        },
+        fileVersionCompatibility,
+      );
+    return {
+      authorize,
+      content: async (row: FileVersionRow) => {
+        const content = await bytes.read(objectPath(workspaceId, row), row.size, signal);
+        if (content.byteLength !== row.size || digest(content) !== row.sha256) throw new FileError('integrity');
+        return content;
+      },
+    };
+  }
+  /** One version's bytes for a reader of the file. `signal` is the reader going away. */
+  async function downloadVersion(
+    workspaceId: string,
+    userId: string,
+    id: string,
+    version: number,
+    signal?: AbortSignal,
+  ) {
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    version = z.number().int().positive().parse(version);
+    return bounded(async () => {
+      const reader = readVersion(workspaceId, userId, id, version, signal);
+      const { row } = await reader.authorize('viewer');
+      const content = await reader.content(row);
+      const current = await reader.authorize('viewer');
+      return { name: current.item.name, mediaType: row.media_type, version: row.version, bytes: content };
+    });
+  }
+  /** Copies an earlier version's bytes into a new current version. Restoring the current bytes adds nothing. */
+  async function restoreVersion(workspaceId: string, userId: string, id: string, version: number) {
+    denyMcpEgress();
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    version = z.number().int().positive().parse(version);
+    return bounded(async () => {
+      const reader = readVersion(workspaceId, userId, id, version);
+      const { row } = await reader.authorize('manager');
+      const content = await reader.content(row);
+      return storeVersion(workspaceId, { kind: 'user', userId }, id, { mediaType: row.media_type, content }, 'restore');
+    });
+  }
   async function usage(workspaceId: string, userId: string) {
     return transaction(workspaceId, userId, false, async tx => ({
       usedBytes: await chargedBytes(tx),
@@ -1425,6 +1871,8 @@ export function createFiles(
     recordRecentUse,
     rename,
     share,
+    previewShare,
+    shareReviewed,
     readSharing,
     previewMove,
     move,
@@ -1433,6 +1881,10 @@ export function createFiles(
     deleteForever,
     sweepDeletions,
     usage,
+    addVersion,
+    listVersions,
+    downloadVersion,
+    restoreVersion,
   };
 }
 import { requireSkillFileSources, visibleSkillFiles } from './skill-sources.ts';

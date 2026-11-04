@@ -1,0 +1,15 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "dev": {
+      "passThroughEnv": [
+        "$TURBO_EXTENDS$",
+        "TULIPFARM_OBJECT_STORAGE_FILES_BUCKET",
+        "CHROMIUM_EXECUTABLE_PATH",
+        "CHROMIUM_SANDBOX",
+        "RENDER_WORKER_CONCURRENCY",
+        "PLAYWRIGHT_BROWSERS_PATH"
+      ]
+    }
+  }
+}

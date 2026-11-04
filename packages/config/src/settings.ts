@@ -7,7 +7,15 @@
 
 import { featureFlags } from './feature-flags.ts';
 
-export const settingServices = ['api', 'worker', 'storage-worker', 'snippet-broker', 'database', 'compose'] as const;
+export const settingServices = [
+  'api',
+  'worker',
+  'storage-worker',
+  'render-worker',
+  'snippet-broker',
+  'database',
+  'compose',
+] as const;
 export type SettingService = (typeof settingServices)[number];
 
 /**
@@ -739,7 +747,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_ENDPOINT',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description: 'S3-compatible endpoint, such as Cloudflare R2 or MinIO. Unset uses AWS S3 in the region below.',
@@ -747,7 +755,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_REGION',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'conditional',
     secret: false,
     default: 'auto',
@@ -756,7 +764,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description: 'Object-storage access key. Unset uses the default AWS credential chain, such as an ECS task role.',
@@ -764,7 +772,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: true,
     description: 'Object-storage secret key. Set it together with the access key.',
@@ -781,7 +789,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_FILES_BUCKET',
     group: 'Object storage',
-    services: [...apiWorker, 'database'],
+    services: [...apiWorker, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: 'tulipfarm-files',
@@ -874,7 +882,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_ADDRESS',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: '127.0.0.1:7233',
@@ -885,7 +893,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_TLS',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description:
@@ -895,7 +903,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_API_KEY',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: true,
     description:
@@ -905,7 +913,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_NAMESPACE',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: 'default',
@@ -915,7 +923,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_TASK_QUEUE',
     group: 'Temporal',
-    services: apiWorker,
+    services: [...apiWorker, 'render-worker'],
     requirement: 'optional',
     secret: false,
     default: 'tulipfarm',
@@ -930,6 +938,35 @@ export const settings: readonly Setting[] = [
     default: 'all',
     description:
       '`all` runs every task queue in one worker. `core` and `knowledge` split them so knowledge sync cannot starve chats, scheduled jobs and the health check; run one worker with each.',
+  },
+  {
+    name: 'RENDER_WORKER_CONCURRENCY',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    default: '2',
+    description:
+      'Plan documents the render worker draws and prints at once, from 1 to 16. Each holds a Chromium page, so allow about 300 MB per render.',
+  },
+  {
+    name: 'CHROMIUM_EXECUTABLE_PATH',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'The Chromium the render worker drives. The render worker image sets it to Debian’s Chromium; unset uses the Chromium Playwright downloaded.',
+  },
+  {
+    name: 'CHROMIUM_SANDBOX',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    default: 'false',
+    description:
+      '`true` runs Chromium in its own sandbox, which needs user namespaces or a seccomp profile that allows it. Pages always run without network access and with scripts off when printing.',
   },
   {
     name: 'TEMPORAL_STORAGE_TASK_QUEUE',

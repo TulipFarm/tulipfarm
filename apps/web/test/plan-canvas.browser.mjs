@@ -42,6 +42,21 @@ const counts = tasks => {
   return result;
 };
 const agentId = uuid(900);
+const messages = {
+  messages: [
+    {
+      id: chatId,
+      sequence: 1,
+      author: 'human',
+      createdAt: workspace.createdAt,
+      parts: [{ kind: 'text', text: 'Build me a waitlist page for the launch.' }],
+      turn: { id: chatId, status: 'completed', generation: 0 },
+      tools: [],
+    },
+  ],
+  nextBefore: null,
+  hasGitHubProposals: false,
+};
 let next = 1;
 const task = (key, title, extra = {}) => ({
   id: uuid(next++),
@@ -170,28 +185,37 @@ function fixtures() {
   };
 }
 
+async function vite() {
+  const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+    detached: true,
+  });
+  for (let attempt = 0; ; attempt++) {
+    if (
+      await fetch(origin).then(
+        response => response.ok,
+        () => false,
+      )
+    )
+      return server;
+    if (attempt >= 150 || server.exitCode !== null) {
+      try {
+        process.kill(-server.pid, 'SIGTERM');
+      } catch {}
+      assert.fail('Vite starts');
+    }
+    await delay(100);
+  }
+}
+
 test(
   'plans always show a task tree with read-only details; starters control them in chat and viewers only read',
   { timeout: 180000 },
   async () => {
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-      detached: true,
-    });
+    const server = await vite();
     let browser;
     try {
-      for (let attempt = 0; ; attempt++) {
-        if (
-          await fetch(origin).then(
-            response => response.ok,
-            () => false,
-          )
-        )
-          break;
-        assert.ok(attempt < 150 && server.exitCode === null, 'Vite starts');
-        await delay(100);
-      }
       if (shots) mkdirSync(shots, { recursive: true });
       const plans = fixtures();
       let listed = [plans.waitlist, plans.budget];
@@ -252,22 +276,7 @@ test(
             });
           }
           json = plan;
-        } else if (path.endsWith('/messages'))
-          json = {
-            messages: [
-              {
-                id: chatId,
-                sequence: 1,
-                author: 'human',
-                createdAt: workspace.createdAt,
-                parts: [{ kind: 'text', text: 'Build me a waitlist page for the launch.' }],
-                turn: { id: chatId, status: 'completed', generation: 0 },
-                tools: [],
-              },
-            ],
-            nextBefore: null,
-            hasGitHubProposals: false,
-          };
+        } else if (path.endsWith('/messages')) json = messages;
         else if (/\/conversations\/[\w-]+$/.test(path)) json = chat;
         else return route.fulfill({ status: 404, json: { error: 'not-found' } });
         return route.fulfill({ json });
@@ -464,6 +473,199 @@ test(
       if (shots) await page.screenshot({ path: `${shots}/plan-mobile.png` });
       await sheet.getByRole('button', { name: 'Back to chat', exact: true }).click();
       await sheet.waitFor({ state: 'detached' });
+      assert.deepEqual(errors, []);
+    } finally {
+      await browser?.close();
+      try {
+        process.kill(-server.pid, 'SIGTERM');
+      } catch {}
+    }
+  },
+);
+
+test(
+  'the document view keeps the newest page through renders and failures, and Share starts a chat message',
+  { timeout: 180000 },
+  async () => {
+    const server = await vite();
+    let browser;
+    try {
+      const fileId = uuid(700);
+      const plan = view(uuid(104), 'Document the launch', [task('copy', 'Write the launch copy')], {
+        contentRevision: 3,
+        document: { summary: 'Launch the waitlist.', risks: [], diagrams: [] },
+      });
+      const render = extra => {
+        plan.documentRender = {
+          revision: 3,
+          status: 'ready',
+          error: null,
+          pageRevision: 3,
+          fileId,
+          fileVersion: 2,
+          fileDetached: false,
+          ...extra,
+        };
+      };
+      const pages = [];
+      const actions = [];
+      browser = await chromium.launch({ headless: true });
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+      const page = await context.newPage();
+      page.setDefaultTimeout(15000);
+      page.setDefaultNavigationTimeout(60000);
+      const errors = [];
+      page.on('pageerror', error => errors.push(String(error)));
+      await context.route('**/v1/**', route => {
+        const path = new URL(route.request().url()).pathname;
+        const documentPage = path.match(new RegExp(`/agent-plans/${plan.id}/document/(\\d+)$`));
+        const documentAction = path.match(new RegExp(`/agent-plans/${plan.id}/document/(retry|recreate)$`));
+        let json;
+        if (path === '/v1/user/visit') json = { firstSession: false };
+        else if (path === '/v1/auth/get-session') json = session;
+        else if (path === '/v1/workspaces') json = [workspace];
+        else if (path === `/v1/workspaces/${workspace.slug}`) json = workspace;
+        else if (path.endsWith('/governance/me'))
+          json = {
+            membershipId: chatId,
+            role: 'member',
+            teams: [],
+            capabilities: { manageGovernance: false, canLeave: true },
+          };
+        else if (path.endsWith('/model-catalog')) json = chatCatalog;
+        else if (path.endsWith(`/conversations/${chatId}/plans`)) json = { plans: [planListItemSchema.parse(plan)] };
+        else if (documentPage) {
+          pages.push(Number(documentPage[1]));
+          return route.fulfill({
+            contentType: 'text/html',
+            body: `<!doctype html><html><head><title>Page</title></head><body><h1 id="page">Revision ${documentPage[1]}</h1><a href="https://example.test/">Source</a></body></html>`,
+          });
+        } else if (documentAction && route.request().method() === 'POST') {
+          actions.push(documentAction[1]);
+          return route.fulfill({ status: 202, json: { status: 'pending' } });
+        } else if (path.endsWith(`/agent-plans/${plan.id}`)) json = planViewSchema.parse(plan);
+        else if (path.endsWith('/messages')) json = messages;
+        else if (/\/conversations\/[\w-]+$/.test(path)) json = chat;
+        else return route.fulfill({ status: 404, json: { error: 'not-found' } });
+        return route.fulfill({ json });
+      });
+
+      const panel = page.getByRole('region', { name: 'Canvas', exact: true });
+      const canvas = panel.locator('.sprout-canvas-body');
+      const frame = canvas.locator('iframe');
+      const pdf = canvas.locator(`a[href$="/files/${fileId}"]`);
+      const share = canvas.getByRole('button', { name: /share/i });
+      const open = async () => {
+        await page.goto(`${origin}/${workspace.slug}/chat/${chatId}`);
+        await page
+          .getByRole('region', { name: 'Plan: Document the launch' })
+          .getByRole('button', { name: 'Open plan' })
+          .click();
+        await canvas.getByRole('tab', { name: 'Document' }).click();
+      };
+      const shownRevision = () => frame.contentFrame().locator('#page').textContent();
+
+      plan.documentRender = null;
+      await open();
+      await canvas.locator('[data-slot="state-panel"][data-kind="empty"]').waitFor();
+      assert.equal(await frame.count(), 0, 'nothing to show before the first page');
+
+      render({ status: 'rendering', pageRevision: null, fileId: null, fileVersion: null });
+      await open();
+      await canvas.getByRole('status').first().waitFor();
+      assert.deepEqual([await frame.count(), await share.count(), await pdf.count()], [0, 0, 0]);
+
+      render();
+      await open();
+      assert.equal(await shownRevision(), 'Revision 3');
+      assert.equal(await frame.getAttribute('sandbox'), 'allow-popups allow-popups-to-escape-sandbox');
+      const framed = await frame.getAttribute('srcdoc');
+      assert.match(
+        framed,
+        /http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"/,
+      );
+      assert.match(framed, /<base target="_blank">/, 'links leave the sandboxed frame in a new tab');
+      assert.equal(await pdf.getAttribute('target'), '_blank');
+      assert.equal(await canvas.getByRole('alert').count(), 0);
+
+      render({ revision: 4, status: 'rendering' });
+      plan.contentRevision = 4;
+      await open();
+      await canvas.getByRole('status').first().waitFor();
+      assert.equal(await shownRevision(), 'Revision 3', 'the newest ready page stays while the next one renders');
+
+      render({ revision: 4, status: 'failed', error: 'render' });
+      await open();
+      assert.equal(await shownRevision(), 'Revision 3', 'a failed revision leaves the newest ready page');
+      await canvas.getByRole('alert').getByRole('button').click();
+      while (actions.length < 1) await delay(50);
+      assert.deepEqual(actions, ['retry']);
+      assert.deepEqual([...new Set(pages)], [3], 'only the newest ready page is ever requested');
+
+      render({ revision: 4, status: 'failed', error: 'too-large' });
+      await open();
+      await canvas
+        .getByRole('alert')
+        .getByText('The PDF for revision 4 is larger than 10 MB, so it wasn’t saved to Files.', { exact: false })
+        .waitFor();
+      assert.equal(
+        await canvas.getByRole('alert').getByRole('button').count(),
+        0,
+        'a revision too large to save offers no retry',
+      );
+
+      render({ fileId: null, fileVersion: null, fileDetached: true });
+      plan.contentRevision = 3;
+      await open();
+      assert.equal(await pdf.count(), 0, 'a removed PDF is not linked');
+      assert.equal(await share.count(), 0, 'nor offered for sharing');
+      await canvas.getByRole('alert').getByRole('button').click();
+      while (actions.length < 2) await delay(50);
+      assert.deepEqual(actions, ['retry', 'recreate']);
+
+      render();
+      plan.canControl = false;
+      await open();
+      assert.equal(await shownRevision(), 'Revision 3');
+      await pdf.waitFor();
+      assert.deepEqual([await share.count(), await canvas.getByRole('alert').count()], [0, 0], 'readers only read');
+
+      render({ revision: 4, status: 'failed', error: 'render' });
+      await open();
+      await canvas.getByRole('alert').waitFor();
+      assert.equal(await canvas.getByRole('alert').getByRole('button').count(), 0, 'only the starter retries');
+
+      plan.canControl = true;
+      plan.approval = {
+        revision: 3,
+        approvedByMembershipId: chatId,
+        approvedBy: 'Priya Shah',
+        approvedAt: '2026-11-04T05:17:00Z',
+        timeZone: 'Asia/Kolkata',
+      };
+      render();
+      await open();
+      await canvas
+        .getByText('Revision 3 approved by Priya Shah, 4 Nov 2026, 10:47 GMT+5:30', { exact: true })
+        .waitFor();
+      await share.click();
+      const composer = await page.waitForFunction(() => {
+        const editor = document.activeElement;
+        const selection = getSelection();
+        const first = editor?.isContentEditable ? editor.querySelector('p') : null;
+        if (!first?.textContent || !selection?.isCollapsed || !first.contains(selection.anchorNode)) return null;
+        const before = document.createRange();
+        before.selectNodeContents(first);
+        before.setEnd(selection.anchorNode, selection.anchorOffset);
+        return {
+          paragraphs: editor.querySelectorAll('p').length,
+          caret: before.toString().length,
+          length: first.textContent.length,
+        };
+      });
+      const { paragraphs, caret, length } = await composer.jsonValue();
+      assert.equal(caret, length, 'the caret waits right after the prompt');
+      assert.equal(paragraphs, 1, 'an empty draft is replaced rather than kept below the prompt');
       assert.deepEqual(errors, []);
     } finally {
       await browser?.close();

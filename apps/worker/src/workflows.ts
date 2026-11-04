@@ -12,6 +12,7 @@ export { gmailHeartbeat } from './google-heartbeat-workflows.ts';
 export { businessWorkflowV1 } from '@tulipfarm/workflows/temporal';
 export { agentTaskStep, agentTaskRecovery } from './task-workflows.ts';
 export { agentPlanStep, agentPlanRecovery } from './plan-workflows.ts';
+export { planDocument } from './plan-document-workflows.ts';
 export { knowledgeIngest } from './knowledge-workflows.ts';
 export { skillImport } from './skill-workflows.ts';
 

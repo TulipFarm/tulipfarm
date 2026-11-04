@@ -60,6 +60,73 @@ const planTitles = [
   'Verify the first alert and a repeat',
 ];
 const planKeys = ['records', 'agent', 'intake', 'activation', 'verify'];
+/** Plan documents: a draft at revision 1, a failed revision 2 for a blocked plan, and an approved verified plan. */
+function planDocumentFixture(plan: z.infer<typeof planViewSchema>) {
+  const fileId = '66666666-6666-4666-8666-666666666666';
+  if (scenario === 'plan-blocked')
+    return {
+      ...plan,
+      contentRevision: 2,
+      documentRender: {
+        revision: 2,
+        status: 'failed',
+        error: 'render',
+        pageRevision: 1,
+        fileId,
+        fileVersion: 1,
+        fileDetached: false,
+      },
+    };
+  if (scenario === 'plan-verified')
+    return {
+      ...plan,
+      contentRevision: 2,
+      approval: {
+        revision: 2,
+        approvedByMembershipId: id,
+        approvedBy: 'Dhruv Bhatia',
+        approvedAt: '2026-11-04T04:12:00Z',
+        timeZone: 'Asia/Kolkata',
+      },
+      documentRender: {
+        revision: 2,
+        status: 'ready',
+        error: null,
+        pageRevision: 2,
+        fileId,
+        fileVersion: 3,
+        fileDetached: false,
+      },
+    };
+  return {
+    ...plan,
+    documentRender: {
+      revision: 1,
+      status: 'ready',
+      error: null,
+      pageRevision: 1,
+      fileId,
+      fileVersion: 1,
+      fileDetached: false,
+    },
+  };
+}
+function planDocumentHtml(plan: z.infer<typeof planViewSchema>, revision: number) {
+  const escape = (text: string) => text.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`);
+  const tasks = plan.tasks.map(task => `<li><strong>${escape(task.title)}</strong></li>`).join('');
+  const requirements = (plan.planning?.requirements ?? [])
+    .map(item => `<li><code>${escape(item.key)}</code> ${escape(item.description)}</li>`)
+    .join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escape(plan.title)}</title><style>
+body{font:15px/1.6 system-ui,sans-serif;color:#1c1917;margin:0;padding:40px;max-width:760px}
+header{border-bottom:1px solid #e7e5e4;margin-bottom:24px;padding-bottom:16px}h1{font-size:26px;margin:0 0 4px}
+.meta{color:#78716c;font-size:13px}h2{font-size:17px;margin:28px 0 8px}code{background:#f5f5f4;padding:1px 4px;border-radius:4px}
+</style></head><body><header><h1>${escape(plan.title)}</h1><p class="meta">Dhruv Bhatia · Revision ${revision} · Generated 4 Nov 2026</p></header>
+<h2>Summary</h2><p>${escape(plan.brief)}</p><h2>Requirements</h2><ul>${requirements}</ul>
+<h2>Approach</h2><p>Record each alert in a table first, then open or reuse a GitHub issue so repeats never create duplicates.</p>
+<h2>Tasks</h2><ol>${tasks}</ol><h2>Risks</h2><ul><li><strong>Duplicate issues.</strong> Mitigation: match on the alert fingerprint before creating an issue.</li></ul>
+<p><a href="https://example.com">An external link opens in a new tab</a></p></body></html>`;
+}
 function planningFixture() {
   const verified = scenario === 'plan-verified',
     blocked = scenario === 'plan-blocked';
@@ -247,7 +314,18 @@ if (import.meta.env.DEV && window.location.pathname.startsWith('/canvas-mock/'))
         return Response.json(receipt);
       }
       if (method === 'GET' && path.endsWith('/plans')) return Response.json({ plans: [planning] });
-      if (method === 'GET' && path.endsWith(`/agent-plans/${tableId}`)) return Response.json(planning);
+      if (method === 'GET' && path.endsWith(`/agent-plans/${tableId}`))
+        return Response.json(planDocumentFixture(planning));
+      const documentPage = path.match(new RegExp(`/agent-plans/${tableId}/document/(\\d+)$`));
+      if (method === 'GET' && documentPage)
+        return new Response(planDocumentHtml(planning, Number(documentPage[1])), {
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+          },
+        });
+      if (method === 'POST' && /\/agent-plans\/[^/]+\/document\/(retry|recreate)$/.test(path))
+        return Response.json({ id: tableId });
       if (method === 'GET' && path.endsWith('/messages'))
         return Response.json({
           messages: [

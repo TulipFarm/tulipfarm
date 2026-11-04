@@ -2025,3 +2025,78 @@ test('an upload or copy that cannot fit is refused before any bytes move, and a 
     await f.close();
   }
 });
+
+test('versions keep every revision readable, add only changed bytes, restore as a new version and go with the file', async () => {
+  const f = await setup();
+  try {
+    const file = await f.upload('Notes.txt');
+    await f.grant(file.id, 'viewer', 'viewer');
+    await f.grant(file.id, 'manager', 'manager');
+    const listed = async (user = f.w.userId) =>
+      (await f.files.listVersions(f.w.id, user, file.id)).versions.map(entry => [
+        entry.version,
+        entry.source,
+        entry.current,
+      ]);
+    assert.deepEqual(await listed('viewer'), [[1, 'original', true]]);
+    const arrival = text => ({ mediaType: 'text/plain', content: Buffer.from(text) });
+    await assert.rejects(
+      f.files.addVersion(f.w.id, { kind: 'user', userId: 'viewer' }, file.id, arrival('mine now'), 'upload'),
+      AccessDenied,
+    );
+    await assert.rejects(
+      f.files.addVersion(
+        f.w.id,
+        { kind: 'user', userId: f.w.userId },
+        file.id,
+        { mediaType: 'application/pdf', content: Buffer.from('%PDF') },
+        'upload',
+      ),
+      error => error instanceof FileError && error.code === 'media-type',
+    );
+    const objects = f.objects.size;
+    const same = await f.files.addVersion(
+      f.w.id,
+      { kind: 'user', userId: f.w.userId },
+      file.id,
+      arrival('private contents'),
+      'upload',
+    );
+    assert.equal(same.version, 1, 'the same bytes add no version');
+    assert.equal(f.objects.size, objects, 'and leave no stray object');
+
+    const second = await f.files.addVersion(f.w.id, { kind: 'file-owner' }, file.id, arrival('second draft'), 'plan');
+    assert.deepEqual([second.version, second.current, second.createdByMembershipId], [2, true, f.w.membershipId]);
+    assert.equal((await f.files.download(f.w.id, 'viewer', file.id)).bytes.toString(), 'second draft');
+    const first = await f.files.downloadVersion(f.w.id, 'viewer', file.id, 1);
+    assert.deepEqual([first.version, first.name, first.bytes.toString()], [1, 'Notes.txt', 'private contents']);
+
+    await assert.rejects(f.files.restoreVersion(f.w.id, 'viewer', file.id, 1), AccessDenied);
+    const restored = await f.files.restoreVersion(f.w.id, 'manager', file.id, 1);
+    assert.deepEqual(
+      [restored.version, restored.source, restored.createdByMembershipId],
+      [3, 'restore', f.members.manager],
+    );
+    assert.equal((await f.files.download(f.w.id, 'viewer', file.id)).bytes.toString(), 'private contents');
+    assert.equal(
+      (await f.files.restoreVersion(f.w.id, 'manager', file.id, 3)).version,
+      3,
+      'restoring the current bytes adds nothing',
+    );
+    assert.deepEqual(await listed(), [
+      [3, 'restore', true],
+      [2, 'plan', false],
+      [1, 'original', false],
+    ]);
+    await assert.rejects(f.files.downloadVersion(f.w.id, 'viewer', file.id, 4), AccessDenied);
+    await assert.rejects(f.files.listVersions(f.w.id, 'unrelated', file.id), AccessDenied);
+
+    assert.equal(f.objects.size, objects + 2, 'each version owns its object');
+    await f.files.trash(f.w.id, f.w.userId, file.id, true);
+    assert.equal((await f.files.previewDeletion(f.w.id, f.w.userId, file.id)).bytes, 16 + 12 + 16);
+    assert.deepEqual(await f.files.deleteForever(f.w.id, f.w.userId, file.id), { id: file.id, state: 'deleted' });
+    assert.equal(f.objects.size, objects - 1, 'deleting the file removes every version');
+  } finally {
+    await f.close();
+  }
+});

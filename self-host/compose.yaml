@@ -273,6 +273,16 @@ services:
     environment:
       <<: [*temporal-client, *telemetry]
 
+  # Draws plan documents with Chromium. It has no database access, only Temporal and the files bucket.
+  render-worker:
+    <<: *runtime
+    build: { context: .., dockerfile: apps/render-worker/Dockerfile, target: render-worker, args: *release }
+    command: [node, --env-file=/run/tulipfarm/render-worker.env, dist/worker.js]
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      <<: [*temporal-client]
+      RENDER_WORKER_CONCURRENCY: ${RENDER_WORKER_CONCURRENCY:-2}
+
   web:
     build:
       context: ..

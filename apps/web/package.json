@@ -44,6 +44,7 @@
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
     "@tulipfarm/sprout": "https://github.com/TulipFarm/sprout/releases/download/v0.14.0/tulipfarm-sprout-0.14.0.tgz",

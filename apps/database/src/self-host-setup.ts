@@ -200,6 +200,7 @@ async function main() {
   await writeEnvFile(join(out, 'api.env'), generator, { ...services.api, BETTER_AUTH_SECRET: state.betterAuthSecret });
   await writeEnvFile(join(out, 'worker.env'), generator, { ...services.worker, EMAIL_DELIVERY_DATABASE_URL: emailUrl });
   await writeEnvFile(join(out, 'storage-worker.env'), generator, services.storageWorker);
+  await writeEnvFile(join(out, 'render-worker.env'), generator, services.renderWorker);
   const [temporalHost, temporalPort = '5432'] = endpoint.host.split(':');
   const tls = ['require', 'verify-ca', 'verify-full'].includes(admin.searchParams.get('sslmode') ?? '');
   await writeEnvFile(join(out, 'temporal.env'), generator, {

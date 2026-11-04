@@ -100,6 +100,15 @@ The jobs API still serves every route, including `/v1/health`, but needs no
 public traffic. Keep a jobs API running: with only `requests`, queued and
 scheduled work is never started. Unset or `all` keeps one process.
 
+## Render worker
+
+The render worker turns plans into documents: it draws their diagrams and prints
+an A4 PDF with Chromium. It polls the `tulipfarm-render` task queue and needs only
+Temporal and the files bucket, not the database. Its pages never reach the
+network. Chromium runs without its own sandbox unless `CHROMIUM_SANDBOX=true`;
+enable it where the container may create user namespaces. Without the render
+worker, plan documents fail after 30 minutes and nothing else is affected.
+
 ## Health
 
 The API health route is **`/v1/health`**, not `/health`. It returns 200 only when

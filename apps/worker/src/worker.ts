@@ -31,6 +31,7 @@ import { createTaskComposition } from './task-composition.ts';
 import { createModelBundleRegistry } from './model-bundle-registry.ts';
 import { createTaskDispatcher, createTaskRecovery } from './task-dispatch.ts';
 import { createPlanComposition, createPlanDispatcher } from './plan-composition.ts';
+import { createPlanDocumentComposition, createPlanDocumentDispatcher } from './plan-document-composition.ts';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { createSlackPromptComposition } from './slack-composition.ts';
@@ -96,6 +97,7 @@ async function run() {
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
+  let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
   let slack: Awaited<ReturnType<typeof createSlackPromptComposition>>;
   const chatObjects = chatObjectStore();
   let importCleanup: ReturnType<typeof createObjectCleanupSweep> | undefined;
@@ -206,6 +208,21 @@ async function run() {
     const planFailure = (workspaceId: string, planId: string) =>
       Runtime.instance().logger.error('Plan dispatch will retry', { workspaceId, planId });
     planDispatch = coreResources ? createPlanDispatcher(planFailure) : undefined;
+    documentDispatch = coreResources
+      ? createPlanDocumentDispatcher((workspaceId, planId) =>
+          Runtime.instance().logger.error('Plan document dispatch will retry', { workspaceId, planId }),
+        )
+      : undefined;
+    const documents =
+      coreResources && documentDispatch
+        ? createPlanDocumentComposition({
+            runtime: coreResources.runtime,
+            profiles: coreResources.memberProfiles,
+            files: chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
+            objects: chatObjects ?? undefined,
+            start: documentDispatch.start,
+          })
+        : undefined;
     const plans =
       coreResources && guarded && planDispatch
         ? createPlanComposition({
@@ -215,6 +232,7 @@ async function run() {
             wakeTask: (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
             knowledge: createKnowledgeTools({ runtime: coreResources.runtime }),
             files: chatObjects ? createFiles(guarded, chatObjects) : undefined,
+            ...(documents ? { documents } : {}),
           })
         : undefined;
     slack = guarded
@@ -285,6 +303,7 @@ async function run() {
               ...tasks?.activities,
               ...taskRecovery,
               ...plans?.activities,
+              ...documents?.activities,
               ...email?.activities,
               ...conversations,
               ...(coreResources
@@ -435,6 +454,7 @@ async function run() {
     await modelBundles?.close();
     await taskDispatch?.close();
     await planDispatch?.close();
+    await documentDispatch?.close();
   }
 }
 

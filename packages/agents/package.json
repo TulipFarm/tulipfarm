@@ -131,6 +131,10 @@
       "types": "./dist/model-bundles.d.ts",
       "default": "./dist/model-bundles.js"
     },
+    "./plan-document-store": {
+      "types": "./dist/plan-document-store.d.ts",
+      "default": "./dist/plan-document-store.js"
+    },
     "./plans": {
       "types": "./dist/plans.d.ts",
       "default": "./dist/plans.js"
@@ -320,6 +324,7 @@
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
     "@tulipfarm/slack-presentation": "workspace:*",

@@ -15,8 +15,10 @@ import {
   type FileSharingContribution,
   type FileSharingSnapshot,
   type MoveAudience,
+  type FileSubject,
   type MovePreview,
   type ReadableFileReference,
+  type SharePreview,
 } from './contracts.ts';
 
 const version = { row_version: z.string() };
@@ -314,4 +316,65 @@ export function movePreview(
       )
       .digest('hex');
   return { source: readable(item), destination, subtree, fingerprint };
+}
+
+/**
+ * Previews direct grants of `role` to each subject. A subject whose direct grant is already at least `role` keeps it, so
+ * a reviewed share never lowers anyone's access. The fingerprint covers every row the audience depends on.
+ */
+export function sharePreview(
+  graph: SharingGraph,
+  actor: HumanActor,
+  workspaceId: string,
+  id: string,
+  subjects: FileSubject[],
+  role: FileRole,
+): SharePreview {
+  const { item } = requireFileAccess(graph, actor, id, 'manager');
+  const lineage = chain(graph, id);
+  requireAudienceBudget(graph, [lineage, lineage]);
+  const direct = graph.grantsByItem.get(id) ?? [];
+  const current = subjects.map(subject => ({
+    subject,
+    direct: direct.find(grant => grant.subject_kind === subject.kind && grant.subject_id === subject.id)?.role ?? null,
+  }));
+  const added: Grant[] = current
+    .filter(entry => entry.direct === null || roleLevel[entry.direct] < roleLevel[role])
+    .map(({ subject }) => ({ item_id: id, subject_kind: subject.kind, subject_id: subject.id, role, row_version: '' }));
+  const grantsByItem = new Map(graph.grantsByItem);
+  grantsByItem.set(id, [
+    ...direct.filter(
+      grant => !added.some(next => next.subject_kind === grant.subject_kind && next.subject_id === grant.subject_id),
+    ),
+    ...added,
+  ]);
+  const fingerprint =
+    'files-share-v1:' +
+    createHash('sha256')
+      .update(
+        JSON.stringify([
+          'files-share-v1',
+          workspaceId,
+          actor.membershipId,
+          actor.userId,
+          id,
+          subjects,
+          role,
+          graph.items,
+          graph.grants,
+          graph.memberships,
+          graph.teams,
+          graph.enrollments,
+        ]),
+      )
+      .digest('hex');
+  return {
+    item: { ...readable(item), itemKind: item.kind },
+    creatorMembershipId: item.creator_membership_id,
+    role,
+    subjects: current,
+    before: audience(graph, lineage),
+    after: audience({ ...graph, grantsByItem }, lineage),
+    fingerprint,
+  };
 }

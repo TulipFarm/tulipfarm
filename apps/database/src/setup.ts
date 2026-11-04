@@ -121,6 +121,8 @@ export function serviceEnvironments(input: {
       ...files,
       WORKSPACE_AUTHORING_DATABASE_URL: releaseLoginUrl(endpoint, passwords, 'authoring'),
     },
+    // The render worker draws plan documents. It holds no database or encryption keys, only the files bucket.
+    renderWorker: { ...connection(objectStorage), ...files },
     storageWorker: {
       ...shared,
       ...key('WORKSPACE_MIGRATION', keys.migration),

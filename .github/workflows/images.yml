@@ -51,6 +51,9 @@ jobs:
           - image: storage-maintenance
             dockerfile: apps/worker/Dockerfile
             target: storage-maintenance
+          - image: render-worker
+            dockerfile: apps/render-worker/Dockerfile
+            target: render-worker
           - image: snippet-broker
             dockerfile: apps/snippet-broker/Dockerfile
             target: production

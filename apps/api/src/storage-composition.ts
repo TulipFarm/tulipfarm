@@ -47,7 +47,7 @@ import { registerSkills } from './skills.ts';
 import { registerSkillImports } from './skill-imports.ts';
 import { registerSkillImportDispatch } from './skill-import-dispatch.ts';
 import { registerAgentTasks } from './agent-tasks.ts';
-import { planWake, taskActionWake, taskWake } from './task-dispatch.ts';
+import { planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
 import { registerAgentPlans } from './agent-plans.ts';
 import { createTaskApprovalDecision } from '@tulipfarm/agents/task-approvals';
 import { registerAuthoringDrafts } from './authoring-drafts.ts';
@@ -245,7 +245,13 @@ export function registerStorageComposition(
     resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
     wakeTaskAction,
   });
-  registerAgentPlans(app, { runtime, auth: dependencies.auth, wake: planWake(app, temporal) });
+  registerAgentPlans(app, {
+    runtime,
+    auth: dependencies.auth,
+    wake: planWake(app, temporal),
+    identity: dependencies.pool,
+    ...(chatObjects ? { documents: { objects: chatObjects, start: planDocumentStart(app, temporal) } } : {}),
+  });
   registerAgentTasks(app, {
     runtime,
     auth: dependencies.auth,
