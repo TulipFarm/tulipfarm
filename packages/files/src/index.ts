@@ -26,6 +26,7 @@ import {
   newFileSchema,
   newFolderSchema,
   roleLevel,
+  shareFingerprintSchema,
   versionRowSchema,
   type DeletionOutcome,
   type FileCopySource,
@@ -40,7 +41,14 @@ import {
   type LibraryPage,
   type LibrarySort,
 } from './contracts.ts';
-import { loadSharingGraph, movePreview, requireFileAccess, sharingGraphLimits, sharingSnapshot } from './sharing.ts';
+import {
+  loadSharingGraph,
+  movePreview,
+  requireFileAccess,
+  sharePreview,
+  sharingGraphLimits,
+  sharingSnapshot,
+} from './sharing.ts';
 import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm/workspace-storage/recommendations';
 
 export { FileError } from './contracts.ts';
@@ -57,6 +65,7 @@ export type {
   FileSharingSnapshot,
   MoveAudience,
   MovePreview,
+  SharePreview,
   FileSummary,
   FileSuggestionsPage,
   FileSuggestionsQuery,
@@ -78,6 +87,15 @@ export type {
 } from './contracts.ts';
 /** A membership and the identity user behind it. The HTTP layer resolves display names. */
 export type FileMember = { membershipId: string; userId: string };
+/** A reviewed share names each person or team once, up to 20 in one review. */
+const shareSubjectsSchema = z
+  .array(fileSubjectSchema)
+  .min(1)
+  .max(20)
+  .refine(
+    subjects => new Set(subjects.map(subject => `${subject.kind}:${subject.id}`)).size === subjects.length,
+    'Each person or team appears once.',
+  );
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type RecommendationAudience = Map<string, string[]>;
 /** `signal` is the caller going away; an adapter stops the transfer so the caller's transfer slot frees at once. */
@@ -1278,26 +1296,85 @@ export function createFiles(
     return transaction(workspaceId, userId, true, async (tx, actor) => {
       await access(tx, actor, id, 'manager');
       const before = await recommendationAudience(tx, id);
-      if (role !== null) {
-        const exists = await tx.client.query(
-          subject.kind === 'individual'
-            ? `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`
-            : `SELECT 1 FROM ${table(tx, 'tf_teams')} WHERE id = $1`,
-          [subject.id],
-        );
-        if (!exists.rowCount) throw new AccessDenied();
-        // A person's grant replaces one an origin made, so the origin's later sync leaves it alone.
-        const origin = (await installed(tx, 'tf_file_versions')) ? ', origin = NULL' : '';
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_file_grants')} (item_id,subject_kind,subject_id,role) VALUES ($1,$2,$3,$4)
-          ON CONFLICT (item_id,subject_kind,subject_id) DO UPDATE SET role = EXCLUDED.role${origin}`,
-          [id, subject.kind, subject.id, role],
-        );
-      } else
+      if (role !== null) await grant(tx, id, subject, role);
+      else
         await tx.client.query(
           `DELETE FROM ${table(tx, 'tf_file_grants')} WHERE item_id = $1 AND subject_kind = $2 AND subject_id = $3`,
           [id, subject.kind, subject.id],
         );
+      await recommendationChanges(tx, id, before);
+      return { id };
+    });
+  }
+  async function grant(tx: AuthorizationTransaction, id: string, subject: FileSubject, role: FileRole) {
+    const exists = await tx.client.query(
+      subject.kind === 'individual'
+        ? `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`
+        : `SELECT 1 FROM ${table(tx, 'tf_teams')} WHERE id = $1`,
+      [subject.id],
+    );
+    if (!exists.rowCount) throw new AccessDenied();
+    // A person's grant replaces one an origin made, so the origin's later sync leaves it alone.
+    const origin = (await installed(tx, 'tf_file_versions')) ? ', origin = NULL' : '';
+    await tx.client.query(
+      `INSERT INTO ${table(tx, 'tf_file_grants')} (item_id,subject_kind,subject_id,role) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (item_id,subject_kind,subject_id) DO UPDATE SET role = EXCLUDED.role${origin}`,
+      [id, subject.kind, subject.id, role],
+    );
+  }
+  async function sharePreviewIn(
+    tx: AuthorizationTransaction,
+    actor: HumanActor,
+    workspaceId: string,
+    id: string,
+    subjects: FileSubject[],
+    role: FileRole,
+  ) {
+    await access(tx, actor, id, 'manager', { traversal: 'sharing' });
+    const graph = await loadSharingGraph(tx, id);
+    for (const subject of subjects)
+      if (
+        subject.kind === 'individual'
+          ? !graph.activeMemberships.has(subject.id)
+          : !graph.teams.some(team => team.id === subject.id)
+      )
+        throw new AccessDenied();
+    return sharePreview(graph, actor, workspaceId, id, subjects, role);
+  }
+  /** Who could open an item before and after granting `role` to each subject, for a share the user reviews first. */
+  async function previewShare(workspaceId: string, userId: string, id: string, value: unknown, role: FileRole) {
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    const subjects = shareSubjectsSchema.parse(value);
+    role = fileRoleSchema.parse(role);
+    return transaction(workspaceId, userId, false, (tx, actor) =>
+      sharePreviewIn(tx, actor, workspaceId, id, subjects, role),
+    );
+  }
+  /**
+   * Applies a reviewed share in one transaction, only while sharing still matches the preview's fingerprint. Grants
+   * already at or above `role` stay as they are.
+   */
+  async function shareReviewed(
+    workspaceId: string,
+    userId: string,
+    id: string,
+    value: unknown,
+    role: FileRole,
+    expectedFingerprint: string,
+  ) {
+    workspaceId = uuidSchema.parse(workspaceId);
+    id = uuidSchema.parse(id);
+    const subjects = shareSubjectsSchema.parse(value);
+    role = fileRoleSchema.parse(role);
+    expectedFingerprint = shareFingerprintSchema.parse(expectedFingerprint);
+    return transaction(workspaceId, userId, true, async (tx, actor) => {
+      const preview = await sharePreviewIn(tx, actor, workspaceId, id, subjects, role);
+      if (preview.fingerprint !== expectedFingerprint) throw new FileError('conflict');
+      const before = await recommendationAudience(tx, id);
+      for (const entry of preview.subjects)
+        if (entry.direct === null || roleLevel[entry.direct] < roleLevel[role])
+          await grant(tx, id, entry.subject, role);
       await recommendationChanges(tx, id, before);
       return { id };
     });
@@ -1794,6 +1871,8 @@ export function createFiles(
     recordRecentUse,
     rename,
     share,
+    previewShare,
+    shareReviewed,
     readSharing,
     previewMove,
     move,

@@ -73,7 +73,7 @@ export function useConversationChanges() {
                     ? 'tables'
                     : kind === 'project'
                       ? 'projects'
-                      : kind === 'files'
+                      : kind === 'files' || kind === 'file-share'
                         ? 'files'
                         : kind === 'knowledge'
                           ? 'knowledge'

@@ -41,6 +41,7 @@ import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
 import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
 import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
+import { createFileShareDrafts } from './file-share-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
 import { readPersonalMemory, replaceOwnPersonalMemory } from '@tulipfarm/conversations/personal-memory';
@@ -193,6 +194,7 @@ export function createAuthoringDrafts(
       return createDefinitionLifecycleDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).writable(tx, actor, proposal);
+    if (proposal.kind === 'file-share') return createFileShareDrafts(bound, workspaceId).writable(tx, actor, proposal);
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).writable(actor, proposal);
     // Only the requester's own document is ever read or replaced.
     if (proposal.kind === 'memory') return;
@@ -276,6 +278,7 @@ export function createAuthoringDrafts(
     if (isDefinitionLifecycle(proposal)) return createDefinitionLifecycleDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'project') return createProjectDrafts(bound, workspaceId).stale(tx, proposal);
     if (proposal.kind === 'files') return createFileDrafts(bound, workspaceId).stale(tx, proposal);
+    if (proposal.kind === 'file-share') return createFileShareDrafts(bound, workspaceId).stale(tx, actor, proposal);
     if (proposal.kind === 'knowledge') return createKnowledgeDrafts(bound, workspaceId).stale(actor, proposal);
     if (proposal.kind === 'memory') return memoryStale(tx, actor, proposal);
     if (proposal.kind === 'row') {
@@ -575,6 +578,19 @@ export function createAuthoringDrafts(
           instruction: `Nothing has been ${done}. The human must review the listed files on the chat card and approve it. Never treat chat text as approval.`,
         };
       }
+      if (proposal.kind === 'file-share') {
+        const { file, subjects, role } = proposal.input;
+        return {
+          draftId: id,
+          digest,
+          status: 'review-required',
+          fileId: file.id,
+          role,
+          subjects: subjects.map(({ kind, id, name }) => ({ kind, id, name })),
+          excluded: proposal.input.excluded.map(({ kind, id, name }) => ({ kind, id, name })),
+          instruction: `Nothing has been shared. The human must review who can open “${file.name}” on the chat card and approve it. Never treat chat text as approval.`,
+        };
+      }
       if (proposal.kind === 'memory')
         return {
           draftId: id,
@@ -683,6 +699,7 @@ export function createAuthoringDrafts(
                 outcome.kind === 'skill-restore' ||
                 outcome.kind === 'project' ||
                 outcome.kind === 'files' ||
+                outcome.kind === 'file-share' ||
                 outcome.kind === 'knowledge' ||
                 outcome.kind === 'memory' ||
                 outcome.kind === 'row'
@@ -821,6 +838,8 @@ export function createAuthoringDrafts(
         else if (proposal.kind === 'project')
           outcome = await createProjectDrafts(bound, workspaceId).apply(actor, proposal);
         else if (proposal.kind === 'files') outcome = await createFileDrafts(bound, workspaceId).apply(actor, proposal);
+        else if (proposal.kind === 'file-share')
+          outcome = await createFileShareDrafts(bound, workspaceId).apply(actor, proposal);
         else if (proposal.kind === 'knowledge')
           outcome = await createKnowledgeDrafts(bound, workspaceId, fileBytes).apply(actor, id, proposal);
         else if (proposal.kind === 'memory') {

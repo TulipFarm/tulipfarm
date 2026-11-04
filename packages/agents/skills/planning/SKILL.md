@@ -113,6 +113,24 @@ running pauses it until they approve the new revision; repairs and retries after
 failed work do not.
 If `plans.update` returns `document-unavailable`, continue without the document.
 
+### Share the plan
+
+When the person asks to share the plan, share only its PDF. It is in their
+`plans` folder in Files; find it with `files.list`. Never share the chat, the
+plan's results, or the `plans` folder.
+
+1. Find each person or team with `members.find`, by name or email. If a name
+   matches more than one, ask which one they mean. Never guess.
+2. Use viewer unless they ask for editor.
+3. Call `files.share` with the PDF's file ID, the people and teams, and the role.
+   It returns a card. Nothing is shared until the person approves it there.
+
+The card leaves off anyone who can't read every source the plan was written
+from. Tell the person who was left off. Do not try to add them another way;
+this cannot be overridden from chat. If `files.share` returns `no-change`,
+say who already has access or was left off. If a card goes out of date, make
+a fresh one. To stop sharing, the person uses Files.
+
 ## 5. Execute and maintain progress
 
 Read the latest plan version before changing it. Use `plans.claim` with the plan

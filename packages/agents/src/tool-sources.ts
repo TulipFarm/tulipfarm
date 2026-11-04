@@ -446,6 +446,8 @@ export async function resultSources(
     case 'files.move':
     case 'files.trash':
     case 'files.restore':
+    case 'files.share':
+    case 'members.find':
     case 'agents.archive':
     case 'agents.restore':
     case 'skills.archive':
