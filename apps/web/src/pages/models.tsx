@@ -18,6 +18,8 @@ import { ModelAvailability } from '@/features/models/availability';
 import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
 import { useFlag } from '@/lib/feature-flags';
+import { ChatGptPlanSection } from '@/features/models/chatgpt-plan';
+import { isChatGptFamily } from '@/features/models/chatgpt-plan-api';
 
 export function ModelsPage() {
   const { workspace, user } = workspaceRoute.useRouteContext();
@@ -81,6 +83,11 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const selected = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
   const tab = selected === 'images' && !images ? 'access' : selected;
   const navigate = useNavigate({ from: workspaceModelsRoute.fullPath });
+  const chatGptOutcome = workspaceModelsRoute.useSearch({ select: search => search.chatgpt });
+  const clearChatGptOutcome = useCallback(
+    () => void navigate({ search: previous => ({ ...previous, chatgpt: undefined }), replace: true }),
+    [navigate],
+  );
   return (
     <PageContent>
       <PageHeader
@@ -114,6 +121,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
           </>
         )}
       </ModelRead>
+      <ChatGptPlanSection workspaceId={workspaceId} outcome={chatGptOutcome} clearOutcome={clearChatGptOutcome} />
       <Tabs
         value={tab}
         onValueChange={value =>
@@ -140,7 +148,9 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
               accessVersion={accessVersion}
               refreshAccess={read.refresh}
               renderRow={(family, row) =>
-                snapshot && (
+                snapshot &&
+                // A ChatGPT plan model never falls back to a model the workspace pays for.
+                !isChatGptFamily(family) && (
                   <FallbackRule
                     api={api}
                     userId={userId}

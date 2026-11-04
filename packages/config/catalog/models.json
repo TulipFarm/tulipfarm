@@ -310,6 +310,81 @@
       ]
     },
     {
+      "id": "chatgpt-sol",
+      "name": "GPT Sol (ChatGPT plan)",
+      "vendor": "openai",
+      "speed": null,
+      "quality": null,
+      "routes": [
+        {
+          "provider": "chatgpt",
+          "model": "gpt-6.1-sol"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
+      },
+      "capabilities": {
+        "imageInput": true
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own ChatGPT plan through Sign in with ChatGPT; shown only to members whose ChatGPT model list includes gpt-6.1-sol. Limits mirror gpt-sol."
+      ]
+    },
+    {
+      "id": "chatgpt-astra",
+      "name": "GPT Astra (ChatGPT plan)",
+      "vendor": "openai",
+      "speed": 61.4,
+      "quality": 53,
+      "routes": [
+        {
+          "provider": "chatgpt",
+          "model": "gpt-6-astra"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
+      },
+      "capabilities": {
+        "imageInput": true
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own ChatGPT plan through Sign in with ChatGPT; shown only to members whose ChatGPT model list includes gpt-6-astra. Limits mirror gpt-astra."
+      ]
+    },
+    {
+      "id": "chatgpt-luna",
+      "name": "GPT Luna (ChatGPT plan)",
+      "vendor": "openai",
+      "speed": 120.2,
+      "quality": 38,
+      "routes": [
+        {
+          "provider": "chatgpt",
+          "model": "gpt-6-luna"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 922000,
+        "maxOutputTokens": 128000,
+        "imageInputTokens": 3000
+      },
+      "capabilities": {
+        "imageInput": true
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own ChatGPT plan through Sign in with ChatGPT; shown only to members whose ChatGPT model list includes gpt-6-luna. Limits mirror gpt-luna."
+      ]
+    },
+    {
       "id": "deepseek-pro",
       "name": "DeepSeek Pro",
       "vendor": "deepseek",

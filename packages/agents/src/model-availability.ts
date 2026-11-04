@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { loadModelCatalog, readModelCatalog, type ServedModelCatalog } from '@tulipfarm/config';
+import {
+  chatGptPlanEnabled,
+  chatGptProvider,
+  loadModelCatalog,
+  readModelCatalog,
+  type ServedModelCatalog,
+} from '@tulipfarm/config';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentTransaction } from './store.ts';
@@ -18,17 +24,24 @@ export async function modelAvailability(tx: AgentTransaction) {
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
   const flaggedOff = await flaggedOffModels(tx);
-  return [...catalog.models, ...catalog.imageModels]
-    .filter(family => !flaggedOff.has(family.id))
-    .map(
-      family =>
-        rows.find(row => row.familyId === family.id) ?? {
-          familyId: family.id,
-          enabled: true,
-          revision: 0,
-          lastDisabledRevision: 0,
-        },
-    );
+  const chatGpt = chatGptPlanEnabled(process.env);
+  return (
+    [...catalog.models, ...catalog.imageModels]
+      .filter(family => !flaggedOff.has(family.id))
+      // With CHATGPT_PLAN off, ChatGPT plan models are not offered at all.
+      .filter(
+        family => chatGpt || !('routes' in family && family.routes.some(route => route.provider === chatGptProvider)),
+      )
+      .map(
+        family =>
+          rows.find(row => row.familyId === family.id) ?? {
+            familyId: family.id,
+            enabled: true,
+            revision: 0,
+            lastDisabledRevision: 0,
+          },
+      )
+  );
 }
 
 /**
@@ -88,6 +101,8 @@ export async function stepFamilyAvailable(
   catalog: Pick<ServedModelCatalog, 'model'> = loadModelCatalog(),
 ) {
   const served = catalog.model(familyId);
+  // Plan steps do not run for a member, so a ChatGPT plan model cannot serve them.
+  if (served?.route.type === chatGptProvider) return false;
   return Boolean(served && !served.paused) && (await modelFamilyEnabled(tx, familyId));
 }
 

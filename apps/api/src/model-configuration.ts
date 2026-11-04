@@ -25,6 +25,7 @@ export function createModelConfiguration(input: { pool: Pool; env?: NodeJS.Proce
     };
   };
   const modelFamilyPaused = (familyId: string) => environment.paused(familyId);
+  const isChatGpt = (familyId: string) => environment.catalog.model(familyId)?.route.type === 'chatgpt';
   const snapshot: ModelCatalogSnapshot = {
     catalog: environment.catalog,
     modelFamilyResolution,
@@ -38,13 +39,17 @@ export function createModelConfiguration(input: { pool: Pool; env?: NodeJS.Proce
       )
         return false;
       if (request.fallbackFor === undefined) return true;
+      // A member's ChatGPT plan is never a fallback, and a ChatGPT reply never falls back to a deployment-paid model.
+      if (isChatGpt(request.modelFamilyId) || isChatGpt(request.fallbackFor)) return false;
       return (
         request.fallbackFor !== request.modelFamilyId &&
         modelFamilyResolution({ workspaceId: request.workspaceId, modelFamilyId: request.fallbackFor }) !== null
       );
     },
   };
-  const modelFamilyEligibility: ModelFamilyEligibility = async request => snapshot.modelFamilyEligibility(request);
+  // Agents, policies and compaction run without a requesting member, so they can never use a member's ChatGPT plan.
+  const modelFamilyEligibility: ModelFamilyEligibility = async request =>
+    !isChatGpt(request.modelFamilyId) && snapshot.modelFamilyEligibility(request);
   const bundles = modelBundleStore(input.pool);
   const modelContinuity: ModelContinuity = environment.continuity(
     key => createModelRouteHealth(input.pool, key),

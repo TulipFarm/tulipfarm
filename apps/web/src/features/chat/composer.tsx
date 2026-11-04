@@ -39,7 +39,8 @@ import { ModelSelector, type ModelSelectorModel } from '@tulipfarm/sprout/model-
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 
-export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string };
+/** `plan: 'chatgpt'` marks a model billed to the member's own ChatGPT plan. */
+export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string; plan?: 'chatgpt' };
 
 type ComposerProps = {
   compact?: boolean;
@@ -420,7 +421,11 @@ function selectorModel(model: ComposerModel): ModelSelectorModel {
     label: model.label,
     brand: model.brand ?? undefined,
     icon: model.brand ? undefined : <model.logo size={16} aria-hidden="true" />,
-    description: model.disabled ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}` : undefined,
+    description: model.disabled
+      ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}`
+      : model.plan === 'chatgpt'
+        ? 'ChatGPT plan'
+        : undefined,
     disabled: model.disabled,
     speed: model.speed,
     quality: model.quality,

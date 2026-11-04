@@ -77,6 +77,8 @@ import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { beginReplySession } from './reply-session.ts';
+import { chatGptPlanFromEnvironment, memberChatGptToken, noteChatGptFailure } from './chatgpt-composition.ts';
+import type { ChatGptPlan } from '@tulipfarm/integrations/chatgpt';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
@@ -122,6 +124,8 @@ export type MeteredReplyOptions = {
   chatFiles?: Omit<ChatFiles, 'imageInput'> | undefined;
   /** Reads a workspace's web address so replies can link to its workflows. */
   workspaceSlug?: ((workspaceId: string) => Promise<string | undefined>) | undefined;
+  /** Members' ChatGPT connections; null when the deployment turned `CHATGPT_PLAN` off. */
+  chatGpt?: ChatGptPlan | null | undefined;
 };
 /** A paused family's replacement may not read images that the pinned family would have. */
 function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
@@ -159,6 +163,7 @@ export function meteredReply(
     compactor,
     chatFiles,
     workspaceSlug,
+    chatGpt = chatGptPlanFromEnvironment(runtime),
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
@@ -198,9 +203,18 @@ export function meteredReply(
       : null;
     const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
-    const validatedRoute = inferenceRouteSchema.parse(chat.route);
-    const fallback = chatFallbackModel(chat.price.familyId);
-    const completionCheck = roleModel('completion-check') ?? undefined;
+    // A ChatGPT plan model answers only its requesting member's own chat, with that member's token, and never falls back to
+    // a model the deployment pays for. The token is read here, inside the activity, so it never enters workflow history.
+    const chatGptMember =
+      chat.route.provider === 'chatgpt'
+        ? await memberChatGptToken({ runtime, chatGpt, fence, shared: Boolean(externalContext || project) })
+        : null;
+    const validatedRoute = inferenceRouteSchema.parse(
+      chatGptMember ? { ...chat.route, accessToken: chatGptMember.accessToken } : chat.route,
+    );
+    const fallback = chatGptMember ? undefined : chatFallbackModel(chat.price.familyId);
+    // The member's plan also runs the completion check, so a ChatGPT chat sends nothing to a deployment-paid model.
+    const completionCheck = chatGptMember ? undefined : (roleModel('completion-check') ?? undefined);
     const slug = await workspaceSlug?.(fence.workspaceId);
     const replyContext = {
       builtinSkills,
@@ -549,7 +563,10 @@ export function meteredReply(
         sourceMessages,
       );
       // A lost lease ends the reply with its storage failure at once, even while a model call is still pending.
-      return await session.whileLeased(reply);
+      return await session.whileLeased(reply).catch(async (error: unknown) => {
+        if (chatGptMember) await noteChatGptFailure(chatGpt, fence.workspaceId, chatGptMember.membershipId, error);
+        throw error;
+      });
     } finally {
       session.close();
       await observeChatDetail('publisher-close', () => publisher.close());

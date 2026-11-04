@@ -42,6 +42,10 @@ export const modelFailureClasses = Object.freeze({
   transport: 'network',
   'provider-error': 'unknown',
   'request-failed': 'unknown',
+  'chatgpt-usage-limit': 'quota_exceeded',
+  'chatgpt-reconnect': 'auth',
+  'chatgpt-not-eligible': 'auth',
+  'chatgpt-member-required': 'not_found',
 } as const satisfies Record<string, ModelErrorClass>);
 export type ModelFailureReason = keyof typeof modelFailureClasses;
 
@@ -183,6 +187,8 @@ export type ModelCallDiagnostics = {
   /** HTTP status of the provider response; absent when no response arrived. */
   status?: number | undefined;
   providerCode?: string | undefined;
+  /** The provider's request id, such as `x-request-id`, for support requests. */
+  providerRequestId?: string | undefined;
   /** Already sanitised. Logs only; never a span attribute or label. */
   providerMessage?: string | undefined;
   /** Whether any answer text was produced before the call failed. */
@@ -239,6 +245,9 @@ export class ModelCallError extends Error {
         ? { finishReason: safeProviderCode(diagnostics.finishReason) }
         : {}),
       ...(diagnostics.retryAfterMs === undefined ? {} : { retryAfterMs: diagnostics.retryAfterMs }),
+      ...(diagnostics.providerRequestId && /^[A-Za-z0-9._:-]{1,128}$/.test(diagnostics.providerRequestId)
+        ? { providerRequestId: diagnostics.providerRequestId }
+        : {}),
     };
     const message = sanitizeProviderMessage(diagnostics.providerMessage, diagnostics.request);
     if (message) this.modelDiagnostics.providerMessage = message;

@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
-export const modelProviderSchema = z.enum(['anthropic', 'openai', 'xai', 'google', 'azure', 'openai-compatible']);
+export const modelProviderSchema = z.enum([
+  'anthropic',
+  'openai',
+  'xai',
+  'google',
+  'azure',
+  'openai-compatible',
+  'chatgpt',
+]);
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 
 export const modelCapabilitiesSchema = z
@@ -9,7 +17,7 @@ export const modelCapabilitiesSchema = z
       .enum(['chat-completions', 'responses', 'anthropic-messages', 'gemini'])
       .optional()
       .describe(
-        'Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini',
+        'Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini; ChatGPT plan responses only',
       ),
     toolChoice: z
       .enum(['auto', 'forced'])
@@ -63,6 +71,8 @@ export const providerModelCapabilities: Readonly<Record<ModelProvider, ModelCapa
   google: Object.freeze({ ...base, api: 'gemini', streaming: true }),
   azure: Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
   'openai-compatible': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
+  // A member's ChatGPT plan: the OpenAI Responses API, always streamed.
+  chatgpt: Object.freeze({ ...base, api: 'responses', streaming: true }),
 });
 const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['api'][]>> = {
   anthropic: ['anthropic-messages'],
@@ -71,6 +81,7 @@ const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['a
   google: ['gemini'],
   azure: ['chat-completions', 'responses'],
   'openai-compatible': ['chat-completions', 'responses'],
+  chatgpt: ['responses'],
 };
 
 export function modelApiSupported(provider: ModelProvider, api: ModelCapabilities['api'] | undefined) {

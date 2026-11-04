@@ -73,6 +73,8 @@ export type ModelCatalogDependencies = {
   modelFamilyEligibility?: ModelCatalogEligibility;
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
+  /** The ChatGPT model slugs the member may use on their own ChatGPT plan; absent when the deployment turned it off. */
+  chatGptModels?: (workspaceId: string, userId: string) => Promise<readonly string[]>;
 };
 
 function projectCatalog(
@@ -84,10 +86,17 @@ function projectCatalog(
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
   hidden: ReadonlySet<string> = new Set(),
+  chatGptModels: ReadonlySet<string> = new Set(),
 ): ModelCatalog {
   // Models that are not selectable serve their roles and existing chats, but are never offered. Hidden models are
-  // behind a workspace feature flag that is off.
-  const selectable = catalog.models.filter(model => model.selectable && !hidden.has(model.id));
+  // behind a workspace feature flag that is off. ChatGPT plan models are offered only to a member whose connected
+  // ChatGPT account lists them.
+  const selectable = catalog.models.filter(
+    model =>
+      model.selectable &&
+      !hidden.has(model.id) &&
+      (model.route.type !== 'chatgpt' || chatGptModels.has(model.route.model)),
+  );
   const resolutions = new Map(
     selectable.map(family => {
       const input = { workspaceId, modelFamilyId: family.id };
@@ -230,6 +239,9 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
       async request => {
         const { workspaceId } = params.parse(request.params);
         const userId = user(request);
+        const chatGptModels = new Set(
+          dependencies.chatGptModels ? await dependencies.chatGptModels(workspaceId, userId) : [],
+        );
         return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
           await lockAuthorization(transaction, 'read');
           const actor = await resolveHuman(transaction, userId);
@@ -249,6 +261,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
             await flaggedOffModels(transaction),
+            chatGptModels,
           );
         });
       },

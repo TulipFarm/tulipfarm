@@ -1974,6 +1974,7 @@ function ConversationEntry({
               disabled={disabled}
               control={control}
               modelName={modelName}
+              workspaceSlug={slug}
             />
           )}
         </MessageContent>

@@ -23,6 +23,7 @@ import { registerSocialAccounts } from './social-accounts.ts';
 import { socialAccounts, socialChannels, socialPosts } from './social-composition.ts';
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
+import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { createGitHubBotGrants } from '@tulipfarm/github/bot';
@@ -135,6 +136,8 @@ export function buildApp(
           runtime && github ? createGitHubReads({ runtime, accounts: github }) : undefined,
           runtime && github ? createGitHubBotGrants(runtime) : undefined,
         );
+        const chatGpt = chatGptPlan(runtime, auth.pool);
+        registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(
@@ -155,6 +158,7 @@ export function buildApp(
             runtime,
             compatibility: commonCompatibility,
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
+            ...(chatGpt ? { chatGptModels: chatGpt.memberModels } : {}),
           });
       });
     },

@@ -122,6 +122,7 @@ export async function grantApplicationAccess(
     { table: 'github_event_bodies', privileges: 'SELECT, INSERT' },
     { table: 'github_workflow_subscriptions', privileges: 'SELECT, INSERT, UPDATE, DELETE' },
     { table: 'github_workflow_subscription_repositories', privileges: 'SELECT, INSERT, DELETE' },
+    { table: 'deployment_identity', privileges: 'SELECT, INSERT' },
     {
       table: 'github_event_dispatches',
       privileges: 'SELECT, INSERT, UPDATE (status, reason, lease_id, lease_until, completed_lease_id, next_attempt_at)',
