@@ -2,7 +2,10 @@ import '@tulipfarm/config/load-secret-files';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { captureException, log, startTelemetry } from '@tulipfarm/observability';
 import { buildInfo } from './build-info.ts';
+import { apiRole } from './api-role.ts';
 
+// Fails startup on an invalid TULIPFARM_API_ROLE, even when no sweep is registered to read it.
+apiRole();
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('api', { resolve: specifier => import.meta.resolve(specifier) });
 const telemetry = startTelemetry(buildInfo);

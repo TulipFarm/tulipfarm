@@ -376,6 +376,16 @@ export const settings: readonly Setting[] = [
       'How long a chat reply started on send may stay unclaimed before the background sweep starts it again.',
   },
   {
+    name: 'TULIPFARM_API_ROLE',
+    group: 'Runtime',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: 'all',
+    description:
+      '`all` serves requests and runs the scheduled background sweeps in one process. `requests` starts no sweeps and `jobs` runs them, so sweeps cannot hold the connections requests wait for; run one API with each, and route traffic only to `requests`.',
+  },
+  {
     name: 'API_RATE_LIMIT_PER_MINUTE',
     group: 'Runtime',
     services: ['api'],
