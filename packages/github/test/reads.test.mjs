@@ -19,10 +19,6 @@ const repo = { owner: 'octocat', repo: 'hello-world' };
 const cases = [
   [{ kind: 'repository.read', ...repo }, '/repos/octocat/hello-world'],
   [
-    { kind: 'repository.search', query: 'org:octocat private' },
-    '/search/repositories?per_page=10&page=1&q=org%3Aoctocat%20private',
-  ],
-  [
     { kind: 'file.read', ...repo, path: 'src/main.ts', ref: 'feature/read' },
     '/repos/octocat/hello-world/contents/src/main.ts?ref=feature%2Fread',
   ],
@@ -134,6 +130,99 @@ test('issue and pull search return compact pages that fit the result limit', asy
     '/search/issues?per_page=30&page=1&q=org%3Aoctocat%20is%3Aissue',
     '/search/issues?per_page=10&page=1&q=repo%3Aoctocat%2Fhello-world%20fix%20is%3Apr',
   ]);
+});
+test('repository list and search return compact pages that fit the result limit', async () => {
+  const item = index => ({
+    id: index,
+    node_id: 'n'.repeat(20),
+    url: `https://api.github.com/repos/octocat/repo-${index}`,
+    html_url: `https://github.com/octocat/repo-${index}`,
+    full_name: `octocat/repo-${index}`,
+    name: `repo-${index}`,
+    owner: { login: 'octocat', avatar_url: 'https://avatars.test/u'.repeat(20) },
+    private: true,
+    visibility: 'private',
+    description: 'A repository',
+    fork: false,
+    archived: false,
+    default_branch: 'main',
+    language: 'TypeScript',
+    stargazers_count: 1,
+    open_issues_count: 2,
+    updated_at: '2026-01-02T00:00:00Z',
+    pushed_at: '2026-01-02T00:00:00Z',
+    permissions: { admin: false, push: true, pull: true },
+    // GitHub returns dozens of URL templates per repository; together they push a 30-item page past the limit.
+    ...Object.fromEntries(Array.from({ length: 40 }, (_, field) => [`url_${field}`, 'u'.repeat(120)])),
+  });
+  const items = Array.from({ length: 30 }, (_, index) => item(index + 1));
+  const paths = [];
+  const fetcher = async url => {
+    const path = new URL(url).pathname + new URL(url).search;
+    paths.push(path);
+    if (path.startsWith('/user/repos'))
+      return Response.json(items, {
+        headers: {
+          link: '<https://api.github.com/user/repos?page=3>; rel="next", <https://api.github.com/user/repos?page=9>; rel="last"',
+        },
+      });
+    return Response.json({ total_count: 40, incomplete_results: false, items });
+  };
+  const list = await dispatchGitHubRead({
+    operation: { kind: 'repository.list', page: 2, perPage: 30 },
+    credential,
+    fetcher,
+  });
+  assert.equal(list.data.items.length, 30);
+  assert.equal(list.data.nextPage, 3);
+  assert.deepEqual(list.data.items[0], {
+    url: 'https://api.github.com/repos/octocat/repo-1',
+    html_url: 'https://github.com/octocat/repo-1',
+    full_name: 'octocat/repo-1',
+    name: 'repo-1',
+    owner: 'octocat',
+    private: true,
+    visibility: 'private',
+    description: 'A repository',
+    fork: false,
+    archived: false,
+    default_branch: 'main',
+    language: 'TypeScript',
+    stargazers_count: 1,
+    open_issues_count: 2,
+    updated_at: '2026-01-02T00:00:00Z',
+    pushed_at: '2026-01-02T00:00:00Z',
+    permissions: { admin: false, push: true, pull: true },
+  });
+  const last = await dispatchGitHubRead({
+    operation: { kind: 'repository.list' },
+    credential,
+    fetcher: async () => Response.json([item(1)]),
+  });
+  assert.equal(last.data.nextPage, null);
+  const search = await dispatchGitHubRead({
+    operation: { kind: 'repository.search', query: 'user:octocat', perPage: 30 },
+    credential,
+    fetcher,
+  });
+  assert.equal(search.data.total_count, 40);
+  assert.equal(search.data.items.length, 30);
+  assert.deepEqual(search.data.items[0], list.data.items[0]);
+  assert.deepEqual(paths, [
+    '/user/repos?per_page=30&page=2&sort=updated',
+    '/search/repositories?per_page=30&page=1&q=user%3Aoctocat',
+  ]);
+});
+test('rejected request arguments are reported as invalid, not as GitHub being unavailable', async () => {
+  await assert.rejects(
+    dispatchGitHubRead({
+      operation: { kind: 'repository.search', query: 'user:nobody' },
+      credential,
+      fetcher: async () =>
+        Response.json({ message: 'Validation Failed', errors: [{ code: 'invalid' }] }, { status: 422 }),
+    }),
+    error => error.code === 'read-invalid',
+  );
 });
 test('reads reject arbitrary dispatch and unsafe payloads without exposing credentials', async () => {
   for (const operation of [

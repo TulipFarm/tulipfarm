@@ -12,6 +12,13 @@ test('search provenance pins concrete provider objects rather than rerunning sea
   );
   assert.deepEqual(
     searchAccessTargets(
+      { kind: 'repository.list' },
+      { items: [{ url: 'https://api.github.com/repos/octocat/private' }], nextPage: null },
+    ),
+    [{ kind: 'repository.read', owner: 'octocat', repo: 'private' }],
+  );
+  assert.deepEqual(
+    searchAccessTargets(
       { kind: 'issue.search' },
       { items: [{ url: 'https://api.github.com/repos/octocat/private/issues/7' }] },
     ),
