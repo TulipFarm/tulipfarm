@@ -277,7 +277,7 @@ test('invite chips add members and invite them without sending real mail', { tim
   }
 });
 
-test('a one-member workspace offers inviting from the header until dismissed', { timeout: 120000 }, async () => {
+test('a one-member workspace nudges inviting outside Members until dismissed', { timeout: 120000 }, async () => {
   const origin = 'http://127.0.0.1:5767';
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
@@ -299,7 +299,22 @@ test('a one-member workspace offers inviting from the header until dismissed', {
     await page.waitForTimeout(1000);
     assert.equal(await nudge.count(), 0, 'a workspace with other members gets no nudge');
 
+    await page.goto(`${origin}/invite-mock/members?scenario=solo`);
+    await page.getByRole('dialog').getByRole('button', { name: 'Send invitations', exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.waitForTimeout(1000);
+    assert.equal(await nudge.count(), 0, 'the Members page shows no nudge');
+    assert.equal(await page.getByRole('button', { name: 'Invite members', exact: true }).count(), 1);
+    await page
+      .getByRole('region', { name: 'Workspace members' })
+      .getByRole('button', { name: 'Invite members', exact: true })
+      .waitFor();
+
     await page.goto(`${origin}/invite-mock/?scenario=solo`);
+    const people = page.getByRole('navigation', { name: 'Workspace navigation', exact: true });
+    await people.getByRole('link', { name: 'Members', exact: true }).waitFor();
+    await people.getByRole('link', { name: 'Teams', exact: true }).waitFor();
     await nudge.getByRole('button', { name: 'Invite members', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Send invitations', exact: true }).waitFor();
     await page.keyboard.press('Escape');
