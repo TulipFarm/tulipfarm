@@ -14,6 +14,7 @@ export type GitHubInvestigationPermission = z.infer<typeof githubInvestigationPe
 export function githubInvestigationPermissions(operation: GitHubRead): readonly GitHubInvestigationPermission[] {
   switch (operation.kind) {
     case 'repository.read':
+    case 'repository.list':
     case 'repository.search':
     case 'file.search':
     case 'file.read':

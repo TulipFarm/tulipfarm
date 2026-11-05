@@ -63,8 +63,14 @@ type Canvas = {
   googleMutations: Readonly<Record<string, GoogleMutation>>;
   setGoogleMutation: (proposalId: string, mutation: GoogleMutation) => void;
   /** Text, and files to reference, for the chat composer to add to its draft. */
-  composerRequest: { id: string; prompt: string; files: readonly FileReference[] } | null;
-  requestComposer: (prompt: string, files?: readonly FileReference[]) => void;
+  composerRequest: {
+    id: string;
+    prompt: string;
+    files: readonly FileReference[];
+    /** Puts the caret right after the prompt so the person can finish the sentence. */
+    caretAtPrompt?: boolean;
+  } | null;
+  requestComposer: (prompt: string, files?: readonly FileReference[], options?: { caretAtPrompt?: boolean }) => void;
   consumeComposer: (id: string) => void;
   attention: string | null;
   registerAttention: (id: string, label: string | null) => void;
@@ -107,8 +113,8 @@ export function CanvasProvider({
   }, []);
   const [composerRequest, setComposerRequest] = useState<Canvas['composerRequest']>(null);
   const requestComposer = useCallback(
-    (prompt: string, files: readonly FileReference[] = []) =>
-      setComposerRequest({ id: crypto.randomUUID(), prompt, files }),
+    (prompt: string, files: readonly FileReference[] = [], options: { caretAtPrompt?: boolean } = {}) =>
+      setComposerRequest({ id: crypto.randomUUID(), prompt, files, ...options }),
     [],
   );
   const consumeComposer = useCallback(

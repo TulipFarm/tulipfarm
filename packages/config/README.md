@@ -194,8 +194,8 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   admission and usage billing for that model. Check output uses the route's
   full output cap, because reasoning models spend tokens before deciding. If
   the check's model call fails, the finished answer is delivered and the
-  failure is counted as an `error` check outcome. Reasoning is disabled only where the
-  existing `reasoningOffForTools` capability permits it; qualify a model's
+  failure is counted as an `error` check outcome. Reasoning follows the model's
+  `reasoningEffort` or `reasoningOffForTools` capability; qualify a model's
   decisions and output budget before assigning it this role.
 - **Fallback.** The `fallback` role is off unless a model has it. Then a chat
   model call that fails before producing any output, with a failure another
@@ -228,21 +228,22 @@ A model's optional `capabilities` override the provider defaults
 (`providerModelCapabilities`). They pick the wire behaviour inference uses, never
 a model ID:
 
-| Capability                | Values                                                                                                      | Default            |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------ |
-| `api`                     | `chat-completions` or `responses` (Azure, OpenAI, xAI), `anthropic-messages` (Anthropic), `gemini` (Google) | the provider's API |
-| `toolChoice`              | `forced` makes structured decisions select `select_action`; `auto` also accepts a text answer               | `forced`           |
-| `reasoningOffForTools`    | sends reasoning effort `none` for deployments that reject tools while reasoning                             | `false`            |
-| `reasoningTokensInOutput` | adds reported reasoning tokens to completion tokens when the response omits `total_tokens`                  | `false`            |
-| `streaming`               | chat steps stream the response                                                                              | `true`             |
-| `imageInput`              | the model accepts images in user messages; the `document-vision` model needs it                             | `false`            |
-| `responseModelAliases`    | other model IDs the provider may report                                                                     | `[]`               |
+| Capability                | Values                                                                                                           | Default            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `api`                     | `chat-completions` or `responses` (Azure, OpenAI, xAI), `anthropic-messages` (Anthropic), `gemini` (Google)      | the provider's API |
+| `toolChoice`              | `forced` makes structured decisions select `select_action`; `auto` also accepts a text answer                    | `forced`           |
+| `reasoningEffort`         | reasoning effort sent on every request (`none`, `minimal`, `low`, `medium`, `high`); not for Anthropic or Gemini | provider default   |
+| `reasoningOffForTools`    | sends reasoning effort `none` with tools when `reasoningEffort` is unset                                         | `false`            |
+| `reasoningTokensInOutput` | adds reported reasoning tokens to completion tokens when the response omits `total_tokens`                       | `false`            |
+| `streaming`               | chat steps stream the response                                                                                   | `true`             |
+| `imageInput`              | the model accepts images in user messages; the `document-vision` model needs it                                  | `false`            |
+| `responseModelAliases`    | other model IDs the provider may report                                                                          | `[]`               |
 
 An `api` the provider does not serve is rejected. Capabilities do not change
 mapping or price revisions. `"pricing": "unmetered"` marks a model whose usage
 costs zero.
 
-The [self-hosted models guide](https://docs.tulipfarm.ai/self-hosting/models/) is
+The [self-hosted models guide](https://tulipfarm.ai/docs/self-hosting/models/) is
 the operator reference. The web app does not load the catalog; it reads the
 server's `/model-catalog` route.
 

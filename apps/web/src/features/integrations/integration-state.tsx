@@ -55,7 +55,7 @@ export const defaultKnowledgeProducts: Partial<Record<string, DefaultKnowledgePr
   'google-drive': 'google-drive',
   gmail: 'gmail',
   slack: 'slack',
-  'github-personal': 'github',
+  github: 'github',
   jira: 'jira',
   confluence: 'confluence',
 };

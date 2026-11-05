@@ -40,6 +40,7 @@ import {
   type ModelContinuity,
 } from './continuity.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
 export type { ModelContinuity } from './continuity.ts';
 export { retryModelSchema, retryModelReceiptSchema } from './continuity.ts';
@@ -507,7 +508,7 @@ export function createAgentChat(
             await failGeneration(tx, generation, 'policy-revoked');
             return null;
           }
-          const timeoutMs = Math.min(45000, selected.dispatchDeadline - Date.now());
+          const timeoutMs = Math.min(modelCallTimeoutMs, selected.dispatchDeadline - Date.now());
           if (timeoutMs <= 0) {
             await failGeneration(tx, generation, 'deadline');
             return null;

@@ -61,7 +61,11 @@ export function meteredSkillReviewer(
         });
         if (!admitted) throw new CreditAttemptAlreadyDispatched();
         return async usage => {
-          if (usage.kind !== 'known') return;
+          // Unknown usage means the provider refused the request or never answered, so it charged nothing.
+          if (usage.kind !== 'known') {
+            await runtime.transaction(workspaceId, skillPackageCompatibility, tx => settleCredits(tx, attempt, '0'));
+            return;
+          }
           const { kind, ...tokens } = usage;
           const cost = calculateUsageCost({ ...quote, usage: { kind, tokens } });
           if (cost.kind !== 'known') return;

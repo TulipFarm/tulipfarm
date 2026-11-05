@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   activityStatusSchema,
+  apiCallReceiptSchema,
   toolPresentationSchema,
   workflowReferenceSchema,
 } from '@tulipfarm/conversations/tool-activity';
@@ -50,6 +51,14 @@ const turnSchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
   errorCode: z.string().nullable().optional(),
   mode: z.literal('plan').optional(),
+  stats: z
+    .object({
+      model: z.string().optional(),
+      firstTextMs: z.number().nonnegative().optional(),
+      durationMs: z.number().nonnegative().optional(),
+      traceId: z.string().optional(),
+    })
+    .optional(),
 });
 const attachmentSchema = z.object({
   id: z.uuid(),
@@ -86,6 +95,12 @@ const imageReceiptSchema = z.array(
   }),
 );
 export type ImageReceipt = z.infer<typeof imageReceiptSchema>[number];
+/** Mirrors `integrationCardSchema` in @tulipfarm/conversations/contracts. */
+const integrationCardSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('connect'), app: z.string() }),
+  z.object({ action: z.literal('disconnect'), connectionId: z.string() }),
+]);
+export type IntegrationCardView = z.infer<typeof integrationCardSchema>;
 const messageSchema = z.object({
   id: z.uuid(),
   sequence: z.number().int().positive(),
@@ -104,12 +119,14 @@ const messageSchema = z.object({
         narration: z.string().nullable().optional(),
         presentation: toolPresentationSchema.optional(),
         web: publicWebReceiptSchema.nullable().optional(),
+        api: apiCallReceiptSchema.nullable().optional(),
         knowledge: knowledgeActivitySchema.nullable().optional(),
         fileId: z.uuid().optional(),
         fileIds: z.array(z.uuid()).max(64).optional(),
         importId: z.uuid().optional(),
         followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
+        integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),
         rowChange: rowChangeSchema.optional(),
@@ -292,6 +309,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           response.status,
           code,
           'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
+        );
+      if (code === 'memory-unavailable')
+        throw new TableRequestError(
+          response.status,
+          code,
+          'This chat is now in a project, where your memory isn’t used, so nothing changed. You can edit your memory in Settings.',
         );
       if (code === 'knowledge-quota')
         throw new TableRequestError(

@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { test } from 'node:test';
 import { Agent, request } from 'undici';
-import { fetchPublicFile, pinnedLookup, publicFileLimits, publicNetwork } from '../src/web-fetch.ts';
+import { fetchPublicFile, fetchPublicText, pinnedLookup, publicFileLimits, publicNetwork } from '../src/web-fetch.ts';
 import { inspectMarketplacePackage } from '../src/package-inspection.ts';
 import {
   rankMarketplacePackages,
@@ -404,4 +404,50 @@ test('recommendations report an invalid or unavailable catalog without packages'
     error: 'web-off',
     packages: [],
   });
+});
+
+test('the first page read of a site in a scope also returns its llms.txt; HTML fallbacks are not a guide', async t => {
+  const { requests } = await localWeb(t, {
+    'docs.example.com/llms.txt': send(200, '# Docs\n- [API](https://docs.example.com/api.md)', {
+      'content-type': 'text/plain; charset=utf-8',
+    }),
+    'app.example.com/llms.txt': send(200, '<!doctype html><html><body>Home</body></html>', {
+      'content-type': 'text/html',
+    }),
+  });
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ success: true, data: { markdown: 'Public page', metadata: { title: 'Page' } } }),
+  );
+  const first = await fetchPublicText('https://docs.example.com/start', { scope: 'turn-1' });
+  assert.equal(first.status, 'success');
+  assert.deepEqual(
+    first.pages.map(page => [page.url, page.text]),
+    [
+      ['https://docs.example.com/start', 'Public page'],
+      ['https://docs.example.com/llms.txt', '# Docs\n- [API](https://docs.example.com/api.md)'],
+    ],
+  );
+  assert.deepEqual(
+    first.sources.map(source => source.url),
+    ['https://docs.example.com/start', 'https://docs.example.com/llms.txt'],
+  );
+  assert.match(first.instruction, /llms\.txt/);
+  const again = await fetchPublicText('https://docs.example.com/other', { scope: 'turn-1' });
+  assert.equal(again.pages.length, 1);
+  assert.doesNotMatch(again.instruction, /llms\.txt/);
+  assert.equal((await fetchPublicText('https://docs.example.com/other', { scope: 'turn-2' })).pages.length, 2);
+  assert.equal((await fetchPublicText('https://docs.example.com/llms.txt', { scope: 'turn-3' })).pages.length, 1);
+  assert.equal(requests.filter(request => request.path === '/llms.txt').length, 2);
+  for (const url of ['https://app.example.com/', 'https://missing.example.com/']) {
+    const read = await fetchPublicText(url, { scope: 'turn-1' });
+    assert.equal(read.pages.length, 1, url);
+    assert.equal(read.status, 'success');
+  }
+  t.mock.method(globalThis, 'fetch', async () => new Response('down', { status: 500 }));
+  const partial = await fetchPublicText('https://docs.example.com/gone');
+  assert.equal(partial.status, 'partial');
+  assert.deepEqual(
+    partial.pages.map(page => page.status),
+    ['failed', 'read'],
+  );
 });

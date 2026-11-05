@@ -18,10 +18,13 @@ import { chatTurnFiles } from './turn-files-composition.ts';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { respondToConversation } from './conversation-responder.ts';
 import {
+  apiCallSources,
   conversationPlanning,
   createChatTools,
   discoverToolNames,
   isExternalTool,
+  privateChatResults,
+  publicSourceUrl,
   toolObservation,
 } from '@tulipfarm/agents/tools';
 import { createSubagentPool, resultCapBytes } from '@tulipfarm/agents/subagents';
@@ -38,6 +41,7 @@ import { atlassianChatOperations } from './atlassian-composition.ts';
 import { githubChatReads } from './github-composition.ts';
 import { mergeSources } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
+import { chatConnections } from './connection-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import {
   chatFallbackModel,
@@ -76,6 +80,9 @@ import { beginReplySession } from './reply-session.ts';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
+import { secretsServices } from './secrets-composition.ts';
+import { heldSecrets } from '@tulipfarm/secrets/send';
+import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -149,6 +156,7 @@ export function meteredReply(
     chatFiles,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
+  const secretServices = secretsServices(runtime);
   return async ({
     model,
     messages,
@@ -290,6 +298,7 @@ export function meteredReply(
           : undefined,
       atlassian: tool === undefined || tool.startsWith('atlassian.') ? atlassianChatOperations(toolRuntime) : undefined,
       google: googleOperations,
+      connections: tool === undefined || tool.startsWith('integrations.') ? chatConnections(toolRuntime) : undefined,
       slack,
       github:
         tool === undefined || tool.startsWith('github.personal.') || tool.startsWith('github.investigation.')
@@ -304,6 +313,20 @@ export function meteredReply(
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
       chatFiles: chatFiles && { ...chatFiles, imageInput: routeCapabilities(validatedRoute).imageInput },
+      // Secrets are given only to the member in their own chat in the app, never in Slack or a project chat.
+      apiSecrets:
+        requester && !externalContext && !project && secretServices.secrets.capabilities().enabled
+          ? holder => {
+              const held = heldSecrets(secretServices.secrets, secretServices.requests, {
+                workspaceId: holder.workspaceId,
+                actor: holder.actor,
+                origin: { kind: 'chat', conversationId: holder.conversationId },
+              });
+              return { resolve: held.resolve, recordUse: (id, url) => held.recordUse(id, url, 'api.request') };
+            }
+          : undefined,
+      apiApprovals: Boolean(requester) && !externalContext,
+      apiPrivateHosts: requester && !externalContext && !project ? secretServices.secrets.privateHosts : undefined,
       images:
         outputs?.read && chatFiles
           ? {
@@ -488,6 +511,8 @@ export function createConversationActivities(
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
+  const secretServices = secretsServices(storage);
+  const secrets = secretServices.chat;
   let google: ReturnType<typeof googleOperations> | undefined;
   const googleFiles: GoogleFileReader = {
     fileText: (...args) => (google ??= googleOperations(runtime)).fileText(...args),
@@ -546,6 +571,47 @@ export function createConversationActivities(
         effectiveCompactor,
         conversationPlanning,
         turnFiles,
+        secrets,
+        async context => {
+          const held = secretServices.secrets.capabilities().enabled
+            ? heldSecrets(secretServices.secrets, secretServices.requests, {
+                workspaceId: context.workspaceId,
+                actor: context.actor,
+                origin: { kind: 'chat', conversationId: context.conversationId },
+              })
+            : undefined;
+          const keep = turnFiles?.apiFiles?.keep;
+          const files =
+            keep && (await turnFiles.enabled(context.workspaceId))
+              ? {
+                  save: async (file: Parameters<ApiCallFiles['save']>[0]) =>
+                    (await keep(context.workspaceId, {
+                      conversationId: context.conversationId,
+                      turnId: context.turnId,
+                      callId: context.callId,
+                      membershipId: context.actor.membershipId,
+                      filename: file.name,
+                      mediaType: file.mediaType,
+                      bytes: file.bytes,
+                      sourceUrl: file.private ? null : publicSourceUrl(file.url),
+                    }))
+                      ? { source: context.callId }
+                      : null,
+                }
+              : undefined;
+          const resumed = await resumeApiCall(context.runtime, context.workspaceId, context.callId, {
+            secrets: held && {
+              resolve: held.resolve,
+              recordUse: (id, url) => held.recordUse(id, url, 'api.request'),
+            },
+            files,
+            privateHosts: secretServices.secrets.privateHosts,
+            privateResults: () =>
+              privateChatResults(context.runtime, context.workspaceId, context.actor, context.conversationId),
+          });
+          if (resumed.state === 'waiting') return resumed;
+          return { ...resumed, sources: apiCallSources(resumed.result, context.conversationId) };
+        },
       );
       return process(executor, parsed);
     });

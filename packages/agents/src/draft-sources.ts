@@ -16,7 +16,7 @@ import { requireAgentPermission } from './saved-policy.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
 /**
- * `ownMemory` accepts the actor's own personal memory anywhere in the closure; only row drafts set it. `slackTurn`
+ * `ownMemory` accepts the actor's own personal memory anywhere in the closure; chat drafts set it. `slackTurn`
  * checks a Slack thread in the closure against its current audience; without it a Slack thread is refused.
  */
 export async function requireDraftSources(

@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { requestSignal } from '../http';
 import type { FeatureClient } from './client';
+import { takeEarlyRead } from './early-reads';
 import { featureKey, type FeatureScope } from './scope';
 import type { PollInterval } from './polling';
 
@@ -28,7 +29,9 @@ export function featureReadOptions<T>(
       const current = runtime.fence(scope, admitted);
       if (!current()) throw new DOMException('Authority changed', 'AbortError');
       const deadline = requestSignal(signal);
-      const data = await input.load(deadline);
+      const early =
+        scope.kind === 'workspace' ? await takeEarlyRead<T>(runtime.identity, scope, input.key, deadline) : null;
+      const data = early ? early.value : await input.load(deadline);
       deadline.throwIfAborted();
       if (!current()) throw new DOMException('Authority changed', 'AbortError');
       return data;

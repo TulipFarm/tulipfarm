@@ -1,3 +1,4 @@
+import { apiCallResultSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
 import { publicWebResultSchema } from '@tulipfarm/conversations/contracts';
 import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
@@ -8,6 +9,7 @@ import { blockedTableProposalSchema } from '@tulipfarm/tables/proposal-contracts
 import { referencedRecordIds } from '@tulipfarm/tables/query';
 import { activeGeneration } from '@tulipfarm/tables/store';
 import type { FrameworkCall } from './tools.ts';
+import { taskFileReadResultSchema } from './contracts.ts';
 import { documentUpload } from './google-tools.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import {
@@ -208,6 +210,24 @@ export async function providerSources(
 const ids = z.array(z.object({ id: z.uuid() }));
 type McpProvenanceCall = { tool: 'mcp.call' | 'mcp.search' | 'mcp.describe' };
 /** `actor` is who ran the call; a result listing Files items cites them as that member's, so it needs one. */
+/**
+ * A read that sent no secret is public web content; one that sent a secret stays private to the chat it ran in, and
+ * outside a chat it has no source that can carry it.
+ */
+export function apiCallSources(result: unknown, conversationId: string | null): SourceDependency[] {
+  const parsed = apiCallResultSchema.parse(result);
+  if (parsed.status !== 'sent') return [];
+  // Authenticated and private-host responses stay with the member who made the call.
+  if (parsed.secrets.length || parsed.privateHost)
+    return conversationId ? [{ kind: 'private-conversation', conversationId }] : [{ kind: 'unavailable' }];
+  return [{ kind: 'public-web', url: publicSourceUrl(parsed.url) }];
+}
+
+/** A called URL as a `public-web` source, cut to its origin past 2048 characters. */
+export function publicSourceUrl(url: string) {
+  return url.length <= 2048 ? url : `${new URL(url).origin}/`;
+}
+
 export async function resultSources(
   tx: AgentTransaction,
   call: FrameworkCall | McpProvenanceCall,
@@ -274,11 +294,25 @@ export async function resultSources(
     case 'knowledge.add':
     case 'knowledge.update':
     case 'knowledge.remove':
+    case 'memory.read':
+    case 'memory.edit':
+    case 'memory.forget':
+    case 'integrations.list':
+    case 'integrations.connect':
+    case 'integrations.disconnect':
     case 'conversation.messages.read':
-    case 'files.read':
       return [];
+    case 'files.read': {
+      // Only a task's read of a response file it kept reaches here with a source; it carries its call's sources.
+      const read = taskFileReadResultSchema.safeParse(result);
+      if (!read.success || !('source' in read.data)) return [];
+      if (read.data.private) return [{ kind: 'unavailable' }];
+      return read.data.url ? [{ kind: 'public-web', url: publicSourceUrl(read.data.url) }] : [];
+    }
     case 'web.fetch':
       return [{ kind: 'public-web', url: call.url }];
+    case 'api.request':
+      return apiCallSources(result, null);
     case 'web.search':
       return publicWebResultSchema.parse(result).sources.map(source => ({ kind: 'public-web', url: source.url }));
     case 'tables.list':
@@ -440,6 +474,8 @@ export async function resultSources(
     case 'files.move':
     case 'files.trash':
     case 'files.restore':
+    case 'files.share':
+    case 'members.find':
     case 'agents.archive':
     case 'agents.restore':
     case 'skills.archive':
@@ -454,6 +490,8 @@ export async function resultSources(
     case 'bud.preference.ask':
     case 'bud.preference.propose':
     case 'present.choice':
+    case 'secrets.request':
+    case 'secrets.list':
     case 'plans.create':
     case 'plans.read':
     case 'plans.update':

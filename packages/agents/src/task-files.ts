@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
+import { defaultImageInputLimits } from '@tulipfarm/config';
 import { FileError } from '@tulipfarm/files';
 import {
   googleFailure,
@@ -15,12 +16,15 @@ import {
   readFailureText,
   readFile,
   readingSource,
+  taskFileBlock,
   taskFileContent,
   type AttachmentReader,
   type FileRecognition,
   type ReadFailure,
+  type ReadSelection,
   type TaskFileRead,
 } from '@tulipfarm/conversations/turn-files';
+import type { taskFileReadResultSchema } from './contracts.ts';
 import type { TaskFileContent } from './model.ts';
 import type { taskSourcesSchema } from './task-contracts.ts';
 
@@ -373,4 +377,94 @@ export function taskFileStopMessage(stop: Extract<TaskFileStop, { name: string }
   return stop.kind === 'unreadable'
     ? `The file ${JSON.stringify(stop.name)} could not be read. ${readFailureText(stop.reason)} Remove it or attach a readable copy, then continue the task.`
     : `The file ${JSON.stringify(stop.name)} was not read: the task's other files fill the model's reading budget. Its contents were not read. Remove some files, then continue the task.`;
+}
+
+/** What an `api.request` response kept for its task names: the bytes' key, and the URL it came from unless private. */
+const apiFileSchema = z.strictObject({
+  name: z.string(),
+  mediaType: z.string(),
+  size: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  objectKey: z.string(),
+  url: z.string().nullable(),
+  private: z.boolean(),
+});
+
+/** How much of a response file one task `files.read` returns, since a step's prompt carries every result. */
+export const taskFileResultChars = 16_000;
+
+type ApiFileScope = { workspaceId: string; taskId: string };
+const apiFileKey = (scope: ApiFileScope, callId: string) => `${scope.workspaceId}/task-api/${scope.taskId}/${callId}`;
+
+/**
+ * Keeps an `api.request` response body for every later step of the task to read with `files.read`, by the call's id.
+ * False when the workspace's attachment storage has no room for it; a call kept before keeps its first record.
+ */
+export async function keepTaskApiFile(
+  links: NonNullable<TaskFileReading['links']>,
+  scope: ApiFileScope & { callId: string },
+  file: { name: string; mediaType: string; bytes: Uint8Array; url: string; private: boolean },
+) {
+  if (!(await links.hasRoom(scope.workspaceId, file.bytes.byteLength))) return false;
+  const key = apiFileKey(scope, scope.callId);
+  const digest = hash(file.bytes);
+  const objectKey = `${key}-${digest}`;
+  await links.objects.putIfAbsent(objectKey, file.bytes);
+  const json = Buffer.from(
+    JSON.stringify(
+      apiFileSchema.parse({
+        name: file.name,
+        mediaType: file.mediaType,
+        size: file.bytes.byteLength,
+        sha256: digest,
+        objectKey,
+        url: file.private ? null : file.url,
+        private: file.private,
+      }),
+    ),
+  );
+  if (json.byteLength > keptRecordBytes) throw new Error('task-api-record-too-large');
+  await links.objects.putIfAbsent(key, Buffer.concat([json, Buffer.alloc(keptRecordBytes - json.byteLength, ' ')]));
+  return true;
+}
+
+/**
+ * `files.read` in a task: reads one response file this task kept, by its source, as text within `maxChars`. It runs
+ * inside the step's transaction, so images are not recognised. Another task's file, or a source it did not keep, is not
+ * found.
+ */
+export async function readTaskApiFile(
+  objects: AttachmentBytes | undefined,
+  scope: ApiFileScope,
+  call: { source: string } & ReadSelection,
+  maxChars: number,
+): Promise<z.infer<typeof taskFileReadResultSchema>> {
+  const notFound = {
+    error: 'file-not-found' as const,
+    instruction: 'This task kept no file with that source. Use the source an api.request result of this task names.',
+  };
+  if (!objects || !z.uuid().safeParse(call.source).success) return notFound;
+  let record: z.infer<typeof apiFileSchema>;
+  try {
+    const body = await objects.read(apiFileKey(scope, call.source), keptRecordBytes);
+    record = apiFileSchema.parse(JSON.parse(Buffer.from(body).toString('utf8')));
+  } catch {
+    return notFound;
+  }
+  const bytes = await objects.read(record.objectKey, record.size);
+  if (hash(bytes) !== record.sha256) throw new Error('task-api-file-integrity');
+  const result = await readFile(
+    { name: record.name, mediaType: record.mediaType, bytes },
+    { imageInput: false, maxImageBytes: defaultImageInputLimits.maxImageBytes, selection: call },
+  );
+  const read = {
+    origin: 'attachment' as const,
+    id: call.source,
+    name: record.name,
+    mediaType: record.mediaType,
+    size: record.size,
+    reading: result,
+  };
+  const shell = { source: call.source, file: '', url: record.url, private: record.private };
+  return { ...shell, file: taskFileBlock(read, { imageInputTokens: 0 }, maxChars - JSON.stringify(shell).length) };
 }

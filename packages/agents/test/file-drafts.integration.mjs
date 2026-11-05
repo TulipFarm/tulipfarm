@@ -9,7 +9,8 @@ import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
-import { createFiles } from '../../files/src/index.ts';
+import { createFiles, FileError } from '../../files/src/index.ts';
+import { AgentError } from '../src/saved-contracts.ts';
 
 async function setup(t) {
   const db = await fixture();
@@ -174,4 +175,82 @@ test('chat finds, renames, moves, trashes and restores files only after the huma
   const unseen = await tool({ tool: 'files.trash', fileIds: [hidden.id] });
   assert.equal(unseen.error, 'file-not-found');
   assert.equal(JSON.stringify(unseen).includes('Hidden'), false, 'an item the human cannot see is never named');
+});
+
+test('chat finds members and teams, and shares a file only through a reviewed card that is still current', async t => {
+  const { db, w, runtime, chatId, drafts, tool, approve, table } = await setup(t);
+  const { files, upload } = library(runtime, w);
+  const people = Array.from({ length: 22 }, () => randomUUID());
+  for (const [index, id] of people.entries())
+    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      id,
+      `person-${index}`,
+    ]);
+  const teams = Array.from({ length: 21 }, () => randomUUID());
+  for (const [index, id] of teams.entries())
+    await db.platform.query(`INSERT INTO ${table('tf_teams')} (id,name) VALUES ($1,$2)`, [id, `Design ${index}`]);
+  await db.platform.query(`INSERT INTO ${table('tf_teams')} (id,name) VALUES ($1,'Finance')`, [randomUUID()]);
+
+  const design = await tool({ tool: 'members.find', query: '  DESIGN ' });
+  assert.equal(design.teams.length, 20, 'at most twenty teams');
+  assert.ok(design.teams.every(team => team.name.startsWith('Design')));
+  assert.deepEqual(design.members, []);
+  assert.equal(design.truncated, true);
+  const everyone = await tool({ tool: 'members.find', query: 'unnamed' });
+  assert.equal(everyone.members.length, 20, 'at most twenty members');
+  assert.deepEqual(Object.keys(everyone.members[0]).sort(), ['email', 'membershipId', 'name']);
+  assert.equal(everyone.truncated, true);
+  const finance = await tool({ tool: 'members.find', query: 'finance' });
+  assert.deepEqual(
+    [finance.members, finance.teams.map(team => team.name), finance.truncated],
+    [[], ['Finance'], false],
+  );
+
+  const file = await upload('Plan.pdf');
+  const [first, second] = people;
+  const subject = id => ({ kind: 'individual', id });
+  // The harness skips the model-facing schema, so the role default is passed explicitly.
+  const share = (subjects, role = 'viewer') => tool({ tool: 'files.share', fileId: file.id, subjects, role });
+  assert.equal((await share([subject(first), subject(first)])).error, 'invalid-arguments');
+  assert.equal((await share([subject(randomUUID())])).error, 'subject-not-found');
+
+  const proposed = await share([subject(first), { kind: 'team', id: teams[0] }]);
+  const card = await drafts.read(w.id, w.userId, chatId, proposed.draftId);
+  assert.equal(card.proposal.kind, 'file-share');
+  assert.deepEqual(
+    card.proposal.input.subjects.map(entry => [entry.kind, entry.id, entry.current]),
+    [
+      ['individual', first, null],
+      ['team', teams[0], null],
+    ],
+  );
+  assert.equal(card.proposal.input.role, 'viewer');
+  assert.deepEqual([card.proposal.input.before.count, card.proposal.input.added.count], [1, 1]);
+  await assert.rejects(files.read(w.id, 'person-0', file.id), 'proposing shares nothing');
+
+  await files.share(w.id, w.userId, file.id, subject(second), 'viewer');
+  assert.equal((await drafts.read(w.id, w.userId, chatId, proposed.draftId)).status, 'stale', 'sharing changed since');
+  await assert.rejects(
+    drafts.decide(w.id, w.userId, chatId, proposed.draftId, {
+      commandId: randomUUID(),
+      digest: proposed.digest,
+      decision: 'save',
+    }),
+    error => error instanceof AgentError && error.code === 'draft-stale',
+  );
+  await assert.rejects(files.read(w.id, 'person-0', file.id));
+  await assert.rejects(
+    files.shareReviewed(w.id, w.userId, file.id, [subject(first)], 'viewer', card.proposal.input.fingerprint),
+    error => error instanceof FileError && error.code === 'conflict',
+  );
+
+  const already = await share([subject(second)]);
+  assert.equal(already.error, 'no-change');
+  assert.equal(already.alreadyShared.length, 1);
+
+  const current = await share([subject(first), subject(second)], 'editor');
+  assert.equal((await approve(current)).status, 'saved');
+  assert.equal((await files.read(w.id, 'person-0', file.id)).role, 'editor');
+  assert.equal((await files.read(w.id, 'person-1', file.id)).role, 'editor', 'a reviewed share raises a lower grant');
+  await assert.rejects(files.read(w.id, 'person-2', file.id), 'only the reviewed people gain access');
 });

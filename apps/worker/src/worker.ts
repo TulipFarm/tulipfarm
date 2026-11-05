@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
+import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 import {
   captureException,
   createBackgroundJob,
@@ -31,6 +32,7 @@ import { createTaskComposition } from './task-composition.ts';
 import { createModelBundleRegistry } from './model-bundle-registry.ts';
 import { createTaskDispatcher, createTaskRecovery } from './task-dispatch.ts';
 import { createPlanComposition, createPlanDispatcher } from './plan-composition.ts';
+import { createPlanDocumentComposition, createPlanDocumentDispatcher } from './plan-document-composition.ts';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { createSlackPromptComposition } from './slack-composition.ts';
@@ -56,13 +58,15 @@ import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
+import { createSecretsSweep } from './secrets-sweep.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 
-// Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
-await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier) });
 const role = workerRole();
+const service = workerTelemetryService(role);
+// Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
+await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 const telemetry = startTelemetry(readBuildInfo('worker', new URL('../version.json', import.meta.url)), {
-  serviceName: workerTelemetryService(role),
+  serviceName: service,
 });
 
 async function run() {
@@ -73,8 +77,9 @@ async function run() {
   }
   // Fails startup on an invalid model catalog or provider environment.
   for (const warning of loadModelCatalog().warnings) console.warn(JSON.stringify({ level: 'warn', msg: warning }));
-  // Fails startup on removed Firecrawl settings or an invalid public web endpoint.
+  // Fails startup on removed Firecrawl settings, an invalid public web endpoint or private host list.
   publicWebConfiguration();
+  apiCallPrivateHosts();
   const emailEnabled = emailDeliveryEnabled();
   for (const key of [
     'WORKSPACE_PROVISIONING_DATABASE_URL',
@@ -94,6 +99,7 @@ async function run() {
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
+  let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
   let slack: Awaited<ReturnType<typeof createSlackPromptComposition>>;
   const chatObjects = chatObjectStore();
   let importCleanup: ReturnType<typeof createObjectCleanupSweep> | undefined;
@@ -149,7 +155,9 @@ async function run() {
         if (!workspaces.length) namesCursor = null;
         if (failures.length) throw new AggregateError(failures, 'Table name conversion sweep failed');
       };
-      sweepTelemetry.push(searchJob, namesJob, ...(cleanupJob ? [cleanupJob] : []));
+      const secretsJob = createBackgroundJob('secrets-expiry', 60);
+      const secretsSweep = createSecretsSweep(coreResources.runtime, coreResources.readyTaskWorkspaces);
+      sweepTelemetry.push(searchJob, namesJob, secretsJob, ...(cleanupJob ? [cleanupJob] : []));
       const sweep = () => {
         importSweep ??= (async () => {
           await cleanupJob
@@ -159,6 +167,13 @@ async function run() {
           await namesJob
             .run(nameSweep)
             .catch(() => Runtime.instance().logger.error('Table name conversion sweep failed'));
+          await secretsJob
+            .run(() =>
+              secretsSweep((workspaceId, error) =>
+                Runtime.instance().logger.error('Secrets sweep failed', { workspaceId, ...errorAttributes(error) }),
+              ),
+            )
+            .catch(() => Runtime.instance().logger.error('Secrets sweep failed'));
         })().finally(() => {
           importSweep = undefined;
         });
@@ -195,6 +210,21 @@ async function run() {
     const planFailure = (workspaceId: string, planId: string) =>
       Runtime.instance().logger.error('Plan dispatch will retry', { workspaceId, planId });
     planDispatch = coreResources ? createPlanDispatcher(planFailure) : undefined;
+    documentDispatch = coreResources
+      ? createPlanDocumentDispatcher((workspaceId, planId) =>
+          Runtime.instance().logger.error('Plan document dispatch will retry', { workspaceId, planId }),
+        )
+      : undefined;
+    const documents =
+      coreResources && documentDispatch
+        ? createPlanDocumentComposition({
+            runtime: coreResources.runtime,
+            profiles: coreResources.memberProfiles,
+            files: chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
+            objects: chatObjects ?? undefined,
+            start: documentDispatch.start,
+          })
+        : undefined;
     const plans =
       coreResources && guarded && planDispatch
         ? createPlanComposition({
@@ -204,6 +234,7 @@ async function run() {
             wakeTask: (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
             knowledge: createKnowledgeTools({ runtime: coreResources.runtime }),
             files: chatObjects ? createFiles(guarded, chatObjects) : undefined,
+            ...(documents ? { documents } : {}),
           })
         : undefined;
     slack = guarded
@@ -274,6 +305,7 @@ async function run() {
               ...tasks?.activities,
               ...taskRecovery,
               ...plans?.activities,
+              ...documents?.activities,
               ...email?.activities,
               ...conversations,
               ...(coreResources
@@ -424,6 +456,7 @@ async function run() {
     await modelBundles?.close();
     await taskDispatch?.close();
     await planDispatch?.close();
+    await documentDispatch?.close();
   }
 }
 

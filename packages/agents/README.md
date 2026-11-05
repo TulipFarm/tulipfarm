@@ -69,7 +69,11 @@ unavailable). `error`, `result_error` and `blocked` also count in
 
 `web-fetch.ts` reads the public web. `fetchPublicText` reads a page through
 Huntsman (`POST /v1/scrape`) and `searchPublicWeb` searches through SearXNG
-(`GET /search?format=json`, with `time_range` for the day and week windows). `fetchPublicFile(url, signal)` fetches one link directly for
+(`GET /search?format=json`, with `time_range` for the day and week windows).
+The first `fetchPublicText` read of a site in a turn or run (its `scope`) also
+fetches the site's `/llms.txt` with `fetchPublicFile` and, when it is a text
+file, returns it as a second page so the agent can pick the next pages to read.
+`fetchPublicFile(url, signal)` fetches one link directly for
 reading as a file: it checks every hop's IPv4 addresses are public, connects
 through an undici `Agent` whose `connect.lookup` returns only those addresses,
 follows at most 5 redirects, sends no credentials, and streams under 10 MiB within
@@ -253,13 +257,27 @@ version-checked, replay their receipt, and record a `controlled` event by `start
 
 A saved task that waits for an answer or approval keeps its question in that task. The plan view gives the starter its
 `waitingTaskId` so the canvas can link to the existing task page. The view also reports why a paused plan stopped
-(`starter`, `budget`, `starter-access`, `progress`, or `sources-unavailable`). Every plan write sends a chat change notification with the `planId`, so
+(`starter`, `budget`, `starter-access`, `progress`, `sources-unavailable`, or `awaiting-approval`). Every plan write sends a chat change notification with the `planId`, so
 an open chat can read the plan again.
 
 The web chat lists a chat's plans after its messages and opens one in the Canvas as a read-only outline
 (`apps/web/src/features/chat/plans.tsx`, `@tulipfarm/sprout/plan-outline`). Pause, resume, and stop sit
 on the starter's plan card in chat, never in the outline. A budget pause offers one resume that doubles the budget,
 up to the task maximum.
+
+Plan approval (`0035_plan_approval.sql`, workspace flag `plan-documents`) separates a plan's reviewable content from its
+progress. `version` moves with every change; `content_revision` moves only when the content changes: title, brief,
+planning, tasks and their owners, specialists' names and roles, budget, and the document (`summary`, `approach`,
+`risks`, up to four Mermaid `diagrams`), which `plans.create` and `plans.update` accept. Each revision stores an
+allowlisted snapshot and its SHA-256 digest in `tf_agent_plan_revisions`, never results, evidence or specialist
+instructions. A worker's subtasks and the main agent's retries and repair tasks after failed work are `runtime`
+revisions; every other content change is the `starter`'s. A plan saved before the migration gets its first revision row
+when it is next changed or approved. With the flag on, the starter approves an exact revision with the `approve`
+control, which also takes their IANA time zone and is recorded in `tf_agent_plan_approvals`. Approve starts a draft,
+resumes a paused plan or only records approval of a running one; `start` returns `approval-required`, and an outdated
+`contentRevision` returns 409 `revision-conflict` with the current plan. A starter content change to an approved
+plan that is active or paused pauses it with reason `awaiting-approval`; only approval resumes it. With the flag off,
+`start` behaves as before and `document` returns `document-unavailable`.
 
 Current limits: delegated child tasks share their parent's credit flow but their
 tool calls are not counted against the plan. Claimed coordinator model work uses

@@ -16,6 +16,7 @@ import { createTaskRuntime } from '../src/task-runtime.ts';
 import { createSlackDefault } from '../src/slack-default.ts';
 import { createSlackDirectMessages } from '../../slack/src/direct-messages.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { AccessDenied } from '@tulipfarm/access';
 import { outboundFixture } from './slack-actions-fixture.mjs';
 
 export { outboundFixture };
@@ -1566,6 +1567,75 @@ test('named Slack channel uses the same saved-agent outbound executor for each c
       f.effects.map(item => item.text),
       ['Shared HR update', 'Shared HR update'],
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a chat set to post as the TulipFarm app sends with the bot token, and only its owner can switch', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    assert.deepEqual(await f.service.chatSender(f.workspace.id, f.alice.userId, chatId), {
+      sender: 'user',
+      version: 0,
+      appAvailable: true,
+    });
+    await assert.rejects(f.service.chatSender(f.workspace.id, f.bob.userId, chatId), AccessDenied);
+    await assert.rejects(
+      f.service.selectChatSender(f.workspace.id, f.bob.userId, chatId, { sender: 'app', expectedVersion: 0 }),
+      AccessDenied,
+    );
+    assert.deepEqual(
+      await f.service.selectChatSender(f.workspace.id, f.alice.userId, chatId, { sender: 'app', expectedVersion: 0 }),
+      { sender: 'app', version: 1, appAvailable: true },
+    );
+    await assert.rejects(
+      f.service.selectChatSender(f.workspace.id, f.alice.userId, chatId, { sender: 'user', expectedVersion: 0 }),
+      { message: 'slack-sender-conflict' },
+    );
+    const sent = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Send hey to HR on Slack' }],
+    });
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        const resolved = await executeTool('slack.resolve', false, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.resolve',
+            kind: 'channel',
+            name: 'HR',
+          }),
+        );
+        await executeTool('slack.message.send', true, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.message.send',
+            destinationId: resolved.result.matches[0].destinationId,
+            text: 'hey',
+          }),
+        );
+        return { text: 'Sent', sources: [] };
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+    );
+    assert.equal(
+      await engine.process({ workspaceId: f.workspace.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    const id = (
+      await f.db.platform.query(`SELECT id FROM ${f.table('tf_slack_conversation_actions')} WHERE turn_id=$1`, [
+        sent.turnId,
+      ])
+    ).rows[0].id;
+    const view = await f.service.read(f.workspace.id, f.alice.userId, id);
+    assert.equal(view.status, 'sent');
+    assert.equal(view.sender, 'app');
+    assert.deepEqual(f.effects, [{ token: 'Bearer xoxb-fixture', name: 'send', channel: 'CHR', text: 'hey' }]);
   } finally {
     await f.close();
   }

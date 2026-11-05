@@ -9,14 +9,14 @@
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-188038?style=for-the-badge&labelColor=202326" alt="License: AGPL-3.0"></a>
   <a href="https://tulipfarm.ai"><img src="https://img.shields.io/badge/status-research%20preview-e8456b?style=for-the-badge&labelColor=202326" alt="Status: research preview"></a>
-  <a href="https://docs.tulipfarm.ai"><img src="https://img.shields.io/badge/docs-docs.tulipfarm.ai-188038?style=for-the-badge&labelColor=202326" alt="Docs"></a>
+  <a href="https://tulipfarm.ai/docs/"><img src="https://img.shields.io/badge/docs-tulipfarm.ai%2Fdocs-188038?style=for-the-badge&labelColor=202326" alt="Docs"></a>
 </p>
 
 <p>
   <a href="https://tulipfarm.ai"><b>Website</b></a> ·
   <a href="https://tulipfarm.ai"><b>Try Cloud free</b></a> ·
-  <a href="https://docs.tulipfarm.ai"><b>Docs</b></a> ·
-  <a href="https://docs.tulipfarm.ai/self-hosting/"><b>Self-host</b></a> ·
+  <a href="https://tulipfarm.ai/docs/"><b>Docs</b></a> ·
+  <a href="https://tulipfarm.ai/docs/self-hosting/"><b>Self-host</b></a> ·
   <a href="https://www.reddit.com/r/TulipFarmAI/"><b>Community</b></a>
 </p>
 
@@ -74,7 +74,7 @@ the research preview is open to everyone, your first signup includes free
 credits, and no card is needed.
 
 **🏡 Self-host.** Run it on your own servers with the
-[self-hosting guide](https://docs.tulipfarm.ai/self-hosting/) and
+[self-hosting guide](https://tulipfarm.ai/docs/self-hosting/) and
 [`self-host/`](self-host/README.md). Self-hosted installs are unsupported, so you
 run the servers, upgrades and security yourself.
 

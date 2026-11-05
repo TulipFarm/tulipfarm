@@ -10,6 +10,16 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- The model capability `reasoningEffort` sets the reasoning effort sent on
+  every request to an OpenAI-compatible model. The shipped catalog sets it to
+  the lowest value each model accepts (`none`, or `minimal` for `grok-4.6` and
+  `low` for `gpt-6-astra`), so replies start sooner and cost less.
+- A model call may now run for 2 minutes, up from 45 seconds, so slow models
+  can finish long replies instead of timing out.
+- Model calls are charged only when the provider answered. A call that timed
+  out or failed before any response, or that the provider refused with an
+  error, costs nothing. An answer without usable token counts is charged an
+  estimate from the request and response size instead of the full reservation.
 - **Breaking:** one model catalog file configures every model. The shipped
   catalog is `packages/config/catalog/models.json`, in the
   [model catalog format](https://tulipfarm.ai/schemas/model-catalog.v1.json).
@@ -315,7 +325,7 @@ One version identifies all apps and images of a release.
   models from the catalog's vendor and name, so operator catalog families show
   their own name and a neutral logo for vendors without one, and an empty
   catalog shows "No models configured" with a link to the model setup guide.
-- Self-hosted model guide at https://docs.tulipfarm.ai/self-hosting/models/:
+- Self-hosted model guide at https://tulipfarm.ai/docs/self-hosting/models/:
   the five providers and their credentials, a full operator catalog example,
   capabilities, roles, custom and `openai-compatible` endpoints with
   `MODEL_ENDPOINT_HOSTS`, operator prices and credits, embeddings, and what

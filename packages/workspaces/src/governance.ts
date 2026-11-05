@@ -41,6 +41,7 @@ import {
   personGrantListSchema,
   invitationInputSchema,
   invitationListQuerySchema,
+  invitationDetailsSchema,
   invitationSchema,
   invitationTokenSchema,
   memberRoleInputSchema,
@@ -84,7 +85,8 @@ export class GovernanceConflict extends Error {
       | 'teams-unavailable'
       | 'person-grants-unavailable'
       | 'invitations-unavailable'
-      | 'invitation-request-conflict',
+      | 'invitation-request-conflict'
+      | 'invitation-account-exists',
   ) {
     super(code);
   }
@@ -1237,97 +1239,181 @@ export function createGovernanceService(dependencies: {
       ).status;
   }
 
+  async function lockedInvitation(transaction: Transaction, token: string) {
+    await lockAuthorization(transaction, 'write');
+    await transaction.client.query(
+      `SELECT id FROM ${table(transaction, 'tf_invitations')} WHERE token_hash = $1 FOR UPDATE`,
+      [hashToken(token)],
+    );
+    const result = await transaction.client.query(
+      `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(transaction, 'tf_invitations')} WHERE token_hash = $1`,
+      [hashToken(token)],
+    );
+    const row = invitationRowSchema.optional().parse(result.rows[0]);
+    if (!row || row.kind !== 'email') throw new AccessDenied();
+    return row;
+  }
+
   async function redeemInvitation(userId: string, tokenInput: string) {
     const token = invitationTokenSchema.parse(tokenInput);
     const workspaceId = z.uuid().parse(token.split('.')[0]);
-    return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
-      await lockAuthorization(transaction, 'write');
-      await transaction.client.query(
-        `SELECT id FROM ${table(transaction, 'tf_invitations')} WHERE token_hash = $1 FOR UPDATE`,
-        [hashToken(token)],
+    return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction =>
+      admitInvitation(transaction, workspaceId, await lockedInvitation(transaction, token), userId),
+    );
+  }
+
+  /**
+   * What a signed-out holder of the link may learn: whether it can still be redeemed and, only while it can,
+   * the invited address, the workspace name and whether that address already has an account.
+   */
+  // A forged token names an arbitrary workspace id; answer it like an unknown token before opening that workspace.
+  async function invitedWorkspace(workspaceId: string) {
+    const workspace = z
+      .object({ name: z.string() })
+      .optional()
+      .parse(
+        (await dependencies.identity.query('SELECT name FROM app.workspaces WHERE id = $1', [workspaceId])).rows[0],
       );
+    if (!workspace) throw new AccessDenied();
+    return workspace;
+  }
+
+  async function invitationDetails(tokenInput: string) {
+    const token = invitationTokenSchema.parse(tokenInput);
+    const workspaceId = z.uuid().parse(token.split('.')[0]);
+    const workspace = await invitedWorkspace(workspaceId);
+    const row = await dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
+      await lockAuthorization(transaction, 'read');
       const result = await transaction.client.query(
         `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(transaction, 'tf_invitations')} WHERE token_hash = $1`,
         [hashToken(token)],
       );
-      const row = invitationRowSchema.optional().parse(result.rows[0]);
-      if (!row || row.kind !== 'email') throw new AccessDenied();
-      const registration = await workspaceMembersTable(transaction);
-      const identityRow = (
-        await dependencies.identity.query(
-          `SELECT id, name, email, email_verified${registration ? ', image, profile_revision::text AS revision' : ''} FROM app.users WHERE id = $1`,
-          [userId],
-        )
-      ).rows[0];
-      const identity = profileSchema.optional().parse(identityRow);
-      if (
-        !identity ||
-        (!identity.email_verified && !dependencies.acceptUnverifiedEmail) ||
-        !row.email ||
-        canonicalEmail(identity.email) !== canonicalEmail(row.email)
-      )
-        throw new AccessDenied();
-      const existing = memberRowSchema
-        .optional()
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
-              [userId],
-            )
-          ).rows[0],
-        );
-      if (row.consumed_membership_id) {
-        if (row.consumed_membership_id !== existing?.id) throw new AccessDenied();
-        return { workspaceId, membershipId: existing.id };
-      }
-      if (row.expired || row.revoked_at) throw new AccessDenied();
-      if (
-        (
-          await transaction.client.query(
-            `SELECT 1 FROM ${table(transaction, 'tf_memberships')} m JOIN ${table(transaction, 'tf_invitations')} i ON i.id = $2 WHERE m.user_id = $1 AND m.removed_at >= i.created_at LIMIT 1`,
-            [userId, row.id],
-          )
-        ).rowCount
-      )
-        throw new AccessDenied();
-      const membershipId = existing?.id ?? randomUUID();
-      if (registration) {
-        if (!row.workspace_member_id) throw new WorkspaceMemberError('member-selection-required');
-        await bindWorkspaceMemberAccount(transaction, { memberId: row.workspace_member_id, userId, membershipId });
-      }
-      if (!existing)
-        await transaction.client.query(
-          `INSERT INTO ${table(transaction, 'tf_memberships')} (id, user_id, role) VALUES ($1, $2, 'member')`,
-          [membershipId, userId],
-        );
-      if (registration && row.workspace_member_id) {
-        const profile = memberProfileSchema.parse({
-          id: identity.id,
-          name: identity.name,
-          email: identity.email,
-          image: identityRow.image,
-          revision: identityRow.revision,
-        });
-        await projectWorkspaceMemberProfile(transaction, { memberId: row.workspace_member_id, membershipId, profile });
-      }
-      await transaction.client.query(
-        `UPDATE ${table(transaction, 'tf_invitations')} SET consumed_membership_id = $2, copy_material = NULL WHERE id = $1`,
-        [row.id, membershipId],
-      );
-      await cancelDelivery(transaction, row.id);
-      await transaction.client.query(
-        `INSERT INTO ${table(transaction, 'tf_invitation_redemptions')} (invitation_id, membership_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [row.id, membershipId],
-      );
-      await audit(transaction, { kind: 'human', userId, membershipId }, 'invitation.redeem', row.id);
-      await recommendationChange(transaction, row.id, await activeRecommendationMembers(transaction));
-      afterCommit(transaction.client, () => trackEvent('member_joined', { userId, workspaceId }));
-      return { workspaceId, membershipId };
+      return invitationRowSchema.optional().parse(result.rows[0]);
+    });
+    if (!row || row.kind !== 'email' || !row.email) throw new AccessDenied();
+    const status = invitation(row).status;
+    if (status !== 'active') return invitationDetailsSchema.parse({ status });
+    return invitationDetailsSchema.parse({
+      status,
+      email: row.email,
+      workspaceName: workspace.name,
+      hasAccount: (await accountsForEmail(row.email)).length > 0,
     });
   }
 
+  /**
+   * Redeems an active invitation for an address with no account: creates that account, admits it and consumes the
+   * invitation under the invitation lock, so the link can create an account only on its first redemption.
+   * The account lives in the identity database, so a failure after it was created removes it again.
+   */
+  async function redeemInvitationForNewAccount(
+    tokenInput: string,
+    account: { create: (email: string) => Promise<string>; remove: (userId: string) => Promise<void> },
+  ) {
+    const token = invitationTokenSchema.parse(tokenInput);
+    const workspaceId = z.uuid().parse(token.split('.')[0]);
+    await invitedWorkspace(workspaceId);
+    let created: string | null = null;
+    try {
+      return await dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
+        const row = await lockedInvitation(transaction, token);
+        if (!row.email || row.consumed_membership_id || row.expired || row.revoked_at) throw new AccessDenied();
+        if ((await workspaceMembersTable(transaction)) && !row.workspace_member_id)
+          throw new WorkspaceMemberError('member-selection-required');
+        if ((await accountsForEmail(row.email)).length) throw new GovernanceConflict('invitation-account-exists');
+        created = await account.create(row.email);
+        const joined = await admitInvitation(transaction, workspaceId, row, created);
+        return { ...joined, userId: created };
+      });
+    } catch (error) {
+      if (created) await account.remove(created).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async function admitInvitation(
+    transaction: Transaction,
+    workspaceId: string,
+    row: z.infer<typeof invitationRowSchema>,
+    userId: string,
+  ) {
+    const registration = await workspaceMembersTable(transaction);
+    const identityRow = (
+      await dependencies.identity.query(
+        `SELECT id, name, email, email_verified${registration ? ', image, profile_revision::text AS revision' : ''} FROM app.users WHERE id = $1`,
+        [userId],
+      )
+    ).rows[0];
+    const identity = profileSchema.optional().parse(identityRow);
+    if (
+      !identity ||
+      (!identity.email_verified && !dependencies.acceptUnverifiedEmail) ||
+      !row.email ||
+      canonicalEmail(identity.email) !== canonicalEmail(row.email)
+    )
+      throw new AccessDenied();
+    const existing = memberRowSchema
+      .optional()
+      .parse(
+        (
+          await transaction.client.query(
+            `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL`,
+            [userId],
+          )
+        ).rows[0],
+      );
+    if (row.consumed_membership_id) {
+      if (row.consumed_membership_id !== existing?.id) throw new AccessDenied();
+      return { workspaceId, membershipId: existing.id };
+    }
+    if (row.expired || row.revoked_at) throw new AccessDenied();
+    if (
+      (
+        await transaction.client.query(
+          `SELECT 1 FROM ${table(transaction, 'tf_memberships')} m JOIN ${table(transaction, 'tf_invitations')} i ON i.id = $2 WHERE m.user_id = $1 AND m.removed_at >= i.created_at LIMIT 1`,
+          [userId, row.id],
+        )
+      ).rowCount
+    )
+      throw new AccessDenied();
+    const membershipId = existing?.id ?? randomUUID();
+    if (registration) {
+      if (!row.workspace_member_id) throw new WorkspaceMemberError('member-selection-required');
+      await bindWorkspaceMemberAccount(transaction, { memberId: row.workspace_member_id, userId, membershipId });
+    }
+    if (!existing)
+      await transaction.client.query(
+        `INSERT INTO ${table(transaction, 'tf_memberships')} (id, user_id, role) VALUES ($1, $2, 'member')`,
+        [membershipId, userId],
+      );
+    if (registration && row.workspace_member_id) {
+      const profile = memberProfileSchema.parse({
+        id: identity.id,
+        name: identity.name,
+        email: identity.email,
+        image: identityRow.image,
+        revision: identityRow.revision,
+      });
+      await projectWorkspaceMemberProfile(transaction, { memberId: row.workspace_member_id, membershipId, profile });
+    }
+    await transaction.client.query(
+      `UPDATE ${table(transaction, 'tf_invitations')} SET consumed_membership_id = $2, copy_material = NULL WHERE id = $1`,
+      [row.id, membershipId],
+    );
+    await cancelDelivery(transaction, row.id);
+    await transaction.client.query(
+      `INSERT INTO ${table(transaction, 'tf_invitation_redemptions')} (invitation_id, membership_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [row.id, membershipId],
+    );
+    await audit(transaction, { kind: 'human', userId, membershipId }, 'invitation.redeem', row.id);
+    await recommendationChange(transaction, row.id, await activeRecommendationMembers(transaction));
+    afterCommit(transaction.client, () => trackEvent('member_joined', { userId, workspaceId }));
+    return { workspaceId, membershipId };
+  }
+
   return {
+    invitationDetails,
+    redeemInvitationForNewAccount,
     ownMembership,
     snapshot,
     setMemberRole,

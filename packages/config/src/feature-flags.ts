@@ -70,6 +70,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_SOCIAL_PUBLISHING',
   },
+  'plan-documents': {
+    description:
+      'Chat plans carry a written document (summary, approach, risks and Mermaid diagrams) and a content revision. The starter approves an exact revision to start a plan, and a starter change to an approved active plan pauses it until approved again.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_PLAN_DOCUMENTS',
+  },
   'openai-models': {
     description:
       'Model catalog entries with "featureFlag": "openai-models", such as GPT models on the OpenAI API. Off hides them from the picker and workspace settings and refuses work on them.',

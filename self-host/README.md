@@ -1,7 +1,7 @@
 # Self-hosted stack
 
 [`compose.yaml`](compose.yaml) runs TulipFarm on one machine with Docker Compose 2.20
-or later. Full guides live at [docs.tulipfarm.ai](https://docs.tulipfarm.ai).
+or later. Full guides live at [tulipfarm.ai/docs](https://tulipfarm.ai/docs/).
 
 ```sh
 cp self-host/.env.example self-host/.env   # then fill in the values
@@ -76,6 +76,29 @@ the model is told web access is off. Before turning the flag on, run
 `pnpm db workspace-rollout` so every workspace has common migration
 `0014_conversation_links.sql`; a workspace without it reads no links.
 
+## Private API hosts
+
+Agent API calls (`api.request`) and secret destinations reach public `https`
+hosts only. To let agents call services on your own network, list them in
+`API_CALL_PRIVATE_HOSTS`, set on both api and worker, as comma-separated
+`host[:port][;http]` entries:
+
+```sh
+API_CALL_PRIVATE_HOSTS=billing.internal:8443,metrics.lan;http
+```
+
+- Names are exact and lower case. IP addresses, wildcards and upper case stop
+  the api and worker at startup with an error naming the entry.
+- Without a port, only the scheme's default port is allowed.
+- `;http` also allows plain `http`; `https` always works.
+- A listed name may resolve to any address, including loopback, so list only
+  services every workspace on this server may reach.
+
+A secret may name a listed host as a destination. Remove the host from the list
+and that secret is no longer sent there. Responses from a private host, like
+responses from calls that use a secret, are visible only to the member who ran
+the agent.
+
 ## Separate knowledge worker
 
 By default one worker process runs every task queue. A large knowledge sync
@@ -86,6 +109,28 @@ image twice: one with `TULIPFARM_WORKER_ROLE=core` and one with
 knowledge role needs isolated workspace storage, and its telemetry uses the
 service name `tulipfarm-knowledge-worker`. Unset or `all` keeps one process.
 Document parsers always run at the lowest CPU priority.
+
+## Separate API jobs
+
+By default the API also runs its scheduled background sweeps, which start chat
+replies, workflows, knowledge syncs and other queued work every 2 seconds. They
+share the API's workspace-storage connections with requests. To keep them
+apart, run the same API image twice: one with `TULIPFARM_API_ROLE=requests`,
+which receives all traffic and starts no sweeps, and one with
+`TULIPFARM_API_ROLE=jobs`, which runs them. Both need the API's environment,
+and the jobs role's telemetry uses the service name `tulipfarm-api-jobs`.
+The jobs API still serves every route, including `/v1/health`, but needs no
+public traffic. Keep a jobs API running: with only `requests`, queued and
+scheduled work is never started. Unset or `all` keeps one process.
+
+## Render worker
+
+The render worker turns plans into documents: it draws their diagrams and prints
+an A4 PDF with Chromium. It polls the `tulipfarm-render` task queue and needs only
+Temporal and the files bucket, not the database. Its pages never reach the
+network. Chromium runs without its own sandbox unless `CHROMIUM_SANDBOX=true`;
+enable it where the container may create user namespaces. Without the render
+worker, plan documents fail after 30 minutes and nothing else is affected.
 
 ## Health
 

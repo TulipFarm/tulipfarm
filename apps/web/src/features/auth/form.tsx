@@ -297,6 +297,8 @@ export function AuthForm({
   workspace,
   linkLabel,
   providersFirst,
+  email,
+  redirect,
 }: {
   withName?: boolean;
   submitLabel: string;
@@ -307,9 +309,13 @@ export function AuthForm({
   onPendingChange: (pending: boolean) => void;
   workspace?: WorkspaceDraft;
   /** The email-link action when it sits under a password submit; defaults to `submitLabel`. */
-  linkLabel?: string;
+  linkLabel?: string | undefined;
   /** Puts Google above the email form, for flows where it is the fastest path. */
   providersFirst?: boolean;
+  /** A fixed address, such as the one an invitation was sent to; it is shown but cannot be changed. */
+  email?: string;
+  /** Where to continue after sign-in, instead of the page's `redirect` query. */
+  redirect?: string;
 }) {
   const options = useAuthOptions();
   const passwordSignIn = options.data?.emailPassword === true;
@@ -324,7 +330,7 @@ export function AuthForm({
   const [sentTo, setSentTo] = useState('');
   const [devLink, setDevLink] = useState('');
   const [nameInput, setNameInput] = useState('');
-  const [emailInput, setEmailInput] = useState('');
+  const [emailInput, setEmailInput] = useState(email ?? '');
   const [submitted, setSubmitted] = useState(false);
   const nameError = submitted && withName && !nameInput.trim() ? 'Enter your name.' : undefined;
   const emailError =
@@ -364,7 +370,7 @@ export function AuthForm({
         ? 'Sign-in did not finish. Please try again.'
         : '';
   });
-  const destination = safeAuthRedirect(new URLSearchParams(window.location.search).get('redirect'));
+  const destination = safeAuthRedirect(redirect ?? new URLSearchParams(window.location.search).get('redirect'));
   async function callbacks() {
     const next = workspace ? await workspace.prepare() : destination;
     return authCallbackURLs(next, window.location.origin);
@@ -488,6 +494,7 @@ export function AuthForm({
         callbackURL,
         newUserCallbackURL,
         errorCallbackURL,
+        ...(email && { loginHint: email }),
       });
       if (result.error)
         setError(
@@ -549,24 +556,26 @@ export function AuthForm({
             </Button>
           </div>
         )}
-        <div className="grid">
-          <Button
-            variant="outline"
-            size="lg"
-            disabled={pending}
-            onClick={() => {
-              setSentTo('');
-              setDevLink('');
-              setError('');
-              setEmailInput('');
-              setSubmitted(false);
-              setChallengeToken(null);
-              setChallengeAttempt(value => value + 1);
-            }}
-          >
-            Use a different email
-          </Button>
-        </div>
+        {email === undefined && (
+          <div className="grid">
+            <Button
+              variant="outline"
+              size="lg"
+              disabled={pending}
+              onClick={() => {
+                setSentTo('');
+                setDevLink('');
+                setError('');
+                setEmailInput('');
+                setSubmitted(false);
+                setChallengeToken(null);
+                setChallengeAttempt(value => value + 1);
+              }}
+            >
+              Use a different email
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -612,7 +621,13 @@ export function AuthForm({
                 />
               </Field>
             )}
-            <Field id="email" label="Email" required error={emailError}>
+            <Field
+              id="email"
+              label="Email"
+              required
+              error={emailError}
+              helper={email !== undefined ? 'Your invitation was sent to this address.' : undefined}
+            >
               <Input
                 name="email"
                 type="email"
@@ -620,6 +635,7 @@ export function AuthForm({
                 placeholder="you@company.com"
                 autoComplete="email"
                 value={emailInput}
+                readOnly={email !== undefined}
                 onChange={event => setEmailInput(event.target.value)}
               />
             </Field>

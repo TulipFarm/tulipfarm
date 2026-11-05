@@ -164,6 +164,80 @@ test(
       memberId,
     );
     assert.equal((await read()).id, memberId);
+    const newcomerMemberId = randomUUID();
+    await createMember(newcomerMemberId);
+    const newcomerEmail = `${randomUUID()}@example.test`;
+    const newcomerInvitation = await governance.createInvitation(workspace.id, workspace.userId, {
+      kind: 'email',
+      email: newcomerEmail,
+      requestId: randomUUID(),
+      workspaceMemberId: newcomerMemberId,
+    });
+    const newcomerToken = await token(newcomerInvitation.invitation.id);
+    assert.deepEqual(await governance.invitationDetails(newcomerToken), {
+      status: 'active',
+      email: newcomerEmail,
+      workspaceName: 'Test',
+      hasAccount: false,
+    });
+    const removed = [];
+    const failingCreate = {
+      create: async address => {
+        const id = randomUUID();
+        await seedPlatformUser(db.platform, { id, name: '', email: address, emailVerified: false });
+        return id;
+      },
+      remove: async id => {
+        removed.push(id);
+        await db.platform.query('DELETE FROM app.users WHERE id = $1', [id]);
+      },
+    };
+    await assert.rejects(governance.redeemInvitationForNewAccount(newcomerToken, failingCreate), AccessDenied);
+    assert.equal(removed.length, 1, 'An account created for a failed redemption is removed again');
+    assert.equal((await governance.invitationDetails(newcomerToken)).status, 'active');
+    const newcomer = await governance.redeemInvitationForNewAccount(newcomerToken, {
+      create: async address => {
+        const id = randomUUID();
+        await seedPlatformUser(db.platform, { id, name: '', email: address });
+        return id;
+      },
+      remove: async () => assert.fail('A successful redemption keeps its account'),
+    });
+    assert.equal(
+      (await raw.query(`SELECT member_id FROM ${s}.tf_workspace_member_accounts WHERE user_id=$1`, [newcomer.userId]))
+        .rows[0].member_id,
+      newcomerMemberId,
+    );
+    assert.deepEqual(await governance.invitationDetails(newcomerToken), { status: 'consumed' });
+    await assert.rejects(
+      governance.redeemInvitationForNewAccount(newcomerToken, {
+        create: async () => assert.fail('A consumed invitation never creates an account'),
+        remove: async () => undefined,
+      }),
+      AccessDenied,
+    );
+    const existingMemberId = randomUUID();
+    await createMember(existingMemberId);
+    const existingInvitation = await governance.createInvitation(workspace.id, workspace.userId, {
+      kind: 'email',
+      email: `${randomUUID()}@example.test`,
+      requestId: randomUUID(),
+      workspaceMemberId: existingMemberId,
+    });
+    const existingToken = await token(existingInvitation.invitation.id);
+    await seedPlatformUser(db.platform, {
+      id: randomUUID(),
+      name: 'Existing',
+      email: existingInvitation.invitation.email,
+    });
+    assert.equal((await governance.invitationDetails(existingToken)).hasAccount, true);
+    await assert.rejects(
+      governance.redeemInvitationForNewAccount(existingToken, {
+        create: async () => assert.fail('The link never creates a second account for an address'),
+        remove: async () => undefined,
+      }),
+      /invitation-account-exists/,
+    );
     const reservedUser = randomUUID(),
       reservedAccess = randomUUID();
     await raw.query(`INSERT INTO ${s}.tf_memberships(id,user_id,role) VALUES($1,$2,'member')`, [

@@ -6,6 +6,7 @@ import { Play } from 'reicon-react/icons/Play';
 import { Tasks } from 'reicon-react/icons/Tasks';
 import { planListItemSchema, planReceiptSchema, planViewSchema, type PlanView } from '@tulipfarm/agents/plan-contracts';
 import { maximumTaskLimits } from '@tulipfarm/agents/contracts';
+import { formatDateTime } from '@tulipfarm/plan-documents/stamp';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -30,22 +31,28 @@ import {
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { StatusState } from '@tulipfarm/sprout/status';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { TaskTree, type TaskTreeTask } from '@tulipfarm/sprout/task-tree';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
+import { useFlag } from '@/lib/feature-flags';
 import { jsonResponse, readJson } from '@/lib/http';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
 import { useCanvas, useResultAttention, type CanvasItem } from './canvas-state';
 import { conversationKeys } from './queries';
+import { PlanDocument } from './plan-document';
 import type { ConversationMessage } from './conversation-api';
 import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { resultActivityApps } from './result-activity';
 
 export type PlanSummary = z.infer<typeof planListItemSchema>;
+
+export type PlanDetail = PlanView;
 type PlanTask = PlanView['tasks'][number];
 type PlanControl =
   | { action: 'start' }
+  | { action: 'approve'; contentRevision: number; timeZone: string }
   | { action: 'pause' }
   | { action: 'resume'; budget?: PlanView['budget'] }
   | { action: 'stop' };
@@ -56,6 +63,9 @@ const failures: Record<string, string> = {
   'budget-lowered': 'A plan’s budget can only go up.',
   'not-starter': 'Only the person who started this plan can control it.',
   'plan-source-unavailable': 'A source this plan uses can’t be checked right now. Try again in a few minutes.',
+  'approval-required': 'This plan needs your approval. Review it, then approve it.',
+  'revision-conflict': 'The plan changed. Review the latest revision.',
+  'document-unavailable': 'Plan documents aren’t available in this workspace.',
 };
 
 export function planApi(workspaceId: string) {
@@ -70,23 +80,48 @@ export function planApi(workspaceId: string) {
     const value = await readJson(response, true);
     if (!response.ok) {
       const code = z.object({ error: z.string() }).safeParse(value).data?.error ?? 'plan-operation-unavailable';
+      const revision = z.object({ plan: z.object({ contentRevision: z.number() }) }).safeParse(value).data
+        ?.plan.contentRevision;
       throw new TableRequestError(
         response.status,
         code,
-        failures[code] ??
+        (code === 'revision-conflict' && revision ? `The plan changed. Review revision ${revision}.` : undefined) ??
+          failures[code] ??
           (response.status === 404
             ? 'This plan is unavailable to your current membership.'
-            : 'The plan could not be reached. Check your connection and try again.'),
+            : 'Couldn’t reach the plan. Check your connection and try again.'),
       );
     }
     return value;
   }
+  const plan = (planId: string) => `/agent-plans/${encodeURIComponent(planId)}`;
   return {
     list: async (chatId: string, signal: AbortSignal) =>
       z.object({ plans: z.array(planListItemSchema) }).parse(await request(`/conversations/${chatId}/plans`, signal))
         .plans,
     read: async (planId: string, signal: AbortSignal) =>
       planViewSchema.parse(await request(`/agent-plans/${planId}`, signal)),
+    /** One revision's document page. Revisions never change, so the HTML can be kept. */
+    document: async (planId: string, revision: number, signal: AbortSignal) => {
+      const response = await jsonResponse(`${base}${plan(planId)}/document/${revision}`, { signal });
+      if (!response.ok) {
+        const code =
+          z.object({ error: z.string() }).safeParse(await readJson(response, true)).data?.error ??
+          'plan-document-unavailable';
+        throw new TableRequestError(
+          response.status,
+          code,
+          failures[code] ?? 'Couldn’t load the document. Check your connection and try again.',
+        );
+      }
+      return response.text();
+    },
+    retryDocument: async (planId: string) => {
+      await request(`${plan(planId)}/document/retry`, AbortSignal.timeout(15_000), {});
+    },
+    recreateDocument: async (planId: string) => {
+      await request(`${plan(planId)}/document/recreate`, AbortSignal.timeout(15_000), {});
+    },
     control: async (planId: string, input: PlanControl & { requestId: string; expectedVersion: number }) =>
       planReceiptSchema.parse(await request(`/agent-plans/${planId}/control`, AbortSignal.timeout(15_000), input)),
   };
@@ -95,6 +130,13 @@ export type PlanApi = ReturnType<typeof planApi>;
 
 const open = (plan: Pick<PlanView, 'lifecycle'>) =>
   plan.lifecycle === 'draft' || plan.lifecycle === 'active' || plan.lifecycle === 'paused';
+
+/** A document still being produced for the plan's latest content revision. */
+export const documentPending = (plan: Pick<PlanDetail, 'contentRevision' | 'documentRender'>) =>
+  !!plan.documentRender &&
+  (plan.documentRender.status === 'pending' ||
+    plan.documentRender.status === 'rendering' ||
+    (plan.documentRender.status === 'ready' && plan.documentRender.revision < plan.contentRevision));
 
 export function usePlans(api: PlanApi, chatId: string, enabled: boolean) {
   return useFeatureRead({ key: conversationKeys.planList(chatId), load: signal => api.list(chatId, signal), enabled });
@@ -105,7 +147,7 @@ export function usePlan(api: PlanApi, chatId: string, planId: string) {
   return useFeatureRead({
     key: conversationKeys.plan(chatId, planId),
     load: signal => api.read(planId, signal),
-    pollWhile: open,
+    pollWhile: (plan: PlanDetail) => open(plan) || documentPending(plan),
     interval: 15_000,
     maxChecks: Infinity,
   });
@@ -347,37 +389,43 @@ export function planProgress(counts: PlanView['counts']) {
 }
 
 function PlanNotice({ view }: { view: PlanView }) {
+  const approval = useFlag('plan-documents');
   const waiting = view.tasks.filter(task => task.waitingTaskId).length;
   const notice =
     view.lifecycle === 'paused'
-      ? view.pause === 'budget'
+      ? view.pause === 'awaiting-approval'
         ? {
-            title: 'Paused at its budget',
-            body: `The plan used its budget of ${view.budget.credits.toLocaleString()} credits. Nothing new starts until ${view.canControl ? 'you add budget and resume it' : 'the person who started it resumes it'}.`,
+            title: 'Waiting for approval',
+            body: `The plan changed after it was approved. Saved agents finish their current task, and nothing new starts until ${view.canControl ? 'you approve' : 'the person who started it approves'} revision ${view.contentRevision}.`,
           }
-        : view.pause === 'starter-access'
+        : view.pause === 'budget'
           ? {
-              title: 'Paused after an access change',
-              body: 'The person who started this plan can no longer use this chat, so no new work starts.',
+              title: 'Paused at its budget',
+              body: `The plan used its budget of ${view.budget.credits.toLocaleString()} credits. Nothing new starts until ${view.canControl ? 'you add budget and resume it' : 'the person who started it resumes it'}.`,
             }
-          : view.pause === 'progress'
+          : view.pause === 'starter-access'
             ? {
-                title: 'Needs attention',
-                body: 'Work stopped before all requirements were verified. Check the task details and existing action results before resuming.',
+                title: 'Paused after an access change',
+                body: 'The person who started this plan can no longer use this chat, so no new work starts.',
               }
-            : view.pause === 'sources-unavailable'
+            : view.pause === 'progress'
               ? {
                   title: 'Needs attention',
-                  body: `A saved agent's sources, such as GitHub, couldn't be checked for over an hour. Nothing was revoked. ${view.canControl ? 'Resume' : 'The person who started it can resume'} the plan to try again.`,
+                  body: 'Work stopped before all requirements were verified. Check the task details and existing action results before resuming.',
                 }
-              : {
-                  title: 'Paused',
-                  body: `Running specialists stopped and will start again on resume. Saved agents finish their current task. Nothing new starts until ${view.canControl ? 'you resume it' : 'the person who started it resumes it'}.`,
-                }
+              : view.pause === 'sources-unavailable'
+                ? {
+                    title: 'Needs attention',
+                    body: `A saved agent's sources, such as GitHub, couldn't be checked for over an hour. Nothing was revoked. ${view.canControl ? 'Resume' : 'The person who started it can resume'} the plan to try again.`,
+                  }
+                : {
+                    title: 'Paused',
+                    body: `Running specialists stopped and will start again on resume. Saved agents finish their current task. Nothing new starts until ${view.canControl ? 'you resume it' : 'the person who started it resumes it'}.`,
+                  }
       : view.lifecycle === 'draft'
         ? {
             title: 'Plan only',
-            body: 'Research and the plan are saved. No setup work has started. Start this plan when you want to act; each business action still needs its own permission or review.',
+            body: `Research and the plan are saved. No setup work has started. ${approval ? 'Approve and start' : 'Start'} this plan when you want to act; each business action still needs its own permission or review.`,
           }
         : view.lifecycle === 'stopped'
           ? { title: 'Stopped', body: 'Unfinished tasks were cancelled. Finished work is kept.' }
@@ -413,6 +461,7 @@ export function PlanCanvas({
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => planApi(workspaceId), [workspaceId]);
   const read = usePlan(api, chatId, planId);
+  const documents = useFlag('plan-documents');
   const state = read.state;
   if (state.kind === 'loading')
     return (
@@ -511,20 +560,8 @@ export function PlanCanvas({
       )}
     </div>
   );
-  return (
-    <CanvasSection>
-      <PlanNotice view={view} />
-      {state.error && (
-        <Alert>
-          <AlertTitle>Showing the last loaded plan</AlertTitle>
-          <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
-          <div className="mt-2">
-            <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
-              {state.refreshing ? 'Checking…' : 'Check again'}
-            </Button>
-          </div>
-        </Alert>
-      )}
+  const outline = (
+    <>
       <TaskTree title={view.title} tasks={planTree(view)} summary={planProgress(view.counts)} />
       <Collapsible>
         <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
@@ -542,6 +579,40 @@ export function PlanCanvas({
           />
         </CollapsibleContent>
       </Collapsible>
+    </>
+  );
+  return (
+    <CanvasSection>
+      <PlanNotice view={view} />
+      {state.error && (
+        <Alert>
+          <AlertTitle>Showing the last loaded plan</AlertTitle>
+          <AlertDescription>Newer progress couldn’t be loaded.</AlertDescription>
+          <div className="mt-2">
+            <Button variant="outline" size="sm" disabled={state.refreshing} onClick={() => void read.refresh()}>
+              {state.refreshing ? 'Checking…' : 'Check again'}
+            </Button>
+          </div>
+        </Alert>
+      )}
+      {documents ? (
+        <Tabs defaultValue="outline">
+          <TabsList variant="line" aria-label="Plan views">
+            <TabsTrigger value="outline">Outline</TabsTrigger>
+            <TabsTrigger value="document">Document</TabsTrigger>
+          </TabsList>
+          <TabsContent value="outline">
+            <div className="flex flex-col gap-4 pt-4">{outline}</div>
+          </TabsContent>
+          <TabsContent value="document">
+            <div className="pt-4">
+              <PlanDocument api={api} workspaceSlug={workspaceSlug} chatId={chatId} view={view} />
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : (
+        outline
+      )}
     </CanvasSection>
   );
 }
@@ -709,6 +780,13 @@ function raised(budget: PlanView['budget']): PlanView['budget'] {
   };
 }
 
+/** The approval time as the plan document shows it, in the zone the starter approved from. */
+function formatApproval(approval: NonNullable<PlanView['approval']>) {
+  return Number.isNaN(new Date(approval.approvedAt).getTime())
+    ? null
+    : formatDateTime(approval.approvedAt, approval.timeZone);
+}
+
 /** Starter-only controls. They live beside the reference in chat, never inside the read-only outline. */
 function PlanControls({
   api,
@@ -717,9 +795,16 @@ function PlanControls({
 }: {
   api: PlanApi;
   chatId: string;
-  view: Pick<PlanView, 'id' | 'lifecycle' | 'version'> & Partial<Pick<PlanView, 'pause' | 'budget'>>;
+  view: Pick<PlanView, 'id' | 'lifecycle' | 'version'> &
+    Partial<
+      Pick<PlanView, 'pause' | 'budget' | 'contentRevision' | 'approval' | 'awaitingApproval' | 'changesSinceApproval'>
+    >;
 }) {
   const { change } = useFeatureChanges();
+  const approval = useFlag('plan-documents');
+  const revision = view.contentRevision;
+  const awaiting = view.lifecycle === 'paused' && view.awaitingApproval === true;
+  const approvedAt = view.approval ? formatApproval(view.approval) : null;
   const [busy, setBusy] = useState<PlanControl['action'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmStop, setConfirmStop] = useState(false);
@@ -732,6 +817,13 @@ function PlanControls({
     budget.credits === current.credits &&
     budget.toolCalls === current.toolCalls &&
     budget.activeMilliseconds === current.activeMilliseconds;
+  const approve = () =>
+    revision &&
+    void run({
+      action: 'approve',
+      contentRevision: revision,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
   const run = async (control: PlanControl) => {
     const key = `${control.action}:${view.version}`;
     if (request.current?.key !== key) request.current = { key, id: crypto.randomUUID() };
@@ -743,9 +835,7 @@ function PlanControls({
       setConfirmStop(false);
     } catch (failure) {
       setError(
-        failure instanceof Error
-          ? failure.message
-          : 'The plan could not be reached. Check your connection and try again.',
+        failure instanceof Error ? failure.message : 'Couldn’t reach the plan. Check your connection and try again.',
       );
       if (failure instanceof TableRequestError) request.current = null;
     } finally {
@@ -763,8 +853,41 @@ function PlanControls({
             : `Resuming raises the budget to ${budget.credits.toLocaleString()} credits.`}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        {view.lifecycle === 'draft' ? (
+      {approval && view.approval && (
+        <p className="text-xs text-muted-foreground">
+          You approved revision {view.approval.revision}
+          {approvedAt && ` · ${approvedAt}`}
+        </p>
+      )}
+      {awaiting && view.changesSinceApproval?.length ? (
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+          <p>Changes since you approved revision {view.approval?.revision}:</p>
+          <ul className="list-disc pl-4">
+            {view.changesSinceApproval.map(item => (
+              <li key={item.revision}>
+                Revision {item.revision}:{' '}
+                {item.changeKind === 'starter' ? 'Changed by you in chat' : 'Added by the plan while running'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        {(approval && view.lifecycle === 'draft') || awaiting ? (
+          <>
+            <Button size="sm" disabled={!!busy || !revision} aria-busy={busy === 'approve'} onClick={approve}>
+              <Play size={14} aria-hidden="true" />
+              {busy === 'approve'
+                ? 'Approving…'
+                : view.lifecycle === 'draft'
+                  ? 'Approve and start'
+                  : 'Approve and resume'}
+            </Button>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {revision ? `Revision ${revision}` : 'Loading revision…'}
+            </span>
+          </>
+        ) : view.lifecycle === 'draft' ? (
           <Button
             size="sm"
             disabled={!!busy}

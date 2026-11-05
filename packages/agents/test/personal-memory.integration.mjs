@@ -51,7 +51,7 @@ test(
     });
 
     await t.test(
-      'compaction never captures ephemeral memory and memory-derived authored drafts fail before persistence',
+      "compaction never captures ephemeral memory and drafts may carry the requester's own memory",
       { timeout: 120000 },
       async t => {
         const f = await conversationFixture();
@@ -139,16 +139,6 @@ test(
         }
         const proposals = [
           {
-            kind: 'agent',
-            targetId: randomUUID(),
-            input: {
-              expectedSoulRevision: 'a'.repeat(40),
-              expectedSavedRevision: null,
-              owningTeamId: randomUUID(),
-              definition: { name: 'Derived agent', instructions: 'Preference-derived content', tools: [] },
-            },
-          },
-          {
             kind: 'skill',
             targetId: randomUUID(),
             input: {
@@ -175,35 +165,38 @@ test(
             },
           },
         ];
+        const drafted = [];
         const draftExecutor = createConversationExecutor(f.runtime, async input => {
           assert.deepEqual(await input.readPersonalMemory(), { content: '', revision: 2 });
           for (const proposal of proposals) {
             const output = await input.executeTool(
-              `${proposal.kind === 'skill' ? 'skills' : proposal.kind === 'agent' ? 'agents' : 'workflows'}.draft`,
+              `${proposal.kind === 'skill' ? 'skills' : 'workflows'}.draft`,
               false,
-              context =>
-                createAuthoringDrafts(context.runtime).propose(
+              async context => ({
+                result: await createAuthoringDrafts(context.runtime).propose(
                   w.id,
                   context.actor,
-                  randomUUID(),
+                  context.callId,
                   context.origin,
                   proposal,
                 ),
+                sources: [],
+              }),
             );
-            assert.equal(
-              output.result.error,
-              'access-denied',
-              'retained memory provenance must stop authored-definition persistence after deletion',
-            );
+            assert.equal(output.result.status, 'review-required', "the requester's own memory does not block a card");
+            drafted.push([output.result.draftId, proposal.kind === 'skill' ? 'stale' : 'pending']);
           }
-          return { text: 'Drafts were denied.', sources: [] };
+          return { text: 'Review the drafts.', sources: [] };
         });
         await exchange([{ kind: 'text', text: 'Create definitions from earlier context' }], draftExecutor);
         assert.equal(
           (await f.db.platform.query(`SELECT count(*)::int AS n FROM ${f.table('tf_chat_authoring_drafts')}`)).rows[0]
             .n,
-          0,
+          proposals.length,
         );
+        // Skill drafts always read as stale; the read itself proves the card loads for its requester.
+        for (const [draftId, status] of drafted)
+          assert.equal((await createAuthoringDrafts(f.runtime).read(w.id, w.userId, chatId, draftId)).status, status);
       },
     );
     const sent = await send(chatId, 'Private question');

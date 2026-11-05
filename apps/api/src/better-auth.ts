@@ -9,6 +9,7 @@ import { emitHook } from '@tulipfarm/extensions';
 import { identifyUser, trackEvent } from '@tulipfarm/observability';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
 import { publicGuideOrigins } from './public-guide-config.ts';
+import { invitationSignIn, type InvitationLinks } from './invitation-sign-in.ts';
 
 export const authMethods = ['password', 'magic-link', 'google'] as const;
 export type AuthMethod = (typeof authMethods)[number];
@@ -112,6 +113,7 @@ export function createAuth(
   },
   // Without a sender, /request-password-reset is disabled; the admin CLI issues reset links instead.
   sendResetPassword?: (data: { email: string; url: string }) => Promise<void>,
+  invitationLinks: InvitationLinks = { current: null },
 ) {
   const config = authConfig();
   // True when another user owns this address's canonical form, such as a@gmail.com for a+1@gmail.com.
@@ -245,6 +247,10 @@ export function createAuth(
         storeIdentifier: { default: 'plain', overrides: { 'reset-password:': 'hashed' } },
       }),
     },
-    plugins: [magicLink({ expiresIn: 15 * 60, storeToken: 'hashed', sendMagicLink })],
+    plugins: [
+      magicLink({ expiresIn: 15 * 60, storeToken: 'hashed', sendMagicLink }),
+      // An invitation link signs in only where email sign-in links do.
+      invitationSignIn(invitationLinks, config.magicLink),
+    ],
   });
 }

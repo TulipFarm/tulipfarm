@@ -361,7 +361,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
           .getByText('Queued for indexing. Your integration is ready to use now.')
           .waitFor();
 
-        section = await open('github-personal');
+        section = await open('github');
         const github = section.getByRole('listitem', { name: 'GitHub ada-dev' });
         await github.getByText('27 of 27 repositories included; 1 kept as your own choices.').waitFor();
         await github
@@ -427,7 +427,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
             /TulipFarm never buys credits or raises limits for you\./,
           ],
           [
-            'github-personal',
+            'github',
             'GitHub ada-dev',
             'Needs authorization',
             /TulipFarm can’t reach GitHub with this account\. Content already imported stays as it is\. Choose Reconnect @ada-dev, then Retry now\./,
@@ -562,7 +562,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
             { kind: 'google-begin', app: 'gmail' },
           ],
           [
-            'github-personal',
+            'github',
             'GitHub ada-dev',
             'Reconnect @ada-dev',
             /^https:\/\/github\.com\/login\/oauth\/authorize/,
@@ -588,7 +588,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
           await row.getByText('Needs authorization', { exact: true }).waitFor();
           await row.getByText(`Choose ${label}, then Retry now.`, { exact: false }).waitFor();
           assert.equal(await row.getByRole('button', { name: /^Reconnect/ }).count(), 1, `${app} offers one repair`);
-          if (app === 'github-personal') {
+          if (app === 'github') {
             assert.equal(await page.getByRole('button', { name: 'Reconnect @ada-work' }).count(), 0);
             await page.screenshot({ path: `${screenshots}/repair-github-two-accounts.png`, fullPage: true });
           }
@@ -652,7 +652,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
         const row = (await open('slack')).getByRole('listitem', { name: 'Slack @UADA' });
         await row.getByText(/Ask a workspace admin to reconnect Slack, then choose Retry now\./).waitFor();
         assert.equal(await row.getByRole('button', { name: /^Reconnect/ }).count(), 0);
-        const github = (await open('github-personal')).getByRole('listitem', { name: 'GitHub ada-dev' });
+        const github = (await open('github')).getByRole('listitem', { name: 'GitHub ada-dev' });
         await github
           .getByText(
             /This GitHub login is no longer connected here\. Connect it again in GitHub accounts below, then choose Retry now\./,

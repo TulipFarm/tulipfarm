@@ -9,6 +9,8 @@ import {
   fileSuggestionsPageSchema,
   fileStorageUsageSchema,
   fileSummarySchema,
+  fileVersionSchema,
+  fileVersionsSchema,
   libraryPageSchema,
   movePreviewSchema,
   type FileRole,
@@ -80,6 +82,7 @@ export const fileKeys = {
   directory: (id: string) => ['files', 'directory', id] as const,
   usage: ['files', 'usage'] as const,
   deletion: (id: string) => ['files', 'deletion', id] as const,
+  versions: (id: string) => ['files', 'versions', id] as const,
 };
 
 const messages: Record<string, string> = {
@@ -99,6 +102,7 @@ const messages: Record<string, string> = {
   'file-not-trashed': 'This item is no longer in Trash. Move it to Trash before deleting it forever.',
   'file-restore-destination':
     'Its original folder is in Trash, or you can no longer add to it. Choose where to restore it.',
+  'file-media-type': 'A new version must be the same type of file.',
   'files-unavailable': 'Files are being updated. Try again in a few minutes.',
   'session-changed': 'Your session changed before the upload finished. Sign in again to retry.',
 };
@@ -170,6 +174,14 @@ export function filesApi(workspaceId: string) {
       fileDetailsSchema.parse(await readJson(await send(`${item(id)}/details`, { signal }))),
     directory: async (id: string, signal: AbortSignal) =>
       fileDirectorySchema.parse(await readJson(await send(`${item(id)}/directory`, { signal }))),
+    versions: async (id: string, signal: AbortSignal) =>
+      fileVersionsSchema.parse(await readJson(await send(`${item(id)}/versions`, { signal }))),
+    versionContent: async (id: string, version: number, signal?: AbortSignal) =>
+      (await send(`${item(id)}/versions/${version}/content`, signal ? { signal } : {})).arrayBuffer(),
+    restoreVersion: async (id: string, version: number) =>
+      fileVersionSchema
+        .omit({ createdBy: true })
+        .parse(await readJson(await send(`${item(id)}/versions/${version}/restore`, { method: 'POST' }))),
     sharing: async (id: string, signal: AbortSignal) =>
       fileSharingSnapshotSchema.parse(await readJson(await send(`${item(id)}/sharing`, { signal }))),
     share: async (id: string, subject: FileSubject, role: FileRole | null) => {

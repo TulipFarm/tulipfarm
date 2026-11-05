@@ -2,10 +2,8 @@ import { Button } from '@tulipfarm/sprout/button';
 import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
 
 /** Operator guide for configuring model providers and the catalog. */
-export const modelSetupDocsUrl = new URL(
-  '/self-hosting/models/',
-  import.meta.env.VITE_DOCS_URL || 'https://docs.tulipfarm.ai',
-).href;
+const docsUrl = import.meta.env.VITE_DOCS_URL || 'https://tulipfarm.ai/docs/';
+export const modelSetupDocsUrl = new URL('self-hosting/models/', docsUrl.endsWith('/') ? docsUrl : `${docsUrl}/`).href;
 
 export const noModelsConfigured = 'No models configured';
 

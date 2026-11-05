@@ -10,12 +10,24 @@ import { createPublicHttpsFetch } from './public-https.ts';
 
 export {
   authenticationHeaders,
+  listedPrivateHost,
+  normalizeDestination,
   normalizeEndpoint,
+  parsePrivateHosts,
   publicAddress,
   McpNetworkError,
+  type DestinationAddresses,
   type McpAuthentication,
+  type McpNetworkErrorDetail,
+  type PrivateHost,
 } from './policy.ts';
-export { publicHttpsFetch } from './public-https.ts';
+export {
+  pinnedRequest,
+  publicHttpsFetch,
+  type PinnedRequestInit,
+  type PinnedRequestPolicy,
+  type PinnedResponse,
+} from './public-https.ts';
 export * from './oauth.ts';
 export * from './registry.ts';
 export {

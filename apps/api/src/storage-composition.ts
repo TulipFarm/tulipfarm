@@ -13,6 +13,7 @@ import { registerRecommendationEvents } from './recommendation-events.ts';
 import { recommendationEligibility } from '@tulipfarm/recommendations/configuration';
 import { registerTableDispatch } from './table-dispatch.ts';
 import { createReplyDispatch, registerConversationDispatch } from './conversation-dispatch.ts';
+import { createApiCallReviews, registerApiCalls } from './api-calls.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -47,7 +48,7 @@ import { registerSkills } from './skills.ts';
 import { registerSkillImports } from './skill-imports.ts';
 import { registerSkillImportDispatch } from './skill-import-dispatch.ts';
 import { registerAgentTasks } from './agent-tasks.ts';
-import { planWake, taskActionWake, taskWake } from './task-dispatch.ts';
+import { planDocumentStart, planWake, taskActionWake, taskWake } from './task-dispatch.ts';
 import { registerAgentPlans } from './agent-plans.ts';
 import { createTaskApprovalDecision } from '@tulipfarm/agents/task-approvals';
 import { registerAuthoringDrafts } from './authoring-drafts.ts';
@@ -81,6 +82,8 @@ import { registerKnowledgeComposition } from './knowledge-composition.ts';
 import { registerKnowledgeDispatch } from './knowledge-dispatch.ts';
 import type { defaultKnowledgeStarter } from './knowledge-defaults-dispatch.ts';
 import { workspaceMcpApi } from './workspace-mcp-composition.ts';
+import { registerSecrets } from './secrets.ts';
+import { secretsServices } from './secrets-composition.ts';
 import { registerWorkspaceMcp } from './workspace-mcp.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentSetupOptions } from '@tulipfarm/agents/setup';
@@ -202,6 +205,7 @@ export function registerStorageComposition(
   });
   const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
+  registerSecrets(app, dependencies.auth, secretsServices(runtime), wakeTask);
   const github = githubAccounts(runtime);
   if (github) {
     const batchOptions = {
@@ -242,7 +246,13 @@ export function registerStorageComposition(
     resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
     wakeTaskAction,
   });
-  registerAgentPlans(app, { runtime, auth: dependencies.auth, wake: planWake(app, temporal) });
+  registerAgentPlans(app, {
+    runtime,
+    auth: dependencies.auth,
+    wake: planWake(app, temporal),
+    identity: dependencies.pool,
+    ...(chatObjects ? { documents: { objects: chatObjects, start: planDocumentStart(app, temporal) } } : {}),
+  });
   registerAgentTasks(app, {
     runtime,
     auth: dependencies.auth,
@@ -277,6 +287,16 @@ export function registerStorageComposition(
     events.close();
   });
   const replies = createReplyDispatch({ runtime, temporal });
+  registerApiCalls(
+    app,
+    dependencies.auth,
+    createApiCallReviews({
+      runtime,
+      resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+      wakeChat: replies.sent,
+      wakeTask,
+    }),
+  );
   const conversations = createConversations(runtime, chatSkills, {
     pinTurn: async (tx, workspaceId, familyId) =>
       (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
@@ -310,7 +330,7 @@ export function registerStorageComposition(
   app.addHook('onClose', async () => {
     await confirmation.close();
   });
-  registerGovernance(app, {
+  dependencies.invitationLinks.current = registerGovernance(app, {
     auth: dependencies.auth,
     identity: dependencies.pool,
     runtime,

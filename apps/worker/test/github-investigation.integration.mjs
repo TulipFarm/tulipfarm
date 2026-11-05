@@ -37,6 +37,32 @@ test('private investigation waits for a human choice, reads one source, and bloc
   );
   await f.send(chatId);
   assert.ok(f.providerCalls.some(call => call.url.endsWith('/repos/example/web')));
+  f.setProvider(async url =>
+    new URL(url).pathname === '/user/repos'
+      ? Response.json([
+          {
+            url: 'https://api.github.com/repos/example/web',
+            html_url: 'https://github.com/example/web',
+            full_name: 'example/web',
+            name: 'web',
+            owner: { login: 'example' },
+            private: true,
+            fork: false,
+          },
+        ])
+      : Response.json({ name: 'private-repository', description: 'Private account content' }),
+  );
+  f.decide([{ tool: 'github.investigation.repositories' }], 'The selected account has one repository.');
+  await f.send(chatId, 'List the repositories of the selected account.');
+  assert.ok(
+    f.providerCalls.some(call => new URL(call.url).pathname === '/user/repos'),
+    'personal discovery without a query lists the account repositories',
+  );
+  assert.equal(
+    f.providerCalls.some(call => new URL(call.url).pathname === '/search/repositories'),
+    false,
+  );
+  assert.match(JSON.stringify(f.modelRequests.at(-1)), /example\/web/);
   const before = f.providerCalls.length;
   f.decide(
     [

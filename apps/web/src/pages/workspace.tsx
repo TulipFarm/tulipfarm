@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/rea
 import { Add } from 'reicon-react/icons/Add';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { Check } from 'reicon-react/icons/Check';
+import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
 import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
 import { BookOpen } from 'reicon-react/icons/BookOpen';
@@ -79,11 +80,13 @@ import { overrides } from '@/extensions';
 import { PageChromeContext } from '@tulipfarm/sprout/page-header';
 import { ChatHeaderContext } from '@/features/chat/header-context';
 import { InviteMembersPrompt } from '@/features/governance/invite-members-prompt';
+import { useOwnMembership } from '@/features/governance/queries';
 import { BudProvider } from '@/features/chat/bud-provider';
 import { WorkspaceQueryProvider } from '@/lib/query';
 import { setAnalyticsWorkspace } from '@/lib/analytics';
 import { setFlagWorkspace, useFlag } from '@/lib/feature-flags';
 import { useWorkspaceSettings } from '@/features/settings/queries';
+import { useSecretsCapabilities } from '@/features/secrets/queries';
 import type { RecentSection } from '@/features/navigation/recent-queries';
 import { ReauthorizationBanner } from '@/features/integrations/reauthorization-banner';
 import { ReconnectBanner } from '@/features/workspaces/reconnect-banner';
@@ -104,6 +107,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/workflows'
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
+  | '/$workspaceSlug/settings/secrets'
   | '/$workspaceSlug/settings/models'
   | '/$workspaceSlug/settings/usage'
   | '/$workspaceSlug/teams'
@@ -133,7 +137,9 @@ function preloadChatsCode() {
 const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: Inbox };
 const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: Setting2 };
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
+const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
+const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: People };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
@@ -171,7 +177,7 @@ const usage: Page[] = overrides.get('usage')
 const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
 const administrationPages: Page[] = [
   members,
-  { label: 'Teams', to: '/$workspaceSlug/teams', icon: People },
+  teams,
   { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser },
 ];
 const settingsPages: Page[] = [
@@ -186,6 +192,7 @@ const pages = [
   chats,
   inbox,
   account,
+  secrets,
   models,
   ...usage,
   soul,
@@ -443,7 +450,7 @@ function ProfileMenu() {
 
 function useSettingsMode() {
   const current = useCurrentPage();
-  return current === account || settingsPages.some(page => page.to === current.to);
+  return current === account || current === secrets || settingsPages.some(page => page.to === current.to);
 }
 
 function SettingsNavigation() {
@@ -456,6 +463,8 @@ function SettingsNavigation() {
     !settings.state.error &&
     settings.state.data.settings.canManage &&
     settings.state.data.membership.role === 'admin';
+  const capabilities = useSecretsCapabilities(workspace.id);
+  const secretsVisible = capabilities.state.kind === 'ready' && capabilities.state.data.enabled;
   const { setOpenMobile } = useSidebar();
   return (
     <>
@@ -480,6 +489,7 @@ function SettingsNavigation() {
             <SidebarGroupLabel>Personal</SidebarGroupLabel>
             <SidebarMenu>
               <NavItem page={account} />
+              {secretsVisible && <NavItem page={secrets} />}
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>
@@ -496,6 +506,26 @@ function SettingsNavigation() {
       </SidebarContent>
     </>
   );
+}
+
+function PeopleNavigation() {
+  const { workspace, membershipId } = workspaceRoute.useRouteContext();
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>People</SidebarGroupLabel>
+      <SidebarMenu>
+        {membershipId && workspace.status === 'ready' && <AdminMembersNavItem key={workspace.id} />}
+        <NavItem page={teams} />
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+}
+
+function AdminMembersNavItem() {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const membership = useOwnMembership(workspace.id);
+  const admin = membership.state.kind === 'ready' && membership.state.data.capabilities.manageGovernance;
+  return admin ? <NavItem page={members} /> : null;
 }
 
 function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
@@ -547,6 +577,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                     </SidebarMenu>
                   </SidebarGroup>
                 ))}
+                <PeopleNavigation />
               </nav>
             </SidebarContent>
           </>
@@ -700,7 +731,7 @@ function WorkspaceShellContent() {
               </SidebarTrigger>
               <div ref={setHeaderElement} className="flex min-w-0 flex-1 items-center gap-2" />
               <div ref={setActionsElement} className="flex shrink-0 items-center gap-2" />
-              {membershipId && workspace.status === 'ready' && (
+              {membershipId && workspace.status === 'ready' && currentPage !== members && (
                 <InviteMembersPrompt
                   key={workspace.id}
                   userId={user.id}

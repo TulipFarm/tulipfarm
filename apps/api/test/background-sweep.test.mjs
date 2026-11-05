@@ -6,6 +6,7 @@ import { errorAttributes } from '@tulipfarm/observability';
 import { randomUUID } from 'node:crypto';
 import { taskActionWake, taskWake } from '../src/task-dispatch.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
+import { apiRole, apiTelemetryService } from '../src/api-role.ts';
 
 test('workspace discovery retains the original error and safe stage without changing the query', async () => {
   const failure = Object.freeze(
@@ -36,6 +37,41 @@ test('workspace discovery retains the original error and safe stage without chan
   });
   const rows = [{ workspace_id: randomUUID() }];
   assert.deepEqual(await readyWorkspaces({ query: async () => ({ rows }) }, null, 100), rows);
+});
+
+test('api role defaults to all, accepts requests and jobs, rejects anything else, and names the jobs service', () => {
+  assert.equal(apiRole({}), 'all');
+  assert.equal(apiRole({ TULIPFARM_API_ROLE: ' ' }), 'all');
+  assert.equal(apiRole({ TULIPFARM_API_ROLE: 'requests' }), 'requests');
+  assert.equal(apiRole({ TULIPFARM_API_ROLE: 'jobs' }), 'jobs');
+  assert.throws(() => apiRole({ TULIPFARM_API_ROLE: 'Jobs' }), /must be all, requests or jobs/);
+  assert.equal(apiTelemetryService('jobs'), 'tulipfarm-api-jobs');
+  assert.equal(apiTelemetryService('requests'), undefined);
+  assert.equal(apiTelemetryService('all'), undefined);
+});
+
+test('the requests role starts no sweeps while all and jobs run them', async t => {
+  const previous = process.env.TULIPFARM_API_ROLE;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TULIPFARM_API_ROLE;
+    else process.env.TULIPFARM_API_ROLE = previous;
+  });
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  for (const [role, expected] of [
+    ['all', 2],
+    ['jobs', 2],
+    ['requests', 0],
+  ]) {
+    process.env.TULIPFARM_API_ROLE = role;
+    const app = Fastify();
+    let runs = 0;
+    backgroundSweeps(app, [{ job: 'workflow-dispatch', failure: 'failed', run: async () => void runs++ }]);
+    await app.ready();
+    t.mock.timers.tick(2000);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(runs, expected, role);
+    await app.close();
+  }
 });
 
 test('independent sweeps never overlap and shutdown stops every loop before waiting for work', async t => {

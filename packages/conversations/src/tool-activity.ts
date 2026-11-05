@@ -22,6 +22,8 @@ export const toolActivityLabels = {
   'bud.preference.ask': 'Asking about your preferences',
   'bud.preference.propose': 'Preparing a preference for review',
   'present.choice': 'Asking you to choose',
+  'secrets.request': 'Asking you for a secret',
+  'secrets.list': 'Checking secrets in this chat',
   'tables.list': 'Listing business tables',
   'tables.definitions': 'Listing business tables',
   'tables.propose': 'Preparing table changes for review',
@@ -86,7 +88,14 @@ export const toolActivityLabels = {
   'knowledge.add': 'Preparing a Knowledge entry for review',
   'knowledge.update': 'Preparing a Knowledge change for review',
   'knowledge.remove': 'Preparing a Knowledge removal for review',
+  'memory.read': 'Reading your memory',
+  'memory.edit': 'Preparing a memory change for review',
+  'memory.forget': 'Forgetting part of your memory',
+  'integrations.list': 'Checking your connected accounts',
+  'integrations.connect': 'Preparing a card to connect an app',
+  'integrations.disconnect': 'Preparing a card to disconnect an account',
   'web.fetch': 'Reading a web page',
+  'api.request': 'Calling an API',
   'packages.inspect': 'Inspecting a system package',
   'packages.recommend': 'Finding ready-made packages',
   'conversation.messages.read': 'Rereading an earlier message',
@@ -96,6 +105,8 @@ export const toolActivityLabels = {
   'files.move': 'Preparing a move for review',
   'files.trash': 'Preparing files to move to Trash',
   'files.restore': 'Preparing files to restore from Trash',
+  'files.share': 'Preparing a share for review',
+  'members.find': 'Finding people and teams',
   'files.create': 'Saving a file to Files',
   'images.generate': 'Generating images',
   'slack.resolve': 'Finding a Slack channel or person',
@@ -164,6 +175,7 @@ const toolAreaNames: Record<string, string> = {
   schema: 'Tables',
   knowledge: 'Knowledge',
   web: 'Web search',
+  api: 'APIs',
   files: 'Files',
   images: 'Images',
   skills: 'Skills',
@@ -172,6 +184,7 @@ const toolAreaNames: Record<string, string> = {
   workflows: 'Workflows',
   conversation: 'Chat history',
   bud: 'Preferences',
+  memory: 'Memory',
   present: 'Choices',
   slack: 'Slack',
   github: 'GitHub',
@@ -442,7 +455,73 @@ export function toolPresentation(storedTool: string, call?: unknown, storedActiv
     if (actions.length === 1) label = `Preparing: ${actions[0]}`;
     else if (actions.length > 1) label = `Preparing ${parsed.data.actions.length} GitHub changes for review`;
   }
+  if (tool === 'api.request') label = apiCallLabel(call) ?? label;
   return { label: [...label].slice(0, 240).join(''), brand };
+}
+
+const apiCallShape = z.object({ method: z.string().regex(/^[A-Z]{3,7}$/), url: z.string() });
+/** "GET host/path" without the query, which may carry a secret placement. */
+function apiCallLabel(call: unknown) {
+  const parsed = apiCallShape.safeParse(call);
+  if (!parsed.success || !URL.canParse(parsed.data.url)) return null;
+  const url = new URL(parsed.data.url);
+  return `${parsed.data.method} ${url.host}${url.pathname === '/' ? '' : url.pathname}`;
+}
+
+/** `review` marks a change that waited for its member's approval, which the chat shows as a review card. */
+export const apiCallReceiptSchema = z.union([
+  z.object({ httpStatus: z.int().min(100).max(599), review: z.literal(true).optional() }),
+  z.object({ error: z.string().max(64), review: z.literal(true).optional() }),
+  z.object({ review: z.literal(true) }),
+]);
+const apiCallOutputSchema = z.object({
+  result: z.union([
+    z.object({ status: z.literal('sent'), response: z.object({ status: z.int().min(100).max(599) }) }),
+    z.object({ status: z.literal('failed'), code: z.string().max(64) }),
+  ]),
+});
+/** The HTTP status of a sent API call, or the error code of a failed one; never the body, headers or URL. */
+export function apiCallReceipt(
+  tool: string,
+  output: unknown,
+  review = false,
+): z.infer<typeof apiCallReceiptSchema> | null {
+  if (tool !== 'api.request') return null;
+  const parsed = apiCallOutputSchema.safeParse(output);
+  const marked = review ? { review: true as const } : {};
+  if (!parsed.success) return review ? { review: true } : null;
+  const result = parsed.data.result;
+  return result.status === 'sent'
+    ? { httpStatus: result.response.status, ...marked }
+    : { error: result.code, ...marked };
+}
+
+const apiCallProblems = new Map(
+  Object.entries({
+    'approval-unavailable': 'Changes need your approval, which isn’t available here.',
+    rejected: 'You chose not to send this request.',
+    expired: 'The approval expired.',
+    conflict: 'The approval no longer matches this request.',
+    'outcome-unknown': 'The request may have been sent. Check the service before retrying.',
+    'network-failed': 'Couldn’t reach the server.',
+    'dns-failed': 'Couldn’t find the server.',
+    timeout: 'The server took too long to respond.',
+    'address-denied': 'This address isn’t allowed.',
+    'destination-denied': 'This secret can’t be sent to this address.',
+    'credential-in-request': 'Keys must be saved as secrets, not put in the request.',
+    'secret-reflected': 'The response repeated the secret, so it was hidden.',
+    'call-limit': 'Too many calls. Try again shortly.',
+    'invalid-request': 'The request wasn’t valid.',
+    'too-large': 'The request was too large to send.',
+    disabled: 'Secrets aren’t available here.',
+    'not-found': 'The secret wasn’t found.',
+    unavailable: 'The secret isn’t available.',
+    'placement-unsupported': 'This secret can’t be used that way.',
+    'credential-unavailable': 'The secret couldn’t be read.',
+  }),
+);
+export function apiCallProblem(code: string | undefined) {
+  return (code && apiCallProblems.get(code)) || 'The API call failed.';
 }
 
 const outputSchema = z.object({
@@ -472,7 +551,11 @@ export function toolOutcomeStatus(output: unknown): z.infer<typeof activityStatu
   if (statuses.includes('cancelled')) return 'cancelled';
   if (
     statuses.some(
-      status => status === 'waiting-approval' || status === 'awaiting-approval' || status === 'selection-required',
+      status =>
+        status === 'waiting-approval' ||
+        status === 'awaiting-approval' ||
+        status === 'awaiting-input' ||
+        status === 'selection-required',
     )
   )
     return 'waiting';

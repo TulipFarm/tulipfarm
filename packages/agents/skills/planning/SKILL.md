@@ -91,7 +91,47 @@ creation or the needed trigger is unsupported, record that exact blocker rather
 than inventing a step. Do not send a live alert or create a real issue solely as
 a test without the required authority.
 
-## 4. Execute and maintain progress
+## 4. Write the plan document
+
+When plans offer `document`, write it with every structured plan, in `plans.create`
+or a later `plans.update`:
+
+- `summary`: the outcome and why this plan reaches it, in a few sentences.
+- `approach`: how the work proceeds and the main choices made, with their reasons.
+- `risks`: what could go wrong, each with its mitigation.
+
+The task outline is already drawn as a diagram. Add a diagram only when it explains
+something that outline does not, such as a data flow, a message sequence, or the
+states of a record. Use only `flowchart` (or `graph`), `sequenceDiagram`,
+`stateDiagram-v2` or `timeline`. Use plain-text labels: no links, `click`, HTML,
+or `%%{` directives.
+
+When the person asks to change the plan, update the same plan with `plans.update`,
+including any document sections the change affects. Do not create a new plan.
+The person approves an exact revision. A change to an approved plan that is
+running pauses it until they approve the new revision; repairs and retries after
+failed work do not.
+If `plans.update` returns `document-unavailable`, continue without the document.
+
+### Share the plan
+
+When the person asks to share the plan, share only its PDF. It is in their
+`plans` folder in Files; find it with `files.list`. Never share the chat, the
+plan's results, or the `plans` folder.
+
+1. Find each person or team with `members.find`, by name or email. If a name
+   matches more than one, ask which one they mean. Never guess.
+2. Use viewer unless they ask for editor.
+3. Call `files.share` with the PDF's file ID, the people and teams, and the role.
+   It returns a card. Nothing is shared until the person approves it there.
+
+The card leaves off anyone who can't read every source the plan was written
+from. Tell the person who was left off. Do not try to add them another way;
+this cannot be overridden from chat. If `files.share` returns `no-change`,
+say who already has access or was left off. If a card goes out of date, make
+a fresh one. To stop sharing, the person uses Files.
+
+## 5. Execute and maintain progress
 
 Read the latest plan version before changing it. Use `plans.claim` with the plan
 ID, ready task key, and current version. Keep its attempt ID. Use normal chat
@@ -104,6 +144,7 @@ Do not claim work merely because you wrote instructions for it.
 
 For an explicit request to start a saved draft, use `plans.start` with its current
 version. The person's Start button does the same through the normal chat path.
+If it returns `approval-required`, ask the person to review and approve the plan.
 Never start a draft from a Plan-only turn.
 
 Delegation is optional. Delegate only independent, bounded work with enough
@@ -128,7 +169,7 @@ At a tool boundary, retain the current plan, task, receipts, and next action.
 Yield through durable continuation when offered. Otherwise give an honest
 handoff; never pretend background execution exists when no work was dispatched.
 
-## 5. Verify the original request
+## 6. Verify the original request
 
 Final verification is a separate task, not a closing sentence. Read the original
 requirements and current resource state. For every requirement, record what was

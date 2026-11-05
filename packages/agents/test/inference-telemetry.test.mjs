@@ -506,51 +506,48 @@ test('provider inference telemetry covers body consumption, usage, returned erro
         sent.map(value => Buffer.byteLength(value)),
       );
     });
-    await t.test(
-      'detail admission and transport failures preserve errors and never settle undispatched calls',
-      async t => {
-        const denied = new Error('PRIVATE CREDIT DENIAL');
-        t.mock.method(globalThis, 'fetch', noTools);
-        let count = finished().length;
-        await assert.rejects(
-          withChatMeasurements(() =>
-            inferWithTools(nativeRoutes.azure, messages, noTools, async () => {
-              throw denied;
-            }),
-          ),
-          error => error === denied,
-        );
-        let details = finished().slice(count);
-        assert.equal(details.filter(span => span.name === 'chat.detail.provider').length, 0);
-        assert.equal(details.find(span => span.name === 'chat.detail.reserve').attributes.outcome, 'error');
-        const transport = new Error('PRIVATE TRANSPORT');
-        t.mock.method(globalThis, 'fetch', async () => {
-          throw transport;
-        });
-        count = finished().length;
-        await assert.rejects(
-          withChatMeasurements(() => inferWithTools(nativeRoutes.azure, messages, noTools, async () => noTools)),
-          error => error.message === 'model-transport' && error.code === 'network' && error.cause === transport,
-        );
-        details = finished().slice(count);
-        assert.equal(details.find(span => span.name === 'chat.detail.provider').attributes.outcome, 'error');
-        assert.equal(details.filter(span => span.name === 'chat.detail.settle').length, 0);
-        t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('azure', { text: answer.text })));
-        count = finished().length;
-        await assert.rejects(
-          withChatMeasurements(() =>
-            inferWithTools(nativeRoutes.azure, messages, noTools, async () => async () => {
-              throw denied;
-            }),
-          ),
-          error => error === denied,
-        );
-        details = finished().slice(count);
-        assert.equal(details.find(span => span.name === 'chat.detail.provider').attributes.outcome, 'success');
-        assert.equal(details.find(span => span.name === 'chat.detail.settle').attributes.outcome, 'error');
-        assert.equal(details.filter(span => span.name === 'chat.detail.decision-parse').length, 0);
-      },
-    );
+    await t.test('detail admission and transport failures preserve errors and release undispatched calls', async t => {
+      const denied = new Error('PRIVATE CREDIT DENIAL');
+      t.mock.method(globalThis, 'fetch', noTools);
+      let count = finished().length;
+      await assert.rejects(
+        withChatMeasurements(() =>
+          inferWithTools(nativeRoutes.azure, messages, noTools, async () => {
+            throw denied;
+          }),
+        ),
+        error => error === denied,
+      );
+      let details = finished().slice(count);
+      assert.equal(details.filter(span => span.name === 'chat.detail.provider').length, 0);
+      assert.equal(details.find(span => span.name === 'chat.detail.reserve').attributes.outcome, 'error');
+      const transport = new Error('PRIVATE TRANSPORT');
+      t.mock.method(globalThis, 'fetch', async () => {
+        throw transport;
+      });
+      count = finished().length;
+      await assert.rejects(
+        withChatMeasurements(() => inferWithTools(nativeRoutes.azure, messages, noTools, async () => noTools)),
+        error => error.message === 'model-transport' && error.code === 'network' && error.cause === transport,
+      );
+      details = finished().slice(count);
+      assert.equal(details.find(span => span.name === 'chat.detail.provider').attributes.outcome, 'error');
+      assert.equal(details.find(span => span.name === 'chat.detail.settle').attributes.outcome, 'error');
+      t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('azure', { text: answer.text })));
+      count = finished().length;
+      await assert.rejects(
+        withChatMeasurements(() =>
+          inferWithTools(nativeRoutes.azure, messages, noTools, async () => async () => {
+            throw denied;
+          }),
+        ),
+        error => error === denied,
+      );
+      details = finished().slice(count);
+      assert.equal(details.find(span => span.name === 'chat.detail.provider').attributes.outcome, 'success');
+      assert.equal(details.find(span => span.name === 'chat.detail.settle').attributes.outcome, 'error');
+      assert.equal(details.filter(span => span.name === 'chat.detail.decision-parse').length, 0);
+    });
     await t.test(
       'provider detail consumes the complete SSE body before settlement and preserves streamed text',
       async t => {
@@ -636,7 +633,8 @@ test('provider inference telemetry covers body consumption, usage, returned erro
         ),
         { message: 'model-invalid-decision' },
       );
-      assert.deepEqual(settled.slice(1), [{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }]);
+      assert.equal(settled.length, 4);
+      assert.ok(settled.slice(1).every(usage => usage.kind === 'known' && usage.input > 0 && usage.output === 0));
       const details = finished()
         .slice(start)
         .filter(span => span.name === 'chat.detail.provider');
@@ -660,7 +658,7 @@ test('provider inference telemetry covers body consumption, usage, returned erro
         ),
         { message: 'model-invalid-response' },
       );
-      assert.deepEqual(settled.at(-1), { kind: 'unknown' });
+      assert.equal(settled.at(-1).kind, 'known');
       assert.equal(
         finished()
           .slice(timed)

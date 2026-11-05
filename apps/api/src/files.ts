@@ -15,6 +15,8 @@ import {
   fileSharingSnapshotSchema,
   fileSubjectSchema,
   fileSummarySchema,
+  fileVersionSchema,
+  fileVersionsSchema,
   libraryCursorTokenSchema,
   libraryFiltersSchema,
   libraryPageSchema,
@@ -34,6 +36,7 @@ import { requestBoundaryError } from './security.ts';
 
 const workspaceParams = z.strictObject({ workspaceId: uuidSchema });
 const itemParams = workspaceParams.extend({ fileId: uuidSchema });
+const versionParams = itemParams.extend({ version: z.coerce.number().int().positive().max(2_147_483_647) });
 const listQuery = z.strictObject({
   parentId: z.union([uuidSchema, z.literal('null')]).optional(),
   query: z.string().max(255).optional(),
@@ -75,6 +78,7 @@ export const fileErrorStatus: Record<FileError['code'], number> = {
   'owned-by-others': 409,
   'not-trashed': 409,
   'restore-destination': 409,
+  'media-type': 415,
 };
 const errorSchema = {
   type: 'object',
@@ -126,13 +130,21 @@ export function registerFiles(
     // The response's `close` fires whether it finished or the sender left. Fastify's onRequestAbort misses a sender
     // that leaves after its body arrived, and onResponse never runs for a destroyed socket, so neither can free the slot.
     const transfers = new Set<FastifyRequest>();
+    const transferOperations = new Set([
+      'uploadFileV1',
+      'downloadFileV1',
+      'downloadFileVersionV1',
+      'restoreFileVersionV1',
+    ]);
     routes.addHook('onRequest', async (request, reply) => {
       const operation = request.routeOptions.schema?.operationId;
-      if (operation !== 'uploadFileV1' && operation !== 'downloadFileV1') return;
+      if (!operation || !transferOperations.has(operation)) return;
       if (transfers.size >= 4) return reply.code(503).send({ error: 'file-busy' });
       transfers.add(request);
       reply.raw.once('close', () => transfers.delete(request));
-      itemParams.parse(request.params);
+      (operation === 'uploadFileV1' || operation === 'downloadFileV1' ? itemParams : versionParams).parse(
+        request.params,
+      );
       if (operation === 'uploadFileV1') uploadQuery.parse(request.query);
     });
     routes.setErrorHandler((error, _request, reply) => {
@@ -371,6 +383,69 @@ export function registerFiles(
           .header('Content-Disposition', `attachment; filename="file"; filename*=UTF-8''${filename}`)
           .type('application/octet-stream')
           .send(Buffer.from(result.bytes));
+      },
+    );
+    routes.get(
+      `${base}/:fileId/versions`,
+      { logLevel: 'silent', schema: schema('listFileVersionsV1', itemParams, fileVersionsSchema) },
+      async request => {
+        const { workspaceId, fileId } = itemParams.parse(request.params);
+        const listed = await service.listVersions(workspaceId, user(request), fileId);
+        const names = new Map((await people(listed.creators)).map(person => [person.membershipId, person.name]));
+        return {
+          role: listed.role,
+          versions: listed.versions.map(({ createdByMembershipId, ...version }) => ({
+            ...version,
+            createdBy: {
+              membershipId: createdByMembershipId,
+              name: names.get(createdByMembershipId) ?? 'Former member',
+            },
+          })),
+        };
+      },
+    );
+    const versionDownloadSchema = schema('downloadFileVersionV1', versionParams, z.string());
+    routes.get(
+      `${base}/:fileId/versions/:version/content`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...versionDownloadSchema,
+          response: { ...versionDownloadSchema.response, 200: { type: 'string', format: 'binary' } },
+        },
+      },
+      async (request, reply) => {
+        const { workspaceId, fileId, version } = versionParams.parse(request.params);
+        const reader = new AbortController();
+        if (reply.raw.destroyed || request.raw.aborted) reader.abort();
+        else
+          reply.raw.once('close', () => {
+            if (!reply.raw.writableFinished) reader.abort();
+          });
+        const result = await service.downloadVersion(workspaceId, user(request), fileId, version, reader.signal);
+        const filename = encodeURIComponent(result.name).replaceAll("'", '%27');
+        return reply
+          .header('X-Content-Type-Options', 'nosniff')
+          .header('Content-Disposition', `attachment; filename="file"; filename*=UTF-8''${filename}`)
+          .type('application/octet-stream')
+          .send(Buffer.from(result.bytes));
+      },
+    );
+    routes.post(
+      `${base}/:fileId/versions/:version/restore`,
+      {
+        logLevel: 'silent',
+        schema: schema('restoreFileVersionV1', versionParams, fileVersionSchema.omit({ createdBy: true })),
+      },
+      async request => {
+        const { workspaceId, fileId, version } = versionParams.parse(request.params);
+        const { createdByMembershipId: _creator, ...restored } = await service.restoreVersion(
+          workspaceId,
+          user(request),
+          fileId,
+          version,
+        );
+        return restored;
       },
     );
     routes.patch(

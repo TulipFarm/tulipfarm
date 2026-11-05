@@ -18,7 +18,7 @@ const legacy = proxyActivities<{ processAgentTask(workspaceId: string, taskId: s
 const activities = proxyActivities<{
   processAgentTaskStep(workspaceId: string, taskId: string): Promise<TaskProgress>;
 }>({
-  startToCloseTimeout: '2 minutes',
+  startToCloseTimeout: '4 minutes',
   retry: { initialInterval: '1 second', maximumInterval: '10 seconds' },
 });
 const recovery = proxyActivities<{

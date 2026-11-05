@@ -236,6 +236,7 @@ services:
       WEB_ORIGIN: ${TULIPFARM_PUBLIC_URL}
       WEBSITE_ORIGIN: ${TULIPFARM_PUBLIC_URL}
       API_PROXY_MODE: reverse-proxy
+      API_CALL_PRIVATE_HOSTS: ${API_CALL_PRIVATE_HOSTS:-}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -253,6 +254,7 @@ services:
     environment:
       <<: [*temporal-client, *models, *flags, *telemetry, *public-web]
       BETTER_AUTH_URL: ${TULIPFARM_PUBLIC_URL:?Set TULIPFARM_PUBLIC_URL}
+      API_CALL_PRIVATE_HOSTS: ${API_CALL_PRIVATE_HOSTS:-}
       ACS_CONNECTION_STRING: ${ACS_CONNECTION_STRING:-}
       ACS_SENDER_ADDRESS: ${ACS_SENDER_ADDRESS:-}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
@@ -272,6 +274,16 @@ services:
     volumes: [generated:/run/tulipfarm:ro]
     environment:
       <<: [*temporal-client, *telemetry]
+
+  # Draws plan documents with Chromium. It has no database access, only Temporal and the files bucket.
+  render-worker:
+    <<: *runtime
+    build: { context: .., dockerfile: apps/render-worker/Dockerfile, target: render-worker, args: *release }
+    command: [node, --env-file=/run/tulipfarm/render-worker.env, dist/worker.js]
+    volumes: [generated:/run/tulipfarm:ro]
+    environment:
+      <<: [*temporal-client]
+      RENDER_WORKER_CONCURRENCY: ${RENDER_WORKER_CONCURRENCY:-2}
 
   web:
     build:

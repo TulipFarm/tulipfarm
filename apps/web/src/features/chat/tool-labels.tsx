@@ -7,7 +7,7 @@ import { Users } from 'reicon-react/icons/Users';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import type { ToolActivityItem } from '@tulipfarm/sprout/tool-activity';
 import type { ConversationMessage } from './conversation-api';
-import { isInternalTool, toolPresentation } from '@tulipfarm/conversations/tool-activity';
+import { apiCallProblem, isInternalTool, toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { knowledgeToolActivityItem, knowledgeToolLabel } from './knowledge-activity';
 
 type Tool = ConversationMessage['tools'][number];
@@ -37,7 +37,7 @@ export function toolVisual(tool: string, brand?: Brand | null) {
   if (tool.startsWith('knowledge.')) return <BookOpen size={14} />;
   if (tool.startsWith('agents.')) return <Users size={14} />;
   if (tool === 'web.fetch' || tool === 'files.read') return <BookOpen size={14} />;
-  if (tool.startsWith('web.')) return <Globe size={14} />;
+  if (tool.startsWith('web.') || tool === 'api.request') return <Globe size={14} />;
   if (tool.startsWith('mcp.')) return <Plug size={14} />;
   return <Sparkle size={14} />;
 }
@@ -52,8 +52,8 @@ export function toolLabel(tool: Tool) {
     if (status === 'completed') return search ? 'Searched the web' : 'Read a web page';
     return search ? 'Web search' : 'Page read';
   }
-  if (tool.presentation) return tool.presentation.label;
-  return tool.activity || toolPresentation(tool.tool).label;
+  const label = tool.presentation?.label ?? (tool.activity || toolPresentation(tool.tool).label);
+  return tool.api && 'httpStatus' in tool.api ? `${label} · ${tool.api.httpStatus}` : label;
 }
 
 const problems = {
@@ -100,13 +100,17 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
     visual: toolVisual(tool.tool, brand),
     detail: tool.tool.startsWith('web.')
       ? webDetail(tool)
-      : status === 'blocked' || status === 'failed'
-        ? problems[status]
-        : status === 'unknown'
-          ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
-          : status === 'waiting'
-            ? 'Waiting for approval or another action. Review the action details below.'
-            : undefined,
+      : tool.tool === 'api.request' && status === 'failed'
+        ? apiCallProblem(tool.api && 'error' in tool.api ? tool.api.error : undefined)
+        : status === 'blocked' || status === 'failed'
+          ? problems[status]
+          : status === 'unknown'
+            ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
+            : status === 'waiting'
+              ? tool.tool === 'api.request'
+                ? 'Waiting for your approval.'
+                : 'Waiting for approval or another action. Review the action details below.'
+              : undefined,
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }
       : {}),

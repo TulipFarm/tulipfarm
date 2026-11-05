@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createBackgroundJob, withErrorStage, type BackgroundJob, errorAttributes } from '@tulipfarm/observability';
+import { apiRole } from './api-role.ts';
 
 type Sweep = { run: (stopped: () => boolean) => Promise<void>; failure: string; job: BackgroundJob };
 
@@ -24,6 +25,7 @@ export function backgroundSweep(
 }
 
 export function backgroundSweeps(app: FastifyInstance, sweeps: readonly Sweep[], immediate = true) {
+  if (apiRole() === 'requests') return;
   let stopping = false;
   const tasks = sweeps.map(sweep => {
     const observation = createBackgroundJob(sweep.job, 2);

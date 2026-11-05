@@ -25,7 +25,9 @@ let failList = false,
   failDisconnect = false,
   listDelay = 0,
   consentDelay = 0,
-  callbackStatus = 200;
+  callbackStatus = 200,
+  installationParams = false,
+  inactiveCallback = false;
 let beginCalls = 0,
   disconnectCalls = 0,
   callbackCalls = 0;
@@ -59,7 +61,7 @@ try {
     await route.fulfill({
       status: 302,
       headers: {
-        location: `${origin}/github/callback?${new URLSearchParams({ code: 'browser-provider-code', iss: 'https://github.com/login/oauth', state: url.searchParams.get('state') })}`,
+        location: `${origin}/github/callback?${new URLSearchParams({ code: 'browser-provider-code', iss: 'https://github.com/login/oauth', state: url.searchParams.get('state'), ...(installationParams ? { installation_id: '42', setup_action: 'install' } : {}) })}`,
       },
     });
   });
@@ -93,7 +95,12 @@ try {
         headers: { origin, ...(req.postData() ? { 'content-type': 'application/json' } : {}) },
         ...(req.postData() ? { payload: req.postData() } : {}),
       });
-      return route.fulfill({ status: response.statusCode, contentType: 'application/json', body: response.body });
+      let body = response.body;
+      if (inactiveCallback && path.endsWith('/oauth/callback') && response.statusCode === 200) {
+        const result = JSON.parse(body);
+        body = JSON.stringify({ ...result, account: { ...result.account, state: 'reconnect-required' } });
+      }
+      return route.fulfill({ status: response.statusCode, contentType: 'application/json', body });
     }
     let json,
       status = 200;
@@ -120,10 +127,12 @@ try {
     }
     await route.fulfill({ status, json });
   });
-  const open = () => page.goto(`${origin}/${workspace.slug}/integrations#github-accounts`);
+  const accountsPath = `/${workspace.slug}/integrations/github?tab=accounts`;
+  const open = () => page.goto(origin + accountsPath);
+  const logins = page.getByRole('region', { name: 'GitHub logins' });
   listDelay = 800;
   await open();
-  await page.getByText('Loading GitHub accounts…').waitFor();
+  await page.getByText('Loading GitHub accounts…').waitFor({ state: 'attached' });
   assert.equal(await page.getByText('No personal GitHub accounts', { exact: true }).count(), 0);
   await page.getByText('No personal GitHub accounts', { exact: true }).waitFor();
   listDelay = 0;
@@ -135,11 +144,11 @@ try {
   failList = true;
   await page.reload();
   await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).waitFor();
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await setTimeout(4000);
   await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).waitFor();
   failList = false;
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await page.getByText('No personal GitHub accounts', { exact: true }).waitFor();
   consentDelay = 600;
   await page.getByRole('button', { name: 'Connect GitHub account', exact: true }).dblclick();
@@ -149,34 +158,32 @@ try {
   assert.equal(new URL(page.url()).search, '');
   await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
   await page.getByText('@octocat', { exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname + new URL(page.url()).search, accountsPath);
   f.setProfile({ id: 456, login: 'second-person' });
-  assert.equal(await page.getByRole('button', { name: 'Reconnect @octocat', exact: true }).count(), 0);
-  await page.getByRole('button', { name: 'Manage accounts', exact: true }).click();
-  await page.getByRole('button', { name: 'Connect another GitHub account', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect another login', exact: true }).click();
   await page.getByRole('heading', { name: 'Connected @second-person' }).waitFor();
   await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
   await page.getByText('@octocat', { exact: true }).waitFor();
   await page.getByText('@second-person', { exact: true }).waitFor();
   assert.equal((await f.service.list(f.one.id, f.member.userId)).accounts.length, 2);
-  await page.getByRole('button', { name: 'Manage accounts', exact: true }).click();
   failList = true;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await setTimeout(300);
   assert.equal(await page.getByText(/Account status may be stale/).count(), 0);
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await page.getByText(/Account status may be stale/).waitFor();
   assert.equal(
     await page.getByRole('list', { name: 'GitHub accounts' }).getByText('@octocat', { exact: true }).isVisible(),
     true,
   );
   failList = false;
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await page.getByText(/Account status may be stale/).waitFor({ state: 'hidden' });
   failDisconnect = true;
   await page.getByRole('button', { name: 'Disconnect @octocat', exact: true }).click();
   await page.getByText(/The result could not be confirmed/).waitFor();
   failDisconnect = false;
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await page.getByRole('button', { name: 'Disconnect @octocat', exact: true }).click();
   await page.getByText(/Disconnected from TulipFarm/).waitFor();
   assert.equal(disconnectCalls, 2);
@@ -184,19 +191,21 @@ try {
     account => account.identity.id === '123',
   );
   assert.equal(first.state, 'disconnected');
+  const second = (await f.service.list(f.one.id, f.member.userId)).accounts.find(
+    account => account.identity.id === '456',
+  );
   f.setProfile({ id: 999, login: 'wrong-person' });
-  await page.getByRole('button', { name: 'Reconnect @octocat', exact: true }).click();
+  await page.getByRole('button', { name: 'Reconnect @second-person', exact: true }).click();
   await page.getByRole('heading', { name: 'GitHub consent could not be confirmed' }).waitFor();
-  assert.equal((await f.service.status(f.one.id, f.member.userId, first.id)).identity.id, '123');
-  await open();
-  await page.getByText('Reconnect required', { exact: true }).waitFor();
-  f.setProfile({ id: 123, login: 'renamed-octocat' });
-  await page.getByRole('button', { name: 'Reconnect @octocat', exact: true }).click();
+  assert.equal((await f.service.status(f.one.id, f.member.userId, second.id)).identity.id, '456');
+  await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
+  await page.getByText('@second-person', { exact: true }).waitFor();
+  f.setProfile({ id: 456, login: 'renamed-octocat' });
+  await page.getByRole('button', { name: 'Reconnect @second-person', exact: true }).click();
   await page.getByRole('heading', { name: 'Connected @renamed-octocat' }).waitFor();
   await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
   await page.getByText('@renamed-octocat', { exact: true }).waitFor();
   await page.screenshot({ path: '/tmp/github-accounts-desktop.png', fullPage: true });
-  await page.getByRole('button', { name: 'Manage accounts', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.getByRole('button', { name: 'Reconnect @renamed-octocat', exact: true }).focus();
@@ -209,7 +218,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: '/tmp/github-accounts-mobile-dark.png', fullPage: true });
   accessLost = true;
-  await page.getByRole('button', { name: 'Check GitHub accounts', exact: true }).click();
+  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
   await page.getByRole('heading', { name: 'GitHub account access unavailable' }).waitFor();
   assert.equal(await page.getByText('@renamed-octocat', { exact: true }).count(), 0);
   accessLost = false;
@@ -217,9 +226,29 @@ try {
   await page.goto(`${origin}/github/callback?code=denied&state=${f.one.id}.${'x'.repeat(43)}`);
   await page.getByText(/GitHub consent was denied/).waitFor();
   assert.equal(new URL(page.url()).search, '');
+  await page.getByRole('button', { name: 'Connect GitHub', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'Return to GitHub accounts' }).waitFor();
+  callbackStatus = 200;
+  await open();
+  installationParams = true;
+  await page.getByRole('button', { name: 'Reconnect @renamed-octocat', exact: true }).click();
+  await page.getByRole('heading', { name: 'Connected @renamed-octocat' }).waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  installationParams = false;
+  await page.goto(`${origin}/integrations/github?installation_id=42&setup_action=install`);
+  await page.getByRole('heading', { name: 'Connected @renamed-octocat' }).waitFor();
+  assert.equal(new URL(page.url()).search, '');
+  await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
+  await page.getByText('@renamed-octocat', { exact: true }).waitFor();
+  inactiveCallback = true;
+  await page.getByRole('button', { name: 'Reconnect @renamed-octocat', exact: true }).click();
+  await page.getByRole('heading', { name: 'GitHub sign-in finished, but the login is not connected' }).waitFor();
+  assert.equal(await page.getByRole('heading', { name: /^Connected/ }).count(), 0);
+  await page.getByRole('button', { name: 'Connect GitHub', exact: true }).waitFor();
+  inactiveCallback = false;
   assert.deepEqual(errors, []);
   console.log(
-    'PASS GitHub browser with real API and PostgreSQL. Slow/empty/error/retry, single connect, two accounts, stale read retention, disconnect uncertainty, identity mismatch and recovery, callback cleanup, mobile/dark/keyboard. Provider and shell identity are synthetic.',
+    'PASS GitHub browser with real API and PostgreSQL. Slow/empty/error/retry, single connect, two accounts, stale read retention, disconnect uncertainty, identity mismatch and recovery, callback cleanup, App installation returns, inactive results, mobile/dark/keyboard. Provider and shell identity are synthetic.',
   );
 } finally {
   await browser?.close();

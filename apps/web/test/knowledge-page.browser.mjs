@@ -14,6 +14,27 @@ const counts = (ready, queued = 0) => ({
   skipped: 0,
   quotaLimited: 0,
 });
+const githubSource = (n, title, repositories, rest = {}) => ({
+  sourceId: `00000000-0000-4000-9000-${String(n).padStart(12, '0')}`,
+  selection: null,
+  memberIds: [],
+  title,
+  state: 'active',
+  syncState: 'ready',
+  failure: null,
+  nextAttemptAt: new Date(Date.now() + 240_000).toISOString(),
+  repositories: Array.from({ length: repositories }, (_, i) => ({
+    repositoryId: String(i + 1),
+    fullName: `acme/repo-${i}`,
+    visibility: 'private',
+    title: `acme/repo-${i}`,
+    state: 'active',
+    failure: null,
+  })),
+  counts: { total: 21, ready: 21, failed: 0 },
+  canManage: true,
+  ...rest,
+});
 const intent = (n, product, accountLabel, included, rest = {}) => ({
   intentId: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
   product,
@@ -49,6 +70,16 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
   const { workspace, session } = createWorkspaceFixture({ slug: 'knowledge-qa', name: 'Knowledge QA' });
   const items = [
     intent(1, 'github', 'ada-dev', 1, {
+      sources: [
+        {
+          sourceId: '00000000-0000-4000-9000-000000000001',
+          state: 'created',
+          failure: null,
+          sourceState: 'active',
+          syncState: 'ready',
+          syncFailure: null,
+        },
+      ],
       counts: counts(5, 7),
       ingestion: { state: 'pending', pending: 7, failed: 0, failure: null },
     }),
@@ -56,6 +87,32 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     intent(3, 'google-drive', 'ada@example.test', 3, { counts: counts(8) }),
     intent(5, 'jira', 'Ada Lovelace', 2, { syncState: 'failed', failure: 'provider', counts: counts(3) }),
   ];
+  // The automatic source is already counted by its intent, and removed sources stay hidden.
+  const github = [
+    githubSource(1, 'All repositories', 0, { repositories: null }),
+    githubSource(2, 'acme/repo-0 and 9 more', 10),
+    githubSource(3, 'acme/old', 1, { state: 'removed' }),
+  ];
+  // Hand-picked sources from other products join their product's row.
+  const manual = {
+    github,
+    google: [githubSource(4, 'Design folder', 0, { selection: { kind: 'drive-folder', folderId: 'f1' } })],
+    atlassian: [
+      githubSource(5, 'Docs and 1 more', 0, {
+        product: 'confluence',
+        counts: { total: 15, ready: 15, failed: 0 },
+        targets: ['S1', 'S2'].map(id => ({
+          kind: 'space',
+          id,
+          key: id,
+          title: id,
+          descendants: true,
+          state: 'active',
+          failure: null,
+        })),
+      }),
+    ],
+  };
   const writes = [],
     errors = [];
   const context = await browser.newContext({
@@ -105,6 +162,16 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
         action === 'opt-out' ? { state: 'opted-out' } : { state: 'active', syncState: 'queued', failure: null },
       );
       json = target;
+    } else if (/^\/knowledge\/(github|google|atlassian)\/sources$/.test(path.slice(base.length)))
+      json = { items: manual[path.split('/')[5]] };
+    else if (/^\/knowledge\/(github|google|atlassian)\/sources\/[^/]+\/manage$/.test(path.slice(base.length))) {
+      const provider = path.split('/')[5],
+        id = path.split('/sources/')[1].split('/')[0],
+        { action } = request.postDataJSON();
+      writes.push([`${provider}-${id.slice(-1)}`, action]);
+      const target = manual[provider].find(source => source.sourceId === id);
+      target.state = action === 'pause' ? 'paused' : 'active';
+      json = target;
     } else if (path.endsWith('/bud'))
       json = {
         conversationId: null,
@@ -124,29 +191,64 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
   try {
     await page.goto(`${origin}/${workspace.slug}/knowledge`);
     const main = page.getByRole('main');
-    await main.getByText('ada-dev · 1 repository', { exact: true }).waitFor();
-    await main.getByText('ada@example.test · 3 drives', { exact: true }).waitFor();
+    // The automatic GitHub source and the hand-picked one share one row: 26 of 33 items are searchable.
+    await main.getByText('ada-dev · all repositories', { exact: true }).waitFor();
+    await main.getByText('78%', { exact: true }).waitFor();
+    assert.equal(await main.getByRole('button', { name: 'Actions for GitHub' }).count(), 1);
+    assert.equal(await main.getByText('acme/', { exact: false }).count(), 0);
+    await main.getByText('ada@example.test · 4 drives', { exact: true }).waitFor();
+    await main.getByText('29 chunks', { exact: true }).waitFor();
+    await main.getByText('2 spaces', { exact: true }).waitFor();
+    await main.getByText('15 chunks', { exact: true }).waitFor();
     await main.getByText('ada@example.test · 1 mailbox', { exact: true }).waitFor();
-    for (const product of ['Slack', 'Confluence'])
-      await main.getByRole('button', { name: `Connect ${product}` }).waitFor();
+    await main.getByRole('button', { name: 'Connect Slack' }).waitFor();
+    assert.equal(await main.getByRole('button', { name: 'Connect Confluence' }).count(), 0);
     await page.getByRole('link', { name: 'Knowledge', exact: true }).waitFor();
     await page.screenshot({ path: `${screenshots}/sources.png`, fullPage: true });
 
+    const settle = async count => {
+      for (let tries = 0; writes.length < count && tries < 50; tries++) await page.waitForTimeout(100);
+      await page.waitForTimeout(200);
+    };
     await main.getByRole('button', { name: 'Retry Jira' }).click();
     await main.getByRole('button', { name: 'Retry Jira' }).waitFor({ state: 'detached' });
     await main.getByRole('button', { name: 'Actions for Google Drive' }).click();
     await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    await settle(3);
     await main.getByRole('button', { name: 'Actions for Gmail' }).click();
     await page.getByRole('menuitem', { name: 'Resume syncing' }).click();
-    for (let tries = 0; writes.length < 3 && tries < 50; tries++) await page.waitForTimeout(100);
-    assert.deepEqual(writes, [
-      ['5', 'retry'],
-      ['3', 'opt-out'],
+    await settle(4);
+    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
+    await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    await settle(6);
+    await main.getByRole('button', { name: 'Actions for Confluence' }).click();
+    await page.getByRole('menuitem', { name: 'Pause syncing' }).click();
+    await settle(7);
+    assert.deepEqual(writes.toSorted(), [
+      ['1', 'opt-out'],
       ['2', 'resume'],
+      ['3', 'opt-out'],
+      ['5', 'retry'],
+      ['atlassian-5', 'pause'],
+      ['github-2', 'pause'],
+      ['google-4', 'pause'],
     ]);
 
     await main.getByRole('button', { name: 'Connect Slack' }).click();
     await page.waitForURL(`${origin}/${workspace.slug}/integrations/slack?tab=knowledge`);
+
+    Object.assign(items[0], {
+      counts: counts(12),
+      ingestion: { state: 'ready', pending: 0, failed: 0, failure: null },
+    });
+    await page.goto(`${origin}/${workspace.slug}/knowledge`);
+    await main.getByRole('button', { name: 'Actions for GitHub' }).click();
+    await page.getByRole('menuitem', { name: 'Settings' }).click();
+    await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
+    await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
+    await page.goto(`${origin}/${workspace.slug}/integrations/github-personal?tab=knowledge`);
+    await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
+    await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await context.close();

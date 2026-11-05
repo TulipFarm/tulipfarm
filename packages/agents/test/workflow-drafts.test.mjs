@@ -106,3 +106,35 @@ test('drafts reject code steps unless a code runner is configured', () => {
   assert.equal(workflowDefinitionProblem(code, now, true), null);
   assert.equal(workflowDefinitionProblem(weekdayReview, now, false), null);
 });
+
+test('drafts reject Slack text that comes from HTTP or agent output', () => {
+  const now = new Date('2026-10-08T12:00:00Z');
+  const destinationId = '11111111-1111-4111-8111-111111111111';
+  const fetch = { id: 'fetch', kind: 'http', method: 'GET', url: 'https://api.github.com/orgs/example/repos' };
+  const slack = text => ({ id: 'notify', kind: 'slack-message', destinationId, text });
+  const draft = steps => workflowDefinitionProblem({ ...weekdayReview, steps }, now, true)?.error;
+  assert.equal(draft([fetch, slack({ kind: 'step', step: 'fetch', path: ['body'] })]), 'slack-text-source-unsupported');
+  assert.equal(
+    draft([
+      fetch,
+      { id: 'shape', kind: 'transform', fields: { text: { kind: 'step', step: 'fetch', path: ['body'] } } },
+      slack({ kind: 'step', step: 'shape', path: ['text'] }),
+    ]),
+    'slack-text-source-unsupported',
+  );
+  assert.equal(
+    draft([
+      fetch,
+      {
+        id: 'format',
+        kind: 'code',
+        language: 'python',
+        source: 'return input',
+        input: { kind: 'step', step: 'fetch', path: [] },
+      },
+      slack({ kind: 'step', step: 'format', path: [] }),
+    ]),
+    'slack-text-source-unsupported',
+  );
+  assert.equal(draft([fetch, slack({ kind: 'literal', value: 'Daily check done.' })]), undefined);
+});

@@ -64,6 +64,7 @@ const recordDefinition = {
   steps: [{ id: 'note', kind: 'transform', fields: { record: { kind: 'input', path: ['recordId'] } } }],
 };
 const rowDraft = '24242424-2424-4424-8424-242424242424';
+const replacedDraft = '30303030-3030-4030-8030-303030303030';
 const slackDraft = '28282828-2828-4828-8828-282828282828';
 const destinationId = '29292929-2929-4929-8929-292929292929';
 const slackDefinition = {
@@ -231,6 +232,20 @@ const initialDrafts = () => ({
       input: { expectedRevision: null, definition: rowDefinition, activate: true },
     },
   },
+  [replacedDraft]: {
+    id: replacedDraft,
+    digest: '9'.repeat(64),
+    status: 'stale',
+    replaced: true,
+    outcome: null,
+    agentChange: null,
+    workflowNextRunAt: null,
+    proposal: {
+      kind: 'workflow',
+      targetId: workflowId,
+      input: { expectedRevision: null, definition: { ...definition, name: 'Earlier ticket review' }, activate: true },
+    },
+  },
   [slackDraft]: {
     id: slackDraft,
     digest: 'c'.repeat(64),
@@ -318,6 +333,7 @@ test(
               tool(recordDraft, 'workflows.draft'),
               tool(rowDraft, 'workflows.draft'),
               tool(slackDraft, 'workflows.draft'),
+              tool(replacedDraft, 'workflows.draft'),
             ],
             calendarResults: [],
           },
@@ -355,6 +371,10 @@ test(
             return route.fulfill({ status: 404, json: { error: 'not-found' } });
           if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
           if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+          if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: true, accounts: [] } });
+          if (path.endsWith(`/github/chats/${chatId}/selection`))
+            return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+          if (path.endsWith(`/github/chats/${chatId}/batches`)) return route.fulfill({ json: { batches: [] } });
           if (path.endsWith('/system-package-installations'))
             return route.fulfill({ json: { installations: [], nextCursor: null } });
           if (path.endsWith('/governance')) return route.fulfill({ status: 404, json: { error: 'not-found' } });
@@ -453,6 +473,18 @@ test(
           failReads = false;
           await page.getByRole('button', { name: 'Retry loading draft' }).click();
           await created.getByText('Creates a new workflow and activates it', { exact: true }).waitFor();
+          await page.getByText('Replaced: Earlier ticket review', { exact: true }).waitFor();
+          await page
+            .getByText(
+              'Chat revised this workflow in a newer draft further down. Review that one. This version can no longer be saved.',
+              { exact: true },
+            )
+            .waitFor();
+          assert.equal(
+            await cards.filter({ hasText: 'Earlier ticket review' }).count(),
+            0,
+            'a replaced draft collapses to a note instead of a second review card with Save',
+          );
           assert.equal(
             await page.locator('[data-slot="activity-viewport"] [aria-label="Review workflow draft"]').count(),
             0,
@@ -573,9 +605,7 @@ test(
           const slackViewer = await openDraft(slack, slackDefinition.name);
           let slackStep = await assertConfiguration(slackViewer, 1, slackDefinition.steps[0]);
           await slackStep.getByText('run input values.title.value', { exact: true }).waitFor();
-          await slackStep
-            .getByText('The requester or sponsor approves each exact message before it is sent.', { exact: true })
-            .waitFor();
+          await slackStep.getByText('Slack account of the person running this workflow', { exact: true }).waitFor();
           await returnToChat();
           await slack
             .getByText('Check this Slack destination before saving. The channel is not verified.', { exact: true })

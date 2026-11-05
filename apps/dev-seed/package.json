@@ -7,6 +7,8 @@
     "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
+    "@temporalio/client": "1.24.0",
+    "@tulipfarm/access": "workspace:*",
     "@tulipfarm/agents": "workspace:*",
     "@tulipfarm/api": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",

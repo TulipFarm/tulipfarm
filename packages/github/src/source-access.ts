@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { githubReadSchema, type GitHubRead } from './read-contracts.ts';
 
-// Search pages can silently omit revoked objects. Retain the original targets, not a new result set.
+// Search and list pages can silently omit revoked objects. Retain the original targets, not a new result set.
 export function searchAccessTargets(operation: GitHubRead, data: unknown): GitHubRead[] | undefined {
-  if (!['repository.search', 'issue.search', 'pull.search', 'file.search'].includes(operation.kind)) return undefined;
+  if (!['repository.list', 'repository.search', 'issue.search', 'pull.search', 'file.search'].includes(operation.kind))
+    return undefined;
   const parsed = z.object({ items: z.array(z.object({ url: z.url() }).passthrough()).max(30) }).safeParse(data);
   if (!parsed.success) return undefined;
   const targets: GitHubRead[] = [];
@@ -14,7 +15,7 @@ export function searchAccessTargets(operation: GitHubRead, data: unknown): GitHu
     if (!match) return undefined;
     const [, owner, repo, family, number, path] = match;
     const target = githubReadSchema.safeParse(
-      operation.kind === 'repository.search' && !family && !path
+      (operation.kind === 'repository.search' || operation.kind === 'repository.list') && !family && !path
         ? { kind: 'repository.read', owner, repo }
         : (operation.kind === 'issue.search' || operation.kind === 'pull.search') && family
           ? { kind: family === 'pulls' ? 'pull.read' : 'issue.read', owner, repo, number: Number(number) }

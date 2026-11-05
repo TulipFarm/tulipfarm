@@ -49,6 +49,7 @@ export const githubDownloadReceiptSchema = z.strictObject({
 });
 export const githubReadSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('repository.read'), ...repo }),
+  z.strictObject({ kind: z.literal('repository.list'), ...page }),
   z.strictObject({ kind: z.enum(['repository.search', 'file.search', 'issue.search', 'pull.search']), query, ...page }),
   z.strictObject({ kind: z.enum(['file.read', 'file.content']), ...repo, path, ref: ref.optional() }),
   z.strictObject({

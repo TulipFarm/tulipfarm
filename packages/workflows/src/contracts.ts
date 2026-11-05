@@ -210,6 +210,16 @@ export type AgentStep = Extract<Step, { kind: 'agent' }>;
 export function stepValues(step: Step): z.infer<typeof valueSchema>[] {
   return stepValueEntries(step).map(entry => entry.value);
 }
+/** Whether Slack text resolves from agent or HTTP output, directly or through a transform or code step's input. Such text is never sent. */
+export function slackTextFromUnverifiedSource(steps: Step[], value: z.infer<typeof valueSchema>): boolean {
+  if (value.kind !== 'step') return false;
+  const source = steps.find(step => step.id === value.step);
+  if (!source || source.kind === 'agent' || source.kind === 'http') return true;
+  if (source.kind === 'transform')
+    return Object.values(source.fields).some(field => slackTextFromUnverifiedSource(steps, field));
+  if (source.kind === 'code') return slackTextFromUnverifiedSource(steps, source.input);
+  return false;
+}
 export type ConditionStep = Extract<Step, { kind: 'condition' }>;
 /** A condition step's receipt records whether it held and the steps it ran and skipped, so history explains a run without its definition. */
 export const conditionOutputSchema = z.object({

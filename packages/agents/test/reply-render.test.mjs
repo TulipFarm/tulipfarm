@@ -11,6 +11,7 @@ import {
   nativeRoutes,
   offeredTools,
   toolResults,
+  use,
 } from './native-fixture.mjs';
 
 const reply = (components, placement = 'canvas') => ({
@@ -121,7 +122,7 @@ test('the design option rejects only canvas design problems, and invalid layouts
   assert.match(parseReplyRender({ ...wall, title: '' }).error, /^Invalid layout: /);
 });
 
-const layoutTurn = async (t, format, replies) => {
+const layoutTurn = async (t, format, replies, { route = nativeRoutes[format], layout = true } = {}) => {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     const body = JSON.parse(options.body);
@@ -131,13 +132,13 @@ const layoutTurn = async (t, format, replies) => {
     return Response.json(nativeReply(format, replies.shift()));
   });
   const result = await inferWithTools(
-    nativeRoutes[format],
+    route,
     [{ role: 'user', text: 'Which cache should we use?' }],
     () => assert.fail('No business tool expected'),
     undefined,
     false,
     null,
-    { layout: true },
+    { layout },
   );
   return { result, requests };
 };
@@ -156,7 +157,7 @@ for (const format of formats) {
   });
 }
 
-test('a plain-text answer gets one request for a layout; a second one is kept as text', async t => {
+test('a plain-text answer gets one required request for a layout; on the web a second one is kept as text', async t => {
   const corrected = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, render(chatReply)]);
   assert.deepEqual(corrected.result, { text: chatReply.summary, layout: chatReply });
   assert.match(lastText('anthropic', corrected.requests[1]), /calling reply_render/);
@@ -165,6 +166,87 @@ test('a plain-text answer gets one request for a layout; a second one is kept as
   const kept = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, { text: 'Valkey, really.' }]);
   assert.deepEqual(kept.result, { text: 'Valkey, really.' });
   assert.equal(kept.requests.length, 2);
+});
+
+const requiredChoice = {
+  anthropic: body => body.tool_choice,
+  azure: body => body.tool_choice,
+  responses: body => body.tool_choice,
+  google: body => body.toolConfig.functionCallingConfig,
+};
+const forcedChoice = name => ({
+  anthropic: { type: 'tool', name },
+  azure: { type: 'function', function: { name } },
+  responses: { type: 'function', name },
+  google: { mode: 'ANY', allowedFunctionNames: [name] },
+});
+const autoChoice = { anthropic: { type: 'auto' }, azure: 'auto', responses: 'auto', google: { mode: 'AUTO' } };
+
+for (const format of formats)
+  test(`${format}: the layout request after a plain-text answer requires the layout tool`, async t => {
+    const route = { ...nativeRoutes[format], capabilities: { toolChoice: 'forced' } };
+    const { requests } = await layoutTurn(t, format, [{ text: 'Use Valkey.' }, render(chatReply)], { route });
+    assert.deepEqual(requiredChoice[format](requests[0]), autoChoice[format]);
+    assert.deepEqual(requiredChoice[format](requests[1]), forcedChoice('reply_render')[format]);
+  });
+
+test('a route that accepts only an automatic tool choice is asked for the layout in the message alone', async t => {
+  const route = { ...nativeRoutes.azure, capabilities: { toolChoice: 'auto' } };
+  const { result, requests } = await layoutTurn(t, 'azure', [{ text: 'Use Valkey.' }, render(chatReply)], { route });
+  assert.deepEqual(result, { text: chatReply.summary, layout: chatReply });
+  assert.equal(requests[1].tool_choice, 'auto');
+  assert.match(lastText('azure', requests[1]), /calling reply_render/);
+  t.mock.restoreAll();
+
+  // Claude Sonnet, Opus and Fable are catalogued with an automatic tool choice.
+  const claude = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, render(chatReply)]);
+  assert.deepEqual(claude.requests[1].tool_choice, { type: 'auto' });
+});
+
+const slack = { slack: { interactive: true } };
+const slackReply = {
+  placement: 'chat',
+  title: 'Hello',
+  summary: 'Warm greeting and offer to help with one question',
+  blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'Hello! What can I help you with today?' } }],
+};
+const writtenCall = `call slack_render with placement is chat title is Hello summary is Warm greeting and offer to help with one question. blocks is ${JSON.stringify(slackReply.blocks)}`;
+
+test('Slack: a slack_render call written as prose is read back as the layout, never posted as text', async t => {
+  const { result, requests } = await layoutTurn(t, 'azure', [{ text: writtenCall }], { layout: slack });
+  assert.equal(requests.length, 1);
+  assert.equal(result.text, slackReply.summary);
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
+  assert.doesNotMatch(JSON.stringify(result), /call slack_render/);
+});
+
+test('Slack: a slack_render call written as JSON is read back as the layout', async t => {
+  const text = `slack_render ${JSON.stringify({ name: 'slack_render', arguments: slackReply })}`;
+  const { result, requests } = await layoutTurn(t, 'anthropic', [{ text }], { layout: slack });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
+});
+
+test('Slack: a layout call written as text without a usable layout requires the real call next', async t => {
+  const { result, requests } = await layoutTurn(
+    t,
+    'azure',
+    [{ text: 'call slack_render with title is Hello' }, { calls: [{ name: 'slack_render', input: slackReply }] }],
+    { layout: slack },
+  );
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].tool_choice, { type: 'function', function: { name: 'slack_render' } });
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
+});
+
+test('Slack: plain text after the required layout request is laid out as the answer, not posted bare', async t => {
+  const { result, requests } = await layoutTurn(t, 'azure', [{ text: 'Hello!' }, { text: 'Hello! How can I help?' }], {
+    layout: slack,
+  });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].tool_choice, { type: 'function', function: { name: 'slack_render' } });
+  assert.deepEqual(result.layout.slack.blocks, [{ type: 'markdown', text: 'Hello! How can I help?' }]);
+  assert.equal(result.layout.placement, 'chat');
 });
 
 test('chat completions resend a plain-text answer without an empty tool_calls list', async t => {
@@ -205,4 +287,32 @@ test('reply_render must be called alone', async t => {
   ]);
   assert.deepEqual(result, { text: chatReply.summary, layout: chatReply });
   assert.match(toolResults('anthropic', requests[1])[0].output, /call reply_render alone/);
+});
+
+test('Slack: a layout call written as text on the tool-free final step is read back, not posted', async t => {
+  let rounds = 0,
+    finals = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const body = JSON.parse(options.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply('azure'));
+    rounds++;
+    assert.ok(rounds <= 5, 'loop is bounded');
+    if (!body.tools) {
+      finals++;
+      return Response.json(nativeReply('azure', { text: writtenCall }));
+    }
+    return Response.json(nativeReply('azure', { calls: [use('web.fetch', { url: 'https://example.com/same' })] }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Hey' }],
+    async () => ({}),
+    undefined,
+    false,
+    null,
+    { layout: slack },
+  );
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
+  assert.doesNotMatch(result.text, /call slack_render/);
+  assert.equal(finals, 1);
 });

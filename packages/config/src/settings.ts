@@ -7,7 +7,15 @@
 
 import { featureFlags } from './feature-flags.ts';
 
-export const settingServices = ['api', 'worker', 'storage-worker', 'snippet-broker', 'database', 'compose'] as const;
+export const settingServices = [
+  'api',
+  'worker',
+  'storage-worker',
+  'render-worker',
+  'snippet-broker',
+  'database',
+  'compose',
+] as const;
 export type SettingService = (typeof settingServices)[number];
 
 /**
@@ -36,6 +44,7 @@ export const settingGroups = [
   'Social publishing',
   'Slack',
   'Workspace MCP',
+  'Secrets',
   'Skills and code steps',
   'Recommendations',
   'Telemetry and flags',
@@ -50,7 +59,7 @@ export const selfHostSections = {
   infrastructure: ['Infrastructure credentials you choose. Use URL-safe values: openssl rand -hex 32'],
   models: [
     'Models. Set the API key of at least one provider; the shipped model catalog serves every model whose provider key is set.',
-    'Providers, custom catalogs and endpoints: https://docs.tulipfarm.ai/self-hosting/models/',
+    'Providers, custom catalogs and endpoints: https://tulipfarm.ai/docs/self-hosting/models/',
   ],
   turnstile: [
     'Optional Cloudflare Turnstile challenge for sign-in. Unset disables it; set both keys for your hostname.',
@@ -61,7 +70,7 @@ export const selfHostSections = {
   ],
   embeddings: [
     'Semantic knowledge search. Disabled unless set. The provider must serve',
-    'text-embedding-3-large at 1536 dimensions. See https://docs.tulipfarm.ai/self-hosting/models/#embedding-providers',
+    'text-embedding-3-large at 1536 dimensions. See https://tulipfarm.ai/docs/self-hosting/models/#embedding-providers',
   ],
   temporal: [
     'Temporal. COMPOSE_PROFILES=temporal runs Temporal (server, UI, schema and namespace jobs) in this stack.',
@@ -373,6 +382,16 @@ export const settings: readonly Setting[] = [
     default: '5000',
     description:
       'How long a chat reply started on send may stay unclaimed before the background sweep starts it again.',
+  },
+  {
+    name: 'TULIPFARM_API_ROLE',
+    group: 'Runtime',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: 'all',
+    description:
+      '`all` serves requests and runs the scheduled background sweeps in one process. `requests` starts no sweeps and `jobs` runs them, so sweeps cannot hold the connections requests wait for; run one API with each, and route traffic only to `requests`.',
   },
   {
     name: 'API_RATE_LIMIT_PER_MINUTE',
@@ -728,7 +747,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_ENDPOINT',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description: 'S3-compatible endpoint, such as Cloudflare R2 or MinIO. Unset uses AWS S3 in the region below.',
@@ -736,7 +755,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_REGION',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'conditional',
     secret: false,
     default: 'auto',
@@ -745,7 +764,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description: 'Object-storage access key. Unset uses the default AWS credential chain, such as an ECS task role.',
@@ -753,7 +772,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY',
     group: 'Object storage',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: true,
     description: 'Object-storage secret key. Set it together with the access key.',
@@ -770,7 +789,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_FILES_BUCKET',
     group: 'Object storage',
-    services: [...apiWorker, 'database'],
+    services: [...apiWorker, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: 'tulipfarm-files',
@@ -863,7 +882,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_ADDRESS',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: '127.0.0.1:7233',
@@ -874,7 +893,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_TLS',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     description:
@@ -884,7 +903,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_API_KEY',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: true,
     description:
@@ -894,7 +913,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_NAMESPACE',
     group: 'Temporal',
-    services: [...apps, 'database'],
+    services: [...apps, 'render-worker', 'database'],
     requirement: 'optional',
     secret: false,
     default: 'default',
@@ -904,7 +923,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TEMPORAL_TASK_QUEUE',
     group: 'Temporal',
-    services: apiWorker,
+    services: [...apiWorker, 'render-worker'],
     requirement: 'optional',
     secret: false,
     default: 'tulipfarm',
@@ -919,6 +938,35 @@ export const settings: readonly Setting[] = [
     default: 'all',
     description:
       '`all` runs every task queue in one worker. `core` and `knowledge` split them so knowledge sync cannot starve chats, scheduled jobs and the health check; run one worker with each.',
+  },
+  {
+    name: 'RENDER_WORKER_CONCURRENCY',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    default: '2',
+    description:
+      'Plan documents the render worker draws and prints at once, from 1 to 16. Each holds a Chromium page, so allow about 300 MB per render.',
+  },
+  {
+    name: 'CHROMIUM_EXECUTABLE_PATH',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'The Chromium the render worker drives. The render worker image sets it to Debian’s Chromium; unset uses the Chromium Playwright downloaded.',
+  },
+  {
+    name: 'CHROMIUM_SANDBOX',
+    group: 'Temporal',
+    services: ['render-worker'],
+    requirement: 'optional',
+    secret: false,
+    default: 'false',
+    description:
+      '`true` runs Chromium in its own sandbox, which needs user namespaces or a seccomp profile that allows it. Pages always run without network access and with scripts off when printing.',
   },
   {
     name: 'TEMPORAL_STORAGE_TASK_QUEUE',
@@ -1106,7 +1154,7 @@ export const settings: readonly Setting[] = [
     secret: false,
     default: 'azure-foundry',
     description:
-      '`azure-foundry` or `openai-compatible`. Either must serve `text-embedding-3-large` at 1536 dimensions. See [embedding providers](https://docs.tulipfarm.ai/self-hosting/models/#embedding-providers).',
+      '`azure-foundry` or `openai-compatible`. Either must serve `text-embedding-3-large` at 1536 dimensions. See [embedding providers](https://tulipfarm.ai/docs/self-hosting/models/#embedding-providers).',
     selfHost: { section: 'embeddings', example: 'openai-compatible', commented: true },
   },
   {
@@ -1201,7 +1249,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Comma-separated sign-in methods to allow: `password`, `magic-link`, `google`. Unset allows `magic-link` when an email transport is configured and `google` when its client ID and secret are set; `password` must be listed. A listed method without its credentials logs a warning and stays off. Without email, an admin runs `pnpm auth:reset-password <email>` for a password reset link. See [sign-in methods](https://docs.tulipfarm.ai/self-hosting/sign-in/).',
+      'Comma-separated sign-in methods to allow: `password`, `magic-link`, `google`. Unset allows `magic-link` when an email transport is configured and `google` when its client ID and secret are set; `password` must be listed. A listed method without its credentials logs a warning and stays off. Without email, an admin runs `pnpm auth:reset-password <email>` for a password reset link. See [sign-in methods](https://tulipfarm.ai/docs/self-hosting/sign-in/).',
     selfHost: {
       section: 'sign-in',
       example: 'password,magic-link,google',
@@ -1238,13 +1286,13 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      '`acs` or `smtp`. Unset uses ACS when `ACS_CONNECTION_STRING` is set, otherwise SMTP when `SMTP_HOST` is set. Any email setting disables local dev sign-in. See [email transports](https://docs.tulipfarm.ai/self-hosting/email/#choose-a-transport).',
+      '`acs` or `smtp`. Unset uses ACS when `ACS_CONNECTION_STRING` is set, otherwise SMTP when `SMTP_HOST` is set. Any email setting disables local dev sign-in. See [email transports](https://tulipfarm.ai/docs/self-hosting/email/#choose-a-transport).',
     selfHost: {
       section: 'sign-in',
       example: 'smtp',
       commented: true,
       comment:
-        'Email through any SMTP server instead of ACS. See https://docs.tulipfarm.ai/self-hosting/email/#choose-a-transport',
+        'Email through any SMTP server instead of ACS. See https://tulipfarm.ai/docs/self-hosting/email/#choose-a-transport',
     },
   },
   {
@@ -1486,6 +1534,16 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description: '`true` dispatches tool calls to workspace MCP servers.',
+  },
+  {
+    name: 'API_CALL_PRIVATE_HOSTS',
+    group: 'Secrets',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Private hosts that agent API calls and secret destinations may reach: comma-separated `host[:port][;http]` entries of exact lower-case host names, such as `billing.internal:8443,metrics.lan;http`. Without a port only the default port is allowed; `;http` also allows plain HTTP. A listed host may resolve to any address, including loopback, and every workspace on this server can reach it. IP addresses and wildcards fail startup. Unset allows public hosts only.',
+    selfHost: { section: 'optional', example: 'billing.internal:8443,metrics.lan;http', commented: true },
   },
 
   {

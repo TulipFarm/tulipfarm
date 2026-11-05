@@ -7,6 +7,7 @@ import {
 import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import { readUpcomingCalendar } from './calendar-read';
 import { useIsFetching } from '@tanstack/react-query';
+import { slackSenderApi } from '@/lib/slack-sender';
 import { useFeatureRead, useFeatureChanges, featureKey } from '@/lib/query';
 import type { ReadIssue } from '@tulipfarm/integrations/contracts';
 import { useProviderAuthority } from './query-authority';
@@ -77,6 +78,7 @@ export const integrationKeys = {
   selectionAuthority: (chatId: string, task = false) =>
     ['integrations', 'github-personal', 'selection-authority', ...(task ? ['task'] : []), chatId] as const,
   botGrants: () => ['integrations', 'github-personal', 'content', 'bot-grants'] as const,
+  slackSender: (chatId: string) => ['integrations', 'slack', 'content', 'sender', chatId] as const,
   batches: (chatId: string, task = false) =>
     ['integrations', 'github-personal', 'content', 'batches', ...(task ? ['task'] : []), chatId] as const,
   proposals: (cursor: string | null) => ['integrations', 'google', 'content', 'proposals', { cursor }] as const,
@@ -347,7 +349,7 @@ export function useGitHubInvestigation(workspaceId: string, id: string, task = f
     load: signal => githubApi.investigation(workspaceId, id, task, signal),
   });
 }
-export function useGitHubSelection(workspaceId: string, chatId: string, task = false) {
+export function useGitHubSelection(workspaceId: string, chatId: string, task = false, enabled = true) {
   useIntegrationAuthority('github-personal');
   useProviderAuthority(
     integrationKeys.selectionAuthority(chatId, task),
@@ -356,7 +358,16 @@ export function useGitHubSelection(workspaceId: string, chatId: string, task = f
   );
   return useFeatureRead({
     key: integrationKeys.selection(chatId, task),
+    enabled,
     load: signal => (task ? githubApi.taskSelection : githubApi.selection)(workspaceId, chatId, signal),
+  });
+}
+export function useSlackChatSender(workspaceId: string, chatId: string, enabled = true) {
+  useIntegrationAuthority('slack');
+  return useFeatureRead({
+    key: integrationKeys.slackSender(chatId),
+    enabled,
+    load: signal => slackSenderApi.read(workspaceId, chatId, signal),
   });
 }
 export function useGitHubBatches(workspaceId: string, chatId: string, task = false) {

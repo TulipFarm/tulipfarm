@@ -330,6 +330,15 @@ export type ResumeMcpAction = (
   context: ConversationToolContext,
   call: unknown,
 ) => Promise<{ result: { kind: string; actionId?: string; status?: string }; sources: SourceDependency[] }>;
+/** Continues an `api.request` change waiting for its member's decision; `waiting` means it is not decided yet. */
+export type ResumeApiCall = (context: {
+  runtime: ConversationRuntime;
+  workspaceId: string;
+  actor: HumanActor;
+  conversationId: string;
+  turnId: string;
+  callId: string;
+}) => Promise<{ state: 'waiting' } | { state: 'done'; result: unknown; sources: SourceDependency[] }>;
 const executionStepSchema = z.object({
   call_id: uuidSchema,
   call: z.json(),
@@ -340,6 +349,9 @@ const executionStepSchema = z.object({
 });
 const mcpWaitSchema = z.object({
   result: z.object({ provider: z.literal('workspace-mcp'), kind: z.literal('waiting'), actionId: uuidSchema }),
+});
+const apiCallWaitSchema = z.object({
+  result: z.object({ provider: z.literal('api-call'), kind: z.literal('waiting'), callId: uuidSchema }),
 });
 const protectedOutputSchema = z.object({ result: z.unknown(), sources: conversationResultSchema.shape.sources });
 class ExternalActionWaiting extends Error {}
@@ -368,7 +380,9 @@ const modelFailureSchema = z.enum([
 ]);
 type ModelFailure = z.infer<typeof modelFailureSchema>;
 // A retry repeats the same request, so failures caused by the model's setup or the request itself end the turn.
+// A timeout already waited the full model-call limit; the person decides whether to retry or switch models.
 const terminalModelFailures = new Set<ModelFailure>([
+  'model-timeout',
   'model-configuration',
   'model-authentication',
   'model-permission',
@@ -523,6 +537,25 @@ export type ConversationPlanning = {
   failure?: (error: unknown) => { code: 'plan-budget'; instruction: string } | null;
 };
 
+/**
+ * Secret forms for private chats, supplied by the secrets service. The runtime only pauses and resumes the turn; it
+ * never sees a value.
+ */
+export type ConversationSecrets = {
+  enabled(): boolean;
+  prepare(call: unknown): { ok: true; prompt: string; request: unknown } | { ok: false; result: unknown };
+  create(
+    tx: AuthorizationTransaction,
+    input: {
+      id: string;
+      membershipId: string;
+      origin: { kind: 'chat'; conversationId: string; turnId: string; conversationRequestId: string };
+      request: unknown;
+    },
+  ): Promise<unknown>;
+  list(tx: AuthorizationTransaction, membershipId: string, conversationId: string): Promise<unknown>;
+};
+
 export function createConversationExecutor(
   runtime: ConversationRuntime,
   reply?: ConversationReply,
@@ -535,6 +568,8 @@ export function createConversationExecutor(
   compactor?: ConversationCompactor,
   planning?: ConversationPlanning,
   turnFiles?: TurnFiles,
+  secrets?: ConversationSecrets,
+  resumeApiCall?: ResumeApiCall,
 ) {
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
@@ -739,6 +774,22 @@ export function createConversationExecutor(
       ) {
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='mcp-action-waiting' WHERE id=$1`,
+          [turn.id],
+        );
+        await changed(tx, work, true);
+        return null;
+      }
+      if (
+        resumeApiCall &&
+        (
+          await tx.client.query(
+            `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_api_calls')} a ON a.id=c.id WHERE c.turn_id=$1 AND c.tool='api.request' AND c.status='running'`,
+            [turn.id],
+          )
+        ).rowCount
+      ) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='api-call-waiting' WHERE id=$1`,
           [turn.id],
         );
         await changed(tx, work, true);
@@ -1475,7 +1526,8 @@ export function createConversationExecutor(
             (turn.planning_mode ||
               Boolean(planningContext) ||
               Boolean(resumeMcp) ||
-              priorTools.some(call => call.tool === 'present.choice')) &&
+              Boolean(resumeApiCall) ||
+              priorTools.some(call => call.tool === 'present.choice' || call.tool === 'secrets.request')) &&
             !chat.slack &&
             !chat.context;
           // The member chose Continue after these tool calls, so this attempt resumes from their receipts.
@@ -1517,7 +1569,15 @@ export function createConversationExecutor(
             return null;
           }
           for (const step of executionSteps) {
-            if (step.tool !== 'present.choice') continue;
+            if (step.tool !== 'present.choice' && step.tool !== 'secrets.request') continue;
+            // A rejected secret request never opened a form; its stored error is already the model's answer.
+            if (
+              step.tool === 'secrets.request' &&
+              !z
+                .object({ status: z.literal('awaiting-input') })
+                .safeParse(protectedOutputSchema.parse(step.output).result).success
+            )
+              continue;
             const request = (
               await tx.client.query(
                 `SELECT r.prompt,r.answer_schema,r.status,a.answer FROM ${table(tx, 'tf_conversation_requests')} r LEFT JOIN ${table(tx, 'tf_conversation_responses')} a ON a.request_id=r.id WHERE r.turn_id=$1 AND r.producer_id=$2 AND r.internal_id IS NULL`,
@@ -1529,7 +1589,9 @@ export function createConversationExecutor(
               result: {
                 ...request,
                 instruction:
-                  'This is the human response to your question, not action approval. Continue from it without repeating the question. If cancelled or expired, do not assume a choice.',
+                  step.tool === 'secrets.request'
+                    ? 'This is the member’s answer to your secret request. Use only the returned references; you never see values. If declined, cancelled or expired, do not ask for the same secret again unless the member asks.'
+                    : 'This is the human response to your question, not action approval. Continue from it without repeating the question. If cancelled or expired, do not assume a choice.',
               },
               sources: protectedOutputSchema.parse(step.output).sources,
             });
@@ -1865,6 +1927,8 @@ export function createConversationExecutor(
         const captureOutput =
           durable ||
           name === 'present.choice' ||
+          name === 'secrets.request' ||
+          name === 'secrets.list' ||
           name === 'agents.delegate' ||
           name === 'followups.schedule' ||
           ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
@@ -1872,6 +1936,7 @@ export function createConversationExecutor(
             (isCalendarReadCall(name, call) ||
               name === 'web.fetch' ||
               name === 'web.search' ||
+              name === 'api.request' ||
               name === 'files.create'));
         const currentSources = conversationResultSchema.shape.sources.parse(dependencies);
         if (++calls > chatToolCallLimit || !conversationToolNameAllowed(name))
@@ -1999,7 +2064,7 @@ export function createConversationExecutor(
             tool: name,
             sequence,
             status,
-            presentation: toolPresentation(name),
+            presentation: toolPresentation(name, name === 'api.request' ? call : undefined),
           });
           await changed(tx, fence);
           if ((captureOutput || interactiveChat) && call !== undefined)
@@ -2082,6 +2147,53 @@ export function createConversationExecutor(
             });
             throw new ExternalActionWaiting();
           }
+          if (name === 'secrets.request' || name === 'secrets.list') {
+            // Forms are addressed to the chat's owner, so shared, Slack, external-context and project chats have none.
+            if (!interactiveChat || external || source.project || !secrets?.enabled()) throw new AccessDenied();
+            if (name === 'secrets.list')
+              return await guarded(async (tx, context) => {
+                await receipt(tx, 'running');
+                const output = {
+                  result: await secrets.list(tx, context.actor.membershipId, fence.conversationId),
+                  sources: [],
+                };
+                await receipt(tx, 'completed');
+                await saveOutput(tx, output);
+                return output;
+              });
+            const prepared = secrets.prepare(call);
+            if (!prepared.ok) {
+              const output = { result: prepared.result, sources: [] };
+              await guarded(async tx => {
+                await receipt(tx, 'failed');
+                await saveOutput(tx, output);
+              });
+              return output;
+            }
+            await guarded(async (tx, context) => {
+              await receipt(tx, 'running');
+              const secretRequestId = randomUUID();
+              const request = await createConversationRequests(context.runtime).createForChat(fence, {
+                producerId: callId,
+                prompt: prepared.prompt,
+                answerSchema: { kind: 'secrets', secretRequestId },
+              });
+              const result = await secrets.create(tx, {
+                id: secretRequestId,
+                membershipId: context.actor.membershipId,
+                origin: {
+                  kind: 'chat',
+                  conversationId: fence.conversationId,
+                  turnId: fence.turnId,
+                  conversationRequestId: request.requestId,
+                },
+                request: prepared.request,
+              });
+              await receipt(tx, 'completed');
+              await saveOutput(tx, { result, sources: [] });
+            });
+            throw new ExternalActionWaiting();
+          }
           if (external) {
             const context = await guarded(async (tx, context) => {
               await receipt(tx, 'running');
@@ -2143,6 +2255,19 @@ export function createConversationExecutor(
               await guarded(async tx => {
                 await tx.client.query(
                   `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='mcp-action-waiting' WHERE id=$1`,
+                  [fence.turnId],
+                );
+                await changed(tx, fence, true);
+              });
+              throw new ExternalActionWaiting();
+            }
+            const apiCall = apiCallWaitSchema.safeParse(result);
+            if (apiCall.success) {
+              if (!source.durable || !resumeApiCall || apiCall.data.result.callId !== callId || name !== 'api.request')
+                throw new AccessDenied();
+              await guarded(async tx => {
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='api-call-waiting' WHERE id=$1`,
                   [fence.turnId],
                 );
                 await changed(tx, fence, true);
@@ -2698,6 +2823,64 @@ export function createConversationExecutor(
                     });
                   }
                 }
+                if (resumeApiCall) {
+                  const pending = await transaction(work.workspaceId, async tx => {
+                    const chat = await root(tx, work);
+                    if (!chat || chat.slack || chat.context) return null;
+                    const turn = await head(tx, work.conversationId);
+                    if (
+                      !turn ||
+                      turn.id !== work.turnId ||
+                      turn.generation !== work.generation ||
+                      turn.status !== 'waiting'
+                    )
+                      return null;
+                    const row = (
+                      await tx.client.query(
+                        `SELECT c.id FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_api_calls')} a ON a.id=c.id WHERE c.turn_id=$1 AND c.tool='api.request' AND c.status='running'`,
+                        [work.turnId],
+                      )
+                    ).rows[0];
+                    if (!row) return null;
+                    return { callId: uuidSchema.parse(row.id), actor: chat.requester };
+                  });
+                  if (pending) {
+                    const response = await resumeApiCall({
+                      runtime,
+                      workspaceId: work.workspaceId,
+                      actor: pending.actor,
+                      conversationId: work.conversationId,
+                      turnId: work.turnId,
+                      callId: pending.callId,
+                    });
+                    if (response.state === 'waiting') return 'idle';
+                    await transaction(work.workspaceId, async tx => {
+                      const chat = await root(tx, work);
+                      const turn = await head(tx, work.conversationId);
+                      if (
+                        !chat ||
+                        !turn ||
+                        turn.id !== work.turnId ||
+                        turn.generation !== work.generation ||
+                        turn.status !== 'waiting'
+                      )
+                        throw new AccessDenied();
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                        [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                        [pending.callId],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                        [work.turnId],
+                      );
+                      await changed(tx, work);
+                    });
+                  }
+                }
                 const waiting = await transaction(work.workspaceId, async tx => {
                   if (!(await root(tx, work))) return false;
                   return Boolean(
@@ -2842,7 +3025,7 @@ export function createConversationExecutor(
 
   function dueTurns(tx: RuntimeTransaction) {
     return `FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
-          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting')))
+          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting','api-call-waiting')))
           AND o.next_attempt_at <= clock_timestamp()
           AND ($1::uuid IS NULL OR t.conversation_id = $1)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.turn_id=t.id)

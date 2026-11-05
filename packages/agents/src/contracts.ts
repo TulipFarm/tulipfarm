@@ -1,4 +1,11 @@
+import { apiCallResultSchema, apiCallWaitingSchema, apiRequestCallSchema } from '@tulipfarm/api-calls/contracts';
 import { z } from 'zod';
+import {
+  placementSchema,
+  secretKindSchema,
+  secretsListCallSchema,
+  secretsRequestCallSchema,
+} from '@tulipfarm/secrets/tool-contracts';
 import { skillIdSchema, skillResourceSchema } from './skill-ids.ts';
 import { publicWebResultSchema } from '@tulipfarm/conversations/public-web';
 import { generateImagesCallSchema, imageOutputResultSchema } from '@tulipfarm/conversations/image-contracts';
@@ -157,6 +164,19 @@ export const publicWebCallSchema = z.discriminatedUnion('tool', [
   }),
 ]);
 export const toolCallSchema = z.discriminatedUnion('tool', [
+  apiRequestCallSchema,
+  secretsRequestCallSchema,
+  secretsListCallSchema,
+  z.strictObject({
+    tool: z.literal('files.read'),
+    source: z.string().trim().min(1).max(256),
+    pages: z
+      .strictObject({ from: z.number().int().min(1), to: z.number().int().min(1) })
+      .refine(pages => pages.to >= pages.from, 'to must not be before from')
+      .optional(),
+    sheet: z.string().min(1).max(256).optional(),
+    range: z.strictObject({ start: z.number().int().min(0), end: z.number().int().min(1).optional() }).optional(),
+  }),
   generateImagesCallSchema,
   skillExecutionCallSchema,
   skillFileCallSchema,
@@ -228,8 +248,44 @@ export const recordConflict = {
     'The row changed after your last read or no read token was supplied. Read it again with rows.get, then retry with the new token.',
 } as const;
 const recordConflictSchema = z.strictObject({ error: z.literal(recordConflict.error), instruction: z.string() });
+/** `files.read` in a task: one response file the task kept, as a labelled untrusted block, or why there is none. */
+export const taskFileReadResultSchema = z.union([
+  z.strictObject({ source: uuidSchema, file: z.string(), url: z.string().nullable(), private: z.boolean() }),
+  z.strictObject({ error: z.literal('file-not-found'), instruction: z.string() }),
+]);
+const secretReferenceResultSchema = z.strictObject({
+  referenceId: uuidSchema,
+  fieldId: z.string(),
+  name: z.string(),
+  kind: secretKindSchema,
+  placement: placementSchema,
+  destinations: z.array(z.strictObject({ kind: z.enum(['host', 'endpoint']), value: z.string() })),
+});
+/** What a task's `secrets.request` and `secrets.list` calls return: references and states, never values. */
+const taskSecretResultSchema = z.union([
+  z.strictObject({ error: z.string(), instruction: z.string() }),
+  z.strictObject({ status: z.literal('awaiting-input'), secretRequestId: uuidSchema }),
+  z.strictObject({
+    status: z.literal('provided'),
+    references: z.array(secretReferenceResultSchema),
+    instruction: z.string(),
+  }),
+  z.strictObject({ status: z.literal('declined'), reason: z.string().nullable(), instruction: z.string() }),
+  z.strictObject({ status: z.enum(['expired', 'cancelled']), instruction: z.string() }),
+  z.strictObject({
+    references: z.array(
+      secretReferenceResultSchema.extend({
+        variableName: z.string(),
+        status: z.enum(['active', 'expired', 'suspended']),
+      }),
+    ),
+    instruction: z.string(),
+  }),
+]);
 export const toolResultSchema = z.union([
+  taskSecretResultSchema,
   imageOutputResultSchema,
+  taskFileReadResultSchema,
   z.strictObject({
     taskId: uuidSchema,
     status: z.enum(['pending', 'completed', 'waiting-clarification', 'waiting-approval', 'paused', 'failed']),
@@ -239,6 +295,8 @@ export const toolResultSchema = z.union([
   skillFileResultSchema,
   knowledgeToolResultSchema,
   githubTaskResultSchema,
+  apiCallResultSchema,
+  apiCallWaitingSchema,
   publicWebResultSchema,
   mcpExecutionResultSchema,
   slackActionViewSchema,

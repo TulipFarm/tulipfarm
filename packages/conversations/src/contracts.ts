@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { toolPresentationSchema, activityStatusSchema, workflowReferenceSchema } from './tool-activity.ts';
+import {
+  apiCallReceiptSchema,
+  toolPresentationSchema,
+  activityStatusSchema,
+  workflowReferenceSchema,
+} from './tool-activity.ts';
 export { workflowReferenceSchema } from './tool-activity.ts';
 import { publicWebReceiptSchema } from './public-web.ts';
 import { knowledgeActivitySchema } from './knowledge-activity.ts';
@@ -247,6 +252,15 @@ export const turnSummarySchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
   errorCode: z.string().nullable().optional(),
   mode: z.literal('plan').optional(),
+  /** How the reply was produced: its model, milliseconds from the send to the first word and to the end, and kept trace. */
+  stats: z
+    .object({
+      model: z.string().optional(),
+      firstTextMs: z.number().nonnegative().optional(),
+      durationMs: z.number().nonnegative().optional(),
+      traceId: z.string().optional(),
+    })
+    .optional(),
 });
 export const controlTurnSchema = z.strictObject({
   commandId: uuidSchema,
@@ -284,6 +298,16 @@ export const imageReceiptSchema = z.array(
 );
 /** One card per image of an `images.generate` call in a chat. */
 export type ImageReceipt = z.infer<typeof imageReceiptSchema>;
+/** The card an `integrations.connect` or `integrations.disconnect` call shows; the card reads the account live. */
+export const integrationCardSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('connect'), app: z.string().regex(/^[a-z][a-z-]{0,39}$/) }),
+  z.strictObject({
+    action: z.literal('disconnect'),
+    connectionId: z
+      .string()
+      .regex(/^(google|(github|atlassian):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+  }),
+]);
 export const toolReceiptSchema = z.object({
   id: uuidSchema,
   tool: z.string(),
@@ -294,6 +318,8 @@ export const toolReceiptSchema = z.object({
   narration: z.string().nullable().default(null),
   presentation: toolPresentationSchema.optional(),
   web: publicWebReceiptSchema.nullable().default(null),
+  /** The HTTP status or error code of an `api.request` call. */
+  api: apiCallReceiptSchema.nullable().optional(),
   knowledge: knowledgeActivitySchema.nullable().optional(),
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),
@@ -301,6 +327,7 @@ export const toolReceiptSchema = z.object({
   /** The follow-up a `followups.schedule` call saved. */
   followUpId: uuidSchema.optional(),
   googleProposalId: uuidSchema.optional(),
+  integration: integrationCardSchema.optional(),
   rowDraftId: uuidSchema.optional(),
   rowView: rowViewSchema.optional(),
   rowChange: rowChangeSchema.optional(),

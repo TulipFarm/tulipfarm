@@ -104,6 +104,16 @@ export const invitationTokenSchema = z
   .string()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/);
 export const redeemInvitationSchema = z.strictObject({ token: invitationTokenSchema });
+/** What a signed-out holder of an invitation link learns; the details appear only while the invitation is active. */
+export const invitationDetailsSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.enum(['expired', 'revoked', 'consumed']) }),
+  z.object({
+    status: z.literal('active'),
+    email: z.email(),
+    workspaceName: z.string(),
+    hasAccount: z.boolean(),
+  }),
+]);
 export const createdInvitationSchema = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal('already-member') }),
   z.object({ outcome: z.enum(['created', 'pending']), invitation: invitationSchema }),

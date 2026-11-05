@@ -4,6 +4,8 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { errorAttributes } from '@tulipfarm/observability';
+import type { PlanDocumentMode } from '@tulipfarm/agents/plan-document-store';
+import { planDocumentRenderQueue } from '@tulipfarm/plan-documents';
 
 export function taskWake(app: FastifyInstance, temporal: ReturnType<typeof createTemporalClient>) {
   return async (workspaceId: string, taskId: string) => {
@@ -47,6 +49,28 @@ export function planWake(app: FastifyInstance, temporal: ReturnType<typeof creat
       app.log.error(
         { workspaceId, planId, ...errorAttributes(error) },
         'Plan dispatch will retry from worker recovery',
+      );
+    }
+  };
+}
+
+/** Starts a plan's document rendering. Its workflow ID matches the worker's plan document dispatcher. */
+export function planDocumentStart(app: FastifyInstance, temporal: ReturnType<typeof createTemporalClient>) {
+  return async (workspaceId: string, planId: string, mode: PlanDocumentMode) => {
+    try {
+      await temporal.connection.withDeadline(Date.now() + 5000, () =>
+        temporal.client.workflow.start('planDocument', {
+          workflowId: `plan-document:${workspaceId}:${planId}`,
+          taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+          args: [workspaceId, planId, { mode, renderQueue: planDocumentRenderQueue(process.env) }],
+          workflowIdConflictPolicy: 'TERMINATE_EXISTING',
+          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+        }),
+      );
+    } catch (error) {
+      app.log.error(
+        { workspaceId, planId, ...errorAttributes(error) },
+        'Plan document dispatch will retry from worker recovery',
       );
     }
   };

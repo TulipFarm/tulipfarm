@@ -6,6 +6,8 @@ import { AccessDenied } from '@tulipfarm/access';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { fixture, connect, denied } from '../../../workspace-storage/test/integration/fixture.mjs';
 import { createConversations, ConversationConflict } from '../../src/index.ts';
+import { createConversationExecutor } from '../../src/runtime.ts';
+import { conversationFixture } from '../fixture.mjs';
 
 test(
   'private store persists ordered queued sends, retries exactly, conceals admin access and retains incarnation ownership',
@@ -92,6 +94,33 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       );
       assert.deepEqual(older.messages[0].parts, send.parts);
       assert.deepEqual(older.messages[0].turn, { id: first.turnId, status: 'queued', generation: 0, epoch: 0 });
+      // A finished reply reports its model, time to first word, total time and kept trace.
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_first_text_at=timing_started_at+interval '1.5 seconds' WHERE id=$1`,
+        [first.turnId],
+      );
+      const trace = 'a'.repeat(32);
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_requested_at=timing_started_at,timing_finished_at=timing_started_at+interval '4 seconds',trace_id=$2,trace_sampled=true WHERE id=$1`,
+        [first.turnId, trace],
+      );
+      assert.deepEqual((await service.history(upgraded.id, user, id, { before: 2 })).messages[0].turn.stats, {
+        model: 'claude-sonnet',
+        firstTextMs: 1500,
+        durationMs: 4000,
+        traceId: trace,
+      });
+      await db.platform.query(`UPDATE ${table('tf_conversation_turns')} SET trace_sampled=false WHERE id=$1`, [
+        first.turnId,
+      ]);
+      assert.equal(
+        (await service.history(upgraded.id, user, id, { before: 2 })).messages[0].turn.stats.traceId,
+        undefined,
+      );
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_first_text_at=NULL,timing_first_text_seconds=NULL,timing_finished_at=NULL,trace_id=NULL,trace_sampled=NULL WHERE id=$1`,
+        [first.turnId],
+      );
       assert.equal(older.nextBefore, null);
       assert.deepEqual(
         (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('tf_conversation_outbox')}`)).rows,
@@ -238,3 +267,83 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     }
   },
 );
+
+function countQueries(runtime) {
+  const counter = { count: 0 };
+  const wrap = client =>
+    new Proxy(client, {
+      get(target, key) {
+        const value = Reflect.get(target, key);
+        if (key === 'query')
+          return (...args) => {
+            counter.count++;
+            return value.apply(target, args);
+          };
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  return {
+    counter,
+    runtime: {
+      transaction: (id, compatibility, operation) =>
+        runtime.transaction(id, compatibility, tx => operation(Object.assign(tx, { client: wrap(tx.client) }))),
+    },
+  };
+}
+
+test('history and list read a page in a fixed number of queries', { timeout: 120000 }, async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const counted = countQueries(f.runtime);
+    const store = createConversations(counted.runtime);
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool('tables.definitions', false, async () => ({ tables: [] }), [], { tool: 'tables.definitions' });
+      return { text: 'Done', sources: [{ kind: 'table', tableId: randomUUID() }] };
+    });
+    const chatId = randomUUID();
+    const chats = [];
+    async function grow(turns) {
+      for (let index = 0; index < turns; index++) {
+        const sent = await f.store.send(w.id, w.userId, chatId, {
+          commandId: randomUUID(),
+          messageId: randomUUID(),
+          parts: [{ kind: 'text', text: `request ${index}` }],
+        });
+        assert.equal(
+          await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+          'completed',
+        );
+        const id = randomUUID();
+        await f.store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });
+        chats.push(id);
+      }
+    }
+    async function counts() {
+      counted.counter.count = 0;
+      const history = await store.history(w.id, w.userId, chatId);
+      const historyQueries = counted.counter.count;
+      counted.counter.count = 0;
+      const list = await store.list(w.id, w.userId);
+      return { history, list, counts: [historyQueries, counted.counter.count] };
+    }
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    await grow(2);
+    const small = await counts();
+    assert.equal(small.history.messages.length, 4);
+    await grow(6);
+    const large = await counts();
+    assert.equal(large.history.messages.length, 16);
+    assert.deepEqual(
+      large.history.messages.map(message => [message.author, message.tools?.length ?? 0]),
+      Array.from({ length: 8 }, () => [
+        ['human', 1],
+        ['assistant', 0],
+      ]).flat(),
+    );
+    assert.equal(large.list.chats.length, 9);
+    assert.deepEqual(large.counts, small.counts);
+  } finally {
+    await f.close();
+  }
+});

@@ -115,6 +115,12 @@ try {
         assert.equal(await shellHeader.getByText('Acme', { exact: true }).isVisible(), true);
       }
     }
+    if (!mobile) {
+      await page.goto(`${origin}/acme/agents`);
+      await nav.getByRole('link', { name: 'Teams', exact: true }).waitFor();
+      await page.waitForTimeout(500);
+      assert.equal(await nav.getByRole('link', { name: 'Members', exact: true }).count(), 0, 'only admins get Members');
+    }
     await page.goto(`${origin}/acme`);
     await shellHeader.getByRole('heading', { name: 'New chat', exact: true }).waitFor();
     const heading = shellHeader.getByRole('heading', { name: 'New chat', exact: true });

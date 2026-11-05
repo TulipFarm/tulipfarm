@@ -341,7 +341,7 @@ test('admission bounds repeated paid requests and settles abandoned reservations
     reserved: '1000000000000',
     charged: null,
     provider_pico_usd: null,
-    created_at: Date.now() - 100000,
+    created_at: Date.now() - 200000,
   });
   await improve(recovery);
   assert.equal(recovery.state.ledger.get('agent-authoring:abandoned').charged, '1000000000000');
@@ -349,7 +349,7 @@ test('admission bounds repeated paid requests and settles abandoned reservations
   assertSettled(recovery);
 });
 
-test('cancellation before dispatch refunds, and cancellation after dispatch settles unknown usage at reservation', async () => {
+test('cancellation before the provider answers refunds the reservation', async () => {
   const before = authoringFixture(),
     controller = new AbortController();
   controller.abort();
@@ -371,8 +371,7 @@ test('cancellation before dispatch refunds, and cancellation after dispatch sett
     });
   await rejectsCode(improve(after, input, afterController.signal), 'cancelled');
   assertSettled(after);
-  const row = [...after.state.ledger.values()][0];
-  assert.equal(row.charged, row.reserved);
+  assert.equal([...after.state.ledger.values()][0].charged, '0');
   await rejectsCode(improve(after, input), 'request-already-dispatched');
   assert.equal(after.state.requests.length, 1);
 });
@@ -488,7 +487,7 @@ test('known usage settles even when output is empty, malformed, interrupted, too
   assert.equal((await improve(accepted)).suggestion.length, 31999);
 });
 
-test('unknown usage, transport failure, oversized response, and pricing failure never silently refund or retry', async () => {
+test('no response refunds, an answer without usable usage bills an estimate, and neither retries', async () => {
   for (const [response, expected] of [
     [
       () => {
@@ -502,7 +501,7 @@ test('unknown usage, transport failure, oversized response, and pricing failure 
         delete body.usage;
         return Response.json(body);
       },
-      'provider-usage-unavailable',
+      null,
     ],
     [() => new Response('{unfinished'), 'provider-invalid-response'],
     [() => new Response(new Uint8Array([255, 254])), 'provider-invalid-response'],
@@ -518,10 +517,12 @@ test('unknown usage, transport failure, oversized response, and pricing failure 
   ]) {
     const fixture = authoringFixture();
     fixture.state.response = response;
-    await rejectsCode(improve(fixture), expected);
+    if (expected) await rejectsCode(improve(fixture), expected);
+    else assert.ok((await improve(fixture)).suggestion);
     assertSettled(fixture);
     const row = [...fixture.state.ledger.values()][0];
-    assert.equal(row.charged, row.reserved);
+    if (expected === 'provider-unavailable') assert.equal(row.charged, '0');
+    else assert.ok(BigInt(row.charged) > 0n && BigInt(row.charged) <= BigInt(row.reserved));
     assert.equal(fixture.state.requests.length, 1);
   }
   const failedSettlement = authoringFixture();

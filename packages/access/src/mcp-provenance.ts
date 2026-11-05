@@ -44,34 +44,116 @@ export async function mcpSourceClosure(tx: AuthorizationTransaction, sources: un
   return mcp;
 }
 
+type ConversationSourceRows = {
+  models: { sources: unknown }[];
+  steps: { sources: unknown; output: { sources?: unknown } | null }[];
+  results: { sources: unknown }[];
+  actions: { integration_id: string; authorization_epoch: number; sources: unknown; result_sources: unknown }[];
+};
+
+/** Rows a batch of private-conversation sources expand into, read once for a page of conversations. */
+export type ConversationSourcePrefetch = {
+  installed: Map<string, boolean>;
+  resultsReadable?: boolean;
+  conversations: Map<string, ConversationSourceRows>;
+};
+
 export async function protectedSourceClosure(
   tx: AuthorizationTransaction,
   sources: unknown,
+  prefetch?: ConversationSourcePrefetch,
 ): Promise<SourceDependency[]> {
-  return sourceClosure(tx, sources, true);
+  return sourceClosure(tx, sources, true, prefetch);
+}
+
+async function tableInstalled(tx: AuthorizationTransaction, installed: Map<string, boolean>, name: string) {
+  if (!installed.has(name))
+    installed.set(
+      name,
+      installedSchema.parse(
+        (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0],
+      ).installed,
+    );
+  return installed.get(name);
+}
+
+async function resultsReadable(tx: AuthorizationTransaction) {
+  return allowedSchema.parse(
+    (
+      await tx.client.query("SELECT has_table_privilege(current_user,$1,'SELECT') AS allowed", [
+        table(tx, 'tf_conversation_results'),
+      ])
+    ).rows[0],
+  ).allowed;
+}
+
+/**
+ * Reads the rows each private conversation's source closure expands into, with one query per table for the whole batch.
+ * Each conversation keeps the 1001-row bound the closure checks.
+ */
+async function readConversationSources(
+  tx: AuthorizationTransaction,
+  conversationIds: string[],
+  installed: Map<string, boolean>,
+): Promise<ConversationSourcePrefetch> {
+  const conversations = new Map<string, ConversationSourceRows>(
+    conversationIds.map(id => [id, { models: [], steps: [], results: [], actions: [] }]),
+  );
+  const prefetch: ConversationSourcePrefetch = { installed, conversations };
+  if (!conversationIds.length) return prefetch;
+  const read = async (key: keyof ConversationSourceRows, sql: string) => {
+    const rows = await tx.client.query(
+      conversationIds.length === 1
+        ? `${sql} LIMIT 1001`
+        : `SELECT * FROM (SELECT x.*, row_number() OVER (PARTITION BY x.conversation_id) AS position FROM (${sql}) x) y WHERE position<=1001`,
+      [conversationIds],
+    );
+    for (const row of rows.rows) (conversations.get(row.conversation_id)?.[key] as unknown[] | undefined)?.push(row);
+  };
+  if (await tableInstalled(tx, installed, 'tf_conversation_model_sources')) {
+    await read(
+      'models',
+      `SELECT t.conversation_id, s.sources FROM ${table(tx, 'tf_conversation_model_sources')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
+    );
+    await read(
+      'steps',
+      `SELECT t.conversation_id, s.sources, CASE WHEN s.output IS NULL OR s.output='null'::jsonb THEN NULL ELSE jsonb_build_object('sources', s.output->'sources') END AS output FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=ANY($1::uuid[])`,
+    );
+  }
+  if (await tableInstalled(tx, installed, 'tf_conversation_results')) {
+    prefetch.resultsReadable = await resultsReadable(tx);
+    if (prefetch.resultsReadable)
+      await read(
+        'results',
+        `SELECT conversation_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE conversation_id=ANY($1::uuid[])`,
+      );
+  }
+  if (await tableInstalled(tx, installed, 'tf_mcp_actions'))
+    await read(
+      'actions',
+      `SELECT a.origin->>'conversationId' AS conversation_id,a.integration_id,a.authorization_epoch,a.sources,r.sources AS result_sources FROM ${table(tx, 'tf_mcp_actions')} a LEFT JOIN ${table(tx, 'tf_mcp_receipts')} r ON r.action_id=a.id WHERE a.origin->>'kind'='private-chat' AND a.origin->>'conversationId'=ANY($1::text[])`,
+    );
+  return prefetch;
+}
+
+/** Reads a page of private conversations' source rows up front so their closures need no per-conversation reads. */
+export async function prefetchConversationSources(tx: AuthorizationTransaction, conversationIds: string[]) {
+  return readConversationSources(tx, conversationIds, new Map());
 }
 
 async function sourceClosure(
   tx: AuthorizationTransaction,
   sources: unknown,
   full: boolean,
+  prefetch?: ConversationSourcePrefetch,
 ): Promise<SourceDependency[]> {
   const pending = referencesSchema.parse(sources);
   const visited = new Set<string>();
   const edges = new Map<string, string[]>();
   let parent: string | undefined;
   const retained = new Map<string, SourceDependency>();
-  const installed = new Map<string, boolean>();
-  async function has(name: string) {
-    if (!installed.has(name))
-      installed.set(
-        name,
-        installedSchema.parse(
-          (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, name)])).rows[0],
-        ).installed,
-      );
-    return installed.get(name);
-  }
+  const installed = prefetch?.installed ?? new Map<string, boolean>();
+  const has = (name: string) => tableInstalled(tx, installed, name);
   function append(value: unknown) {
     const children = referencesSchema.parse(value);
     if (parent) edges.set(parent, [...(edges.get(parent) ?? []), ...children.map(child => JSON.stringify(child))]);
@@ -283,47 +365,29 @@ async function sourceClosure(
         }
         break;
       }
-      case 'private-conversation':
+      case 'private-conversation': {
+        const read = prefetch?.conversations.has(source.conversationId)
+          ? prefetch
+          : await readConversationSources(tx, [source.conversationId], installed);
+        const rows = read.conversations.get(source.conversationId);
+        if (!rows) throw new AccessDenied();
         if (await has('tf_conversation_model_sources')) {
-          const models = await tx.client.query(
-            `SELECT s.sources FROM ${table(tx, 'tf_conversation_model_sources')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=$1 LIMIT 1001`,
-            [source.conversationId],
-          );
-          if (models.rows.length > 1000) throw new AccessDenied();
-          for (const model of models.rows) append(model.sources);
-          const steps = await tx.client.query(
-            `SELECT s.sources,s.output FROM ${table(tx, 'tf_conversation_execution_steps')} s JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id WHERE t.conversation_id=$1 LIMIT 1001`,
-            [source.conversationId],
-          );
-          if (steps.rows.length > 1000) throw new AccessDenied();
-          for (const step of steps.rows) {
+          if (rows.models.length > 1000) throw new AccessDenied();
+          for (const model of rows.models) append(model.sources);
+          if (rows.steps.length > 1000) throw new AccessDenied();
+          for (const step of rows.steps) {
             append(step.sources);
             if (step.output !== null) append(step.output.sources);
           }
         }
         if (await has('tf_conversation_results')) {
-          const readable = allowedSchema.parse(
-            (
-              await tx.client.query("SELECT has_table_privilege(current_user,$1,'SELECT') AS allowed", [
-                table(tx, 'tf_conversation_results'),
-              ])
-            ).rows[0],
-          ).allowed;
-          if (!readable) throw new AccessDenied();
-          const results = await tx.client.query(
-            `SELECT sources FROM ${table(tx, 'tf_conversation_results')} WHERE conversation_id=$1 LIMIT 1001`,
-            [source.conversationId],
-          );
-          if (results.rows.length > 1000) throw new AccessDenied();
-          for (const result of results.rows) append(result.sources);
+          if (!read.resultsReadable) throw new AccessDenied();
+          if (rows.results.length > 1000) throw new AccessDenied();
+          for (const result of rows.results) append(result.sources);
         }
         if (await has('tf_mcp_actions')) {
-          const actions = await tx.client.query(
-            `SELECT a.integration_id,a.authorization_epoch,a.sources,r.sources AS result_sources FROM ${table(tx, 'tf_mcp_actions')} a LEFT JOIN ${table(tx, 'tf_mcp_receipts')} r ON r.action_id=a.id WHERE a.origin->>'kind'='private-chat' AND a.origin->>'conversationId'=$1 LIMIT 1001`,
-            [source.conversationId],
-          );
-          if (actions.rows.length > 1000) throw new AccessDenied();
-          for (const action of actions.rows) {
+          if (rows.actions.length > 1000) throw new AccessDenied();
+          for (const action of rows.actions) {
             append([
               {
                 kind: 'mcp-integration',
@@ -336,6 +400,7 @@ async function sourceClosure(
           }
         }
         break;
+      }
       default:
         break;
     }
