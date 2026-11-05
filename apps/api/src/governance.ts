@@ -295,4 +295,5 @@ export function registerGovernance(
       request => service.redeemInvitation(user(request), redeemInvitationSchema.parse(request.body).token),
     );
   });
+  return service;
 }

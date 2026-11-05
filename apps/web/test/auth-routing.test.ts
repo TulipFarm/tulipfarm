@@ -72,6 +72,7 @@ beforeEach(() => {
       localStorage: {
         getItem: (key: string) => storage.get(key) ?? null,
         setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
       },
     },
   });
@@ -473,6 +474,23 @@ test('Google and email callbacks preserve destinations for both new and returnin
   assert.equal(magicLinkDestination(`${origin}/acme/settings`, origin), '/acme/settings');
   assert.equal(magicLinkDestination('https://example.com/acme', origin), '/');
   assert.equal(magicLinkDestination(null, origin), '/');
+});
+
+test('an invitation opened in this browser wins over workspace creation when a sign-in loses its redirect', async () => {
+  const invitation = `/invite?token=${acme.id}.${'a'.repeat(43)}`;
+  workspaces = [];
+  storage.set(
+    'tulipfarm.pending-invitation',
+    JSON.stringify({ token: invitation.split('=')[1], until: Date.now() + 60_000 }),
+  );
+  const returned = await destination('/');
+  assert.equal(`${returned.pathname}${returned.search}`, invitation);
+  storage.set(
+    'tulipfarm.pending-invitation',
+    JSON.stringify({ token: invitation.split('=')[1], until: Date.now() - 1 }),
+  );
+  assert.equal((await destination('/')).pathname, '/create-workspace');
+  assert.equal(storage.has('tulipfarm.pending-invitation'), false);
 });
 
 test('invitation continuation survives auth, profile completion and already signed-out logout without workspace lookup', async () => {

@@ -53,12 +53,15 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     identityUrl.username = identityRole;
     identityUrl.password = password;
     identity = new Pool({ connectionString: identityUrl.href, options: '-c search_path=app' });
+    const invitationLinks = { current: null };
     const auth = createAuth(
       identity,
       async ({ url }) => {
         identities.push(url);
       },
       async () => {},
+      undefined,
+      invitationLinks,
     );
     async function signIn(name, email = `${randomUUID()}@example.com`) {
       await auth.api.signInMagicLink({
@@ -97,14 +100,15 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     app = Fastify();
     app.register(swagger, { openapi: { info: { title: 'Governance verification', version: '1' } } });
     app.register(
-      async routes =>
-        registerGovernance(routes, {
+      async routes => {
+        invitationLinks.current = registerGovernance(routes, {
           auth,
           runtime,
           identity,
           compatibility,
           emailDelivery: { keys, webOrigin: 'http://localhost:5173' },
-        }),
+        });
+      },
       { prefix: '/v1' },
     );
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -296,6 +300,84 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         }),
         { outcome: 'already-member' },
       );
+    }
+    {
+      const invitationAuth = async (path, token, cookie) => {
+        const response = await auth.handler(
+          new Request(`http://localhost:3001/v1/auth/invitation/${path}`, {
+            method: 'POST',
+            headers: { origin: 'http://localhost:5173', 'content-type': 'application/json', ...(cookie && { cookie }) },
+            body: JSON.stringify({ token }),
+          }),
+        );
+        return { status: response.status, json: await response.json(), headers: response.headers };
+      };
+      const newEmail = `${randomUUID()}@example.com`;
+      const fresh = await invite(newEmail);
+      assert.deepEqual((await invitationAuth('details', fresh.token)).json, {
+        status: 'active',
+        email: newEmail,
+        workspaceName: 'Test',
+        hasAccount: false,
+        linkSignIn: true,
+      });
+      const signedIn = await invitationAuth('sign-in', fresh.token, stranger.cookie);
+      assert.equal(signedIn.status, 409);
+      assert.equal(signedIn.json.code, 'SIGNED_IN');
+      const attempts = await Promise.all([1, 2].map(() => invitationAuth('sign-in', fresh.token)));
+      const joined = attempts.find(attempt => attempt.status === 200);
+      assert.ok(joined, JSON.stringify(attempts.map(attempt => attempt.json)));
+      assert.deepEqual(
+        attempts.map(attempt => attempt.status).sort(),
+        [200, 404],
+        'The link signs in only on its first redemption',
+      );
+      assert.equal(joined.json.workspaceId, a.id);
+      const newcomer = {
+        email: newEmail,
+        cookie: joined.headers
+          .getSetCookie()
+          .map(value => value.split(';')[0])
+          .join('; '),
+      };
+      const session = await auth.api.getSession({ headers: new Headers({ cookie: newcomer.cookie }) });
+      assert.equal(session.user.email, newEmail);
+      assert.equal(session.user.emailVerified, true);
+      assert.equal(session.user.name, '');
+      assert.deepEqual(await ok(newcomer, 'POST', '/v1/invitations/redeem', { token: fresh.token }), {
+        workspaceId: a.id,
+        membershipId: joined.json.membershipId,
+      });
+      assert.deepEqual((await invitationAuth('details', fresh.token)).json, { status: 'consumed' });
+      assert.equal((await invitationAuth('sign-in', fresh.token)).status, 404);
+      assert.equal(
+        (await identity.query('SELECT count(*)::int AS count FROM app.users WHERE email = $1', [newEmail])).rows[0]
+          .count,
+        1,
+      );
+
+      const existing = await signIn('Existing account');
+      const existingInvitation = await invite(existing.email);
+      assert.deepEqual((await invitationAuth('details', existingInvitation.token)).json, {
+        status: 'active',
+        email: existing.email,
+        workspaceName: 'Test',
+        hasAccount: true,
+        linkSignIn: false,
+      });
+      const refused = await invitationAuth('sign-in', existingInvitation.token);
+      assert.equal(refused.status, 409);
+      assert.equal(refused.json.code, 'ACCOUNT_EXISTS');
+      assert.equal(refused.headers.getSetCookie().length, 0, 'The link never signs in to an existing account');
+      const existingJoined = await ok(existing, 'POST', '/v1/invitations/redeem', { token: existingInvitation.token });
+      for (const membershipId of [joined.json.membershipId, existingJoined.membershipId])
+        await ok(admin, 'DELETE', `/members/${membershipId}`);
+
+      const revoked = await invite();
+      await ok(admin, 'POST', `/invitations/${revoked.invitation.id}/revoke`);
+      assert.deepEqual((await invitationAuth('details', revoked.token)).json, { status: 'revoked' });
+      assert.equal((await invitationAuth('sign-in', revoked.token)).status, 404);
+      assert.equal((await invitationAuth('details', `${randomUUID()}.${'a'.repeat(43)}`)).status, 404);
     }
     {
       const original = await invite(stranger.email);

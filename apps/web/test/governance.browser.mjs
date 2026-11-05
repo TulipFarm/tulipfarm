@@ -69,6 +69,9 @@ try {
   let invitations = [];
   const invitationToken = `${workspaceId}.${'a'.repeat(43)}`;
   let redemptions = 0;
+  let signedOut = false;
+  let invitationDetails;
+  let linkSignIns = 0;
   let governanceReads = 0;
   let workspaceLists = 0;
   const refreshGovernance = () => workspaceChange(page, workspaceId, 'ada', [['governance', 'administration']]);
@@ -89,8 +92,19 @@ try {
     let status = 200;
     let json;
     if (path === '/v1/auth/get-session')
-      json = { session: { id: 'session', userId: 'ada' }, user: { id: 'ada', name: 'Ada', email: 'ada@example.com' } };
-    else if (path === '/v1/workspaces') {
+      json = signedOut
+        ? null
+        : { session: { id: 'session', userId: 'ada' }, user: { id: 'ada', name: 'Ada', email: 'ada@example.com' } };
+    else if (path === '/v1/auth/options') json = { google: false, magicLink: true, emailPassword: true };
+    else if (path === '/v1/auth/invitation/details') {
+      assert.equal(request.postDataJSON().token, invitationToken);
+      json = invitationDetails;
+    } else if (path === '/v1/auth/invitation/sign-in') {
+      assert.equal(request.postDataJSON().token, invitationToken);
+      linkSignIns++;
+      signedOut = false;
+      json = { workspaceId, membershipId: memberId };
+    } else if (path === '/v1/workspaces') {
       workspaceLists++;
       json = [workspace];
     } else if (path === '/v1/workspaces/acme') {
@@ -441,9 +455,45 @@ try {
   await page.goto(`${origin}/invite?token=${invitationToken}`);
   await page.waitForURL(`${origin}/acme`);
   assert.equal(redemptions, 2);
+  signedOut = true;
+  invitationDetails = {
+    status: 'active',
+    email: 'ada@example.com',
+    workspaceName: 'Acme',
+    hasAccount: true,
+    linkSignIn: false,
+  };
+  await page.goto(`${origin}/invite?token=${invitationToken}`);
+  await page.getByRole('heading', { name: 'Join Acme', exact: true }).waitFor();
+  const invitedEmail = page.getByRole('textbox', { name: 'Email' });
+  assert.equal(await invitedEmail.inputValue(), 'ada@example.com');
+  assert.equal(await invitedEmail.isEditable(), false);
+  assert.equal(await page.getByRole('heading', { name: 'Sign in before joining' }).count(), 0);
+  assert.equal(linkSignIns, 0, 'The link never signs in to an existing account');
+  // A sign-in that loses its redirect lands on the root, which returns to the invitation opened in this browser.
+  signedOut = false;
+  await page.goto(`${origin}/`);
+  await page.waitForURL(`${origin}/acme`);
+  assert.equal(redemptions, 3);
+  signedOut = true;
+  invitationDetails = { status: 'consumed' };
+  await page.goto(`${origin}/invite?token=${invitationToken}`);
+  await page.getByRole('heading', { name: 'This invitation was already used' }).waitFor();
+  assert.equal(linkSignIns, 0);
+  invitationDetails = {
+    status: 'active',
+    email: 'ada@example.com',
+    workspaceName: 'Acme',
+    hasAccount: false,
+    linkSignIn: true,
+  };
+  await page.goto(`${origin}/invite?token=${invitationToken}`);
+  await page.waitForURL(`${origin}/acme`);
+  assert.equal(linkSignIns, 1);
+  assert.equal(redemptions, 4);
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Governance browser checks passed. Read recovery, aborted refresh reset, immutable uncertain team retries and reconciliation, duplicate writes, explicit grants, mobile dark mode, keyboard, access loss, invitation pagination/retry, stale read cancellation, confirmed revoke retained after refresh failure, create/revoke/join.\n',
+    'Governance browser checks passed. Read recovery, aborted refresh reset, immutable uncertain team retries and reconciliation, duplicate writes, explicit grants, mobile dark mode, keyboard, access loss, invitation pagination/retry, stale read cancellation, confirmed revoke retained after refresh failure, create/revoke/join, signed-out invitation sign-in.\n',
   );
 } catch (e) {
   const p = browser?.contexts()[0]?.pages()[0];

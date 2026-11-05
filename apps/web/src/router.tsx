@@ -34,6 +34,7 @@ import {
   workspaceDestination,
   workspaceIdHint,
 } from '@/lib/last-workspace';
+import { pendingInvitationDestination } from '@/lib/pending-invitation';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceSlugError } from '@/lib/workspace-slug';
@@ -460,7 +461,8 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: async () => {
-    throw redirect({ href: await defaultWorkspaceDestination('/'), replace: true });
+    const destination = await defaultWorkspaceDestination('/');
+    throw redirect({ href: pendingInvitationDestination() ?? destination, replace: true });
   },
 });
 export const slackLinkRoute = createRoute({

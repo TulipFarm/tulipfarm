@@ -330,7 +330,7 @@ export function registerStorageComposition(
   app.addHook('onClose', async () => {
     await confirmation.close();
   });
-  registerGovernance(app, {
+  dependencies.invitationLinks.current = registerGovernance(app, {
     auth: dependencies.auth,
     identity: dependencies.pool,
     runtime,
