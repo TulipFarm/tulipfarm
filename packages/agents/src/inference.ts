@@ -6,6 +6,7 @@ import {
   modelCapabilities,
   modelCapabilitiesSchema,
   modelImageLimits,
+  reasoningRequestFields,
   type ModelCapabilities,
 } from '@tulipfarm/config';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
@@ -92,13 +93,14 @@ import {
 import type { AvatarSnapshot } from '@tulipfarm/conversations/results';
 import type { ReplyStatus } from '@tulipfarm/conversations/events';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
+import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 export { serverSentEvents } from './inference-stream.ts';
 
 const credentialSchema = z.string().regex(/^[\x21-\x7e]{1,4096}$/);
 const routeFields = {
   endpoint: z.url(),
   model: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/),
-  timeoutMs: z.number().int().min(1).max(45000).default(45000),
+  timeoutMs: z.number().int().min(1).max(modelCallTimeoutMs).default(modelCallTimeoutMs),
   maxOutputTokens: z.number().int().min(1).max(4096).default(4096),
   capabilities: modelCapabilitiesSchema.optional(),
 };
@@ -299,11 +301,6 @@ function anthropicToolChoice(capabilities: ModelCapabilities) {
     ? { type: 'auto', disable_parallel_tool_use: true }
     : { type: 'tool', name: 'select_action', disable_parallel_tool_use: true };
 }
-// Some Azure reasoning deployments reject function tools unless reasoning is off.
-function reasoningOff(capabilities: ModelCapabilities) {
-  if (!capabilities.reasoningOffForTools) return {};
-  return capabilities.api === 'responses' ? { reasoning: { effort: 'none' } } : { reasoning_effort: 'none' };
-}
 function azureTools(capabilities: ModelCapabilities, description: string, parameters: object) {
   return {
     tools: [
@@ -312,7 +309,6 @@ function azureTools(capabilities: ModelCapabilities, description: string, parame
     tool_choice:
       capabilities.toolChoice === 'auto' ? 'auto' : { type: 'function', function: { name: 'select_action' } },
     parallel_tool_calls: false,
-    ...reasoningOff(capabilities),
   };
 }
 
@@ -372,9 +368,9 @@ function openAiShapedRequest(
               tools: [{ type: 'function', name: 'select_action', description, parameters: schema, strict: false }],
               tool_choice: capabilities.toolChoice === 'auto' ? 'auto' : { type: 'function', name: 'select_action' },
               parallel_tool_calls: false,
-              ...reasoningOff(capabilities),
             }
           : {}),
+        ...reasoningRequestFields(capabilities, Boolean(schema)),
       },
     };
   return {
@@ -385,6 +381,7 @@ function openAiShapedRequest(
       messages,
       max_completion_tokens: config.maxOutputTokens,
       ...(schema ? azureTools(capabilities, description, schema) : {}),
+      ...reasoningRequestFields(capabilities, Boolean(schema)),
     },
   };
 }
@@ -1220,8 +1217,9 @@ function chatWire(
 }
 /**
  * `provider` and `model` name the route of this request; a fallback retry may use a different route from the chat
- * steps. The settlement's `rejected` is true when the provider refused the request with an HTTP error and
- * reported no usage, so nothing was generated.
+ * steps. Every dispatched call settles once. Answered calls settle known usage, estimated when the provider reported
+ * none. Unknown usage means the provider refused the request or never answered, so it charged nothing; `rejected`
+ * is then true.
  */
 export type ToolModelMeter = (attempt: {
   step: number;
@@ -1638,7 +1636,7 @@ function nativeWire(
                   parallel_tool_calls: true,
                 }
               : {}),
-            ...reasoningOff(capabilities),
+            ...reasoningRequestFields(capabilities, true),
           },
         };
       }
@@ -1686,7 +1684,7 @@ function nativeWire(
                 parallel_tool_calls: true,
               }
             : {}),
-          ...reasoningOff(capabilities),
+          ...reasoningRequestFields(capabilities, true),
         },
       };
     }
@@ -1883,6 +1881,32 @@ function timedOut(error: unknown) {
   return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }
 
+/**
+ * The usage to bill for a call the provider answered. The provider charges for every answered call, so when it
+ * reports no usage, or the stream breaks, the call bills an estimate: the request's size, and the output's size or one
+ * token per streamed event. Calls the provider refused or never answered keep their unknown usage and bill nothing.
+ */
+export function billedUsage(
+  answered: boolean,
+  reported: InferenceUsage,
+  measure: { inputBytes: number; imageInputTokens: number },
+  output: { body: unknown; events: number },
+): InferenceUsage {
+  if (!answered || reported.kind === 'known') return reported;
+  return {
+    kind: 'known',
+    input: estimateInputTokens(measure.inputBytes) + measure.imageInputTokens,
+    output:
+      output.body === null || output.body === undefined
+        ? output.events
+        : estimateInputTokens(Buffer.byteLength(JSON.stringify(output.body))),
+    cacheRead: 0,
+    cacheWrite: 0,
+    cacheWrite5m: 0,
+    cacheWrite1h: 0,
+  };
+}
+
 async function observeProviderResponse<T>(call: () => Promise<T>, failed: (result: T) => boolean): Promise<T> {
   const marker = new Error('model-provider-response-failed');
   let rejected: T;
@@ -1931,6 +1955,7 @@ async function sendChatRequest<T>(
     // The streamed answer is a preview; a failing consumer must not affect the turn.
     let held = false;
     let published = false;
+    let events = 0;
     let previousText: string | undefined;
     const publish = (text: string) => {
       if (previousText === text) return;
@@ -1966,7 +1991,10 @@ async function sendChatRequest<T>(
           signal: signal
             ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
             : AbortSignal.timeout(target.timeoutMs),
-        }).catch((error: unknown) => {
+        }).catch(async (error: unknown) => {
+          await observeChatDetail('settle', async () => onUsage?.({ kind: 'unknown' }, { rejected: true })).catch(
+            () => undefined,
+          );
           throw new ModelCallError(
             timedOut(error) ? 'timeout' : 'transport',
             { outputStarted: false },
@@ -1976,6 +2004,7 @@ async function sendChatRequest<T>(
         const result = await readModelResponse(response, streamFormat, {
           onText,
           onFirstToken: report.firstToken,
+          onEvent: () => events++,
         }).catch((error: unknown) => {
           report.error(
             new ModelCallError(
@@ -1992,9 +2021,8 @@ async function sendChatRequest<T>(
     );
     const value = observeChatDetailSync('response-parse', () => usage(target, json));
     reportUsage(report, value, json);
-    await observeChatDetail('settle', async () =>
-      onUsage?.(value, { rejected: !response.ok && value.kind !== 'known' }),
-    );
+    const billed = billedUsage(response.ok && !error, value, measure, { body: json, events });
+    await observeChatDetail('settle', async () => onUsage?.(billed, { rejected: billed.kind !== 'known' }));
     onSettled?.(measure, response.ok ? value : { kind: 'unknown' });
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
@@ -3232,10 +3260,11 @@ export async function inferSpecialist(
     const selected = await withChatModelRequest('reply', async () => {
       const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
       const serialized = serializeChatRequest(wire.body);
+      const measure = measureRequest(config, serialized, wire.turns);
       const onUsage = await observeChatDetail('reserve', () =>
         meter({
           step,
-          ...measureRequest(config, serialized, wire.turns),
+          ...measure,
           maxOutputTokens: config.maxOutputTokens,
           provider: config.provider,
           model: config.model,
@@ -3252,6 +3281,11 @@ export async function inferSpecialist(
               signal: live?.signal
                 ? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), live.signal])
                 : AbortSignal.timeout(config.timeoutMs),
+            }).catch(async (error: unknown) => {
+              await observeChatDetail('settle', () => onUsage({ kind: 'unknown' }, { rejected: true })).catch(
+                () => undefined,
+              );
+              throw error;
             });
             const json: unknown = await response.json().catch(() => null);
             return { response, json };
@@ -3260,7 +3294,8 @@ export async function inferSpecialist(
         );
         const value = observeChatDetailSync('response-parse', () => usage(config, json));
         reportUsage(report, value, json);
-        await observeChatDetail('settle', () => onUsage(value));
+        const billed = billedUsage(response.ok, value, measure, { body: json, events: 0 });
+        await observeChatDetail('settle', () => onUsage(billed, { rejected: billed.kind !== 'known' }));
         if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
         const step = observeChatDetailSync('decision-parse', () => nativeStep(config, json));
         if (step.kind === 'failure')
@@ -3450,6 +3485,9 @@ export async function inferWithSystem(
             body: serialized,
             redirect: 'manual',
             signal: AbortSignal.timeout(config.timeoutMs),
+          }).catch(async (error: unknown) => {
+            await observeChatDetail('settle', async () => onUsage?.({ kind: 'unknown' })).catch(() => undefined);
+            throw error;
           });
           const json: unknown = await response.json().catch(() => null);
           return { response, json };
@@ -3458,7 +3496,11 @@ export async function inferWithSystem(
       );
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
       reportUsage(report, value, json);
-      await observeChatDetail('settle', async () => onUsage?.(value));
+      const billed = billedUsage(response.ok, value, measureRequest(config, serialized, messages), {
+        body: json,
+        events: 0,
+      });
+      await observeChatDetail('settle', async () => onUsage?.(billed));
       if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {
         const parsed = nativeStep(config, json);
@@ -3502,6 +3544,9 @@ export async function inferText(
             body: serialized,
             redirect: 'manual',
             signal: AbortSignal.timeout(config.timeoutMs),
+          }).catch(async (error: unknown) => {
+            await observeChatDetail('settle', async () => onUsage?.({ kind: 'unknown' })).catch(() => undefined);
+            throw error;
           });
           const json: unknown = await response.json().catch(() => null);
           return { response, json };
@@ -3510,7 +3555,11 @@ export async function inferText(
       );
       const value = observeChatDetailSync('response-parse', () => usage(config, json));
       reportUsage(report, value, json);
-      await observeChatDetail('settle', async () => onUsage?.(value));
+      const billed = billedUsage(response.ok, value, measureRequest(config, serialized, context), {
+        body: json,
+        events: 0,
+      });
+      await observeChatDetail('settle', async () => onUsage?.(billed));
       if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
       return observeChatDetailSync('decision-parse', () => {
         const parsed = nativeStep(config, json);

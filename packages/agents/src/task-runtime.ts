@@ -70,6 +70,7 @@ import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
 import { readTaskFiles, taskFileStopMessage, type TaskFileReading, type TaskReadingFamily } from './task-files.ts';
 import type { TaskFileContent } from './model.ts';
+import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
 const compatibility = commonCompatibility;
 type Transaction = Parameters<Parameters<AgentStorage['transaction']>[2]>[0];
@@ -793,7 +794,10 @@ export function createTaskRuntime(
         ...(reading?.links && (await reading.enabled(workspaceId)) ? { taskFiles: true as const } : {}),
         ...(secrets?.tools.enabled() ? { taskSecrets: true as const } : {}),
       });
-      const timeoutMs = Math.min(47000, task.limits.activeMilliseconds - Number(task.activeMilliseconds));
+      const timeoutMs = Math.min(
+        modelCallTimeoutMs + 2000,
+        task.limits.activeMilliseconds - Number(task.activeMilliseconds),
+      );
       const claim = await claimAttempt(tx, model, workspaceId, generation, input, {
         flowId: task.flowId,
         credits: task.limits.credits,
@@ -999,7 +1003,7 @@ export function createTaskRuntime(
     }
     if (!claim || claim.kind !== 'model' || !model) return;
     let result: InferenceResult;
-    const timeoutMs = Math.max(1, Math.min(45000, claim.dispatchDeadline - Date.now()));
+    const timeoutMs = Math.max(1, Math.min(modelCallTimeoutMs, claim.dispatchDeadline - Date.now()));
     const controller = new AbortController();
     const failed = (
       reason: 'timeout' | 'provider-error' | 'unavailable',

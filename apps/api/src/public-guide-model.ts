@@ -136,6 +136,7 @@ export function publicGuideModel(env: NodeJS.ProcessEnv = process.env, fetcher: 
   const config = inferenceRouteSchema.parse(selected.route);
   if (config.provider !== 'azure') return null;
   const model = config.model;
+  const reasoningEffort = routeCapabilities(config).reasoningEffort ?? 'none';
   // The deployment, a catalog alias, or a dated snapshot of either, as task attempts accept.
   const identities = [model, ...routeCapabilities(config).responseModelAliases];
   const responseModel = z
@@ -166,7 +167,7 @@ export function publicGuideModel(env: NodeJS.ProcessEnv = process.env, fetcher: 
         redirect: 'error',
         signal,
         headers,
-        body: JSON.stringify({ model, messages, reasoning_effort: 'none', store: false, ...fields }),
+        body: JSON.stringify({ model, messages, reasoning_effort: reasoningEffort, store: false, ...fields }),
       }),
     );
   }

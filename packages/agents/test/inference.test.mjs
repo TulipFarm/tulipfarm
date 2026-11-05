@@ -1839,7 +1839,8 @@ test('ordinary Gemini text treats omitted documented zero counters as zero but r
   await inferText(routes.google, [{ role: 'user', text: 'hello' }], async value => {
     receipts.push(value);
   });
-  assert.deepEqual(receipts[1], { kind: 'unknown' });
+  assert.equal(receipts[1].kind, 'known');
+  assert.ok(receipts[1].input > 0 && receipts[1].output > 0);
 });
 
 test('Gemini agent normalizes absent zero counters without losing reported input and output', async t => {
@@ -2535,7 +2536,7 @@ test('invalid endpoints, credentials, model paths, and deadlines fail before dis
   }
   for (const patch of [
     { timeoutMs: 0 },
-    { timeoutMs: 45001 },
+    { timeoutMs: 120001 },
     { maxOutputTokens: 4097 },
     { apiKey: 'key\nheader' },
     { model: '../model' },
@@ -2989,7 +2990,9 @@ for (const status of [null, 200, 429, 503]) {
 for (const [model, effort] of [
   ['gpt-6-luna', 'none'],
   ['gpt-6-sol', 'none'],
-  ['DeepSeek-V4-Flash', undefined],
+  ['DeepSeek-V4-Flash', 'none'],
+  ['grok-4.6', 'minimal'],
+  ['custom-deployment', undefined],
 ])
   test(`Azure ${model} tool requests send reasoning_effort ${effort}`, async t => {
     const wire = await boundary(t, (_req, res) =>

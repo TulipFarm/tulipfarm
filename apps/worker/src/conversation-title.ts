@@ -129,7 +129,11 @@ function titleMeter(
     );
     if (!admitted) throw new Error('model-request-not-dispatched');
     return async usage => {
-      if (usage.kind !== 'known') return;
+      // Unknown usage means the provider refused the request or never answered, so it charged nothing.
+      if (usage.kind !== 'known') {
+        await runtime.transaction(work.workspaceId, commonCompatibility, tx => settleCredits(tx, id, '0'));
+        return;
+      }
       const { kind, ...tokens } = usage;
       const cost = calculateUsageCost({ ...quote, usage: { kind, tokens } });
       if (cost.kind !== 'known') return;

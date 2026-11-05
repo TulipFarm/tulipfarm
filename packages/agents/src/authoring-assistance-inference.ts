@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { reasoningRequestFields } from '@tulipfarm/config';
 import { observeInference } from '@tulipfarm/observability';
 import {
+  billedUsage,
   inferenceRouteSchema,
   openAiUsage,
   openAiWire,
@@ -65,7 +67,7 @@ function wire(config: Route, system: string, messages: readonly Message[]) {
               input: turns,
               max_output_tokens: config.maxOutputTokens,
               store: false,
-              ...(capabilities.reasoningOffForTools ? { reasoning: { effort: 'none' } } : {}),
+              ...reasoningRequestFields(capabilities, true),
             },
           }
         : {
@@ -76,7 +78,7 @@ function wire(config: Route, system: string, messages: readonly Message[]) {
               messages: turns,
               max_completion_tokens: config.maxOutputTokens,
               ...(config.provider === 'xai' ? {} : { store: false }),
-              ...(capabilities.reasoningOffForTools ? { reasoning_effort: 'none' } : {}),
+              ...reasoningRequestFields(capabilities, true),
             },
           };
     }
@@ -329,11 +331,10 @@ export function prepareAgentAuthoringInference(
   return {
     inputBytes,
     maxOutputTokens: config.maxOutputTokens,
-    async run(signal: AbortSignal, onUsage: (value: InferenceUsage) => void, onDispatch?: () => void) {
+    async run(signal: AbortSignal, onUsage: (value: InferenceUsage) => void, onAnswered?: () => void) {
       return observeInference({ provider: config.provider, model: config.model, operation: 'chat' }, async report => {
         try {
           signal.throwIfAborted();
-          onDispatch?.();
           const response = await fetcher(request.url, {
             method: 'POST',
             headers: request.headers,
@@ -341,6 +342,7 @@ export function prepareAgentAuthoringInference(
             redirect: 'error',
             signal,
           });
+          onAnswered?.();
           let json: unknown;
           try {
             json = await readBody(response, signal);
@@ -348,12 +350,18 @@ export function prepareAgentAuthoringInference(
             if (!response.ok && !signal.aborted) throw providerError(response.status, null);
             throw error;
           }
-          const consumed = usage(config, json);
+          const reported = usage(config, json);
+          const consumed = billedUsage(
+            response.ok,
+            reported,
+            { inputBytes, imageInputTokens: 0 },
+            { body: json, events: 0 },
+          );
           onUsage(consumed);
-          if (consumed.kind === 'known')
+          if (reported.kind === 'known')
             report.usage(
-              consumed.input + consumed.cacheRead + consumed.cacheWrite + consumed.cacheWrite5m + consumed.cacheWrite1h,
-              consumed.output,
+              reported.input + reported.cacheRead + reported.cacheWrite + reported.cacheWrite5m + reported.cacheWrite1h,
+              reported.output,
             );
           if (!response.ok) throw providerError(response.status, json);
           const model = metadata.parse(json);

@@ -11,6 +11,7 @@ test('deterministic model failures end the turn instead of retrying', () => {
     'model-invalid-request',
     'model-refusal',
     'model-incomplete-response',
+    'model-timeout',
   ])
     assert.equal(modelFailureEndsTurn(failure), true, failure);
 });
@@ -20,7 +21,6 @@ test('transient model failures keep retrying', () => {
     'model-rate-limit',
     'model-overload',
     'model-unavailable',
-    'model-timeout',
     'model-transport',
     'model-provider-error',
     'not-a-model-failure',

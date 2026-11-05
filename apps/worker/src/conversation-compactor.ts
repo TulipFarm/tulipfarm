@@ -142,7 +142,11 @@ export function conversationCompactor(
               });
               if (!admitted) throw new CreditAttemptAlreadyDispatched();
               return async usage => {
-                if (usage.kind !== 'known') return;
+                // Unknown usage means the provider refused the request or never answered, so it charged nothing.
+                if (usage.kind !== 'known') {
+                  await runtime.transaction(fence.workspaceId, commonCompatibility, tx => settleCredits(tx, id, '0'));
+                  return;
+                }
                 const { kind, ...tokens } = usage;
                 const cost = calculateUsageCost({ ...quote, usage: { kind, tokens } });
                 if (cost.kind !== 'known') return;

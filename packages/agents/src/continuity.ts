@@ -27,6 +27,7 @@ import { isFeatureEnabled } from '@tulipfarm/observability';
 import type { ServedModelCatalog } from '@tulipfarm/config';
 import { CreditsExhausted, requireCredits, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
+import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
 type Input = Parameters<AgentModel>[0];
 export type ModelContinuity = {
@@ -400,7 +401,9 @@ export async function claimAttempt(
       return null;
     }
   }
-  const lease = new Date(Math.min(now.getTime() + (task?.timeoutMs ?? 47000), generation.deadline.getTime()));
+  const lease = new Date(
+    Math.min(now.getTime() + (task?.timeoutMs ?? modelCallTimeoutMs + 2000), generation.deadline.getTime()),
+  );
   if (!(await config.health.claim(resolution, id, lease))) return null;
   const agentId = z
     .string()
@@ -489,8 +492,9 @@ export async function settleAttempt(
     usage = { kind: 'unknown', reason: 'invalid' };
     cost = { kind: 'unknown', reason: 'invalid' };
   }
+  // A request the provider never answered was not charged by it.
   const definitiveCharge =
-    result.kind === 'failure' && result.dispatch === 'not-started'
+    result.kind === 'failure' && (result.dispatch === 'not-started' || result.status === null)
       ? '0'
       : cost.kind === 'known'
         ? cost.providerPicoUsd

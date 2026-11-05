@@ -19,6 +19,12 @@ export const modelCapabilitiesSchema = z
       .boolean()
       .optional()
       .describe('Disable reasoning on tool requests the deployment rejects with reasoning on'),
+    reasoningEffort: z
+      .enum(['none', 'minimal', 'low', 'medium', 'high'])
+      .optional()
+      .describe(
+        "Reasoning effort sent on every chat-completions or responses request; use the lowest value the model accepts, such as none, or minimal for models that can't turn reasoning off",
+      ),
     reasoningTokensInOutput: z
       .boolean()
       .optional()
@@ -37,8 +43,11 @@ export const modelCapabilitiesSchema = z
   .readonly();
 export type ModelCapabilityOverrides = z.infer<typeof modelCapabilitiesSchema>;
 export type ModelCapabilities = {
-  readonly [Key in keyof ModelCapabilityOverrides]-?: Exclude<ModelCapabilityOverrides[Key], undefined>;
-};
+  readonly [Key in Exclude<keyof ModelCapabilityOverrides, 'reasoningEffort'>]-?: Exclude<
+    ModelCapabilityOverrides[Key],
+    undefined
+  >;
+} & { readonly reasoningEffort?: ModelCapabilityOverrides['reasoningEffort'] };
 
 const base = {
   toolChoice: 'forced',
@@ -79,8 +88,20 @@ export function resolveModelCapabilities(
   const capabilities = resolved as ModelCapabilities;
   if (!modelApiSupported(provider, capabilities.api))
     throw new Error(`Model API ${capabilities.api} is not supported by provider ${provider}`);
+  if (capabilities.reasoningEffort && !['chat-completions', 'responses'].includes(capabilities.api))
+    throw new Error(`Model API ${capabilities.api} does not take a reasoning effort`);
   return Object.freeze({
     ...capabilities,
     responseModelAliases: Object.freeze([...capabilities.responseModelAliases]),
   });
+}
+
+/**
+ * The reasoning fields of a chat-completions or responses request: the model's `reasoningEffort` on every request, or
+ * effort `none` on tool requests when only `reasoningOffForTools` is set.
+ */
+export function reasoningRequestFields(capabilities: ModelCapabilities, tools: boolean): Record<string, unknown> {
+  const effort = capabilities.reasoningEffort ?? (tools && capabilities.reasoningOffForTools ? 'none' : undefined);
+  if (!effort) return {};
+  return capabilities.api === 'responses' ? { reasoning: { effort } } : { reasoning_effort: effort };
 }

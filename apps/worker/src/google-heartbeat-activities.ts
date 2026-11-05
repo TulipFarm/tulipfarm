@@ -82,7 +82,11 @@ export function heartbeatProcessor(
       return await input.dispatch(() => {
         dispatched = true;
         return inferText({ ...validated.data, maxOutputTokens }, messages, async usage => {
-          if (usage.kind !== 'known') return;
+          // Unknown usage means the provider refused the request or never answered, so it charged nothing.
+          if (usage.kind !== 'known') {
+            await runtime.transaction(input.work.workspaceId, commonCompatibility, tx => settleCredits(tx, id, '0'));
+            return;
+          }
           const { kind, ...tokens } = usage;
           const cost = calculateUsageCost({ ...quote, usage: { kind, tokens } });
           if (cost.kind !== 'known') return;
