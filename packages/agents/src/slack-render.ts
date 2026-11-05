@@ -10,6 +10,8 @@ import { slackModalView } from '@tulipfarm/slack';
 import { parseSlackSurface, SlackPayloadError } from '@tulipfarm/slack-presentation';
 import type { NativeTool } from './native-tools.ts';
 import type { ReplyRender } from './reply-render.ts';
+import { reportText } from './slack-layout-delivery.ts';
+import { recoverLayoutCall } from './tool-text.ts';
 
 export const slackRenderToolName = 'slack_render';
 const checkSurfaceId = '00000000-0000-4000-8000-000000000000';
@@ -501,4 +503,55 @@ export function parseSlackRender(
       };
   }
   return { ok: true, input: layout, text: layoutText(checked.layout) };
+}
+
+/** One or two plain sentences from Markdown, for a reply's notification text. */
+function plainSummary(text: string) {
+  const plain = mrkdwnToMarkdown(text)
+    .replace(/\[([^\]\n]+)\]\([^)\s]+\)/gu, '$1')
+    .replace(/[*_`#>~|]+/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  const sentence = /^.{20,280}?[.!?](?=\s|$)/u.exec(plain)?.[0] ?? plain;
+  return sentence.length > 300 ? `${sentence.slice(0, 297).trimEnd()}...` : sentence;
+}
+
+/**
+ * A `slack_render` call that a model wrote as text, read back as the tool's input. The title and summary default
+ * from the blocks when the text leaves them out. `undefined` when the text holds no Block Kit array.
+ */
+export function slackRenderFromText(text: string): SlackRenderInput | undefined {
+  const call = recoverLayoutCall(text, {
+    list: 'blocks',
+    fields: ['placement', 'title', 'summary', 'report', 'modals'],
+  });
+  if (!call) return undefined;
+  const blocks = call.blocks as SlackRenderInput['blocks'];
+  const string = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
+  const report = string(call.report);
+  return {
+    placement: call.placement === 'canvas' && report ? 'canvas' : 'chat',
+    title: (string(call.title) ?? 'Answer').slice(0, 120),
+    summary: (string(call.summary) ?? (plainSummary(textsOf(blocks).join(' ')) || 'Answer')).slice(0, 2000),
+    blocks,
+    ...(report ? { report } : {}),
+    ...(Array.isArray(call.modals) ? { modals: call.modals as SlackRenderInput['modals'] } : {}),
+  };
+}
+
+/**
+ * A plain-text answer as `slack_render` input: one markdown block, so the reply is posted like any laid-out answer,
+ * with the TulipFarm link and feedback buttons. An answer longer than a message holds is kept whole as a canvas
+ * report, and the message shows it cut at a paragraph.
+ */
+export function slackRenderFromAnswer(text: string): SlackRenderInput {
+  const answer = text.trim();
+  const cut = reportText(answer);
+  return {
+    placement: cut === answer ? 'chat' : 'canvas',
+    title: 'Answer',
+    summary: plainSummary(answer) || 'Answer',
+    blocks: [{ type: 'markdown', text: cut }],
+    ...(cut === answer ? {} : { report: answer.slice(0, 60_000) }),
+  };
 }

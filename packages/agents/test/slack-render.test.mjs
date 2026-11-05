@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseSlackRender } from '../src/slack-render.ts';
+import { parseSlackRender, slackRenderFromAnswer, slackRenderFromText } from '../src/slack-render.ts';
+import { recoverLayoutCall } from '../src/tool-text.ts';
 
 const base = {
   placement: 'chat',
@@ -107,4 +108,64 @@ test('a chart that breaks a limit says which one', () => {
   const result = parseSlackRender({ ...base, modals: undefined, blocks: [chart] }, { interactive: true });
   assert.equal(result.ok, false);
   assert.match(result.error, /one data point per category/);
+});
+
+const greeting = [{ type: 'section', text: { type: 'mrkdwn', text: 'Hello! What can I help you with today?' } }];
+
+test('a slack_render call written as prose is read back as valid input', () => {
+  const input = slackRenderFromText(
+    `call slack_render with placement is chat title is Hello summary is Warm greeting and offer to help with one question. blocks is ${JSON.stringify(greeting)}`,
+  );
+  assert.deepEqual(input, {
+    placement: 'chat',
+    title: 'Hello',
+    summary: 'Warm greeting and offer to help with one question',
+    blocks: greeting,
+  });
+  assert.equal(parseSlackRender(input, { interactive: true }).ok, true);
+});
+
+test('a slack_render call written as JSON is read back, wrapped or not, with a title and summary by default', () => {
+  for (const text of [
+    `slack_render(${JSON.stringify({ blocks: greeting })})`,
+    JSON.stringify({ name: 'slack_render', arguments: JSON.stringify({ blocks: greeting }) }),
+    `{"tool": "slack_render", "input": ${JSON.stringify({ blocks: greeting, title: 'Hi' })}}`,
+  ]) {
+    const input = slackRenderFromText(text);
+    assert.deepEqual(input.blocks, greeting, text);
+    assert.equal(parseSlackRender(input, { interactive: true }).ok, true, text);
+  }
+  assert.equal(slackRenderFromText(`slack_render(${JSON.stringify({ blocks: greeting })})`).title, 'Answer');
+  assert.equal(
+    slackRenderFromText(`slack_render(${JSON.stringify({ blocks: greeting })})`).summary,
+    'Hello! What can I help you with today?',
+  );
+});
+
+test('text without a Block Kit array is not read back as a layout call', () => {
+  assert.equal(slackRenderFromText('call slack_render with title is Hello summary is A greeting'), undefined);
+  assert.equal(slackRenderFromText('call slack_render with blocks is [not json'), undefined);
+  assert.equal(recoverLayoutCall('{"blocks": "none"}', { list: 'blocks', fields: ['title'] }), undefined);
+  assert.deepEqual(recoverLayoutCall('title: "Hi", blocks = []', { list: 'blocks', fields: ['title'] }), {
+    blocks: [],
+    title: 'Hi',
+  });
+});
+
+test('a plain answer is laid out as one markdown block; a long one keeps the full text as a canvas report', () => {
+  const short = slackRenderFromAnswer('  **Valkey** is the best default. It is fast.  ');
+  assert.deepEqual(short, {
+    placement: 'chat',
+    title: 'Answer',
+    summary: 'Valkey is the best default.',
+    blocks: [{ type: 'markdown', text: '**Valkey** is the best default. It is fast.' }],
+  });
+  assert.equal(parseSlackRender(short, { interactive: true }).ok, true);
+
+  const answer = `${'Valkey is fast. '.repeat(100)}\n\n`.repeat(10).trim();
+  const long = slackRenderFromAnswer(answer);
+  assert.equal(long.placement, 'canvas');
+  assert.equal(long.report, answer);
+  assert.ok(long.blocks[0].text.length < answer.length);
+  assert.equal(parseSlackRender(long, { interactive: true }).ok, true);
 });
