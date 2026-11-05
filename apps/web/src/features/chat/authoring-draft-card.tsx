@@ -68,7 +68,7 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
       <StatePanel
         kind="unavailable"
         title="Draft unavailable"
-        description="This draft is missing or your current access does not allow it. Its definition has been cleared."
+        description="This chat has no draft here that you can open. Your access to something it uses may have changed. Ask chat for a fresh draft."
       />
     );
   if (read.state.kind === 'loading')
@@ -87,6 +87,15 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
       </StatePanel>
     );
   if (!draft) return null;
+  if (draft.replaced)
+    return (
+      <StatePanel
+        kind="empty"
+        icon={BranchDown}
+        title={`Replaced: ${draft.proposal.kind === 'workflow' || draft.proposal.kind === 'workflow-activation' ? draft.proposal.input.definition.name : 'workflow draft'}`}
+        description="Chat revised this workflow in a newer draft further down. Review that one. This version can no longer be saved."
+      />
+    );
   const proposal = draft.proposal;
   const slackUnchecked =
     (proposal.kind === 'workflow' || (proposal.kind === 'workflow-activation' && proposal.input.enabled)) &&

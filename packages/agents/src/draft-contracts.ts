@@ -255,6 +255,8 @@ export const draftViewSchema = z.object({
   proposal: authoringProposalSchema,
   status: z.enum(['pending', 'stale', 'preparing', 'saved', 'failed', 'dismissed']),
   outcome: draftOutcomeSchema.nullable(),
+  /** An undecided workflow draft that a later draft in the same chat replaced. Its status is `stale`. */
+  replaced: z.boolean().default(false),
   agentChange: agentDraftChangeSchema.nullable().default(null),
   workflowNextRunAt: z.string().nullable().default(null),
   workflowRecordSource: z

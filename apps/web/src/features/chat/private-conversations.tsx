@@ -56,7 +56,7 @@ import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
-import { newestTools, reconcileLiveTools, unclaimedToolTurns } from './live-tools';
+import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, type OutgoingMessage } from './current-reply';
 import { useSmoothText } from './smooth-text';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
@@ -1939,8 +1939,7 @@ function ConversationTools({
       {message.tools
         .filter(
           tool =>
-            tool.status === 'completed' &&
-            tool.activityStatus !== 'failed' &&
+            succeeded(tool) &&
             !tool.importId &&
             ([
               'agents.draft',
