@@ -76,3 +76,8 @@ export function fallbackNote(status: string, code: string | null | undefined): s
   const family = code.slice(modelFallbackPrefix.length);
   return family ? `Answered by ${family} because the chat model was unavailable.` : null;
 }
+
+/** The model family that wrote a reply: the configured fallback when it answered, else the chat model. */
+export function replyModel(model: string | undefined, code: string | null | undefined): string | undefined {
+  return code?.startsWith(modelFallbackPrefix) ? code.slice(modelFallbackPrefix.length) || model : model;
+}

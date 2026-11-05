@@ -51,7 +51,7 @@ import { Label } from '@tulipfarm/sprout/label';
 import { Message, MessageBubble, MessageContent, MessageFooter } from '@tulipfarm/sprout/message';
 import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { GitHubChatResponse } from './github-download';
-import { MessageActions } from '@tulipfarm/sprout/message-actions';
+import { MessageActions, type MessageActionsStats } from '@tulipfarm/sprout/message-actions';
 import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { SubagentFanout } from './subagent-fanout';
@@ -81,10 +81,9 @@ import { Composer } from './composer';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
 import { ImageCards } from './image-cards';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
-import type { RichTextEditorHandle } from '@tulipfarm/sprout/rich-text-editor';
+import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
-import { RichMessage } from './rich-message';
-import { PackageMessageText } from './package-reference';
+import { ChatKeywords, RichMessage } from './rich-message';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModels } from './chat-models';
 import { useFlag } from '@/lib/feature-flags';
@@ -120,6 +119,7 @@ import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
 import { fallbackNote, replyFailure, replyRetrying, retryLabel } from './reply-failure-copy';
+import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
 import { useBud } from './bud-context';
@@ -426,7 +426,10 @@ function ConversationDetail({
   const projects = useWorkspaceProjects(workspace.id);
   const navigate = useNavigate();
   const { workspaceSlug } = workspaceRoute.useParams();
-  const integrations = useIntegrationKeywords(workspace.id, workspaceSlug, draft ? undefined : chatId);
+  const integrations = useIntegrationKeywords(workspace.id, workspaceSlug, draft ? undefined : chatId, {
+    id: chatId,
+    draft,
+  });
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
   const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
@@ -733,6 +736,14 @@ function ConversationDetail({
     if ((!packageRequest && (!models.usable || !models.model)) || locked || posting.current) return;
     posting.current = true;
     const messageId = crypto.randomUUID();
+    // Each integration chip keeps naming the account the message was sent with, even after a later switch.
+    const accounts = keywordAccounts(shown.doc as RichTextValue, integrations.keywords);
+    if (Object.keys(accounts).length) {
+      shown = { ...shown, accounts };
+      parts = parts.map(part =>
+        part.kind === 'text' && part.content ? { ...part, content: { ...part.content, accounts } } : part,
+      );
+    }
     if (draft) {
       sendNavigation.current = true;
       void navigate({
@@ -757,6 +768,7 @@ function ConversationDetail({
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         mode,
       })
+      .then(() => (draft ? integrations.applyDraft(chatId).catch(() => undefined) : undefined))
       .finally(() => {
         posting.current = false;
       });
@@ -850,394 +862,432 @@ function ConversationDetail({
     return () => observer.disconnect();
   }, []);
   return (
-    <div
-      className={
-        !compact && empty
-          ? 'flex min-h-0 flex-1 flex-col overflow-y-auto pt-8 pb-24 sm:pt-16 sm:pb-12'
-          : 'flex min-h-0 flex-1 flex-col'
-      }
-    >
-      {!draft && (
-        <MoveToProjectDialog
-          workspaceId={workspace.id}
-          open={moving}
-          onOpenChange={setMoving}
-          onMove={projectId => submit({ kind: 'move', chatId, commandId: crypto.randomUUID(), projectId })}
-        />
-      )}
-      <UnsavedChanges
-        dirty={
-          !persistent &&
-          (!!text || staged || !!editing || write.state.kind === 'sending' || write.state.kind === 'uncertain')
+    <ChatKeywords value={integrations.keywords}>
+      <div
+        className={
+          !compact && empty
+            ? 'flex min-h-0 flex-1 flex-col overflow-y-auto pt-8 pb-24 sm:pt-16 sm:pb-12'
+            : 'flex min-h-0 flex-1 flex-col'
         }
-        allowNavigation={sendNavigation}
-      />
-      {!compact &&
-        headerElement &&
-        createPortal(
-          <>
-            {!empty && !sharedChat && (draft || data) && <Bud state={budState(data?.messages, !!pending, stream)} />}
-            {data ? (
-              <>
-                <h1
-                  ref={heading}
-                  tabIndex={-1}
-                  title={data.chat.title}
-                  className="min-w-0 flex-1 truncate text-sm font-medium"
-                >
-                  <TypedText text={data.chat.title} animate={!data.chat.titleManual && data.chat.titleRevision > 1} />
-                </h1>
-                {!draft && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<Button size="icon-sm" variant="ghost" aria-label="Chat actions" title="Chat actions" />}
-                    >
-                      <ChevronDown size={16} aria-hidden="true" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent size="menu" align="end">
-                      <DropdownMenuItem
-                        disabled={locked || !!editing}
-                        onClick={() => setEditing({ title: data.chat.title, titleRevision: data.chat.titleRevision })}
-                      >
-                        Edit title
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={locked}
-                        onClick={() =>
-                          submit({
-                            kind: 'archive',
-                            chatId,
-                            commandId: crypto.randomUUID(),
-                            archived: !data.chat.archived,
-                          })
+      >
+        {!draft && (
+          <MoveToProjectDialog
+            workspaceId={workspace.id}
+            open={moving}
+            onOpenChange={setMoving}
+            onMove={projectId => submit({ kind: 'move', chatId, commandId: crypto.randomUUID(), projectId })}
+          />
+        )}
+        <UnsavedChanges
+          dirty={
+            !persistent &&
+            (!!text || staged || !!editing || write.state.kind === 'sending' || write.state.kind === 'uncertain')
+          }
+          allowNavigation={sendNavigation}
+        />
+        {!compact &&
+          headerElement &&
+          createPortal(
+            <>
+              {!empty && !sharedChat && (draft || data) && <Bud state={budState(data?.messages, !!pending, stream)} />}
+              {data ? (
+                <>
+                  <h1
+                    ref={heading}
+                    tabIndex={-1}
+                    title={data.chat.title}
+                    className="min-w-0 flex-1 truncate text-sm font-medium"
+                  >
+                    <TypedText text={data.chat.title} animate={!data.chat.titleManual && data.chat.titleRevision > 1} />
+                  </h1>
+                  {!draft && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button size="icon-sm" variant="ghost" aria-label="Chat actions" title="Chat actions" />
                         }
                       >
-                        {data.chat.archived ? 'Restore chat' : 'Archive chat'}
-                      </DropdownMenuItem>
-                      {!data.chat.projectId && !persistent && (
-                        <DropdownMenuItem disabled={locked} onClick={() => setMoving(true)}>
-                          Move to project
+                        <ChevronDown size={16} aria-hidden="true" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent size="menu" align="end">
+                        <DropdownMenuItem
+                          disabled={locked || !!editing}
+                          onClick={() => setEditing({ title: data.chat.title, titleRevision: data.chat.titleRevision })}
+                        >
+                          Edit title
                         </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </>
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                {read.state.kind === 'loading' ? 'Loading chat…' : 'Chat unavailable'}
-              </span>
-            )}
-            <ChatCanvasToggle />
-          </>,
-          headerElement,
-        )}
-      <div
-        ref={timeline}
-        role="region"
-        aria-label="Conversation"
-        tabIndex={0}
-        className={
-          compact
-            ? 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-3'
-            : empty
-              ? 'conversation-timeline shrink-0 px-4 sm:px-6'
-              : 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6'
-        }
-        onScroll={event => {
-          const element = event.currentTarget;
-          if (followLatest.current !== 'inspecting')
-            followLatest.current =
-              element.scrollHeight - element.scrollTop - element.clientHeight < 80 ? 'following' : 'scrolled';
-          setAwayFromLatest(followLatest.current !== 'following');
-        }}
-      >
+                        <DropdownMenuItem
+                          disabled={locked}
+                          onClick={() =>
+                            submit({
+                              kind: 'archive',
+                              chatId,
+                              commandId: crypto.randomUUID(),
+                              archived: !data.chat.archived,
+                            })
+                          }
+                        >
+                          {data.chat.archived ? 'Restore chat' : 'Archive chat'}
+                        </DropdownMenuItem>
+                        {!data.chat.projectId && !persistent && (
+                          <DropdownMenuItem disabled={locked} onClick={() => setMoving(true)}>
+                            Move to project
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </>
+              ) : (
+                <span className="text-sm text-muted-foreground">
+                  {read.state.kind === 'loading' ? 'Loading chat…' : 'Chat unavailable'}
+                </span>
+              )}
+              <ChatCanvasToggle />
+            </>,
+            headerElement,
+          )}
         <div
-          ref={timelineContent}
+          ref={timeline}
+          role="region"
+          aria-label="Conversation"
+          tabIndex={0}
           className={
             compact
-              ? 'w-full space-y-3 py-3'
+              ? 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-3'
               : empty
-                ? 'mx-auto w-full max-w-3xl space-y-4 pt-4 pb-3'
-                : 'mx-auto w-full max-w-3xl space-y-6 py-6 sm:py-8'
+                ? 'conversation-timeline shrink-0 px-4 sm:px-6'
+                : 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6'
           }
+          onScroll={event => {
+            const element = event.currentTarget;
+            if (followLatest.current !== 'inspecting')
+              followLatest.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight < 80 ? 'following' : 'scrolled';
+            setAwayFromLatest(followLatest.current !== 'following');
+          }}
         >
-          {data?.chat.archived && (
-            <p role="status" className="text-sm text-muted-foreground">
-              This chat is archived. Messages remain saved and reply work continues.
-            </p>
-          )}
-          {!draft &&
-            data &&
-            (data.chat.isClosed ||
-              data.messages.some(message =>
-                message.parts.some(part => part.kind === 'compaction' && part.trigger === 'inactivity'),
-              )) && <ChatMaintenance api={api} chatId={chatId} isClosed={data.chat.isClosed} disabled={locked} />}
-          {editing && (
-            <form
-              className="space-y-2 rounded-lg border p-4"
-              onSubmit={event => {
-                event.preventDefault();
-                if (!locked && !titleValidation)
-                  submit({
-                    kind: 'rename',
-                    chatId,
-                    commandId: crypto.randomUUID(),
-                    title: editing.title.trim(),
-                    expectedRevision: editing.titleRevision,
-                  });
-              }}
-            >
-              <Label htmlFor="chat-title">Chat title</Label>
-              <Input
-                id="chat-title"
-                autoFocus
-                value={editing.title}
-                maxLength={640}
-                disabled={locked}
-                aria-invalid={!!titleValidation}
-                aria-describedby={titleValidation ? 'title-error' : undefined}
-                onChange={event => setEditing({ ...editing, title: event.target.value })}
-              />
-              {titleValidation && (
-                <p id="title-error" role="alert">
-                  {titleValidation}
-                </p>
-              )}
-              <div className="flex gap-2">
-                <Button type="submit" disabled={locked || !!titleValidation}>
-                  Save title
-                </Button>
-                <Button variant="ghost" disabled={write.locked} onClick={() => setEditing(null)}>
-                  Cancel title edit
-                </Button>
-              </div>
-            </form>
-          )}
-          {!draft && <McpChatActions workspaceId={workspace.id} chatId={chatId} />}
-          <ConversationRead
-            state={read.state.kind === 'ready' && data ? { ...read.state, data } : read.state}
-            refresh={read.refresh}
-            quiet={commandFailed}
+          <div
+            ref={timelineContent}
+            className={
+              compact
+                ? 'w-full space-y-3 py-3'
+                : empty
+                  ? 'mx-auto w-full max-w-3xl space-y-4 pt-4 pb-3'
+                  : 'mx-auto w-full max-w-3xl space-y-6 py-6 sm:py-8'
+            }
           >
-            {history => (
-              <>
-                {history.nextBefore && (
-                  <div className="flex justify-center">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={!ready}
-                      onClick={() => {
-                        olderScrollHeight.current = timeline.current?.scrollHeight ?? null;
-                        setPages(value => value + 1);
-                      }}
-                    >
-                      Load older messages
-                    </Button>
-                  </div>
+            {data?.chat.archived && (
+              <p role="status" className="text-sm text-muted-foreground">
+                This chat is archived. Messages remain saved and reply work continues.
+              </p>
+            )}
+            {!draft &&
+              data &&
+              (data.chat.isClosed ||
+                data.messages.some(message =>
+                  message.parts.some(part => part.kind === 'compaction' && part.trigger === 'inactivity'),
+                )) && <ChatMaintenance api={api} chatId={chatId} isClosed={data.chat.isClosed} disabled={locked} />}
+            {editing && (
+              <form
+                className="space-y-2 rounded-lg border p-4"
+                onSubmit={event => {
+                  event.preventDefault();
+                  if (!locked && !titleValidation)
+                    submit({
+                      kind: 'rename',
+                      chatId,
+                      commandId: crypto.randomUUID(),
+                      title: editing.title.trim(),
+                      expectedRevision: editing.titleRevision,
+                    });
+                }}
+              >
+                <Label htmlFor="chat-title">Chat title</Label>
+                <Input
+                  id="chat-title"
+                  autoFocus
+                  value={editing.title}
+                  maxLength={640}
+                  disabled={locked}
+                  aria-invalid={!!titleValidation}
+                  aria-describedby={titleValidation ? 'title-error' : undefined}
+                  onChange={event => setEditing({ ...editing, title: event.target.value })}
+                />
+                {titleValidation && (
+                  <p id="title-error" role="alert">
+                    {titleValidation}
+                  </p>
                 )}
-                {empty ? (
-                  compact ? (
-                    <p className="text-sm text-muted-foreground">What can I help you with?</p>
-                  ) : (
-                    <div className="flex items-center gap-4">
-                      {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <BudWelcome />}
-                      <div className="min-w-0 space-y-1">
-                        <h2 className="text-2xl font-medium tracking-tight">
-                          <Greeting />
-                        </h2>
-                        <p className="text-base text-pretty text-muted-foreground">{emptyChatIntro(draft)}</p>
-                      </div>
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={locked || !!titleValidation}>
+                    Save title
+                  </Button>
+                  <Button variant="ghost" disabled={write.locked} onClick={() => setEditing(null)}>
+                    Cancel title edit
+                  </Button>
+                </div>
+              </form>
+            )}
+            {!draft && <McpChatActions workspaceId={workspace.id} chatId={chatId} />}
+            <ConversationRead
+              state={read.state.kind === 'ready' && data ? { ...read.state, data } : read.state}
+              refresh={read.refresh}
+              quiet={commandFailed}
+            >
+              {history => (
+                <>
+                  {history.nextBefore && (
+                    <div className="flex justify-center">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!ready}
+                        onClick={() => {
+                          olderScrollHeight.current = timeline.current?.scrollHeight ?? null;
+                          setPages(value => value + 1);
+                        }}
+                      >
+                        Load older messages
+                      </Button>
                     </div>
-                  )
-                ) : (
-                  <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
-                    {[
-                      ...history.messages.map((message, index) =>
-                        answerOnly(message) ? null : (
-                          <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
-                            <ConversationEntry
-                              api={api}
-                              chatId={chatId}
-                              slug={workspaceSlug}
-                              message={message}
-                              latest={index === history.messages.length - 1}
-                              rowViews={rowViewsForMessage(history.messages, message)}
-                              disabled={locked}
-                              packageContext={{
-                                packages,
-                                chatId,
-                                disabled: history.chat.isClosed || projectArchived,
-                                foreground: visible && !compact,
-                              }}
-                              retryHandoff={compactionId => {
-                                if (!locked && models.usable)
-                                  post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
-                              }}
-                              control={kind => {
-                                if (message.turn)
-                                  submit({
-                                    kind,
-                                    chatId,
-                                    commandId: crypto.randomUUID(),
-                                    turnId: message.turn.id,
-                                    expectedGeneration: message.turn.generation,
-                                  });
-                              }}
-                            />
+                  )}
+                  {empty ? (
+                    compact ? (
+                      <p className="text-sm text-muted-foreground">What can I help you with?</p>
+                    ) : (
+                      <div className="flex items-center gap-4">
+                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <BudWelcome />}
+                        <div className="min-w-0 space-y-1">
+                          <h2 className="text-2xl font-medium tracking-tight">
+                            <Greeting />
+                          </h2>
+                          <p className="text-base text-pretty text-muted-foreground">{emptyChatIntro(draft)}</p>
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
+                      {[
+                        ...history.messages.map((message, index) =>
+                          answerOnly(message) ? null : (
+                            <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
+                              <ConversationEntry
+                                api={api}
+                                chatId={chatId}
+                                slug={workspaceSlug}
+                                message={message}
+                                latest={index === history.messages.length - 1}
+                                rowViews={rowViewsForMessage(history.messages, message)}
+                                stats={replyStats(history.messages, index, modelFamilies)}
+                                disabled={locked}
+                                packageContext={{
+                                  packages,
+                                  chatId,
+                                  disabled: history.chat.isClosed || projectArchived,
+                                  foreground: visible && !compact,
+                                }}
+                                retryHandoff={compactionId => {
+                                  if (!locked && models.usable)
+                                    post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
+                                }}
+                                control={kind => {
+                                  if (message.turn)
+                                    submit({
+                                      kind,
+                                      chatId,
+                                      commandId: crypto.randomUUID(),
+                                      turnId: message.turn.id,
+                                      expectedGeneration: message.turn.generation,
+                                    });
+                                }}
+                              />
+                              <ToolActivity
+                                key="activity"
+                                variant="transcript"
+                                items={toolActivityItems(message.tools)}
+                                active={thinking && !!turn && message.turn?.id === turn.id}
+                                activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
+                                onToggle={() => {
+                                  followLatest.current = 'inspecting';
+                                  setAwayFromLatest(true);
+                                }}
+                              />
+                              {message.tools.map(tool => {
+                                const replyTurn = message.turn;
+                                return tool.tool === 'agents.delegate' ? (
+                                  <SubagentFanout
+                                    key={`subagents:${tool.id}`}
+                                    tool={tool}
+                                    live={stream.subagents?.get(tool.id)}
+                                    families={modelFamilies}
+                                    stop={
+                                      replyTurn?.status === 'processing'
+                                        ? key =>
+                                            api.stopSubagent(
+                                              chatId,
+                                              replyTurn.id,
+                                              tool.id,
+                                              key,
+                                              AbortSignal.timeout(15_000),
+                                            )
+                                        : undefined
+                                    }
+                                  />
+                                ) : null;
+                              })}
+                              <ConversationTools
+                                api={api}
+                                chatId={chatId}
+                                slug={workspaceSlug}
+                                message={message}
+                                changed={read.refresh}
+                                githubLocked={
+                                  locked ||
+                                  history.messages.some(
+                                    item =>
+                                      item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
+                                  )
+                                }
+                                pickGitHub={pickGitHub}
+                                correct={() => composerInput.current?.focus()}
+                              />
+                            </li>
+                          ),
+                        ),
+                        pending ? (
+                          <li key="pending">
+                            <Message align="end">
+                              <MessageContent>
+                                {pending.skill && <SentSkill skill={pending.skill} />}
+                                <MessageBubble variant="secondary">
+                                  <RichMessage
+                                    content={pending.content}
+                                    file={reference =>
+                                      reference.source === 'tulipfarm' ? (
+                                        <ConversationFileReference
+                                          workspaceId={workspace.id}
+                                          slug={workspaceSlug}
+                                          fileId={reference.id}
+                                        />
+                                      ) : (
+                                        (() => {
+                                          const item = pending.references.find(
+                                            candidate => candidate.source === 'google' && candidate.id === reference.id,
+                                          );
+                                          return item?.source === 'google' ? (
+                                            <ConversationGoogleFileReference
+                                              slug={workspaceSlug}
+                                              fileId={item.id}
+                                              name={item.name}
+                                              mimeType={item.mediaType}
+                                            />
+                                          ) : null;
+                                        })()
+                                      )
+                                    }
+                                  />
+                                </MessageBubble>
+                              </MessageContent>
+                            </Message>
+                          </li>
+                        ) : null,
+                        ...incomingTurns.map(incoming => (
+                          <li key={`turn:${incoming.id}`}>
                             <ToolActivity
                               key="activity"
                               variant="transcript"
-                              items={toolActivityItems(message.tools)}
-                              active={thinking && !!turn && message.turn?.id === turn.id}
-                              activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
+                              items={toolActivityItems(incoming.tools)}
+                              active={thinking}
+                              activityLabel={activityLabel}
                               onToggle={() => {
                                 followLatest.current = 'inspecting';
                                 setAwayFromLatest(true);
                               }}
                             />
-                            {message.tools.map(tool => {
-                              const replyTurn = message.turn;
-                              return tool.tool === 'agents.delegate' ? (
+                            {incoming.tools.map(tool =>
+                              tool.tool === 'agents.delegate' ? (
                                 <SubagentFanout
                                   key={`subagents:${tool.id}`}
                                   tool={tool}
                                   live={stream.subagents?.get(tool.id)}
                                   families={modelFamilies}
-                                  stop={
-                                    replyTurn?.status === 'processing'
-                                      ? key =>
-                                          api.stopSubagent(
-                                            chatId,
-                                            replyTurn.id,
-                                            tool.id,
-                                            key,
-                                            AbortSignal.timeout(15_000),
-                                          )
-                                      : undefined
+                                  stop={key =>
+                                    api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
                                   }
                                 />
-                              ) : null;
-                            })}
-                            <ConversationTools
-                              api={api}
-                              chatId={chatId}
-                              slug={workspaceSlug}
-                              message={message}
-                              changed={read.refresh}
-                              githubLocked={
-                                locked ||
-                                history.messages.some(
-                                  item =>
-                                    item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
-                                )
-                              }
-                              pickGitHub={pickGitHub}
-                              correct={() => composerInput.current?.focus()}
-                            />
+                              ) : null,
+                            )}
                           </li>
-                        ),
-                      ),
-                      pending ? (
-                        <li key="pending">
-                          <Message align="end">
+                        )),
+                      ]}
+                      {pending && !turn && !incomingTurns.length && (
+                        <li>
+                          <ToolActivity
+                            variant="transcript"
+                            items={[]}
+                            active={thinking}
+                            activityLabel={activityLabel}
+                          />
+                        </li>
+                      )}
+                      {answerText ? (
+                        <li aria-busy="true">
+                          <Message align="start">
                             <MessageContent>
-                              {pending.skill && <SentSkill skill={pending.skill} />}
-                              <MessageBubble variant="secondary">
-                                <RichMessage
-                                  content={pending.content}
-                                  file={reference =>
-                                    reference.source === 'tulipfarm' ? (
-                                      <ConversationFileReference
-                                        workspaceId={workspace.id}
-                                        slug={workspaceSlug}
-                                        fileId={reference.id}
-                                      />
-                                    ) : (
-                                      (() => {
-                                        const item = pending.references.find(
-                                          candidate => candidate.source === 'google' && candidate.id === reference.id,
-                                        );
-                                        return item?.source === 'google' ? (
-                                          <ConversationGoogleFileReference
-                                            slug={workspaceSlug}
-                                            fileId={item.id}
-                                            name={item.name}
-                                            mimeType={item.mediaType}
-                                          />
-                                        ) : null;
-                                      })()
-                                    )
-                                  }
-                                />
-                              </MessageBubble>
+                              <span className="sr-only">TulipFarm said</span>
+                              <AssistantText
+                                workspaceId={workspace.id}
+                                chatId={chatId}
+                                text={answerText}
+                                streaming
+                                rowViews={
+                                  history.messages.at(-1)
+                                    ? rowViewsForMessage(history.messages, history.messages.at(-1)!)
+                                    : []
+                                }
+                              />
                             </MessageContent>
                           </Message>
                         </li>
-                      ) : null,
-                      ...incomingTurns.map(incoming => (
-                        <li key={`turn:${incoming.id}`}>
-                          <ToolActivity
-                            key="activity"
-                            variant="transcript"
-                            items={toolActivityItems(incoming.tools)}
-                            active={thinking}
-                            activityLabel={activityLabel}
-                            onToggle={() => {
-                              followLatest.current = 'inspecting';
-                              setAwayFromLatest(true);
-                            }}
-                          />
-                          {incoming.tools.map(tool =>
-                            tool.tool === 'agents.delegate' ? (
-                              <SubagentFanout
-                                key={`subagents:${tool.id}`}
-                                tool={tool}
-                                live={stream.subagents?.get(tool.id)}
-                                families={modelFamilies}
-                                stop={key =>
-                                  api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
-                                }
-                              />
-                            ) : null,
-                          )}
-                        </li>
-                      )),
-                    ]}
-                    {pending && !turn && !incomingTurns.length && (
-                      <li>
-                        <ToolActivity variant="transcript" items={[]} active={thinking} activityLabel={activityLabel} />
-                      </li>
-                    )}
-                    {answerText ? (
-                      <li aria-busy="true">
-                        <Message align="start">
-                          <MessageContent>
-                            <span className="sr-only">TulipFarm said</span>
-                            <AssistantText
-                              workspaceId={workspace.id}
-                              chatId={chatId}
-                              text={answerText}
-                              streaming
-                              rowViews={
-                                history.messages.at(-1)
-                                  ? rowViewsForMessage(history.messages, history.messages.at(-1)!)
-                                  : []
-                              }
-                            />
-                          </MessageContent>
-                        </Message>
-                      </li>
-                    ) : (
-                      thinking && (
-                        <li aria-busy="true" className="space-y-2">
-                          {narration && <p className="text-sm text-muted-foreground">{narration}</p>}
-                          {slowTurn && (
-                            <div className="flex flex-wrap items-center gap-3">
-                              <p role="status" className="text-sm text-muted-foreground">
-                                This step is taking longer than usual. The reply continues, or you can stop it.
-                              </p>
+                      ) : (
+                        thinking && (
+                          <li aria-busy="true" className="space-y-2">
+                            {narration && <p className="text-sm text-muted-foreground">{narration}</p>}
+                            {slowTurn && (
+                              <div className="flex flex-wrap items-center gap-3">
+                                <p role="status" className="text-sm text-muted-foreground">
+                                  This step is taking longer than usual. The reply continues, or you can stop it.
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={locked}
+                                  onClick={() =>
+                                    submit({
+                                      kind: 'cancel',
+                                      chatId,
+                                      commandId: crypto.randomUUID(),
+                                      turnId: slowTurn.id,
+                                      expectedGeneration: slowTurn.generation,
+                                    })
+                                  }
+                                >
+                                  Stop reply
+                                </Button>
+                              </div>
+                            )}
+                          </li>
+                        )
+                      )}
+                      {stalledTurn && (
+                        <li>
+                          <Alert>
+                            <AlertTitle>Reply is taking too long</AlertTitle>
+                            <AlertDescription>
+                              The reply has not started after 1 minute. Cancel it, then send your message again.
+                            </AlertDescription>
+                            <div className="mt-2 flex flex-wrap gap-2">
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -1247,252 +1297,230 @@ function ConversationDetail({
                                     kind: 'cancel',
                                     chatId,
                                     commandId: crypto.randomUUID(),
-                                    turnId: slowTurn.id,
-                                    expectedGeneration: slowTurn.generation,
+                                    turnId: stalledTurn.id,
+                                    expectedGeneration: stalledTurn.generation,
                                   })
                                 }
                               >
-                                Stop reply
+                                Cancel reply
                               </Button>
                             </div>
-                          )}
+                          </Alert>
                         </li>
-                      )
-                    )}
-                    {stalledTurn && (
-                      <li>
-                        <Alert>
-                          <AlertTitle>Reply is taking too long</AlertTitle>
-                          <AlertDescription>
-                            The reply has not started after 1 minute. Cancel it, then send your message again.
-                          </AlertDescription>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={locked}
-                              onClick={() =>
-                                submit({
-                                  kind: 'cancel',
-                                  chatId,
-                                  commandId: crypto.randomUUID(),
-                                  turnId: stalledTurn.id,
-                                  expectedGeneration: stalledTurn.generation,
-                                })
-                              }
-                            >
-                              Cancel reply
-                            </Button>
-                          </div>
-                        </Alert>
-                      </li>
-                    )}
-                  </ol>
-                )}
-                {!draft && (
-                  <ChatPackages
-                    packages={packages}
-                    chatId={chatId}
-                    disabled={history.chat.isClosed || projectArchived}
-                    foreground={visible && !compact}
-                  />
-                )}
-                {!empty && (
-                  <IntegrationLinks
-                    workspaceId={workspace.id}
-                    slug={workspaceSlug}
-                    chatId={chatId}
-                    messages={history.messages}
-                  />
-                )}
-                {!draft && !empty && (
-                  <NewWorkflowDrafts
-                    workspaceId={workspace.id}
-                    chatId={chatId}
-                    tools={history.messages.flatMap(message => message.tools)}
-                    foreground={visible && !compact}
-                  />
-                )}
-                {!draft && !empty && (
-                  <ChatPlans
-                    workspaceId={workspace.id}
-                    chatId={chatId}
-                    tools={history.messages.flatMap(message => message.tools)}
-                    foreground={visible && !compact}
-                    revision={(() => {
-                      const last = history.messages.at(-1);
-                      return `${last?.id}:${last?.turn?.status}`;
-                    })()}
-                  />
-                )}
-              </>
-            )}
-          </ConversationRead>
-          {!draft && data?.hasGitHubProposals && (
-            <GitHubBatches
-              workspaceId={workspace.id}
-              chatId={chatId}
-              revision={JSON.stringify(data.messages.map(message => [message.id, message.turn?.status, message.tools]))}
-            />
-          )}
-        </div>
-      </div>
-      <footer className={compact ? 'shrink-0 px-3 pb-3' : 'shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-5'}>
-        <div className="mx-auto w-full max-w-3xl space-y-3">
-          {awayFromLatest && (
-            <div className="flex justify-center">
-              <Button
-                size="sm"
-                variant="outline"
-                aria-label="Jump to latest"
-                title="Jump to latest"
-                onClick={() => {
-                  const element = timeline.current;
-                  if (element) element.scrollTop = element.scrollHeight;
-                  followLatest.current = 'following';
-                  setAwayFromLatest(false);
-                  setUnseenUpdates(false);
-                }}
-              >
-                <ArrowDown size={16} aria-hidden="true" />
-                {unseenUpdates ? 'New updates' : 'Jump to latest'}
-              </Button>
-            </div>
-          )}
-          <CommandFeedback
-            write={write}
-            refreshed={refreshed && ready}
-            refresh={() => void refresh()}
-            review={() => {
-              if (editing && read.state.kind === 'ready')
-                setEditing({ ...editing, titleRevision: read.state.data.chat.titleRevision });
-            }}
-          />
-          {skillHandoffError && (
-            <Alert variant="destructive">
-              <AlertDescription>{skillHandoffError}</AlertDescription>
-            </Alert>
-          )}
-          {notice}
-          <div data-slot="conversation-input" className={questionPending ? 'space-y-1' : 'space-y-3'}>
-            <div
-              className={compact ? 'max-h-64 space-y-3 overflow-y-auto overscroll-contain empty:hidden' : 'space-y-3'}
-            >
-              {!sharedChat && <BudPreferences chatId={chatId} />}
-              <ApprovalDock />
-              <ChoiceDock />
-            </div>
-            <Composer
-              compact={compact}
-              inputRef={composerInput}
-              content={draftSent ? emptyRichDocument() : content}
-              onContentChange={setContent}
-              onSend={send}
-              canSend={!locked && canSend && sendAvailable}
-              placeholder={compact ? 'Reply…' : empty ? 'What would you like to get done?' : 'Reply…'}
-              mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
-              scope={draft && empty ? scope : projectSharingScope}
-              onStop={
-                turn && !text && !staged
-                  ? () =>
-                      submit({
-                        kind: 'cancel',
-                        chatId,
-                        commandId: crypto.randomUUID(),
-                        turnId: turn.id,
-                        expectedGeneration: turn.generation,
-                      })
-                  : undefined
-              }
-              disabled={write.locked || projectArchived}
-              sending={write.state.kind === 'sending'}
-              validation={validation}
-              onFiles={uploads.add}
-              integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
-              attachments={
-                !draftSent && (staged || uploads.error || mentions.notice) ? (
-                  <div className="space-y-2">
-                    {skills.staged && (
-                      <StagedSkill skill={skills.staged} disabled={write.locked} onRemove={skills.remove} />
-                    )}
-                    <StagedAttachments
-                      uploads={uploads}
-                      disabled={write.locked}
-                      reading={
-                        imagesReader
-                          ? {
-                              imageInput:
-                                modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
-                            }
-                          : undefined
-                      }
-                      references={{ items: mentions.references, notice: mentions.notice }}
-                      blocked={
-                        googleBlocked && (
-                          <GooglePrivateOnly
-                            disabled={write.locked}
-                            draft={draft}
-                            remove={() => {
-                              for (const reference of mentions.references)
-                                if (reference.source === 'google') mentions.remove(reference);
-                            }}
-                            usePrivate={() => {
-                              if (draft || mentions.moveGoogleToNewChat())
-                                void navigate({
-                                  to: '/$workspaceSlug',
-                                  params: { workspaceSlug },
-                                  search: {},
-                                  ignoreBlocker: true,
-                                });
-                            }}
-                          />
-                        )
-                      }
+                      )}
+                    </ol>
+                  )}
+                  {!draft && (
+                    <ChatPackages
+                      packages={packages}
+                      chatId={chatId}
+                      disabled={history.chat.isClosed || projectArchived}
+                      foreground={visible && !compact}
                     />
-                  </div>
-                ) : undefined
-              }
-              extensions={composerExtensions}
-              picker={picker}
-              model={models.model}
-              models={models.choices}
-              onModelChange={models.select}
-            />
+                  )}
+                  {!empty && (
+                    <IntegrationLinks
+                      workspaceId={workspace.id}
+                      slug={workspaceSlug}
+                      chatId={chatId}
+                      messages={history.messages}
+                    />
+                  )}
+                  {!draft && !empty && (
+                    <NewWorkflowDrafts
+                      workspaceId={workspace.id}
+                      chatId={chatId}
+                      tools={history.messages.flatMap(message => message.tools)}
+                      foreground={visible && !compact}
+                    />
+                  )}
+                  {!draft && !empty && (
+                    <ChatPlans
+                      workspaceId={workspace.id}
+                      chatId={chatId}
+                      tools={history.messages.flatMap(message => message.tools)}
+                      foreground={visible && !compact}
+                      revision={(() => {
+                        const last = history.messages.at(-1);
+                        return `${last?.id}:${last?.turn?.status}`;
+                      })()}
+                    />
+                  )}
+                </>
+              )}
+            </ConversationRead>
+            {!draft && data?.hasGitHubProposals && (
+              <GitHubBatches
+                workspaceId={workspace.id}
+                chatId={chatId}
+                revision={JSON.stringify(
+                  data.messages.map(message => [message.id, message.turn?.status, message.tools]),
+                )}
+              />
+            )}
           </div>
-          {!compact && empty && (
-            <StartingTasks
-              disabled={locked || !models.usable || !!text || staged}
-              onChoose={prompt => {
-                if (!locked && models.usable && !text && !staged)
-                  post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
+        </div>
+        <footer className={compact ? 'shrink-0 px-3 pb-3' : 'shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-5'}>
+          <div className="mx-auto w-full max-w-3xl space-y-3">
+            {awayFromLatest && (
+              <div className="flex justify-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  aria-label="Jump to latest"
+                  title="Jump to latest"
+                  onClick={() => {
+                    const element = timeline.current;
+                    if (element) element.scrollTop = element.scrollHeight;
+                    followLatest.current = 'following';
+                    setAwayFromLatest(false);
+                    setUnseenUpdates(false);
+                  }}
+                >
+                  <ArrowDown size={16} aria-hidden="true" />
+                  {unseenUpdates ? 'New updates' : 'Jump to latest'}
+                </Button>
+              </div>
+            )}
+            <CommandFeedback
+              write={write}
+              refreshed={refreshed && ready}
+              refresh={() => void refresh()}
+              review={() => {
+                if (editing && read.state.kind === 'ready')
+                  setEditing({ ...editing, titleRevision: read.state.data.chat.titleRevision });
               }}
             />
-          )}
-          {draft && empty && (
-            <div className="pt-6">
-              <UpcomingMeetings
-                workspaceId={workspace.id}
-                disabled={locked || !models.usable || !!text || staged}
-                onShowAll={() => {
-                  if (!locked && models.usable && !text && !staged)
-                    post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
+            {skillHandoffError && (
+              <Alert variant="destructive">
+                <AlertDescription>{skillHandoffError}</AlertDescription>
+              </Alert>
+            )}
+            {notice}
+            <div data-slot="conversation-input" className={questionPending ? 'space-y-1' : 'space-y-3'}>
+              <div
+                className={compact ? 'max-h-64 space-y-3 overflow-y-auto overscroll-contain empty:hidden' : 'space-y-3'}
+              >
+                {!sharedChat && <BudPreferences chatId={chatId} />}
+                <ApprovalDock />
+                <ChoiceDock />
+              </div>
+              <Composer
+                compact={compact}
+                inputRef={composerInput}
+                content={draftSent ? emptyRichDocument() : content}
+                onContentChange={setContent}
+                onSend={send}
+                canSend={!locked && canSend && sendAvailable}
+                placeholder={compact ? 'Reply…' : empty ? 'What would you like to get done?' : 'Reply…'}
+                mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
+                scope={draft && empty ? scope : projectSharingScope}
+                onStop={
+                  turn && !text && !staged
+                    ? () =>
+                        submit({
+                          kind: 'cancel',
+                          chatId,
+                          commandId: crypto.randomUUID(),
+                          turnId: turn.id,
+                          expectedGeneration: turn.generation,
+                        })
+                    : undefined
+                }
+                disabled={write.locked || projectArchived}
+                sending={write.state.kind === 'sending'}
+                validation={validation}
+                onFiles={uploads.add}
+                integrations={{
+                  keywords: integrations.keywords,
+                  onConnect: integrations.connect,
+                  onAccountChange: integrations.switchAccount,
                 }}
+                attachments={
+                  !draftSent && (staged || uploads.error || mentions.notice) ? (
+                    <div className="space-y-2">
+                      {skills.staged && (
+                        <StagedSkill skill={skills.staged} disabled={write.locked} onRemove={skills.remove} />
+                      )}
+                      <StagedAttachments
+                        uploads={uploads}
+                        disabled={write.locked}
+                        reading={
+                          imagesReader
+                            ? {
+                                imageInput:
+                                  modelFamilies.find(family => family.id === models.model?.id)?.imageInput ?? null,
+                              }
+                            : undefined
+                        }
+                        references={{ items: mentions.references, notice: mentions.notice }}
+                        blocked={
+                          googleBlocked && (
+                            <GooglePrivateOnly
+                              disabled={write.locked}
+                              draft={draft}
+                              remove={() => {
+                                for (const reference of mentions.references)
+                                  if (reference.source === 'google') mentions.remove(reference);
+                              }}
+                              usePrivate={() => {
+                                if (draft || mentions.moveGoogleToNewChat())
+                                  void navigate({
+                                    to: '/$workspaceSlug',
+                                    params: { workspaceSlug },
+                                    search: {},
+                                    ignoreBlocker: true,
+                                  });
+                              }}
+                            />
+                          )
+                        }
+                      />
+                    </div>
+                  ) : undefined
+                }
+                extensions={composerExtensions}
+                picker={picker}
+                model={models.model}
+                models={models.choices}
+                onModelChange={models.select}
               />
             </div>
-          )}
-          <ChatModelStatus
-            catalog={models}
-            slug={workspaceSlug}
-            quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
-          />
-          {!compact && !empty && (
-            <p className="text-center text-xs text-muted-foreground">
-              TulipFarm can make mistakes. Check important details.
-            </p>
-          )}
-        </div>
-      </footer>
-    </div>
+            {!compact && empty && (
+              <StartingTasks
+                disabled={locked || !models.usable || !!text || staged}
+                onChoose={prompt => {
+                  if (!locked && models.usable && !text && !staged)
+                    post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
+                }}
+              />
+            )}
+            {draft && empty && (
+              <div className="pt-6">
+                <UpcomingMeetings
+                  workspaceId={workspace.id}
+                  disabled={locked || !models.usable || !!text || staged}
+                  onShowAll={() => {
+                    if (!locked && models.usable && !text && !staged)
+                      post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
+                  }}
+                />
+              </div>
+            )}
+            <ChatModelStatus
+              catalog={models}
+              slug={workspaceSlug}
+              quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
+            />
+            {!compact && !empty && (
+              <p className="text-center text-xs text-muted-foreground">
+                TulipFarm can make mistakes. Check important details.
+              </p>
+            )}
+          </div>
+        </footer>
+      </div>
+    </ChatKeywords>
   );
 }
 
@@ -1589,11 +1617,13 @@ const EntryActions = memo(function EntryActions({
   text,
   author,
   createdAt,
+  stats,
   entry,
 }: {
   text: string;
   author: ConversationMessage['author'];
   createdAt: string;
+  stats: MessageActionsStats | undefined;
   entry: RefObject<HTMLDivElement | null>;
 }) {
   return (
@@ -1601,6 +1631,7 @@ const EntryActions = memo(function EntryActions({
       text={text}
       author={author}
       createdAt={createdAt}
+      stats={stats}
       hover
       html={() => {
         const parts = entry.current?.querySelectorAll('[data-slot=message-bubble]');
@@ -1621,6 +1652,7 @@ function ConversationEntry({
   packageContext,
   retryHandoff,
   control,
+  stats,
 }: {
   api: ConversationApi;
   chatId: string;
@@ -1632,6 +1664,7 @@ function ConversationEntry({
   packageContext: PackageChatContextValue;
   retryHandoff: (compactionId: string) => void;
   control: (kind: 'retry' | 'cancel') => void;
+  stats?: MessageActionsStats | undefined;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const text = message.parts
@@ -1720,7 +1753,7 @@ function ConversationEntry({
               case 'text':
                 return message.followUp ? (
                   <MessageBubble key={index} variant="secondary">
-                    <p className="whitespace-pre-wrap text-base break-words">
+                    <p className="whitespace-pre-wrap break-words">
                       <span aria-hidden>⏰ </span>
                       <span className="font-medium">Follow-up:</span> {message.followUp.instruction}
                     </p>
@@ -1738,32 +1771,27 @@ function ConversationEntry({
                   />
                 ) : (
                   <MessageBubble key={index} variant="secondary">
-                    {part.content ? (
-                      <RichMessage
-                        content={part.content}
-                        file={reference =>
-                          reference.source === 'tulipfarm' ? (
-                            <ConversationFileReference workspaceId={workspace.id} slug={slug} fileId={reference.id} />
-                          ) : (
-                            (() => {
-                              const google = googleParts.get(reference.id);
-                              return google ? (
-                                <ConversationGoogleFileReference
-                                  slug={slug}
-                                  fileId={google.fileId}
-                                  name={google.name}
-                                  mimeType={google.mimeType}
-                                />
-                              ) : null;
-                            })()
-                          )
-                        }
-                      />
-                    ) : (
-                      <p className="whitespace-pre-wrap text-base break-words">
-                        <PackageMessageText text={part.text} />
-                      </p>
-                    )}
+                    <RichMessage
+                      content={part.content}
+                      text={part.text}
+                      file={reference =>
+                        reference.source === 'tulipfarm' ? (
+                          <ConversationFileReference workspaceId={workspace.id} slug={slug} fileId={reference.id} />
+                        ) : (
+                          (() => {
+                            const google = googleParts.get(reference.id);
+                            return google ? (
+                              <ConversationGoogleFileReference
+                                slug={slug}
+                                fileId={google.fileId}
+                                name={google.name}
+                                mimeType={google.mimeType}
+                              />
+                            ) : null;
+                          })()
+                        )
+                      }
+                    />
                   </MessageBubble>
                 );
               default: {
@@ -1775,7 +1803,15 @@ function ConversationEntry({
           {message.turn?.mode === 'plan' && (
             <p className="text-xs text-muted-foreground">Plan only · no setup actions</p>
           )}
-          {text && <EntryActions text={text} author={message.author} createdAt={message.createdAt} entry={entry} />}
+          {text && (
+            <EntryActions
+              text={text}
+              author={message.author}
+              createdAt={message.createdAt}
+              stats={stats}
+              entry={entry}
+            />
+          )}
           {message.turn && !quiet && (
             <MessageFooter>
               <div className="space-y-2">

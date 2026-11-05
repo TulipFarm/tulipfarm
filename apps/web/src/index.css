@@ -1080,3 +1080,30 @@
     animation: workflow-working 1.6s ease-in-out infinite;
   }
 }
+
+/* A reply's text reads at the same size as the message it answers; captions and cards keep the compact size. */
+@layer components {
+  [data-layout] > p,
+  [data-layout='chat'] .sprout-a2ui-text:not(.sprout-a2ui-caption) {
+    font-size: var(--sprout-text-base);
+    line-height: 1.625;
+  }
+}
+
+/* An active mode tints the composer and its chip, as Sprout's ChatInput does. */
+@layer components {
+  .sprout-input-group[data-mode='plan'] {
+    --chat-mode: var(--sprout-info);
+    border-color: var(--chat-mode);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--chat-mode) 14%, transparent);
+  }
+  .sprout-input-group[data-mode] [data-mode-chip] {
+    background: color-mix(in oklab, var(--chat-mode) 14%, transparent);
+    color: var(--chat-mode);
+  }
+  @media (hover: hover) {
+    .sprout-input-group[data-mode] [data-mode-chip]:hover {
+      background: color-mix(in oklab, var(--chat-mode) 22%, transparent);
+    }
+  }
+}

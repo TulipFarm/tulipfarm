@@ -70,7 +70,14 @@ type ComposerProps = {
   /** Offers the three things a file can become here, so a person knows before choosing whether this chat reads it. */
   extensions?: Extensions;
   /** Integration names typed in the message show as chips; a disconnected one offers Connect. */
-  integrations?: { keywords: readonly RichTextKeyword[]; onConnect: (keyword: RichTextKeyword) => void } | undefined;
+  integrations?:
+    | {
+        keywords: readonly RichTextKeyword[];
+        onConnect: (keyword: RichTextKeyword) => void;
+        /** Switches the account a keyword's app uses in this chat; offered when the keyword lists accounts. */
+        onAccountChange?: ((keyword: RichTextKeyword, accountId: string) => Promise<unknown>) | undefined;
+      }
+    | undefined;
   /** Suggestions anchored above the message field. */
   picker?:
     | {
@@ -163,7 +170,10 @@ export function Composer({
             }}
           />
         )}
-        <InputGroup variant={questionPending ? 'question-composer' : 'composer'}>
+        <InputGroup
+          variant={questionPending ? 'question-composer' : 'composer'}
+          data-mode={mode?.value === 'plan' ? 'plan' : undefined}
+        >
           {attachments && <InputGroupAddon align="block-start">{attachments}</InputGroupAddon>}
           <RichTextEditor
             key={compact ? 'compact' : 'full'}
@@ -187,6 +197,7 @@ export function Composer({
             extensions={editorExtensions}
             keywords={integrations?.keywords}
             onKeywordConnect={integrations?.onConnect}
+            onKeywordAccountChange={integrations?.onAccountChange}
             onChange={doc => onContentChange({ version: 1, doc })}
             onSend={send}
             toolbarAddon={
@@ -512,6 +523,7 @@ function ModeMenu({
               <InputGroupButton
                 size="md"
                 variant="secondary"
+                data-mode-chip=""
                 aria-label="Turn off Plan"
                 disabled={disabled}
                 onClick={() => onChange('normal')}

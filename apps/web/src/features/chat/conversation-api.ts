@@ -51,6 +51,14 @@ const turnSchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
   errorCode: z.string().nullable().optional(),
   mode: z.literal('plan').optional(),
+  stats: z
+    .object({
+      model: z.string().optional(),
+      firstTextMs: z.number().nonnegative().optional(),
+      durationMs: z.number().nonnegative().optional(),
+      traceId: z.string().optional(),
+    })
+    .optional(),
 });
 const attachmentSchema = z.object({
   id: z.uuid(),

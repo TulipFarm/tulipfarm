@@ -64,6 +64,12 @@ export type SlackActionsFactory = (
 ) => ReturnType<typeof createSlackActions> & { threadReaction?: SlackThreadReactions };
 const range = commonCompatibility;
 const hasSender = (tx: AgentTransaction) => 'commonVersion' in tx && Number(tx.commonVersion) >= 1;
+const hasChatSender = (tx: AgentTransaction) => 'commonVersion' in tx && Number(tx.commonVersion) >= 38;
+const chatSenderSchema = z.object({ sender: slackSenderSchema, version: z.number().int().nonnegative() });
+export const slackChatSenderInputSchema = z.strictObject({
+  sender: slackSenderSchema,
+  expectedVersion: z.number().int().nonnegative(),
+});
 const rowSchema = z.object({
   id: z.uuid(),
   run_id: z.uuid(),
@@ -1069,7 +1075,63 @@ export function createSlackActions(options: Options) {
         ).rows[0],
       );
   }
-  // Human chat always posts as the requester. Workflows and agents use their saved sender choice.
+  async function readChatSender(tx: AgentTransaction, conversationId: string) {
+    if (!hasChatSender(tx)) return { sender: 'user' as const, version: 0 };
+    return chatSenderSchema.parse(
+      (
+        await tx.client.query(
+          `SELECT sender,version FROM ${relation(tx, 'tf_slack_chat_sender')} WHERE conversation_id=$1`,
+          [conversationId],
+        )
+      ).rows[0] ?? { sender: 'user', version: 0 },
+    );
+  }
+  // Only the chat's owner sees or changes who posts its Slack messages.
+  async function ownChat(tx: Transaction, userId: string, conversationId: string) {
+    const actor = await resolveHuman(tx, userId);
+    await currentMember(tx, actor);
+    const owned = await tx.client.query(
+      `SELECT 1 FROM ${relation(tx, 'tf_conversations')} WHERE id=$1 AND kind='private' AND owner_user_id=$2 AND owner_membership_id=$3 AND deleted_at IS NULL FOR UPDATE`,
+      [z.uuid().parse(conversationId), actor.userId, actor.membershipId],
+    );
+    if (!owned.rowCount) throw new AccessDenied();
+  }
+  // The app can post only when the workspace's Slack app is installed with permission to write messages.
+  async function appCanPost(tx: AgentTransaction) {
+    return Boolean(
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${relation(tx, 'tf_slack_installations')} WHERE app_id=$1 AND state='active' AND bot_credential IS NOT NULL AND 'chat:write'=ANY(scopes) LIMIT 1`,
+          [options.appId],
+        )
+      ).rowCount,
+    );
+  }
+  async function chatSender(workspaceId: string, userId: string, conversationId: string) {
+    return transaction(workspaceId, async tx => {
+      await ownChat(tx, userId, conversationId);
+      return { ...(await readChatSender(tx, conversationId)), appAvailable: await appCanPost(tx) };
+    });
+  }
+  async function selectChatSender(workspaceId: string, userId: string, conversationId: string, input: unknown) {
+    const { sender, expectedVersion } = slackChatSenderInputSchema.parse(input);
+    return transaction(workspaceId, async tx => {
+      if (!hasChatSender(tx)) throw new AccessDenied();
+      await ownChat(tx, userId, conversationId);
+      const current = await readChatSender(tx, conversationId);
+      if (current.version !== expectedVersion) throw new Error('slack-sender-conflict');
+      if (sender === 'app' && !(await appCanPost(tx))) throw new Error('slack-sender-unavailable');
+      if (current.sender !== sender)
+        await tx.client.query(
+          `INSERT INTO ${relation(tx, 'tf_slack_chat_sender')} (conversation_id,sender,version) VALUES ($1,$2,1)
+          ON CONFLICT (conversation_id) DO UPDATE SET sender=EXCLUDED.sender,version=${relation(tx, 'tf_slack_chat_sender')}.version+1`,
+          [conversationId, sender],
+        );
+      return { ...(await readChatSender(tx, conversationId)), appAvailable: await appCanPost(tx) };
+    });
+  }
+  // Chats use the sender their owner picked; workflows and agents use their saved sender choice.
+  // A chat's version is its sender version, so switching makes sends prepared under the old choice stale.
   async function agentPolicy(
     tx: AgentTransaction,
     runId: string,
@@ -1078,7 +1140,8 @@ export function createSlackActions(options: Options) {
     const workflow = await workflowOrigin(tx, runId, callId);
     if (workflow)
       return { version: 0, sender: await workflows.slackSender(tx as Transaction, runId, workflow.step_id) };
-    if (await conversationOrigin(tx, runId)) return { version: 0, sender: 'user' };
+    const chat = await conversationOrigin(tx, runId);
+    if (chat) return readChatSender(tx, chat.conversation_id);
     const agent = z
       .object({ policy_version: z.number(), slack_sender: slackSenderSchema.default('user') })
       .parse(
@@ -1243,6 +1306,8 @@ export function createSlackActions(options: Options) {
     resolve,
     conversation,
     resumeConversation,
+    chatSender,
+    selectChatSender,
     taskActions,
     workflow,
     /** Checks a Slack turn's audience for chat row drafts asked from that thread; absent outside Slack replies. */

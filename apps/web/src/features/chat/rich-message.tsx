@@ -1,123 +1,72 @@
-import { Fragment, type ReactNode } from 'react';
-import type { JSONContent } from '@tiptap/core';
+import { createContext, use, type ReactNode } from 'react';
 import { chatDocumentSchema, type ChatDocument, type ChatFileReference } from '@tulipfarm/conversations/rich-content';
-import { PackageMessageText } from './package-reference';
+import { MessageRichText } from '@tulipfarm/sprout/message-rich-text';
+import type { RichTextKeyword, RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
+import { PackagePill, packageLinkParts } from './package-reference';
 
+/** The composer's integration keywords, so sent messages show the same chips. */
+export const ChatKeywords = createContext<readonly RichTextKeyword[] | undefined>(undefined);
+
+/** A sent message with the composer's integration chips, file chips and package pills. Plain text shows as typed. */
 export function RichMessage({
   content,
+  text,
   file,
 }: {
-  content: ChatDocument;
+  content?: ChatDocument | undefined;
+  text?: string;
   file: (reference: ChatFileReference) => ReactNode;
 }) {
-  const document = chatDocumentSchema.parse(content);
+  const keywords = use(ChatKeywords);
+  const document = content ? chatDocumentSchema.parse(content) : null;
+  const value = document ? withPackages(document.doc as RichTextValue) : plainDocument(text ?? '');
   return (
-    <div className="space-y-3 text-base wrap-break-word">
-      {document.doc.content.map((node, index) => (
-        <Block key={index} node={node as JSONContent} file={file} />
-      ))}
+    <div className="wrap-break-word">
+      <MessageRichText
+        value={value}
+        keywords={keywords}
+        accounts={document?.accounts}
+        renderNode={node =>
+          node.type === 'fileReference' ? (
+            file(node.attrs as ChatFileReference)
+          ) : node.type === 'packageReference' ? (
+            <PackagePill url={String(node.attrs?.url)} />
+          ) : null
+        }
+      />
     </div>
   );
 }
 
-function Inline({ node, file }: { node: JSONContent; file: (reference: ChatFileReference) => ReactNode }) {
-  if (node.type === 'hardBreak') return <br />;
-  if (node.type === 'fileReference') return <>{file(node.attrs as ChatFileReference)}</>;
-  let content: ReactNode = node.marks?.some(mark => mark.type === 'code' || mark.type === 'link') ? (
-    (node.text ?? '')
-  ) : (
-    <PackageMessageText text={node.text ?? ''} />
-  );
-  for (const mark of node.marks ?? []) {
-    if (mark.type === 'bold') content = <strong>{content}</strong>;
-    else if (mark.type === 'italic') content = <em>{content}</em>;
-    else if (mark.type === 'strike') content = <s>{content}</s>;
-    else if (mark.type === 'code') content = <code className="rounded bg-muted px-1 font-mono text-sm">{content}</code>;
-    else if (mark.type === 'link')
-      content = (
-        <a
-          className="text-primary-text underline"
-          href={String(mark.attrs?.href)}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {content}
-        </a>
-      );
-  }
-  return <>{content}</>;
-}
-
-function Inlines({
-  nodes,
-  file,
-}: {
-  nodes?: JSONContent[] | undefined;
-  file: (reference: ChatFileReference) => ReactNode;
-}) {
-  return (
-    <>
-      {(nodes ?? []).map((node, index) => (
-        <Fragment key={index}>
-          <Inline node={node} file={file} />
-        </Fragment>
-      ))}
-    </>
+function packageNodes(text: string, marks?: RichTextValue['marks']): RichTextValue[] {
+  return packageLinkParts(text).map(part =>
+    'url' in part
+      ? { type: 'packageReference', attrs: { url: part.url } }
+      : { type: 'text', text: part.text, ...(marks ? { marks } : {}) },
   );
 }
 
-function Block({ node, file }: { node: JSONContent; file: (reference: ChatFileReference) => ReactNode }) {
-  if (node.type === 'paragraph')
-    return (
-      <p className="whitespace-pre-wrap">
-        <Inlines nodes={node.content} file={file} />
-      </p>
-    );
-  if (node.type === 'heading') {
-    const children = <Inlines nodes={node.content} file={file} />;
-    if (node.attrs?.level === 1) return <h1 className="text-xl font-medium">{children}</h1>;
-    if (node.attrs?.level === 2) return <h2 className="text-lg font-medium">{children}</h2>;
-    return <h3 className="text-base font-medium">{children}</h3>;
-  }
-  if (node.type === 'blockquote')
-    return (
-      <blockquote className="space-y-2 border-l-2 border-border pl-3">
-        {node.content?.map((child, index) => (
-          <Block key={index} node={child} file={file} />
-        ))}
-      </blockquote>
-    );
-  if (node.type === 'codeBlock')
-    return (
-      <pre className="overflow-x-auto rounded-lg bg-muted p-3">
-        <code className="font-mono text-sm">{node.content?.map(child => child.text ?? '').join('')}</code>
-      </pre>
-    );
-  if (node.type === 'bulletList')
-    return (
-      <ul className="list-disc space-y-1 pl-6">
-        {node.content?.map((item, index) => (
-          <ListItem key={index} item={item} file={file} />
-        ))}
-      </ul>
-    );
-  if (node.type === 'orderedList')
-    return (
-      <ol className="list-decimal space-y-1 pl-6" start={Number(node.attrs?.start ?? 1)}>
-        {node.content?.map((item, index) => (
-          <ListItem key={index} item={item} file={file} />
-        ))}
-      </ol>
-    );
-  return null;
+// Marketplace package links in a sent message show as package pills, as they did in the composer.
+function withPackages(node: RichTextValue): RichTextValue {
+  if (node.type === 'codeBlock' || !node.content) return node;
+  return {
+    ...node,
+    content: node.content.flatMap(child =>
+      child.type === 'text' && !child.marks?.some(mark => mark.type === 'code' || mark.type === 'link')
+        ? packageNodes(child.text ?? '', child.marks)
+        : [withPackages(child)],
+    ),
+  };
 }
 
-function ListItem({ item, file }: { item: JSONContent; file: (reference: ChatFileReference) => ReactNode }) {
-  return (
-    <li className="space-y-1">
-      {item.content?.map((child, index) => (
-        <Block key={index} node={child} file={file} />
-      ))}
-    </li>
-  );
+function plainDocument(text: string): RichTextValue {
+  return {
+    type: 'doc',
+    content: text.split(/\n{2,}/).map(paragraph => ({
+      type: 'paragraph',
+      content: paragraph
+        .split('\n')
+        .flatMap((line, index) => [...(index ? [{ type: 'hardBreak' }] : []), ...packageNodes(line)]),
+    })),
+  };
 }

@@ -25,6 +25,16 @@ test('malformed link destinations return validation errors instead of throwing',
   }
 });
 
+test('rich chat documents keep the account each named integration was sent with', () => {
+  const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Post to Slack' }] }] };
+  const document = { version: 1, doc, accounts: { github: 'dhruv-tulipfarm', slack: 'TulipFarm app' } };
+  assert.deepEqual(chatDocumentSchema.parse(document), document);
+  for (const accounts of [{ GitHub: 'x' }, { github: ' ' }, { github: 'x'.repeat(201) }])
+    assert.equal(chatDocumentSchema.safeParse({ version: 1, doc, accounts }).success, false, JSON.stringify(accounts));
+  const many = Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`app-${i}`, 'x']));
+  assert.equal(chatDocumentSchema.safeParse({ version: 1, doc, accounts: many }).success, false);
+});
+
 test('rich chat documents preserve formatting text and inline file positions through a strict public contract', () => {
   const localFileId = randomUUID();
   const googleFileId = 'google-file-1';

@@ -252,6 +252,15 @@ export const turnSummarySchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
   errorCode: z.string().nullable().optional(),
   mode: z.literal('plan').optional(),
+  /** How the reply was produced: its model, milliseconds from the send to the first word and to the end, and kept trace. */
+  stats: z
+    .object({
+      model: z.string().optional(),
+      firstTextMs: z.number().nonnegative().optional(),
+      durationMs: z.number().nonnegative().optional(),
+      traceId: z.string().optional(),
+    })
+    .optional(),
 });
 export const controlTurnSchema = z.strictObject({
   commandId: uuidSchema,

@@ -87,12 +87,25 @@ const listItemSchema: z.ZodType<ListItemNode> = z.lazy(() =>
   }),
 );
 const docSchema = z.strictObject({ type: z.literal('doc'), content: z.array(blockNodeSchema).min(1).max(128) });
-export type ChatDocument = { version: 1; doc: { type: 'doc'; content: BlockNode[] } };
+/**
+ * The account each integration named in the message was sent with, by integration ID, such as `github` to a login.
+ * It labels the message's integration chips; the account a reply uses is chosen elsewhere.
+ */
+export type ChatDocumentAccounts = Record<string, string>;
+export type ChatDocument = {
+  version: 1;
+  doc: { type: 'doc'; content: BlockNode[] };
+  accounts?: ChatDocumentAccounts | undefined;
+};
+const accountsSchema = z
+  .record(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/), z.string().trim().min(1).max(200))
+  .refine(accounts => Object.keys(accounts).length <= 32, 'Too many accounts');
 
 export const chatDocumentSchema: z.ZodType<ChatDocument> = z
   .strictObject({
     version: z.literal(1),
     doc: docSchema,
+    accounts: accountsSchema.optional(),
   })
   .superRefine((document, context) => {
     if (new TextEncoder().encode(JSON.stringify(document)).length > 131_072) {
