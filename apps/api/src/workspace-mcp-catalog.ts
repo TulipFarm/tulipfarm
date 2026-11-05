@@ -22,7 +22,12 @@ export function workspaceMcpCatalog(
       await load();
       await catalog.refreshIfDue();
       const snapshot = catalog.snapshot();
-      if (snapshot.syncedAt && !snapshot.refreshFailed && !snapshot.refreshInProgress) {
+      if (
+        snapshot.syncedAt &&
+        !snapshot.refreshFailed &&
+        !snapshot.refreshInProgress &&
+        (!restored || snapshot.syncedAt > restored.syncedAt)
+      ) {
         const publicSnapshot = publicMcpSnapshotSchema.parse({
           policyVersion: 'latest-usable-v1',
           syncedAt: snapshot.syncedAt,
@@ -40,10 +45,8 @@ export function workspaceMcpCatalog(
             }),
           ),
         });
-        if (!restored || publicSnapshot.syncedAt > restored.syncedAt) {
-          await cache?.publish(publicSnapshot);
-          restored = publicSnapshot;
-        }
+        await cache?.publish(publicSnapshot);
+        restored = publicSnapshot;
       }
       return {
         refreshFailed: snapshot.refreshFailed,
