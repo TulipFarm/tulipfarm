@@ -59,6 +59,20 @@ import { WorkspaceMemberError } from './workspace-members.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 export const tableProposalDigest = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const range = commonCompatibility;
+/**
+ * True for proposal `p` when a newer, unrejected proposal from the same person
+ * in the same chat replaces it: it names `p` in `revises`, or redesigns the
+ * same table, or proposes a new table with the same title.
+ */
+const tableProposalSupersededSql = (tx: TableTransaction) =>
+  `EXISTS (SELECT 1 FROM ${table(tx, 'tf_table_proposals')} n WHERE n.conversation_id=p.conversation_id AND n.membership_id=p.membership_id AND (n.created_at,n.id)>(p.created_at,p.id)
+    AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_table_proposal_decisions')} nd WHERE nd.proposal_id=n.id AND nd.decision='reject')
+    AND (n.manifest->>'revises'=p.id::text OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(n.manifest->'plans') np, jsonb_array_elements(p.manifest->'plans') op
+      WHERE np->'input'->>'kind'='schema' AND op->'input'->>'kind'='schema'
+        AND (np->'input'->>'tableId'=op->'input'->>'tableId'
+          OR (jsonb_typeof(np->'before')='null' AND jsonb_typeof(op->'before')='null'
+            AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label')))))))`;
 type Origin = { conversationId: string; turnId: string; sources: readonly SourceDependency[] };
 type InstallationOrigin = {
   conversationId: null;
@@ -306,7 +320,14 @@ function operations(options: TableProposalOptions) {
                 : saved.some(item => item.receipt.status === 'failed')
                   ? 'failed'
                   : decision !== 'approve'
-                    ? 'pending'
+                    ? (
+                        await tx.client.query(
+                          `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p WHERE p.id=$1 AND ${tableProposalSupersededSql(tx)}`,
+                          [id],
+                        )
+                      ).rowCount
+                      ? 'superseded'
+                      : 'pending'
                     : (
                           await tx.client.query(
                             `SELECT 1 FROM ${table(tx, 'tf_table_executions')} WHERE proposal_id=$1`,
@@ -801,6 +822,8 @@ function operations(options: TableProposalOptions) {
         ...('installationId' in origin ? { installationId: origin.installationId } : {}),
         sources,
         expiresAt,
+        ...(input.revises ? { revises: input.revises } : {}),
+        ...(input.label ? { label: input.label } : {}),
         plans: previews.map(item => item.reviewed),
       });
       const digest = tableProposalDigest(manifest);
@@ -1025,6 +1048,8 @@ function operations(options: TableProposalOptions) {
         if (action === 'approve' || action === 'resume') {
           if (row.expired) throw new TableProposalError('proposal-expired');
           if (action === 'approve' && status.cancelled) throw new TableProposalError('proposal-cancelled');
+          if (action === 'approve' && status.status === 'superseded')
+            throw new TableProposalError('proposal-superseded');
           if (action === 'resume' && status.decision !== 'approve')
             throw new TableProposalError('proposal-not-approved');
           await visible(tx, actor, row.manifest, 'require-added');
