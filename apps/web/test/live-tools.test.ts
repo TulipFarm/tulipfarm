@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { newestTools, reconcileLiveTools, unclaimedToolTurns } from '../src/features/chat/live-tools.ts';
+import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from '../src/features/chat/live-tools.ts';
 import type { ConversationMessage } from '../src/features/chat/conversation-api.ts';
 import type { StreamTool } from '@tulipfarm/conversations/events';
 
@@ -83,4 +83,22 @@ test('provisional activity keeps turn identity and execution order until saved h
     unclaimedToolTurns([message], updates).map(turn => turn.id),
     ['other-turn'],
   );
+});
+
+test('a live completion renders no result card until the saved receipt carries the outcome', () => {
+  const done = { ...update, tool: 'workflows.draft', status: 'completed' as const };
+  const live = reconcile(message, done).tools[0]!;
+  assert.equal(live.status, 'completed', 'the activity still shows the call finished');
+  assert.equal(succeeded(live), false, 'an error result also completes, so no draft card yet');
+  const saved = { id: done.id, tool: done.tool, status: 'completed' as const };
+  assert.equal(
+    succeeded(reconcile({ ...message, tools: [{ ...saved, activityStatus: 'completed' }] }, done).tools[0]!),
+    true,
+  );
+  assert.equal(
+    succeeded(reconcile({ ...message, tools: [{ ...saved, activityStatus: 'failed' }] }, done).tools[0]!),
+    false,
+  );
+  const running = { ...saved, status: 'running' as const };
+  assert.equal(succeeded(reconcile({ ...message, tools: [running] }, done).tools[0]!), false);
 });

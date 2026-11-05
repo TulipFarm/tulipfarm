@@ -642,8 +642,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const second = await draft({ ...weekdayReview, name: 'Review urgent tickets' });
   assert.equal(second.change, 'create');
   assert.equal(second.workflowId, first.workflowId, 'the replacement keeps the same workflow');
-  assert.equal((await drafts.read(w.id, user, chatId, first.draftId)).status, 'stale');
-  assert.equal((await drafts.read(w.id, user, chatId, second.draftId)).status, 'pending');
+  const replaced = await drafts.read(w.id, user, chatId, first.draftId);
+  assert.equal(replaced.status, 'stale');
+  assert.equal(replaced.replaced, true, 'the earlier card says a newer draft replaced it');
+  const latest = await drafts.read(w.id, user, chatId, second.draftId);
+  assert.equal(latest.status, 'pending');
+  assert.equal(latest.replaced, false);
 
   await drafts.decide(w.id, user, chatId, second.draftId, {
     commandId: randomUUID(),
@@ -655,6 +659,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   assert.equal(third.change, 'update', 'after a save, the next draft edits the saved workflow');
   assert.equal(third.workflowId, saved.id);
   assert.equal((await drafts.read(w.id, user, chatId, third.draftId)).proposal.input.expectedRevision, saved.revision);
+  assert.equal(
+    (await drafts.read(w.id, user, chatId, second.draftId)).replaced,
+    false,
+    'a saved draft is never shown as replaced',
+  );
   assert.equal((await workflows.list(w.id, user)).length, 1);
 });
 
