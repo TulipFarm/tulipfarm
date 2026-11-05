@@ -250,7 +250,7 @@ test(
         page.setDefaultTimeout(10000);
         const targetId = randomUUID(),
           draftId = randomUUID(),
-          scheduleId = randomUUID();
+          triggerId = randomUUID();
         const messageId = randomUUID(),
           turnId = randomUUID();
         const decisions = [],
@@ -273,17 +273,14 @@ test(
               ...(handoff ? { detach: true } : {}),
             },
           ],
-          schedules: [
+          triggers: [
             {
-              id: scheduleId,
-              action: {
-                kind: 'task',
-                text: 'Prepare a weekly policy update.',
-                limits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
-              },
+              id: triggerId,
               trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
-              sponsorMembershipId: fixture.membership.membershipId,
+              prompt: 'Prepare a weekly policy update.',
+              limits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
             },
+            { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Answer a policy question on request.' },
           ],
         };
         const view = {
@@ -409,13 +406,15 @@ test(
           );
           assert.equal(new URL(page.url()).searchParams.has('instructions'), false);
           await form.getByRole('button', { name: 'Save draft', exact: true }).click();
-          await form.getByText('Draft saved. Slack channels and schedules are not started.', { exact: true }).waitFor();
+          await form
+            .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
+            .waitFor();
           const saved = fixture.setups.get(targetId).setup;
           assert.deepEqual(saved.policy, setup.policy);
           assert.deepEqual(saved.enrollment, setup.enrollment);
           assert.equal(saved.slackSender, 'app');
           assert.deepEqual(saved.slackChannels, setup.slackChannels);
-          assert.deepEqual(saved.schedules, setup.schedules);
+          assert.deepEqual(saved.triggers, setup.triggers);
           assert.equal(decisions.length, 0, 'manual handoff is not chat approval');
           deny = true;
           await page.goto(
@@ -426,7 +425,9 @@ test(
         } else {
           assert.equal(await card.getByRole('button', { name: 'Create and activate', exact: true }).isDisabled(), true);
           assert.equal(decisions.length, 0);
-          await card.getByRole('checkbox', { name: /I sponsor schedule/ }).check();
+          const sponsor = card.getByRole('checkbox', { name: /^I sponsor trigger/ });
+          assert.equal(await sponsor.count(), 1, 'a trigger run by hand needs no sponsor');
+          await sponsor.check();
           await card.getByRole('checkbox', { name: /Replace the existing agent/ }).check();
           await card.getByRole('button', { name: 'Create and activate', exact: true }).click();
           await card.getByRole('button', { name: 'Retry same decision', exact: true }).click();
@@ -435,7 +436,7 @@ test(
             .waitFor();
           assert.equal(decisions.length, 2);
           assert.deepEqual(decisions[0], decisions[1]);
-          assert.deepEqual(decisions[0].consent, { sponsorScheduleIds: [scheduleId], replaceChannels: ['CPEOPLE'] });
+          assert.deepEqual(decisions[0].consent, { sponsorTriggerIds: [triggerId], replaceChannels: ['CPEOPLE'] });
         }
         assert.deepEqual(errors, []);
         await page.close();

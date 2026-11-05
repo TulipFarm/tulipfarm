@@ -40,6 +40,8 @@ export type AgentCommand = z.infer<typeof agentCommandStatusSchema>;
 type ExecutionSettings = z.infer<typeof executionPolicySchema>;
 
 const rejections: Partial<Record<string, string>> = {
+  'trigger-sponsor-consent-required':
+    'Sponsor each trigger that runs on its own before activating. Your input is retained.',
   'task-schedule-interval': `Prompt schedules run at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.`,
   'schedule-invalid':
     'This calendar schedule is invalid. Check the cron expression and IANA time zone. Your input is retained.',

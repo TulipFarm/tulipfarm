@@ -167,6 +167,10 @@ export const stepSchema = z.discriminatedUnion('kind', [
     kind: z.literal('agent'),
     agentId: idSchema,
     prompt: valueSchema,
+    /** Trigger or step data appended to the prompt as JSON, marked as data rather than instructions. */
+    context: valueSchema.optional(),
+    /** Runs this exact activation instead of the agent's newest; a revoked one fails the step. */
+    activationId: idSchema.optional(),
     limits: agentTaskLimitsSchema.default({ toolCalls: 100, activeMilliseconds: 300000, credits: 100 }),
   }),
   httpStepSchema,
@@ -635,6 +639,8 @@ export const workflowSchema = z.object({
     .default(null),
   archivedAt: z.string().nullable().default(null),
   rowQueue: rowQueueSchema.nullable().default(null),
+  /** The agent this workflow was created for; archiving or restoring that agent carries it. */
+  agentId: idSchema.nullable().default(null),
 });
 // The server returns a generated key once; a replayed command cannot show it again.
 export const webhookKeyIssuedSchema = z.object({ workflow: workflowSchema, key: webhookKeyValueSchema.nullable() });

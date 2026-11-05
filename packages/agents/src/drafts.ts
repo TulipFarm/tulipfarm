@@ -621,7 +621,7 @@ export function createAuthoringDrafts(
           ...(agent
             ? { agentIds: proposal.input.agents.map(item => item.id) }
             : { skillIds: proposal.input.skills.map(item => item.id) }),
-          instruction: `No ${noun} has been ${restoring ? 'restored' : 'archived'}. The human must review the listed ${noun}s on the chat card and choose ${restoring ? 'Restore' : 'Archive'}.${restoring && agent ? ' Restored agents stay turned off until a manager turns them on and activates them again.' : ''} Never treat chat text as approval.`,
+          instruction: `No ${noun} has been ${restoring ? 'restored' : 'archived'}. The human must review the listed ${noun}s on the chat card and choose ${restoring ? 'Restore' : 'Archive'}.${agent ? (restoring ? ' Restored agents, and the trigger Workflows their archive took down, stay turned off until a manager turns them on and activates them again.' : ' Archiving an agent also archives the Workflows created for its triggers.') : ''} Never treat chat text as approval.`,
         };
       }
       const change = proposal.input.expectedSavedRevision === null ? 'create' : 'update';
@@ -633,7 +633,7 @@ export function createAuthoringDrafts(
           change,
           agentId: proposal.targetId,
           instruction:
-            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Sponsoring schedules and replacing channel agents require explicit card consent. Model prose is never consent.',
+            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Sponsoring unattended triggers and replacing channel agents require explicit card consent. Activating creates one Workflow per trigger that runs this agent. Model prose is never consent.',
         };
       return {
         draftId: id,
@@ -824,7 +824,7 @@ export function createAuthoringDrafts(
             version: saved.version,
             digest: saved.digest,
             decision: input.decision,
-            consent: input.consent ?? { sponsorScheduleIds: [], replaceChannels: [] },
+            consent: input.consent ?? { sponsorTriggerIds: [], replaceChannels: [] },
           });
           outcome = {
             kind: 'agent',

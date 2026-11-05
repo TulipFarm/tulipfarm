@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
-import type { Definition, workflowSchema } from '@tulipfarm/workflows/contracts';
+import type { Definition, DisabledReason, workflowSchema } from '@tulipfarm/workflows/contracts';
 import type { z } from 'zod';
 import { cronSummary, ordinaryCron } from './calendar-schedule';
 import { triggerTitles, workflowDuration } from './diagram-model';
@@ -113,4 +113,43 @@ export function StatusLine({ state }: { state: WorkflowState }) {
       {state.detail && <span className="truncate ps-4.5 text-xs text-muted-foreground">{state.detail}</span>}
     </span>
   );
+}
+
+const formatTime = (value: string) =>
+  new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const nextRun = (workflow: Workflow) => (workflow.nextRunAt ? `Next run ${formatTime(workflow.nextRunAt)}` : undefined);
+const sponsorSource: Partial<Record<Definition['trigger']['kind'], string>> = {
+  record: ' or to read the table its record trigger watches',
+  row: ' or to read the table its row trigger watches',
+  provider: ' or to use the connected app its trigger polls',
+};
+export const disabledReasons: Record<
+  DisabledReason,
+  { status: string; explanation: (workflow: Workflow) => string; recovery: string }
+> = {
+  'sponsor-access-lost': {
+    status: 'sponsor lost access',
+    explanation: workflow =>
+      `its sponsor lost access needed to run it${sponsorSource[(workflow.activeTrigger ?? workflow.definition.trigger).kind] ?? ''}`,
+    recovery: 'Restore that access or choose a sponsor who has it, then activate the saved revision.',
+  },
+  'record-field-unavailable': {
+    status: 'record field unavailable',
+    explanation: () => 'the table, watched fields, or filter its trigger uses is no longer available',
+    recovery: 'Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',
+  },
+  'provider-backlog': {
+    status: 'connected app backlog',
+    explanation: () => 'too many connected-app events waited to start runs',
+    recovery: 'Activate the saved revision to discard the waiting events and collect only new ones.',
+  },
+};
+export function workflowState(workflow: Workflow): WorkflowState {
+  if (workflow.archivedAt) return { mark: 'stopped', label: 'Archived', detail: formatTime(workflow.archivedAt) };
+  if (workflow.enabled && workflow.activeRevision !== workflow.revision)
+    return { mark: 'warning', label: 'Saved changes not active', detail: nextRun(workflow) };
+  if (workflow.enabled) return { mark: 'success', label: 'Active', detail: nextRun(workflow) };
+  if (workflow.disabledReason)
+    return { mark: 'error', label: `Disabled: ${disabledReasons[workflow.disabledReason].status}` };
+  return { mark: 'stopped', label: 'Disabled' };
 }

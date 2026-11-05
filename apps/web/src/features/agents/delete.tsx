@@ -31,7 +31,10 @@ export function AgentDelete({
   const write = useTableWrite((agentId: string) => api.remove(agentId), onDeleted);
   if (concealed) return null;
   return (
-    <FormSection title="Delete agent" description="Removes the agent and stops its active versions.">
+    <FormSection
+      title="Delete agent"
+      description="Removes the agent, stops its active versions and archives its trigger workflows."
+    >
       <Button
         variant="destructive"
         pendingLabel="Deleting agent…"
@@ -55,7 +58,7 @@ export function AgentDelete({
         <AlertDialogContent>
           <AlertDialogTitle>Delete this saved agent?</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes it from accessible lists and revokes its activations.
+            This removes it from accessible lists, revokes its activations and archives its trigger workflows.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep agent</AlertDialogCancel>
@@ -94,7 +97,7 @@ export function AgentArchive({
   return (
     <FormSection
       title="Archive agent"
-      description="Hides the agent and stops its active versions and schedules. You can restore it later from Archived agents."
+      description="Hides the agent, stops its active versions and archives its trigger workflows. You can restore it later from Archived agents."
     >
       <Button
         variant="outline"
@@ -119,8 +122,8 @@ export function AgentArchive({
         <AlertDialogContent>
           <AlertDialogTitle>Archive this agent?</AlertDialogTitle>
           <AlertDialogDescription>
-            It leaves the agent list, turns off and ends its activations and schedules. Its team, sharing and history
-            stay. Restoring brings it back turned off, ready to activate again.
+            It leaves the agent list, turns off and ends its activations, and archives its trigger workflows. Its team,
+            sharing and history stay. Restoring brings it and its workflows back turned off, ready to activate again.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep agent</AlertDialogCancel>

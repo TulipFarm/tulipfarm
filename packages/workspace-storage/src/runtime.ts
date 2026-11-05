@@ -19,12 +19,12 @@ export {
   workspaceIdSchema,
   workspaceNames,
 } from './names.ts';
-export { afterCommit } from './transactions.ts';
+export { afterCommit, afterCommitMark } from './transactions.ts';
 export type { WorkspaceId } from './names.ts';
 export type { SqlClient } from './transactions.ts';
 
 // Readers must accept every shipped common migration; the migrations test pins this to the common/ file count.
-export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 39 });
+export const commonCompatibility = Object.freeze({ minimum: 1, maximum: 40 });
 
 export const runtimeCredentialSchema = z.object({
   workspaceId: workspaceIdSchema,

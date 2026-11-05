@@ -115,8 +115,11 @@ import { readConversationMessage } from '@tulipfarm/conversations/compaction';
 import { standaloneTurn } from '@tulipfarm/conversations/turn-requester';
 import { admittedMcpTools, validateMcpCall } from './mcp-catalog.ts';
 import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool-contracts.ts';
-import { authoredDefinitionSchema } from '@tulipfarm/workflows/contracts';
-import { createWorkflowDrafts, summarizeWorkflow } from './workflow-drafts.ts';
+import { authoredDefinitionSchema, triggerSchema } from '@tulipfarm/workflows/contracts';
+import { createWorkflows } from '@tulipfarm/workflows';
+import { createWorkflowDrafts, previewWorkflowRun, summarizeWorkflow } from './workflow-drafts.ts';
+import { requireAgentTriggerCadence } from './agent-trigger-workflows.ts';
+import { unattendedTrigger } from './setup-contracts.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createAgentPlans, planCompatibility, planDocumentsEnabled } from './plans.ts';
 import { createFileShareDrafts } from './file-share-drafts.ts';
@@ -135,8 +138,7 @@ import { agentDraftInputSchema, type FilesProposal, type KnowledgeProposal } fro
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
-import { createAgentSchedules, previewAgentTaskSchedule } from './schedules.ts';
-import { scheduleTriggerSchema, taskScheduleMinimumMinutes } from './schedule-contracts.ts';
+import { taskScheduleMinimumMinutes } from './schedule-contracts.ts';
 import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
@@ -197,7 +199,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('agents.context'),
     agentId: z.uuid().optional(),
     channels: z.array(z.string().regex(/^[CG][A-Z0-9]{1,63}$/)).optional(),
-    scheduleTriggers: z.array(scheduleTriggerSchema).max(100).optional(),
+    triggers: z.array(triggerSchema).max(20).optional(),
   }),
   z.strictObject({
     tool: z.literal('agents.draft'),
@@ -645,15 +647,15 @@ const descriptions: Record<ToolName, string> = {
   'projects.draft':
     'Prepare a project review card to create, rename, change the instructions of, archive or restore a project. To create, give name and optional instructions. To change one, give projectId with the exact revision from projects.read and only the fields to change; archived=true archives and archived=false restores, and only a project manager can change a project. Returns one draft card and changes nothing until the human approves it. Never treat chat text as approval.',
   'agents.archive':
-    'Prepare an archive review for 1–20 saved agents the human may delete, using IDs from agents.list. Archiving hides the agent, turns it off and ends its activations and schedules; its team, sharing and history stay, and agents.restore can bring it back turned off. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
+    'Prepare an archive review for 1–20 saved agents the human may delete, using IDs from agents.list. Archiving hides the agent, turns it off, ends its activations and archives the Workflows created for its triggers; its team, sharing and history stay, and agents.restore can bring it back turned off. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
   'agents.restore':
-    'Prepare a restore review for 1–20 archived agents, using IDs from agents.list with archived=true. Restored agents come back turned off with no activations or schedules; a manager turns them on and activates them again. Returns one draft card and restores nothing until the human approves it. Never treat chat text as approval.',
+    'Prepare a restore review for 1–20 archived agents, using IDs from agents.list with archived=true. Restored agents come back turned off with no activations, and the trigger Workflows their archive took down come back disabled; a manager turns them on and activates them again. Returns one draft card and restores nothing until the human approves it. Never treat chat text as approval.',
   'agents.read':
     'Read one visible saved-agent definition, including its saved and definition revisions, before drafting a revision. Returns no execution history, private draft, or activation change. Use agents.list to find an ID; saving and activation remain separate human actions.',
   'agents.context':
-    'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills and tools/runtime support. Supply agentId for current policy, activation versions and schedules; channels for checked Slack attachments/readiness; scheduleTriggers for validated next-run times using the existing scheduler. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
+    'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills and tools/runtime support. Supply agentId for current policy, activation versions and the Workflows that already trigger it; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
   'agents.draft':
-    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and task-prompt schedules, plus expectedPolicyVersion/expectedActivationIds from context. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to sponsorship/replacement on the exact card. Never use model prose as consent; this tool saves or activates nothing.',
+    'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Each setup.triggers item is {id: new UUID, trigger: a Workflow trigger (cron, interval, once, webhook, event, record, row, provider, github), prompt: what the agent does each time, optional limits}; activating creates one Workflow per trigger that runs the agent with the prompt, and the data from the trigger (new row, issue, webhook body) is passed to it. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to sponsorship/replacement on the exact card. Never use model prose as consent; this tool saves or activates nothing.',
   'agents.task.start':
     "Start bounded work with an activated saved agent; use agents.task.read for its status. Returns a task ID and status, not the result. The owner keeps all approval authority, and delegation is bounded by the saved agent's limits.",
   'agents.delegate':
@@ -765,7 +767,7 @@ const descriptions: Record<ToolName, string> = {
   'files.read':
     'Read one file attached to or referenced in this chat by the attachment-id, file-id or google-file-id its file block shows, or any file in Files by its ID from files.list, when the turn left it out or included only part. Also reads a response file an api.request result names by its source. Pass pages (PDF pages or slides), sheet (a spreadsheet sheet) or range (characters of text, start inclusive, end exclusive) to read one part. Returns the same labelled, untrusted block; images follow the tool results for models that read images, otherwise their recognised text is included. Changes nothing.',
   'followups.schedule':
-    'Schedule a follow-up: one saved instruction that runs once, later, as a new turn in this same chat or Slack thread, as this person with the same tools and access. Use it whenever the person asks to do something later, after a delay, at a time, or to check back (e.g. "in 10 minutes send a quote to #tech", "remind @asha here at 5pm", "check in 5 minutes whether the run finished"). Never do the deferred action now, and never create a workflow or agent schedule for one-off timed work. Give delayMinutes (1 to 1440) or an absolute at time within 24 hours. A follow-up turn may schedule the next check, up to 12 in a chain and 24 hours from the first request; when it is refused for the limit, report back instead. Repeating work belongs in an agent schedule or a workflow.',
+    'Schedule a follow-up: one saved instruction that runs once, later, as a new turn in this same chat or Slack thread, as this person with the same tools and access. Use it whenever the person asks to do something later, after a delay, at a time, or to check back (e.g. "in 10 minutes send a quote to #tech", "remind @asha here at 5pm", "check in 5 minutes whether the run finished"). Never do the deferred action now, and never create a workflow or agent trigger for one-off timed work. Give delayMinutes (1 to 1440) or an absolute at time within 24 hours. A follow-up turn may schedule the next check, up to 12 in a chain and 24 hours from the first request; when it is refused for the limit, report back instead. Repeating work belongs in a workflow, including one that runs an agent.',
   'followups.list':
     "List this person's follow-ups in this chat or Slack thread: pending ones and those from the last day, with ids, due times and status. Changes nothing.",
   'followups.cancel':
@@ -1282,8 +1284,10 @@ export function createChatTools(
               agentSetup!.inspectSlack!(tx, workspaceId, actor.userId, channel),
             )),
           });
-        const schedules = call.agentId
-          ? await createAgentSchedules(runtime).list(workspaceId, actor.userId, call.agentId)
+        const linked = call.agentId
+          ? (await createWorkflows(runtime).list(workspaceId, actor.userId))
+              .filter(workflow => workflow.agentId === call.agentId)
+              .map(summarizeWorkflow)
           : [];
         return {
           ...context,
@@ -1293,12 +1297,23 @@ export function createChatTools(
           expectedPolicyVersion: policy?.version ?? 0,
           expectedActivationIds: activations,
           tools: toolNameSchema.options.map(name => ({ name, runtimes: supportedAgentToolRuntimes(name) })),
-          schedules: {
-            existing: schedules,
-            minimumIntervalMinutes: taskScheduleMinimumMinutes,
+          triggers: {
+            existingWorkflows: linked,
+            maximum: 20,
+            minimumScheduleMinutes: taskScheduleMinimumMinutes,
             promptMaxCharacters: 8000,
             sponsorMembershipId: actor.membershipId,
-            previews: (call.scheduleTriggers ?? []).map(trigger => previewAgentTaskSchedule(trigger)),
+            previews: (call.triggers ?? []).map(trigger => {
+              try {
+                requireAgentTriggerCadence(trigger);
+              } catch (error) {
+                if (error instanceof AgentError) return { trigger, error: error.code };
+                throw error;
+              }
+              return { trigger, nextRunAt: previewWorkflowRun(trigger), needsSponsor: unattendedTrigger(trigger) };
+            }),
+            instruction:
+              'Each trigger becomes its own Workflow. Use workflows.providers for GitHub repositoryId and provider integrationId, and tables.list/schema.inspect for row and record triggers. Unattended triggers (all but manual and event) need the human to sponsor them on the card.',
           },
           slack: {
             available: Boolean(agentSetup?.inspectSlack),

@@ -22,6 +22,21 @@ import { createAgentStore, relation, type AgentStorage, type AgentTransaction } 
 import { visiblePage } from './visible-page.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 import { listSkills } from './skills.ts';
+import { createWorkflows } from '@tulipfarm/workflows';
+
+/** The workflows service in the agent's own transaction, so trigger workflows change with the agent or not at all. */
+const linkedWorkflows = (transaction: AgentTransaction & { commonVersion: number }, workspaceId: string) =>
+  createWorkflows({
+    transaction: async (id, range, operation) => {
+      if (
+        id.toLowerCase() !== workspaceId.toLowerCase() ||
+        transaction.commonVersion < range.minimum ||
+        transaction.commonVersion > range.maximum
+      )
+        throw new AccessDenied();
+      return operation({ ...transaction, workspaceId });
+    },
+  } satisfies AgentStorage);
 
 type ProjectionReader = (workspaceId: string, projection: z.infer<typeof agentProjectionSchema>) => Promise<unknown>;
 const selectedSchema = savedAgentSchema.extend({ projection: agentProjectionSchema });
@@ -399,6 +414,7 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.delete',$3)`,
         [randomUUID(), actor.membershipId, agentId],
       );
+      await linkedWorkflows(transaction, workspaceId).archiveForAgent(workspaceId, actor.membershipId, agentId);
       await recordDefinitionRecommendationChanges(transaction, 'agent', agentId, before);
       return { deleted: true };
     });
@@ -434,6 +450,7 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.archive',$3)`,
         [randomUUID(), actor.membershipId, agentId],
       );
+      await linkedWorkflows(transaction, workspaceId).archiveForAgent(workspaceId, actor.membershipId, agentId);
       await recordDefinitionRecommendationChanges(transaction, 'agent', agentId, before);
       return { archived: true };
     });
@@ -454,6 +471,8 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.restore',$3)`,
         [randomUUID(), actor.membershipId, agentId],
       );
+      // Like the agent, its trigger workflows come back disabled.
+      await linkedWorkflows(transaction, workspaceId).restoreForAgent(workspaceId, actor.membershipId, agentId);
       await recordDefinitionRecommendationChanges(transaction, 'agent', agentId, before);
       return { restored: true };
     });

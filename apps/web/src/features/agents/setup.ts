@@ -42,7 +42,7 @@ export const agentTabs: readonly {
   {
     value: 'schedules',
     label: 'Triggers',
-    description: 'Choose how this agent starts, including repeating schedules.',
+    description: 'See the workflows that start this agent, and inspect tables on a schedule.',
     requires: 'manage',
   },
   { value: 'settings', label: 'Settings', description: 'Technical details and deletion.', requires: null },

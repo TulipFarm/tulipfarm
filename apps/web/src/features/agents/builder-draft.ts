@@ -1,11 +1,10 @@
-import { agentSetupSchema, type AgentSetup, type AgentSetupDraft } from '@tulipfarm/agents/setup-contracts';
+import { agentSetupSchema, unattendedTrigger, type AgentSetupDraft } from '@tulipfarm/agents/setup-contracts';
 import type { AgentAuthoringSource } from '@tulipfarm/agents/authoring-assistance-contracts';
 import { defaultTaskLimits, limitDraft, parseLimits } from '../tasks/limits.ts';
-import { parseSchedule } from './administration.ts';
 import type { AgentInput } from './api';
 import type { BuilderAccessDraft } from './builder-access';
 import type { BuilderChannel } from './builder-slack';
-import type { BuilderSchedule } from './builder-schedules';
+import type { BuilderTrigger } from './builder-triggers';
 import type { BuilderStep } from './builder-layout';
 
 export type BuilderDraft = {
@@ -13,7 +12,7 @@ export type BuilderDraft = {
   owningTeamId: string | null;
   access: BuilderAccessDraft;
   channels: BuilderChannel[];
-  schedules: BuilderSchedule[];
+  triggers: BuilderTrigger[];
   source: AgentAuthoringSource;
 };
 export type BuilderInitial = Pick<
@@ -55,27 +54,9 @@ export function builderDraft(initial?: BuilderInitial): BuilderDraft {
       channelResponses: null,
       replaceConsent: false,
     })),
-    schedules: (setup?.schedules ?? []).map(schedule => ({
-      id: schedule.id,
-      kind: 'task',
-      activationId: '',
-      text: schedule.action.text,
-      tableId: '',
-      cadence: schedule.trigger.kind,
-      minutes: {
-        task: schedule.trigger.kind === 'interval' ? String(schedule.trigger.minutes) : '1440',
-        inspect: '60',
-      },
-      cronExpression: schedule.trigger.kind === 'cron' ? schedule.trigger.expression : '0 9 * * 1',
-      timezone:
-        schedule.trigger.kind === 'cron' ? schedule.trigger.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone,
-      limits: limitDraft(schedule.action.limits),
-      sponsorConsent: false,
-      sponsorMembershipId: schedule.sponsorMembershipId,
-    })),
+    triggers: (setup?.triggers ?? []).map(trigger => ({ ...trigger, sponsorConsent: false })),
   };
 }
-
 export function builderDefinition(draft: BuilderDraft): BuilderDraft['definition'] {
   return {
     ...draft.definition,
@@ -99,28 +80,9 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
     problems.push({ step: 'skills', message: 'Choose no more than 16 skills.' });
   const limits = parseLimits(draft.access.taskLimits, { kind: 'start' });
   if (!limits.ok) problems.push({ step: 'access', message: 'Check the execution limits.' });
-  const schedules: AgentSetup['schedules'] = [];
-  for (const schedule of draft.schedules) {
-    const parsed = parseSchedule({ ...schedule, sponsorConsent: !activating || schedule.sponsorConsent }, 0, false);
-    if (
-      Object.values(parsed.errors).some(Boolean) ||
-      !parsed.action ||
-      parsed.action.kind !== 'task' ||
-      !parsed.trigger
-    )
-      problems.push({
-        step: 'triggers',
-        message: `Check schedule ${draft.schedules.indexOf(schedule) + 1}: ${Object.values(parsed.errors).filter(Boolean).join(' ')}`,
-      });
-    else
-      schedules.push({
-        id: schedule.id,
-        action: parsed.action,
-        trigger: parsed.trigger,
-        sponsorMembershipId: schedule.sponsorConsent ? membershipId : (schedule.sponsorMembershipId ?? membershipId),
-      });
-  }
   if (activating) {
+    if (draft.triggers.some(trigger => unattendedTrigger(trigger.trigger) && !trigger.sponsorConsent))
+      problems.push({ step: 'triggers', message: 'Sponsor each trigger that runs on its own before activation.' });
     if (draft.channels.some(channel => !channel.detach && !channel.channelResponses))
       problems.push({
         step: 'triggers',
@@ -148,7 +110,7 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
       replaceAgentId,
       ...(detach === undefined ? {} : { detach }),
     })),
-    schedules,
+    triggers: draft.triggers.map(({ id, trigger, prompt, limits }) => ({ id, trigger, prompt, limits })),
   });
   if (!parsed.success && !problems.length)
     for (const issue of parsed.error.issues) {
@@ -161,7 +123,7 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
               : issue.path[1] === 'tools' || issue.path[1] === 'mcp'
                 ? 'access'
                 : 'basics'
-            : field === 'schedules' || field === 'slackChannels'
+            : field === 'triggers' || field === 'slackChannels'
               ? 'triggers'
               : 'access',
         message: issue.message,

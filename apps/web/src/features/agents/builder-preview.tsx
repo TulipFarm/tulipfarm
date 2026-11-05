@@ -18,7 +18,7 @@ export function AgentDraftSummary({
   skills,
   tools,
   channelNames,
-  scheduleLabels,
+  triggerLabels,
   onEdit,
 }: {
   name: string;
@@ -28,7 +28,7 @@ export function AgentDraftSummary({
   skills: SkillSelections;
   tools: readonly ToolName[];
   channelNames: readonly string[];
-  scheduleLabels: readonly string[];
+  triggerLabels: readonly string[];
   onEdit?: ((step: BuilderStep) => void) | undefined;
 }) {
   return (
@@ -73,9 +73,9 @@ export function AgentDraftSummary({
             {
               step: 'triggers',
               Icon: CalendarClock,
-              term: 'Schedules',
-              value: scheduleLabels.length
-                ? `${scheduleLabels.length} scheduled task${scheduleLabels.length === 1 ? '' : 's'}`
+              term: 'Workflow triggers',
+              value: triggerLabels.length
+                ? `${triggerLabels.length} workflow trigger${triggerLabels.length === 1 ? '' : 's'}`
                 : 'Manual use only',
             },
           ] as const
@@ -118,9 +118,9 @@ export function AgentDraftSummary({
               ))}
             </ul>
           )}
-          {scheduleLabels.length > 0 && (
+          {triggerLabels.length > 0 && (
             <ul className="grid gap-1">
-              {scheduleLabels.map((label, index) => (
+              {triggerLabels.map((label, index) => (
                 <li key={index} className="wrap-anywhere">
                   {label}
                 </li>

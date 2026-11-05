@@ -50,8 +50,9 @@ type ScheduleWrite =
   | { kind: 'revoke'; id: string };
 
 const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+// New prompt schedules are workflows with an agent step, so this form creates only table inspections.
 const emptyDraft: ScheduleDraft = {
-  kind: 'task',
+  kind: 'inspect',
   cadence: 'interval',
   text: '',
   tableId: '',
@@ -227,25 +228,12 @@ export function AgentSchedules({
   return (
     <FormSection
       id="agent-schedules"
-      title="Scheduled trigger"
-      label="Agent schedules"
-      description="Start this agent with a saved prompt or table inspection on an interval or calendar schedule with an active version."
+      title="Table inspection schedule"
+      label="Agent table inspection schedules"
+      description="Inspect a table on an interval or calendar schedule with an active version."
     >
       <Form disabled={state.kind !== 'ready'} onSubmit={create}>
         <div className="grid gap-5">
-          <ChoiceGroup
-            type="radio"
-            layout="columns"
-            required
-            legend="What runs"
-            value={draft.kind}
-            onValueChange={kind => update({ kind })}
-            options={(['task', 'inspect'] as const).map(value => ({
-              value,
-              label: kinds[value].label,
-              description: kinds[value].description,
-            }))}
-          />
           {draft.kind === 'task' ? (
             <Field
               id="schedule-prompt"

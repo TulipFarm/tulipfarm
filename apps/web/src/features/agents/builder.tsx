@@ -19,7 +19,7 @@ import { ImportSkillForm, SkillImportPanel } from '@/features/skills/import-flow
 import { AgentSkillPicker } from './skill-picker';
 import { BuilderAccess } from './builder-access';
 import { BuilderSlack } from './builder-slack';
-import { BuilderSchedules, builderScheduleLabel } from './builder-schedules';
+import { BuilderTriggers } from './builder-triggers';
 import { AgentBuilderLayout, builderSteps, type BuilderStep } from './builder-layout';
 import { AgentBuilderPreview, AgentDraftSummary } from './builder-preview';
 import { builderDraft, builderDefinition, parseBuilder, type BuilderDraft, type BuilderInitial } from './builder-draft';
@@ -28,7 +28,7 @@ import { BuilderTestChat, useBuilderTestChat } from './builder-test-chat';
 import { AgentRead } from './feedback';
 import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
-import { AgentSetupReview } from './setup-review';
+import { AgentSetupReview, setupTriggerLabel } from './setup-review';
 import type { agentApi, AgentContext } from './api';
 
 type Operation = {
@@ -39,7 +39,7 @@ type Operation = {
 };
 const resultText: Record<AgentSetupReceipt['status'], string> = {
   preparing: 'Saving your setup. Nothing new runs until activation completes.',
-  saved: 'Draft saved. Slack channels and schedules are not started.',
+  saved: 'Draft saved. Slack channels and workflow triggers are not started.',
   active: 'Agent created and activated.',
   blocked: 'Instructions saved, but setup is incomplete. No new triggers were started.',
   conflict: 'Something changed before this setup could be applied. Your draft is kept.',
@@ -170,7 +170,7 @@ export function AgentBuilder({
       skills={draft.definition.skills ?? []}
       tools={draft.definition.tools}
       channelNames={draft.channels.filter(channel => !channel.detach).map(channel => channel.name)}
-      scheduleLabels={draft.schedules.map(builderScheduleLabel)}
+      triggerLabels={draft.triggers.map(item => setupTriggerLabel(item.trigger))}
       onEdit={chooseStep}
     />
   );
@@ -203,7 +203,7 @@ export function AgentBuilder({
       publicationId: crypto.randomUUID(),
       decision,
       consent: {
-        sponsorScheduleIds: draft.schedules.filter(schedule => schedule.sponsorConsent).map(schedule => schedule.id),
+        sponsorTriggerIds: draft.triggers.filter(trigger => trigger.sponsorConsent).map(trigger => trigger.id),
         replaceChannels: draft.channels.filter(channel => channel.replaceConsent).map(channel => channel.channel),
       },
     });
@@ -354,9 +354,10 @@ export function AgentBuilder({
           showErrors={showErrors && activating}
           enabled={step === 'triggers' || draft.channels.length > 0}
         />
-        <BuilderSchedules
-          value={draft.schedules}
-          onChange={schedules => update({ schedules })}
+        <BuilderTriggers
+          slug={slug}
+          value={draft.triggers}
+          onChange={triggers => update({ triggers })}
           disabled={locked}
           showErrors={showErrors}
           activating={activating}
@@ -401,7 +402,7 @@ export function AgentBuilder({
             Agent created and activated.
           </h2>
           <p className="text-sm text-muted-foreground">
-            Its reviewed access, channel attachments, and schedules are now in place.
+            Its reviewed access, channel attachments, and workflow triggers are now in place.
           </p>
           <div>
             <Button

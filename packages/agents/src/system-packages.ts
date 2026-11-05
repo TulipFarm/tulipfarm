@@ -30,8 +30,10 @@ import { tableProposalOptions } from './table-proposals.ts';
 import { createWorkspaceSkills, resolveProcedures } from './workspace-skills.ts';
 import { createSkillObjects } from './skill-objects.ts';
 import { inspectSkillFiles } from './skill-package-review.ts';
-import { createAgentSetup, agentSetupScheduleId, type AgentSetupOptions } from './setup.ts';
-import { createAgentSchedules } from './schedules.ts';
+import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
+import { agentSetupWorkflowId } from './agent-trigger-workflows.ts';
+import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
+import { unattendedTrigger } from './setup-contracts.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import { requireAgentCreation, requireAgentPermission } from './saved-policy.ts';
 import { createAgentRecordTools } from './record-tools.ts';
@@ -722,7 +724,7 @@ export function createSystemPackages(options: Options) {
             : resource.kind === 'workflow' && resource.requestedState === 'enabled'
               ? 'Save and enable this exact workflow. Enabling its trigger can start real work. You approve the declared sponsorship.'
               : resource.kind === 'agent' && resource.requestedState === 'active'
-                ? 'Save and activate this exact agent, including declared grants, team enrollment, schedules and Slack channel replacements. Approval consents to your declared schedule sponsorship and replacements.'
+                ? 'Save and activate this exact agent, including declared grants, team enrollment, trigger Workflows and Slack channel replacements. Approval consents to your sponsoring its scheduled triggers and the declared replacements.'
                 : `Create this exact ${resource.kind}${resource.kind === 'skill' && resource.requestedState === 'enabled' ? ' and approve its files for use' : ''}.`,
       href: null,
     };
@@ -970,9 +972,9 @@ export function createSystemPackages(options: Options) {
         digest: draft.digest,
         decision: resource.requestedState === 'active' ? 'activate' : 'save',
         consent: {
-          sponsorScheduleIds: draft.setup.schedules
-            .filter(schedule => schedule.sponsorMembershipId === actor.membershipId)
-            .map(schedule => schedule.id),
+          sponsorTriggerIds: draft.setup.triggers
+            .filter(trigger => unattendedTrigger(trigger.trigger))
+            .map(trigger => trigger.id),
           replaceChannels: draft.setup.slackChannels
             .filter(channel => channel.replaceAgentId !== null)
             .map(channel => channel.channel),
@@ -1199,23 +1201,26 @@ export function createSystemPackages(options: Options) {
           )
             throw new SystemPackageError(`verification-drift:${resource.key}`);
           const command = agentSetupReceiptSchema.parse((await operation(tx, row, node.key, 'apply'))?.receipt);
-          const schedules = await createAgentSchedules(s.bound).list(workspaceId, actor.userId, id);
-          if (schedules.filter(schedule => !schedule.revoked).length !== prepared.setup.schedules.length)
+          const linked = (
+            tx.commonVersion < agentWorkflowCommonVersion
+              ? { rows: [] }
+              : await tx.client.query(
+                  `SELECT w.id,w.enabled,w.sponsor_membership_id AS "sponsorMembershipId",a.definition FROM ${relation(tx, 'tf_workflows')} w LEFT JOIN ${relation(tx, 'tf_workflow_revisions')} a ON a.workflow_id=w.id AND a.id=w.active_revision WHERE w.agent_id=$1 AND w.archived_at IS NULL`,
+                  [id],
+                )
+          ).rows;
+          if (linked.length !== prepared.setup.triggers.length)
             throw new SystemPackageError(`verification-drift:${resource.key}`);
-          for (const expected of prepared.setup.schedules) {
-            const actualSchedule = schedules.find(
-              schedule => schedule.id === agentSetupScheduleId(command.commandId, expected.id),
-            );
+          for (const expected of prepared.setup.triggers) {
+            const actual = linked.find(row => row.id === agentSetupWorkflowId(command.commandId, expected.id));
+            const step = actual?.definition?.steps?.[0];
             if (
-              !actualSchedule ||
-              actualSchedule.revoked ||
-              !actualSchedule.enabled ||
-              actualSchedule.paused ||
-              actualSchedule.activationId !== command.activationId ||
-              actualSchedule.sponsorMembershipId !== expected.sponsorMembershipId ||
-              !same(actualSchedule.action, expected.action) ||
-              !same(actualSchedule.trigger, expected.trigger) ||
-              actualSchedule.historyAudience.length
+              !actual?.enabled ||
+              actual.sponsorMembershipId !== (unattendedTrigger(expected.trigger) ? actor.membershipId : null) ||
+              !same(actual.definition.trigger, expected.trigger) ||
+              step?.kind !== 'agent' ||
+              step.agentId !== id ||
+              !same(step.prompt, { kind: 'literal', value: expected.prompt })
             )
               throw new SystemPackageError(`verification-drift:${resource.key}`);
           }

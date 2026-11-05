@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { agentDefinitionSchema } from '../src/contracts.ts';
-import { agentSetupSchema, publishAgentSetupSchema, saveAgentSetupDraftSchema } from '../src/setup-contracts.ts';
+import {
+  agentSetupConsentSchema,
+  agentSetupSchema,
+  publishAgentSetupSchema,
+  saveAgentSetupDraftSchema,
+} from '../src/setup-contracts.ts';
+import { agentTriggerLabel } from '../src/agent-trigger-workflows.ts';
 import { agentSetupDigest } from '../src/setup.ts';
 import { authoringProposalSchema, draftDecisionSchema } from '../src/draft-contracts.ts';
 import { frameworkCallSchema, discoverTools } from '../src/tools.ts';
@@ -24,7 +30,7 @@ const setup = () => ({
   taskLimits: limits,
   slackSender: 'user',
   slackChannels: [],
-  schedules: [],
+  triggers: [],
 });
 const input = () => ({
   requestId: randomUUID(),
@@ -50,20 +56,52 @@ test('setup surrounds the unchanged strict definition and enforces existing limi
       false,
     );
   assert.equal(agentSetupSchema.safeParse({ ...setup(), enrollment: [member, member] }).success, false);
-  const schedule = {
-    id: randomUUID(),
-    trigger: { kind: 'interval', minutes: 60 },
-    action: { kind: 'task', text: 'Check pending requests.', limits },
-    sponsorMembershipId: member,
-  };
-  assert.equal(agentSetupSchema.safeParse({ ...setup(), schedules: [schedule, schedule] }).success, false);
+  const trigger = { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check pending requests.' };
+  assert.equal(agentSetupSchema.safeParse({ ...setup(), triggers: [trigger, trigger] }).success, false);
   assert.equal(
-    agentSetupSchema.safeParse({
-      ...setup(),
-      schedules: [{ ...schedule, action: { ...schedule.action, text: 'x'.repeat(8001) } }],
-    }).success,
+    agentSetupSchema.safeParse({ ...setup(), triggers: [{ ...trigger, prompt: 'x'.repeat(8001) }] }).success,
     false,
   );
+});
+
+test('setups and consent stored before triggers moved to Workflows read as triggers', () => {
+  const id = randomUUID();
+  const trigger = { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' };
+  const { triggers: _triggers, ...legacy } = setup();
+  const parsed = agentSetupSchema.parse({
+    ...legacy,
+    schedules: [
+      {
+        id,
+        trigger,
+        action: { kind: 'task', text: 'Prepare the weekly update.', limits },
+        sponsorMembershipId: member,
+      },
+    ],
+  });
+  assert.deepEqual(parsed.triggers, [{ id, trigger, prompt: 'Prepare the weekly update.', limits }]);
+  assert.equal('schedules' in parsed, false);
+  assert.deepEqual(agentSetupConsentSchema.parse({ sponsorScheduleIds: [id], replaceChannels: [] }), {
+    sponsorTriggerIds: [id],
+    replaceChannels: [],
+  });
+});
+
+test('trigger workflow names say when the agent runs', () => {
+  assert.equal(
+    agentTriggerLabel({ kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' }),
+    'Every Monday at 09:00 (Asia/Kolkata)',
+  );
+  assert.equal(
+    agentTriggerLabel({ kind: 'cron', expression: '30 7 * * 1-5', timezone: 'America/New_York' }),
+    'Every weekday at 07:30 (America/New York)',
+  );
+  assert.equal(agentTriggerLabel({ kind: 'cron', expression: '0 9 1 * *', timezone: 'UTC' }), 'Cron 0 9 1 * * (UTC)');
+  assert.deepEqual(
+    [60, 120, 1440, 2880, 90].map(minutes => agentTriggerLabel({ kind: 'interval', minutes })),
+    ['Every hour', 'Every 2 hours', 'Every day', 'Every 2 days', 'Every 90 minutes'],
+  );
+  assert.equal(agentTriggerLabel({ kind: 'manual' }), 'Run by hand');
 });
 
 test('the review digest freezes setup, versions and identity, not transport request identity', () => {
@@ -103,7 +141,7 @@ test('chat supports full setup without accepting model-authored consent', () => 
   assert.equal(
     frameworkCallSchema.safeParse({
       ...call,
-      input: { ...value, consent: { sponsorScheduleIds: [], replaceChannels: [] } },
+      input: { ...value, consent: { sponsorTriggerIds: [], replaceChannels: [] } },
     }).success,
     false,
   );
@@ -131,7 +169,7 @@ test('chat supports full setup without accepting model-authored consent', () => 
       commandId: randomUUID(),
       digest: 'b'.repeat(64),
       decision: 'activate',
-      consent: { sponsorScheduleIds: [], replaceChannels: [] },
+      consent: { sponsorTriggerIds: [], replaceChannels: [] },
     }).success,
     true,
   );
@@ -164,7 +202,7 @@ test('create agent discovery loads setup, Slack checks and publication status to
     frameworkCallSchema.safeParse({
       tool: 'agents.context',
       channels: ['C123'],
-      scheduleTriggers: [{ kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' }],
+      triggers: [{ kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' }],
     }).success,
     true,
   );

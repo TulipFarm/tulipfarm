@@ -32,35 +32,31 @@ test('builder enforces exact manual text, skill and action bounds on the owning 
   assert.equal(parseBuilder(draft, member, false, agent).problems[0]?.step, 'access');
 });
 
-test('restored setup preserves distinct scopes and sponsor until explicit consent', () => {
+test('restored setup preserves distinct scopes and needs explicit consent for unattended triggers', () => {
   const draft = complete(),
-    previousSponsor = randomUUID(),
-    assetId = randomUUID();
+    assetId = randomUUID(),
+    triggerId = randomUUID();
   draft.access.scope = [{ assetId, permissions: ['table.row.read'] }];
   draft.access.limits = [{ assetId, permissions: ['table.row.read', 'table.row.update'] }];
-  draft.schedules = [
+  draft.triggers = [
     {
-      id: randomUUID(),
-      kind: 'task',
-      activationId: '',
-      tableId: '',
-      text: 'Prepare the weekly update.',
-      cadence: 'interval',
-      minutes: { task: '60', inspect: '60' },
-      cronExpression: '0 9 * * 1',
-      timezone: 'UTC',
-      limits: { toolCalls: '10', activeMilliseconds: '60', credits: '20' },
+      id: triggerId,
+      trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' },
+      prompt: 'Prepare the weekly update.',
       sponsorConsent: false,
-      sponsorMembershipId: previousSponsor,
     },
+    { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Answer on demand.', sponsorConsent: false },
   ];
   const saved = parseBuilder(draft, member, false, agent).setup;
   assert.ok(saved);
   assert.notDeepEqual(saved.scope, saved.limits);
-  assert.equal(saved.schedules[0]?.sponsorMembershipId, previousSponsor);
+  assert.deepEqual(saved.triggers[0], {
+    id: triggerId,
+    trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' },
+    prompt: 'Prepare the weekly update.',
+    limits: undefined,
+  });
   assert.equal(parseBuilder(draft, member, true, agent).problems[0]?.step, 'triggers');
-  draft.schedules[0]!.sponsorConsent = true;
-  assert.equal(parseBuilder(draft, member, true, agent).setup?.schedules[0]?.sponsorMembershipId, member);
-  draft.schedules[0]!.minutes.task = '59';
-  assert.equal(parseBuilder(draft, member, false, agent).problems[0]?.step, 'triggers');
+  draft.triggers[0]!.sponsorConsent = true;
+  assert.equal(parseBuilder(draft, member, true, agent).setup?.triggers.length, 2);
 });

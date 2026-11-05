@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { shellRead } from './shell-reads.mjs';
+import { reviewDefinition } from './workflow-definition.fixture.mjs';
 
 const port = Number(process.env.AGENT_ADMIN_BROWSER_PORT ?? 5261);
 const origin = `http://127.0.0.1:${port}`;
@@ -157,8 +158,46 @@ test(
         const activationWrites = [];
         let failConfigure = false;
         const scheduleWrites = [];
-        let scheduleList = [];
-        let rejectSchedule = true;
+        const existingSchedule = {
+          id: 'abababab-abab-4bab-8bab-abababababab',
+          activationId,
+          action: {
+            kind: 'task',
+            text: 'Summarize overdue invoices for the team.',
+            limits: { toolCalls: 100, credits: 100, activeMilliseconds: 300000 },
+          },
+          trigger: { kind: 'interval', minutes: 60 },
+          sponsorMembershipId: membershipId,
+          historyAudience: [],
+        };
+        const listed = body => ({
+          ...body,
+          revision: 'b'.repeat(64),
+          nextRunAt: '2026-10-10T09:00:00Z',
+          revoked: false,
+          enabled: true,
+          paused: false,
+          pauseReason: null,
+          lastRun: { kind: 'task', taskId, status: 'waiting-approval' },
+        });
+        let scheduleList = [listed(existingSchedule)];
+        const workflowSummary = (id, name, agent) => ({
+          id,
+          revision: id,
+          activeRevision: id,
+          enabled: true,
+          generation: 1,
+          nextRunAt: '2026-10-10T09:00:00Z',
+          activeTrigger: { kind: 'interval', minutes: 60 },
+          webhookConfigured: false,
+          capabilities: { read: true, invoke: true, manage: true },
+          definition: reviewDefinition(name, { kind: 'interval', minutes: 60 }),
+          agentId: agent,
+        });
+        const workflowList = [
+          workflowSummary('cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', 'Customer reviewer: Every hour', agentId),
+          workflowSummary('efefefef-efef-4fef-8fef-efefefefefef', 'Unrelated hourly workflow', null),
+        ];
         await page.route('**/v1/**', async route => {
           const request = route.request();
           const fulfill = response => {
@@ -216,25 +255,11 @@ test(
             return fulfill({ status: 500, json: { error: 'unexpected write' } });
           } else if (path.endsWith(`/agents/${agentId}/schedules`) && request.method() === 'PUT') {
             const body = request.postDataJSON();
-            if (rejectSchedule) {
-              rejectSchedule = false;
-              return fulfill({ status: 400, json: { error: 'task-schedule-interval' } });
-            }
             scheduleWrites.push(body);
-            scheduleList = [
-              {
-                ...body,
-                revision: 'b'.repeat(64),
-                nextRunAt: '2026-10-10T09:00:00Z',
-                revoked: false,
-                enabled: true,
-                paused: false,
-                pauseReason: null,
-                lastRun: { kind: 'task', taskId, status: 'waiting-approval' },
-              },
-            ];
+            scheduleList = [listed(body)];
             json = { saved: true };
           } else if (path.endsWith(`/agents/${agentId}/schedules`)) json = scheduleList;
+          else if (path === `/v1/workspaces/${workspace.id}/workflows`) json = workflowList;
           else if (path.endsWith(`/agents/${agentId}/chat`)) json = { configured: true };
           else if (path.endsWith('/slack/destinations')) {
             if (request.method() === 'PUT') {
@@ -546,69 +571,14 @@ test(
         assert.equal(destinationWrites.length, 1);
 
         await openTab('Triggers');
-        const schedules = page.getByRole('region', { name: 'Agent schedules', exact: true });
-        await schedules.getByRole('heading', { name: 'No schedules yet', exact: true }).waitFor();
-        assert.equal(
-          await schedules.getByRole('radio', { name: 'Run a saved prompt', exact: true }).getAttribute('aria-checked'),
-          'true',
-        );
-        assert.equal(await schedules.getByRole('group', { name: 'Who can see results', exact: true }).count(), 0);
-        await schedules.getByRole('button', { name: 'Create prompt schedule', exact: true }).click();
-        assert.equal(await schedules.getByRole('alert').textContent(), 'Fix 3 fields to create the schedule.');
-        await eventually(
-          () => describedTexts(schedules.getByLabel('Prompt', { exact: true })),
-          ['Write the prompt each run starts with.', '0 / 8,000'],
-        );
-        await schedules.getByLabel('Prompt', { exact: true }).fill('Summarize overdue invoices for the team.');
-        await schedules.getByRole('button', { name: 'Calendar schedule', exact: true }).click();
-        const timezone = schedules.getByRole('combobox', { name: 'Time zone', exact: true });
-        await timezone.click();
-        await page.getByRole('option', { name: 'Europe/Paris', exact: true }).click();
-        assert.equal((await timezone.innerText()).trim(), 'Europe/Paris');
-        await schedules.getByRole('button', { name: 'Repeat interval', exact: true }).click();
-        await schedules.getByRole('combobox', { name: 'Instructions to run', exact: true }).click();
-        await page.getByRole('option', { name: /77777777$/ }).click();
-        await schedules.getByText('Data each run may use: Customers: read rows.', { exact: true }).waitFor();
-        await schedules.getByLabel('Interval in minutes', { exact: true }).fill('30');
-        await schedules
-          .getByRole('checkbox', { name: 'I sponsor this schedule using my current permissions', exact: true })
-          .click();
-        await schedules.getByRole('button', { name: 'Create prompt schedule', exact: true }).click();
-        await eventually(
-          () => describedTexts(schedules.getByLabel('Interval in minutes', { exact: true })),
-          ['Enter whole minutes from 60 to 10,080.'],
-        );
-        assert.deepEqual(scheduleWrites, []);
-        await schedules.getByLabel('Interval in minutes', { exact: true }).fill('60');
-        await schedules.getByRole('button', { name: 'Create prompt schedule', exact: true }).click();
-        await schedules
-          .getByText(
-            'Prompt schedules run at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.',
-            { exact: true },
-          )
-          .waitFor();
-        assert.equal(
-          await schedules.getByLabel('Prompt', { exact: true }).inputValue(),
-          'Summarize overdue invoices for the team.',
-        );
-        await schedules.getByRole('button', { name: 'Create prompt schedule', exact: true }).click();
+        const triggerWorkflows = page.getByRole('region', { name: 'Agent workflow triggers', exact: true });
+        const linked = triggerWorkflows.getByRole('list', { name: 'Workflows that run this agent', exact: true });
+        await linked.getByRole('link', { name: 'Customer reviewer: Every hour', exact: true }).waitFor();
+        assert.equal(await linked.getByRole('link').count(), 1);
+        const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
         await schedules.getByText('Runs prompt: Summarize overdue invoices for the team.', { exact: true }).waitFor();
-        assert.deepEqual(
-          scheduleWrites.map(({ id: _id, ...write }) => write),
-          [
-            {
-              activationId,
-              action: {
-                kind: 'task',
-                text: 'Summarize overdue invoices for the team.',
-                limits: { toolCalls: 100, credits: 100, activeMilliseconds: 300000 },
-              },
-              trigger: { kind: 'interval', minutes: 60 },
-              sponsorMembershipId: membershipId,
-              historyAudience: [],
-            },
-          ],
-        );
+        assert.equal(await schedules.getByRole('radio', { name: 'Run a saved prompt', exact: true }).count(), 0);
+        assert.equal(await schedules.getByLabel('Prompt', { exact: true }).count(), 0);
         await schedules
           .getByText('Limits for each run: 100 tool calls, 100 credits, 300 seconds.', { exact: true })
           .waitFor();
@@ -617,7 +587,6 @@ test(
           `/acme/agent-tasks/${taskId}`,
         );
         assert.equal(await schedules.getByText('Last task: Needs your review', { exact: false }).count(), 1);
-        assert.equal(await schedules.getByLabel('Prompt', { exact: true }).inputValue(), '');
         const sponsorTask = schedules.getByRole('button', { name: 'Sponsor this schedule', exact: true });
         assert.deepEqual(await describedTexts(sponsorTask), ['Check I sponsor this schedule above first.']);
         const interval = schedules.getByRole('form', { name: 'Change interval', exact: true });
@@ -636,11 +605,11 @@ test(
           () => describedTexts(interval.getByLabel('New interval in minutes', { exact: true })),
           ['Enter whole minutes from 60 to 10,080.'],
         );
-        assert.equal(scheduleWrites.length, 1);
+        assert.deepEqual(scheduleWrites, []);
         await interval.getByLabel('New interval in minutes', { exact: true }).fill('120');
         await saveInterval.click();
         await schedules.getByText('Scheduled every 120 minutes', { exact: true }).waitFor();
-        assert.deepEqual(scheduleWrites[1], { ...scheduleWrites[0], trigger: { kind: 'interval', minutes: 120 } });
+        assert.deepEqual(scheduleWrites, [{ ...existingSchedule, trigger: { kind: 'interval', minutes: 120 } }]);
         assert.equal(await interval.getByLabel('New interval in minutes', { exact: true }).inputValue(), '120');
         await consent.click();
         scheduleList = [{ ...scheduleList[0], paused: true, pauseReason: 'sponsor-access-lost' }];
@@ -658,13 +627,12 @@ test(
           .click();
         await resume.click();
         await schedules.getByText('Scheduled every 120 minutes', { exact: true }).waitFor();
-        assert.deepEqual(scheduleWrites[2], scheduleWrites[1]);
+        assert.deepEqual(scheduleWrites[1], scheduleWrites[0]);
         if (shots)
           await schedules.screenshot({
             path: `${shots}/schedules-${device.viewport.width}-${device.theme}.png`,
             animations: 'disabled',
           });
-        await schedules.getByRole('radio', { name: 'Inspect a table', exact: true }).click();
         const inspect = schedules.getByRole('button', { name: 'Activate saved revision for inspection', exact: true });
         assert.deepEqual(await describedTexts(inspect), ['Choose a table to inspect first.']);
         await schedules.getByRole('button', { name: 'Choose a table', exact: true }).click();
@@ -792,7 +760,7 @@ test(
           await page.getByRole('tab', { name: 'Triggers', exact: true }).click();
         };
         await openSchedules();
-        const schedules = page.getByRole('region', { name: 'Agent schedules', exact: true });
+        const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
         await schedules
           .getByText(
             'Last scheduled start skipped: You have 1,000 active tasks. Complete active tasks to free capacity. The schedule will try again at the next occurrence.',

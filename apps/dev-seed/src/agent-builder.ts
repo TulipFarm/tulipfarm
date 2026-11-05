@@ -115,18 +115,14 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
           taskLimits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
           slackSender: 'user',
           slackChannels: [],
-          schedules: active
+          triggers: active
             ? []
             : [
                 {
                   id: stableId(id, 'weekly'),
-                  action: {
-                    kind: 'task',
-                    text: 'Prepare the weekly People Ops update. List questions that need a human decision.',
-                    limits: { toolCalls: 20, activeMilliseconds: 120000, credits: 20 },
-                  },
                   trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
-                  sponsorMembershipId: workspace.members.find(member => member.email === owner.email)!.membershipId,
+                  prompt: 'Prepare the weekly People Ops update. List questions that need a human decision.',
+                  limits: { toolCalls: 20, activeMilliseconds: 120000, credits: 20 },
                 },
               ],
         },
@@ -136,7 +132,7 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
         version: draft.version,
         digest: draft.digest,
         decision: active ? 'activate' : 'save',
-        consent: { sponsorScheduleIds: [], replaceChannels: [] },
+        consent: { sponsorTriggerIds: [], replaceChannels: [] },
       });
       const definition = await setup.definitionCommand(workspace.id, owner.id, command.commandId);
       let status = definition.status;

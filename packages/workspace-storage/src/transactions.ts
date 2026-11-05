@@ -13,13 +13,24 @@ const commitCallbacks = new WeakMap<SqlClient, (() => void)[]>();
 
 /**
  * Runs `callback` once the inTransaction transaction on `client` commits, or drops it on rollback.
- * Outside such a transaction it runs now. Savepoint rollbacks do not drop callbacks.
+ * Outside such a transaction it runs now. A savepoint rollback drops callbacks only through `afterCommitMark`.
  * Callback failures are swallowed: they never undo or fail the committed work.
  */
 export function afterCommit(client: SqlClient, callback: () => void) {
   const callbacks = commitCallbacks.get(client);
   if (callbacks) callbacks.push(callback);
   else runCallback(callback);
+}
+
+/** Marks the callbacks queued so far; `drop` discards those queued after, for use on ROLLBACK TO SAVEPOINT. */
+export function afterCommitMark(client: SqlClient) {
+  const callbacks = commitCallbacks.get(client);
+  const length = callbacks?.length ?? 0;
+  return {
+    drop() {
+      if (callbacks && commitCallbacks.get(client) === callbacks) callbacks.length = Math.min(callbacks.length, length);
+    },
+  };
 }
 
 function runCallback(callback: () => void) {

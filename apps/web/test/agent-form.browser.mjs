@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { agentBuilderFixture } from './agent-builder.fixture.mjs';
@@ -85,22 +86,19 @@ test(
       await page.getByRole('option', { name: 'ask-people-ops', exact: true }).click();
       await form.getByRole('combobox', { name: 'Add a channel', exact: true }).click();
       await page.getByRole('option', { name: 'new-starters', exact: true }).click();
-      await form.getByRole('button', { name: 'Add schedule', exact: true }).click();
       await form
-        .getByRole('textbox', { name: 'Task prompt', exact: true })
-        .fill('Prepare the weekly People Ops update.');
+        .getByText('No triggers. People can still use this agent in chat and Slack.', { exact: true })
+        .waitFor();
       await step('Basics');
       await form.getByRole('heading', { name: 'Identity', exact: true }).scrollIntoViewIfNeeded();
       await captureBuilderScreenshot(page, 'agent-builder-desktop');
       await step('Review');
-      await form
-        .getByRole('region', { name: 'Reviewed scheduled tasks' })
-        .getByText('Prepare the weekly People Ops update.', { exact: true })
-        .waitFor();
       fixture.loseNextPublication();
       await form.getByRole('button', { name: 'Save draft', exact: true }).click();
       await form.getByRole('button', { name: 'Retry same operation', exact: true }).click();
-      await form.getByText('Draft saved. Slack channels and schedules are not started.', { exact: true }).waitFor();
+      await form
+        .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
+        .waitFor();
       const saves = fixture.requests.filter(request => request.path.endsWith('/setup'));
       assert.equal(saves.length, 2);
       assert.deepEqual(saves[0].body, saves[1].body, 'uncertain publication reuses exact review and identity');
@@ -110,9 +108,16 @@ test(
       assert.deepEqual(setup.definition.tools, ['rows.get']);
       assert.equal(setup.definition.skills.length, 2);
       assert.equal(setup.slackChannels.length, 2);
-      assert.equal(setup.schedules[0].action.text, 'Prepare the weekly People Ops update.');
+      assert.deepEqual(setup.triggers, []);
       assert.deepEqual(setup.policy, { grants: [], personGrants: [] }, 'placement never silently shares');
-      assert.deepEqual(saves[0].body.consent.sponsorScheduleIds, [], 'saving needs no sponsor approval');
+      assert.deepEqual(saves[0].body.consent.sponsorTriggerIds, [], 'saving needs no sponsor approval');
+      // Triggers come from chat; the builder reviews and sponsors those already on the draft.
+      const trigger = {
+        id: randomUUID(),
+        trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
+        prompt: 'Prepare the weekly People Ops update.',
+      };
+      [...fixture.setups.values()][0].setup.triggers = [trigger];
       await page.reload();
       await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
       await step('Triggers');
@@ -120,12 +125,21 @@ test(
       for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
         await recheck.click();
       await form
-        .getByRole('checkbox', { name: 'I sponsor these runs with my current permissions', exact: true })
-        .check();
+        .getByRole('region', { name: 'Trigger 1' })
+        .getByText('Prepare the weekly People Ops update.', { exact: true })
+        .waitFor();
+      await form.getByRole('checkbox', { name: 'I sponsor this trigger', exact: true }).check();
       await step('Review');
+      await form
+        .getByRole('region', { name: 'Reviewed triggers' })
+        .getByText('Prepare the weekly People Ops update.', { exact: true })
+        .waitFor();
       await form.getByRole('button', { name: 'Create and activate', exact: true }).click();
       await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).waitFor();
       assert.equal(fixture.publications.size, 2);
+      const activation = [...fixture.publications.values()].find(item => item.body.decision === 'activate');
+      assert.deepEqual(activation.body.consent.sponsorTriggerIds, [trigger.id]);
+      assert.deepEqual([...fixture.setups.values()][0].setup.triggers, [trigger]);
       assert.deepEqual(errors, []);
     } catch (error) {
       await captureBrowserFailure(page, 'agent-builder-form');

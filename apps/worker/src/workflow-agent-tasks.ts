@@ -11,6 +11,7 @@ export function createWorkflowAgentTasks(
       value: {
         requestId: string;
         agentId: string;
+        activationId?: string;
         text: string;
         limits: { toolCalls: number; activeMilliseconds: number; credits: number };
       },

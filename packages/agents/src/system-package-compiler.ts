@@ -454,14 +454,15 @@ export function packageCompiler(pkg: SystemPackage, bindings: PackageBindings, i
         replaceAgentId: replaceAgent ? resolve(replaceAgent) : null,
         ...(detach === undefined ? {} : { detach }),
       })),
-      schedules: resource.schedules.map(schedule => ({
+      // Package schedules become agent trigger Workflows, sponsored by the installer.
+      triggers: resource.schedules.map(schedule => ({
         id: packageIdentity(installationId, `schedule:${resource.key}:${schedule.key}`),
         trigger:
           schedule.trigger.kind === 'cron'
             ? { ...schedule.trigger, timezone: timezone(schedule.trigger.timezone) }
             : schedule.trigger,
-        action: schedule.action,
-        sponsorMembershipId: resolve(schedule.sponsor),
+        prompt: schedule.action.text,
+        limits: schedule.action.limits,
       })),
     });
   }
