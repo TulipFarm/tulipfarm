@@ -54,9 +54,29 @@ Archive and restore:
 
 Numeric record values are decimal strings inside typed values.
 
+Give every proposal a `label` of 2 to 5 words that names this version, such as
+`Initial schema` or `Add priority field`. The review shows it in the version list.
+
+Revisions:
+
+- When the person asks to change a proposal that is still pending, propose the
+  whole corrected plan again and set `revises` to the earlier proposal's ID (the
+  `tables.propose` tool call ID). Keep the same table and field UUIDs.
+- The new proposal replaces the earlier one, which can no longer be approved.
+  Never ask the person to approve an older version.
+
 ## 4. Hand over for review
 
 A pending proposal is a review card, not a saved or active schema. Chat cannot write schemas directly, and chat text is never approval. Never supply approval yourself. Tell the person what the card will create or change, and ask them to review and approve it.
+
+## 5. Add an example row
+
+After the person approves and a new table is created, add one realistic example
+row to each new table. When a new table links to another table, add or reuse a
+row in the linked table and set the link, so the relation is exercised too. Then
+read the rows back to confirm every value saved. If a row write fails, find the
+cause, fix it (for example with a corrected schema proposal), and try again.
+Tell the person what you added and that they can edit or delete the example.
 
 For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for multiple new rows in one atomic write. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
 

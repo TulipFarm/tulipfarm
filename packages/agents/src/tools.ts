@@ -152,7 +152,9 @@ const tableProposalInputSchema = tableProposalJsonSchema();
 const tableProposalInput = z
   .string()
   .max(1048576)
-  .describe('JSON-encoded {plans:[...]}. Read skills.read(table-authoring) for proposalInputSchema and constraints.');
+  .describe(
+    'JSON-encoded {plans:[...], label, revises?}: label names this version in 2–5 words; revises is the pending proposal it replaces. Read skills.read(table-authoring) for proposalInputSchema and constraints.',
+  );
 export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('packages.inspect'), url: z.url().max(2048) }),
   presentChoiceSchema,

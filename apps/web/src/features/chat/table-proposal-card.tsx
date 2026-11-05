@@ -11,6 +11,7 @@ import { Badge } from '@tulipfarm/sprout/badge';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
 import { Disclosure } from '@/components/disclosure';
 import { Table } from '@tulipfarm/sprout/table';
 import { TableRead, WriteFeedback } from '@/features/tables/feedback';
@@ -31,6 +32,7 @@ import type { ImportProgress, ProposalCommand, ProposalView, ReviewedPlan } from
 
 const statusLabels = {
   pending: 'Awaiting your review',
+  superseded: 'Replaced by a newer version',
   approved: 'Approved, waiting to start',
   running: 'Applying changes',
   rejected: 'Rejected',
@@ -70,6 +72,8 @@ type ProposalCardProps = {
   userId: string;
   membershipId?: string | null | undefined;
   order?: number;
+  /** Called once when an approval made from this card finishes creating new tables. */
+  onCreated?: ((tables: string[]) => void) | undefined;
 };
 
 export function TableProposalCard({
@@ -80,10 +84,13 @@ export function TableProposalCard({
   membershipId,
   order = 0,
   correct,
+  onCreated,
 }: ProposalCardProps & { correct: () => void }) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
   const read = useTableProposalOutcome(api, { chatId, proposalId: id });
+  // A call the tool rejected as invalid saved no proposal; the assistant corrects it and proposes again.
+  if (read.state.kind === 'unavailable' && read.state.status === 404) return null;
   return (
     <section aria-label={read.state.kind === 'ready' ? undefined : 'Table change proposal'}>
       <TableRead state={read.state} refresh={read.refresh}>
@@ -96,6 +103,7 @@ export function TableProposalCard({
               userId={userId}
               membershipId={membershipId}
               order={order}
+              onCreated={onCreated}
             />
           ) : (
             <section
@@ -166,7 +174,7 @@ export function TableProposalCard({
   );
 }
 
-function proposalTitle(plans: readonly ReviewedPlan[]) {
+export function proposalTitle(plans: readonly ReviewedPlan[]) {
   const [plan] = plans;
   if (plans.length !== 1 || !plan) return `Change ${plans.length} tables`;
   const label = plan.after.label;
@@ -210,11 +218,19 @@ const badgeVariant = (status: ProposalView['status']) =>
       ? 'info'
       : status === 'failed' || status === 'rejected'
         ? 'destructive'
-        : status === 'approved'
+        : status === 'approved' || status === 'superseded'
           ? 'secondary'
           : 'warning';
 
-function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId, order = 0 }: ProposalCardProps) {
+function ValidTableProposalCard({
+  workspaceId,
+  chatId,
+  id,
+  userId,
+  membershipId,
+  order = 0,
+  onCreated,
+}: ProposalCardProps) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
   const identity = { chatId, proposalId: id };
@@ -224,7 +240,42 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
   const loaded = read.state.kind === 'ready' ? read.state.data : null;
   useResultAttention(`table-proposal:${id}`, loaded?.status === 'pending', 'Table changes need your review');
   const title = loaded?.content === 'available' ? proposalTitle(loaded.manifest.plans) : 'Table changes';
-  const dock = useApprovalDockEntry({ id, title, status: loaded?.status ?? 'loading', order });
+  const available = loaded?.content === 'available' ? loaded : null;
+  const hasSchemaPlan = !!available?.manifest.plans.some(plan => plan.input.kind === 'schema');
+  const dock = useApprovalDockEntry({
+    id,
+    title,
+    status: loaded?.status ?? 'loading',
+    order,
+    label: available?.manifest.label,
+    schema: hasSchemaPlan,
+    fields: available?.manifest.plans
+      .flatMap(plan =>
+        plan.input.kind === 'schema' ? plan.after.fields.map(field => `${plan.after.label}/${field.label}`) : [],
+      )
+      .join('\n'),
+  });
+  // A newer proposal in this chat may replace this one, so recheck its status when it stops being the latest.
+  const refresh = read.refresh;
+  const pending = loaded?.status === 'pending';
+  useEffect(() => {
+    if (dock && !dock.latest && pending) void refresh();
+  }, [dock?.latest]);
+  const approvedHere = useRef(false);
+  useEffect(() => {
+    if (!approvedHere.current || loaded?.status !== 'completed' || !available) return;
+    const created = available.manifest.plans.filter(plan => plan.input.kind === 'schema' && !plan.before);
+    approvedHere.current = false;
+    if (created.length) onCreated?.(created.map(plan => plan.after.label));
+  }, [loaded?.status, available, onCreated]);
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    if (autoOpened.current || !canvas || !dock?.latest || loaded?.status !== 'pending' || !hasSchemaPlan) return;
+    autoOpened.current = true;
+    // On a narrow screen Canvas would cover the chat, so it waits for the user to open it.
+    if (window.innerWidth >= canvasSplitMinWidth && !window.matchMedia('(max-width: 767px)').matches)
+      canvas.show(schemaCanvasItem(workspaceId, chatId, id, title));
+  }, [canvas, dock?.latest, loaded?.status, hasSchemaPlan, workspaceId, chatId, id, title]);
   const heading = useRef<HTMLHeadingElement>(null);
   const approvalFocus = useRef<Element | null>(null);
   useEffect(() => {
@@ -327,7 +378,10 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
           const submit = (action: 'approve' | 'reject' | 'cancel' | 'resume') => {
             if (locked) return;
             dock?.activate();
-            if (action === 'approve' || action === 'resume') approvalFocus.current = document.activeElement;
+            if (action === 'approve' || action === 'resume') {
+              approvalFocus.current = document.activeElement;
+              approvedHere.current = true;
+            }
             const common = { commandId: crypto.randomUUID(), digest: view.digest };
             const command: ProposalCommand =
               action === 'approve' || action === 'reject'
@@ -531,13 +585,23 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                     </AlertDescription>
                   </Alert>
                 )}
-                {(view.expired || (!current && view.freshness === 'current')) && view.status !== 'completed' && (
+                {view.status === 'superseded' && (
                   <Alert>
                     <AlertDescription>
-                      This review expired. Ask the assistant for a new proposal and review its effects before approving.
+                      A newer version in this chat replaced these changes, so they can no longer be approved. Review the
+                      latest version instead.
                     </AlertDescription>
                   </Alert>
                 )}
+                {(view.expired || (!current && view.freshness === 'current')) &&
+                  !['completed', 'superseded'].includes(view.status) && (
+                    <Alert>
+                      <AlertDescription>
+                        This review expired. Ask the assistant for a new proposal and review its effects before
+                        approving.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 {view.manifest.plans.some(plan => plan.input.kind === 'import' && plan.audience) && (
                   <p className="text-xs text-muted-foreground">
                     Imported rows follow destination table permissions. Administrators can access the copy.

@@ -100,7 +100,8 @@ test(
         reducedMotion: 'reduce',
       });
       const errors = [],
-        decisions = [];
+        decisions = [],
+        sent = [];
       let count = 1;
       page.on('pageerror', error => errors.push(String(error)));
       await page.route('**/v1/**', async route => {
@@ -126,6 +127,10 @@ test(
             view.status = body.decision === 'approve' ? 'approved' : 'rejected';
             json = view;
           } else json = path.endsWith('/outcome') ? { kind: 'proposal' } : view;
+        } else if (request.method() === 'PUT' && path.includes(`/conversations/${chatId}/messages/`)) {
+          const body = request.postDataJSON();
+          sent.push(body.parts.map(part => part.text).join(''));
+          json = { messageId: path.split('/').at(-1), turnId: randomUUID(), sequence: count + sent.length };
         } else if (path.endsWith('/messages'))
           json = {
             messages: views.slice(0, count).map((view, index) => ({
@@ -204,6 +209,9 @@ test(
         await card.locator('a').filter({ hasText: 'View table' }).getAttribute('href'),
         `/${workspace.slug}/tables/${views[0].plans[0].tableId}`,
       );
+      for (let attempt = 0; sent.length === 0 && attempt < 50; attempt++) await delay(100);
+      assert.equal(sent.length, 1, 'creation asks the assistant for an example row once');
+      assert.match(sent[0], /the table "Customers" was created\. Add one realistic example row/);
       await capture('approval-completed');
       await load();
       await card.getByRole('heading', { name: 'Customers table created', exact: true }).waitFor();

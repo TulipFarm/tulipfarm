@@ -726,6 +726,11 @@ function ConversationDetail({
     const reply = `I selected GitHub account ${login}. Continue my previous GitHub request with it.`;
     if (!locked && models.usable) post(textDocument(reply), [{ kind: 'text', text: reply }]);
   }
+  function tablesCreated(tables: string[]) {
+    const names = tables.map(name => `"${name}"`).join(', ');
+    const reply = `I approved the proposal and ${tables.length > 1 ? 'the tables' : 'the table'} ${names} ${tables.length > 1 ? 'were' : 'was'} created. Add one realistic example row to each new table, linking it to a row in any related table, then read the rows back to confirm they saved correctly. If adding a row fails, find the cause and fix it.`;
+    if (!locked && models.usable) post(textDocument(reply), [{ kind: 'text', text: reply }]);
+  }
   function post(
     shown: ChatDocument,
     parts: ConversationPart[],
@@ -1151,6 +1156,7 @@ function ConversationDetail({
                                 }
                                 pickGitHub={pickGitHub}
                                 correct={() => composerInput.current?.focus()}
+                                tablesCreated={tablesCreated}
                               />
                             </li>
                           ),
@@ -1888,6 +1894,7 @@ function ConversationTools({
   githubLocked,
   pickGitHub,
   correct,
+  tablesCreated,
 }: {
   api: ConversationApi;
   chatId: string;
@@ -1897,6 +1904,7 @@ function ConversationTools({
   githubLocked: boolean;
   pickGitHub: (login: string) => void;
   correct: () => void;
+  tablesCreated: (tables: string[]) => void;
 }) {
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
@@ -2060,6 +2068,7 @@ function ConversationTools({
             membershipId={membershipId}
             order={message.sequence}
             correct={correct}
+            onCreated={tablesCreated}
           />
         ))}
     </section>

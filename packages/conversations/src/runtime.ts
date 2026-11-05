@@ -1628,6 +1628,7 @@ export function createConversationExecutor(
                         'cancelled',
                         'expired',
                         'approved',
+                        'superseded',
                         'pending',
                       ]),
                     }),
@@ -1639,7 +1640,16 @@ export function createConversationExecutor(
           CASE WHEN (SELECT count(*) FROM ${table(tx, 'tf_table_proposal_receipts')} r WHERE r.proposal_id=p.id AND r.receipt->>'status'='completed')>=jsonb_array_length(p.manifest->'plans') THEN 'completed'
             WHEN EXISTS (SELECT 1 FROM ${table(tx, 'tf_table_proposal_receipts')} r WHERE r.proposal_id=p.id AND r.receipt->>'status'='failed') THEN 'failed'
             WHEN d.decision='reject' THEN 'rejected'
-            WHEN (SELECT operation FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1)='cancel' THEN 'cancelled' WHEN p.expires_at<=clock_timestamp() THEN 'expired' WHEN d.decision='approve' THEN 'approved' ELSE 'pending' END AS status
+            WHEN (SELECT operation FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1)='cancel' THEN 'cancelled' WHEN p.expires_at<=clock_timestamp() THEN 'expired' WHEN d.decision='approve' THEN 'approved'
+            WHEN EXISTS (SELECT 1 FROM ${table(tx, 'tf_table_proposals')} n WHERE n.conversation_id=p.conversation_id AND n.membership_id=p.membership_id AND (n.created_at,n.id)>(p.created_at,p.id)
+              AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_table_proposal_decisions')} nd WHERE nd.proposal_id=n.id AND nd.decision='reject')
+              AND (n.manifest->>'revises'=p.id::text OR EXISTS (
+                SELECT 1 FROM jsonb_array_elements(n.manifest->'plans') np, jsonb_array_elements(p.manifest->'plans') op
+                WHERE np->'input'->>'kind'='schema' AND op->'input'->>'kind'='schema'
+                  AND (np->'input'->>'tableId'=op->'input'->>'tableId'
+                    OR (jsonb_typeof(np->'before')='null' AND jsonb_typeof(op->'before')='null'
+                      AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label'))))))) THEN 'superseded'
+            ELSE 'pending' END AS status
         FROM ${table(tx, 'tf_table_proposals')} p LEFT JOIN ${table(tx, 'tf_table_proposal_decisions')} d ON d.proposal_id=p.id
         WHERE p.conversation_id=$1 AND p.turn_id<>$2 AND p.membership_id=$3 AND p.user_id=$4 ORDER BY p.created_at DESC,p.id DESC LIMIT 10`,
                         [fence.conversationId, fence.turnId, chat.requester.membershipId, chat.requester.userId],
@@ -2490,7 +2500,7 @@ export function createConversationExecutor(
                   'Current status of table proposals prepared earlier in this chat. This replaces any earlier pending or not-active statement about them:',
                   ...source.tableProposals.map(
                     proposal =>
-                      `- ${proposal.labels ?? 'Table changes'}: ${{ completed: 'applied and active', failed: 'execution failed', rejected: 'rejected by the requester', cancelled: 'cancelled by the requester', expired: 'review expired, not applied', approved: 'approved, still applying', pending: "awaiting the requester's review" }[proposal.status]}`,
+                      `- ${proposal.labels ?? 'Table changes'}: ${{ completed: 'applied and active', failed: 'execution failed', rejected: 'rejected by the requester', cancelled: 'cancelled by the requester', expired: 'review expired, not applied', approved: 'approved, still applying', superseded: 'replaced by a newer proposal, cannot be approved', pending: "awaiting the requester's review" }[proposal.status]}`,
                   ),
                 ].join('\n'),
               },

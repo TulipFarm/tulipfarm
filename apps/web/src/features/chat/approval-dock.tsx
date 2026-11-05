@@ -1,7 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 
-type Entry = { id: string; title: string; status: string; order: number };
+type Entry = {
+  id: string;
+  title: string;
+  status: string;
+  order: number;
+  /** The proposal's short version name, such as “Add priority field”. */
+  label?: string | undefined;
+  /** Whether the proposal changes a table schema, so it has a diagram. */
+  schema?: boolean | undefined;
+  /** The schema's fields as newline-separated `table/field` labels, to name a revision by what changed. */
+  fields?: string | undefined;
+};
 type Dock = {
   target: HTMLDivElement | null;
   activeId: string | null;
@@ -16,6 +27,7 @@ const activeStatuses = new Set(['pending', 'approved', 'running', 'partial']);
 const statusLabels: Record<string, string> = {
   loading: 'Loading',
   pending: 'Needs approval',
+  superseded: 'Replaced',
   approved: 'Approved',
   running: 'In progress',
   completed: 'Completed',
@@ -34,7 +46,14 @@ export function ApprovalDockProvider({ children }: { children: ReactNode }) {
     (entry: Entry) =>
       setEntries(previous => {
         const current = previous.find(item => item.id === entry.id);
-        if (current?.title === entry.title && current.status === entry.status && current.order === entry.order)
+        if (
+          current?.title === entry.title &&
+          current.status === entry.status &&
+          current.order === entry.order &&
+          current.label === entry.label &&
+          current.schema === entry.schema &&
+          current.fields === entry.fields
+        )
           return previous;
         return [...previous.filter(item => item.id !== entry.id), entry].sort(
           (a, b) => b.order - a.order || a.id.localeCompare(b.id),
@@ -68,38 +87,54 @@ export function useApprovalDockEntry(entry: Entry) {
     remove = dock?.remove;
   useEffect(() => {
     register?.(entry);
-  }, [register, entry.id, entry.title, entry.status, entry.order]);
+  }, [register, entry.id, entry.title, entry.status, entry.order, entry.label, entry.schema, entry.fields]);
   useEffect(() => () => remove?.(entry.id), [remove, entry.id]);
   return dock
-    ? { target: dock.target, active: dock.activeId === entry.id, activate: () => dock.activate(entry.id) }
+    ? {
+        target: dock.target,
+        active: dock.activeId === entry.id,
+        latest: dock.entries[0]?.id === entry.id,
+        activate: () => dock.activate(entry.id),
+      }
     : null;
 }
+
+/** Every proposal in this chat, newest first. */
+export function useApprovalDockEntries() {
+  return useContext(ApprovalDockContext)?.entries ?? [];
+}
+
+export const proposalStatusLabel = (status: string) => statusLabels[status] ?? status;
+
+const entryName = (entry: Entry) => (entry.label ? `${entry.title} (${entry.label})` : entry.title);
 
 export function ApprovalDock() {
   const dock = useContext(ApprovalDockContext);
   if (!dock) return null;
+  // Replaced versions can't be approved; the schema canvas still lists them.
+  const entries = dock.entries.filter(entry => entry.status !== 'superseded' || entry.id === dock.activeId);
   return (
-    <div hidden={dock.entries.length === 0} className="space-y-2">
-      {dock.entries.length > 1 && (
+    <div hidden={entries.length === 0} className="space-y-2">
+      {entries.length > 1 && (
         <div className="flex items-center gap-3">
-          <span className="shrink-0 text-xs text-muted-foreground">{dock.entries.length} proposals</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{entries.length} proposals</span>
           <Select
             value={dock.activeId}
             onValueChange={value => {
               if (value) dock.activate(value);
             }}
-            items={dock.entries.map(entry => ({
+            items={entries.map(entry => ({
               value: entry.id,
-              label: `${entry.title} · ${statusLabels[entry.status] ?? entry.status}`,
+              label: `${entryName(entry)} · ${statusLabels[entry.status] ?? entry.status}`,
             }))}
           >
             <SelectTrigger width="full" size="sm" aria-label="Choose proposal">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {dock.entries.map(entry => (
+              {entries.map(entry => (
                 <SelectItem key={entry.id} value={entry.id}>
-                  {entry.title} · {statusLabels[entry.status] ?? entry.status}
+                  {entryName(entry)} · {statusLabels[entry.status] ?? entry.status}
                 </SelectItem>
               ))}
             </SelectContent>

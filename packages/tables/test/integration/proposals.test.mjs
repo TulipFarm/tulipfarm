@@ -505,6 +505,38 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         assert.equal((await service.status(workspace.id, actor.userId, chat, id)).status, 'approved');
         await setup.platform.query(`UPDATE ${s}.tf_memberships SET role='admin' WHERE id=$1`, [actor.membershipId]);
       });
+      await t.test('a newer draft of the same table replaces the older one and blocks its approval', async () => {
+        const create = (label, revises) => {
+          const definition = tableDefinition({ owningTeamId: team, label, fields: [textField('Name')] });
+          return propose({
+            ...(revises ? { revises } : {}),
+            plans: [
+              {
+                kind: 'schema',
+                tableId: definition.id,
+                dependsOn: [],
+                expectedRevision: null,
+                target: definition,
+                transforms: { outputs: [] },
+              },
+            ],
+          });
+        };
+        const first = await create('Vendors');
+        assert.equal((await status(first)).status, 'pending');
+        const second = await create(' vendors ');
+        assert.equal((await status(first)).status, 'superseded');
+        assert.equal((await status(second)).status, 'pending');
+        await assert.rejects(decide(first), error => error.code === 'proposal-superseded');
+
+        const named = await create('Suppliers');
+        const renamed = await create('Partners', named.id);
+        assert.equal((await status(named)).status, 'superseded');
+        await decide(renamed, 'reject');
+        assert.equal((await status(named)).status, 'pending');
+        await decide(second, 'reject');
+        await decide(named, 'reject');
+      });
       await t.test('expired approval and removed membership never execute', async () => {
         const proposal = await propose(update(r, 'expired'));
         await decide(proposal);

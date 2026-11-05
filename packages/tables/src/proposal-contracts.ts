@@ -74,7 +74,13 @@ export const proposalPlanSchema = z.discriminatedUnion('kind', [
 ]);
 export const proposalPlansSchema = <T extends z.ZodType>(plan: T) => z.array(plan).min(1).max(20);
 export const proposeTableSchema = z
-  .strictObject({ plans: proposalPlansSchema(proposalPlanSchema) })
+  .strictObject({
+    plans: proposalPlansSchema(proposalPlanSchema),
+    /** The earlier proposal in this chat that this one replaces. */
+    revises: z.uuid().optional(),
+    /** A 2–5 word name for this version, such as “Add priority field”. */
+    label: z.string().trim().min(1).max(40).optional(),
+  })
   .superRefine((input, ctx) => {
     const seen = new Set<string>();
     for (const plan of input.plans) {
@@ -130,6 +136,8 @@ export const proposalManifestSchema = z
     installationId: z.uuid().optional(),
     sources: sourceDependenciesSchema,
     expiresAt: z.iso.datetime(),
+    revises: z.uuid().optional(),
+    label: z.string().min(1).max(40).optional(),
     plans: z.array(reviewedPlanSchema).min(1).max(20),
   })
   .refine(
@@ -163,6 +171,7 @@ export const proposalStatusSchema = z.object({
   digest: digestSchema,
   status: z.enum([
     'pending',
+    'superseded',
     'approved',
     'running',
     'rejected',
@@ -240,6 +249,7 @@ export class TableProposalError extends Error {
     | 'proposal-expired'
     | 'proposal-not-approved'
     | 'proposal-cancelled'
+    | 'proposal-superseded'
     | 'dependency-unfinished'
     | 'invalid-transform'
     | 'invalid-import'

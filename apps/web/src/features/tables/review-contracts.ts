@@ -131,6 +131,7 @@ export const proposalStatusSchema = z.object({
   digest: z.string().regex(/^[a-f0-9]{64}$/),
   status: z.enum([
     'pending',
+    'superseded',
     'approved',
     'running',
     'rejected',
@@ -163,6 +164,8 @@ export const proposalViewSchema = z.discriminatedUnion('content', [
       conversationId: z.uuid(),
       turnId: z.uuid(),
       expiresAt: z.iso.datetime(),
+      revises: z.uuid().optional(),
+      label: z.string().optional(),
       plans: z.array(reviewedPlanSchema),
     }),
   }),
