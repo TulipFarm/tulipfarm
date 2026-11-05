@@ -21,6 +21,8 @@ export function InvitationList({
   invite?: ReactNode;
 }) {
   const { data, error, busy, refresh, search, setSearch } = invitations;
+  // The empty state carries the invite button itself.
+  const emptyState = data?.items.length === 0 && !search.trim();
   return (
     <section aria-label="Invitations" className="flex flex-col gap-4 pt-4">
       <h2 className="text-sm font-medium">Invitations</h2>
@@ -28,14 +30,17 @@ export function InvitationList({
         Invitation validity and email delivery are independent. Resend creates a new link and invalidates the previous
         one.
       </p>
-      <SearchField
-        id="invitation-search"
-        label="Search invitations"
-        value={search}
-        onChange={setSearch}
-        placeholder="Search email, validity, or delivery"
-        maxLength={254}
-      />
+      <div className="flex items-center justify-between gap-3">
+        <SearchField
+          id="invitation-search"
+          label="Search invitations"
+          value={search}
+          onChange={setSearch}
+          placeholder="Search email, validity, or delivery"
+          maxLength={254}
+        />
+        {!emptyState && invite}
+      </div>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>

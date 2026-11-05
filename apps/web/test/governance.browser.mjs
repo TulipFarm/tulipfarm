@@ -377,7 +377,10 @@ try {
   await page.goto(`${origin}/acme/members`);
   await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
   await stale.started.promise;
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Invitations', exact: true })
+    .getByRole('button', { name: 'Invite members', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   stale.release.resolve();

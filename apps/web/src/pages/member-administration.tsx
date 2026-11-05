@@ -37,11 +37,13 @@ export function MemberAdministration({
   busy,
   change,
   recovery,
+  invite,
 }: {
   data: GovernanceSnapshot;
   busy: boolean;
   change: GovernanceChange;
   recovery: ReactNode;
+  invite?: ReactNode;
 }) {
   const [search, setSearch] = useState('');
   const admins = data.members.filter(member => member.role === 'admin').length;
@@ -57,13 +59,16 @@ export function MemberAdministration({
   );
   return (
     <section aria-label="Workspace members" className="flex flex-col gap-4 pt-4">
-      <SearchField
-        id="member-search"
-        label="Search members"
-        value={search}
-        onChange={setSearch}
-        placeholder="Search members"
-      />
+      <div className="flex items-center justify-between gap-3">
+        <SearchField
+          id="member-search"
+          label="Search members"
+          value={search}
+          onChange={setSearch}
+          placeholder="Search members"
+        />
+        {invite}
+      </div>
       {!members.length ? (
         <StatePanel
           kind="empty"
