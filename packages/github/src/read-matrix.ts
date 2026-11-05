@@ -16,6 +16,8 @@ const pull = (method: string): McpRead => ({ name: 'pull_request_read', method, 
 
 export const githubReadMatrix = {
   'repository.read': { transport: 'rest', path: repository },
+  // The selected account's own repositories (owned, collaborator and organization member); search covers all of GitHub.
+  'repository.list': { transport: 'rest', path: `/user/repos${paging}&sort=updated` },
   'repository.search': {
     transport: 'rest',
     path: `/search/repositories${paging}&q={query}`,

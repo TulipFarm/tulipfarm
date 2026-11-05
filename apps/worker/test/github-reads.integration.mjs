@@ -195,3 +195,47 @@ test('one active account is used without asking; several accounts make the model
   ]);
   assert.match(JSON.stringify(f.modelRequests.at(-1)), /github\.personal\.account/);
 });
+test('the chat lists the selected account repositories and explains a withheld search page', async t => {
+  const f = await githubChatFixture();
+  t.after(() => f.close());
+  await f.connect(123);
+  const chatId = await f.chat();
+  const repository = name => ({
+    url: `https://api.github.com/repos/octocat/${name}`,
+    html_url: `https://github.com/octocat/${name}`,
+    full_name: `octocat/${name}`,
+    name,
+    owner: { login: 'octocat' },
+    private: true,
+    fork: false,
+  });
+  f.setProvider(async url => {
+    const { pathname } = new URL(url);
+    if (pathname === '/user/repos') return Response.json([repository('private')]);
+    if (pathname === '/search/repositories')
+      return Response.json({
+        total_count: 2,
+        incomplete_results: false,
+        items: [repository('private'), repository('elsewhere')],
+      });
+    if (pathname === '/repos/octocat/elsewhere') return Response.json({}, { status: 403 });
+    return Response.json(repository(pathname.split('/').at(-1)));
+  });
+  f.decide([{ tool: 'github.personal.read', operation: { kind: 'repository.list' } }], 'Listed.');
+  assert.equal((await f.send(chatId, 'List my repositories.')).status, 'completed');
+  assert.ok(f.providerCalls.some(call => new URL(call.url).pathname === '/user/repos'));
+  assert.equal(
+    f.providerCalls.some(call => new URL(call.url).pathname === '/search/repositories'),
+    false,
+  );
+  assert.match(JSON.stringify(f.modelRequests.at(-1)), /octocat\/private/);
+  f.decide(
+    [{ tool: 'github.personal.read', operation: { kind: 'repository.search', query: 'stars:>1' } }],
+    'Withheld.',
+  );
+  assert.equal((await f.send(chatId, 'Search repositories.')).status, 'completed');
+  const reply = JSON.stringify(f.modelRequests.at(-1));
+  assert.match(reply, /source-access-revoked/);
+  assert.match(reply, /repository\.list/);
+  assert.equal(reply.includes('octocat/elsewhere'), false);
+});

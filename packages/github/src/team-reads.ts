@@ -266,12 +266,16 @@ export function createTeamGitHubReads(options: {
       denyMcpEgress();
       const binding = teamGitHubReadBindingSchema.parse(inputBinding);
       const operation = githubReadSchema.parse(input);
-      if (operation.kind === 'repository.search')
+      if (operation.kind === 'repository.search' || operation.kind === 'repository.list')
         return repositories(
           workspaceId,
           actor,
           binding,
-          { query: operation.query, page: operation.page, perPage: operation.perPage },
+          {
+            ...(operation.kind === 'repository.search' ? { query: operation.query } : {}),
+            page: operation.page,
+            perPage: operation.perPage,
+          },
           'github.investigation.read',
         );
       if (operation.kind.startsWith('project.')) throw new GitHubReadError('read-unqualified');
