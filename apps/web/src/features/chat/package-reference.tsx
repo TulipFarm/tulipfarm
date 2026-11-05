@@ -1,5 +1,4 @@
 import { Node } from '@tiptap/core';
-import type { ReactNode } from 'react';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { isHistoryTransaction } from '@tiptap/pm/history';
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react';
@@ -22,20 +21,22 @@ function PackageReference({ node }: NodeViewProps) {
   );
 }
 
-export function PackageMessageText({ text }: { text: string }) {
-  const parts: ReactNode[] = [];
+/** Splits text at marketplace package links, which show as package pills. */
+export function packageLinkParts(text: string): ({ text: string } | { url: string })[] {
+  const parts: ({ text: string } | { url: string })[] = [];
   let offset = 0;
   for (const match of text.matchAll(/https:\/\/[^\s<>"`]+/gi)) {
     const url = match[0].replace(/[)\]}>.,;!?]+$/, '');
     if (!marketplacePackage(url)) continue;
-    parts.push(text.slice(offset, match.index), <PackagePill key={match.index} url={url} />);
+    if (match.index > offset) parts.push({ text: text.slice(offset, match.index) });
+    parts.push({ url });
     offset = match.index + url.length;
   }
-  parts.push(text.slice(offset));
-  return <>{parts}</>;
+  if (offset < text.length) parts.push({ text: text.slice(offset) });
+  return parts;
 }
 
-function PackagePill({ url }: { url: string }) {
+export function PackagePill({ url }: { url: string }) {
   const workspaceSlug = workspaceRoute.useParams({ shouldThrow: false })?.workspaceSlug;
   const link = marketplacePackage(url);
   const read = useFeatureRead({

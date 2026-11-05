@@ -94,6 +94,33 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       );
       assert.deepEqual(older.messages[0].parts, send.parts);
       assert.deepEqual(older.messages[0].turn, { id: first.turnId, status: 'queued', generation: 0, epoch: 0 });
+      // A finished reply reports its model, time to first word, total time and kept trace.
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_first_text_at=timing_started_at+interval '1.5 seconds' WHERE id=$1`,
+        [first.turnId],
+      );
+      const trace = 'a'.repeat(32);
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_requested_at=timing_started_at,timing_finished_at=timing_started_at+interval '4 seconds',trace_id=$2,trace_sampled=true WHERE id=$1`,
+        [first.turnId, trace],
+      );
+      assert.deepEqual((await service.history(upgraded.id, user, id, { before: 2 })).messages[0].turn.stats, {
+        model: 'claude-sonnet',
+        firstTextMs: 1500,
+        durationMs: 4000,
+        traceId: trace,
+      });
+      await db.platform.query(`UPDATE ${table('tf_conversation_turns')} SET trace_sampled=false WHERE id=$1`, [
+        first.turnId,
+      ]);
+      assert.equal(
+        (await service.history(upgraded.id, user, id, { before: 2 })).messages[0].turn.stats.traceId,
+        undefined,
+      );
+      await db.platform.query(
+        `UPDATE ${table('tf_conversation_turns')} SET timing_first_text_at=NULL,timing_first_text_seconds=NULL,timing_finished_at=NULL,trace_id=NULL,trace_sampled=NULL WHERE id=$1`,
+        [first.turnId],
+      );
       assert.equal(older.nextBefore, null);
       assert.deepEqual(
         (await db.platform.query(`SELECT count(*)::int AS count FROM ${table('tf_conversation_outbox')}`)).rows,

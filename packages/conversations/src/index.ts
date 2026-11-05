@@ -98,6 +98,13 @@ export {
   deleteChatSchema,
 } from './contracts.ts';
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
+// When the reply was asked for: the send request when recorded, else when the turn started.
+// Stats appear once the turn has finished, so a queued or running reply shows none.
+const turnStart = `COALESCE((to_jsonb(t)->>'timing_requested_at')::timestamptz, t.timing_started_at)`;
+const turnStats = `CASE WHEN t.timing_finished_at IS NOT NULL THEN jsonb_build_object('model', t.responder,
+  'firstTextMs', round(extract(epoch FROM t.timing_first_text_at - ${turnStart}) * 1000),
+  'durationMs', round(extract(epoch FROM t.timing_finished_at - ${turnStart}) * 1000),
+  'traceId', CASE WHEN (to_jsonb(t)->>'trace_sampled')::boolean THEN to_jsonb(t)->>'trace_id' END) END`;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 const chatColumns = `id, title, title_revision AS "titleRevision", title_manual AS "titleManual", archived_at IS NOT NULL AS archived, COALESCE((to_jsonb(c)->>'is_closed')::boolean,false) AS "isClosed",
   to_char(activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "activityAt",
@@ -621,7 +628,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           await tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
         (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
-        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END)) END AS turn
+        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
         FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,

@@ -147,6 +147,29 @@ export function registerSlackActions(
     for (const method of ['GET', 'PUT'] as const)
       routes.route({
         method,
+        url: '/workspaces/:workspaceId/slack/chats/:conversationId/sender',
+        handler: async (request, reply) => {
+          if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
+            return reply.code(403).send({ error: 'untrusted-origin' });
+          const session = await options.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+          if (!session) return reply.code(401).send({ error: 'sign-in-required' });
+          const p = z.object({ workspaceId: z.uuid(), conversationId: z.uuid() }).parse(request.params);
+          try {
+            return method === 'GET'
+              ? await service.chatSender(p.workspaceId, session.user.id, p.conversationId)
+              : await service.selectChatSender(p.workspaceId, session.user.id, p.conversationId, request.body);
+          } catch (error) {
+            if (error instanceof Error && error.message === 'slack-sender-conflict')
+              return reply.code(409).send({ error: 'slack-sender-changed' });
+            if (error instanceof Error && error.message === 'slack-sender-unavailable')
+              return reply.code(409).send({ error: 'slack-app-unavailable' });
+            throw error;
+          }
+        },
+      });
+    for (const method of ['GET', 'PUT'] as const)
+      routes.route({
+        method,
         url: '/workspaces/:workspaceId/slack/actions/:actionId',
         handler: async (request, reply) => {
           if (method === 'PUT' && request.headers.origin !== authConfig().webOrigin)
