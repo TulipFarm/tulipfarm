@@ -1086,6 +1086,22 @@ export function createSlackActions(options: Options) {
       ).rows[0] ?? { sender: 'user', version: 0 },
     );
   }
+  // A turn fired by a follow-up posts as the sender saved when the follow-up was scheduled.
+  async function followUpSender(tx: AgentTransaction, turnId: string) {
+    if (!('commonVersion' in tx) || Number(tx.commonVersion) < 39) return undefined;
+    const row = z
+      .object({ slack_sender: slackSenderSchema.nullable() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT f.slack_sender FROM ${relation(tx, 'tf_follow_ups')} f JOIN ${relation(tx, 'tf_conversation_turns')} t ON t.source_message_id=f.fired_message_id WHERE t.id=$1`,
+            [turnId],
+          )
+        ).rows[0],
+      );
+    return row?.slack_sender ? { sender: row.slack_sender, version: 0 } : undefined;
+  }
   // Only the chat's owner sees or changes who posts its Slack messages.
   async function ownChat(tx: Transaction, userId: string, conversationId: string) {
     const actor = await resolveHuman(tx, userId);
@@ -1141,7 +1157,7 @@ export function createSlackActions(options: Options) {
     if (workflow)
       return { version: 0, sender: await workflows.slackSender(tx as Transaction, runId, workflow.step_id) };
     const chat = await conversationOrigin(tx, runId);
-    if (chat) return readChatSender(tx, chat.conversation_id);
+    if (chat) return (await followUpSender(tx, runId)) ?? readChatSender(tx, chat.conversation_id);
     const agent = z
       .object({ policy_version: z.number(), slack_sender: slackSenderSchema.default('user') })
       .parse(

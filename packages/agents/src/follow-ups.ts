@@ -27,6 +27,8 @@ import { relation, type AgentStorage } from './store.ts';
 
 /** The first common migration with `tf_follow_ups`. */
 export const followUpsVersion = 27;
+/** The first common migration that saves a chat follow-up's Slack sender. */
+const followUpSenderVersion = 39;
 const pendingLimit = 25;
 const claimBatch = 20;
 const reclaimAfterMinutes = 2;
@@ -58,6 +60,7 @@ const rowSchema = z.object({
   chain_started_at: z.date(),
   created_at: z.date(),
   failure_reason: z.string().nullable(),
+  slack_sender: z.enum(['user', 'app']).nullable().optional(),
 });
 type FollowUpRow = z.infer<typeof rowSchema>;
 
@@ -237,6 +240,17 @@ async function bind(
   };
 }
 
+// A chained follow-up keeps the sender of the follow-up that scheduled it; otherwise the chat's current choice.
+async function chatSlackSender(tx: Transaction, conversationId: string, parent: FollowUpRow | undefined) {
+  if (parent?.slack_sender) return parent.slack_sender;
+  const row = (
+    await tx.client.query(`SELECT sender FROM ${relation(tx, 'tf_slack_chat_sender')} WHERE conversation_id=$1`, [
+      conversationId,
+    ])
+  ).rows[0];
+  return z.enum(['user', 'app']).parse(row?.sender ?? 'user');
+}
+
 function bindingScope(binding: Binding, membershipId: string): { where: string; values: unknown[] } {
   return binding.surface === 'chat'
     ? { where: 'conversation_id=$1 AND membership_id=$2', values: [binding.conversationId, membershipId] }
@@ -326,9 +340,10 @@ export function createFollowUps(runtime: AgentStorage) {
           'too-many-pending',
           `The person already has ${pendingLimit} pending follow-ups. Tell them to cancel some first; do not do the deferred work now.`,
         );
+      const saveSender = binding.surface === 'chat' && Number(tx.commonVersion ?? 0) >= followUpSenderVersion;
       await tx.client.query(
-        `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,conversation_id,origin_turn_id,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_parent_event_id,instruction,due_at,timezone,chain_root_id,chain_depth,chain_started_at,created_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,conversation_id,origin_turn_id,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_parent_event_id,instruction,due_at,timezone,chain_root_id,chain_depth,chain_started_at,created_at${saveSender ? ',slack_sender' : ''})
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19${saveSender ? ',$20' : ''})`,
         [
           id,
           actor.membershipId,
@@ -349,6 +364,9 @@ export function createFollowUps(runtime: AgentStorage) {
           depth,
           chainStarted,
           now,
+          ...(saveSender && binding.surface === 'chat'
+            ? [await chatSlackSender(tx, binding.conversationId, parent)]
+            : []),
         ],
       );
       await audit(tx, actor.membershipId, 'agent.follow-up.schedule', id);
