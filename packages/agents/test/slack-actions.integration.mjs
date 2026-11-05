@@ -11,6 +11,7 @@ import { createSlackInbox } from '../../slack/src/inbox.ts';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createChatTools } from '../src/tools.ts';
+import { createFollowUps } from '../src/follow-ups.ts';
 import { createAgentTasks } from '../src/tasks.ts';
 import { createTaskRuntime } from '../src/task-runtime.ts';
 import { createSlackDefault } from '../src/slack-default.ts';
@@ -1631,6 +1632,88 @@ test('a chat set to post as the TulipFarm app sends with the bot token, and only
       await f.db.platform.query(`SELECT id FROM ${f.table('tf_slack_conversation_actions')} WHERE turn_id=$1`, [
         sent.turnId,
       ])
+    ).rows[0].id;
+    const view = await f.service.read(f.workspace.id, f.alice.userId, id);
+    assert.equal(view.status, 'sent');
+    assert.equal(view.sender, 'app');
+    assert.deepEqual(f.effects, [{ token: 'Bearer xoxb-fixture', name: 'send', channel: 'CHR', text: 'hey' }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a chat follow-up posts as the sender chosen when it was scheduled', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const followUps = createFollowUps(f.runtime);
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    await f.service.selectChatSender(f.workspace.id, f.alice.userId, chatId, { sender: 'app', expectedVersion: 0 });
+    const asked = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'In 5 minutes send hey to HR on Slack' }],
+    });
+    const scheduled = await followUps.schedule(
+      f.workspace.id,
+      { kind: 'human', ...f.alice },
+      randomUUID(),
+      { conversationId: chatId, turnId: asked.turnId },
+      { tool: 'followups.schedule', instruction: 'Send hey to HR on Slack.', delayMinutes: 5 },
+    );
+    assert.equal(scheduled.status, 'scheduled');
+    await f.service.selectChatSender(f.workspace.id, f.alice.userId, chatId, { sender: 'user', expectedVersion: 1 });
+    await f.db.platform.query(`UPDATE ${f.table('tf_follow_ups')} SET due_at=now()-interval '1 second' WHERE id=$1`, [
+      scheduled.followUp.id,
+    ]);
+    assert.deepEqual(await followUps.due(f.workspace.id, f.store.send), [chatId]);
+    const turnId = (
+      await f.db.platform.query(
+        `SELECT t.id FROM ${f.table('tf_conversation_turns')} t JOIN ${f.table('tf_follow_ups')} u ON u.fired_message_id=t.source_message_id WHERE u.id=$1`,
+        [scheduled.followUp.id],
+      )
+    ).rows[0].id;
+    let scheduling = true;
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        if (scheduling) return { text: 'Scheduled', sources: [] };
+        const resolved = await executeTool('slack.resolve', false, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.resolve',
+            kind: 'channel',
+            name: 'HR',
+          }),
+        );
+        await executeTool('slack.message.send', true, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.message.send',
+            destinationId: resolved.result.matches[0].destinationId,
+            text: 'hey',
+          }),
+        );
+        return { text: 'Sent', sources: [] };
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+    );
+    assert.equal(
+      await engine.process({
+        workspaceId: f.workspace.id,
+        conversationId: chatId,
+        turnId: asked.turnId,
+        generation: 0,
+      }),
+      'completed',
+    );
+    scheduling = false;
+    assert.equal(
+      await engine.process({ workspaceId: f.workspace.id, conversationId: chatId, turnId, generation: 0 }),
+      'completed',
+    );
+    const id = (
+      await f.db.platform.query(`SELECT id FROM ${f.table('tf_slack_conversation_actions')} WHERE turn_id=$1`, [turnId])
     ).rows[0].id;
     const view = await f.service.read(f.workspace.id, f.alice.userId, id);
     assert.equal(view.status, 'sent');
