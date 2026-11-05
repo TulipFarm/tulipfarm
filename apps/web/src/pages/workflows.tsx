@@ -3,13 +3,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { RefreshCwIcon } from 'lucide-react';
 import { z } from 'zod';
-import {
-  statusSchema,
-  webhookKeyIssuedSchema,
-  workflowSchema,
-  type Definition,
-  type DisabledReason,
-} from '@tulipfarm/workflows/contracts';
+import { statusSchema, webhookKeyIssuedSchema, workflowSchema } from '@tulipfarm/workflows/contracts';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -58,9 +52,10 @@ import { WorkflowSharing, AcceptWorkflowSponsorship, recordSourceDenied } from '
 import {
   TriggerIcon,
   WorkflowRow,
+  disabledReasons,
   liveTrigger,
   triggerLine,
-  type WorkflowState,
+  workflowState,
 } from '@/features/workflows/workflow-summary';
 
 type Workflow = z.infer<typeof workflowSchema>;
@@ -1233,45 +1228,10 @@ function formatDuration(startedAt: string, finishedAt: string) {
   if (minutes < 60) return `${minutes} min ${remainingSeconds} sec`;
   return `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
 }
-const sponsorSource: Partial<Record<Definition['trigger']['kind'], string>> = {
-  record: ' or to read the table its record trigger watches',
-  row: ' or to read the table its row trigger watches',
-  provider: ' or to use the connected app its trigger polls',
-};
-const disabledReasons: Record<
-  DisabledReason,
-  { status: string; explanation: (workflow: Workflow) => string; recovery: string }
-> = {
-  'sponsor-access-lost': {
-    status: 'sponsor lost access',
-    explanation: workflow =>
-      `its sponsor lost access needed to run it${sponsorSource[(workflow.activeTrigger ?? workflow.definition.trigger).kind] ?? ''}`,
-    recovery: 'Restore that access or choose a sponsor who has it, then activate the saved revision.',
-  },
-  'record-field-unavailable': {
-    status: 'record field unavailable',
-    explanation: () => 'the table, watched fields, or filter its trigger uses is no longer available',
-    recovery: 'Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',
-  },
-  'provider-backlog': {
-    status: 'connected app backlog',
-    explanation: () => 'too many connected-app events waited to start runs',
-    recovery: 'Activate the saved revision to discard the waiting events and collect only new ones.',
-  },
-};
 function disabledExplanation(workflow: Workflow) {
   if (!workflow.disabledReason) return 'Disabled. Saving does not activate it.';
   const reason = disabledReasons[workflow.disabledReason];
   return `Disabled automatically because ${reason.explanation(workflow)}. ${workflow.capabilities.manage ? reason.recovery : 'Ask a workflow manager to restore access or update its trigger.'}`;
-}
-function workflowState(workflow: Workflow): WorkflowState {
-  if (workflow.archivedAt) return { mark: 'stopped', label: 'Archived', detail: formatTime(workflow.archivedAt) };
-  if (workflow.enabled && workflow.activeRevision !== workflow.revision)
-    return { mark: 'warning', label: 'Saved changes not active', detail: nextRun(workflow) };
-  if (workflow.enabled) return { mark: 'success', label: 'Active', detail: nextRun(workflow) };
-  if (workflow.disabledReason)
-    return { mark: 'error', label: `Disabled: ${disabledReasons[workflow.disabledReason].status}` };
-  return { mark: 'stopped', label: 'Disabled' };
 }
 const pendingChanges = (workflow: Workflow) =>
   workflow.enabled && !!workflow.activeRevision && workflow.activeRevision !== workflow.revision;
@@ -1280,7 +1240,6 @@ function pendingSchedule(workflow: Workflow) {
   const saved = triggerLine(workflow.definition.trigger);
   return saved === triggerLine(workflow.activeTrigger) ? undefined : saved;
 }
-const nextRun = (workflow: Workflow) => (workflow.nextRunAt ? `Next run ${formatTime(workflow.nextRunAt)}` : undefined);
 function Count({ value }: { value: number | undefined }) {
   return <span className="min-w-4 text-muted-foreground tabular-nums">{value ?? ''}</span>;
 }

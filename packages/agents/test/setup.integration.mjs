@@ -14,6 +14,10 @@ import { createConversations } from '../../conversations/src/index.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
+import { createAgentSchedules } from '../src/schedules.ts';
+import { createAgentScheduleMigration } from '../src/schedule-migration.ts';
+import { agentTriggerDefinition, derivedId } from '../src/agent-trigger-workflows.ts';
+import { createWorkflows } from '@tulipfarm/workflows';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
 async function environment(t) {
@@ -76,7 +80,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     taskLimits: limits,
     slackSender: 'user',
     slackChannels: [],
-    schedules: [],
+    triggers: [],
   });
   const input = async (overrides = {}) => ({
     requestId: randomUUID(),
@@ -94,7 +98,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     digest: draft.digest,
     decision: choice,
     consent: {
-      sponsorScheduleIds: draft.setup.schedules.map(schedule => schedule.id),
+      sponsorTriggerIds: draft.setup.triggers.map(selected => selected.id),
       replaceChannels: draft.setup.slackChannels
         .filter(channel => channel.replaceAgentId)
         .map(channel => channel.channel),
@@ -116,9 +120,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         [agentId],
       )
     ).rows.map(row => row.id),
-    schedules: (
+    workflows: (
       await db.platform.query(
-        `SELECT s.id,s.call,s.activation_id FROM ${table('tf_agent_schedules')} s JOIN ${table('tf_agent_activations')} a ON a.id=s.activation_id WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND s.revoked_at IS NULL ORDER BY s.id`,
+        `SELECT w.id,w.enabled,w.sponsor_membership_id,w.archived_at,w.archived_with_agent,r.definition FROM ${table('tf_workflows')} w JOIN ${table('tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.revision WHERE w.agent_id=$1 ORDER BY w.id`,
         [agentId],
       )
     ).rows,
@@ -145,18 +149,14 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
 test('draft choices persist inactive; publication has one Soul write and one activation across retries', async t => {
   const f = await environment(t),
     service = createAgentSetup(f.runtime);
-  const schedule = text => ({
+  const weekdays = prompt => ({
     id: randomUUID(),
-    action: { kind: 'task', text, limits },
     trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },
-    sponsorMembershipId: f.member,
+    prompt,
   });
+  const triggers = [weekdays('Check urgent tasks.'), weekdays('Prepare daily summary.')];
   const value = await f.input({
-    setup: {
-      ...f.setup(),
-      policy: { grants: [], personGrants: [] },
-      schedules: [schedule('Check urgent tasks.'), schedule('Prepare daily summary.')],
-    },
+    setup: { ...f.setup(), policy: { grants: [], personGrants: [] }, triggers },
   });
   const draft = await service.saveDraft(f.w.id, f.user, f.agentId, value);
   assert.deepEqual(await service.saveDraft(f.w.id, f.user, f.agentId, value), draft);
@@ -167,7 +167,8 @@ test('draft choices persist inactive; publication has one Soul write and one act
   await f.accept(service, save);
   assert.equal((await service.advance(f.w.id, f.user, save.commandId)).status, 'saved');
   assert.equal((await f.state()).agent.enabled, false);
-  assert.deepEqual((await f.state()).schedules, []);
+  assert.deepEqual((await f.state()).workflows, []);
+  assert.deepEqual(save.workflows, []);
   const activationInput = f.decision(draft);
   const command = await service.publish(f.w.id, f.user, f.agentId, activationInput);
   assert.equal(
@@ -189,7 +190,33 @@ test('draft choices persist inactive; publication has one Soul write and one act
   const active = await f.state();
   assert.equal(active.agent.enabled, true);
   assert.deepEqual(active.activations, [done.activationId]);
-  assert.equal(active.schedules.length, 2);
+  assert.equal(active.workflows.length, 2);
+  assert.deepEqual(
+    done.workflows.map(item => item.workflowId).sort(),
+    active.workflows.map(row => row.id),
+  );
+  for (const selected of triggers) {
+    const workflowId = done.workflows.find(item => item.triggerId === selected.id).workflowId;
+    const row = active.workflows.find(item => item.id === workflowId);
+    assert.equal(row.enabled, true);
+    assert.equal(row.sponsor_membership_id, f.member, 'the consenting reviewer sponsors the unattended trigger');
+    assert.equal(row.definition.name, 'Setup helper: Every weekday at 09:00 (Asia/Kolkata)');
+    assert.deepEqual(row.definition.trigger, selected.trigger);
+    assert.deepEqual(row.definition.steps, [
+      {
+        id: 'run_agent',
+        kind: 'agent',
+        agentId: f.agentId,
+        prompt: { kind: 'literal', value: selected.prompt },
+        limits,
+      },
+    ]);
+  }
+  assert.equal(
+    (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agent_schedules')}`)).rows[0].n,
+    0,
+    'setup gives the agent no schedule of its own',
+  );
   assert.equal(f.writes(), 1);
   assert.equal(
     (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agent_commands')}`)).rows[0].n,
@@ -208,14 +235,7 @@ for (const resume of ['new-stage', 'fresh-page'])
     const localSetup = {
       ...f.setup(),
       policy: { grants: [], personGrants: [] },
-      schedules: [
-        {
-          id: randomUUID(),
-          action: { kind: 'task', text: 'Check the daily queue.', limits },
-          trigger: { kind: 'interval', minutes: 60 },
-          sponsorMembershipId: f.member,
-        },
-      ],
+      triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check the daily queue.' }],
     };
     const original = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: localSetup }));
     const saved = await service.publish(f.w.id, f.user, f.agentId, f.decision(original, 'save'));
@@ -224,7 +244,7 @@ for (const resume of ['new-stage', 'fresh-page'])
     assert.equal(accepted.status, 'saved');
     assert.equal((await f.state()).agent.enabled, false);
     assert.deepEqual((await f.state()).activations, []);
-    assert.deepEqual((await f.state()).schedules, []);
+    assert.deepEqual((await f.state()).workflows, []);
 
     const resumed = createAgentSetup(f.runtime);
     const restored = await resumed.readDraft(f.w.id, f.user, f.agentId);
@@ -266,13 +286,13 @@ for (const resume of ['new-stage', 'fresh-page'])
     await assert.rejects(
       resumed.publish(f.w.id, f.user, f.agentId, {
         ...decision,
-        consent: { sponsorScheduleIds: [], replaceChannels: [] },
+        consent: { sponsorTriggerIds: [], replaceChannels: [] },
       }),
-      /schedule-sponsor-consent-required/,
+      /trigger-sponsor-consent-required/,
     );
     const command = await resumed.publish(f.w.id, f.user, f.agentId, decision);
     if (resume === 'new-stage') await f.accept(resumed, command);
-    assert.equal((await f.state()).agent.enabled, false, 'accepting a definition alone never starts the schedule');
+    assert.equal((await f.state()).agent.enabled, false, 'accepting a definition alone never starts the trigger');
     const activated = await resumed.advance(f.w.id, f.user, command.commandId);
     assert.equal(activated.status, 'active', activated.error);
     const activePolicy = await createSavedAgentService(f.runtime).policy(f.w.id, f.user, f.agentId);
@@ -281,11 +301,12 @@ for (const resume of ['new-stage', 'fresh-page'])
       { membershipId: f.member, permissions: ['delete', 'edit', 'invoke', 'manage', 'read'] },
     ]);
     assert.deepEqual((await f.state()).activations, [activated.activationId]);
-    assert.equal((await f.state()).schedules.length, 1);
+    assert.equal((await f.state()).workflows.length, 1);
+    assert.equal((await f.state()).workflows[0].definition.name, 'Setup helper: Every hour');
     assert.equal(f.writes(), resume === 'new-stage' ? 2 : 1);
     assert.deepEqual(await resumed.advance(f.w.id, f.user, command.commandId), activated);
     assert.equal((await resumed.publish(f.w.id, f.user, f.agentId, decision)).commandId, command.commandId);
-    assert.equal((await f.state()).schedules.length, 1);
+    assert.equal((await f.state()).workflows.length, 1);
     assert.equal(
       (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agents')}`)).rows[0].n,
       1,
@@ -406,14 +427,7 @@ test('post-Soul setup failures roll back every DB effect and resume with stable 
       setup: {
         ...f.setup(),
         slackChannels: [{ channel: 'C123', expectedVersion: 0, replaceAgentId: null }],
-        schedules: [
-          {
-            id: randomUUID(),
-            action: { kind: 'task', text: 'Check once per hour.', limits },
-            trigger: { kind: 'interval', minutes: 60 },
-            sponsorMembershipId: f.member,
-          },
-        ],
+        triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check once per hour.' }],
       },
     }),
   );
@@ -427,7 +441,7 @@ test('post-Soul setup failures roll back every DB effect and resume with stable 
   assert.equal(inactive.agent.enabled, false);
   assert.equal(inactive.agent.policy_version, 0);
   assert.deepEqual(inactive.activations, []);
-  assert.deepEqual(inactive.schedules, []);
+  assert.deepEqual(inactive.workflows, []);
   assert.equal(
     (
       await f.db.platform.query(
@@ -440,7 +454,10 @@ test('post-Soul setup failures roll back every DB effect and resume with stable 
   const active = await service.advance(f.w.id, f.user, command.commandId);
   assert.equal(active.status, 'active');
   assert.equal(active.activationId, command.activationId);
-  assert.equal((await f.state()).schedules.length, 1);
+  assert.equal((await f.state()).workflows.length, 1);
+  assert.deepEqual(active.workflows, [
+    { triggerId: draft.setup.triggers[0].id, workflowId: (await f.state()).workflows[0].id },
+  ]);
   assert.deepEqual(await service.advance(f.w.id, f.user, command.commandId), active);
   assert.equal(
     (
@@ -550,13 +567,9 @@ test('review versions, sponsorship, replacement and current membership are enfor
     setup: {
       ...f.setup(),
       slackChannels: [{ channel: 'C123', expectedVersion: 2, replaceAgentId: randomUUID() }],
-      schedules: [
-        {
-          id: randomUUID(),
-          action: { kind: 'task', text: 'Check.', limits },
-          trigger: { kind: 'interval', minutes: 60 },
-          sponsorMembershipId: f.member,
-        },
+      triggers: [
+        { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check.' },
+        { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Check when asked.' },
       ],
     },
   });
@@ -576,14 +589,15 @@ test('review versions, sponsorship, replacement and current membership are enfor
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
       ...f.decision(draft),
-      consent: { sponsorScheduleIds: [], replaceChannels: [] },
+      consent: { sponsorTriggerIds: [], replaceChannels: [] },
     }),
-    /schedule-sponsor-consent-required/,
+    /trigger-sponsor-consent-required/,
   );
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
       ...f.decision(draft),
-      consent: { sponsorScheduleIds: draft.setup.schedules.map(s => s.id), replaceChannels: [] },
+      // A manual trigger runs only when a member starts it, so it needs no sponsor.
+      consent: { sponsorTriggerIds: [draft.setup.triggers[0].id], replaceChannels: [] },
     }),
     /slack-replacement-consent-required/,
   );
@@ -621,7 +635,7 @@ test('publication resume rechecks removed membership after Soul accepted the def
   await assert.rejects(service.advance(f.w.id, f.user, command.commandId));
   assert.equal((await f.state()).agent.enabled, false);
   assert.deepEqual((await f.state()).activations, []);
-  assert.deepEqual((await f.state()).schedules, []);
+  assert.deepEqual((await f.state()).workflows, []);
 });
 
 test('chat full setup approves the same coordinator; historical drafts stay save-only', async t => {
@@ -672,7 +686,7 @@ test('chat full setup approves the same coordinator; historical drafts stay save
     commandId: randomUUID(),
     digest: full.digest,
     decision: 'activate',
-    consent: { sponsorScheduleIds: [], replaceChannels: [] },
+    consent: { sponsorTriggerIds: [], replaceChannels: [] },
   };
   const outcome = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(outcome.kind, 'agent');
@@ -686,4 +700,100 @@ test('chat full setup approves the same coordinator; historical drafts stay save
   const replayed = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(replayed.setupReceipt.commandId, outcome.setupReceipt.commandId);
   assert.equal(replayed.setupReceipt.status, 'active');
+});
+
+async function activeAgent(f, triggers = []) {
+  const service = createAgentSetup(f.runtime);
+  const draft = await service.saveDraft(
+    f.w.id,
+    f.user,
+    f.agentId,
+    await f.input({ setup: { ...f.setup(), triggers } }),
+  );
+  const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(draft));
+  await f.accept(service, command);
+  const active = await service.advance(f.w.id, f.user, command.commandId);
+  assert.equal(active.status, 'active', active.error);
+  return active;
+}
+
+test('archiving an agent archives only its trigger workflows; restoring brings them back disabled', async t => {
+  const f = await environment(t),
+    agents = createSavedAgentService(f.runtime);
+  await activeAgent(f, [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check the queue.' }]);
+  const unlinkedId = randomUUID();
+  await createWorkflows(f.runtime, { agentSteps: true }).save(f.w.id, f.user, unlinkedId, {
+    revision: randomUUID(),
+    expectedRevision: null,
+    definition: agentTriggerDefinition(
+      { id: f.agentId, name: 'Setup helper' },
+      { trigger: { kind: 'manual' }, prompt: 'Run by hand.' },
+    ),
+  });
+  const unlinked = async () =>
+    (
+      await f.db.platform.query(
+        `SELECT agent_id,archived_at,archived_with_agent FROM ${f.table('tf_workflows')} WHERE id=$1`,
+        [unlinkedId],
+      )
+    ).rows[0];
+  assert.deepEqual(await unlinked(), { agent_id: null, archived_at: null, archived_with_agent: false });
+  assert.equal((await f.state()).workflows[0].enabled, true);
+
+  await agents.archive(f.w.id, f.user, f.agentId);
+  const [archived] = (await f.state()).workflows;
+  assert.ok(archived.archived_at);
+  assert.equal(archived.archived_with_agent, true);
+  assert.equal(archived.enabled, false);
+  assert.deepEqual(await unlinked(), { agent_id: null, archived_at: null, archived_with_agent: false });
+
+  await agents.restore(f.w.id, f.user, f.agentId);
+  const [restored] = (await f.state()).workflows;
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archived_with_agent, false);
+  assert.equal(restored.enabled, false, 'a restored trigger waits for a manager to turn it on');
+  assert.deepEqual(await unlinked(), { agent_id: null, archived_at: null, archived_with_agent: false });
+});
+
+test('agent task schedules move into pinned, sponsored trigger workflows and stop as schedules', async t => {
+  const f = await environment(t);
+  const { activationId } = await activeAgent(f);
+  const schedules = createAgentSchedules(f.runtime);
+  const running = randomUUID(),
+    paused = randomUUID();
+  for (const [id, trigger, text] of [
+    [running, { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' }, 'Prepare the weekly update.'],
+    [paused, { kind: 'interval', minutes: 120 }, 'Check the queue.'],
+  ])
+    await schedules.save(f.w.id, f.user, f.agentId, {
+      id,
+      activationId,
+      action: { kind: 'task', text, limits },
+      trigger,
+      sponsorMembershipId: f.member,
+      historyAudience: [],
+    });
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_schedules')} SET paused_at=now() WHERE id=$1`, [paused]);
+
+  assert.deepEqual(await createAgentScheduleMigration(f.runtime).migrate(f.w.id), { migrated: 2 });
+  assert.deepEqual(
+    (
+      await f.db.platform.query(
+        `SELECT id FROM ${f.table('tf_agent_schedules')} WHERE revoked_at IS NULL AND id = ANY($1::uuid[])`,
+        [[running, paused]],
+      )
+    ).rows,
+    [],
+  );
+  const rows = (await f.state()).workflows;
+  const moved = rows.find(row => row.id === derivedId('schedule', running));
+  assert.equal(moved.enabled, true);
+  assert.equal(moved.sponsor_membership_id, f.member);
+  assert.equal(moved.definition.name, 'Setup helper: Every Monday at 09:00 (Asia/Kolkata)');
+  assert.equal(moved.definition.steps[0].activationId, activationId);
+  assert.equal(moved.definition.steps[0].prompt.value, 'Prepare the weekly update.');
+  const stopped = rows.find(row => row.id === derivedId('schedule', paused));
+  assert.equal(stopped.enabled, false, 'a paused schedule moves without starting');
+  assert.equal(stopped.definition.name, 'Setup helper: Every 2 hours');
+  assert.deepEqual(await createAgentScheduleMigration(f.runtime).migrate(f.w.id), { migrated: 0 });
 });

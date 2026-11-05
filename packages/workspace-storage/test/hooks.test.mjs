@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { defineExtension, registerExtension, resetExtensions } from '@tulipfarm/extensions';
 import { workspaceIdFromSchema, workspaceNames } from '../src/names.ts';
-import { afterCommit, inTransaction } from '../src/transactions.ts';
+import { afterCommit, afterCommitMark, inTransaction } from '../src/transactions.ts';
 import { settleCredits } from '../src/credits.ts';
 import { recordKnowledgeCreditOutcome } from '../src/knowledge-credits.ts';
 
@@ -71,6 +71,20 @@ test('afterCommit runs after COMMIT, drops on rollback, and runs now outside a t
   );
   afterCommit(client, () => order.push('outside'));
   assert.deepEqual(order, ['callback after COMMIT', 'second', 'outside']);
+});
+
+test('afterCommitMark drops only callbacks queued after a rolled-back savepoint', async () => {
+  const client = { query: async () => ({ rows: [] }) };
+  const order = [];
+  await inTransaction(client, async tx => {
+    afterCommit(tx, () => order.push('before savepoint'));
+    const rolledBack = afterCommitMark(tx);
+    afterCommit(tx, () => order.push('rolled back'));
+    rolledBack.drop();
+    afterCommit(tx, () => order.push('after savepoint'));
+    assert.deepEqual(order, []);
+  });
+  assert.deepEqual(order, ['before savepoint', 'after savepoint']);
 });
 
 test('settled credit usage emits usage.recorded after commit only', async () => {

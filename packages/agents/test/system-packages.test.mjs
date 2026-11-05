@@ -340,8 +340,9 @@ test('agent compilation preserves independent limits, grants, skill pins, MCP an
   assert.equal(setup.definition.responseRule, 'tag');
   assert.equal(setup.definition.skills[1].id, 'table-authoring');
   assert.equal(setup.definition.mcp[0].integrationId, selected.mcp.id);
-  assert.equal(setup.schedules[0].sponsorMembershipId, bindings['package-manager'].id);
-  assert.deepEqual(setup.schedules[0].action, agent.schedules[0].action);
+  assert.deepEqual(setup.triggers[0].trigger, agent.schedules[0].trigger);
+  assert.equal(setup.triggers[0].prompt, agent.schedules[0].action.text);
+  assert.deepEqual(setup.triggers[0].limits, agent.schedules[0].action.limits);
 });
 
 test('portable field mappings resolve select options and relationship rows to each installation identity', async () => {

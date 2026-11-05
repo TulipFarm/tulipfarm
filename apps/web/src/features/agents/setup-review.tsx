@@ -8,7 +8,8 @@ import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { ModelOption } from '@/features/models/model-option';
 import { skillApi } from '@/features/skills/api';
 import { useSkillDetail } from '@/features/skills/queries';
-import { cronSummary } from '@/features/workflows/calendar-schedule';
+import { triggerLine, TriggerIcon } from '@/features/workflows/workflow-summary';
+import { describeGitHubTrigger } from '@/features/workflows/definition-description';
 import { AgentDraftSummary } from './builder-preview';
 import { agentApi } from './api';
 import { agentReads } from './queries';
@@ -18,8 +19,8 @@ import { ScopeSummary } from './reference-names';
 import { toolLabels } from './labels';
 import { changingTools } from './tool-picker';
 
-export function setupScheduleLabel(trigger: AgentSetup['schedules'][number]['trigger']) {
-  return trigger.kind === 'interval' ? `Every ${trigger.minutes} minutes` : cronSummary(trigger);
+export function setupTriggerLabel(trigger: AgentSetup['triggers'][number]['trigger']) {
+  return trigger.kind === 'github' ? describeGitHubTrigger(trigger) : triggerLine(trigger);
 }
 
 export function AgentSetupReview({
@@ -63,7 +64,7 @@ export function AgentSetupReview({
         channelNames={setup.slackChannels
           .filter(item => !item.detach)
           .map(item => channelNames[item.channel] ?? item.channel)}
-        scheduleLabels={setup.schedules.map(schedule => setupScheduleLabel(schedule.trigger))}
+        triggerLabels={setup.triggers.map(item => setupTriggerLabel(item.trigger))}
       />
       {!!setup.definition.skills?.length && (
         <section aria-label="Reviewed skills" className="grid gap-2">
@@ -146,19 +147,28 @@ export function AgentSetupReview({
           </p>
         </section>
       )}
-      {!!setup.schedules.length && (
-        <section aria-label="Reviewed scheduled tasks" className="grid gap-3 border-t pt-4 text-sm">
-          <h3 className="font-medium">Scheduled tasks</h3>
-          {setup.schedules.map(schedule => (
-            <div key={schedule.id} className="grid gap-1">
-              <p className="font-medium">{setupScheduleLabel(schedule.trigger)}</p>
-              <p className="whitespace-pre-wrap wrap-anywhere">{schedule.action.text}</p>
-              <p className="text-muted-foreground">
-                {schedule.action.limits.toolCalls} tool calls, {schedule.action.limits.activeMilliseconds / 1000} active
-                seconds, {schedule.action.limits.credits} credits per run.
-              </p>
-            </div>
-          ))}
+      {!!setup.triggers.length && (
+        <section aria-label="Reviewed triggers" className="grid gap-3 border-t pt-4 text-sm">
+          <h3 className="font-medium">Triggers</h3>
+          <p className="text-muted-foreground">
+            Activating creates one workflow per trigger. Each workflow runs this agent with its task.
+          </p>
+          {setup.triggers.map(item => {
+            const limits = item.limits ?? setup.taskLimits;
+            return (
+              <div key={item.id} className="flex gap-3">
+                <TriggerIcon trigger={item.trigger} />
+                <div className="grid min-w-0 gap-1">
+                  <p className="font-medium">{setupTriggerLabel(item.trigger)}</p>
+                  <p className="whitespace-pre-wrap wrap-anywhere">{item.prompt}</p>
+                  <p className="text-muted-foreground">
+                    {limits.toolCalls} tool calls, {limits.activeMilliseconds / 1000} active seconds, {limits.credits}{' '}
+                    credits per run.
+                  </p>
+                </div>
+              </div>
+            );
+          })}
         </section>
       )}
       <Disclosure title="Setup details">

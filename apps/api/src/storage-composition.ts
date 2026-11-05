@@ -99,7 +99,7 @@ export function registerStorageComposition(
   runtime: WorkspaceRuntime | undefined,
   agentModel?: ModelContinuity | null,
   modelFamilyEligibility?: ModelFamilyEligibility,
-  agentSetup?: AgentSetupOptions,
+  configuredAgentSetup?: AgentSetupOptions,
   defaultKnowledge?: ReturnType<typeof defaultKnowledgeStarter>,
 ) {
   if (!runtime) {
@@ -116,6 +116,7 @@ export function registerStorageComposition(
   const wakeTask = taskWake(app, temporal);
   const wakeTaskAction = taskActionWake(app, runtime, wakeTask, wake);
   const githubSubscriptions = createGitHubSubscriptions(dependencies.pool);
+  const agentSetup: AgentSetupOptions = { ...configuredAgentSetup, workflowWake: wake, githubSubscriptions };
   const chatObjects = chatObjectStore();
   registerAuthoringDrafts(app, {
     runtime,
@@ -359,7 +360,7 @@ export function registerStorageComposition(
     approve: googleApproval.approve,
   });
   if (files) registerFilesGoogleCopy(app, { auth: dependencies.auth, files, google });
-  registerTableDispatch(app, { pool: dependencies.pool, runtime, temporal, wakeTask });
+  registerTableDispatch(app, { pool: dependencies.pool, runtime, temporal, wakeTask, agentWorkflows: agentSetup });
   registerConversationDispatch(app, {
     pool: dependencies.pool,
     runtime,

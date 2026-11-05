@@ -26,6 +26,7 @@ import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
 import { AgentSchedules } from '@/features/agents/schedules';
+import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
 import { AgentChat } from '@/features/agents/chat';
 import { AgentArchive, AgentDelete } from '@/features/agents/delete';
 import { AgentActivations } from '@/features/agents/activations';
@@ -550,7 +551,7 @@ function AgentPage({
           <StatePanel
             kind="success"
             title="Agent archived"
-            description="Its activations and schedules have ended. Restore it from Archived on the agents page."
+            description="Its activations have ended and its trigger workflows are archived. Restore it from Archived on the agents page."
           />
         ) : deleted ? (
           <StatePanel
@@ -701,18 +702,19 @@ function AgentPage({
                           {can('manage') && (
                             <li className="grid gap-2 rounded-lg border p-3">
                               <div className="grid gap-1">
-                                <p className="text-sm font-medium text-foreground">Scheduled run</p>
+                                <p className="text-sm font-medium text-foreground">Workflow triggers</p>
                                 <p className="text-sm text-muted-foreground">
-                                  Run a saved prompt or inspect a table on a repeating interval.
+                                  Workflows run this agent on a schedule, from a webhook, or when a connected app
+                                  changes.
                                 </p>
                               </div>
                               <div>
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => open('schedules', 'agent-schedules')}
+                                  onClick={() => open('schedules', 'agent-trigger-workflows')}
                                 >
-                                  Add schedule
+                                  View triggers
                                 </Button>
                               </div>
                             </li>
@@ -769,15 +771,18 @@ function AgentPage({
                   {can('manage') &&
                     panel(
                       'schedules',
-                      <AgentSchedules
-                        api={api}
-                        detail={detail}
-                        workspaceId={workspaceId}
-                        slug={slug}
-                        teams={snapshot.context.teams}
-                        concealed={!ready}
-                        refresh={refresh}
-                      />,
+                      <>
+                        <AgentTriggerWorkflows agentId={id} workspaceId={workspaceId} slug={slug} />
+                        <AgentSchedules
+                          api={api}
+                          detail={detail}
+                          workspaceId={workspaceId}
+                          slug={slug}
+                          teams={snapshot.context.teams}
+                          concealed={!ready}
+                          refresh={refresh}
+                        />
+                      </>,
                     )}
                   {panel(
                     'settings',

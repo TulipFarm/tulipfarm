@@ -1,14 +1,13 @@
 import { useState, type ReactNode, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { AuthoringProposal, DraftView } from '@tulipfarm/agents/draft-contracts';
-import type { PublishAgentSetup } from '@tulipfarm/agents/setup-contracts';
+import { unattendedTrigger, type PublishAgentSetup } from '@tulipfarm/agents/setup-contracts';
 import { Users } from 'reicon-react/icons/Users';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField } from '@tulipfarm/sprout/field';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
-import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { UnsavedChanges } from '@/features/tables/feedback';
-import { AgentSetupReview, setupScheduleLabel } from '@/features/agents/setup-review';
+import { AgentSetupReview, setupTriggerLabel } from '@/features/agents/setup-review';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
 
@@ -34,8 +33,8 @@ export function AgentSetupDraftCard({
   feedback: ReactNode;
   checkStatus: ReactNode;
 }) {
-  const { workspace, membershipId } = workspaceRoute.useRouteContext();
-  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsorScheduleIds: [], replaceChannels: [] });
+  const { workspace } = workspaceRoute.useRouteContext();
+  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsorTriggerIds: [], replaceChannels: [] });
   if (!proposal.input.setup) return null;
   const setup = {
     ...proposal.input.setup,
@@ -46,10 +45,10 @@ export function AgentSetupDraftCard({
   const replacements = setup.slackChannels.filter(
     channel => channel.replaceAgentId && channel.replaceAgentId !== proposal.targetId,
   );
+  const sponsored = setup.triggers.filter(item => unattendedTrigger(item.trigger));
   const ready =
-    setup.schedules.every(
-      schedule => schedule.sponsorMembershipId === membershipId && consent.sponsorScheduleIds.includes(schedule.id),
-    ) && replacements.every(channel => consent.replaceChannels.includes(channel.channel));
+    sponsored.every(item => consent.sponsorTriggerIds.includes(item.id)) &&
+    replacements.every(channel => consent.replaceChannels.includes(channel.channel));
   const updating = proposal.input.expectedSavedRevision !== null;
   const handoff = {
     setupAgentId: proposal.targetId,
@@ -105,6 +104,30 @@ export function AgentSetupDraftCard({
             {receipt?.status === 'active' && (
               <p role="status">Agent active. Its reviewed access and triggers are now in place.</p>
             )}
+            {receipt?.status === 'active' && !!receipt.workflows.length && (
+              <ul aria-label="Workflows that run this agent" className="mt-2 grid gap-1">
+                {receipt.workflows.map((item, index) => {
+                  const trigger = setup.triggers.find(candidate => candidate.id === item.triggerId);
+                  return (
+                    <li key={item.workflowId}>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        nativeButton={false}
+                        render={
+                          <Link
+                            to="/$workspaceSlug/workflows/$workflowId"
+                            params={{ workspaceSlug: workspace.slug, workflowId: item.workflowId }}
+                          />
+                        }
+                      >
+                        {`Workflow ${index + 1}${trigger ? `: ${setupTriggerLabel(trigger.trigger)}` : ''}`}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             {receipt?.status === 'saved' && (
               <p role="status">Draft saved. No new triggers were started. Any earlier active revision is unchanged.</p>
             )}
@@ -135,32 +158,23 @@ export function AgentSetupDraftCard({
       {draft.status === 'pending' && (
         <fieldset disabled={locked} className="grid gap-3">
           <legend className="sr-only">Activation consent</legend>
-          {setup.schedules.map((schedule, index) =>
-            schedule.sponsorMembershipId === membershipId ? (
-              <CheckboxField
-                key={schedule.id}
-                id={`draft-${draft.id}-schedule-${schedule.id}`}
-                label={`I sponsor schedule ${index + 1}: ${setupScheduleLabel(schedule.trigger)}`}
-                helper="Runs use your current permissions and create private tasks."
-                checked={consent.sponsorScheduleIds.includes(schedule.id)}
-                onCheckedChange={checked =>
-                  setConsent(previous => ({
-                    ...previous,
-                    sponsorScheduleIds: checked
-                      ? [...previous.sponsorScheduleIds, schedule.id]
-                      : previous.sponsorScheduleIds.filter(id => id !== schedule.id),
-                  }))
-                }
-              />
-            ) : (
-              <Alert key={schedule.id} variant="destructive">
-                <AlertDescription>
-                  Schedule {index + 1} names another sponsor. Edit in the builder and choose to sponsor it yourself
-                  before activating.
-                </AlertDescription>
-              </Alert>
-            ),
-          )}
+          {sponsored.map((item, index) => (
+            <CheckboxField
+              key={item.id}
+              id={`draft-${draft.id}-trigger-${item.id}`}
+              label={`I sponsor trigger ${index + 1}: ${setupTriggerLabel(item.trigger)}`}
+              helper="Activating creates a workflow that runs this agent with your current permissions and creates private tasks."
+              checked={consent.sponsorTriggerIds.includes(item.id)}
+              onCheckedChange={checked =>
+                setConsent(previous => ({
+                  ...previous,
+                  sponsorTriggerIds: checked
+                    ? [...previous.sponsorTriggerIds, item.id]
+                    : previous.sponsorTriggerIds.filter(id => id !== item.id),
+                }))
+              }
+            />
+          ))}
           {replacements.map((channel, index) => (
             <CheckboxField
               key={channel.channel}

@@ -26,7 +26,10 @@ export function stepValueEntries(step: Step): { value: Value; path: (string | nu
     case 'code':
       return [{ value: step.input, path: ['input'] }];
     case 'agent':
-      return [{ value: step.prompt, path: ['prompt'] }];
+      return [
+        { value: step.prompt, path: ['prompt'] },
+        ...(step.context ? [{ value: step.context, path: ['context'] }] : []),
+      ];
     case 'slack-message':
       return [{ value: step.text, path: ['text'] }];
     case 'http':

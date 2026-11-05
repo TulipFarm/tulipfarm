@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { afterCommitMark, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   AccessDenied,
   canAccessAsset,
@@ -11,9 +11,16 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { WorkflowConflict } from '@tulipfarm/workflows';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
-import { createAgentSchedules } from './schedules.ts';
+import {
+  agentSetupWorkflowId,
+  agentTriggerDefinition,
+  createAgentTriggerWorkflow,
+  requireAgentTriggerCadence,
+  type AgentWorkflowOptions,
+} from './agent-trigger-workflows.ts';
 import { createAgentStore, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError, agentCommandStatusSchema } from './saved-contracts.ts';
 import { requireAgentCreation, requireAgentPermission, withHuman } from './saved-policy.ts';
@@ -29,9 +36,10 @@ import {
   type AgentSetupDraft,
   type AgentSetupReceipt,
   type SaveAgentSetupDraft,
+  unattendedTrigger,
 } from './setup-contracts.ts';
 
-export type AgentSetupOptions = {
+export type AgentSetupOptions = AgentWorkflowOptions & {
   attachSlack?:
     | ((
         transaction: AgentTransaction,
@@ -89,7 +97,7 @@ const draftView = (row: z.infer<typeof draftRowSchema>): AgentSetupDraft => {
   const { requestId: _requestId, expectedVersion: _expectedVersion, ...input } = row.input;
   return agentSetupDraftSchema.parse({ agentId: row.agent_id, version: row.version, digest: row.digest, ...input });
 };
-const receipt = (row: Command): AgentSetupReceipt =>
+const receipt = (row: Command, draft: z.infer<typeof draftRowSchema>): AgentSetupReceipt =>
   agentSetupReceiptSchema.parse({
     commandId: row.id,
     agentId: row.agent_id,
@@ -99,6 +107,13 @@ const receipt = (row: Command): AgentSetupReceipt =>
     savedRevision: row.saved_revision,
     activationId: row.activation_id,
     error: row.error,
+    workflows:
+      row.status === 'active'
+        ? draft.input.setup.triggers.map(selected => ({
+            triggerId: selected.id,
+            workflowId: agentSetupWorkflowId(row.id, selected.id),
+          }))
+        : [],
   });
 export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft) {
   const { requestId: _requestId, expectedVersion, ...reviewed } = input;
@@ -106,13 +121,10 @@ export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft) {
     .update(canonicalJson({ agentId, version: expectedVersion + 1, ...reviewed }))
     .digest('hex');
 }
-export function agentSetupScheduleId(commandId: string, selectedId: string) {
-  const hash = createHash('sha256').update(`${commandId}:${selectedId}`).digest('hex');
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-}
 function setupFailure(error: unknown) {
   if (error instanceof AgentError) return error.code;
   if (error instanceof AccessDenied) return 'setup-access-denied';
+  if (error instanceof WorkflowConflict && /^[a-z0-9-]{1,64}$/.test(error.message)) return `workflow-${error.message}`;
   if (
     error instanceof Error &&
     ['slack-attachment-conflict', 'slack-channel-delivery-disabled'].includes(error.message)
@@ -271,17 +283,14 @@ export function createAgentSetup(
       if (previous) {
         if (previous.agent_id !== agentId || canonicalJson(previous.input) !== canonicalJson(input))
           throw new AgentError('idempotency-conflict');
-        return receipt(previous);
+        return receipt(previous, draft);
       }
       const latest = await loadDraft(tx, actor, agentId);
       if (latest.version !== input.version) throw new AgentError('setup-version-conflict');
       if (input.decision === 'activate') {
-        for (const selected of draft.input.setup.schedules)
-          if (
-            selected.sponsorMembershipId !== actor.membershipId ||
-            !input.consent.sponsorScheduleIds.includes(selected.id)
-          )
-            throw new AgentError('schedule-sponsor-consent-required', 400);
+        for (const selected of draft.input.setup.triggers)
+          if (unattendedTrigger(selected.trigger) && !input.consent.sponsorTriggerIds.includes(selected.id))
+            throw new AgentError('trigger-sponsor-consent-required', 400);
         for (const channel of draft.input.setup.slackChannels) {
           if (channel.detach && channel.replaceAgentId !== agentId) throw new AgentError('slack-detachment-conflict');
           if (
@@ -331,7 +340,7 @@ export function createAgentSetup(
           )
         ).rows[0],
       );
-      return receipt(command);
+      return receipt(command, draft);
     });
   }
   async function apply(
@@ -411,7 +420,7 @@ export function createAgentSetup(
           )
         ).rows[0]?.definition_revision,
       );
-    const activated = await store.activate(workspaceId, actor, {
+    await store.activate(workspaceId, actor, {
       agentId: command.agent_id,
       revision,
       scope: setup.scope,
@@ -419,14 +428,26 @@ export function createAgentSetup(
     });
     for (const id of draft.expectedActivationIds)
       await store.revokeActivation(workspaceId, actor, { agentId: command.agent_id, activationId: id });
-    for (const selected of setup.schedules) {
-      await requireTaskInvocation(tx, actor, command.agent_id);
-      await createAgentSchedules(bound).save(workspaceId, actor.userId, command.agent_id, {
-        ...selected,
-        id: agentSetupScheduleId(command.id, selected.id),
-        activationId: activated.activationId,
-        historyAudience: [],
-      });
+    if (setup.triggers.length) await requireTaskInvocation(tx, actor, command.agent_id);
+    // Each trigger becomes a Workflow that runs this agent; setup no longer gives agents schedules of their own.
+    for (const selected of setup.triggers) {
+      requireAgentTriggerCadence(selected.trigger);
+      await createAgentTriggerWorkflow(
+        tx,
+        bound,
+        workspaceId,
+        actor,
+        {
+          id: agentSetupWorkflowId(command.id, selected.id),
+          agentId: command.agent_id,
+          definition: agentTriggerDefinition(
+            { id: command.agent_id, name: setup.definition.name },
+            { ...selected, limits: selected.limits ?? setup.taskLimits },
+          ),
+          enabled: true,
+        },
+        options,
+      );
     }
     for (const selected of setup.slackChannels) {
       if (!options.attachSlack) throw new AgentError('slack-channel-setup-unavailable', 503);
@@ -456,13 +477,13 @@ export function createAgentSetup(
           : 'read',
       );
       await requireCommandDraftSources(tx, actor, command.definition_command_id);
-      if (!['preparing', 'blocked'].includes(command.status)) return receipt(command);
+      if (!['preparing', 'blocked'].includes(command.status)) return receipt(command, draft);
       const definition = await createAgentAuthoring(boundRuntime(tx, workspaceId), eligible).commandStatus(
         workspaceId,
         actor,
         command.definition_command_id,
       );
-      if (definition.status === 'preparing') return receipt(command);
+      if (definition.status === 'preparing') return receipt(command, draft);
       const saveStatus = definition.status === 'accepted' ? 'saved' : definition.status;
       command = {
         ...command,
@@ -473,6 +494,7 @@ export function createAgentSetup(
       if (saveStatus === 'saved' && command.input.decision === 'activate') {
         // Soul acceptance is durable already. Only the database setup is rolled back on a recoverable failure.
         await tx.client.query('SAVEPOINT tf_agent_setup');
+        const queued = afterCommitMark(tx.client);
         try {
           await apply(tx, workspaceId, actor, command, draftView(draft));
           command.status = 'active';
@@ -480,6 +502,7 @@ export function createAgentSetup(
         } catch (error) {
           await tx.client.query('ROLLBACK TO SAVEPOINT tf_agent_setup');
           await tx.client.query('RELEASE SAVEPOINT tf_agent_setup');
+          queued.drop();
           command.status = 'blocked';
           command.error = setupFailure(error);
         }
@@ -488,7 +511,7 @@ export function createAgentSetup(
         `UPDATE ${relation(tx, 'tf_agent_setup_commands')} SET status=$2,saved_revision=$3,error=$4,updated_at=clock_timestamp() WHERE id=$1`,
         [command.id, command.status, command.saved_revision, command.error],
       );
-      return receipt(command);
+      return receipt(command, draft);
     });
   }
   async function readCommand(workspaceId: string, user: string | HumanActor, commandId: string) {
@@ -498,7 +521,7 @@ export function createAgentSetup(
         draft = await loadDraft(tx, actor, command.agent_id, command.version);
       await authorize(tx, actor, command.agent_id, draft.input, 'read');
       await requireCommandDraftSources(tx, actor, command.definition_command_id);
-      return receipt(command);
+      return receipt(command, draft);
     });
   }
   async function definitionCommand(workspaceId: string, user: string | HumanActor, commandId: string) {

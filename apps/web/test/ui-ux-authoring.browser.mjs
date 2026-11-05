@@ -364,9 +364,9 @@ for (const [name, path, title] of [
   });
 }
 
-test('calendar schedules use days, a time, and a named zone, show the next runs, and keep prompts hourly', async () => {
+test('calendar schedules use days, a time, and a named zone, and show the next runs', async () => {
   const { page, errors, close } = await open(`/acme/agents/${aid}?tab=schedules`);
-  const schedules = page.getByRole('region', { name: 'Agent schedules', exact: true });
+  const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
   await evidence(page, 'a12-calendar-schedule', async () => {
     await schedules.getByRole('button', { name: 'Calendar schedule', exact: true }).click();
     await choose(page, 'Days', 'Monday');
@@ -380,12 +380,6 @@ test('calendar schedules use days, a time, and a named zone, show the next runs,
   await schedules.getByRole('button', { name: 'Advanced schedule', exact: true }).click();
   const cron = schedules.getByLabel('Cron expression', { exact: true });
   assert.equal(await cron.inputValue(), '0 9 * * 1');
-  await cron.fill('*/5 * * * *');
-  await schedules.getByLabel('Prompt', { exact: true }).fill('Summarize overdue invoices.');
-  await schedules.getByRole('button', { name: 'Create prompt schedule', exact: true }).click();
-  await schedules
-    .getByText('Prompt schedules run at most once an hour. Choose runs at least an hour apart.', { exact: true })
-    .waitFor();
   assert.deepEqual(errors, []);
   await close();
 });
