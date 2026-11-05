@@ -16,6 +16,11 @@ import { workspaceRoute } from '@/router';
 import { useOptionalCanvas, type CanvasContent, type CanvasItem } from './canvas-state';
 import { ConversationFileReference } from './file-mentions';
 import { PackageInstallationReply } from '@/features/packages/chat-packages';
+import { proposalStatusLabel } from './approval-dock';
+import { schemaCanvasItem } from './schema-canvas';
+import { proposalTitle } from './table-proposal-card';
+import { useTableProposal } from '@/features/tables/hooks';
+import { proposalApi } from '@/features/tables/proposal-api';
 
 const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCardKind }> = {
   plan: { title: 'Plan', kind: 'Plan' },
@@ -77,19 +82,37 @@ function EmbedAdapter({ props, chatId }: A2uiAdapterProps<{ ref: EmbedReference 
   if (ref.kind === 'package-install') return <PackageInstallationReply url={ref.url} chatId={chatId} />;
   if (ref.kind === 'workspace-file')
     return <ConversationFileReference workspaceId={workspace.id} slug={workspace.slug} fileId={ref.fileId} />;
+  if (ref.kind === 'schema') return <SchemaEmbed workspaceId={workspace.id} chatId={chatId} id={ref.proposalId} />;
   const title = embedTitle(ref);
   const content = embedContent(ref, workspace.id, chatId);
+  const item = content && { id: embedId(ref), title, content };
   return (
     <ResultCard
       title={title}
       kind={embedNames[ref.kind].kind}
       apps={[]}
       status={content ? 'Ready to review.' : 'Open it from the chat.'}
-      action={
-        content && canvas
-          ? { label: 'Open in Canvas', onClick: () => canvas.show({ id: embedId(ref), title, content }) }
-          : undefined
-      }
+      action={item && canvas ? { label: 'Open in Canvas', onClick: () => canvas.show(item) } : undefined}
+    />
+  );
+}
+
+function SchemaEmbed({ workspaceId, chatId, id }: { workspaceId: string; chatId: string; id: string }) {
+  const canvas = useOptionalCanvas();
+  const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
+  const read = useTableProposal(api, { chatId, proposalId: id });
+  // The assistant can reference a proposal that was never saved; there is nothing to show.
+  if (read.state.kind === 'unavailable' && read.state.status === 404) return null;
+  const loaded = read.state.kind === 'ready' ? read.state.data : null;
+  const title = loaded?.content === 'available' ? proposalTitle(loaded.manifest.plans) : embedNames.schema.title;
+  const item = schemaCanvasItem(workspaceId, chatId, id, title);
+  return (
+    <ResultCard
+      title={title}
+      kind="Table"
+      apps={[]}
+      status={loaded ? `${proposalStatusLabel(loaded.status)}.` : 'Loading.'}
+      action={canvas ? { label: 'Open in Canvas', onClick: () => canvas.show(item) } : undefined}
     />
   );
 }

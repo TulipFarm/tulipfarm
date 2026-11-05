@@ -15,6 +15,7 @@ const messages: Record<string, string> = {
     'Affected data or permissions changed. Ask the assistant for a new proposal and review its updated effects.',
   'proposal-expired': 'This proposal expired. Ask the assistant for a new proposal before approving.',
   'proposal-conflict': 'This proposal already has a different decision or command. Check its current status.',
+  'proposal-superseded': 'A newer version of these table changes replaced this one. Review the latest version instead.',
   'proposal-cancelled': 'This proposal is cancelled. Check its status before resuming unfinished work.',
   'proposal-storage-unavailable': 'Table changes are temporarily unavailable. Retry loading this proposal.',
   'table-title-immutable':
