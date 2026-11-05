@@ -103,11 +103,14 @@ export function createRegistryCatalog({
     pages: number;
   } | null = null;
 
+  function isStale() {
+    return !syncedAt || now().getTime() - Date.parse(syncedAt) >= 21600000 || refreshFailed;
+  }
   function snapshot(): RegistrySnapshot {
     return {
-      entries: structuredClone([...entries.values()]),
+      entries: [...entries.values()],
       syncedAt,
-      stale: !syncedAt || now().getTime() - Date.parse(syncedAt) >= 21600000 || refreshFailed,
+      stale: isStale(),
       refreshFailed,
       ...(failureCode ? { failureCode } : {}),
       refreshInProgress: scan !== null,
@@ -242,7 +245,7 @@ export function createRegistryCatalog({
             if (next.size >= maximumEntries) throw new McpNetworkError('catalog-entry-limit');
             const bytes = Buffer.byteLength(JSON.stringify(entry)) + (next.size ? 1 : 0);
             if (current.nextBytes + bytes > maximumSnapshotBytes) throw new McpNetworkError('catalog-byte-limit');
-            next.set(id, entry);
+            next.set(id, Object.freeze(entry));
             current.nextBytes += bytes;
           }
         }
@@ -281,7 +284,7 @@ export function createRegistryCatalog({
     return pending;
   }
   async function refreshIfDue() {
-    return scan || snapshot().stale ? refresh() : snapshot();
+    return scan || isStale() ? refresh() : snapshot();
   }
   return { snapshot, search, refresh, refreshIfDue };
 }

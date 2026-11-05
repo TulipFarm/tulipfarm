@@ -494,7 +494,9 @@ test('Registry publishes atomic latest snapshots, removes absent listings and ke
     ['org/alpha', 'org/beta'],
   );
   const copy = catalog.snapshot();
-  copy.entries[0].name = 'mutated';
+  assert.throws(() => {
+    copy.entries[0].name = 'mutated';
+  }, TypeError);
   assert.equal(catalog.snapshot().entries[0].name, 'org/alpha');
   date = new Date('2026-10-02T06:00:01Z');
   mode = 'replacement';
