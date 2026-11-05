@@ -380,7 +380,9 @@ const modelFailureSchema = z.enum([
 ]);
 type ModelFailure = z.infer<typeof modelFailureSchema>;
 // A retry repeats the same request, so failures caused by the model's setup or the request itself end the turn.
+// A timeout already waited the full model-call limit; the person decides whether to retry or switch models.
 const terminalModelFailures = new Set<ModelFailure>([
+  'model-timeout',
   'model-configuration',
   'model-authentication',
   'model-permission',

@@ -45,7 +45,7 @@ function previousModel(family) {
       : { provider: 'azure', ...common, auth: { kind: 'api-key', value: keys.AZURE_FOUNDRY_API_KEY } };
   const maxOutputTokens = Math.min(4096, model.maxOutputTokens);
   return {
-    route: { ...route, timeoutMs: 45000, maxOutputTokens },
+    route: { ...route, timeoutMs: 120000, maxOutputTokens },
     price: {
       familyId: family,
       modelId: model.id,

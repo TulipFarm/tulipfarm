@@ -281,12 +281,14 @@ test('streamed Grok usage bills reasoning tokens reported outside completion_tok
   assert.deepEqual(metered, [known(32, 23, 8)]);
 });
 
-test('a stream with no usage is metered unknown, counted and logged with its reason', async t => {
+test('a stream with no usage is billed an estimate, counted unknown and logged with its reason', async t => {
   const otel = telemetry(t);
   provider(t, () => stream([content('Hello'), finalContent(null)]));
   const { result, metered } = await reply(azure('deepseek-without-usage'));
   assert.deepEqual(result, { text: 'Hello' });
-  assert.deepEqual(metered, [{ kind: 'unknown' }]);
+  assert.equal(metered.length, 1);
+  assert.equal(metered[0].kind, 'known');
+  assert.ok(metered[0].input > 0 && metered[0].output > 0);
   assert.deepEqual(await otel.metric('gen_ai_client_tokens', 'deepseek-without-usage'), []);
   const usageCounts = await otel.metric('gen_ai_model_usage', 'deepseek-without-usage');
   assert.deepEqual(
@@ -301,13 +303,31 @@ test('a stream with no usage is metered unknown, counted and logged with its rea
   assert.equal(warnings[0]['gen_ai.request.model'], 'deepseek-without-usage');
 });
 
+test('a call the provider never answered settles as rejected so its hold is released', async t => {
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new DOMException('The operation timed out.', 'TimeoutError');
+  });
+  const metered = [];
+  await assert.rejects(
+    inferWithTools(
+      deepseek,
+      [{ role: 'user', text: 'Hi' }],
+      () => assert.fail('No tool expected'),
+      async () => async (value, outcome) => metered.push([value, outcome]),
+    ),
+    { message: 'model-timeout' },
+  );
+  assert.deepEqual(metered, [[{ kind: 'unknown' }, { rejected: true }]]);
+});
+
 test('usage that does not add up is logged as invalid with only its field names and counts', async t => {
   const otel = telemetry(t);
   provider(t, () =>
     stream([content('Hello'), finalContent({ prompt_tokens: 40, completion_tokens: 3, total_tokens: 99, note: 'x' })]),
   );
   const { metered } = await reply(azure('deepseek-invalid-usage'));
-  assert.deepEqual(metered, [{ kind: 'unknown' }]);
+  assert.equal(metered.length, 1);
+  assert.equal(metered[0].kind, 'known');
   const [warning] = otel.logs.filter(log => log['error.type'] === 'usage-unknown');
   assert.equal(warning['usage.unknown_reason'], 'invalid');
   assert.equal(warning['usage.shape'], 'prompt_tokens=40,completion_tokens=3,total_tokens=99,note=string');

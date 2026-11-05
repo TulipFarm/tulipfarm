@@ -254,6 +254,17 @@
                 "description": "Disable reasoning on tool requests the deployment rejects with reasoning on",
                 "type": "boolean"
               },
+              "reasoningEffort": {
+                "description": "Reasoning effort sent on every chat-completions or responses request; use the lowest value the model accepts, such as none, or minimal for models that can't turn reasoning off",
+                "type": "string",
+                "enum": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
               "reasoningTokensInOutput": {
                 "description": "Usage reports reasoning tokens separately from completion tokens; count them as output",
                 "type": "boolean"

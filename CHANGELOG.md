@@ -10,6 +10,16 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- The model capability `reasoningEffort` sets the reasoning effort sent on
+  every request to an OpenAI-compatible model. The shipped catalog sets it to
+  the lowest value each model accepts (`none`, or `minimal` for `grok-4.6` and
+  `low` for `gpt-6-astra`), so replies start sooner and cost less.
+- A model call may now run for 2 minutes, up from 45 seconds, so slow models
+  can finish long replies instead of timing out.
+- Model calls are charged only when the provider answered. A call that timed
+  out or failed before any response, or that the provider refused with an
+  error, costs nothing. An answer without usable token counts is charged an
+  estimate from the request and response size instead of the full reservation.
 - **Breaking:** one model catalog file configures every model. The shipped
   catalog is `packages/config/catalog/models.json`, in the
   [model catalog format](https://tulipfarm.ai/schemas/model-catalog.v1.json).

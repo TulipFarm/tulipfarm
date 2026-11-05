@@ -5,6 +5,7 @@ import {
   modelCapabilities,
   modelCapabilitiesSchema,
   modelImageLimits,
+  reasoningRequestFields,
   modelCatalogFileSchema,
   providerModelCapabilities,
   resolveModelCapabilities,
@@ -18,13 +19,15 @@ const shipped = {
   'claude-sonnet': { toolChoice: 'auto', imageInput: true },
   'claude-opus': { toolChoice: 'auto', imageInput: true },
   'claude-fable': { toolChoice: 'auto', imageInput: true },
-  'gpt-luna': { reasoningOffForTools: true, imageInput: true },
-  'gpt-sol': { reasoningOffForTools: true, imageInput: true },
-  'gpt-astra': { api: 'responses', imageInput: true },
-  grok: { reasoningTokensInOutput: true, imageInput: true },
-  'grok-fast': { reasoningTokensInOutput: true },
-  kimi: { imageInput: true },
-  'kimi-code': { imageInput: true },
+  'gpt-luna': { reasoningEffort: 'none', imageInput: true },
+  'gpt-sol': { reasoningEffort: 'none', imageInput: true },
+  'gpt-astra': { api: 'responses', reasoningEffort: 'low', imageInput: true },
+  grok: { reasoningEffort: 'minimal', reasoningTokensInOutput: true, imageInput: true },
+  'grok-fast': { reasoningEffort: 'none', reasoningTokensInOutput: true },
+  'deepseek-pro': { reasoningEffort: 'none' },
+  'deepseek-flash': { reasoningEffort: 'none' },
+  kimi: { reasoningEffort: 'none', imageInput: true },
+  'kimi-code': { reasoningEffort: 'none', imageInput: true },
   'gemini-flash': { imageInput: true },
   'gemini-pro': { imageInput: true },
 };
@@ -65,6 +68,7 @@ test('unknown models use provider defaults and later layers override earlier one
     ...providerModelCapabilities.azure,
     api: 'responses',
     toolChoice: 'auto',
+    reasoningEffort: 'low',
     imageInput: true,
   });
   assert.equal(modelCapabilities('azure', 'gpt-6-astra', { api: 'chat-completions' }).api, 'chat-completions');
@@ -139,4 +143,22 @@ test('shipped models reserve the per-image token bound their provider documents'
     'gemini-flash': [true, 2240, 5242880],
     'gemini-pro': [true, 2240, 5242880],
   });
+});
+
+test('reasoning effort is sent on every OpenAI-shaped request and rejected elsewhere', () => {
+  const chat = resolveModelCapabilities('azure', { reasoningEffort: 'minimal' });
+  assert.deepEqual(reasoningRequestFields(chat, false), { reasoning_effort: 'minimal' });
+  const responses = resolveModelCapabilities('openai', { api: 'responses', reasoningEffort: 'low' });
+  assert.deepEqual(reasoningRequestFields(responses, true), { reasoning: { effort: 'low' } });
+  const toolsOnly = resolveModelCapabilities('openai', { reasoningOffForTools: true });
+  assert.deepEqual(reasoningRequestFields(toolsOnly, true), { reasoning_effort: 'none' });
+  assert.deepEqual(reasoningRequestFields(toolsOnly, false), {});
+  assert.throws(
+    () => resolveModelCapabilities('anthropic', { reasoningEffort: 'none' }),
+    /does not take a reasoning effort/,
+  );
+  assert.throws(
+    () => resolveModelCapabilities('google', { reasoningEffort: 'none' }),
+    /does not take a reasoning effort/,
+  );
 });

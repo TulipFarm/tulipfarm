@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { modelFamilyIdSchema } from './model-policy-contracts.ts';
+import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 
 export const agentAuthoringLimits = {
   agentName: 120,
@@ -16,8 +17,8 @@ export const agentAuthoringLimits = {
   responseBytes: 262144,
   improvementTokens: 4096,
   previewTokens: 2048,
-  timeoutMs: 45000,
-  abandonedSeconds: 90,
+  timeoutMs: modelCallTimeoutMs,
+  abandonedSeconds: 180,
   workspaceConcurrency: 1,
   workspaceStartsPerMinute: 10,
 } as const;

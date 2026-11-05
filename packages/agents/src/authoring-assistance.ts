@@ -244,7 +244,7 @@ export function createAgentAuthoringAssistance(dependencies: {
       throw error;
     }
     let consumed: InferenceUsage = { kind: 'unknown' },
-      dispatched = false;
+      answered = false;
     let answer: { text: string; actualModel: string } | undefined, failure: unknown;
     try {
       checkSignal(signal);
@@ -254,7 +254,7 @@ export function createAgentAuthoringAssistance(dependencies: {
           consumed = value;
         },
         () => {
-          dispatched = true;
+          answered = true;
         },
       );
       checkSignal(signal);
@@ -264,7 +264,8 @@ export function createAgentAuthoringAssistance(dependencies: {
     let credits: number;
     const observed = consumed as InferenceUsage;
     try {
-      let cost: string | null = dispatched ? null : '0';
+      // The provider charges only for requests it answered.
+      let cost: string | null = answered ? null : '0';
       if (
         observed.kind === 'known' &&
         !(failure instanceof AgentAuthoringError && failure.code === 'provider-model-mismatch')

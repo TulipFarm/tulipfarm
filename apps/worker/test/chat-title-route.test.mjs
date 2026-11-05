@@ -26,7 +26,7 @@ test('chat titles default to the priced Claude Haiku route with a small output l
     endpoint: 'https://api.anthropic.com/',
     model: 'claude-haiku-4-5',
     apiKey: 'synthetic-key',
-    timeoutMs: 45000,
+    timeoutMs: 120000,
     maxOutputTokens: 256,
   });
 });

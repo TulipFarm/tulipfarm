@@ -177,8 +177,8 @@
         "imageInputTokens": 3000
       },
       "capabilities": {
-        "reasoningOffForTools": true,
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "none"
       },
       "pricing": [
         {
@@ -228,8 +228,8 @@
         "imageInputTokens": 3000
       },
       "capabilities": {
-        "reasoningOffForTools": true,
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "none"
       },
       "pricing": [
         {
@@ -280,7 +280,8 @@
       },
       "capabilities": {
         "api": "responses",
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "low"
       },
       "pricing": [
         {
@@ -335,7 +336,10 @@
       ],
       "notes": [
         "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'"
-      ]
+      ],
+      "capabilities": {
+        "reasoningEffort": "none"
+      }
     },
     {
       "id": "deepseek-flash",
@@ -364,7 +368,10 @@
       ],
       "notes": [
         "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'"
-      ]
+      ],
+      "capabilities": {
+        "reasoningEffort": "none"
+      }
     },
     {
       "id": "grok",
@@ -388,7 +395,8 @@
       },
       "capabilities": {
         "reasoningTokensInOutput": true,
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "minimal"
       },
       "pricing": [
         {
@@ -437,7 +445,8 @@
         "maxOutputTokens": 8192
       },
       "capabilities": {
-        "reasoningTokensInOutput": true
+        "reasoningTokensInOutput": true,
+        "reasoningEffort": "none"
       },
       "pricing": [
         {
@@ -474,7 +483,8 @@
         "maxOutputTokens": 262144
       },
       "capabilities": {
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "none"
       },
       "pricing": [
         {
@@ -509,7 +519,8 @@
         "maxOutputTokens": 262144
       },
       "capabilities": {
-        "imageInput": true
+        "imageInput": true,
+        "reasoningEffort": "none"
       },
       "pricing": [
         {

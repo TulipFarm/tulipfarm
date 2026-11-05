@@ -459,7 +459,7 @@ const assemblers: Record<StreamFormat, () => Assembler> = {
 export async function readModelResponse(
   response: Response,
   format: StreamFormat | null,
-  options: { onText: ((text: string) => void) | undefined; onFirstToken?: () => void },
+  options: { onText: ((text: string) => void) | undefined; onFirstToken?: () => void; onEvent?: () => void },
 ): Promise<StreamedResponse> {
   if (
     !format ||
@@ -472,6 +472,7 @@ export async function readModelResponse(
   let shown = '';
   let firstToken = false;
   for await (const event of serverSentEvents(response.body)) {
+    options.onEvent?.();
     if (assembler.push(event) && !firstToken) {
       firstToken = true;
       options.onFirstToken?.();
