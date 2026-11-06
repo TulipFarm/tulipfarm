@@ -10,6 +10,15 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- A model call may now write up to 16,384 output tokens, up from 4,096, within
+  each model's own limit, so large replies such as a multi-table proposal no
+  longer stop at the response limit. Credit holds grow to match; unused credit
+  is still released.
+- Chat tool search loads at most 32 KB of tool definitions per search, besides
+  its best match. Common words such as "create" or "propose" only rank tools
+  that match a more specific word, and smaller definitions win ties, so a
+  search no longer loads large unrelated integration tools that slowed every
+  later step of the reply.
 - The model capability `reasoningEffort` sets the reasoning effort sent on
   every request to an OpenAI-compatible model. The shipped catalog sets it to
   the lowest value each model accepts (`none`, or `minimal` for `grok-4.6` and

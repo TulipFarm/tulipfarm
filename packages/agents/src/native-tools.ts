@@ -122,6 +122,20 @@ const coreChatTools = new Set(
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';
+/** Most schema bytes one `tools_search` loads, beyond its best match and the agent-authoring set. */
+export const discoveryBytes = 32 * 1024;
+/** Query words too common in tool names and descriptions to choose a tool on their own. */
+const genericSearchWords = new Set(
+  'a an the and or of to for in on with by from my our this that tool tools new create add make build get read list show view find look fetch update edit change set modify delete remove propose draft write save run use manage do'.split(
+    ' ',
+  ),
+);
+const schemaSizes = new WeakMap<NativeTool, number>();
+function schemaBytes(tool: NativeTool) {
+  let bytes = schemaSizes.get(tool);
+  if (bytes === undefined) schemaSizes.set(tool, (bytes = Buffer.byteLength(JSON.stringify(tool))));
+  return bytes;
+}
 const searchSchema = z.strictObject({ query: z.string().trim().min(1).max(200) });
 
 export type ChatCatalog = NativeCatalog & {
@@ -176,15 +190,19 @@ export function nativeChatTools(
             .filter(Boolean)
         : [];
       const exact = words.join('_');
-      const score = (tool: NativeTool) =>
-        tool.name.toLowerCase() === exact
-          ? 1000
-          : words.reduce(
-              (total, word) =>
-                total +
-                (tool.name.toLowerCase().includes(word) ? 10 : tool.description.toLowerCase().includes(word) ? 1 : 0),
-              0,
-            );
+      const topical = words.filter(word => !genericSearchWords.has(word));
+      const key = topical.length ? topical : words;
+      const score = (tool: NativeTool) => {
+        const name = tool.name.toLowerCase();
+        if (name === exact) return 1000;
+        const description = tool.description.toLowerCase();
+        const matched = key.reduce(
+          (total, word) => total + (name.includes(word) ? 10 : description.includes(word) ? 1 : 0),
+          0,
+        );
+        // Generic words such as "create" only order tools that already match a topical word.
+        return matched && matched + words.filter(word => !key.includes(word) && name.includes(word)).length;
+      };
       const authoring =
         words.some(word => word === 'agent' || word === 'agents') &&
         words.some(word => ['create', 'new', 'setup', 'build', 'author'].includes(word))
@@ -195,12 +213,20 @@ export function nativeChatTools(
       const authoringTools = authoring.flatMap(name =>
         deferred.filter(tool => tool.name === name && !loaded.has(name)),
       );
-      const hits = [
-        ...authoringTools,
-        ...deferred
-          .filter(tool => !loaded.has(tool.name) && !authoringTools.includes(tool) && score(tool) > 0)
-          .sort((left, right) => score(right) - score(left)),
-      ].slice(0, 8);
+      const ranked = deferred
+        .filter(tool => !loaded.has(tool.name) && !authoringTools.includes(tool))
+        .map(tool => ({ tool, score: score(tool), bytes: schemaBytes(tool) }))
+        .filter(entry => entry.score > 0)
+        .sort((left, right) => right.score - left.score || left.bytes - right.bytes);
+      // Every loaded schema is resent on each later step, so one search adds a bounded amount; the best match always loads.
+      const hits = [...authoringTools];
+      let bytes = authoringTools.reduce((total, tool) => total + schemaBytes(tool), 0);
+      for (const entry of ranked) {
+        if (hits.length >= 8) break;
+        if (hits.length && bytes + entry.bytes > discoveryBytes) continue;
+        hits.push(entry.tool);
+        bytes += entry.bytes;
+      }
       for (const tool of hits) loaded.add(tool.name);
       return hits.map(tool => tool.name);
     },

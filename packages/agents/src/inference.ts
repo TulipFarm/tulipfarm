@@ -5,6 +5,7 @@ import {
   modelEndpointProblem,
   modelCapabilities,
   modelCapabilitiesSchema,
+  modelCallOutputTokenLimit,
   modelImageLimits,
   reasoningRequestFields,
   type ModelCapabilities,
@@ -109,7 +110,7 @@ const routeFields = {
   endpoint: z.url(),
   model: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/),
   timeoutMs: z.number().int().min(1).max(modelCallTimeoutMs).default(modelCallTimeoutMs),
-  maxOutputTokens: z.number().int().min(1).max(4096).default(4096),
+  maxOutputTokens: z.number().int().min(1).max(modelCallOutputTokenLimit).default(4096),
   capabilities: modelCapabilitiesSchema.optional(),
 };
 export const inferenceRouteSchema = z

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { nativeChatTools, nativeToolName } from '../src/native-tools.ts';
+import { discoveryBytes, nativeChatTools, nativeToolName } from '../src/native-tools.ts';
 import { createMcpCatalog } from '../src/mcp-catalog.ts';
 import { chatCallSchema, discoverTools, toolDescription } from '../src/tools.ts';
 import { mcpName } from './native-fixture.mjs';
@@ -197,6 +197,24 @@ test('ordinary row work offers inspection and one bounded batch create without d
 test('discovery ranks an exact tool name ahead of description-only matches', () => {
   const catalog = nativeChatTools(undefined, false, new Set());
   assert.equal(catalog.search('rows.create')[0], 'rows_create');
+});
+
+test('discovery loads a bounded set of definitions and skips large unrelated tools', () => {
+  const loaded = new Set();
+  const catalog = nativeChatTools(undefined, false, loaded);
+  const names = catalog.search('create tables propose');
+  assert.equal(names[0], 'tables_propose');
+  for (const name of ['google_propose', 'github_personal_propose', 'atlassian_propose'])
+    assert.ok(!names.includes(name), name);
+  const bytes = nativeChatTools(undefined, false, new Set(names))
+    .tools.filter(tool => names.includes(tool.name))
+    .reduce((total, tool) => total + Buffer.byteLength(JSON.stringify(tool)), 0);
+  assert.ok(bytes <= discoveryBytes, `${bytes} bytes`);
+});
+
+test('discovery still loads a large tool named exactly', () => {
+  const names = nativeChatTools(undefined, false, new Set()).search('github personal propose');
+  assert.deepEqual(names, ['github_personal_propose']);
 });
 
 test('repeated catalogs reuse tool schemas without sharing mutations or going stale', () => {

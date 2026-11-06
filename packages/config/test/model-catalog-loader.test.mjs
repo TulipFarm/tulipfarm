@@ -74,13 +74,13 @@ test('the first route with its key serves a model', () => {
 
 test('shipped bundles keep the ids and contents the previous configuration produced', () => {
   const ids = {
-    'server-bcf05d7d723237b91d5708d36afb8813c6d5202ad261740315342f617302adb2': anthropic,
-    'server-67f61aa0a90b75e4f8835fc99fe147b7d677642edba3cb3310758b893a6dc95c': azure,
-    'server-f81c2d7415f2bcbb1d340f4b33abf1f80d0d3bf9e7cad78a33970180dc831caa': {
+    'server-df252f852c308e4b4cbf30d9bfcd9493d6ba5d96aea8b3ab0fe8dbdf7ceff75c': anthropic,
+    'server-32997cfa52952018391f4bbce8fd0aad1cb3e6dcdcd4d5b285abbad585fe8773': azure,
+    'server-213b84957e410b090951a6a1cd90e3c74c835b327acf7b7c4a1c428fb6c32ab5': {
       OPENAI_API_KEY: 'test-key',
       XAI_API_KEY: 'test-key',
     },
-    'server-8f5cfc715bbe6c233be7f45f0c602fce9b67cfc1c02844c48d4b2a5c5e8b7398': {
+    'server-925e080139216a2494f888c320debd4d52ed4564087b78210ae038b7be9292a6': {
       ...anthropic,
       ...azure,
       OPENAI_API_KEY: 'test-key',

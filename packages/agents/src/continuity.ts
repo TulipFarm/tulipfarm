@@ -6,6 +6,7 @@ import {
   calculateModelCost,
   estimateInputTokens,
   modelBundleSchema,
+  modelCallOutputTokenLimit,
   modelUsageSchema,
   parseModelResolution,
   resolvedModelShapeSchema,
@@ -275,7 +276,7 @@ function reservation(resolution: ResolvedModel, date: string, trustedBundle: Mod
       if (!resolution.rates.some(rate => rate.usdPerMillionTokens[category] !== undefined)) continue;
       const tokens = {
         input: 0,
-        output: Math.min(4096, resolution.route.maxOutputTokens),
+        output: Math.min(modelCallOutputTokenLimit, resolution.route.maxOutputTokens),
         cacheRead: 0,
         cacheWrite: 0,
         cacheWrite5m: 0,
