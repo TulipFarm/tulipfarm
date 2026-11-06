@@ -114,8 +114,6 @@ export function createSlackDefault(
     compactor?: ConversationCompactor | undefined;
     /** Links each row card to the row in the web app. */
     rowLink?: SlackRowLink | undefined;
-    /** The chat's address in the web app, linked from a laid-out reply. Only its requester can open it. */
-    chatLink?: ((workspaceId: string, conversationId: string) => Promise<string | undefined>) | undefined;
   },
 ) {
   const { runtime, channels } = options;
@@ -694,7 +692,6 @@ export function createSlackDefault(
         token,
         canvas: row.scopes.includes(slackCanvasScope),
         audience: destination.kind === 'ChannelAllowed' ? { channel } : { user: row.request_snapshot.user },
-        app: await options.chatLink?.(workspaceId, row.conversation_id),
         echo: scheduled
           ? `:alarm_clock: Follow-up for <@${row.request_snapshot.user}>: ${scheduled.instruction.slice(0, 500)}`
           : row.followup
