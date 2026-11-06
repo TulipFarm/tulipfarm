@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { backgroundSweeps, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweeps, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import { WorkflowNotFoundError } from '@temporalio/client';
 import type { createWorkflows } from '@tulipfarm/workflows';
 import { businessWorkflowId, wakeSignal, type Work } from '@tulipfarm/workflows/contracts';
@@ -78,6 +78,11 @@ export function registerWorkflowDispatch(
   }
   backgroundSweeps(app, [
     { run: sweep, failure: 'Workflow sweep will retry', job: 'workflow-dispatch' },
-    { run: providerSweep, failure: 'Provider sweep will retry', job: 'provider-dispatch' },
+    {
+      run: providerSweep,
+      failure: 'Provider sweep will retry',
+      job: 'provider-dispatch',
+      intervalMs: sweepIntervals.recovery,
+    },
   ]);
 }

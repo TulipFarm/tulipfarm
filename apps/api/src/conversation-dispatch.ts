@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import { createConversationDispatch, defaultDispatchGraceMs } from '@tulipfarm/conversations/dispatch';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { createTemporalClient } from './temporal.ts';
@@ -166,5 +166,7 @@ export function registerConversationDispatch(
     }
     if (rows.length < 100) after = null;
   }
-  backgroundSweep(app, sweep, 'Conversation discovery will retry', 'conversation-discovery');
+  backgroundSweep(app, sweep, 'Conversation discovery will retry', 'conversation-discovery', {
+    intervalMs: sweepIntervals.recovery,
+  });
 }

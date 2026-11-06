@@ -5,7 +5,7 @@ import type { SlackKnowledge } from '@tulipfarm/knowledge';
 import { slackKnowledgeWorkSchema, type SlackKnowledgeWork } from '@tulipfarm/knowledge/slack-contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function startSlackKnowledgeWorkflow(
@@ -59,5 +59,6 @@ export function registerSlackKnowledgeDispatch(
     },
     'Slack Knowledge discovery will retry',
     'knowledge-slack-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

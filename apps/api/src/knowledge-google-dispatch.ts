@@ -5,7 +5,7 @@ import type { GoogleKnowledge } from '@tulipfarm/knowledge';
 import { googleKnowledgeWorkSchema, type GoogleKnowledgeWork } from '@tulipfarm/knowledge/google-contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function startGoogleKnowledgeWorkflow(
@@ -59,5 +59,6 @@ export function registerGoogleKnowledgeDispatch(
     },
     'Google Knowledge discovery will retry',
     'knowledge-google-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

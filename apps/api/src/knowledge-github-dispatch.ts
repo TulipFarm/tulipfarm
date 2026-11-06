@@ -10,7 +10,7 @@ import {
 } from '@tulipfarm/knowledge/github-contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createKnowledgeSyncMetrics, recordDispatchSkip } from '@tulipfarm/observability';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function startGitHubKnowledgeWorkflow(
@@ -98,5 +98,6 @@ export function registerGitHubKnowledgeDispatch(
     },
     'GitHub Knowledge discovery will retry',
     'knowledge-github-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

@@ -398,7 +398,7 @@ each. Search makes no GitHub requests.
 
 ### Dispatch
 
-The API sweep starts due sources (20 per check) every two seconds. A workspace
+The API sweep starts due sources (20 per check) every 30 seconds. A workspace
 whose storage version the API cannot use is skipped and counted in
 `cloud_dispatch_skipped_workspaces` (labels `dispatcher` and
 `reason=incompatible_version`; no workspace label).

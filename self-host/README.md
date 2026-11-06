@@ -113,7 +113,9 @@ Document parsers always run at the lowest CPU priority.
 ## Separate API jobs
 
 By default the API also runs its scheduled background sweeps, which start chat
-replies, workflows, knowledge syncs and other queued work every 2 seconds. They
+replies, workflows, knowledge syncs and other queued work. Sweeps that someone
+waits on run every 2 seconds, recovery sweeps every 10 seconds, and knowledge
+and recommendation syncs every 30 seconds. They
 share the API's workspace-storage connections with requests. To keep them
 apart, run the same API image twice: one with `TULIPFARM_API_ROLE=requests`,
 which receives all traffic and starts no sweeps, and one with

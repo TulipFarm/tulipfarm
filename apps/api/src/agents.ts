@@ -132,7 +132,7 @@ export function registerAgents(
     );
     after = rows.length < 20 ? null : (rows.at(-1)?.workspace_id ?? null);
   }
-  backgroundSweep(app, sweepChat, 'Agent chat discovery will retry', 'agent-chat-discovery', false);
+  backgroundSweep(app, sweepChat, 'Agent chat discovery will retry', 'agent-chat-discovery', { immediate: false });
   let setupAfter: string | null = null;
   backgroundSweep(
     app,
