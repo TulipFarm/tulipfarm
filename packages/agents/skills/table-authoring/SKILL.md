@@ -31,7 +31,7 @@ New table plans need:
 - `expectedRevision: null` and `dependsOn: []`.
 - A complete `formatVersion: 2` target with `id`, `owningTeamId`, `label`, `fields`, and `uniqueKeys`.
 - `transforms: {outputs: []}`.
-- New UUIDs for the table and each field. `target.id` must equal `tableId`.
+- New UUIDs for the table and each field, copied from `newIds` in `schema.context`, never invented. `target.id` must equal `tableId`.
 - Team IDs copied from discovery, never invented.
 - On each field: `id`, `label`, `kind`, `required`, plus every property that its kind requires in the schema.
 

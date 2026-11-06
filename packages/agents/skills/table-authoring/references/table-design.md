@@ -55,7 +55,7 @@ Do not add a field for a value that is computed from other fields, such as quant
 | Yes or no                   | `boolean`       |                                                                                                      |
 | Calendar day without a time | `date`          | Due dates and birthdays.                                                                             |
 | Exact moment                | `timestamp`     | `timezone` is always `"UTC"`.                                                                        |
-| One value from a fixed list | `single-select` | Status, priority, category. Each option is `{id, label, retired:false}` with a new UUID.             |
+| One value from a fixed list | `single-select` | Status, priority, category. Each option is `{id, label, retired:false}` with a UUID from `newIds`.   |
 | Several values from a list  | `multi-select`  | Tags and labels.                                                                                     |
 | A row in another table      | `relationship`  | Customer, project, assignee in a People table. The target table must exist or be in an earlier plan. |
 | Attachments                 | `file`          | Screenshots, contracts.                                                                              |

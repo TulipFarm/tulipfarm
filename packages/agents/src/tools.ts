@@ -614,7 +614,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.list':
     'List accessible tables with their applied schemas for whoever may operate on them; use tables.definitions for schema-authoring catalog entries. Returns a permission-filtered page ordered by table ID (limit 1–100, default 25; continue with after), total, and nextCursor—not rows or archived tables.',
   'schema.context':
-    'Read table-authoring context before proposing a schema: eligible owning teams, existing tables, and capabilities for an optional table. Results do not create anything; null capabilityTableId is not a denial. Read skills.read(table-authoring) for payload rules rather than inferring them from this context.',
+    'Read table-authoring context before proposing a schema: eligible owning teams, existing tables, capabilities for an optional existing table, and newIds, fresh UUIDs to use for new tables, fields and options. Omit tableId for a new table; tableFound false means the id is not an existing table you can see. Results do not create anything; null capabilityTableId is not a denial. Read skills.read(table-authoring) for payload rules rather than inferring them from this context.',
   'schema.inspect':
     'Inspect one table’s saved and applied schema revisions, fields, and migration state, plus its query capabilities: each field’s id, RSQL selector, operators, sort and group support, and link target. Call it before rows.list or rows.summarize. Returns schema and status, not row data and not a change.',
   'schema.status':
@@ -1188,6 +1188,13 @@ export function createChatTools(
                 : [{ path: [], code: 'invalid-json', message: 'Input is not valid JSON' }],
             instruction:
               'No proposal was created. This is not a permission denial. Read skills.read(table-authoring) for proposalInputSchema, correct the JSON payload at the reported paths, and submit a new proposal for review.',
+            ...(error instanceof z.ZodError && error.issues.some(issue => issue.code === 'invalid_format')
+              ? {
+                  newIds: freshIds(),
+                  idInstruction:
+                    'Replace each invalid id with an unused UUID from newIds, using the same replacement everywhere that id is referenced. Never invent UUIDs.',
+                }
+              : {}),
           };
         }
         return createChatTableProposals(runtime, objects).propose(workspaceId, actor, callId, context.origin, input);
@@ -1255,7 +1262,7 @@ export function createChatTools(
       case 'tables.list':
         return resources.list(workspaceId, actor, { after: call.after, limit: call.limit });
       case 'schema.context':
-        return resources.authoringContext(workspaceId, actor, call.tableId);
+        return { ...(await resources.authoringContext(workspaceId, actor, call.tableId)), newIds: freshIds() };
       case 'rows.get':
         return resources.getRecord(workspaceId, actor, call.tableId, call.expectedAppliedRevision, call.recordId);
       case 'agents.list':
@@ -2907,6 +2914,8 @@ const memberErrorInstructions: Record<z.infer<typeof workspaceMemberErrorCodeSch
   'member-profile-pending': 'Member profiles are still syncing. Tell the user and do not retry in this reply.',
   'member-profile-failed': 'Member profiles failed to sync. Tell the user and do not retry in this reply.',
 };
+/** Fresh UUIDs for new table, field and option ids, because models often write malformed ones. */
+const freshIds = () => Array.from({ length: 32 }, () => randomUUID());
 const generationErrorInstructions: Partial<Record<string, string>> = {
   'stale-generation': 'The table schema changed. Call schema.inspect again, then retry with the new applied revision.',
   'duplicate-key': 'Another row already has the same value in a unique field. Use or update that row instead.',
