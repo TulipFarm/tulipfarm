@@ -8,6 +8,7 @@ import {
   PeriodicExportingMetricReader,
 } from '@opentelemetry/sdk-metrics';
 import {
+  errorSite,
   errorType,
   fallbackEligibleClasses,
   ModelCallError,
@@ -15,6 +16,7 @@ import {
   modelErrorClass,
   modelFailureClasses,
   modelErrorClasses,
+  log,
   observeInference,
   recordModelFallback,
   sanitizeProviderMessage,
@@ -186,4 +188,27 @@ test('a usage shape keeps only lowercase field names and counts', () => {
   assert.equal(usageShape(undefined), undefined);
   assert.equal(usageShape('PRIVATE'), undefined);
   assert.equal(usageShape({}), undefined);
+});
+
+test('error.site logs where an error was thrown and nothing else', async t => {
+  function refuseSend() {
+    return new Error('Resource not found: PRIVATE text');
+  }
+  const site = errorSite(refuseSend());
+  assert.match(site, /^refuseSend@model-errors\.test:\d+ < /);
+  assert.equal(errorSite('not an error'), undefined);
+  const records = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (typeof chunk === 'string' && chunk.startsWith('{"level":')) {
+      records.push(JSON.parse(chunk));
+      return true;
+    }
+    return write(chunk, ...args);
+  });
+  log('warn', 'tool', 'call_failed', { 'error.site': site });
+  log('warn', 'tool', 'call_failed', { 'error.site': 'Resource not found: PRIVATE text' });
+  assert.equal(records[0]['error.site'], site);
+  assert.equal(records[1]['error.site'], undefined);
+  assert.ok(!JSON.stringify(records).includes('PRIVATE'));
 });

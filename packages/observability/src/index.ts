@@ -270,7 +270,10 @@ const logOnlyAttributes = new Set([
   'github.ratelimit_resource',
   'completion.reason',
   'layout.reason',
+  'error.site',
 ]);
+// Where an error was thrown: up to eight "function@file:line" frames from TulipFarm's own code, innermost first.
+const errorSitePattern = /^[\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}( < [\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}){0,7}$/;
 // A stored Slack event's own row id: it locates the event in the database and carries no Slack content.
 const rowIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -308,6 +311,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'completion.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
     // Why a reply layout was rejected: the validator's rule, with quoted values removed.
     if (key === 'layout.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
+    if (key === 'error.site') return typeof value === 'string' && errorSitePattern.test(value);
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
@@ -819,6 +823,24 @@ const severity = {
   error: SeverityNumber.ERROR,
 };
 const backgroundContext = new AsyncLocalStorage<{ job: string; entryPoint: 'scheduler'; run_id: string }>();
+
+/** The "function@file:line" frames of an error's stack from TulipFarm's own code, for the log-only `error.site`. */
+export function errorSite(error: unknown): string | undefined {
+  if (!(error instanceof Error) || !error.stack) return undefined;
+  const frames = [];
+  for (const line of error.stack.split('\n').slice(1)) {
+    const match = /^\s*at (?:async )?(?:([\w$.<>-]+) )?\(?(?:file:\/\/)?([^()\s]+):(\d+):\d+\)?$/.exec(line);
+    if (!match || /node_modules|^node:/.test(match[2]!)) continue;
+    const file = match[2]!
+      .split('/')
+      .slice(-1)[0]!
+      .replace(/\.[cm]?[jt]s$/, '');
+    frames.push(`${(match[1] ?? 'anonymous').slice(-80)}@${file.slice(0, 80)}:${match[3]}`);
+    if (frames.length === 8) break;
+  }
+  const site = frames.join(' < ');
+  return errorSitePattern.test(site) ? site : undefined;
+}
 
 export function errorType(error: unknown) {
   return safeErrorType(error);
