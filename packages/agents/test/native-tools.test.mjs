@@ -202,8 +202,9 @@ test('discovery ranks an exact tool name ahead of description-only matches', () 
 test('discovery loads a bounded set of definitions and skips large unrelated tools', () => {
   const loaded = new Set();
   const catalog = nativeChatTools(undefined, false, loaded);
-  const names = catalog.search('create tables propose');
-  assert.equal(names[0], 'tables_propose');
+  assert.ok(catalog.tools.some(tool => tool.name === 'tables_propose'));
+  const names = catalog.search('import tables file');
+  assert.equal(names[0], 'tables_import_file');
   for (const name of ['google_propose', 'github_personal_propose', 'atlassian_propose'])
     assert.ok(!names.includes(name), name);
   const bytes = nativeChatTools(undefined, false, new Set(names))
