@@ -571,6 +571,10 @@ export function createConversationExecutor(
   secrets?: ConversationSecrets,
   resumeApiCall?: ResumeApiCall,
 ) {
+  // Matches the durable replay rule in prepare: these chats store every tool receipt, so a turn can resume its model.
+  const replayable = (chat: { slack: unknown; context: unknown }) =>
+    Boolean(resumeMcp || resumeApiCall) && !chat.slack && !chat.context;
+
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
       runtime.transaction(workspaceId, { minimum: 1, maximum: commonCompatibility.maximum }, async tx => {
@@ -795,11 +799,15 @@ export function createConversationExecutor(
         await changed(tx, work, true);
         return null;
       }
+      // A replayable chat waits only on a send still in flight; a settled send replays from its stored receipt.
       if (
         (
-          await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_conversation_actions')} WHERE turn_id=$1`, [
-            turn.id,
-          ])
+          await tx.client.query(
+            replayable(chat)
+              ? `SELECT 1 FROM ${table(tx, 'tf_slack_conversation_actions')} a JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=a.id WHERE a.turn_id=$1 AND c.status='running'`
+              : `SELECT 1 FROM ${table(tx, 'tf_slack_conversation_actions')} WHERE turn_id=$1`,
+            [turn.id],
+          )
         ).rowCount
       ) {
         await tx.client.query(
@@ -2906,6 +2914,36 @@ export function createConversationExecutor(
                   if (!resumeExternal) return 'idle';
                   const action = await resumeExternal(work.workspaceId, work.turnId);
                   if (['pending', 'retry', 'sending', 'approved'].includes(action.status)) return 'idle';
+                  const output = { provider: 'slack', id: action.id, status: action.status };
+                  const continued = await transaction(work.workspaceId, async tx => {
+                    const chat = await root(tx, work);
+                    if (!chat || !replayable(chat)) return false;
+                    const turn = await head(tx, work.conversationId);
+                    if (
+                      !turn ||
+                      turn.id !== work.turnId ||
+                      turn.status !== 'waiting' ||
+                      turn.generation !== work.generation
+                    )
+                      return false;
+                    await tx.client.query(
+                      `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status=$2 WHERE id=$1 AND status='running'`,
+                      [action.id, action.status === 'sent' ? 'completed' : 'failed'],
+                    );
+                    await tx.client.query(
+                      `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=jsonb_build_object('result',$2::jsonb,'sources',sources)
+            WHERE call_id=$1 AND output IS NULL`,
+                      [action.id, JSON.stringify(output)],
+                    );
+                    await tx.client.query(
+                      `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                      [work.turnId],
+                    );
+                    await changed(tx, work);
+                    return true;
+                  });
+                  // The model continues from the send's receipt and writes its own reply.
+                  if (continued) return undefined;
                   return {
                     finish: () =>
                       transaction(work.workspaceId, async tx => {
@@ -2926,7 +2964,7 @@ export function createConversationExecutor(
                         await tx.client.query(
                           `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=jsonb_build_object('result',$2::jsonb,'sources',sources)
             WHERE call_id=$1 AND output IS NULL`,
-                          [action.id, JSON.stringify({ provider: 'slack', id: action.id, status: action.status })],
+                          [action.id, JSON.stringify(output)],
                         );
                         const nextPlan = await planning?.finish?.(tx, { ...work, epoch: turn.attempt_epoch });
                         if (nextPlan?.kind === 'continue') {

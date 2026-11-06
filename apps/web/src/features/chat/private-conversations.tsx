@@ -751,7 +751,13 @@ function ConversationDetail({
     posting.current = true;
     const messageId = crypto.randomUUID();
     // Each integration chip keeps naming the account the message was sent with, even after a later switch.
-    const accounts = keywordAccounts(shown.doc as RichTextValue, integrations.keywords);
+    const accounts = Object.fromEntries(
+      Object.entries(keywordAccounts(shown.doc as RichTextValue, integrations.keywords)).map(([id, account]) => [
+        id,
+        integrations.keywords.find(keyword => keyword.id === id)?.accounts?.find(option => option.id === account)
+          ?.label ?? account,
+      ]),
+    );
     if (Object.keys(accounts).length) {
       shown = { ...shown, accounts };
       parts = parts.map(part =>
@@ -1955,7 +1961,7 @@ function ConversationTools({
             ['slack.message.send', 'slack.thread.reply', 'slack.reaction.add'].includes(tool.tool),
         )
         .map(tool => (
-          <SlackAction key={tool.id} api={slack} id={tool.id} refresh={changed} />
+          <SlackAction key={tool.id} api={slack} id={tool.id} refresh={changed} running={tool.status === 'running'} />
         ))}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.followUpId)

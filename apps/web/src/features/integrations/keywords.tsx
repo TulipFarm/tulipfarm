@@ -81,8 +81,10 @@ export function useIntegrationKeywords(
           match: [app.name, ...(aliases[app.name] ?? [])],
           icon: <BrandIcon brand={app.brand} size="inline" />,
           connected: true,
-          account: slackSenders.find(sender => sender.id === slack.sender)?.label,
-          ...(slack.appAvailable ? { accounts: slackSenders } : {}),
+          // With a Switch menu, `account` is the menu's id so the current choice is ticked.
+          ...(slack.appAvailable
+            ? { account: slack.sender, accounts: slackSenders }
+            : { account: slackSenders.find(sender => sender.id === slack.sender)?.label }),
         },
       ];
     return [
@@ -94,7 +96,13 @@ export function useIntegrationKeywords(
         // Workflow apps run without an account connection; "soon" apps can't be used yet.
         connected: status ? !disconnected.has(status.kind) : app.provider !== 'soon',
         account:
-          github && selected ? selected.label : status?.kind === 'connected' ? (status.detail ?? undefined) : undefined,
+          github && selected
+            ? accounts.length > 1
+              ? selected.id
+              : selected.label
+            : status?.kind === 'connected'
+              ? (status.detail ?? undefined)
+              : undefined,
         ...(github && accounts.length > 1 ? { accounts } : {}),
       },
     ];

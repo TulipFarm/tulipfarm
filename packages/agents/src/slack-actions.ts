@@ -6,6 +6,7 @@ import {
   currentMember,
   lockAuthorization,
   requireCurrentActor,
+  requireProtectedSource,
   requireTeamMember,
   resolveHuman,
   sourceDependenciesSchema,
@@ -292,6 +293,13 @@ export function createSlackActions(options: Options) {
         if (dependency.kind === 'shared-slack-turn') {
           if (!options.audienceSources) throw new AccessDenied();
           await options.audienceSources(tx, workspaceId, actor, dependency.eventId);
+        } else if (
+          dependency.kind === 'private-conversation' &&
+          dependency.conversationId === conversation.conversation_id
+        ) {
+          // The requester's own earlier turns may inform the send; everything those turns read stays public-only.
+          await requireProtectedSource(tx, actor, dependency);
+          await requireDraftSources(tx, actor, [dependency], new Set([canonicalJson(dependency)]), undefined, true);
         } else await requireDraftSources(tx, actor, [dependency], new Set(), undefined, true);
       }
       const attachments = await tx.client.query(
