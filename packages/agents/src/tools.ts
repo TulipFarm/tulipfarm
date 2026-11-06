@@ -8,7 +8,14 @@ import { createBudAssistant } from '@tulipfarm/conversations/bud-assistant';
 import { renameLegacyToolCall } from '@tulipfarm/conversations/tool-activity';
 import type { ConversationPlanning } from '@tulipfarm/conversations/runtime';
 import { z } from 'zod';
-import { observeTool, type ToolObservation, type ToolOutcome, type ToolRuntime } from '@tulipfarm/observability';
+import {
+  errorSite,
+  log,
+  observeTool,
+  type ToolObservation,
+  type ToolOutcome,
+  type ToolRuntime,
+} from '@tulipfarm/observability';
 import {
   AccessDenied,
   denyMcpEgress,
@@ -1216,12 +1223,18 @@ export function createChatTools(
         } catch (error) {
           if (error instanceof SlackChannelAccessError) return { error: error.code, instruction: error.instruction };
           // Thrown denials roll back before dispatch; delivery-time denials return a revoked action instead.
-          if (error instanceof AccessDenied)
+          if (error instanceof AccessDenied) {
+            log('warn', 'tool', 'call_failed', {
+              tool: call.tool,
+              'error.code': 'slack-access-required',
+              'error.site': errorSite(error),
+            });
             return {
               error: 'slack-access-required',
               instruction:
                 'TulipFarm could not confirm your access to this Slack destination, so nothing was posted. Check your Slack integration in Integrations and your membership in the channel, then call slack.resolve again. Do not retry with a different destination.',
             };
+          }
           throw error;
         }
       case 'followups.schedule':

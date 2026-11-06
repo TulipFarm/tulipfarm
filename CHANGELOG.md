@@ -10,6 +10,9 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- When TulipFarm refuses a Slack send from chat, the warning log now records
+  where the refusal came from (`error.site`: function, file and line only), so
+  the failing access check can be found without guessing.
 - A model call may now write up to 16,384 output tokens, up from 4,096, within
   each model's own limit, so large replies such as a multi-table proposal no
   longer stop at the response limit. Credit holds grow to match; unused credit
