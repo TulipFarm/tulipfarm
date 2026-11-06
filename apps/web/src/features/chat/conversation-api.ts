@@ -43,6 +43,7 @@ const chatSchema = z.object({
   activityAt: z.string(),
   createdAt: z.string(),
   projectId: z.uuid().nullable().default(null),
+  model: z.string().nullable().optional(),
 });
 const turnSchema = z.object({
   id: z.uuid(),

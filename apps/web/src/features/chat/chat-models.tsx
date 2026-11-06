@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { Button } from '@tulipfarm/sprout/button';
@@ -91,6 +91,27 @@ export function useChatModels(
 }
 
 // quiet hides failures while a chat error is shown, so one backend outage shows one alert.
+type ChatModels = ReturnType<typeof useChatModels>;
+
+/** An open chat keeps the model of its latest reply. Picking another one also makes it the default for new chats. */
+export function useChatModelFor(models: ChatModels, chatModel: string | null, chatId: string): ChatModels {
+  const [picked, setPicked] = useState<{ chatId: string; id: string } | null>(null);
+  const families = models.state.kind === 'ready' ? models.state.data.families : [];
+  const id = picked?.chatId === chatId ? picked.id : chatModel;
+  const family = id ? families.find(item => item.id === id && item.available) : undefined;
+  const model = useMemo(() => (family ? composerModel(family) : null), [family]);
+  const { select } = models;
+  return useMemo(() => {
+    const choose = (next: string) => {
+      if (models.choices.some(choice => choice.id === next && !choice.disabled)) setPicked({ chatId, id: next });
+      select(next);
+    };
+    return model
+      ? { ...models, model, usable: true, replacedModel: null, select: choose }
+      : { ...models, select: choose };
+  }, [models, model, select, chatId]);
+}
+
 export function ChatModelStatus({
   catalog,
   slug,

@@ -213,6 +213,8 @@ export const chatSchema = z.object({
   activityAt: z.string(),
   createdAt: z.string(),
   projectId: uuidSchema.nullable().default(null),
+  /** The model of the chat's latest reply; null before the first one. */
+  model: conversationModelSchema.nullable().default(null),
 });
 /** A chat the requester can post in, offered by Use in chat. */
 export const chatDestinationSchema = z.object({

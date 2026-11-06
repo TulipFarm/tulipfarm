@@ -85,7 +85,7 @@ import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '
 import { emptyChatDocument } from './editor-extensions';
 import { ChatKeywords, RichMessage } from './rich-message';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
-import { ChatModelStatus, useChatModels } from './chat-models';
+import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
@@ -395,7 +395,7 @@ function ConversationDetail({
   api,
   chatId,
   headerElement,
-  models,
+  models: workspaceModels,
   draft = false,
   draftProjectId = null,
   scope,
@@ -432,10 +432,11 @@ function ConversationDetail({
   });
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
-  const modelFamilies = models.state.kind === 'ready' ? models.state.data.families : [];
+  const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : [];
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
+  const models = useChatModelFor(workspaceModels, draft ? null : (savedData?.chat.model ?? null), chatId);
   const packages = useChatPackages(
     workspace.id,
     chatId,

@@ -106,6 +106,12 @@ const turnStats = `CASE WHEN t.timing_finished_at IS NOT NULL THEN jsonb_build_o
   'durationMs', round(extract(epoch FROM t.timing_finished_at - ${turnStart}) * 1000),
   'traceId', CASE WHEN (to_jsonb(t)->>'trace_sampled')::boolean THEN to_jsonb(t)->>'trace_id' END) END`;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+/** A turn sent without a model, such as a follow-up, keeps the chat's latest model while it is still offered. */
+function chatModel(latest: string | null) {
+  const catalog = loadModelCatalog();
+  const kept = latest ? catalog.model(latest) : undefined;
+  return kept?.selectable && !kept.paused ? kept.id : catalog.defaultModel.id;
+}
 const chatColumns = `id, title, title_revision AS "titleRevision", title_manual AS "titleManual", archived_at IS NOT NULL AS archived, COALESCE((to_jsonb(c)->>'is_closed')::boolean,false) AS "isClosed",
   to_char(activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "activityAt",
   to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt"`;
@@ -236,7 +242,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const row = (
       await tx.client.query(
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
-      (owner_user_id = $2 AND owner_membership_id = $3) AS owner
+      (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
+      (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder <> 'package-install-v1'
+        ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
         [chatId, actor.userId, actor.membershipId],
       )
@@ -480,7 +488,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           );
         } else if (skill) await insertSkillPart(tx, chatId, input.messageId, ordinal, 'skill', skill);
       }
-      const responder = packageInstall ? 'package-install-v1' : (input.model ?? loadModelCatalog().defaultModel.id);
+      const responder = packageInstall ? 'package-install-v1' : (input.model ?? chatModel(chat.model));
       const turnId = randomUUID();
       // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
       const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
