@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { request as httpRequest } from 'node:http';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import Fastify from 'fastify';
+import { Pool } from 'pg';
+import { commonCompatibility, createWorkspaceRuntime, workspaceNames } from '@tulipfarm/workspace-storage/runtime';
 import { registerObservability } from '../src/observability.ts';
 
 test('HTTP hooks preserve responses and record reviewed error codes without private data', async t => {
@@ -45,4 +50,66 @@ test('HTTP hooks preserve responses and record reviewed error codes without priv
   assert.equal(records[0]['http.route'], '/denied/:id');
   assert.ok(records.every(record => record.duration_ms >= 0));
   assert.doesNotMatch(JSON.stringify(records), /PRIVATE|private-id|private-user-text/);
+});
+
+test('a sender that leaves frees its queued workspace storage place', async t => {
+  const workspaceId = '00000000-0000-4000-8000-000000000001';
+  const names = workspaceNames(workspaceId);
+  const client = Object.assign(new EventEmitter(), {
+    async query(sql) {
+      if (sql === 'SELECT session_user, current_user')
+        return { rows: [{ session_user: names.runtime, current_user: names.runtime }] };
+      if (sql.includes('FROM pg_proc')) return { rows: [], rowCount: 1 };
+      if (sql.includes('app.workspace_access')) return { rows: [{ allowed: true }] };
+      if (sql.includes('count(*)')) return { rows: [{ version: commonCompatibility.maximum }] };
+      return { rows: [] };
+    },
+    release() {},
+  });
+  t.mock.method(Pool.prototype, 'connect', async () => client);
+  const runtime = createWorkspaceRuntime({
+    maxConcurrentTransactions: 1,
+    replicaCount: 1,
+    reservedConnections: 0,
+    databaseConnectionBudget: 16,
+    background: () => false,
+    resolveCredential: async () => ({
+      workspaceId,
+      generation: 1,
+      connectionString: `postgres://${names.runtime}:password@localhost/database`,
+    }),
+  });
+  const release = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  const busy = runtime.transaction(workspaceId, commonCompatibility, async () => {
+    entered.resolve();
+    await release.promise;
+  });
+  const app = Fastify();
+  t.after(async () => {
+    release.resolve();
+    await app.close();
+    await runtime.close();
+  });
+  registerObservability(app);
+  const failure = Promise.withResolvers();
+  app.get('/read', () =>
+    runtime
+      .transaction(workspaceId, commonCompatibility, async () => 'read')
+      .catch(error => {
+        failure.resolve(error);
+        throw error;
+      }),
+  );
+  await entered.promise;
+  const address = await app.listen({ port: 0, host: '127.0.0.1' });
+  const sent = httpRequest(`${address}/read`);
+  sent.on('error', () => undefined);
+  sent.end();
+  while (runtime.stats().queuedTransactions === 0) await delay(5);
+  sent.destroy();
+  assert.equal((await failure.promise).code, 'caller_left');
+  assert.equal(runtime.stats().queuedTransactions, 0);
+  release.resolve();
+  await busy;
 });

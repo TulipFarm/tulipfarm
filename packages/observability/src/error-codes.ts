@@ -5,6 +5,7 @@ const codes = new Set<string>([
   'closed',
   'queue_full',
   'wait_timeout',
+  'caller_left',
   'pool_capacity',
   'stale_credential',
   'incompatible_version',

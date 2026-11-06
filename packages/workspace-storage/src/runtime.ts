@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import {
@@ -68,6 +69,7 @@ export class StorageUnavailableError extends Error {
     | 'closed'
     | 'queue_full'
     | 'wait_timeout'
+    | 'caller_left'
     | 'pool_capacity'
     | 'stale_credential'
     | 'incompatible_version'
@@ -117,14 +119,32 @@ export function transientStorageError(error: unknown): boolean {
   );
 }
 
+const callerSignals = new AsyncLocalStorage<AbortSignal>();
+
+/**
+ * Runs `call` for a caller that can leave, such as an HTTP request. When `signal` aborts, its transactions that still
+ * wait for a turn or a connection give up their place; a transaction that already started runs to its end.
+ */
+export function withCallerSignal<T>(signal: AbortSignal, call: () => T): T {
+  return callerSignals.run(signal, call);
+}
+
+function unavailable(reason: unknown) {
+  return reason instanceof StorageUnavailableError ? reason : new StorageUnavailableError('wait_timeout');
+}
+
 class TransactionDeadline {
   readonly controller = new AbortController();
   readonly signal = this.controller.signal;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly deadlineAt: number | undefined;
+  private readonly caller = callerSignals.getStore();
+  private readonly callerLeft = () => this.controller.abort(new StorageUnavailableError('caller_left'));
 
   constructor(deadlineAt?: number) {
     this.deadlineAt = deadlineAt;
+    if (this.caller?.aborted) this.callerLeft();
+    else this.caller?.addEventListener('abort', this.callerLeft, { once: true });
     const tick = () => {
       if (deadlineAt === undefined) return;
       const remaining = deadlineAt - Date.now();
@@ -137,13 +157,18 @@ class TransactionDeadline {
   check() {
     if (this.deadlineAt !== undefined && Date.now() >= this.deadlineAt)
       this.controller.abort(new StorageUnavailableError('wait_timeout'));
-    this.signal.throwIfAborted();
+    if (this.signal.aborted) throw unavailable(this.signal.reason);
+  }
+
+  /** The transaction holds a connection now, so the caller leaving no longer stops it. */
+  started() {
+    this.caller?.removeEventListener('abort', this.callerLeft);
   }
 
   async wait<T>(operation: () => Promise<T>, releaseLate?: (value: T) => void): Promise<T> {
     this.check();
     return new Promise<T>((resolve, reject) => {
-      const abort = () => reject(new StorageUnavailableError('wait_timeout'));
+      const abort = () => reject(unavailable(this.signal.reason));
       this.signal.addEventListener('abort', abort, { once: true });
       void Promise.resolve()
         .then(() => {
@@ -164,13 +189,14 @@ class TransactionDeadline {
           },
           (error: unknown) => {
             this.signal.removeEventListener('abort', abort);
-            reject(this.signal.aborted ? new StorageUnavailableError('wait_timeout') : error);
+            reject(this.signal.aborted ? unavailable(this.signal.reason) : error);
           },
         );
     });
   }
 
   dispose() {
+    this.started();
     clearTimeout(this.timer);
   }
 }
@@ -303,8 +329,9 @@ export function createWorkspaceRuntime(
         },
       };
       const abort = () => {
-        recordWorkspaceAdmissionRejection('wait_timeout', background);
-        waiter.reject(new StorageUnavailableError('wait_timeout'));
+        const error = unavailable(deadline.signal.reason);
+        recordWorkspaceAdmissionRejection(error.code, background);
+        waiter.reject(error);
       };
       const timer = setTimeout(abort, config.waitTimeoutMs);
       deadline.signal.addEventListener('abort', abort, { once: true });
@@ -515,6 +542,7 @@ export function createWorkspaceRuntime(
           );
         }),
       );
+      deadline.started();
       return await observeWorkspaceConnection('hold', async () => {
         let destroy = false;
         const onError = () => undefined;

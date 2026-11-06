@@ -1753,6 +1753,7 @@ const databaseStopCodes = new Set([
   'closed',
   'queue_full',
   'wait_timeout',
+  'caller_left',
   'pool_capacity',
   'stale_credential',
   'incompatible_version',
