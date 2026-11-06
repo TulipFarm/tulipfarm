@@ -5,6 +5,7 @@ import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
+import { executionConfiguration } from '@tulipfarm/config/execution';
 import {
   captureException,
   createBackgroundJob,
@@ -14,7 +15,7 @@ import {
   registerFlagSubjectResolver,
   startTelemetry,
 } from '@tulipfarm/observability';
-import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import { configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { temporalSlotReadings, workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
@@ -55,6 +56,7 @@ import { createSkillActivities } from './skill-activities.ts';
 import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-composition.ts';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
+import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
@@ -67,6 +69,17 @@ const role = workerRole();
 const service = workerTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
+let chatExecution: ChatExecution | undefined;
+if (role !== 'knowledge') {
+  try {
+    const configuration = executionConfiguration();
+    const backend = configuredExecutionBackend(configuration);
+    if (backend && configuration.mode !== 'off') chatExecution = createChatExecution(backend, configuration);
+  } catch (error) {
+    await shutdownExtensions();
+    throw error;
+  }
+}
 const telemetry = startTelemetry(readBuildInfo('worker', new URL('../version.json', import.meta.url)), {
   serviceName: service,
 });
@@ -268,6 +281,7 @@ async function run() {
           planDispatch?.wake,
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
           async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
+          chatExecution,
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;

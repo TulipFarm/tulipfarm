@@ -1,14 +1,133 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { registerConversations } from '../src/conversations.ts';
+import { registerExecutionFiles } from '../src/execution-files.ts';
 import { registerAbuseHooks } from '../src/abuse.ts';
 import { AccessDenied } from '@tulipfarm/access';
 import { useModelCatalog } from '../../worker/test/model-catalog-fixture.mjs';
 
 // Messages without a model use the shipped catalog's default, served with this key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
+test('saved execution files require a session and stream only the authorized download', async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID(),
+    chatId = randomUUID(),
+    userId = randomUUID(),
+    manifestId = randomUUID();
+  const base = `/workspaces/${workspaceId}/conversations/${chatId}/execution/files`;
+  const bytes = Buffer.alloc(1048583, 'a');
+  const file = {
+    path: "reports/founder's result.bin",
+    size: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    executable: false,
+  };
+  let reads = 0,
+    denied = false;
+  registerExecutionFiles(app, {
+    auth: {
+      api: {
+        getSession: async ({ headers }) =>
+          headers.get('cookie') === 'session=reader'
+            ? { session: { id: 'reader-session' }, user: { id: userId } }
+            : null,
+      },
+    },
+    service: {
+      files: async (workspace, user, chat, after) => {
+        reads++;
+        assert.deepEqual([workspace, user, chat, after], [workspaceId, userId, chatId, null]);
+        if (denied) throw new AccessDenied();
+        return { manifestId, files: [file], after: null };
+      },
+      download: async (workspace, user, chat, input) => {
+        reads++;
+        assert.deepEqual(
+          [workspace, user, chat, input],
+          [workspaceId, userId, chatId, { manifestId, path: file.path }],
+        );
+        if (denied) throw new AccessDenied();
+        return {
+          file,
+          bytes: (async function* () {
+            yield bytes.subarray(0, 1048576);
+            yield bytes.subarray(1048576);
+          })(),
+        };
+      },
+    },
+  });
+  const headers = { cookie: 'session=reader' };
+  const url = `${base}/content?${new URLSearchParams({ manifestId, path: file.path })}`;
+  assert.equal((await app.inject({ url })).statusCode, 401);
+  assert.equal(
+    (await app.inject({ url, headers: { ...headers, 'x-tulipfarm-expected-session': 'other-session' } })).statusCode,
+    401,
+  );
+  assert.equal(reads, 0);
+  const listed = await app.inject({ url: base, headers });
+  assert.deepEqual(listed.json(), { manifestId, files: [file], after: null });
+  const response = await app.inject({ url, headers });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['cache-control'], 'no-store');
+  assert.equal(response.headers['content-type'], 'application/octet-stream');
+  assert.equal(response.headers['x-content-type-options'], 'nosniff');
+  assert.equal(response.headers['content-length'], String(bytes.length));
+  assert.match(response.headers['content-disposition'], /attachment;.*founder%27s%20result.bin/);
+  assert.deepEqual(response.rawPayload, bytes);
+  const accepted = reads;
+  for (const input of [
+    { manifestId, path: '../secret' },
+    { manifestId: 'invalid', path: file.path },
+    { manifestId, path: file.path, userId: 'forged' },
+  ]) {
+    assert.equal((await app.inject({ url: `${base}/content?${new URLSearchParams(input)}`, headers })).statusCode, 400);
+  }
+  assert.equal(reads, accepted);
+  denied = true;
+  assert.equal((await app.inject({ url, headers })).statusCode, 404);
+});
+
+test('disconnecting an execution download cancels its upstream read', { timeout: 10000 }, async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  const workspaceId = randomUUID(),
+    chatId = randomUUID(),
+    manifestId = randomUUID();
+  let cancelled;
+  registerExecutionFiles(app, {
+    auth: { api: { getSession: async () => ({ session: { id: 'reader' }, user: { id: randomUUID() } }) } },
+    service: {
+      download: async (_workspace, _user, _chat, _input, signal) => {
+        cancelled = once(signal, 'abort', { signal: AbortSignal.timeout(3000) });
+        return {
+          file: { path: 'slow.bin', size: 20 * 1048576, sha256: 'a'.repeat(64), executable: false },
+          bytes: (async function* () {
+            for (let index = 0; index < 20; index++) {
+              await delay(30, undefined, { signal });
+              yield Buffer.alloc(1048576);
+            }
+          })(),
+        };
+      },
+    },
+  });
+  const address = await app.listen({ host: '127.0.0.1', port: 0 });
+  const response = await fetch(
+    `${address}/workspaces/${workspaceId}/conversations/${chatId}/execution/files/content?${new URLSearchParams({ manifestId, path: 'slow.bin' })}`,
+  );
+  assert.equal(response.status, 200);
+  const reader = response.body.getReader();
+  await reader.read();
+  await reader.cancel();
+  await cancelled;
+});
 
 test('private chat mutation budgets apply to verified users before persistence', async t => {
   const app = Fastify();

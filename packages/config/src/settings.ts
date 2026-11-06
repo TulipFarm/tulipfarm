@@ -442,6 +442,25 @@ export const settings: readonly Setting[] = [
     description:
       'Comma-separated extension modules loaded at startup: package names (resolved from the app) or paths. Unset runs with no extensions. See packages/extensions/README.md.',
   },
+  {
+    name: 'TULIPFARM_EXECUTION_BACKEND',
+    group: 'Skills and code steps',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: false,
+    default: 'off',
+    description:
+      'Chat execution backend: off, local, docker, or extension. Off does not enable or resolve a backend. Selecting an unavailable backend fails startup; there is no fallback. Local and Docker implementations are not included yet.',
+  },
+  {
+    name: 'TULIPFARM_EXECUTION_POLICY_FILE',
+    group: 'Skills and code steps',
+    services: apiWorker,
+    requirement: 'conditional',
+    secret: false,
+    description:
+      'Operator JSON policy for chat execution profiles, base revision and explicit limits. Required when execution is not off. This is configuration, not a credentials file. See packages/execution-contract/README.md.',
+  },
 
   {
     name: 'BETTER_AUTH_URL',

@@ -77,6 +77,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
     ['SLACK_OUTBOUND_ENABLED', 'true'],
     ['INTEGRATION_CREDENTIAL_KEY_ID', 'test'],
     ['INTEGRATION_CREDENTIAL_KEY', '33'.repeat(32)],
+    ['TULIPFARM_EXECUTION_BACKEND', 'extension'],
   ]) {
     const previous = process.env[name];
     process.env[name] = value;
@@ -101,6 +102,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
 test('optional tools appear only when their context admits them', () => {
   const names = (...args) => nativeChatTools(...args).tools.map(tool => tool.name);
   assert.equal(names().includes('secrets_request'), false);
+  assert.equal(names().includes('execution_run'), false);
   assert.equal(names().includes('conversation_messages_read'), false);
   assert.ok(names(undefined, true).includes('conversation_messages_read'));
   assert.equal(names().includes('files_read'), false);

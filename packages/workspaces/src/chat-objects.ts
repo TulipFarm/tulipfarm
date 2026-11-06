@@ -9,9 +9,20 @@ const clientSettings = {
   responseChecksumValidation: 'WHEN_REQUIRED',
 } as const;
 
-export function chatObjectStore(
-  env: NodeJS.ProcessEnv = process.env,
-): (AttachmentBytes & { close: () => void }) | null {
+type ChatObjectAdapter = AttachmentBytes & {
+  retireExecutionChunk(key: string, signal: AbortSignal): Promise<void>;
+  close(): void;
+};
+const executionChunkKey = z.tuple([
+  z.literal('execution'),
+  z.literal('v1'),
+  z.uuid(),
+  z.uuid(),
+  z.uuid(),
+  z.string().regex(/^(0|[1-9][0-9]*)$/),
+]);
+
+export function chatObjectStore(env: NodeJS.ProcessEnv = process.env): ChatObjectAdapter | null {
   if (env.TULIPFARM_OBJECT_STORAGE_FILES_BUCKET) {
     const bucket = z
       .string()
@@ -45,7 +56,7 @@ export function chatObjectStore(
 const deadline = (signal?: AbortSignal) =>
   signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000);
 
-export function createChatObjectAdapter(client: S3Client, Bucket: string): AttachmentBytes & { close: () => void } {
+export function createChatObjectAdapter(client: S3Client, Bucket: string): ChatObjectAdapter {
   return {
     async putIfAbsent(Key, Body, signal) {
       try {
@@ -92,6 +103,25 @@ export function createChatObjectAdapter(client: S3Client, Bucket: string): Attac
     },
     async remove(Key) {
       await client.send(new DeleteObjectCommand({ Bucket, Key }), { abortSignal: AbortSignal.timeout(20000) });
+    },
+    async retireExecutionChunk(Key, signal) {
+      signal.throwIfAborted();
+      executionChunkKey.parse(Key.split('/'));
+      try {
+        await client.send(
+          new PutObjectCommand({
+            Bucket,
+            Key,
+            Body: new Uint8Array(0),
+            ContentLength: 0,
+            ContentType: 'application/octet-stream',
+          }),
+          { abortSignal: deadline(signal) },
+        );
+      } catch {
+        signal.throwIfAborted();
+        throw new Error('execution-object-retire-unavailable');
+      }
     },
     close() {
       client.destroy();

@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import {
   captureAnalytics,
+  configuredExecutionBackend,
   creditGate,
   creditPricing,
   creditUnitsForProviderCost,
   defineExtension,
   emitHook,
+  executionBackend,
   extensionMigrations,
   flagProvider,
   flushExtensions,
@@ -53,6 +55,7 @@ test('every slot is a no-op by default', async () => {
   await creditGate().debit(tx, -1n, { id: 'r', activity: 'chat' });
   assert.equal(flagProvider(), undefined);
   assert.equal(socialPlatformApps(), undefined);
+  assert.equal(executionBackend(), undefined);
   assert.deepEqual(extensionMigrations(), []);
   captureAnalytics({ event: 'e', distinctId: 'd' });
   reportError(new Error('x'));
@@ -232,6 +235,165 @@ test('social platform apps are a single slot for the hosted edition (social PROD
     /"broken" social platform apps need a resolve function/,
   );
   assert.equal(socialPlatformApps(), undefined);
+});
+
+function executionFixture() {
+  const profiles = [
+    { id: 'small', resources: { kind: 'limited', cpuMillis: 500, memoryMiB: 1024, diskBytes: 1048576 } },
+  ];
+  const backend = {
+    descriptor: {
+      profiles,
+      capabilities: {
+        isolation: 'container',
+        network: 'public-only',
+        hardDeadlines: true,
+        reconnect: true,
+        previews: false,
+      },
+    },
+    ...Object.fromEntries(
+      [
+        'prepare',
+        'inspect',
+        'destroy',
+        'startJob',
+        'inspectJob',
+        'stopJob',
+        'readOutput',
+        'listFiles',
+        'readFile',
+        'writeFile',
+        'removeFile',
+      ].map(method => [method, () => assert.fail(`Preflight must not call ${method}`)]),
+    ),
+  };
+  return {
+    backend,
+    configuration: { mode: 'extension', policy: { profiles, network: 'public-only' }, policyRevision: 'a'.repeat(64) },
+  };
+}
+
+test('execution remains off after registration and never falls back to another backend', async () => {
+  const { backend, configuration } = executionFixture();
+  assert.throws(() => configuredExecutionBackend(configuration), /backend is unavailable/);
+  await registerExtension({ name: 'execution', register: slots => slots.executionBackend(backend) }, context);
+  assert.equal(configuredExecutionBackend({ mode: 'off' }), undefined);
+  assert.equal(configuredExecutionBackend(configuration), backend);
+  for (const mode of ['local', 'docker'])
+    assert.throws(() => configuredExecutionBackend({ ...configuration, mode }), /backend is unavailable/);
+  assert.equal(configuredExecutionBackend({ ...configuration, mode: 'docker' }, { docker: backend }), backend);
+});
+
+test('execution registration is single-owner and failed registrations roll back all slots', async () => {
+  const { backend } = executionFixture();
+  await assert.rejects(
+    registerExtension(
+      {
+        name: 'broken',
+        register(slots) {
+          slots.executionBackend(backend);
+          throw new Error('registration failed');
+        },
+      },
+      context,
+    ),
+    /registration failed/,
+  );
+  assert.equal(executionBackend(), undefined);
+  await assert.rejects(
+    registerExtension(
+      {
+        name: 'invalid',
+        register: slots => slots.executionBackend({ ...backend, startJob: undefined }),
+      },
+      context,
+    ),
+    /invalid execution backend/,
+  );
+  assert.equal(executionBackend(), undefined);
+  await registerExtension({ name: 'execution', register: slots => slots.executionBackend(backend) }, context);
+  await assert.rejects(
+    registerExtension(
+      {
+        name: 'other',
+        register(slots) {
+          slots.flagProvider({ isEnabled: async () => true });
+          slots.executionBackend(backend);
+        },
+      },
+      context,
+    ),
+    /"execution" already set it/,
+  );
+  assert.equal(flagProvider(), undefined);
+  assert.equal(executionBackend(), backend);
+  assert.deepEqual(loadedExtensions(), ['execution']);
+});
+
+test('execution rejects unsupported isolation, network, deadlines and reconnection', () => {
+  const { backend, configuration } = executionFixture();
+  for (const change of [
+    { isolation: 'direct' },
+    { network: 'inherited' },
+    { hardDeadlines: false },
+    { reconnect: false },
+  ]) {
+    const candidate = {
+      ...backend,
+      descriptor: { ...backend.descriptor, capabilities: { ...backend.descriptor.capabilities, ...change } },
+    };
+    assert.throws(
+      () => configuredExecutionBackend({ ...configuration, mode: 'docker' }, { docker: candidate }),
+      /cannot enforce/,
+    );
+  }
+  const direct = {
+    ...backend,
+    descriptor: {
+      profiles: [{ id: 'shared', resources: { kind: 'shared' } }],
+      capabilities: { ...backend.descriptor.capabilities, isolation: 'direct', network: 'inherited' },
+    },
+  };
+  const local = {
+    ...configuration,
+    mode: 'local',
+    policy: { profiles: direct.descriptor.profiles, network: 'inherited' },
+  };
+  assert.equal(configuredExecutionBackend(local, { local: direct }), direct);
+  assert.throws(() => configuredExecutionBackend(local, { local: backend }), /cannot enforce/);
+});
+
+test('execution profiles require exact resource matches without rounding up', () => {
+  const { backend, configuration } = executionFixture();
+  const requested = configuration.policy.profiles[0];
+  for (const profile of [
+    { ...requested, id: 'other' },
+    { ...requested, resources: { kind: 'shared' } },
+    ...['cpuMillis', 'memoryMiB', 'diskBytes'].map(field => ({
+      ...requested,
+      resources: { ...requested.resources, [field]: requested.resources[field] + 1 },
+    })),
+  ]) {
+    const candidate = { ...backend, descriptor: { ...backend.descriptor, profiles: [profile] } };
+    assert.throws(
+      () => configuredExecutionBackend({ ...configuration, mode: 'docker' }, { docker: candidate }),
+      /does not support the requested profiles/,
+    );
+  }
+});
+
+test('execution shutdown closes its client once without destroying allocations', async () => {
+  const { backend } = executionFixture();
+  let closed = 0;
+  backend.shutdown = async () => {
+    closed++;
+  };
+  await registerExtension({ name: 'execution', register: slots => slots.executionBackend(backend) }, context);
+  await flushExtensions();
+  assert.equal(closed, 0);
+  await Promise.all([shutdownExtensions(), shutdownExtensions()]);
+  assert.equal(closed, 1);
 });
 
 test('credit pricing defaults to provider cost and is a single slot', async () => {

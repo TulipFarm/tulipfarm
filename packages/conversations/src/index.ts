@@ -39,6 +39,7 @@ import {
   type createWorkspaceRuntime,
 } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
+import { cancelExecutionTurn, chatExecutionVersion, deleteChatExecution, hasExecutionWork } from './execution.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
 import { keepStoppedReply } from './stopped-replies.ts';
 import { notifyConversationChange } from './event-publisher.ts';
@@ -1198,6 +1199,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         async () => {
           const chat = await owned(tx, actor, chatId, true, 'manage');
           if (!chat.owner) throw new AccessDenied();
+          if (tx.commonVersion >= chatExecutionVersion) await deleteChatExecution(tx, chatId);
           const turns = z.array(z.object({ id: uuidSchema })).parse(
             (
               await tx.client.query(
@@ -1253,9 +1255,16 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             ).rows[0],
           );
         if (!turn) throw new AccessDenied();
+        const executionWaiting =
+          operation === 'cancel' &&
+          turn.status === 'waiting' &&
+          tx.commonVersion >= chatExecutionVersion &&
+          (await hasExecutionWork(tx, chatId, turnId));
         if (
           turn.generation !== input.expectedGeneration ||
-          (operation === 'retry' ? turn.status !== 'failed' : !['queued', 'processing', 'failed'].includes(turn.status))
+          (operation === 'retry'
+            ? turn.status !== 'failed'
+            : !executionWaiting && !['queued', 'processing', 'failed'].includes(turn.status))
         )
           throw new ConversationConflict('turn-conflict');
         const status = operation === 'retry' ? 'queued' : 'cancelled';
@@ -1272,6 +1281,8 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         // Text a stopped reply had already streamed stays in the chat as a partial reply.
         if (operation === 'cancel' && turn.status === 'processing')
           await keepStoppedReply(tx, chatId, { id: turnId, generation: turn.generation, epoch: turn.attempt_epoch });
+        if (operation === 'cancel' && tx.commonVersion >= chatExecutionVersion)
+          await cancelExecutionTurn(tx, chatId, turnId);
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, generation = $3, attempt_epoch = attempt_epoch + 1, attempts = CASE WHEN $2 = 'queued' THEN 0 ELSE attempts END, lease_until = NULL, retry_at = NULL, error_code = NULL WHERE id = $1`,
           [turnId, status, generation],

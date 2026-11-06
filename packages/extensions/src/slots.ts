@@ -1,6 +1,8 @@
 // Server extension slots. TulipFarm runs with every slot at its no-op default;
 // an extension listed in TULIPFARM_EXTENSIONS fills slots at startup.
 
+import type { ExecutionBackend } from '@tulipfarm/execution-contract';
+
 export type ExtensionApp = 'api' | 'worker' | 'storage-worker' | 'database';
 
 export type ExtensionContext = {
@@ -248,6 +250,7 @@ export type ExtensionMigrations = {
 };
 
 export type ExtensionRegistrar = {
+  executionBackend(backend: ExecutionBackend): void;
   /** Single slot: a second extension setting it fails startup. */
   creditGate(gate: CreditGate): void;
   /** Single slot: a second extension setting it fails startup. */

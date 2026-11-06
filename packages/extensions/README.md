@@ -45,6 +45,7 @@ export default defineExtension({
 | `creditPricing`      | one per process | `providerCostPricing`: one credit per $0.01 of provider cost, no markup, no rounding | `creditUnitsForProviderCost`, the credit meter, knowledge-embedding credits, the model catalog's credit rates |
 | `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                       |
 | `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app      |
+| `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                                |
 | `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
 | `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
 | `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
@@ -54,7 +55,21 @@ export default defineExtension({
 A second extension setting a single slot fails startup. Failures inside
 analytics, error reporters, usage sinks, and hook subscribers never reach the
 caller; sink and hook failures go to the error reporters. `flushExtensions()` and
-`shutdownExtensions()` flush and close analytics, error, and flag clients.
+`shutdownExtensions()` flush and close registered clients, including the
+execution backend's optional `shutdown` hook. Shutdown closes its clients, not
+all of its remote execution environments.
+
+### Execution backend
+
+`slots.executionBackend(backend)` accepts the provider-neutral
+[`ExecutionBackend` contract](../execution-contract/README.md). Registering a
+backend does not enable execution: `configuredExecutionBackend` returns nothing
+while operator configuration is off. An explicitly selected backend must support
+the configured profiles, network restrictions, reconnection and hard deadlines.
+Unavailable backends and unsupported policies fail preflight without fallback.
+
+This registration and configuration foundation does not yet expose chat tools
+or implement local/Docker execution.
 
 ### Credits
 
