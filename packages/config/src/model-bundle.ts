@@ -191,6 +191,8 @@ function bundleModelIds(models: readonly ServedModel[]) {
 
 /** Routes of server bundles are this deployment's own configuration. */
 export const serverRouteLocation = 'server';
+/** Most output tokens one model call may produce, within the model's own limit. */
+export const modelCallOutputTokenLimit = 16384;
 
 /**
  * The server bundle of the served models, in catalog order, with the bundle route of each. Prices keep the frozen
@@ -218,7 +220,7 @@ export function servedModelBundle(served: Pick<ServedModelCatalog, 'models'>) {
       qualification: 'server-configuration',
       lifecycle: 'current' as const,
       maxInputTokens: bundleModel.maxInputTokens,
-      maxOutputTokens: Math.min(4096, bundleModel.maxOutputTokens),
+      maxOutputTokens: Math.min(modelCallOutputTokenLimit, bundleModel.maxOutputTokens),
       boundedDecision: true as const,
     };
     return { model, bundleModel, route };

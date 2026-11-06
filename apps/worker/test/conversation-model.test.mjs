@@ -43,7 +43,7 @@ function previousModel(family) {
     model.provider === 'anthropic'
       ? { provider: 'anthropic', ...common, apiKey: keys.ANTHROPIC_API_KEY }
       : { provider: 'azure', ...common, auth: { kind: 'api-key', value: keys.AZURE_FOUNDRY_API_KEY } };
-  const maxOutputTokens = Math.min(4096, model.maxOutputTokens);
+  const maxOutputTokens = Math.min(16384, model.maxOutputTokens);
   return {
     route: { ...route, timeoutMs: 120000, maxOutputTokens },
     price: {

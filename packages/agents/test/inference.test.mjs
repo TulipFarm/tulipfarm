@@ -2537,7 +2537,7 @@ test('invalid endpoints, credentials, model paths, and deadlines fail before dis
   for (const patch of [
     { timeoutMs: 0 },
     { timeoutMs: 120001 },
-    { maxOutputTokens: 4097 },
+    { maxOutputTokens: 16385 },
     { apiKey: 'key\nheader' },
     { model: '../model' },
   ]) {
