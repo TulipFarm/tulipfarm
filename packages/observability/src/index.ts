@@ -83,6 +83,7 @@ import {
   modelUsageOutcomes,
   modelUsageUnknownReasons,
   providerMessageLimit,
+  responseRejections,
   safeProviderCode,
   safeUsageShape,
   usageShape,
@@ -113,6 +114,7 @@ export {
   modelFallbackOutcomes,
   modelUsageOutcomes,
   modelUsageUnknownReasons,
+  responseRejections,
   sanitizeProviderMessage,
   usageShape,
   type ModelCallDiagnostics,
@@ -120,6 +122,7 @@ export {
   type ModelFallbackOutcome,
   type ModelUsageOutcome,
   type ModelUsageUnknownReason,
+  type ResponseRejection,
 } from './model-errors.ts';
 
 const scope = 'tulipfarm';
@@ -257,6 +260,8 @@ const spanAttributes = new Set([
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
 const logOnlyAttributes = new Set([
   'provider.error_code',
+  'response.rejection',
+  'response.finish_reason',
   'provider.error_message',
   'usage.shape',
   'slack.event_id',
@@ -293,7 +298,8 @@ const titleGenerationOutcomes = new Set<string>(titleGenerationOutcomeValues);
 
 function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (logLine && logOnlyAttributes.has(key)) {
-    if (key === 'provider.error_code') return safeProviderCode(value) === value;
+    if (key === 'provider.error_code' || key === 'response.finish_reason') return safeProviderCode(value) === value;
+    if (key === 'response.rejection') return (responseRejections as readonly unknown[]).includes(value);
     if (key === 'usage.shape') return safeUsageShape(value);
     if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
     if (key === 'github.ratelimit_resource') return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value);
@@ -2803,6 +2809,8 @@ export async function observeInference<T>(
             ...spanDetails,
             ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
             ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
+            ...(diagnostics?.rejection ? { 'response.rejection': diagnostics.rejection } : {}),
+            ...(diagnostics?.finishReason ? { 'response.finish_reason': diagnostics.finishReason } : {}),
           });
         };
         try {

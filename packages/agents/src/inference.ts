@@ -14,6 +14,7 @@ import {
   fallbackEligibleClasses,
   log,
   ModelCallError,
+  type ResponseRejection,
   modelCallDiagnostics,
   observeInference,
   observeChatDetail,
@@ -1336,7 +1337,7 @@ type ToolRejection =
   | 'mcp-invalid';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
-  | { kind: 'failure'; reason: InferenceFailure };
+  | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
 
 // Without Bud, bud_state is never offered. A request for it alone is dropped so avatar state cannot cost a round:
 // any text is the answer, and an otherwise empty reply is malformed.
@@ -1422,19 +1423,37 @@ function parseArguments(text: string): { ok: true; value: unknown } | { ok: fals
   }
 }
 
+/** The provider's own finish or stop reason, whatever its shape, for diagnosing a rejected response. */
+function responseFinishReason(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const value = body as {
+    stop_reason?: unknown;
+    status?: unknown;
+    choices?: { finish_reason?: unknown }[];
+    candidates?: { finishReason?: unknown }[];
+  };
+  const reason =
+    value.choices?.[0]?.finish_reason ?? value.candidates?.[0]?.finishReason ?? value.stop_reason ?? value.status;
+  return typeof reason === 'string' ? reason : undefined;
+}
+
 function nativeStep(route: CapableRoute, body: unknown): NativeStep {
-  const invalid = { kind: 'failure', reason: 'invalid-decision' } satisfies NativeStep;
+  const invalid = (rejection: ResponseRejection): NativeStep => ({
+    kind: 'failure',
+    reason: 'invalid-decision',
+    rejection,
+  });
   const step = (text: string, calls: NativeCall[], raw: unknown): NativeStep =>
-    text.trim() || calls.length ? { kind: 'step', text, calls, raw } : invalid;
+    text.trim() || calls.length ? { kind: 'step', text, calls, raw } : invalid('empty');
   switch (route.provider) {
     case 'anthropic': {
       const parsed = anthropicNativeSchema.safeParse(body);
-      if (!parsed.success) return invalid;
+      if (!parsed.success) return invalid('schema');
       const data = parsed.data;
       if (data.stop_reason === 'refusal') return { kind: 'failure', reason: 'refusal' };
       if (data.stop_reason === 'model_context_window_exceeded') return { kind: 'failure', reason: 'context-overflow' };
       if (data.stop_reason === 'max_tokens') return { kind: 'failure', reason: 'output-limit' };
-      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(data.stop_reason)) return invalid;
+      if (!['end_turn', 'tool_use', 'stop_sequence'].includes(data.stop_reason)) return invalid('finish-reason');
       const calls = data.content.flatMap(block =>
         block.type === 'tool_use' ? [{ id: block.id, name: block.name, input: block.input, providerId: true }] : [],
       );
@@ -1446,7 +1465,7 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     case 'azure': {
       if (routeCapabilities(route).api === 'responses') {
         const parsed = responsesNativeSchema.safeParse(body);
-        if (!parsed.success) return invalid;
+        if (!parsed.success) return invalid('schema');
         const data = parsed.data;
         if (data.incomplete_details?.reason === 'max_output_tokens') return { kind: 'failure', reason: 'output-limit' };
         if (
@@ -1454,12 +1473,12 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
           data.output.some(item => item.type === 'message' && item.content.some(part => part.type === 'refusal'))
         )
           return { kind: 'failure', reason: 'refusal' };
-        if (data.status !== 'completed') return invalid;
+        if (data.status !== 'completed') return invalid('finish-reason');
         const calls: NativeCall[] = [];
         for (const item of data.output) {
           if (item.type !== 'function_call') continue;
           const input = parseArguments(item.arguments);
-          if (!input.ok) return invalid;
+          if (!input.ok) return invalid('tool-arguments');
           calls.push({ id: item.call_id, name: item.name, input: input.value, providerId: true });
         }
         return step(
@@ -1476,15 +1495,15 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       }
       const parsed = azureNativeSchema.safeParse(body);
       const choice = parsed.success ? parsed.data.choices[0] : undefined;
-      if (!choice) return invalid;
+      if (!choice) return invalid('schema');
       if (choice.message.refusal || choice.finish_reason === 'content_filter')
         return { kind: 'failure', reason: 'refusal' };
       if (choice.finish_reason === 'length') return { kind: 'failure', reason: 'output-limit' };
-      if (!['tool_calls', 'stop'].includes(choice.finish_reason)) return invalid;
+      if (!['tool_calls', 'stop'].includes(choice.finish_reason)) return invalid('finish-reason');
       const calls: NativeCall[] = [];
       for (const call of choice.message.tool_calls ?? []) {
         const input = parseArguments(call.function.arguments);
-        if (!input.ok) return invalid;
+        if (!input.ok) return invalid('tool-arguments');
         calls.push({ id: call.id, name: call.function.name, input: input.value, providerId: true });
       }
       return step(choice.message.content ?? '', calls, null);
@@ -1499,7 +1518,7 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
         return { kind: 'failure', reason: 'refusal' };
       const parsed = googleResponseSchema.safeParse(body);
       const candidate = parsed.success ? parsed.data.candidates?.[0] : undefined;
-      if (!candidate) return invalid;
+      if (!candidate) return invalid('schema');
       if (
         ['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY'].includes(
           candidate.finishReason,
@@ -1508,7 +1527,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
         return { kind: 'failure', reason: 'refusal' };
       if (candidate.finishReason === 'MAX_TOKENS') return { kind: 'failure', reason: 'output-limit' };
       const content = googleNativeContentSchema.safeParse(candidate.content);
-      if (candidate.finishReason !== 'STOP' || !content.success) return invalid;
+      if (candidate.finishReason !== 'STOP') return invalid('finish-reason');
+      if (!content.success) return invalid('schema');
       const parts = content.data.parts;
       const calls = parts.flatMap((part, index) =>
         part.functionCall
@@ -1948,7 +1968,12 @@ async function sendChatRequest<T>(
   step: number,
   meter: ToolModelMeter | undefined,
   wire: { url: string; headers: Record<string, string>; body: object; turns: readonly ChatTurn[] },
-  select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
+  select: (body: unknown) => {
+    value: T;
+    failed: boolean;
+    finalText?: string | undefined;
+    rejection?: ResponseRejection | undefined;
+  },
   answerText?: ToolInferenceContext['answerText'],
   onOutput?: () => void,
   onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
@@ -2044,7 +2069,14 @@ async function sendChatRequest<T>(
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
-      report.error(new ModelCallError('invalid-decision', { status: response.status, outputStarted: published }));
+      report.error(
+        new ModelCallError('invalid-decision', {
+          status: response.status,
+          outputStarted: published,
+          rejection: selected.rejection,
+          finishReason: responseFinishReason(json),
+        }),
+      );
     if (!selected.failed && held && selected.finalText !== undefined) publish(selected.finalText);
     return selected.value;
   });
@@ -2318,7 +2350,12 @@ export async function inferWithTools(
   const signal = tools?.signal;
   const send = async <T>(
     wire: { url: string; headers: Record<string, string>; body: object; turns: readonly ChatTurn[] },
-    select: (body: unknown) => { value: T; failed: boolean; finalText?: string | undefined },
+    select: (body: unknown) => {
+      value: T;
+      failed: boolean;
+      finalText?: string | undefined;
+      rejection?: ResponseRejection | undefined;
+    },
     answerText?: ToolInferenceContext['answerText'],
     target = config,
     settled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
@@ -2696,6 +2733,7 @@ export async function inferWithTools(
               return {
                 value: selected,
                 failed: selected.kind === 'failure' || envelope,
+                rejection: envelope ? 'tool-envelope' : selected.kind === 'failure' ? selected.rejection : undefined,
                 ...(selected.kind === 'step' && !selected.calls.length && !envelope
                   ? { finalText: selected.text }
                   : {}),

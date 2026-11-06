@@ -160,6 +160,17 @@ function redactEchoes(text: string, request: string): string {
   return kept.join(' ');
 }
 
+/** Why a successful provider response could not be used as a reply step. Content-free, for logs. */
+export const responseRejections = [
+  'schema',
+  'finish-reason',
+  'empty',
+  'tool-arguments',
+  'tool-envelope',
+  'bud-only',
+] as const;
+export type ResponseRejection = (typeof responseRejections)[number];
+
 /** What a failed model call reports to logs and telemetry. */
 export type ModelCallDiagnostics = {
   errorClass: ModelErrorClass;
@@ -170,6 +181,10 @@ export type ModelCallDiagnostics = {
   providerMessage?: string | undefined;
   /** Whether any answer text was produced before the call failed. */
   outputStarted: boolean;
+  /** Why a well-formed HTTP response was still rejected. Logs only. */
+  rejection?: ResponseRejection | undefined;
+  /** The provider's finish reason on a rejected response, when it is a short identifier. Logs only. */
+  finishReason?: string | undefined;
 };
 
 /**
@@ -199,6 +214,12 @@ export class ModelCallError extends Error {
       ...(diagnostics.status === undefined ? {} : { status: diagnostics.status }),
       ...(safeProviderCode(diagnostics.providerCode)
         ? { providerCode: safeProviderCode(diagnostics.providerCode) }
+        : {}),
+      ...(diagnostics.rejection && responseRejections.includes(diagnostics.rejection)
+        ? { rejection: diagnostics.rejection }
+        : {}),
+      ...(safeProviderCode(diagnostics.finishReason)
+        ? { finishReason: safeProviderCode(diagnostics.finishReason) }
         : {}),
     };
     const message = sanitizeProviderMessage(diagnostics.providerMessage, diagnostics.request);

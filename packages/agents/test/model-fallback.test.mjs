@@ -177,3 +177,20 @@ test('a fallback that also fails surfaces the chat model failure and is counted 
   );
   assert.deepEqual(failures.map(record => record['error.code']).sort(), ['quota_exceeded', 'server_error']);
 });
+
+test('a rejected response logs why it was rejected and the finish reason, without its content', async t => {
+  const records = logs(t);
+  const { meter } = harness(t, {
+    azure: () => Response.json(nativeReply('azure', { calls: [{ name: 'tables_list', input: '{"PRIVATE PROMPT' }] })),
+    anthropic: () => assert.fail(),
+  });
+  await assert.rejects(inferWithTools(primary, messages, noTools, meter), { message: 'model-invalid-decision' });
+  const failed = records.filter(record => record.event === 'call_failed');
+  assert.equal(failed.length, 3, 'each corrected attempt is logged');
+  for (const record of failed) {
+    assert.equal(record['error.code'], 'invalid_response');
+    assert.equal(record['response.rejection'], 'tool-arguments');
+    assert.equal(record['response.finish_reason'], 'tool_calls');
+  }
+  assert.ok(!JSON.stringify(records).includes('PRIVATE PROMPT'), 'no prompt or response content is logged');
+});
