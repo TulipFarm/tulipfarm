@@ -43,6 +43,8 @@ export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: st
 
 type ComposerProps = {
   compact?: boolean;
+  /** Lines the empty message shows before it grows; `1` once a conversation has started. */
+  minRows?: number | undefined;
   content: ChatDraft;
   inputRef?: Ref<RichTextEditorHandle>;
   onContentChange: (content: ChatDraft) => void;
@@ -90,6 +92,7 @@ type ComposerProps = {
 
 export function Composer({
   compact = false,
+  minRows,
   content,
   inputRef,
   onContentChange,
@@ -179,6 +182,7 @@ export function Composer({
             key={compact ? 'compact' : 'full'}
             size={compact ? 'sm' : 'md'}
             condensed={condensed}
+            minRows={minRows}
             ref={inputRef}
             placeholder={
               questionPending

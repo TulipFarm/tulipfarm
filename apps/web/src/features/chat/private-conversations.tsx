@@ -1427,6 +1427,7 @@ function ConversationDetail({
               </div>
               <Composer
                 compact={compact}
+                minRows={empty ? undefined : 1}
                 inputRef={composerInput}
                 content={draftSent ? emptyRichDocument() : content}
                 onContentChange={setContent}
