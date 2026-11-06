@@ -45,7 +45,7 @@ export async function requireMcpTaskRun(tx: AuthorizationTransaction, actor: Hum
     `SELECT r.id FROM ${table(tx, 'tf_agent_runs')} r
     JOIN ${table(tx, 'tf_agent_task_runs')} b ON b.run_id=r.id
     JOIN ${table(tx, 'tf_agent_tasks')} t ON t.id=b.task_id
-    WHERE r.id=$1 AND r.kind='delegated' AND r.schedule_id IS NULL
+    WHERE r.id=$1 AND r.kind='delegated'
       AND r.user_id=$2 AND r.membership_id=$3 AND t.owner_user_id=$2 AND t.owner_membership_id=$3
       AND b.generation=t.generation`,
     [runId, actor.userId, actor.membershipId],

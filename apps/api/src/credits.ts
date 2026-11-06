@@ -18,7 +18,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 
 // A flow is the caller's when they own the chat or task, requested the delegated agent run,
-// sponsored the scheduled run, or own the Gmail heartbeat item. Shared agents do not make
+// sponsored a past scheduled run, or own the Gmail heartbeat item. Shared agents do not make
 // another person's flows visible.
 async function ownFlowIds(tx: AuthorizationTransaction, actor: HumanActor) {
   const owners = [

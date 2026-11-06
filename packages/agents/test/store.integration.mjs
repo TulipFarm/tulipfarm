@@ -58,8 +58,7 @@ test(
       const teamId = randomUUID(),
         agentId = randomUUID(),
         revision = 'a'.repeat(64),
-        activationId = randomUUID(),
-        scheduleId = randomUUID();
+        activationId = randomUUID();
       const scope = [{ assetId: teamId, permissions: ['table.create'] }];
       await owner.query(`INSERT INTO "${names.schema}".tf_teams (id, name) VALUES ($1, 'Billing')`, [teamId]);
       await owner.query(`INSERT INTO "${names.schema}".tf_agents (id) VALUES ($1)`, [agentId]);
@@ -71,11 +70,6 @@ test(
         `INSERT INTO "${names.schema}".tf_agent_activations (id,agent_id,definition_revision,scope) VALUES ($1,$2,$3,$4)`,
         [activationId, agentId, revision, JSON.stringify(scope)],
       );
-      await owner.query(`INSERT INTO "${names.schema}".tf_agent_schedules (id,activation_id,scope) VALUES ($1,$2,$3)`, [
-        scheduleId,
-        activationId,
-        JSON.stringify(scope),
-      ]);
       const denied = error => error?.message === 'Resource not found';
       await assert.rejects(
         store.saveDefinition(workspaceId, actor, agentId, {
@@ -90,15 +84,13 @@ test(
         store.configure(workspaceId, actor, { agentId, version: 0, enabled: true, teamIds: [teamId], limits: scope }),
         denied,
       );
-      await assert.rejects(store.authorizeSchedule(workspaceId, actor, { activationId, scope }), denied);
-      await assert.rejects(store.revoke(workspaceId, actor, { kind: 'schedule', id: scheduleId }), denied);
-      await assert.rejects(store.startScheduled(workspaceId, { scheduleId, runId: randomUUID() }), denied);
+      await assert.rejects(store.revoke(workspaceId, actor, { kind: 'activation', id: activationId }), denied);
       assert.equal(
         (await owner.query(`SELECT count(*)::int AS count FROM "${names.schema}".tf_agent_runs`)).rows[0].count,
         0,
       );
       assert.equal(
-        (await owner.query(`SELECT revoked_at FROM "${names.schema}".tf_agent_schedules WHERE id=$1`, [scheduleId]))
+        (await owner.query(`SELECT revoked_at FROM "${names.schema}".tf_agent_activations WHERE id=$1`, [activationId]))
           .rows[0].revoked_at,
         null,
       );

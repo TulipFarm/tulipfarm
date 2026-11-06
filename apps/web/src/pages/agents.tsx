@@ -25,7 +25,6 @@ import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
-import { AgentSchedules } from '@/features/agents/schedules';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
 import { AgentChat } from '@/features/agents/chat';
 import { AgentArchive, AgentDelete } from '@/features/agents/delete';
@@ -417,7 +416,7 @@ function NewAgentBuilder({
         {import.meta.env.DEV && workspace.slug === 'agent-builder-mock' && (
           <p role="note" className="rounded-lg border bg-muted p-3 text-sm">
             Local design demo. Models, prices, channels, and replies are illustrative. No live model calls, Slack
-            messages, or scheduled jobs.
+            messages, or workflow runs.
           </p>
         )}
         <AgentRead state={read.state} refresh={read.refresh}>
@@ -769,21 +768,7 @@ function AgentPage({
                       </>,
                     )}
                   {can('manage') &&
-                    panel(
-                      'schedules',
-                      <>
-                        <AgentTriggerWorkflows agentId={id} workspaceId={workspaceId} slug={slug} />
-                        <AgentSchedules
-                          api={api}
-                          detail={detail}
-                          workspaceId={workspaceId}
-                          slug={slug}
-                          teams={snapshot.context.teams}
-                          concealed={!ready}
-                          refresh={refresh}
-                        />
-                      </>,
-                    )}
+                    panel('schedules', <AgentTriggerWorkflows agentId={id} workspaceId={workspaceId} slug={slug} />)}
                   {panel(
                     'settings',
                     <>

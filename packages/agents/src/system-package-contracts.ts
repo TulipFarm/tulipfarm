@@ -20,7 +20,6 @@ import { agentDefinitionSchema, taskLimitsSchema } from './contracts.ts';
 import { skillPackageLimits, skillPathSchema } from './skill-package-contracts.ts';
 import { skillSelectionSchema } from './skill-ids.ts';
 import { agentPermissionSchema } from './saved-contracts.ts';
-import { scheduleActionSchema } from './schedule-contracts.ts';
 
 export const systemPackageSchemaId = 'https://tulipfarm.ai/schemas/system-package.v1.json';
 export const packageKeySchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
@@ -331,7 +330,11 @@ export const packageResourceSchema = z.discriminatedUnion('kind', [
         z.strictObject({
           key: packageKeySchema,
           trigger: z.discriminatedUnion('kind', [intervalTriggerSchema, portableCron]),
-          action: scheduleActionSchema.options[1],
+          action: z.strictObject({
+            kind: z.literal('task'),
+            text: z.string().trim().min(1).max(8000),
+            limits: taskLimitsSchema,
+          }),
           sponsor: inputReference('member'),
         }),
       )

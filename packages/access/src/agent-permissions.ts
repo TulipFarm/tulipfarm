@@ -67,7 +67,7 @@ export async function requireAgentRunInvocation(
     JOIN ${table(tx, 'tf_slack_installations')} i ON i.id=p.installation_id AND i.generation=p.generation
     JOIN ${table(tx, 'tf_agents')} g ON g.id=a.agent_id
     JOIN ${table(tx, 'tf_agent_activations')} x ON x.id=a.activation_id AND x.agent_id=a.agent_id AND x.definition_revision=a.definition_revision
-    WHERE a.id=$1 AND a.agent_id=$2 AND a.user_id=$3 AND a.membership_id=$4 AND a.kind='delegated' AND a.schedule_id IS NULL AND a.task_id IS NULL
+    WHERE a.id=$1 AND a.agent_id=$2 AND a.user_id=$3 AND a.membership_id=$4 AND a.kind='delegated' AND a.task_id IS NULL
       AND a.status IN ('ready','running','waiting') AND g.enabled AND g.saved_revision IS NOT NULL AND g.deleted_at IS NULL AND x.revoked_at IS NULL
       AND r.channel ~ '^[CG]' AND t.request_snapshot->>'channel'=r.channel AND e.payload->>'channel'=r.channel
       AND t.request_snapshot->>'user'=p.slack_user_id AND e.payload->>'user'=p.slack_user_id AND e.disposition='held'
@@ -118,7 +118,7 @@ const runSchema = z.object({
   agent_id: z.uuid(),
 });
 
-// A delegated run belongs to its requester. A scheduled run is visible only to its recorded audience.
+// A delegated run belongs to its requester. A scheduled run, kept from removed agent schedules, is visible only to its recorded audience.
 export async function requireAgentRunHistory(tx: AuthorizationTransaction, actor: HumanActor, runId: string) {
   const member = await currentMember(tx, actor);
   const run = runSchema

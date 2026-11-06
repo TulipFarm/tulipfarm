@@ -15,7 +15,6 @@ export const agentKeys = {
   context: ['agents', 'authoring-context'] as const,
   detail: (id: string) => ['agents', 'detail', id] as const,
   policy: (id: string) => ['agents', 'detail', id, 'policy'] as const,
-  schedules: (id: string) => ['agents', 'detail', id, 'schedules'] as const,
   availability: (id: string) => ['agents', 'detail', id, 'chat-availability'] as const,
   turn: (id: string, turnId: string | null) => ['agents', 'detail', id, 'turn', turnId] as const,
   command: (id: string, commandId: string | null) => ['agents', 'commands', id, commandId] as const,
@@ -35,10 +34,6 @@ export const agentReads = {
   policy: (api: Api, id: string) => ({
     key: agentKeys.policy(id),
     load: (signal: AbortSignal) => api.policy(id, signal),
-  }),
-  schedules: (api: Api, id: string) => ({
-    key: agentKeys.schedules(id),
-    load: (signal: AbortSignal) => api.schedules(id, signal),
   }),
 };
 export function combineAgentReads<A, B, T>(a: ReadState<A>, b: ReadState<B>, combine: (a: A, b: B) => T): ReadState<T> {
@@ -87,9 +82,6 @@ export function useAgentPage(api: Api, id: string, creating: boolean) {
 }
 export function useAgentPolicy(api: Api, id: string, enabled = true) {
   return useFeatureRead({ ...agentReads.policy(api, id), enabled });
-}
-export function useAgentSchedules(api: Api, id: string, enabled = true) {
-  return useFeatureRead({ ...agentReads.schedules(api, id), enabled });
 }
 export function useAgentAvailability(api: Api, id: string, enabled = true) {
   return useFeatureRead({ key: agentKeys.availability(id), load: signal => api.chatAvailability(id, signal), enabled });
@@ -208,11 +200,7 @@ export function useAgentApi(workspaceId: string) {
       archive: (id: string) => permissions(id, api.archive(id)),
       restore: (id: string) => saved(id, api.restore(id)),
       activate: (id: string, input: Parameters<Api['activate']>[1]) => saved(id, api.activate(id, input)),
-      activateInspection: (id: string, input: Parameters<Api['activateInspection']>[1]) =>
-        saved(id, api.activateInspection(id, input)),
       revokeActivation: (id: string, activationId: string) => permissions(id, api.revokeActivation(id, activationId)),
-      schedule: (id: string, input: Parameters<Api['schedule']>[1]) => saved(id, api.schedule(id, input)),
-      revokeSchedule: (id: string, scheduleId: string) => saved(id, api.revokeSchedule(id, scheduleId)),
       chat: (id: string, input: Parameters<Api['chat']>[1]) => usage(id, api.chat(id, input)),
       retryModel: (id: string, turnId: string, input: Parameters<Api['retryModel']>[2]) =>
         usage(id, api.retryModel(id, turnId, input)),

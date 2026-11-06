@@ -98,18 +98,18 @@ Model callers share a [stable system prompt and runtime reminder](../../docs/age
 
 An admin saves an immutable definition, configures current limits and team assignments, then activates an exact definition revision and scope. Saving another definition leaves existing activations and runs pinned.
 
-A delegated run stores its initiating user and membership incarnation. A scheduled run stores an independently revocable admin-authorized schedule. The shared `@tulipfarm/access` policy intersects current caller authority, agent grants, limits, activation, and run scope on each operation. Scheduled work additionally uses current schedule authorization.
+A run is delegated: it stores its initiating user and membership incarnation. The shared `@tulipfarm/access` policy intersects current caller authority, agent grants, limits, activation, and run scope on each operation.
 
-A schedule's action is either a table inspection or a saved prompt ([schedules](src/schedules.ts), [contract](src/schedule-contracts.ts)). A prompt schedule starts a private task owned by its sponsor, so the task runs with the sponsor's access intersected with the activation scope and appears only in the sponsor's task list. It runs at most hourly, uses the saved task limits, and starts the next task only after the previous one is completed, failed, or paused. A sponsor who loses access pauses the schedule. A refused start, such as the 1,000-task limit, skips that occurrence. Common migration `0008_agent_task_schedules.sql` links each task to its schedule. Saving an existing schedule with a new interval changes it in place, makes the saver its sponsor, and records an `agent.schedule.interval` audit event. A due run stays due; a later run moves to its last start plus the new interval, but never into the past. Common migration `0009_agent_schedule_interval_edit.sql` lets the runtime change the interval. Inspected 12 October 2026: the contract also supports five-field cron with an IANA time zone, retaining the hourly minimum for task prompts.
+An agent runs on its own only through Workflows. Each trigger in agent setup becomes a linked Workflow ([agent trigger workflows](src/agent-trigger-workflows.ts)) whose agent step runs the agent. Scheduled triggers run at most hourly. Common migration `0041_drop_agent_schedules.sql` removed the earlier agent schedules (task prompts and table inspections) and their tables; scheduled runs they left stay readable as history but can no longer act.
 
 Agent creation now uses a [persisted setup coordinator](src/setup.ts) for shared
 manual/chat review, save-only drafts and explicit activation. It stages Slack and
-schedule intents without starting them. See the [approved experience](../../docs/plans/agent-builder-experience.md)
+trigger intents without starting them. See the [approved experience](../../docs/plans/agent-builder-experience.md)
 and [verification guide](../../docs/verification.md) for local proof and its limits.
 
 The tool registry offers schema inspection and status, plus record listing, creation, update and deletion. Agents cannot change schemas. Schema changes go through reviewed resource proposals.
 
-Task admission is capped at 1,000 active tasks per member: pending, waiting for clarification or approval, and paused tasks count; completed and failed history does not. Starting, reopening completed work, and retrying or pausing failed work use the same capacity check. A refused scheduled start is recorded as `agent.schedule.skip.<reason>` and shown only to its sponsor as the latest schedule result. The schedule remains enabled and tries again at the next occurrence.
+Task admission is capped at 1,000 active tasks per member: pending, waiting for clarification or approval, and paused tasks count; completed and failed history does not. Starting, reopening completed work, and retrying or pausing failed work use the same capacity check.
 
 ## Follow-ups
 
@@ -119,7 +119,7 @@ chat, Slack default-agent thread or Slack direct message where it was asked for
 agent schedules one with `followups.schedule` whenever someone asks for work
 later, after a delay or at a time, including "check back in 5 minutes". It
 must not do the deferred work now. One-off later work needs no workflow;
-repeating work uses agent schedules or workflows. `followups.list` and
+repeating work uses workflows. `followups.list` and
 `followups.cancel` cover the requester's pending follow-ups in the current chat
 or thread.
 

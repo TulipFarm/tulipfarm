@@ -15,7 +15,6 @@ import { AccessDenied, lockAuthorization, requireCurrentActor } from '@tulipfarm
 import { createAgentAuthoring } from '../dist/authoring.js';
 import { createSavedAgentService } from '../dist/saved-service.js';
 import { agentCompatibility, createAgentStore } from '../dist/store.js';
-import { createAgentSchedules } from '../dist/schedules.js';
 import { policyVersion, soulStorageSkip } from './soul-fixture.mjs';
 
 async function saveRace(owner, table, operations) {
@@ -222,7 +221,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
       const legacyRevision = 'c'.repeat(64);
       const legacyActivation = randomUUID();
-      const legacySchedule = randomUUID();
       const legacyRun = randomUUID();
       await owner.query(`INSERT INTO ${table('tf_agents')} (id) VALUES ($1)`, [legacyId]);
       await owner.query(
@@ -234,13 +232,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         [legacyActivation, legacyId, legacyRevision],
       );
       await owner.query(`INSERT INTO ${table('tf_agent_limits')} (agent_id,scope) VALUES ($1,'[]')`, [legacyId]);
-      await owner.query(`INSERT INTO ${table('tf_agent_schedules')} (id,activation_id,scope) VALUES ($1,$2,'[]')`, [
-        legacySchedule,
-        legacyActivation,
-      ]);
       await owner.query(
-        `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,schedule_id,scope) VALUES ($1,$2,$3,$4,'scheduled',$5,'[]')`,
-        [legacyRun, legacyId, legacyActivation, legacyRevision, legacySchedule],
+        `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,status,scope) VALUES ($1,$2,$3,$4,'scheduled','completed','[]')`,
+        [legacyRun, legacyId, legacyActivation, legacyRevision],
       );
       await assert.rejects(
         executor.activate(workspaceId, actor, { agentId: legacyId, revision: legacyRevision, scope: [] }),
@@ -248,10 +242,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
       await assert.rejects(
         executor.startDelegated(workspaceId, actor, { activationId: legacyActivation, scope: [] }),
-        AccessDenied,
-      );
-      await assert.rejects(
-        executor.startScheduled(workspaceId, { scheduleId: legacySchedule, runId: randomUUID() }),
         AccessDenied,
       );
       await assert.rejects(
@@ -545,7 +535,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         expectedSoulRevision: changed.savedRevision,
       });
       assert.equal((await worker.prepare(workspaceId, otherCommand.commandId)).status, 'accepted');
-      const schedules = createAgentSchedules(runtime);
       const tableId = randomUUID();
       const inspectionScope = [{ assetId: tableId, permissions: ['table.row.read'] }];
       await service.configure(workspaceId, userId, agentId, {
@@ -554,20 +543,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         teamIds: [engineering],
         limits: inspectionScope,
       });
-      const inspectionId = randomUUID();
-      const inspectionInput = {
-        id: inspectionId.toUpperCase(),
+      const { activationId: inspectionId } = await service.activate(workspaceId, userId, agentId, {
         revision: first.definitionRevision,
-        tableId: tableId.toUpperCase(),
-      };
-      assert.deepEqual(
-        await schedules.activate(workspaceId.toUpperCase(), userId, agentId.toUpperCase(), inspectionInput),
-        { activationId: inspectionId },
-      );
-      assert.deepEqual(
-        await schedules.activate(workspaceId, userId, agentId, { ...inspectionInput, id: inspectionId, tableId }),
-        { activationId: inspectionId },
-      );
+        scope: inspectionScope,
+      });
       const inspectionRow = async () =>
         (
           await owner.query(
@@ -609,11 +588,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const revokedInspection = await inspectionRow();
       assert.ok(revokedInspection.revoked_at instanceof Date);
       assert.deepEqual(await service.revokeActivation(workspaceId, userId, agentId, inspectionId), { saved: true });
-      assert.deepEqual(await inspectionRow(), revokedInspection);
-      assert.deepEqual(
-        await schedules.activate(workspaceId, userId, agentId, { ...inspectionInput, id: inspectionId, tableId }),
-        { activationId: inspectionId },
-      );
       assert.deepEqual(await inspectionRow(), revokedInspection);
       await assert.rejects(
         executor.startDelegated(workspaceId, actor, { activationId: inspectionId, scope: inspectionScope }),

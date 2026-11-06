@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { normalizeCronExpression, type Definition, type Trigger, type Work } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
+import { nextOccurrence } from '@tulipfarm/workflows/schedule';
 import { afterCommit } from '@tulipfarm/workspace-storage/runtime';
 import type { HumanActor } from '@tulipfarm/access';
 import { AgentError } from './saved-contracts.ts';
-import { previewAgentTaskSchedule } from './schedules.ts';
 import { unattendedTrigger, type AgentSetupTrigger } from './setup-contracts.ts';
 import type { AgentStorage, AgentTransaction } from './store.ts';
 
@@ -15,7 +15,7 @@ export type AgentWorkflowOptions = {
 };
 
 /** A UUID derived from its parts, so a retried setup or migration finds the workflow it already made. */
-export function derivedId(...parts: string[]) {
+function derivedId(...parts: string[]) {
   const hash = createHash('sha256').update(parts.join(':')).digest('hex');
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
@@ -70,9 +70,33 @@ export function agentTriggerLabel(trigger: Trigger) {
 /** Kinds whose runs start from data the trigger carries; the agent receives that data with its prompt. */
 const carriesData = (trigger: Trigger) => !['manual', 'once', 'interval', 'cron'].includes(trigger.kind);
 
-/** An agent task runs at most hourly from a schedule, as it did when agents kept their own schedules. */
+/** An interval or cron trigger starts a private task owned by its sponsor, so it runs at most hourly. */
+export const agentTriggerMinimumMinutes = 60;
+
+function nextRun(trigger: Extract<Trigger, { kind: 'interval' | 'cron' }>, now: Date) {
+  try {
+    const occurrence = nextOccurrence(trigger, now);
+    if (!occurrence) throw new Error('not scheduled');
+    return occurrence;
+  } catch {
+    throw new AgentError('schedule-invalid', 400);
+  }
+}
+
+export function previewAgentTriggerCadence(trigger: Extract<Trigger, { kind: 'interval' | 'cron' }>, now = new Date()) {
+  const allowed =
+    trigger.kind === 'interval'
+      ? trigger.minutes >= agentTriggerMinimumMinutes
+      : (() => {
+          const first = new Date(nextRun(trigger, new Date('2024-01-01T00:00:00.000Z')));
+          return new Date(nextRun(trigger, first)).getTime() - first.getTime() >= agentTriggerMinimumMinutes * 60000;
+        })();
+  if (!allowed) throw new AgentError('task-schedule-interval', 400);
+  return { trigger, nextRunAt: nextRun(trigger, now) };
+}
+
 export function requireAgentTriggerCadence(trigger: Trigger) {
-  if (trigger.kind === 'interval' || trigger.kind === 'cron') previewAgentTaskSchedule(trigger);
+  if (trigger.kind === 'interval' || trigger.kind === 'cron') previewAgentTriggerCadence(trigger);
 }
 
 export function agentTriggerDefinition(

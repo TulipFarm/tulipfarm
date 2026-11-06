@@ -286,7 +286,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
         : `${pendingLabel} tasks and approvals without a scheduled time`;
   const planning = calendarNowNext(visible, now, zone);
   const planningComplete =
-    [sources.agents.state, sources.workflows.state, ...(sources.connected ? [sources.google.state] : [])].every(
+    [sources.workflows.state, ...(sources.connected ? [sources.google.state] : [])].every(
       state => state.kind === 'ready' && !state.error,
     ) &&
     sources.integration.state.kind === 'ready' &&
@@ -829,7 +829,6 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
           <div className="space-y-1 px-4 empty:hidden">
             <SourceStatus label="integrations" read={sources.integration} />
             <SourceStatus label="workflows" read={sources.workflows} />
-            <SourceStatus label="agent schedules" read={sources.agents} />
             {sources.connected && <SourceStatus label="Google Calendar" read={sources.google} />}
             {calendarStatus && !sources.connected && (
               <p className="py-2 text-xs text-muted-foreground">
@@ -854,14 +853,13 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 </Button>
               </p>
             ))}
-            {(workflows?.more || (sources.agents.state.kind === 'ready' && sources.agents.state.data.more)) && (
+            {workflows?.more && (
               <p className="py-1 text-xs text-muted-foreground">
                 Some scheduled work is outside this result limit. Choose a shorter view or open Workflows.
               </p>
             )}
             {visible.length === 0 &&
               sources.workflows.state.kind === 'ready' &&
-              sources.agents.state.kind === 'ready' &&
               (!sources.connected || sources.google.state.kind === 'ready') && (
                 <div className="flex flex-wrap items-center gap-2 py-2 text-xs text-muted-foreground">
                   <p>
@@ -986,7 +984,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                 </Field>
                 <p className="text-xs text-muted-foreground">
                   9 AM–6 PM in {zone.replaceAll('_', ' ')}. Uses all connected calendars, including hidden ones.
-                  Scheduled agents and workflows do not block time.
+                  Scheduled workflows do not block time.
                 </p>
                 {!canFind ? (
                   <Alert>
@@ -1084,7 +1082,7 @@ function PersonalCalendar({ workspaceId, slug }: { workspaceId: string; slug: st
                       />
                     }
                   >
-                    Open {item.kind === 'workflow' ? 'workflow' : item.kind === 'agent' ? 'agent' : 'original'}
+                    Open {item.kind === 'workflow' ? 'workflow' : 'original'}
                     <ExternalLink size={14} />
                   </Button>
                 )}

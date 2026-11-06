@@ -13,7 +13,7 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 const claimInput = ({ callId: _callId, ...input }) => input;
 
 test(
-  'autonomous internal runtime retains tool authority, hides legacy results, and fences takeover and retries',
+  'internal runtime retains tool authority, hides direct results, and fences takeover and retries',
   { timeout: 60000 },
   async () => {
     const f = await internalFixture();
@@ -21,7 +21,7 @@ test(
     try {
       const { workspace: w, db, table } = f;
       let service = createInternalAgentComposition(f.runtime);
-      const run = await f.run('autonomous');
+      const run = await f.run();
       const old = await service.claim(claimInput(run));
       const text = { producerId: randomUUID(), parts: [{ kind: 'text', text: 'runtime-private-sentinel' }] };
       const [a, b] = await Promise.all([service.append(old, text), service.append(old, text)]);
@@ -65,10 +65,8 @@ test(
         }),
         AccessDenied,
       );
-      await assert.rejects(service.publishTool(old, { producerId: randomUUID(), callId: run.callId }), AccessDenied);
       await assert.rejects(f.store.history(w.id, w.userId, run.runId), AccessDenied);
-      assert.deepEqual((await f.store.list(w.id, w.userId)).chats, []);
-      const other = await f.run('autonomous');
+      const other = await f.run();
       await assert.rejects(
         service.append(old, { producerId: randomUUID(), parts: [{ kind: 'tool', callId: other.callId }] }),
         AccessDenied,
@@ -154,7 +152,6 @@ test(
           .name,
         'raw-secret-resource',
       );
-      await assert.rejects(service.claim({ ...claimInput(legacy), origin: { kind: 'autonomous' } }), AccessDenied);
       await db.platform.query(
         `UPDATE ${table('tf_conversation_turns')} SET attempt_epoch=attempt_epoch+1 WHERE id=$1`,
         [run.origin.turnId],
@@ -190,7 +187,7 @@ test('restricted runtime cannot mutate internal history or mint confirmation aut
   const f = await internalFixture();
   let otherLogin;
   try {
-    const run = await f.run('autonomous');
+    const run = await f.run();
     const service = createInternalConversations(f.runtime);
     const fence = await service.claim(claimInput(run));
     await service.append(fence, { producerId: randomUUID(), parts: [{ kind: 'text', text: 'immutable' }] });

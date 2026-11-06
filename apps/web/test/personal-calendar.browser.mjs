@@ -15,7 +15,8 @@ const shots = process.env.PERSONAL_CALENDAR_SCREENSHOTS,
   cdp = process.env.PERSONAL_CALENDAR_CDP_PORT;
 const { workspace, session } = createWorkspaceFixture({ slug: 'calendar-qa', name: 'Acme Studio' });
 const id = '33333333-3333-4333-8333-333333333333',
-  otherId = '44444444-4444-4444-8444-444444444444';
+  otherId = '44444444-4444-4444-8444-444444444444',
+  briefId = '55555555-5555-4555-8555-555555555555';
 const scope = 'https://www.googleapis.com/auth/calendar';
 const scopes = ['openid', 'https://www.googleapis.com/auth/userinfo.email', scope];
 const integration = { integrationId: id, accountId: 'account', generation: 1, scopes, requiredScopes: [scope] };
@@ -201,6 +202,15 @@ test(
                 occurrences: follow ? [{ at: '2030-01-07T12:00:00Z', status: 'Scheduled' }] : [],
                 more: false,
               },
+              {
+                id: briefId,
+                name: 'Morning brief',
+                personal: true,
+                following: false,
+                enabled: true,
+                occurrences: [{ at: '2030-01-07T08:00:00Z', status: 'Scheduled' }],
+                more: false,
+              },
             ],
             actions: hideActions
               ? []
@@ -211,12 +221,7 @@ test(
           follows.push(request.postDataJSON());
           follow = request.postDataJSON().following;
           json = { following: follow };
-        } else if (path.endsWith('/agents/calendar'))
-          json = {
-            schedules: [{ id, agentId: otherId, name: 'Morning brief', times: ['2030-01-07T08:00:00Z'], more: false }],
-            more: false,
-          };
-        else if (path.endsWith('/agent-tasks')) {
+        } else if (path.endsWith('/agent-tasks')) {
           if (failTasks) return route.fulfill({ status: 503, json: { error: 'tasks-unavailable' } });
           json = { tasks: hideTasks ? [] : [task], nextCursor: moreTasks ? 'next-page' : null };
         } else if (path.endsWith(`/agent-tasks/${otherId}/history`))
@@ -293,7 +298,7 @@ test(
       );
       assert.equal(
         await calendarFilters.getByRole('region', { name: 'Event types', exact: true }).getByRole('checkbox').count(),
-        4,
+        3,
         'event types stay directly available',
       );
       assert.equal(
@@ -457,11 +462,11 @@ test(
       await close();
       await button('Weekly planning').waitFor();
       const colors = await page.evaluate(() =>
-        ['meeting', 'task', 'agent', 'workflow'].map(
+        ['meeting', 'task', 'workflow'].map(
           kind => getComputedStyle(document.querySelector(`.calendar-entry[data-kind="${kind}"]`)).color,
         ),
       );
-      assert.equal(new Set(colors).size, 4, 'colors identify event types only');
+      assert.equal(new Set(colors).size, 3, 'colors identify event types only');
       assert.equal(
         await page.locator('.calendar-source-mark').count(),
         0,

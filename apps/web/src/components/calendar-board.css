@@ -88,11 +88,6 @@
   --event-ink: var(--warning);
   --event-paper: var(--warning-subtle);
 }
-.calendar-entry[data-kind='agent'],
-.calendar-kind-mark[data-kind='agent'] {
-  --event-ink: var(--chart-4);
-  --event-paper: color-mix(in oklch, var(--chart-4) 12%, var(--card));
-}
 .calendar-entry[data-kind='workflow'],
 .calendar-kind-mark[data-kind='workflow'] {
   --event-ink: var(--foreground-secondary);

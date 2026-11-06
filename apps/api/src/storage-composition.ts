@@ -360,7 +360,7 @@ export function registerStorageComposition(
     approve: googleApproval.approve,
   });
   if (files) registerFilesGoogleCopy(app, { auth: dependencies.auth, files, google });
-  registerTableDispatch(app, { pool: dependencies.pool, runtime, temporal, wakeTask, agentWorkflows: agentSetup });
+  registerTableDispatch(app, { pool: dependencies.pool, runtime, temporal });
   registerConversationDispatch(app, {
     pool: dependencies.pool,
     runtime,

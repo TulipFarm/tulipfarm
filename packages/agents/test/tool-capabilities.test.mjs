@@ -37,16 +37,15 @@ test('saved-agent selectable tools come only from supported runtime profiles', (
 });
 
 test('task-based runtimes and Slack channel agents advertise distinct support', () => {
-  assert.strictEqual(agentRuntimeToolNames.schedule, agentRuntimeToolNames.task);
   assert.strictEqual(agentRuntimeToolNames.workflowStep, agentRuntimeToolNames.task);
   assert.deepEqual(supportedAgentToolRuntimes('google.read'), ['slackChannel']);
   assert.deepEqual(supportedAgentToolRuntimes('github.issue.read'), ['slackChannel']);
-  assert.deepEqual(supportedAgentToolRuntimes('github.personal.read'), ['task', 'schedule', 'workflowStep']);
+  assert.deepEqual(supportedAgentToolRuntimes('github.personal.read'), ['task', 'workflowStep']);
   for (const tool of ['skills.execute', 'skills.files.read']) {
-    assert.deepEqual(supportedAgentToolRuntimes(tool), ['task', 'schedule', 'workflowStep']);
+    assert.deepEqual(supportedAgentToolRuntimes(tool), ['task', 'workflowStep']);
   }
   assert.equal(agentToolRuntimeDescription('google.read'), 'Available to Slack channel agents.');
-  assert.equal(agentToolRuntimeDescription('rows.update'), 'Available to private tasks, schedules, workflow steps.');
+  assert.equal(agentToolRuntimeDescription('rows.update'), 'Available to private tasks, workflow steps.');
   assert.equal(supportedAgentToolRuntimes('files.create').length, 0);
 });
 

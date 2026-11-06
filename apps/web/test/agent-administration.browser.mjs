@@ -36,7 +36,6 @@ const teams = [
   { id: support, name: 'Support' },
 ];
 const membershipId = '88888888-8888-4888-8888-888888888888';
-const taskId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const resource = {
   id: tableId,
   revision: 'a'.repeat(40),
@@ -157,30 +156,6 @@ test(
         const destinationWrites = [];
         const activationWrites = [];
         let failConfigure = false;
-        const scheduleWrites = [];
-        const existingSchedule = {
-          id: 'abababab-abab-4bab-8bab-abababababab',
-          activationId,
-          action: {
-            kind: 'task',
-            text: 'Summarize overdue invoices for the team.',
-            limits: { toolCalls: 100, credits: 100, activeMilliseconds: 300000 },
-          },
-          trigger: { kind: 'interval', minutes: 60 },
-          sponsorMembershipId: membershipId,
-          historyAudience: [],
-        };
-        const listed = body => ({
-          ...body,
-          revision: 'b'.repeat(64),
-          nextRunAt: '2026-10-10T09:00:00Z',
-          revoked: false,
-          enabled: true,
-          paused: false,
-          pauseReason: null,
-          lastRun: { kind: 'task', taskId, status: 'waiting-approval' },
-        });
-        let scheduleList = [listed(existingSchedule)];
         const workflowSummary = (id, name, agent) => ({
           id,
           revision: id,
@@ -253,13 +228,7 @@ test(
           } else if (path.endsWith(`/agents/${agentId}/activations`)) {
             activationWrites.push(request.postDataJSON());
             return fulfill({ status: 500, json: { error: 'unexpected write' } });
-          } else if (path.endsWith(`/agents/${agentId}/schedules`) && request.method() === 'PUT') {
-            const body = request.postDataJSON();
-            scheduleWrites.push(body);
-            scheduleList = [listed(body)];
-            json = { saved: true };
-          } else if (path.endsWith(`/agents/${agentId}/schedules`)) json = scheduleList;
-          else if (path === `/v1/workspaces/${workspace.id}/workflows`) json = workflowList;
+          } else if (path === `/v1/workspaces/${workspace.id}/workflows`) json = workflowList;
           else if (path.endsWith(`/agents/${agentId}/chat`)) json = { configured: true };
           else if (path.endsWith('/slack/destinations')) {
             if (request.method() === 'PUT') {
@@ -575,93 +544,16 @@ test(
         const linked = triggerWorkflows.getByRole('list', { name: 'Workflows that run this agent', exact: true });
         await linked.getByRole('link', { name: 'Customer reviewer: Every hour', exact: true }).waitFor();
         assert.equal(await linked.getByRole('link').count(), 1);
-        const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
-        await schedules.getByText('Runs prompt: Summarize overdue invoices for the team.', { exact: true }).waitFor();
-        assert.equal(await schedules.getByRole('radio', { name: 'Run a saved prompt', exact: true }).count(), 0);
-        assert.equal(await schedules.getByLabel('Prompt', { exact: true }).count(), 0);
-        await schedules
-          .getByText('Limits for each run: 100 tool calls, 100 credits, 300 seconds.', { exact: true })
-          .waitFor();
         assert.equal(
-          await schedules.getByRole('link', { name: 'Open last task', exact: true }).getAttribute('href'),
-          `/acme/agent-tasks/${taskId}`,
+          await page.getByRole('region', { name: 'Agent table inspection schedules', exact: true }).count(),
+          0,
+          'agent schedules are replaced by trigger workflows',
         );
-        assert.equal(await schedules.getByText('Last task: Needs your review', { exact: false }).count(), 1);
-        const sponsorTask = schedules.getByRole('button', { name: 'Sponsor this schedule', exact: true });
-        assert.deepEqual(await describedTexts(sponsorTask), ['Check I sponsor this schedule above first.']);
-        const interval = schedules.getByRole('form', { name: 'Change interval', exact: true });
-        const saveInterval = interval.getByRole('button', { name: 'Save interval', exact: true });
-        assert.equal(await interval.getByLabel('New interval in minutes', { exact: true }).inputValue(), '60');
-        assert.deepEqual(await describedTexts(saveInterval), ['Check I sponsor this schedule above first.']);
-        const consent = schedules.getByRole('checkbox', {
-          name: 'I sponsor this schedule using my current permissions',
-          exact: true,
-        });
-        await consent.click();
-        await interval.getByLabel('New interval in minutes', { exact: true }).fill('30');
-        await saveInterval.click();
-        assert.equal(await interval.getByRole('alert').textContent(), 'Fix 1 field to change the interval.');
-        await eventually(
-          () => describedTexts(interval.getByLabel('New interval in minutes', { exact: true })),
-          ['Enter whole minutes from 60 to 10,080.'],
-        );
-        assert.deepEqual(scheduleWrites, []);
-        await interval.getByLabel('New interval in minutes', { exact: true }).fill('120');
-        await saveInterval.click();
-        await schedules.getByText('Scheduled every 120 minutes', { exact: true }).waitFor();
-        assert.deepEqual(scheduleWrites, [{ ...existingSchedule, trigger: { kind: 'interval', minutes: 120 } }]);
-        assert.equal(await interval.getByLabel('New interval in minutes', { exact: true }).inputValue(), '120');
-        await consent.click();
-        scheduleList = [{ ...scheduleList[0], paused: true, pauseReason: 'sponsor-access-lost' }];
-        await page.reload();
-        await openTab('Triggers');
-        await schedules.getByText('Paused, sponsor required every 120 minutes', { exact: true }).waitFor();
-        await schedules
-          .getByText('The sponsor no longer has access. Resume as sponsor using your current permissions.', {
-            exact: true,
-          })
-          .waitFor();
-        const resume = schedules.getByRole('button', { name: 'Resume as sponsor', exact: true });
-        await schedules
-          .getByRole('checkbox', { name: 'I sponsor this schedule using my current permissions', exact: true })
-          .click();
-        await resume.click();
-        await schedules.getByText('Scheduled every 120 minutes', { exact: true }).waitFor();
-        assert.deepEqual(scheduleWrites[1], scheduleWrites[0]);
         if (shots)
-          await schedules.screenshot({
-            path: `${shots}/schedules-${device.viewport.width}-${device.theme}.png`,
+          await triggerWorkflows.screenshot({
+            path: `${shots}/triggers-${device.viewport.width}-${device.theme}.png`,
             animations: 'disabled',
           });
-        const inspect = schedules.getByRole('button', { name: 'Activate saved revision for inspection', exact: true });
-        assert.deepEqual(await describedTexts(inspect), ['Choose a table to inspect first.']);
-        await schedules.getByRole('button', { name: 'Choose a table', exact: true }).click();
-        await eventually(() => isFocused(schedules.getByLabel('Table to inspect', { exact: true })), true);
-        await schedules.getByRole('button', { name: 'Create inspection schedule', exact: true }).click();
-        await eventually(
-          () => describedTexts(schedules.getByLabel('Table to inspect', { exact: true })),
-          ['Choose a table to inspect.'],
-        );
-        assert.deepEqual(
-          await describedTexts(schedules.getByRole('combobox', { name: 'Instructions to run', exact: true })),
-          ['Choose the instructions to run.'],
-        );
-        assert.deepEqual(
-          await describedTexts(
-            schedules.getByRole('checkbox', {
-              name: 'I sponsor this schedule using my current permissions',
-              exact: true,
-            }),
-          ),
-          ['Confirm that you sponsor this schedule.'],
-        );
-        assert.equal(await schedules.getByRole('alert').textContent(), 'Fix 3 fields to create the schedule.');
-        await choose(schedules, 'Table to inspect', 'Customers · Engineering · 55555555');
-        assert.match(
-          await schedules.getByLabel('Table to inspect', { exact: true }).textContent(),
-          /Customers · Engineering · 55555555/,
-        );
-        await eventually(() => inspect.isDisabled(), false);
 
         assert.deepEqual(errors, []);
         assert.deepEqual(failedLoads.toSorted(), servedFailures.toSorted());
@@ -669,113 +561,6 @@ test(
         console.log(
           `${device.name} passed: per-section saves and unsaved state, read with any permission, blocked reasons with fixes, Slack validation without a request, review recovery after an unconfirmed save and a conflict.`,
         );
-      }
-    } finally {
-      await browser?.close();
-      try {
-        process.kill(-server.pid, 'SIGTERM');
-      } catch {}
-    }
-  },
-);
-
-test(
-  'sponsor sees skipped task schedule capacity and recovery on desktop and mobile',
-  { timeout: 120000 },
-  async () => {
-    const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-      cwd: new URL('..', import.meta.url),
-      stdio: 'ignore',
-      detached: true,
-    });
-    let browser;
-    try {
-      for (let attempt = 0; ; attempt++) {
-        try {
-          if ((await fetch(origin)).ok) break;
-        } catch {}
-        assert.ok(attempt < 150 && server.exitCode === null, 'Schedule browser server must start');
-        await delay(100);
-      }
-      browser = await chromium.launch({ headless: true });
-      for (const viewport of [
-        { width: 1440, height: 1000 },
-        { width: 390, height: 844 },
-      ]) {
-        const context = await browser.newContext({ viewport });
-        const page = await context.newPage();
-        page.setDefaultTimeout(15000);
-        let lastRun = { kind: 'skipped', reason: 'task-limit' };
-        const schedule = {
-          id: crypto.randomUUID(),
-          activationId,
-          sponsorMembershipId: membershipId,
-          historyAudience: [],
-          action: {
-            kind: 'task',
-            text: 'Summarize overdue invoices.',
-            limits: { toolCalls: 100, credits: 100, activeMilliseconds: 300000 },
-          },
-          trigger: { kind: 'interval', minutes: 60 },
-          revision: 'b'.repeat(64),
-          nextRunAt: '2026-10-10T09:00:00Z',
-          revoked: false,
-          enabled: true,
-          paused: false,
-          pauseReason: null,
-        };
-        await page.route('**/v1/**', async route => {
-          const path = new URL(route.request().url()).pathname;
-          let json;
-          if (path === '/v1/auth/get-session')
-            json = {
-              session: { id: 'session-ada', userId: 'ada' },
-              user: { id: 'ada', name: 'Ada', email: 'ada@example.com' },
-            };
-          else if (path === '/v1/workspaces') json = [workspace];
-          else if (path === '/v1/workspaces/acme') json = workspace;
-          else if (path.endsWith('/governance/me'))
-            json = { membershipId, role: 'admin', teams, capabilities: { manageGovernance: true, canLeave: true } };
-          else if (path.endsWith('/agents/sharing-candidates')) json = { membershipId, people: [], teams };
-          else if (path.endsWith('/agents/authoring-context'))
-            json = { currentSoulRevision: 'a'.repeat(40), teams, admin: true };
-          else if (path.endsWith(`/agents/${agentId}`)) json = detail;
-          else if (path.endsWith(`/agents/${agentId}/policy`))
-            json = {
-              version: 1,
-              owningTeamId: engineering,
-              grants: [],
-              personGrants: [{ membershipId, permissions: ['manage'] }],
-              enrollment: [engineering],
-              enabled: true,
-              limits,
-            };
-          else if (path.endsWith(`/agents/${agentId}/schedules`)) json = [{ ...schedule, lastRun }];
-          else if (path.endsWith(`/agents/${agentId}/chat`)) json = { configured: true };
-          else return route.fulfill({ status: 404, json: { error: 'unavailable' } });
-          await route.fulfill({ json });
-        });
-        const openSchedules = async () => {
-          await page.goto(`${origin}/acme/agents/${agentId}`);
-          await page.getByRole('tab', { name: 'Triggers', exact: true }).click();
-        };
-        await openSchedules();
-        const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
-        await schedules
-          .getByText(
-            'Last scheduled start skipped: You have 1,000 active tasks. Complete active tasks to free capacity. The schedule will try again at the next occurrence.',
-            { exact: true },
-          )
-          .waitFor();
-        assert.equal(await schedules.getByRole('link', { name: 'Open last task', exact: true }).count(), 0);
-        lastRun = { kind: 'task', taskId, status: 'pending' };
-        await openSchedules();
-        await schedules.getByText('Last task: Working', { exact: false }).waitFor();
-        assert.equal(
-          await schedules.getByRole('link', { name: 'Open last task', exact: true }).getAttribute('href'),
-          `/acme/agent-tasks/${taskId}`,
-        );
-        await context.close();
       }
     } finally {
       await browser?.close();

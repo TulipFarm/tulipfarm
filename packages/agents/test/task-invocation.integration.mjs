@@ -326,10 +326,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         executor.startDelegated(w.id, admin, { activationId: agent.activationId, scope }),
         AccessDenied,
       );
-      await assert.rejects(
-        executor.authorizeSchedule(w.id, admin, { activationId: agent.activationId, scope }),
-        AccessDenied,
-      );
       await select(member);
       const memberTask = await start(member),
         { runId: memberRun } = await approvals.bindRun(w.id, member.userId, memberTask.id, { generation: 0 });

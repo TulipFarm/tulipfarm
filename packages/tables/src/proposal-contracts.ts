@@ -259,7 +259,6 @@ export class TableProposalError extends Error {
     | 'unsupported-definition'
     | 'table-linked'
     | 'workflow-active'
-    | 'agent-schedule-active'
     | 'table-title-immutable'
     | 'table-name-unavailable';
   constructor(code: TableProposalError['code']) {

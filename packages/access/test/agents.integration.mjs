@@ -5,7 +5,7 @@ import { fixture, connect } from '../../workspace-storage/test/integration/fixtu
 import { inTransaction } from '../../workspace-storage/src/provisioning.ts';
 import { AccessDenied, canAccessTable, lockAuthorization, queryHumanContext } from '../src/index.ts';
 
-test('persisted agent authorization intersects live grants, limits, activation, caller and schedule', async () => {
+test('persisted agent authorization intersects live grants, limits, activation and caller', async () => {
   const setup = await fixture();
   const workspace = await setup.create();
   const client = await connect(setup.login(workspace));
@@ -14,7 +14,6 @@ test('persisted agent authorization intersects live grants, limits, activation, 
     activation = randomUUID(),
     run = randomUUID(),
     scheduled = randomUUID(),
-    schedule = randomUUID(),
     team = randomUUID(),
     asset = randomUUID();
   const revision = 'a'.repeat(64);
@@ -90,31 +89,16 @@ test('persisted agent authorization intersects live grants, limits, activation, 
     assert.equal(await allowed(actor), false, 'agent grants cannot bypass caller grants');
     await setup.platform.query(`INSERT INTO ${s}.tf_member_teams VALUES ($1,$2)`, [workspace.membershipId, team]);
     assert.equal(await allowed(actor), true);
-    await setup.platform.query(`INSERT INTO ${s}.tf_agent_schedules (id,activation_id,scope) VALUES ($1,$2,$3)`, [
-      schedule,
-      activation,
-      JSON.stringify(scope),
-    ]);
+    // A scheduled run kept as history from before agent schedules were removed never acts again.
     await setup.platform.query(
-      `INSERT INTO ${s}.tf_agent_runs (id,agent_id,activation_id,definition_revision,kind,schedule_id,scope) VALUES ($1,$2,$3,$4,'scheduled',$5,$6)`,
-      [scheduled, agent, activation, revision, schedule, JSON.stringify(scope)],
+      `INSERT INTO ${s}.tf_agent_runs(id,agent_id,activation_id,definition_revision,kind,status,scope,sponsor_membership_id)
+      VALUES($1,$2,$3,$4,'scheduled','completed',$5,$6)`,
+      [scheduled, agent, activation, revision, JSON.stringify(scope), workspace.membershipId],
     );
-    const sponsoredSchedule = randomUUID(),
-      sponsoredRun = randomUUID();
-    await setup.platform.query(
-      `INSERT INTO ${s}.tf_agent_schedules(id,activation_id,scope,sponsor_membership_id)
-      VALUES($1,$2,$3,$4)`,
-      [sponsoredSchedule, activation, JSON.stringify(scope), workspace.membershipId],
-    );
-    await setup.platform.query(
-      `INSERT INTO ${s}.tf_agent_runs(id,agent_id,activation_id,definition_revision,kind,schedule_id,scope,sponsor_membership_id)
-      VALUES($1,$2,$3,$4,'scheduled',$5,$6,$7)`,
-      [sponsoredRun, agent, activation, revision, sponsoredSchedule, JSON.stringify(scope), workspace.membershipId],
-    );
-    assert.equal(
-      await queryHumanContext({ client, schema: workspace.names.schema }, { kind: 'agent', runId: sponsoredRun }),
-      null,
-      'A sponsor is not the identity for an autonomous is-me query',
+    await assert.rejects(allowed({ kind: 'agent', runId: scheduled }), AccessDenied);
+    await assert.rejects(
+      queryHumanContext({ client, schema: workspace.names.schema }, { kind: 'agent', runId: scheduled }),
+      AccessDenied,
     );
     await setup.platform.query(`UPDATE ${s}.tf_memberships SET removed_at = now() WHERE id = $1`, [
       workspace.membershipId,
@@ -124,13 +108,6 @@ test('persisted agent authorization intersects live grants, limits, activation, 
       workspace.userId,
     ]);
     await assert.rejects(allowed(actor), AccessDenied);
-    // Scheduled runs act only for a current named sponsor. Unsponsored legacy schedules stay locked.
-    await assert.rejects(allowed({ kind: 'agent', runId: scheduled }), AccessDenied);
-    await setup.platform.query(`UPDATE ${s}.tf_agent_schedules SET revoked_at = now() WHERE id = $1`, [schedule]);
-    await assert.rejects(allowed({ kind: 'agent', runId: scheduled }), AccessDenied);
-    await setup.platform.query(`UPDATE ${s}.tf_agent_schedules SET revoked_at = NULL WHERE id = $1`, [schedule]);
-    await setup.platform.query(`UPDATE ${s}.tf_agents SET enabled = false WHERE id = $1`, [agent]);
-    await assert.rejects(allowed({ kind: 'agent', runId: scheduled }), AccessDenied);
   } finally {
     await client.end();
     await setup.close();

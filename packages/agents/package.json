@@ -259,21 +259,9 @@
       "types": "./dist/inference.d.ts",
       "default": "./dist/inference.js"
     },
-    "./schedules": {
-      "types": "./dist/schedules.d.ts",
-      "default": "./dist/schedules.js"
-    },
     "./agent-trigger-workflows": {
       "types": "./dist/agent-trigger-workflows.d.ts",
       "default": "./dist/agent-trigger-workflows.js"
-    },
-    "./schedule-migration": {
-      "types": "./dist/schedule-migration.d.ts",
-      "default": "./dist/schedule-migration.js"
-    },
-    "./schedule-contracts": {
-      "types": "./dist/schedule-contracts.d.ts",
-      "default": "./dist/schedule-contracts.js"
     },
     "./follow-ups": {
       "types": "./dist/follow-ups.d.ts",

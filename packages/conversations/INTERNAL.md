@@ -6,9 +6,8 @@ on 29 September 2026. This service does not route private replies to a model.
 ## Runtime contract
 
 `createInternalConversations` in `src/internal.ts` accepts a live existing agent
-run. An autonomous origin requires scheduled authority. A linked origin requires
-the delegated membership to own the private chat and an unexpired processing turn
-with the supplied generation and epoch. One run has one immutable internal origin.
+run. Its linked origin requires the delegated membership to own the private chat
+and an unexpired processing turn with the supplied generation and epoch. One run has one immutable internal origin.
 
 The internal conversation ID equals its existing run ID. Ordered messages contain
 bounded text or same-run tool-call references. Inputs, results, errors, and tool

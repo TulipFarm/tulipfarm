@@ -431,11 +431,6 @@ test('saved-agent model and deterministic executor intersect selected tools, lim
     const denied = { workspaceId: w, runId: run.runId, callId: randomUUID() };
     await f.executor.queueCall(w, f.member, { runId: run.runId, callId: denied.callId, sequence: 1, call: read });
     assert.equal(await f.executor.execute(denied), 'blocked');
-    // Admin status grants no integration permissions, so an admin cannot sponsor scheduled use of a member's personal integration.
-    await assert.rejects(
-      f.executor.authorizeSchedule(w, f.admin, { activationId: agent.activationId, scope: agent.scope }),
-      AccessDenied,
-    );
     assert.equal(f.calls.length, 2);
     const fresh = await f.saveAgent();
     const oldOwner = await f.executor.startDelegated(w, f.member, {

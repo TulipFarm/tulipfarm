@@ -5,9 +5,6 @@ import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { createTemporalClient } from './temporal.ts';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { createAgentSchedules } from '@tulipfarm/agents/schedules';
-import { createAgentScheduleMigration } from '@tulipfarm/agents/schedule-migration';
-import type { AgentWorkflowOptions } from '@tulipfarm/agents/agent-trigger-workflows';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import { errorAttributes } from '@tulipfarm/observability';
 
@@ -17,13 +14,9 @@ export function registerTableDispatch(
     pool: Pool;
     runtime: WorkspaceRuntime;
     temporal: ReturnType<typeof createTemporalClient>;
-    wakeTask?: (workspaceId: string, taskId: string) => Promise<void>;
-    agentWorkflows?: AgentWorkflowOptions;
   },
 ) {
   const { pool, runtime, temporal } = dependencies;
-  const schedules = createAgentSchedules(runtime);
-  const migration = createAgentScheduleMigration(runtime, dependencies.agentWorkflows);
   let after: string | null = null;
   async function sweep(stopped: () => boolean) {
     const rows = await readyWorkspaces(pool, after, 100);
@@ -101,28 +94,6 @@ export function registerTableDispatch(
         }
       } catch (error) {
         app.log.error({ workspaceId: row.workspace_id, ...errorAttributes(error) }, 'Agent dispatch will retry');
-      }
-      try {
-        // Agent task schedules move into Workflows before they can fire again here.
-        await migration.migrate(row.workspace_id, (scheduleId, error) =>
-          app.log.error(
-            { workspaceId: row.workspace_id, scheduleId, ...errorAttributes(error) },
-            'Agent schedule stays in place; it could not move to a Workflow',
-          ),
-        );
-        for (const ids of await schedules.due(row.workspace_id, dependencies.wakeTask)) {
-          await temporal.connection.withDeadline(Date.now() + 10000, () =>
-            temporal.client.workflow.start('boundedAgentTool', {
-              workflowId: `agent-scheduled-tool-v1-${ids.workspaceId}-${ids.callId}`,
-              taskQueue: process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
-              args: [ids],
-              workflowIdConflictPolicy: 'USE_EXISTING',
-              workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-            }),
-          );
-        }
-      } catch (error) {
-        app.log.error({ workspaceId: row.workspace_id, ...errorAttributes(error) }, 'Schedule dispatch will retry');
       }
       after = row.workspace_id;
     }

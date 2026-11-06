@@ -534,19 +534,6 @@ test(
       );
       assert.equal(typeof issueResult.result.body, 'string');
       integrationPrivateValues.push(issueResult.result.title, issueResult.result.body);
-      const integrationSchedule = await agent.authorizeSchedule(workspace.id, actor, {
-        activationId: integrationActivation.activationId,
-        scope: integrationScope,
-      });
-      const scheduledRun = await agent.startScheduled(workspace.id, {
-        scheduleId: integrationSchedule.scheduleId,
-        runId: randomUUID(),
-      });
-      assert.equal(scheduledRun.revision, integrationSaved.definitionRevision);
-      const scheduledRead = await startCall(0, issueCall, scheduledRun.runId);
-      assert.equal(await scheduledRead.handle.result(), 'completed');
-      const scheduledResult = await agent.readResult(scheduledRead.ids, actor);
-      assert.ok(JSON.stringify(scheduledResult) === JSON.stringify(issueResult), 'Scheduled issue result differs');
       const pendingIssueIds = { workspaceId: workspace.id, runId: integrationRun.runId, callId: randomUUID() };
       await agent.queueCall(workspace.id, actor, {
         runId: integrationRun.runId,
@@ -561,12 +548,7 @@ test(
           [integrationId],
         )
       ).rows;
-      assert.deepEqual(
-        dispatches,
-        [issueRead.ids.callId, scheduledRead.ids.callId]
-          .sort()
-          .map(request_id => ({ request_id, status: 'completed', attempt: 1 })),
-      );
+      assert.deepEqual(dispatches, [{ request_id: issueRead.ids.callId, status: 'completed', attempt: 1 }]);
       await httpRequest(
         'PUT',
         `${agents}/${integrationAgentId}/policy`,

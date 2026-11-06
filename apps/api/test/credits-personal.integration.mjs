@@ -77,16 +77,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       return id;
     };
+    // A scheduled run left from before agent schedules were removed still counts as its sponsor's spend.
     const scheduled = async person => {
-      const schedule = randomUUID(),
-        id = randomUUID();
+      const id = randomUUID();
       await db.platform.query(
-        `INSERT INTO ${table('tf_agent_schedules')} (id,activation_id,scope,sponsor_membership_id) VALUES ($1,$2,'[]',$3)`,
-        [schedule, shared.activation, person.membershipId],
-      );
-      await db.platform.query(
-        `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,schedule_id,scope,sponsor_membership_id) VALUES ($1,$2,$3,$4,'scheduled',$5,'[]',$6)`,
-        [id, shared.id, shared.activation, shared.revision, schedule, person.membershipId],
+        `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,status,scope,sponsor_membership_id) VALUES ($1,$2,$3,$4,'scheduled','completed','[]',$5)`,
+        [id, shared.id, shared.activation, shared.revision, person.membershipId],
       );
       return id;
     };

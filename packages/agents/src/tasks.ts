@@ -60,14 +60,6 @@ type Scope = z.infer<typeof scopeSchema>;
 type TaskLimits = z.infer<typeof taskLimitsSchema>;
 const maximumDelegationDepth = 3;
 const maximumChildTasks = 5;
-const scheduledTaskSchema = z.strictObject({
-  scheduleId: uuidSchema,
-  agentId: uuidSchema,
-  activationId: uuidSchema,
-  scope: scopeSchema,
-  limits: taskLimitsSchema,
-  text: startTaskSchema.shape.text,
-});
 const googleIntegrationSchema = z.object({
   id: uuidSchema,
   account_id: z.string(),
@@ -212,13 +204,13 @@ export function createAgentTasks(
         );
         if (!allowed.rowCount) throw new AccessDenied();
       } else if (source.kind === 'file') {
-        // Only the owner's delegated run for this task may read it; a scheduled run has no person whose access applies.
+        // Only the owner's delegated run for this task may read it.
         if (runId) await requireMcpTaskRun(tx, actor, runId);
         const readable = bindFileSources(tx).requireTulipFarmFile;
         if (!readable) throw new AccessDenied();
         await readable(actor, source);
       } else if (source.kind === 'google-drive-file') {
-        // Google decides who can open the file; the runtime reads it only through the owner's bound integration, and never for a scheduled run.
+        // Google decides who can open the file; the runtime reads it only through the owner's bound integration.
         if (runId) await requireMcpTaskRun(tx, actor, runId);
       } else if (source.kind === 'private-task') {
         await requirePrivateTaskSource(tx, actor, source.taskId);
@@ -358,7 +350,6 @@ export function createAgentTasks(
       limits: TaskLimits;
       text: string;
       sources: Sources;
-      scheduleId: string | null;
       parentTask?: Task;
       delegationTools?: string[];
       flowId?: string;
@@ -367,11 +358,8 @@ export function createAgentTasks(
     },
   ) {
     const id = randomUUID();
-    // Only a scheduled start names schedule_id, so a workspace still before common migration 0008 can start ordinary tasks.
-    const scheduled =
-      input.scheduleId === null ? { columns: '', values: '' } : { columns: ',schedule_id', values: ',$14' };
     const inserted = await tx.client.query(
-      `INSERT INTO ${relation(tx, 'tf_agent_tasks')} (id,owner_user_id,owner_membership_id,agent_id,activation_id,definition_revision,parent_task_id,delegation_depth,delegation_tools,skills,scope,limits,flow_id${scheduled.columns}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13${scheduled.values})`,
+      `INSERT INTO ${relation(tx, 'tf_agent_tasks')} (id,owner_user_id,owner_membership_id,agent_id,activation_id,definition_revision,parent_task_id,delegation_depth,delegation_tools,skills,scope,limits,flow_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         id,
         actor.userId,
@@ -386,7 +374,6 @@ export function createAgentTasks(
         JSON.stringify(input.scope),
         input.limits,
         input.flowId ?? id,
-        ...(input.scheduleId === null ? [] : [input.scheduleId]),
       ],
     );
     taskTransition(tx, 'started', inserted.rowCount);
@@ -443,7 +430,6 @@ export function createAgentTasks(
         scope: useActivationScope ? activation.scope : input.scope,
         limits: await clampLimits(tx, input.agentId, input.limits),
         sources,
-        scheduleId: null,
         ...(subagent
           ? {
               delegationDepth: 1,
@@ -608,7 +594,6 @@ export function createAgentTasks(
               ),
           },
         ],
-        scheduleId: null,
         parentTask: parent,
         delegationTools: childTools,
         flowId: parent.flowId,
@@ -657,20 +642,6 @@ export function createAgentTasks(
           : undefined;
       if (latest) await sourcesAllowed(tx, actor, latest.sources);
       return { taskId: id, status: task.status, ...(latest ? { result: latest.text } : {}) };
-    });
-  }
-  /** Starts a schedule's task as its sponsor; the schedule's occurrence is the request, so no idempotency receipt is kept. */
-  async function startScheduled(workspaceId: string, user: string, value: unknown) {
-    const input = scheduledTaskSchema.parse(value);
-    return transaction(workspaceId, user, true, async (tx, actor) => {
-      const activation = await admit(tx, actor, input.agentId, input.activationId);
-      return taskReceiptSchema.parse(
-        await insert(tx, actor, activation, {
-          ...input,
-          limits: await clampLimits(tx, input.agentId, input.limits),
-          sources: [],
-        }),
-      );
     });
   }
   async function reopen(workspaceId: string, user: string, id: string, value: unknown) {
@@ -1056,7 +1027,6 @@ export function createAgentTasks(
       guard?: (tx: AgentTransaction) => Promise<void>,
       knowledgeOrigin?: KnowledgeRootOrigin,
     ) => start(workspaceId, user, value, true, inherited, guard, knowledgeOrigin),
-    startScheduled,
     reopen,
     continueTask,
     pause,

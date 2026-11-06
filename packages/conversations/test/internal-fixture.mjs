@@ -104,29 +104,22 @@ export async function internalFixture(extend = async stream => stream, prepareIn
     );
     await executor.configure(w.id, actor, { agentId, version: 0, enabled: true, teamIds: [teamId], limits: scope });
     const { activationId } = await executor.activate(w.id, actor, { agentId, revision, scope });
-    async function run(kind = 'linked') {
-      let runId, origin;
-      if (kind === 'autonomous') {
-        const { scheduleId } = await executor.authorizeSchedule(w.id, actor, { activationId, scope });
-        ({ runId } = await executor.startScheduled(w.id, { scheduleId, runId: randomUUID() }));
-        origin = { kind: 'autonomous' };
-      } else {
-        ({ runId } = await executor.startDelegated(w.id, actor, { activationId, scope }));
-        const conversationId = randomUUID();
-        await f.store.create(w.id, w.userId, { chatId: conversationId, commandId: randomUUID() });
-        const sent = await f.store.send(w.id, w.userId, conversationId, {
-          commandId: randomUUID(),
-          messageId: randomUUID(),
-          parts: [{ kind: 'text', text: 'Inspect this privately' }],
-        });
-        const fence = await createConversationExecutor(f.runtime, reverseReply).claim({
-          workspaceId: w.id,
-          conversationId,
-          turnId: sent.turnId,
-          generation: 0,
-        });
-        origin = { kind: 'linked', conversationId, turnId: sent.turnId, generation: 0, epoch: fence.epoch };
-      }
+    async function run() {
+      const { runId } = await executor.startDelegated(w.id, actor, { activationId, scope });
+      const conversationId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId: conversationId, commandId: randomUUID() });
+      const sent = await f.store.send(w.id, w.userId, conversationId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text: 'Inspect this privately' }],
+      });
+      const fence = await createConversationExecutor(f.runtime, reverseReply).claim({
+        workspaceId: w.id,
+        conversationId,
+        turnId: sent.turnId,
+        generation: 0,
+      });
+      const origin = { kind: 'linked', conversationId, turnId: sent.turnId, generation: 0, epoch: fence.epoch };
       const callId = randomUUID();
       await executor.queueCall(w.id, actor, { runId, callId, sequence: 0, call: { tool: 'schema.inspect', tableId } });
       return { workspaceId: w.id, runId, ownerId: randomUUID(), origin, callId };

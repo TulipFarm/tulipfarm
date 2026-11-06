@@ -292,7 +292,6 @@ try {
           enabled: true,
           limits: agent.activations[0].scope,
         });
-      if (p.endsWith('/schedules')) return send([]);
       if (p.endsWith('/chat')) return send({ configured: true });
       if (p.endsWith('/skills'))
         return send({

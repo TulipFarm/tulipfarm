@@ -237,12 +237,7 @@ export async function archiveBlockers(tx: TableTransaction, tableId: string) {
     `SELECT 1 FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND r.definition::text LIKE '%' || $1 || '%' LIMIT 1`,
     [id],
   );
-  if (workflows.rowCount) return 'workflow-active';
-  const schedules = await tx.client.query(
-    `SELECT 1 FROM ${table(tx, 'tf_agent_schedules')} WHERE revoked_at IS NULL AND paused_at IS NULL AND (scope::text LIKE '%' || $1 || '%' OR call::text LIKE '%' || $1 || '%') LIMIT 1`,
-    [id],
-  );
-  return schedules.rowCount ? 'agent-schedule-active' : null;
+  return workflows.rowCount ? 'workflow-active' : null;
 }
 
 export function changedEffect(

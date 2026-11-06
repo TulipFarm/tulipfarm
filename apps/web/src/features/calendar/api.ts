@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { workflowCalendarSchema } from '@tulipfarm/workflows/calendar-contracts';
-import { agentCalendarSchema } from '@tulipfarm/agents/schedule-contracts';
 import { taskSummarySchema } from '@tulipfarm/agents/task-contracts';
 import { parseCalendarRead } from '@tulipfarm/google-workspace/calendar-events';
 import { googleAppScopes, type GoogleStatus } from '@tulipfarm/google-workspace/public-contracts';
@@ -156,15 +155,6 @@ export const calendarApi = {
     workflowCalendarSchema.parse(
       await workflowRequest(
         `/workspaces/${workspaceId}/workflows/calendar?${new URLSearchParams(range)}`,
-        'GET',
-        undefined,
-        signal,
-      ),
-    ),
-  agents: async (workspaceId: string, range: { from: string; to: string }, signal: AbortSignal) =>
-    agentCalendarSchema.parse(
-      await workflowRequest(
-        `/workspaces/${workspaceId}/agents/calendar?${new URLSearchParams(range)}`,
         'GET',
         undefined,
         signal,

@@ -147,6 +147,6 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
     await writer.close();
   }
   context.log(
-    'Agent builder data is ready. No Slack installation, due schedule, pending task, or paid model call was created.',
+    'Agent builder data is ready. No Slack installation, scheduled workflow, pending task, or paid model call was created.',
   );
 }
