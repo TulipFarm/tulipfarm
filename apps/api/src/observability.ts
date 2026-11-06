@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { captureException, startHttp, telemetryErrorCode, withTelemetryContext } from '@tulipfarm/observability';
+import { withCallerSignal } from '@tulipfarm/workspace-storage/runtime';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -20,10 +21,14 @@ export function registerObservability(app: FastifyInstance) {
       telemetry.finish(reply.statusCode, false, codes.get(request), errors.get(request));
       if (reply.statusCode >= 500 && errors.has(request)) captureException(errors.get(request));
     });
+    // A sender that leaves, such as a reloaded page, frees its place in the workspace storage queue.
+    const sender = new AbortController();
     reply.raw.once('close', () => {
-      if (!reply.raw.writableFinished) telemetry.finish(499, true);
+      if (reply.raw.writableFinished) return;
+      telemetry.finish(499, true);
+      sender.abort();
     });
-    withTelemetryContext(telemetry.context, done);
+    withTelemetryContext(telemetry.context, () => withCallerSignal(sender.signal, done));
   });
   app.addHook('onError', (request, _reply, error, done) => {
     errors.set(request, error);
