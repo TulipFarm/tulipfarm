@@ -1723,3 +1723,123 @@ test('a chat follow-up posts as the sender chosen when it was scheduled', async 
     await f.close();
   }
 });
+
+test('a later turn in the same chat can send to Slack again, unless an earlier turn drew on private data', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    let replySources = [],
+      outcome;
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        const resolved = await executeTool('slack.resolve', false, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.resolve',
+            kind: 'channel',
+            name: 'HR',
+          }),
+        );
+        const sent = await executeTool('slack.message.send', true, context =>
+          createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, {
+            tool: 'slack.message.send',
+            destinationId: resolved.result.matches[0].destinationId,
+            text: 'hey',
+          }),
+        );
+        outcome = sent.result.status ?? sent.result.error;
+        return { text: 'Sent', sources: replySources };
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+    );
+    const turn = async text => {
+      const sent = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text }],
+      });
+      assert.equal(
+        await engine.process({
+          workspaceId: f.workspace.id,
+          conversationId: chatId,
+          turnId: sent.turnId,
+          generation: 0,
+        }),
+        'completed',
+      );
+      return outcome;
+    };
+    assert.equal(await turn('Send hey to HR on Slack'), 'sent');
+    replySources = [{ kind: 'personal-memory', membershipId: f.alice.membershipId }];
+    assert.equal(await turn('Send hey to HR on Slack again'), 'sent');
+    replySources = [];
+    assert.equal(
+      await turn('And once more'),
+      'slack-access-required',
+      'private data from an earlier reply stays out of Slack',
+    );
+    assert.equal(f.effects.length, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a chat turn that fails after a Slack send retries from the send receipt and keeps its own reply', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Send hey to HR on Slack' }],
+    });
+    let calls = 0;
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        if (++calls > 1) return { text: 'Posted hey in #hr.', sources: [] };
+        const call = (name, external, input) =>
+          executeTool(
+            name,
+            external,
+            context => createChatTools(context.runtime, { slack: factory }).invokeWithSources(context, input),
+            [],
+            input,
+          );
+        const resolved = await call('slack.resolve', false, { tool: 'slack.resolve', kind: 'channel', name: 'HR' });
+        await call('slack.message.send', true, {
+          tool: 'slack.message.send',
+          destinationId: resolved.result.matches[0].destinationId,
+          text: 'hey',
+        });
+        throw new Error('model-overload');
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+      async () => assert.fail('no MCP call was made'),
+    );
+    const work = { workspaceId: f.workspace.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    assert.equal(await engine.process(work), 'retry');
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+      [sent.turnId],
+    );
+    assert.equal(await engine.process({ ...work, generation: 1 }), 'completed');
+    assert.equal(calls, 2);
+    const reply = (
+      await f.db.platform.query(
+        `SELECT p.text FROM ${f.table('tf_conversation_turns')} t JOIN ${f.table('tf_conversation_parts')} p ON p.message_id=t.response_message_id WHERE t.id=$1`,
+        [sent.turnId],
+      )
+    ).rows;
+    assert.deepEqual(reply, [{ text: 'Posted hey in #hr.' }]);
+    assert.equal(f.effects.length, 1);
+  } finally {
+    await f.close();
+  }
+});

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useSlackAction, useIntegrationChanges } from '@/features/integrations/queries';
@@ -24,14 +24,23 @@ export function SlackAction({
   id,
   refresh,
   variant = 'card',
+  running = false,
 }: {
   api: Pick<ReturnType<typeof agentApi>, 'slackAction' | 'slackDecision'>;
   id: string;
   refresh: () => Promise<void>;
   variant?: 'card' | 'review';
+  /** The send is still in progress, so the action may not be saved yet. */
+  running?: boolean;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const read = useSlackAction(api, id);
+  // A read made while the send was running can miss the action, so read again once it finishes.
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current && !running) void read.refresh();
+    wasRunning.current = running;
+  }, [running, read]);
   const canvas = useOptionalCanvas();
   const changes = useIntegrationChanges();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -147,6 +156,7 @@ export function SlackAction({
         )}
       </section>
     );
+  if (running && read.state.kind === 'unavailable') return null;
   return (
     <section aria-label="Slack action" className="space-y-3">
       <h3 ref={heading} tabIndex={-1} className="sr-only">
