@@ -1,4 +1,53 @@
 import type { Workspace } from '@tulipfarm/workspaces/contracts';
+import { persistedReads } from './query/persisted-reads';
+import type { SessionIdentity } from './query/scope';
+
+const sessionKey = 'tulipfarm:last-session';
+
+/**
+ * The session this browser last confirmed. A fresh page load uses it to start workspace reads, and to
+ * show persisted reads, before the session check returns; both are checked against the real session.
+ */
+export function lastSession(): SessionIdentity | null {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(sessionKey) ?? 'null');
+    return typeof value === 'object' &&
+      value !== null &&
+      'userId' in value &&
+      'sessionId' in value &&
+      typeof value.userId === 'string' &&
+      typeof value.sessionId === 'string' &&
+      value.userId &&
+      value.sessionId
+      ? { userId: value.userId, sessionId: value.sessionId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberSession(identity: SessionIdentity) {
+  const previous = lastSession();
+  if (previous?.userId === identity.userId && previous.sessionId === identity.sessionId) return;
+  // Another person signed in on this browser: nothing the previous one saved may be shown to them.
+  if (previous && previous.userId !== identity.userId) void persistedReads.clear(previous.userId);
+  try {
+    window.localStorage.setItem(sessionKey, JSON.stringify(identity));
+  } catch {
+    /* Storage can be disabled by the browser. */
+  }
+}
+
+/** Drops the remembered session and everything persisted for its user. */
+export function forgetSession() {
+  const previous = lastSession();
+  try {
+    window.localStorage.removeItem(sessionKey);
+  } catch {
+    /* Storage can be disabled by the browser. */
+  }
+  return previous ? persistedReads.clear(previous.userId) : Promise.resolve();
+}
 
 function storageKey(userId: string) {
   return `tulipfarm:last-workspace:${userId}`;

@@ -112,7 +112,7 @@ changes, such as team names, can be excluded from authority comparisons.
 
 Workspace admission subscriptions deliver `admitted`, `empty`, or `denied`
 snapshots. An `empty` navigation fence calls `runtime.suspend(scope)` to cancel
-old reads while retaining memory and persisted catalogs. Only an explicit
+old reads while retaining memory and persisted data. Only an explicit
 `denied` event for the observed admission calls `runtime.revoke(scope, true)`.
 Subscriptions that invoke listeners without an event remain supported as local
 navigation fences; authority owners must send `denied` or call `revoke` directly.
@@ -151,6 +151,13 @@ On a fresh load it also starts the membership read from the workspace id the
 slug had at the last admission (`workspaceIdHint`). It uses that result only when
 the workspace read returns the same id, and forgets the hint on 403 or 404.
 
+The API checks the session cookie on every read, so a fresh load does not wait
+for the session read before starting these reads. `lastSession()` in
+`lib/last-workspace.ts` remembers the user and session the router last confirmed.
+The workspace, workspace list, hinted membership and page reads start for that
+session alongside `get-session`. Admission uses them only when the session read
+returns the same user and session; otherwise it discards them and reads again.
+
 ## Provider admission
 
 `SessionQueryProvider` accepts explicit `identity: SessionIdentity | null`,
@@ -173,13 +180,59 @@ scope until membership admission becomes available. On 5 October 2026,
 for Members, and demotion for Models without a loaded governance view.
 
 Workspace denial and membership replacement cancel protected reads and clear
-catalog snapshots. Cancellation checks run after the transport resolves, even
+catalog snapshots and persisted reads. Cancellation checks run after the transport resolves, even
 when the transport ignores its AbortSignal. Logout detaches and clears the old
 client. StrictMode cleanup does not broadcast a false logout.
 
+## Persisted reads and provisional admission
+
+[`persisted-reads.ts`](./persisted-reads.ts) keeps selected query data in the
+`tulipfarm-query-cache` IndexedDB database so a return visit can show it before
+the network answers. Only reads listed in `persistedPageReads`
+(`features/chat/early-reads.ts`) persist: the first page of the active chat list
+per project filter (up to 4), the first history page of the 12 most recently
+saved chats, and the project list. Each definition matches keys with a zod
+schema and validates data with the response schema its feature API already uses.
+
+Each record's envelope holds version, user, workspace, membership, name, key and
+data timestamp. Records older than 24 hours, future-dated, corrupt, wrong-scope
+or failing their schema are rejected and pruned. A record over 1 MB is not saved,
+and a user's records are capped at 3 MB, evicting the oldest first. Saves are
+debounced, fenced by the current membership, and skipped while the scope is
+unconfirmed. Values written with `setQueryData` are not persisted. IndexedDB
+failures leave normal network and memory reads available.
+
+On admission the router saves the workspace snapshot (user, workspace, workspace
+list and membership) with the session id and session expiry. On a fresh load
+of a workspace page, other than `/<slug>/integrations…`, the router reads that
+snapshot for the last session. When it is younger than 24 hours, its session
+has not expired, and it loads within 300 ms, the route admits it at once with
+`workspaceProvisional: true`. `WorkspaceQueryProvider` seeds the persisted reads
+with their original timestamps, marked stale, so queries refetch in the
+background. The real session and admission check runs alongside. `holdWrites`
+in `lib/http.ts` makes every non-GET request wait for it, and fails them unless
+the check returns the same user, session, workspace and membership.
+
+When the check confirms the snapshot, the router swaps in the confirmed context
+and saves the current reads. Any other result clears that workspace's persisted
+data and admits again as a fresh load would: no session or 401 redirects to
+login, 403 or 404 denies the workspace and shows not found, and a different user
+or membership replaces the scope, which revokes the old one.
+
+Persisted reads are cleared:
+
+- for every user on logout (`LogoutPage`);
+- for the user on a missing session or 401 (`forgetSession`), on query-client
+  retirement, and when a different user signs in (`rememberSession`);
+- for the workspace on revoke, denial, membership replacement, and a provisional
+  check that does not confirm; and
+- per key on a denied read and when dependents are concealed.
+
+Chat content on disk is readable by anyone with access to the browser profile.
+
 ## Catalog persistence integration
 
-Persistence is opt-in. The model feature's
+The model catalog persists separately. The model feature's
 [`useModelCatalog`](../../features/models/use-model-catalog.ts) calls
 `useCatalogRestoration` alongside its read:
 
@@ -194,7 +247,7 @@ const catalog = useFeatureRead({
 });
 ```
 
-Only the model catalog may call this opt-in hook. The runtime deduplicates
+Only the model catalog calls this opt-in hook. The runtime deduplicates
 restoration before readers start. It restores the original `dataUpdatedAt`, marks
 the restored catalog stale so each page load re-reads it once in the background, and
 persists successful values only after validation with the existing
@@ -245,6 +298,18 @@ pnpm --filter @tulipfarm/web exec node --test test/query-foundation.test.ts test
 Core tests cover shared reads, invalidation races, denial scope, bounded and
 unbounded polling, hidden resume, reconnect, snapshot validation, and IDB races.
 The browser test exercises React providers and two actual BroadcastChannels.
+
+Return-visit checks:
+
+```sh
+pnpm --filter @tulipfarm/web exec node --test test/persisted-reads.test.ts test/http.test.ts
+VITE_API_URL= pnpm --filter @tulipfarm/web build
+pnpm --filter @tulipfarm/web exec node --test test/provisional-workspace.browser.mjs
+```
+
+The provisional test needs the production build: on the Vite dev server the
+disk snapshot loads after the 300 ms provisional wait. Reads that succeed before
+persisted reads are configured are saved once configuration finishes.
 
 Ready-workspace fixtures supply `governance/me` membership responses. Feature
 consumers use named queries and dependent-scope concealment for grant changes.

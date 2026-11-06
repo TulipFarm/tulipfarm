@@ -23,6 +23,30 @@ function waitForRetry(signal: AbortSignal) {
   });
 }
 
+let writeHold: Promise<void> | null = null;
+
+/**
+ * While a workspace shown from disk waits for its session and membership to be confirmed, requests
+ * that change data wait too, and fail if the confirmation does. Reads never wait.
+ */
+export function holdWrites(confirmation: Promise<void>) {
+  const hold = confirmation.finally(() => {
+    if (writeHold === hold) writeHold = null;
+  });
+  hold.catch(() => {});
+  writeHold = hold;
+}
+
+export async function writesAllowed() {
+  const hold = writeHold;
+  if (!hold) return;
+  try {
+    await hold;
+  } catch {
+    throw new Error('Could not confirm your workspace access. Reload the page and try again.');
+  }
+}
+
 export async function jsonResponse(
   url: string,
   options: { method?: string; body?: unknown; signal: AbortSignal; cache?: RequestCache },
@@ -38,7 +62,11 @@ export async function jsonResponse(
         ? {}
         : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) }),
     });
-  if (method !== 'GET') return send();
+  if (method !== 'GET') {
+    await writesAllowed();
+    options.signal.throwIfAborted();
+    return send();
+  }
   try {
     const response = await send();
     if (!transientStatuses.has(response.status)) return response;

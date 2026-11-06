@@ -11,6 +11,8 @@ import { Spinner } from '@tulipfarm/sprout/spinner';
 import { apiOrigin, authClient, authCallbackURLs, magicLinkDestination, safeAuthRedirect } from '@/lib/auth';
 import { accountExistsMessage, AuthForm, AuthLayout, SignInAvailable } from '@/features/auth/form';
 import { clearDraftFiles } from '@/features/chat/draft-files';
+import { forgetSession } from '@/lib/last-workspace';
+import { persistedReads } from '@/lib/query/persisted-reads';
 import { useOnboardingFields } from '@/features/auth/onboarding-fields';
 
 export function RegisterPage() {
@@ -210,6 +212,11 @@ export function LogoutPage() {
       if (result.error) setError('Could not log out. Please try again.');
       else {
         clearDraftFiles();
+        // Cached chats must not outlive the session on this device; a stuck database must not hold up logout.
+        await Promise.race([
+          Promise.all([persistedReads.clear(), forgetSession()]).catch(() => {}),
+          new Promise(resolve => setTimeout(resolve, 1000)),
+        ]);
         window.location.replace(`/login?redirect=${encodeURIComponent(destination)}`);
       }
     } catch {

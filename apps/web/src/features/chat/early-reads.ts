@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import type { QueryKey } from '@tanstack/react-query';
 import type { EarlyRead } from '@/lib/query/early-reads';
-import { projectApi } from '@/features/projects/api';
+import type { PersistedRead } from '@/lib/query/persisted-reads';
+import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
-import { conversationApi } from './conversation-api';
+import { chatHistorySchema, chatListSchema, conversationApi } from './conversation-api';
 import { conversationKeys } from './queries';
 
 const chatId = z.uuid();
@@ -39,3 +41,30 @@ export function workspacePageReads(
   if (!chatId.safeParse(id).success) return [];
   return [projects, { key: conversationKeys.history(id, 1), load: signal => conversations.history(id, signal, 1) }];
 }
+
+const listKey = z.tuple([
+  z.literal('conversations'),
+  z.literal('list'),
+  z.strictObject({
+    archived: z.literal(false),
+    search: z.literal(''),
+    pages: z.literal(1),
+    projectId: projectId.nullable(),
+  }),
+]);
+const historyKey = z.tuple([
+  z.literal('conversations'),
+  z.literal('detail'),
+  chatId,
+  z.literal('history'),
+  z.strictObject({ pages: z.literal(1) }),
+]);
+const projectsKey = z.tuple([z.literal('projects'), z.literal('list')]);
+const matches = (schema: z.ZodType) => (key: QueryKey) => schema.safeParse(key).success;
+
+/** The first pages of these reads persist, so a return visit shows them before the network answers. */
+export const persistedPageReads: PersistedRead[] = [
+  { name: 'chat-list', limit: 4, match: matches(listKey), schema: chatListSchema },
+  { name: 'chat-history', limit: 12, match: matches(historyKey), schema: chatHistorySchema },
+  { name: 'projects', limit: 1, match: matches(projectsKey), schema: projectListSchema },
+];

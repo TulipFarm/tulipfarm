@@ -5,6 +5,7 @@ import { decodeFileContent } from '@tulipfarm/github/file-contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { apiOrigin } from '@/lib/auth';
+import { writesAllowed } from '@/lib/http';
 import { githubOperationLabel } from '@tulipfarm/conversations/tool-activity';
 import { ResultCard, type ResultAppAction } from '@tulipfarm/sprout/result-card';
 import { useOptionalCanvas } from './canvas-state';
@@ -61,6 +62,7 @@ export function GitHubBatches({
     canvas?.setActionMutation(`${base}/${batch.snapshot.id}`, 'pending');
     try {
       const decision = action === 'approve' || action === 'reject';
+      await writesAllowed();
       const response = await fetch(`${base}/${batch.snapshot.id}/${decision ? 'decision' : action}`, {
         method: 'POST',
         credentials: 'include',
@@ -92,6 +94,7 @@ export function GitHubBatches({
     setError(false);
     canvas?.setActionMutation(`${base}/${id}`, 'pending');
     try {
+      await writesAllowed();
       const response = await fetch(`${base}/${id}/reconcile-status`, {
         method: 'POST',
         credentials: 'include',
