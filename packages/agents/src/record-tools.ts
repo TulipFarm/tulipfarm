@@ -528,23 +528,30 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           updateRecord: false,
           deleteRecord: false,
         };
+        let tableFound: boolean | undefined;
         if (tableId) {
           capabilities.manageSchema = await canAccessTable(tx, actor, tableId, 'table.schema.manage');
           capabilities.readRecords = await canAccessTable(tx, actor, tableId, 'table.row.read');
-          if (!capabilities.manageSchema && !capabilities.readRecords) throw new TableError('table-not-found', 404);
-          appliedDefinition = (
-            await activeGeneration(tx, tableId).catch((error: unknown) => {
-              // An id that is not a live table, such as a team id, reads as not found instead of an unexplained failure.
-              if (error instanceof GenerationError && error.code === 'not-active')
-                throw new TableError('table-not-found', 404);
-              throw error;
-            })
-          ).definition;
-          capabilities.createRecord =
-            capabilities.readRecords && (await canAccessTable(tx, actor, tableId, 'table.row.create'));
-          capabilities.updateRecord =
-            capabilities.readRecords && (await canAccessTable(tx, actor, tableId, 'table.row.update'));
-          capabilities.deleteRecord = await canAccessTable(tx, actor, tableId, 'table.row.delete');
+          const generation =
+            capabilities.manageSchema || capabilities.readRecords
+              ? await activeGeneration(tx, tableId).catch((error: unknown) => {
+                  if (error instanceof GenerationError && error.code === 'not-active') return null;
+                  throw error;
+                })
+              : null;
+          // Models often pass the id they made up for a new table; they still need the creation context.
+          tableFound = generation !== null;
+          if (generation) {
+            appliedDefinition = generation.definition;
+            capabilities.createRecord =
+              capabilities.readRecords && (await canAccessTable(tx, actor, tableId, 'table.row.create'));
+            capabilities.updateRecord =
+              capabilities.readRecords && (await canAccessTable(tx, actor, tableId, 'table.row.update'));
+            capabilities.deleteRecord = await canAccessTable(tx, actor, tableId, 'table.row.delete');
+          } else {
+            capabilities.manageSchema = false;
+            capabilities.readRecords = false;
+          }
         }
         const head = z
           .object({ revision: z.string() })
@@ -555,6 +562,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           teams: creatable,
           creation: { allowed: creatable.length > 0, eligibleOwningTeams: creatable },
           capabilityTableId: tableId ?? null,
+          ...(tableFound === undefined ? {} : { tableFound }),
           capabilities,
         };
       });

@@ -99,9 +99,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ),
     });
     assert.equal(discovery.capabilities.manageSchema, false);
-    await assert.rejects(tools.invokeWithSources(context, { tool: 'schema.context', tableId: team }), {
-      code: 'table-not-found',
-    });
+    assert.equal(discovery.tableFound, undefined);
+    assert.equal(new Set(discovery.newIds).size, 32);
+    for (const id of discovery.newIds)
+      assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // Models often pass the id they made up for the new table; they still get the creation context.
+    const madeUp = (await tools.invokeWithSources(context, { tool: 'schema.context', tableId: randomUUID() })).result;
+    assert.equal(madeUp.tableFound, false);
+    assert.equal(madeUp.appliedDefinition, null);
+    assert.deepEqual(madeUp.creation, discovery.creation);
+    assert.ok(Object.values(madeUp.capabilities).every(allowed => allowed === false));
     const output = (await tools.invokeWithSources(context, { tool: 'tables.propose', input: JSON.stringify(input) }))
       .result;
     assert.equal(output.status, 'pending');
@@ -134,6 +141,17 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(result.error, 'invalid-arguments');
       assert.match(result.instruction, /not a permission denial/);
     }
+    const malformed = structuredClone(input);
+    malformed.plans[0].target.fields[0].id = 'vendor-name-field';
+    const result = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'tables.propose', input: JSON.stringify(malformed) },
+      )
+    ).result;
+    assert.equal(result.error, 'invalid-arguments');
+    assert.equal(result.newIds.length, 32);
+    assert.match(result.idInstruction, /newIds/);
     assert.equal(await count('tf_table_proposals'), 1);
   });
   await t.test('rule failures explain which rule was broken', async () => {

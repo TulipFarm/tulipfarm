@@ -334,7 +334,7 @@ export async function resultSources(
         .object({ teams: ids })
         .parse(result)
         .teams.map(item => ({ kind: 'creation-team' as const, teamId: item.id, authority: 'table' as const }));
-      if (!call.tableId) return teams;
+      if (!call.tableId || z.object({ tableFound: z.boolean() }).parse(result).tableFound === false) return teams;
       const revision = z
         .string()
         .parse(
