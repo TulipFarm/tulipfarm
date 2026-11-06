@@ -77,6 +77,7 @@ import { analytics, overrides } from '@/extensions';
 import { isAssetLoadError, reloadOnceForAssetError } from '@/lib/asset-recovery';
 import { routeErrorEvent, routeErrorProperties } from '@/lib/route-error-report';
 import { onWindowReturn } from '@/lib/window-return';
+import { retryAdmission, temporaryAdmissionError } from '@/lib/admission-retry';
 
 // Admission and 401/403 responses already catch revocation; this only bounds how long a
 // background tab can keep showing a workspace after another person removes access.
@@ -812,7 +813,8 @@ export const workspaceRoute = createRoute({
       const last = earlyReads ? null : lastSession();
       const speculative = last ? startAdmissionReads(last, params.workspaceSlug, location, loadCause) : null;
 
-      const admit = async (session: AuthSession, signal: AbortSignal): Promise<WorkspaceContext> => {
+      // A retry starts its reads again: the early and speculative reads have already failed.
+      const admit = async (session: AuthSession, signal: AbortSignal, reuse = true): Promise<WorkspaceContext> => {
         signal.throwIfAborted();
         const access = context.workspaceAccess.begin({
           userId: session.user.id,
@@ -830,9 +832,13 @@ export const workspaceRoute = createRoute({
         const identity = { userId: session.user.id, sessionId: session.session.id };
         let pageReads: ReturnType<typeof startPageReads> | null = null;
         const reads =
-          earlyReads?.userId === session.user.id && earlyReads.sessionId === session.session.id ? earlyReads : null;
+          reuse && earlyReads?.userId === session.user.id && earlyReads.sessionId === session.session.id
+            ? earlyReads
+            : null;
         const started =
-          speculative?.identity.userId === session.user.id && speculative.identity.sessionId === session.session.id
+          reuse &&
+          speculative?.identity.userId === session.user.id &&
+          speculative.identity.sessionId === session.session.id
             ? speculative
             : null;
         if (!started) speculative?.discard();
@@ -933,10 +939,7 @@ export const workspaceRoute = createRoute({
             void forgetSession();
             throw redirect({ to: '/login', search: { redirect: location.href }, replace: true });
           }
-          const temporary =
-            error instanceof TypeError ||
-            (error instanceof DOMException && error.name === 'TimeoutError') ||
-            (error instanceof WorkspaceRequestError && error.status >= 500);
+          const temporary = temporaryAdmissionError(error);
           const previous = access.retained(location.pathname);
           if (temporary && !signal.aborted && loadCause === 'stay' && previous) {
             // Integration controls change workspace connections, so those pages confirm the
@@ -961,7 +964,8 @@ export const workspaceRoute = createRoute({
       };
       const profile = (signal: AbortSignal) =>
         requireProfile(location.href).catch(error => {
-          if (!signal.aborted) context.workspaceAccess.clear();
+          // A busy or unreachable API has not changed the session, so the admitted view stays while admission retries.
+          if (!signal.aborted && !temporaryAdmissionError(error)) context.workspaceAccess.clear();
           throw error;
         });
 
@@ -977,7 +981,10 @@ export const workspaceRoute = createRoute({
         if (speculative?.pageReads?.workspaceId === scope.workspaceId) speculative.pageReads.admit(scope.membershipId);
         // The check runs on after this load returns, so leaving the page does not cancel it.
         const check = new AbortController();
-        const verification = profile(check.signal).then(session => admit(session, check.signal));
+        const verification = retryAdmission(
+          fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
+          check.signal,
+        );
         const same = (result: WorkspaceContext) =>
           result.user.id === identity.userId &&
           result.sessionId === identity.sessionId &&
@@ -1025,11 +1032,13 @@ export const workspaceRoute = createRoute({
       const discard = () => speculative?.discard();
       abortController.signal.addEventListener('abort', discard, { once: true });
       try {
-        const session = await profile(abortController.signal).catch(error => {
-          discard();
-          throw error;
-        });
-        return await admit(session, abortController.signal);
+        return await retryAdmission(async fresh => {
+          const session = await profile(abortController.signal).catch(error => {
+            discard();
+            throw error;
+          });
+          return await admit(session, abortController.signal, fresh);
+        }, abortController.signal);
       } finally {
         abortController.signal.removeEventListener('abort', discard);
       }
