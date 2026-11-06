@@ -160,6 +160,8 @@ test('member proposal failures explain rejected resumes and retain completed wor
         },
       });
       await page.goto(`${origin}/members-table-mock/chat/${chatId}`);
+      // A proposal that had already failed when the chat opened stays inline until opened for review.
+      await page.getByRole('button', { name: 'Review changes', exact: true }).click();
       const card = page.getByRole('region', { name: 'Table change proposal' });
       await card.getByText(`Failed. ${message} Completed tables are unchanged.`, { exact: true }).waitFor();
       assert.equal(await page.getByText('GitHub approvals unavailable', { exact: true }).count(), 0);

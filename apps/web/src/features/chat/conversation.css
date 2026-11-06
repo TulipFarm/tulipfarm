@@ -9,11 +9,3 @@
 .question-panel [data-slot='form-footer'] {
   padding-top: 4px;
 }
-
-/* On a phone the floating Bud launcher would cover the composer's controls, so it steps aside once a chat has started. */
-@media (max-width: 639px) {
-  html:has([data-slot='conversation-input'][data-primary])
-    aside[aria-label='Bud assistant']:not([data-corner='header']) {
-    display: none;
-  }
-}

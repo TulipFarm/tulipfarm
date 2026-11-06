@@ -1417,11 +1417,7 @@ function ConversationDetail({
               </Alert>
             )}
             {notice}
-            <div
-              data-slot="conversation-input"
-              data-primary={compact || empty ? undefined : ''}
-              className={questionPending ? 'space-y-1' : 'space-y-3'}
-            >
+            <div data-slot="conversation-input" className={questionPending ? 'space-y-1' : 'space-y-3'}>
               <div
                 className={compact ? 'max-h-64 space-y-3 overflow-y-auto overscroll-contain empty:hidden' : 'space-y-3'}
               >
