@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import type { createGmailHeartbeat } from '@tulipfarm/google-workspace/heartbeat';
 import type { HeartbeatWork } from '@tulipfarm/google-workspace/heartbeat-contracts';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function dispatchGmailHeartbeat(
@@ -48,5 +48,6 @@ export function registerGoogleHeartbeatDispatch(
     },
     'Gmail heartbeat discovery will retry',
     'google-heartbeat-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

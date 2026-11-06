@@ -4,7 +4,7 @@ import { createRecommendationWork } from '@tulipfarm/recommendations/work';
 import { recommendationEligibility } from '@tulipfarm/recommendations/configuration';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { createTemporalClient } from './temporal.ts';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 
 export function registerRecommendationDispatch(
   app: FastifyInstance,
@@ -69,5 +69,6 @@ export function registerRecommendationDispatch(
     },
     'Recommendation queue discovery will retry',
     'recommendation-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

@@ -17,7 +17,7 @@ import { authConfig } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import { errorAttributes } from '@tulipfarm/observability';
 
 export function registerSystemPackages(
@@ -193,5 +193,6 @@ export function registerSystemPackages(
     },
     'Package installation discovery will retry',
     'system-package-dispatch',
+    { intervalMs: sweepIntervals.recovery },
   );
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { backgroundSweeps, readyWorkspaces, sweepFailureBackoffMs } from '../src/background-sweep.ts';
+import { backgroundSweeps, readyWorkspaces, sweepFailureBackoffMs, sweepIntervals } from '../src/background-sweep.ts';
 import { errorAttributes } from '@tulipfarm/observability';
 import { randomUUID } from 'node:crypto';
 import { taskActionWake, taskWake } from '../src/task-dispatch.ts';
@@ -74,6 +74,25 @@ test('the requests role starts no sweeps while all and jobs run them', async t =
   }
 });
 
+test('a slower sweep waits its own interval and reports it', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const app = Fastify();
+  let runs = 0;
+  backgroundSweeps(
+    app,
+    [{ job: 'knowledge-dispatch', failure: 'failed', run: async () => void runs++, intervalMs: sweepIntervals.sync }],
+    false,
+  );
+  await app.ready();
+  t.mock.timers.tick(sweepIntervals.sync - 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runs, 0);
+  t.mock.timers.tick(1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runs, 1);
+  await app.close();
+});
+
 test('independent sweeps never overlap and shutdown stops every loop before waiting for work', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const app = Fastify();
@@ -134,7 +153,14 @@ test('a failing sweep backs off up to a minute and returns to every tick once it
   }
   await app.ready();
   await settle();
-  assert.deepEqual([0, 1, 2, 3, 4, 5, 50].map(sweepFailureBackoffMs), [0, 4000, 8000, 16_000, 32_000, 60_000, 60_000]);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 50].map(failures => sweepFailureBackoffMs(failures)),
+    [0, 4000, 8000, 16_000, 32_000, 60_000, 60_000],
+  );
+  assert.deepEqual(
+    [1, 2].map(failures => sweepFailureBackoffMs(failures, sweepIntervals.sync)),
+    [60_000, 60_000],
+  );
   await advance(150_000);
   // 0 s, then 4, 8, 16, 32 and 60 s after each failure.
   assert.deepEqual(

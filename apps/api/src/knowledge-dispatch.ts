@@ -4,7 +4,7 @@ import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { knowledgeWorkSchema, type createLocalKnowledge, type KnowledgeWork } from '@tulipfarm/knowledge';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function startKnowledgeWorkflow(temporal: ReturnType<typeof createTemporalClient>, value: KnowledgeWork) {
@@ -70,5 +70,6 @@ export function registerKnowledgeDispatch(
     },
     'Knowledge discovery will retry',
     'knowledge-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }

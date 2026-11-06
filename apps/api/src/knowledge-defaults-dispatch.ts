@@ -6,7 +6,7 @@ import { defaultKnowledgeWorkSchema, type DefaultKnowledgeWork } from '@tulipfar
 import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
 
 export async function startDefaultKnowledgeWorkflow(
@@ -86,5 +86,6 @@ export function registerDefaultKnowledgeDispatch(
     },
     'Default Knowledge discovery will retry',
     'knowledge-defaults-dispatch',
+    { intervalMs: sweepIntervals.sync },
   );
 }
