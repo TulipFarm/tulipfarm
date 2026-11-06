@@ -11,6 +11,7 @@ export class GovernanceRequestError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    readonly retryAfter?: string | undefined,
   ) {
     super(code);
   }
@@ -21,7 +22,7 @@ export async function governanceRequest(path: string, method = 'GET', body?: unk
   const value = await readJson(response);
   if (!response.ok) {
     const code = responseError(value, 'request-failed');
-    throw new GovernanceRequestError(response.status, code);
+    throw new GovernanceRequestError(response.status, code, response.headers.get('Retry-After') ?? undefined);
   }
   return value;
 }

@@ -118,6 +118,12 @@ function settledSession() {
   });
 }
 
+export class SessionCheckError extends Error {
+  constructor(readonly status: number | undefined) {
+    super('Could not check your session. Please try again.');
+  }
+}
+
 const sessionRetryDelays = [1_000, 3_000];
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -136,7 +142,7 @@ async function checkSession() {
     }
     // A dropped connection or server error says nothing about the session. Better Auth keeps
     // the last good session in that case, so keep using it; only a 401 clears it.
-    if (error && error.status !== 401 && !data) throw new Error('Could not check your session. Please try again.');
+    if (error && error.status !== 401 && !data) throw new SessionCheckError(error.status);
     checkedIdentity = sessionIdentity(data);
     return data;
   } finally {

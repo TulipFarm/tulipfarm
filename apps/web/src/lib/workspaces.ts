@@ -11,6 +11,7 @@ export class WorkspaceRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly retryAfter?: string | undefined,
   ) {
     super(message);
   }
@@ -26,7 +27,7 @@ async function request(path: string, input?: CreationRequest, signal?: AbortSign
   const body = await readJson(response);
   if (!response.ok) {
     const message = responseError(body, 'Could not contact workspace storage. Please try again.');
-    throw new WorkspaceRequestError(response.status, message);
+    throw new WorkspaceRequestError(response.status, message, response.headers.get('Retry-After') ?? undefined);
   }
   return body;
 }
