@@ -98,12 +98,22 @@ export function requestHeaders(input: ApiRequestCall['headers'] = {}): Record<st
 
 const textTypes = /^(?:text\/[a-z0-9.+-]+|application\/(?:json|xml|[a-z0-9.-]+\+(?:json|xml)))$/;
 
+/** JSON with object keys sorted, so a body reads the same after a jsonb round trip reorders its keys. */
+export function canonical(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(',')}}`;
+}
 /** The request body and its content type. */
 export function encodeBody(body: ApiRequestBody): { body: string; contentType: string } {
   let encoded: { body: string; contentType: string };
   switch (body.kind) {
     case 'json':
-      encoded = { body: JSON.stringify(body.value), contentType: 'application/json' };
+      encoded = { body: canonical(body.value), contentType: 'application/json' };
       break;
     case 'form':
       encoded = {
