@@ -20,7 +20,7 @@ import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-cont
 import { firedFollowUpSchema, followUpViewSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { subagentResultSchema } from '@tulipfarm/conversations/events';
 import { apiOrigin } from '@/lib/auth';
-import { jsonResponse, readJson, responseError } from '@/lib/http';
+import { jsonResponse, readJson, responseError, writesAllowed } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 import {
   approvalSchema,
@@ -160,6 +160,9 @@ const historyPagesSchema = z.object({
     .max(5),
 });
 export type ChatListPage = z.infer<typeof listSchema>;
+export const chatListSchema = listSchema;
+/** A first history read: page one of messages with its chat. */
+export const chatHistorySchema = historySchema.extend({ chat: chatSchema, hasGitHubProposals: z.boolean() });
 export type ChatHistoryPage = z.infer<typeof historySchema>;
 const destinationSchema = z.object({
   id: z.uuid(),
@@ -359,6 +362,7 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
     return readJson(response);
   }
   async function fileResponse(chatId: string, path: string, method: string, signal: AbortSignal, body?: File | string) {
+    if (method !== 'GET') await writesAllowed();
     const response = await fetch(`${base}/${chatId}${path}`, {
       method,
       credentials: 'include',

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { jsonResponse, readJson, requestSignal, responseError } from '../src/lib/http.ts';
+import { setTimeout as delay } from 'node:timers/promises';
+import { holdWrites, jsonResponse, readJson, requestSignal, responseError, writesAllowed } from '../src/lib/http.ts';
 
 test('JSON transport sends the exact operation and preserves error parsing policy', async () => {
   const received: { method: string | undefined; contentType: string | undefined; body: string }[] = [];
@@ -122,6 +123,65 @@ test('leaving the page during the retry delay cancels the read', async () => {
       setTimeout(() => controller.abort(new Error('left page')), 100);
       await assert.rejects(read, /left page/);
       assert.equal(attempts(), 1);
+    },
+  );
+});
+
+test('writes wait for a held access check and are sent once it confirms; reads never wait', async () => {
+  await withServer(
+    (_attempt, _request, response) => {
+      response.writeHead(204);
+      response.end();
+    },
+    async (url, attempts) => {
+      let confirm!: () => void;
+      holdWrites(new Promise<void>(resolve => (confirm = resolve)));
+      const write = jsonResponse(url, { method: 'POST', body: {}, signal: requestSignal() });
+      assert.equal((await jsonResponse(url, { signal: requestSignal() })).status, 204);
+      await delay(50);
+      assert.equal(attempts(), 1, 'Only the read reached the server');
+      confirm();
+      assert.equal((await write).status, 204);
+      assert.equal(attempts(), 2);
+      await writesAllowed();
+    },
+  );
+});
+
+test('a failed access check rejects held writes without sending them, and later writes are not held', async () => {
+  await withServer(
+    (_attempt, _request, response) => {
+      response.writeHead(204);
+      response.end();
+    },
+    async (url, attempts) => {
+      let fail!: (error: Error) => void;
+      holdWrites(new Promise<void>((_resolve, reject) => (fail = reject)));
+      const write = jsonResponse(url, { method: 'DELETE', signal: requestSignal() });
+      fail(new Error('Workspace access changed'));
+      await assert.rejects(write, /Could not confirm your workspace access/);
+      assert.equal(attempts(), 0);
+      assert.equal((await jsonResponse(url, { method: 'POST', body: {}, signal: requestSignal() })).status, 204);
+      assert.equal(attempts(), 1);
+    },
+  );
+});
+
+test('a write abandoned while held is never sent after the check confirms', async () => {
+  await withServer(
+    (_attempt, _request, response) => {
+      response.writeHead(204);
+      response.end();
+    },
+    async (url, attempts) => {
+      let confirm!: () => void;
+      holdWrites(new Promise<void>(resolve => (confirm = resolve)));
+      const left = new AbortController();
+      const write = jsonResponse(url, { method: 'PATCH', body: {}, signal: requestSignal(left.signal) });
+      left.abort(new Error('left page'));
+      confirm();
+      await assert.rejects(write, /left page/);
+      assert.equal(attempts(), 0);
     },
   );
 });

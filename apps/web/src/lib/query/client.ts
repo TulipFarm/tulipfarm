@@ -1,6 +1,7 @@
 import { QueryCache, QueryClient, hashKey, type QueryKey } from '@tanstack/react-query';
 import { modelCatalogSchema } from '@tulipfarm/config/model-catalog';
 import { createCatalogPersistence } from './catalog-persistence';
+import { persistedReads } from './persisted-reads';
 import { discardEarlyReads } from './early-reads';
 import { queryNotifications, type QueryNotice } from './notifications';
 import { createPolling } from './polling';
@@ -8,6 +9,9 @@ import { deniedStatus, freshness, retryDelay, retryRead } from './policy';
 import { featureKey, scopeKey, type FeatureScope, type SessionIdentity, type WorkspaceScope } from './scope';
 
 export type FeatureChange = { kind?: 'change' | 'conceal'; keys: readonly QueryKey[] };
+
+// Successful reads are written to disk after this quiet period, so a burst of refetches writes once.
+const persistDelay = 2000;
 
 export function createFeatureClient(
   identity: SessionIdentity,
@@ -36,6 +40,22 @@ export function createFeatureClient(
   const catalogs = new Map<string, { scope: WorkspaceScope; current: () => boolean; ready: Promise<void> }>();
   const account: FeatureScope = { kind: 'account', userId: identity.userId };
   const catalog = createCatalogPersistence();
+  const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The workspace scope and feature key of a cached read that may persist, if it is one. */
+  const persistedTarget = (queryKey: QueryKey) => {
+    const [user, userId, workspace, workspaceId, membership, membershipId, ...key] = queryKey;
+    if (
+      user !== 'user' ||
+      userId !== identity.userId ||
+      workspace !== 'workspace' ||
+      typeof workspaceId !== 'string' ||
+      membership !== 'membership' ||
+      typeof membershipId !== 'string' ||
+      !persistedReads.persists(key)
+    )
+      return null;
+    return { scope: { kind: 'workspace', userId, workspaceId, membershipId } satisfies WorkspaceScope, key };
+  };
   const client = new QueryClient({
     queryCache: new QueryCache({
       onError(error, query) {
@@ -48,6 +68,8 @@ export function createFeatureClient(
           catalogs.delete(query.queryHash);
           void catalog.clear(entry.scope.userId, entry.scope.workspaceId);
         }
+        const target = persistedTarget(query.queryKey);
+        if (target) void persistedReads.remove(target.scope, [target.key]);
         if (status === 401) revoke(account, true);
       },
     }),
@@ -79,6 +101,7 @@ export function createFeatureClient(
     if (scope.kind === 'workspace') discardEarlyReads(scope.userId, scope.workspaceId, input.keys);
     const keys = input.keys.map(key => featureKey(scope, key));
     if (input.kind === 'conceal') {
+      if (scope.kind === 'workspace') void persistedReads.remove(scope, input.keys);
       const queries = new Set(keys.flatMap(queryKey => client.getQueryCache().findAll({ queryKey })));
       for (const query of queries) {
         void client.cancelQueries({ queryKey: query.queryKey, exact: true });
@@ -133,6 +156,7 @@ export function createFeatureClient(
       });
     }
     void catalog.clear(scope.userId, scope.kind === 'workspace' ? scope.workspaceId : undefined);
+    void persistedReads.clear(scope.userId, scope.kind === 'workspace' ? scope.workspaceId : undefined);
     authorityChanged();
     if (broadcast) notifications?.send(scope, scope.kind === 'account' ? 'logout' : 'denied');
     environment.authorityLost?.(scope);
@@ -163,6 +187,40 @@ export function createFeatureClient(
   };
   let detach: (() => void) | undefined;
 
+  function persist(queryHash: string, queryKey: QueryKey) {
+    const configuring = persistedReads.untilConfigured();
+    if (configuring) {
+      void configuring.then(() => persist(queryHash, queryKey));
+      return;
+    }
+    const target = persistedTarget(queryKey);
+    if (!target) return;
+    const { scope, key } = target;
+    // Only the membership this client admitted, and never one still shown from disk unconfirmed.
+    const admitted = () =>
+      memberships.get(scope.workspaceId)?.membershipId === scope.membershipId && !persistedReads.unconfirmed(scope);
+    const current = fence(scope, admitted);
+    clearTimeout(persistTimers.get(queryHash));
+    persistTimers.set(
+      queryHash,
+      setTimeout(() => {
+        persistTimers.delete(queryHash);
+        const state = client.getQueryState(queryKey);
+        if (current() && state?.status === 'success' && state.data !== undefined)
+          void persistedReads.save(scope, key, state.data, state.dataUpdatedAt, current);
+      }, persistDelay),
+    );
+  }
+
+  function fence(scope: FeatureScope, admission: () => boolean = () => true) {
+    const revision = generation;
+    const hash = hashKey(scopeKey(scope));
+    const scopeRevision = revisions.get(hash);
+    const admitted = isCurrent(scope) && admission();
+    return () =>
+      admitted && revision === generation && scopeRevision === revisions.get(hash) && isCurrent(scope) && admission();
+  }
+
   return {
     client,
     polling,
@@ -188,19 +246,33 @@ export function createFeatureClient(
       };
     },
     authoritySnapshot: () => authorityRevision,
-    fence(scope: FeatureScope, admission: () => boolean = () => true) {
-      const revision = generation;
-      const hash = hashKey(scopeKey(scope));
-      const scopeRevision = revisions.get(hash);
-      const admitted = isCurrent(scope) && admission();
-      return () =>
-        admitted && revision === generation && scopeRevision === revisions.get(hash) && isCurrent(scope) && admission();
-    },
+    fence,
     admit(scope: WorkspaceScope) {
       const previous = memberships.get(scope.workspaceId);
       if (previous && previous.membershipId !== scope.membershipId) revoke(previous, true);
       memberships.set(scope.workspaceId, scope);
       if (denied.delete(hashKey(scopeKey(scope)))) authorityChanged();
+    },
+    /**
+     * Seeds a workspace the router is showing from disk with its persisted reads, before the page's
+     * queries mount. They are marked stale so each refetches; a query that already has newer data, is
+     * reading or failed keeps its own state.
+     */
+    restorePersisted(scope: WorkspaceScope) {
+      if (!isCurrent(scope)) return;
+      for (const read of persistedReads.provisionalReads(identity, scope)) {
+        const fullKey = featureKey(scope, read.key);
+        const existing = client.getQueryState(fullKey);
+        if (existing && (existing.error || existing.fetchStatus !== 'idle' || existing.dataUpdatedAt >= read.updatedAt))
+          continue;
+        client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
+        void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
+      }
+    },
+    /** Saves a scope's current reads once its provisional admission is confirmed. */
+    persistScope(scope: WorkspaceScope) {
+      for (const query of client.getQueryCache().findAll({ queryKey: scopeKey(scope) }))
+        if (query.state.status === 'success') persist(query.queryHash, query.queryKey);
     },
     prepareCatalog(scope: WorkspaceScope, key: QueryKey, admitted: () => boolean): Promise<void> {
       const fullKey = featureKey(scope, key);
@@ -246,6 +318,8 @@ export function createFeatureClient(
           const parsed = modelCatalogSchema.safeParse(event.query.state.data);
           if (entry?.current() && parsed.success)
             void catalog.save(entry.scope, parsed.data, event.query.state.dataUpdatedAt, entry.current);
+          // Values a feature writes into the cache itself are not server reads, so only fetched ones persist.
+          if (!event.action.manual) persist(event.query.queryHash, event.query.queryKey);
         }
         polling.sync();
       });
@@ -275,6 +349,8 @@ export function createFeatureClient(
       detach = undefined;
       polling.clear();
       catalogs.clear();
+      for (const timer of persistTimers.values()) clearTimeout(timer);
+      persistTimers.clear();
       void client.cancelQueries();
       client.clear();
     },
@@ -287,6 +363,7 @@ export function createFeatureClient(
       channel.send(account, 'logout');
       channel.close();
       void catalog.clear(identity.userId);
+      void persistedReads.clear(identity.userId);
     },
   };
 }

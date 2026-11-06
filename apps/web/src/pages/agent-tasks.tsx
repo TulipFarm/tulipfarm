@@ -54,6 +54,7 @@ import { TaskSecretRequests } from '@/features/secrets/task-requests';
 import { useTaskSecretRequests } from '@/features/secrets/queries';
 import { useTaskApiCalls } from '@/features/api-calls/queries';
 import { apiOrigin } from '@/lib/auth';
+import { writesAllowed } from '@/lib/http';
 import { GitHubChatResponse } from '@/features/chat/github-download';
 import { ActivityResultCard } from '@/features/chat/activity-result-card';
 
@@ -294,13 +295,16 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
                     if (pausing) return;
                     setPausing(true);
                     setPauseError(false);
-                    void fetch(`${apiOrigin}/v1/workspaces/${workspace.id}/agent-tasks/${taskId}/pause`, {
-                      method: 'POST',
-                      credentials: 'include',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ expectedGeneration: task.generation }),
-                      signal: AbortSignal.timeout(30000),
-                    })
+                    void writesAllowed()
+                      .then(() =>
+                        fetch(`${apiOrigin}/v1/workspaces/${workspace.id}/agent-tasks/${taskId}/pause`, {
+                          method: 'POST',
+                          credentials: 'include',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ expectedGeneration: task.generation }),
+                          signal: AbortSignal.timeout(30000),
+                        }),
+                      )
                       .then(async response => {
                         if (!response.ok) throw new Error('unconfirmed');
                         await read.refresh();

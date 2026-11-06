@@ -13,6 +13,7 @@ const projectSchema = z.object({
   archived: z.boolean(),
   manager: z.boolean(),
 });
+export const projectListSchema = z.array(projectSchema);
 const person = { membershipId: z.uuid(), userId: z.string(), name: z.string(), email: z.string() };
 const memberSchema = z.object({ ...person, role: z.enum(['manager', 'member']) });
 const sourceFileSchema = z.object({

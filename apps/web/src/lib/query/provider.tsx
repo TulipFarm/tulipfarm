@@ -81,6 +81,10 @@ export function WorkspaceQueryProvider({
     () => ({ runtime, scope, current: () => runtime.isCurrent(scope) && admitted() }),
     [runtime, scope.userId, scope.workspaceId, scope.membershipId, admitted],
   );
+  // Before the children render, so their first frame shows what was persisted.
+  useMemo(() => {
+    if (admitted()) runtime.restorePersisted(scope);
+  }, [runtime, scope.userId, scope.workspaceId, scope.membershipId, admitted]);
   useLayoutEffect(() => {
     if (admitted()) runtime.admit(scope);
     let observing = admitted();

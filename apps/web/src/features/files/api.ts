@@ -22,7 +22,7 @@ import {
   type LibrarySort,
 } from '@tulipfarm/files/contracts';
 import { apiOrigin } from '@/lib/auth';
-import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http';
+import { jsonResponse, readJson, requestSignal, responseError, writesAllowed } from '@/lib/http';
 import { useFeatureChanges } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import type { FilesSearch } from './search.ts';
@@ -261,7 +261,10 @@ export function filesApi(workspaceId: string) {
           return;
         }
         signal.addEventListener('abort', abort, { once: true });
-        xhr.send(file);
+        void writesAllowed().then(() => {
+          if (signal.aborted) reject(new DOMException('The upload was cancelled.', 'AbortError'));
+          else xhr.send(file);
+        }, reject);
       });
     },
   };
