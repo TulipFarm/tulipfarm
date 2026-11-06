@@ -27,6 +27,8 @@ import {
   type ApiCallSecrets,
   type SendApiCallOptions,
 } from '@tulipfarm/api-calls';
+import { isOwnServiceUrl, ownServiceDomains, ownServiceRefusal } from './own-service.ts';
+const ownDomains = ownServiceDomains();
 import { createAgentRecordTools } from './record-tools.ts';
 import { workspaceMembersInstruction } from './record-contracts.ts';
 import { createRecordBatchSchema, recordConflict, rowsListModelSchema, toolCallSchema } from './contracts.ts';
@@ -2408,6 +2410,7 @@ export function createChatTools(
     call: Extract<FrameworkCall, { tool: 'api.request' }>,
   ) {
     denyMcpEgress();
+    if (isOwnServiceUrl(call.url, ownDomains)) return ownServiceRefusal;
     const origin = context.origin;
     const chat: ApiCallOrigin | undefined =
       origin?.generation !== undefined
