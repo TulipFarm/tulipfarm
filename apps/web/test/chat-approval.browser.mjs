@@ -214,7 +214,12 @@ test(
       assert.match(sent[0], /the table "Customers" was created\. Add one realistic example row/);
       await capture('approval-completed');
       await load();
+      await page.getByRole('button', { name: 'Review changes', exact: true }).waitFor();
+      assert.equal(await card.count(), 0, 'a settled proposal stays inline instead of taking footer room');
+      await page.getByRole('button', { name: 'Review changes', exact: true }).click();
       await card.getByRole('heading', { name: 'Customers table created', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Hide', exact: true }).click();
+      await card.waitFor({ state: 'detached' });
 
       count = 2;
       await load();

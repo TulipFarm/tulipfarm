@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Button } from '@tulipfarm/sprout/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 
 type Entry = {
@@ -20,6 +21,7 @@ type Dock = {
   register: (entry: Entry) => void;
   remove: (id: string) => void;
   activate: (id: string) => void;
+  dismiss: () => void;
   setTarget: (target: HTMLDivElement | null) => void;
 };
 const ApprovalDockContext = createContext<Dock | null>(null);
@@ -62,21 +64,34 @@ export function ApprovalDockProvider({ children }: { children: ReactNode }) {
     [],
   );
   const remove = useCallback((id: string) => setEntries(previous => previous.filter(entry => entry.id !== id)), []);
-  const activate = useCallback(
-    (id: string) => {
-      setSelected(id);
-      target?.focus({ preventScroll: true });
-    },
-    [target],
-  );
+  const [focusRequest, setFocusRequest] = useState(0);
+  const activate = useCallback((id: string) => {
+    setSelected(id);
+    setFocusRequest(request => request + 1);
+  }, []);
+  // The dock is hidden until something is docked, so focus waits for the render that shows it.
+  useEffect(() => {
+    if (focusRequest) target?.focus({ preventScroll: true });
+  }, [focusRequest, target]);
+  const [lastActive, setLastActive] = useState<string | null>(null);
+  const dismiss = useCallback(() => {
+    setSelected(null);
+    setLastActive(null);
+  }, []);
+  const waiting = entries.find(entry => activeStatuses.has(entry.status))?.id ?? null;
+  useEffect(() => {
+    if (waiting) setLastActive(waiting);
+  }, [waiting]);
+  // Proposals already settled when the chat opens stay inline. One that needs action, or that settled
+  // while this chat was open, stays docked until hidden, so its result is still in view.
   const activeId =
     entries.find(entry => entry.id === selected)?.id ??
-    entries.find(entry => activeStatuses.has(entry.status))?.id ??
-    entries[0]?.id ??
+    waiting ??
+    entries.find(entry => entry.id === lastActive)?.id ??
     null;
   const value = useMemo(
-    () => ({ entries, activeId, target, register, remove, activate, setTarget }),
-    [entries, activeId, target, register, remove, activate],
+    () => ({ entries, activeId, target, register, remove, activate, dismiss, setTarget }),
+    [entries, activeId, target, register, remove, activate, dismiss],
   );
   return <ApprovalDockContext value={value}>{children}</ApprovalDockContext>;
 }
@@ -113,32 +128,45 @@ export function ApprovalDock() {
   if (!dock) return null;
   // Replaced versions can't be approved; the schema canvas still lists them.
   const entries = dock.entries.filter(entry => entry.status !== 'superseded' || entry.id === dock.activeId);
+  const docked = entries.find(entry => entry.id === dock.activeId);
+  const settled = !!docked && !activeStatuses.has(docked.status) && docked.status !== 'loading';
   return (
-    <div hidden={entries.length === 0} className="space-y-2">
-      {entries.length > 1 && (
+    <div hidden={!docked} className="space-y-2">
+      {(entries.length > 1 || settled) && (
         <div className="flex items-center gap-3">
-          <span className="shrink-0 text-xs text-muted-foreground">{entries.length} proposals</span>
-          <Select
-            value={dock.activeId}
-            onValueChange={value => {
-              if (value) dock.activate(value);
-            }}
-            items={entries.map(entry => ({
-              value: entry.id,
-              label: `${entryName(entry)} · ${statusLabels[entry.status] ?? entry.status}`,
-            }))}
-          >
-            <SelectTrigger width="full" size="sm" aria-label="Choose proposal">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {entries.map(entry => (
-                <SelectItem key={entry.id} value={entry.id}>
-                  {entryName(entry)} · {statusLabels[entry.status] ?? entry.status}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {entries.length > 1 && (
+            <>
+              <span className="shrink-0 text-xs text-muted-foreground">{entries.length} proposals</span>
+              <Select
+                value={dock.activeId}
+                onValueChange={value => {
+                  if (value) dock.activate(value);
+                }}
+                items={entries.map(entry => ({
+                  value: entry.id,
+                  label: `${entryName(entry)} · ${statusLabels[entry.status] ?? entry.status}`,
+                }))}
+              >
+                <SelectTrigger width="full" size="sm" aria-label="Choose proposal">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {entries.map(entry => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {entryName(entry)} · {statusLabels[entry.status] ?? entry.status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+          {settled && (
+            <span className="ms-auto shrink-0">
+              <Button size="sm" variant="ghost" onClick={dock.dismiss}>
+                Hide
+              </Button>
+            </span>
+          )}
         </div>
       )}
       <div ref={dock.setTarget} tabIndex={-1} role="region" aria-label="Table approval" />
