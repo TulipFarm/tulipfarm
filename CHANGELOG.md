@@ -20,6 +20,10 @@ One version identifies all apps and images of a release.
   out or failed before any response, or that the provider refused with an
   error, costs nothing. An answer without usable token counts is charged an
   estimate from the request and response size instead of the full reservation.
+- A model response that arrives but can't be used now logs why it was rejected
+  (`response.rejection`, such as `empty` or `tool-arguments`) and the
+  provider's finish reason (`response.finish_reason`) on its `call_failed`
+  line. Neither field contains prompt or response text.
 - **Breaking:** one model catalog file configures every model. The shipped
   catalog is `packages/config/catalog/models.json`, in the
   [model catalog format](https://tulipfarm.ai/schemas/model-catalog.v1.json).
