@@ -15,7 +15,7 @@ import {
   type ApiCallResult,
   type ApiCallWaiting,
 } from './contracts.ts';
-import { encodeBody } from './policy.ts';
+import { canonical, encodeBody } from './policy.ts';
 import {
   callOutcome,
   failedResult,
@@ -52,15 +52,6 @@ const previewBytes = 16 * 1024;
 const callTable = (tx: ApiCallTransaction) => qualified(tx.schema, 'tf_api_calls');
 const decisionTable = (tx: ApiCallTransaction) => qualified(tx.schema, 'tf_api_call_decisions');
 
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(',')}}`;
-}
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 /** Binds an approval to the exact request, who asked, where, and each secret's version, policy and placement (P24). */

@@ -204,6 +204,16 @@ test('an approved change is sent once with its secret, and a second resume does 
   );
 });
 
+test('an approved JSON body whose keys storage reorders is still sent', async t => {
+  const f = await setup(t);
+  const body = { kind: 'json', value: { name: 'Ana', email: 'ana@example.test', tags: [{ z: 1, a: 2 }] } };
+  const { callId } = await f.propose(await f.waitingTurn(), { call: f.call('/created', { body }) });
+  await f.approve(callId);
+  const done = await f.resume(callId);
+  assert.equal(done.result.status, 'sent');
+  assert.equal(f.api.received[0].body, '{"email":"ana@example.test","name":"Ana","tags":[{"a":2,"z":1}]}');
+});
+
 test('a secret changed after approval is a conflict and nothing is sent', async t => {
   const f = await setup(t);
   const { callId } = await f.propose(await f.waitingTurn());
