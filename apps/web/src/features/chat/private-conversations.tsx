@@ -619,6 +619,14 @@ function ConversationDetail({
   const olderScrollHeight = useRef<number | null>(null);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [unseenUpdates, setUnseenUpdates] = useState(false);
+  const pinLatest = (element: HTMLElement) => {
+    element.scrollTop = element.scrollHeight;
+  };
+  const syncLatest = (element: HTMLElement) => {
+    const near = nearLatest(element);
+    setAwayFromLatest(!near);
+    if (near) setUnseenUpdates(false);
+  };
   const updateKey = JSON.stringify([
     data?.messages.at(-1)?.id,
     activityTools.map(tool => [tool.id, tool.activityStatus ?? tool.status]),
@@ -853,17 +861,20 @@ function ConversationDetail({
     if (olderScrollHeight.current !== null) {
       element.scrollTop += element.scrollHeight - olderScrollHeight.current;
       olderScrollHeight.current = null;
-    } else if (followLatest.current === 'following') element.scrollTop = element.scrollHeight;
+    } else if (followLatest.current === 'following') pinLatest(element);
   }, [latestId, firstId, thinking]);
   useLayoutEffect(() => {
     const element = timeline.current;
     const content = timelineContent.current;
     if (!element || !content) return;
+    // The timeline also resizes when the keyboard opens or the footer grows, without firing a scroll.
     const observer = new ResizeObserver(() => {
-      if (followLatest.current === 'following' && olderScrollHeight.current === null)
-        element.scrollTop = element.scrollHeight;
+      if (olderScrollHeight.current !== null) return;
+      if (followLatest.current === 'following') pinLatest(element);
+      else syncLatest(element);
     });
     observer.observe(content);
+    observer.observe(element);
     return () => observer.disconnect();
   }, []);
   return (
@@ -967,9 +978,8 @@ function ConversationDetail({
           onScroll={event => {
             const element = event.currentTarget;
             if (followLatest.current !== 'inspecting')
-              followLatest.current =
-                element.scrollHeight - element.scrollTop - element.clientHeight < 80 ? 'following' : 'scrolled';
-            setAwayFromLatest(followLatest.current !== 'following');
+              followLatest.current = nearLatest(element) ? 'following' : 'scrolled';
+            syncLatest(element);
           }}
         >
           <div
@@ -1115,7 +1125,6 @@ function ConversationDetail({
                                 activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
                                 onToggle={() => {
                                   followLatest.current = 'inspecting';
-                                  setAwayFromLatest(true);
                                 }}
                               />
                               {message.tools.map(tool => {
@@ -1208,7 +1217,6 @@ function ConversationDetail({
                               activityLabel={activityLabel}
                               onToggle={() => {
                                 followLatest.current = 'inspecting';
-                                setAwayFromLatest(true);
                               }}
                             />
                             {incoming.tools.map(tool =>
@@ -1366,28 +1374,34 @@ function ConversationDetail({
             )}
           </div>
         </div>
-        <footer className={compact ? 'shrink-0 px-3 pb-3' : 'shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-5'}>
+        <footer
+          className={
+            compact
+              ? 'relative shrink-0 px-3 pb-3'
+              : `relative shrink-0 px-3 pt-2 pb-3 sm:px-6 ${empty ? 'sm:pb-5' : 'sm:pb-2'}`
+          }
+        >
+          {awayFromLatest && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-full flex justify-center pb-2 *:pointer-events-auto">
+              <Button
+                size={unseenUpdates ? 'sm' : 'icon-sm'}
+                variant="outline"
+                aria-label="Jump to latest"
+                title="Jump to latest"
+                onClick={() => {
+                  const element = timeline.current;
+                  if (element) pinLatest(element);
+                  followLatest.current = 'following';
+                  setAwayFromLatest(false);
+                  setUnseenUpdates(false);
+                }}
+              >
+                <ArrowDown size={14} aria-hidden="true" />
+                {unseenUpdates && 'New updates'}
+              </Button>
+            </div>
+          )}
           <div className="mx-auto w-full max-w-3xl space-y-3">
-            {awayFromLatest && (
-              <div className="flex justify-center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-label="Jump to latest"
-                  title="Jump to latest"
-                  onClick={() => {
-                    const element = timeline.current;
-                    if (element) element.scrollTop = element.scrollHeight;
-                    followLatest.current = 'following';
-                    setAwayFromLatest(false);
-                    setUnseenUpdates(false);
-                  }}
-                >
-                  <ArrowDown size={16} aria-hidden="true" />
-                  {unseenUpdates ? 'New updates' : 'Jump to latest'}
-                </Button>
-              </div>
-            )}
             <CommandFeedback
               write={write}
               refreshed={refreshed && ready}
@@ -1519,7 +1533,7 @@ function ConversationDetail({
               quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
             />
             {!compact && !empty && (
-              <p className="text-center text-xs text-muted-foreground">
+              <p className="-mt-1.5 hidden text-center text-xs text-muted-foreground sm:block">
                 TulipFarm can make mistakes. Check important details.
               </p>
             )}
@@ -1529,6 +1543,8 @@ function ConversationDetail({
     </ChatKeywords>
   );
 }
+
+const nearLatest = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight < 80;
 
 const turnLabels = {
   queued: 'Reply queued',
