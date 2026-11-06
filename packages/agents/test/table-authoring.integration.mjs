@@ -99,6 +99,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ),
     });
     assert.equal(discovery.capabilities.manageSchema, false);
+    await assert.rejects(tools.invokeWithSources(context, { tool: 'schema.context', tableId: team }), {
+      code: 'table-not-found',
+    });
     const output = (await tools.invokeWithSources(context, { tool: 'tables.propose', input: JSON.stringify(input) }))
       .result;
     assert.equal(output.status, 'pending');

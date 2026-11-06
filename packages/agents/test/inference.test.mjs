@@ -1192,7 +1192,7 @@ test('native chat tool schemas accept and reject the same arguments as the serve
   const tools = offeredTools('azure', wire.received[0].body);
   assert.deepEqual(offeredTools('azure', wire.received[1].body), tools);
   const names = tools.map(tool => tool.name);
-  for (const name of ['tools_search', 'tables_definitions', 'rows_page', 'web_fetch', 'web_search'])
+  for (const name of ['tools_search', 'tables_definitions', 'tables_propose', 'rows_page', 'web_fetch', 'web_search'])
     assert.ok(names.includes(name), name);
   const search = tools.find(tool => tool.name === 'tools_search');
   for (const name of [
@@ -1200,7 +1200,6 @@ test('native chat tool schemas accept and reject the same arguments as the serve
     'github_personal_download',
     'github_personal_propose',
     'github_personal_execute',
-    'tables_propose',
     'tables_import_file',
   ]) {
     assert.equal(names.includes(name), false, name);

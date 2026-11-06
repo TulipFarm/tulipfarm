@@ -108,6 +108,7 @@ const coreChatTools = new Set(
     'rows.page',
     'schema.context',
     'schema.inspect',
+    'tables.propose',
     'rows.create.batch',
     'skills.read',
     'knowledge.retrieve',

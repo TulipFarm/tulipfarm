@@ -532,7 +532,14 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           capabilities.manageSchema = await canAccessTable(tx, actor, tableId, 'table.schema.manage');
           capabilities.readRecords = await canAccessTable(tx, actor, tableId, 'table.row.read');
           if (!capabilities.manageSchema && !capabilities.readRecords) throw new TableError('table-not-found', 404);
-          appliedDefinition = (await activeGeneration(tx, tableId)).definition;
+          appliedDefinition = (
+            await activeGeneration(tx, tableId).catch((error: unknown) => {
+              // An id that is not a live table, such as a team id, reads as not found instead of an unexplained failure.
+              if (error instanceof GenerationError && error.code === 'not-active')
+                throw new TableError('table-not-found', 404);
+              throw error;
+            })
+          ).definition;
           capabilities.createRecord =
             capabilities.readRecords && (await canAccessTable(tx, actor, tableId, 'table.row.create'));
           capabilities.updateRecord =
