@@ -18,12 +18,12 @@ const reportLimit = 11500;
 export function reportText(report: string): string {
   if (report.length <= reportLimit) return report;
   const cut = report.lastIndexOf('\n\n', reportLimit);
-  return `${report.slice(0, cut > reportLimit / 2 ? cut : reportLimit).trimEnd()}\n\n_The report is cut here. Open it in TulipFarm to read the rest._`;
+  return `${report.slice(0, cut > reportLimit / 2 ? cut : reportLimit).trimEnd()}\n\n_The report is cut here because it is too long for one Slack message._`;
 }
 
 /**
  * The Slack message for a reply laid out with `slack_render`, or `undefined` for a text reply, which is sent as
- * Markdown. A report becomes a canvas when the installation may create one; the reply links it and the chat. When the canvas
+ * Markdown. A report becomes a canvas when the installation may create one; the reply links it. When the canvas
  * cannot be made, the reply carries the report itself.
  * `reserve` leaves room for blocks the caller adds, such as review cards.
  */
@@ -32,7 +32,6 @@ export async function slackLayoutPresentation(input: {
   token: string;
   canvas: boolean;
   audience: { channel: string } | { user: string };
-  app?: string | undefined;
   echo?: string | undefined;
   feedback?: boolean;
   reserve?: number;
@@ -61,7 +60,7 @@ export async function slackLayoutPresentation(input: {
         ...(echo && input.echo ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: input.echo }] }] : []),
         ...blocks,
       ],
-      links: { canvas, app: input.app },
+      links: { canvas },
       feedback,
     });
   const feedback = input.feedback ?? true;

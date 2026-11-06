@@ -8,19 +8,15 @@ import { callSlackApi } from './web-api.ts';
 export const slackFeedbackActionId = 'tf_feedback';
 
 /**
- * A laid-out reply as a Slack message: the model's blocks, link buttons to the canvas report and the chat in
- * TulipFarm, then the feedback buttons. `summary` is the notification and fallback text.
+ * A laid-out reply as a Slack message: the model's blocks, a link button to the canvas report, then the feedback buttons. `summary` is the notification and fallback text.
  */
 export function slackReplyMessage(input: {
   summary: string;
   blocks: readonly unknown[];
-  links: { canvas?: string | undefined; app?: string | undefined };
+  links: { canvas?: string | undefined };
   feedback: boolean;
 }): SlackMessage {
-  const links = [
-    input.links.canvas ? { label: 'Open report', url: input.links.canvas, primary: true } : undefined,
-    input.links.app ? { label: 'Open in TulipFarm', url: input.links.app, primary: false } : undefined,
-  ].filter(link => link !== undefined);
+  const links = input.links.canvas ? [{ label: 'Open report', url: input.links.canvas, primary: true }] : [];
   return {
     kind: 'message',
     text: input.summary,

@@ -122,13 +122,6 @@ export async function createSlackPromptComposition(
         (await pool.query('SELECT slug FROM app.workspace_flag_context($1)', [workspaceId]).catch(() => null))?.rows[0]
           ?.slug,
       );
-  // Laid-out replies link to their chat in the web app.
-  const chatLink = async (workspaceId: string, conversationId: string) => {
-    const slug = await workspaceSlug(workspaceId);
-    return slug
-      ? new URL(`/${encodeURIComponent(slug)}/chat/${encodeURIComponent(conversationId)}`, settings.webOrigin).href
-      : undefined;
-  };
   // Row cards link to the row in the web app; a workspace whose address cannot be read gets unlinked cards.
   const rowLink = async (workspaceId: string, tableId: string, recordId: string) => {
     const slug = await workspaceSlug(workspaceId);
@@ -143,7 +136,6 @@ export async function createSlackPromptComposition(
         channels,
         compactor,
         rowLink,
-        chatLink,
         reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
       })
     : undefined;
