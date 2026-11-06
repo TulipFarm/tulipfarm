@@ -199,23 +199,6 @@ test(
         Buffer.from((await files.download(workspace.id, actor.userId, named.files[0].id)).bytes).toString(),
         'exact packaged bytes',
       );
-      const folder = await files.createFolder(workspace.id, actor.userId, randomUUID(), {
-        name: 'Scheduled output',
-        parentId: null,
-      });
-      const schedule = await executor.authorizeSchedule(workspace.id, actor, {
-        activationId: agent.activationId,
-        scope: [],
-      });
-      const scheduled = await executor.startScheduled(workspace.id, {
-        scheduleId: schedule.scheduleId,
-        runId: randomUUID(),
-      });
-      const scheduledResult = await executeRun(scheduled, { ...call, folderId: folder.id });
-      assert.equal(
-        Buffer.from((await files.download(workspace.id, actor.userId, scheduledResult.files[0].id)).bytes).toString(),
-        'exact packaged bytes',
-      );
       const noGrant = await savedTaskAgent(db, workspace, runtime, actor.userId, actor.membershipId, selected, [
         'skills.list',
       ]);

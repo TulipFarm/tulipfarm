@@ -104,7 +104,7 @@ export function AgentChat({
             <StatePanel
               kind="unavailable"
               title="Model not configured"
-              description="An operator must configure the model provider before chat can run. Saved definitions and schedules remain available."
+              description="An operator must configure the model provider before chat can run. Saved definitions remain available."
             />
           )
         }

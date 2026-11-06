@@ -25,7 +25,7 @@ import { requireExternalRun, type ExternalRunGuard } from './external-run.ts';
 import { resolveProcedures, resolveRunProcedures } from './workspace-skills.ts';
 import { requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import { isMcpCall } from './mcp-contracts.ts';
-import { canAccessAsset, requireAgentGrant, requireAgentRunHistory, requireTeamManager } from '@tulipfarm/access';
+import { requireAgentGrant, requireAgentRunHistory, requireTeamManager } from '@tulipfarm/access';
 import { requireAgentPermission } from './saved-policy.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 
@@ -45,7 +45,6 @@ const runSchema = z.object({
   kind: z.enum(['delegated', 'scheduled']),
   user_id: z.string().nullable(),
   membership_id: uuidSchema.nullable(),
-  schedule_id: uuidSchema.nullable(),
   scope: scopeSchema,
   status: z.string(),
   task_id: uuidSchema.nullish(),
@@ -195,31 +194,9 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     });
   }
 
-  async function authorizeSchedule(workspaceId: string, actor: HumanActor, input: unknown) {
-    const value = z.strictObject({ activationId: uuidSchema, scope: scopeSchema }).parse(input);
-    return mutation(workspaceId, actor, async transaction => {
-      const activation = await liveActivation(transaction, value.activationId, actor);
-      await requireAgentPermission(transaction, actor, activation.agent_id, 'manage');
-      await requireTaskInvocation(transaction, actor, activation.agent_id);
-      for (const entry of value.scope)
-        for (const permission of entry.permissions)
-          if (!(await canAccessAsset(transaction, actor, entry.assetId, permission))) throw new AccessDenied();
-      const id = randomUUID();
-      await transaction.client.query(
-        `INSERT INTO ${relation(transaction, 'tf_agent_schedules')} (id, activation_id, scope,sponsor_membership_id) VALUES ($1, $2, $3,$4)`,
-        [id, value.activationId, JSON.stringify(value.scope), actor.membershipId],
-      );
-      await transaction.client.query(
-        `INSERT INTO ${relation(transaction, 'tf_agent_schedule_audience')} (schedule_id,membership_id) VALUES ($1,$2)`,
-        [id, actor.membershipId],
-      );
-      return { scheduleId: id };
-    });
-  }
-
   async function revoke(workspaceId: string, actor: HumanActor, input: unknown) {
-    const value = z.strictObject({ kind: z.enum(['activation', 'schedule', 'run']), id: uuidSchema }).parse(input);
-    const tables = { activation: 'tf_agent_activations', schedule: 'tf_agent_schedules', run: 'tf_agent_runs' };
+    const value = z.strictObject({ kind: z.enum(['activation', 'run']), id: uuidSchema }).parse(input);
+    const tables = { activation: 'tf_agent_activations', run: 'tf_agent_runs' };
     return mutation(workspaceId, actor, async transaction => {
       let changedDefinition: { id: string; before: Map<string, string> } | undefined;
       if (value.kind === 'run') {
@@ -229,19 +206,16 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       } else {
         const row = (
           await transaction.client.query(
-            value.kind === 'activation'
-              ? `SELECT agent_id FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$1`
-              : `SELECT a.agent_id FROM ${relation(transaction, 'tf_agent_schedules')} s JOIN ${relation(transaction, 'tf_agent_activations')} a ON a.id=s.activation_id WHERE s.id=$1`,
+            `SELECT agent_id FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$1`,
             [value.id],
           )
         ).rows[0];
         if (!row) throw new AccessDenied();
         await requireAgentPermission(transaction, actor, uuidSchema.parse(row.agent_id), 'manage');
-        if (value.kind === 'activation')
-          changedDefinition = {
-            id: row.agent_id,
-            before: await definitionRecommendationAudience(transaction, 'agent', row.agent_id),
-          };
+        changedDefinition = {
+          id: row.agent_id,
+          before: await definitionRecommendationAudience(transaction, 'agent', row.agent_id),
+        };
       }
       const update = value.kind === 'run' ? "status = 'cancelled'" : 'revoked_at = now()';
       await transaction.client.query(
@@ -371,49 +345,6 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     });
   }
 
-  async function startScheduled(workspaceId: string, input: unknown) {
-    const value = z.strictObject({ scheduleId: uuidSchema, runId: uuidSchema }).parse(input);
-    return storage.transaction(uuidSchema.parse(workspaceId), agentCompatibility, async transaction => {
-      await lockAuthorization(transaction);
-      const schedule = z
-        .object({ activation_id: uuidSchema, scope: scopeSchema, membership_id: uuidSchema, user_id: z.string() })
-        .optional()
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT s.activation_id,s.scope,m.id AS membership_id,m.user_id FROM ${relation(transaction, 'tf_agent_schedules')} s JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=s.sponsor_membership_id AND m.removed_at IS NULL WHERE s.id = $1 AND s.revoked_at IS NULL AND s.paused_at IS NULL`,
-              [value.scheduleId],
-            )
-          ).rows[0],
-        );
-      if (!schedule) throw new AccessDenied();
-      const sponsor: HumanActor = { kind: 'human', membershipId: schedule.membership_id, userId: schedule.user_id };
-      const activation = await liveActivation(transaction, schedule.activation_id, sponsor);
-      await requireTaskInvocation(transaction, sponsor, activation.agent_id);
-      const created = await transaction.client.query(
-        `INSERT INTO ${relation(transaction, 'tf_agent_runs')} (id, agent_id, activation_id, definition_revision, kind, schedule_id, scope,sponsor_membership_id) VALUES ($1, $2, $3, $4, 'scheduled', $5, $6,$7) ON CONFLICT DO NOTHING`,
-        [
-          value.runId,
-          activation.agent_id,
-          activation.id,
-          activation.definition_revision,
-          value.scheduleId,
-          JSON.stringify(schedule.scope),
-          sponsor.membershipId,
-        ],
-      );
-      const run = await loadRun(transaction, value.runId);
-      if (created.rowCount)
-        await transaction.client.query(
-          `INSERT INTO ${relation(transaction, 'tf_agent_run_audience')} (run_id,membership_id) SELECT $1,membership_id FROM ${relation(transaction, 'tf_agent_schedule_audience')} WHERE schedule_id=$2`,
-          [value.runId, value.scheduleId],
-        );
-      if (run.kind !== 'scheduled' || run.schedule_id !== value.scheduleId || run.activation_id !== activation.id)
-        throw new AccessDenied();
-      return { runId: value.runId, revision: activation.definition_revision };
-    });
-  }
-
   async function loadRun(transaction: AgentTransaction, runId: string) {
     const run = runSchema
       .optional()
@@ -444,16 +375,6 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       await requireExternalRun(transaction, workspaceId, value.runId, externalGuard);
       const run = await loadRun(transaction, value.runId);
       await requireAgentRunHistory(transaction, actor, run.id);
-      if (
-        run.kind === 'scheduled' &&
-        !(
-          await transaction.client.query(
-            `SELECT 1 FROM ${relation(transaction, 'tf_agent_runs')} WHERE id=$1 AND sponsor_membership_id=$2`,
-            [run.id, actor.membershipId],
-          )
-        ).rowCount
-      )
-        throw new AccessDenied();
       if (run.task_id) await requireTaskInvocation(transaction, actor, run.agent_id);
       await liveActivation(transaction, run.activation_id, actor);
       await resolveRunProcedures(transaction, run.id);
@@ -528,10 +449,8 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     saveDefinition,
     activate,
     configure,
-    authorizeSchedule,
     revoke,
     revokeActivation,
-    startScheduled,
     queueCall,
     startDelegated: (workspaceId: string, actor: HumanActor, input: unknown) =>
       startDelegatedRun(workspaceId, actor, input),

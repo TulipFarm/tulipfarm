@@ -40,7 +40,7 @@ const copy = {
     done: 'archived',
     doing: 'Archiving…',
     explanation:
-      'Archiving hides each agent, turns it off and ends its activations and schedules. Its team, sharing and history stay, and you can restore it later from Archived.',
+      'Archiving hides each agent, turns it off, ends its activations and archives its trigger workflows. Its team, sharing and history stay, and you can restore it later from Archived.',
     saved: 'Find them on the Agents page under Archived.',
   },
   'agent-restore': {

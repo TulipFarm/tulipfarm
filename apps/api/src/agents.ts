@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
 import { createAgentAuthoring } from '@tulipfarm/agents/authoring';
 import { createSavedAgentService } from '@tulipfarm/agents/saved-service';
-import { createAgentSchedules } from '@tulipfarm/agents/schedules';
 import {
   createAgentChat,
   retryModelSchema,
@@ -14,9 +13,6 @@ import {
   type ModelContinuity,
 } from '@tulipfarm/agents/chat';
 import { chatInputSchema, chatReceiptSchema, chatStatusSchema } from '@tulipfarm/agents/chat-contracts';
-import { inspectionActivationSchema, scheduleInputSchema, scheduleSchema } from '@tulipfarm/agents/schedule-contracts';
-import { agentCalendarSchema } from '@tulipfarm/agents/schedule-contracts';
-import { calendarRangeSchema } from '@tulipfarm/workflows/calendar-contracts';
 import {
   agentDefinitionSchema,
   executionPolicySchema,
@@ -99,7 +95,6 @@ export function registerAgents(
   const models = createModelPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
   const compaction = createCompactionPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
   const images = createImageSettingsService(dependencies.runtime);
-  const schedules = createAgentSchedules(dependencies.runtime);
   const setup = createAgentSetup(dependencies.runtime, dependencies.modelFamilyEligibility, dependencies.agentSetup);
   const chat = createAgentChat(
     dependencies.runtime,
@@ -190,17 +185,6 @@ export function registerAgents(
       return reply.code(503).send({ error: 'agent-operation-unavailable' });
     });
     const base = '/workspaces/:workspaceId/agents';
-    routes.get(
-      `${base}/calendar`,
-      {
-        logLevel: 'silent',
-        schema: {
-          ...schema('agentCalendarV1', workspace, agentCalendarSchema),
-          querystring: json(calendarRangeSchema),
-        },
-      },
-      request => schedules.calendar(workspace.parse(request.params).workspaceId, user(request), request.query),
-    );
     const setupCommand = workspace.extend({ commandId: uuidSchema });
     routes.get(
       `${base}/setup-commands/:commandId`,
@@ -501,23 +485,6 @@ export function registerAgents(
       },
     );
     routes.get(
-      `${base}/:agentId/schedules`,
-      { schema: schema('listAgentSchedulesV1', agent, z.array(scheduleSchema)) },
-      request => {
-        const p = agent.parse(request.params);
-        return schedules.list(p.workspaceId, user(request), p.agentId);
-      },
-    );
-    routes.put(
-      `${base}/:agentId/schedules`,
-      { schema: schema('saveAgentScheduleV1', agent, success, scheduleInputSchema) },
-      request => {
-        const p = agent.parse(request.params);
-        return schedules.save(p.workspaceId, user(request), p.agentId, request.body);
-      },
-    );
-    const scheduleParams = agent.extend({ scheduleId: z.uuid() });
-    routes.get(
       `${base}/:agentId/chat`,
       { schema: schema('getAgentChatAvailabilityV1', agent, z.object({ configured: z.boolean() })) },
       async request => {
@@ -549,29 +516,6 @@ export function registerAgents(
       request => {
         const p = turn.parse(request.params);
         return chat.retry(p.workspaceId, user(request), p.agentId, p.turnId, request.body);
-      },
-    );
-    routes.put(
-      `${base}/:agentId/inspection-activation`,
-      {
-        schema: schema(
-          'activateAgentInspectionV1',
-          agent,
-          z.object({ activationId: z.uuid() }),
-          inspectionActivationSchema,
-        ),
-      },
-      request => {
-        const p = agent.parse(request.params);
-        return schedules.activate(p.workspaceId, user(request), p.agentId, request.body);
-      },
-    );
-    routes.delete(
-      `${base}/:agentId/schedules/:scheduleId`,
-      { schema: schema('revokeAgentScheduleV1', scheduleParams, success) },
-      request => {
-        const p = scheduleParams.parse(request.params);
-        return schedules.revoke(p.workspaceId, user(request), p.agentId, p.scheduleId);
       },
     );
   });

@@ -147,7 +147,7 @@ test(
 );
 
 test(
-  'uppercase agent scopes, scheduled IDs and queued calls replay as canonical UUID identities',
+  'uppercase agent scopes, run IDs and queued calls replay as canonical UUID identities',
   { skip: soulStorageSkip },
   async () => {
     const f = await fixture();
@@ -184,26 +184,11 @@ test(
         teamIds: [f.teamId.toUpperCase()],
         limits: scope,
       });
-      const schedule = await executor.authorizeSchedule(w, human, {
-        activationId: activation.activationId.toUpperCase(),
-        scope,
-      });
-      const runId = randomUUID();
-      assert.equal(
-        (
-          await executor.startScheduled(w.toUpperCase(), {
-            scheduleId: schedule.scheduleId.toUpperCase(),
-            runId: runId.toUpperCase(),
-          })
-        ).runId,
-        runId,
-      );
-      assert.equal((await executor.startScheduled(w, { scheduleId: schedule.scheduleId, runId })).runId, runId);
       const delegated = await executor.startDelegated(w.toUpperCase(), human, {
         activationId: activation.activationId.toUpperCase(),
         scope,
       });
-      for (const run of [runId, delegated.runId]) {
+      for (const run of [delegated.runId]) {
         const callId = randomUUID();
         const call = {
           tool: 'github.issue.read',
@@ -249,7 +234,7 @@ test(
           'Issue title',
         );
       }
-      assert.equal(f.calls.length, 2);
+      assert.equal(f.calls.length, 1);
     } finally {
       await f.close();
     }
@@ -517,13 +502,6 @@ test(
         f.member.userId,
       ]);
       assert.equal(await executor.execute(reincarnated), 'blocked');
-      const schedule = await executor.authorizeSchedule(w, a, { activationId: activation.activationId, scope });
-      const run = await executor.startScheduled(w, { scheduleId: schedule.scheduleId, runId: randomUUID() });
-      const scheduled = { workspaceId: w, runId: run.runId, callId: randomUUID() };
-      await executor.queueCall(w, a, { runId: run.runId, callId: scheduled.callId, sequence: 0, call });
-      assert.equal(await executor.execute(scheduled), 'completed');
-      await executor.revoke(w, a, { kind: 'schedule', id: schedule.scheduleId });
-      assert.equal(await executor.execute(scheduled), 'blocked');
       const persisted = JSON.stringify(
         (await f.owner.query(`SELECT call, result FROM ${f.table('tf_agent_tool_calls')}`)).rows,
       );

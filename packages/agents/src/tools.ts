@@ -118,7 +118,7 @@ import { knowledgeToolsUnavailable, type KnowledgeTools } from './knowledge-tool
 import { authoredDefinitionSchema, triggerSchema } from '@tulipfarm/workflows/contracts';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { createWorkflowDrafts, previewWorkflowRun, summarizeWorkflow } from './workflow-drafts.ts';
-import { requireAgentTriggerCadence } from './agent-trigger-workflows.ts';
+import { agentTriggerMinimumMinutes, requireAgentTriggerCadence } from './agent-trigger-workflows.ts';
 import { unattendedTrigger } from './setup-contracts.ts';
 import { createAgentTasks } from './tasks.ts';
 import { createAgentPlans, planCompatibility, planDocumentsEnabled } from './plans.ts';
@@ -138,7 +138,6 @@ import { agentDraftInputSchema, type FilesProposal, type KnowledgeProposal } fro
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
-import { taskScheduleMinimumMinutes } from './schedule-contracts.ts';
 import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
@@ -1300,7 +1299,7 @@ export function createChatTools(
           triggers: {
             existingWorkflows: linked,
             maximum: 20,
-            minimumScheduleMinutes: taskScheduleMinimumMinutes,
+            minimumScheduleMinutes: agentTriggerMinimumMinutes,
             promptMaxCharacters: 8000,
             sponsorMembershipId: actor.membershipId,
             previews: (call.triggers ?? []).map(trigger => {

@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { toolCallSchema, executionIdsSchema, agentDefinitionSchema } from '../src/contracts.ts';
 import { saveAgentSchema, agentPolicySchema } from '../src/saved-contracts.ts';
-import { inspectionActivationSchema, scheduleInputSchema } from '../src/schedule-contracts.ts';
 
 test('tool admission excludes SQL, credentials, confirmation and role overrides', () => {
   for (const tool of ['sql', 'credentials.get', 'schema.confirm']) {
@@ -208,50 +207,6 @@ test('saved-agent and schedule inputs canonicalize every UUID identity', () => {
       grants: [{ teamId: id, permissions: ['read'] }],
       personGrants: [{ membershipId: id, permissions: ['manage'] }],
     },
-  );
-  assert.deepEqual(inspectionActivationSchema.parse({ id: upper, tableId: upper, revision: 'b'.repeat(64) }), {
-    id,
-    tableId: id,
-    revision: 'b'.repeat(64),
-  });
-  assert.deepEqual(
-    scheduleInputSchema.parse({
-      id: upper,
-      activationId: upper,
-      action: { kind: 'inspect', tableId: upper },
-      trigger: { kind: 'interval', minutes: 5 },
-      sponsorMembershipId: upper,
-      historyAudience: [upper],
-    }),
-    {
-      id,
-      activationId: id,
-      action: { kind: 'inspect', tableId: id },
-      trigger: { kind: 'interval', minutes: 5 },
-      sponsorMembershipId: id,
-      historyAudience: [id],
-    },
-  );
-  assert.deepEqual(
-    scheduleInputSchema.parse({
-      id,
-      activationId: id,
-      action: { kind: 'task', text: ' Summarize new leads ', limits: {} },
-      trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Europe/London' },
-      sponsorMembershipId: id,
-      historyAudience: [],
-    }).action,
-    { kind: 'task', text: 'Summarize new leads', limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 } },
-  );
-  assert.throws(() =>
-    scheduleInputSchema.parse({
-      id,
-      activationId: id,
-      tableId: id,
-      trigger: { kind: 'interval', minutes: 5 },
-      sponsorMembershipId: id,
-      historyAudience: [],
-    }),
   );
   assert.equal(saveAgentSchema.parse({ ...input, owningTeamId: null }).owningTeamId, null);
 });

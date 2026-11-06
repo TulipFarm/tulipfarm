@@ -406,18 +406,14 @@ try {
       assert.equal(executionWrites[0].enabled, true);
       assert.deepEqual(executionWrites[0].limits, policy.limits);
       await page.getByRole('tab', { name: 'Triggers', exact: true }).click();
-      // Schedules default to a saved prompt; table inspection is the second kind (cloud 5aaf3243 #657, features/agents/schedules.tsx:37-38).
-      await page.getByRole('radio', { name: 'Inspect a table', exact: true }).click();
-      await page.getByLabel('Table to inspect', { exact: true }).click();
-      await page.getByRole('option', { name: `Customers · Engineering · ${tableId.slice(0, 8)}`, exact: true }).click();
-      assert.match(await page.getByLabel('Table to inspect', { exact: true }).textContent(), /Customers · Engineering/);
+      await page.getByRole('region', { name: 'Agent workflow triggers', exact: true }).waitFor();
       if (process.env.P1_SCREENSHOT_DIR)
         await page.screenshot({
           path: `${process.env.P1_SCREENSHOT_DIR}/p1-${mobile ? 'mobile' : 'desktop'}.png`,
           fullPage: true,
         });
       console.log(
-        `${mobile ? 'Mobile' : 'Desktop'} passed: read-only workflow and pinned run, chat authoring handoff, approval, table creation handoff, enrollment preservation, named table selection.`,
+        `${mobile ? 'Mobile' : 'Desktop'} passed: read-only workflow and pinned run, chat authoring handoff, approval, table creation handoff, enrollment preservation, workflow triggers.`,
       );
     }
     assert.deepEqual(errors, []);

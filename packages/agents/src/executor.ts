@@ -546,7 +546,7 @@ export function createAgentExecutor(options: Options) {
                     (
                       await transaction.client.query(
                         `SELECT m.user_id,m.id AS membership_id FROM ${relation(transaction, 'tf_agent_runs')} r
-            LEFT JOIN ${relation(transaction, 'tf_agent_schedules')} s ON s.id=r.schedule_id JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,s.sponsor_membership_id,r.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
+            JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,r.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
                         [ids.runId],
                       )
                     ).rows[0],
@@ -600,13 +600,11 @@ export function createAgentExecutor(options: Options) {
                     (
                       await transaction.client.query(
                         `SELECT m.user_id,m.id AS membership_id FROM ${relation(transaction, 'tf_agent_runs')} r
-            LEFT JOIN ${relation(transaction, 'tf_agent_schedules')} s ON s.id=r.schedule_id JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,s.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
+            JOIN ${relation(transaction, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,r.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
                         [ids.runId],
                       )
                     ).rows[0],
                   );
-                  if (call.tool === 'skills.execute' && run.kind === 'scheduled' && !call.folderId)
-                    throw new AccessDenied();
                   await transaction.client.query(
                     `UPDATE ${relation(transaction, 'tf_agent_tool_calls')} SET status='waiting' WHERE id=$1`,
                     [ids.callId],

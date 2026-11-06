@@ -245,7 +245,6 @@ const runSchema = z.object({
   kind: z.enum(['delegated', 'scheduled']),
   user_id: z.string().nullable(),
   membership_id: uuidSchema.nullable(),
-  schedule_id: uuidSchema.nullable(),
   scope: scopeSchema,
   status: z.enum(['ready', 'running', 'waiting', 'completed', 'blocked', 'cancelled']),
   task_id: uuidSchema.nullish(),
@@ -273,37 +272,12 @@ async function agentAuthority(transaction: AuthorizationTransaction, runId: stri
     ).rowCount
   )
     throw new AccessDenied();
-  if (authority.kind === 'delegated') {
-    if (!authority.user_id || !authority.membership_id || authority.schedule_id) throw new AccessDenied();
-    await currentMember(transaction, {
-      kind: 'human',
-      userId: authority.user_id,
-      membershipId: authority.membership_id,
-    });
-    await requireAgentRunInvocation(
-      transaction,
-      { kind: 'human', userId: authority.user_id, membershipId: authority.membership_id },
-      authority.agent_id,
-      runId,
-    );
-    return { authority, scheduledScope: null, sponsor: null };
-  }
-  if (!authority.schedule_id || authority.user_id || authority.membership_id) throw new AccessDenied();
-  const schedule = z
-    .object({ scope: scopeSchema, membership_id: uuidSchema, user_id: z.string() })
-    .optional()
-    .parse(
-      (
-        await transaction.client.query(
-          `SELECT s.scope,m.id AS membership_id,m.user_id FROM ${table(transaction, 'tf_agent_schedules')} s JOIN ${table(transaction, 'tf_memberships')} m ON m.id=s.sponsor_membership_id AND m.removed_at IS NULL JOIN ${table(transaction, 'tf_agent_runs')} r ON r.id=$3 AND r.sponsor_membership_id=m.id WHERE s.id = $1 AND s.activation_id = $2 AND s.revoked_at IS NULL AND s.paused_at IS NULL`,
-          [authority.schedule_id, authority.activation_id, runId],
-        )
-      ).rows[0],
-    );
-  if (!schedule) throw new AccessDenied();
-  const sponsor: HumanActor = { kind: 'human', userId: schedule.user_id, membershipId: schedule.membership_id };
-  await requireTaskInvocation(transaction, sponsor, authority.agent_id);
-  return { authority, scheduledScope: schedule.scope, sponsor };
+  // Only a delegated run acts; scheduled runs are history left from removed agent schedules.
+  if (authority.kind !== 'delegated' || !authority.user_id || !authority.membership_id) throw new AccessDenied();
+  const owner: HumanActor = { kind: 'human', userId: authority.user_id, membershipId: authority.membership_id };
+  await currentMember(transaction, owner);
+  await requireAgentRunInvocation(transaction, owner, authority.agent_id, runId);
+  return { authority, owner };
 }
 
 export async function requireCurrentActor(transaction: AuthorizationTransaction, actor: Actor) {
@@ -311,12 +285,9 @@ export async function requireCurrentActor(transaction: AuthorizationTransaction,
   else await agentAuthority(transaction, actor.runId);
 }
 
-/** The person whose access bounds a run: the delegating member, or the current sponsor of a scheduled run. */
+/** The person whose access bounds a run: its delegating member. */
 export async function agentRunOwner(transaction: AuthorizationTransaction, runId: string): Promise<HumanActor> {
-  const { authority, sponsor } = await agentAuthority(transaction, runId);
-  if (sponsor) return sponsor;
-  if (!authority.user_id || !authority.membership_id) throw new AccessDenied();
-  return { kind: 'human', userId: authority.user_id, membershipId: authority.membership_id };
+  return (await agentAuthority(transaction, runId)).owner;
 }
 
 export async function queryHumanContext(
@@ -327,11 +298,7 @@ export async function queryHumanContext(
     await currentMember(transaction, actor);
     return actor;
   }
-  const { authority } = await agentAuthority(transaction, actor.runId);
-  // Sponsoring a schedule does not make its autonomous query a request from "me".
-  if (authority.kind !== 'delegated') return null;
-  if (!authority.user_id || !authority.membership_id) throw new AccessDenied();
-  return { kind: 'human', userId: authority.user_id, membershipId: authority.membership_id };
+  return (await agentAuthority(transaction, actor.runId)).owner;
 }
 
 export async function resolveActor(transaction: AuthorizationTransaction, principal: string | Actor): Promise<Actor> {
@@ -375,26 +342,15 @@ async function canAgentAccess(
   assetId: string,
   permission: AssetPermission,
 ) {
-  const { authority, scheduledScope, sponsor } = await agentAuthority(transaction, runId);
+  const { authority, owner } = await agentAuthority(transaction, runId);
   const permits = (scope: z.infer<typeof scopeSchema>) =>
     scope.some(entry => entry.assetId === assetId && entry.permissions.includes(permission));
-  if (
-    ![authority.scope, authority.activation_scope, authority.limit_scope].every(permits) ||
-    (scheduledScope && !permits(scheduledScope))
-  )
-    return false;
+  if (![authority.scope, authority.activation_scope, authority.limit_scope].every(permits)) return false;
   const target = grantTarget(permission);
   const grant = await transaction.client.query(
     `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} t JOIN ${table(transaction, target.name)} g ON g.team_id = t.team_id WHERE t.agent_id = $1 AND g.${target.column} = $2 AND g.permission = $3 LIMIT 1`,
     [authority.agent_id, assetId, target.permission],
   );
   if (!grant.rowCount) return false;
-  if (sponsor) return canAccessAsset(transaction, sponsor, assetId, permission);
-  if (!authority.user_id || !authority.membership_id) return false;
-  return canAccessAsset(
-    transaction,
-    { kind: 'human', userId: authority.user_id, membershipId: authority.membership_id },
-    assetId,
-    permission,
-  );
+  return canAccessAsset(transaction, owner, assetId, permission);
 }

@@ -13,16 +13,13 @@ import { ConversationConflict } from './contracts.ts';
 import { type ConversationRuntime } from './runtime.ts';
 import { turnRequester } from './turn-requester.ts';
 
-const originSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('autonomous') }),
-  z.strictObject({
-    kind: z.literal('linked'),
-    conversationId: uuidSchema,
-    turnId: uuidSchema,
-    generation: z.number().int().nonnegative(),
-    epoch: z.number().int().positive(),
-  }),
-]);
+const originSchema = z.strictObject({
+  kind: z.literal('linked'),
+  conversationId: uuidSchema,
+  turnId: uuidSchema,
+  generation: z.number().int().nonnegative(),
+  epoch: z.number().int().positive(),
+});
 const claimSchema = z.strictObject({
   workspaceId: uuidSchema,
   runId: uuidSchema,
@@ -56,7 +53,7 @@ async function origin(tx: AuthorizationTransaction, input: z.infer<typeof claimS
   await requireCurrentActor(tx, { kind: 'agent', runId: input.runId });
   const run = z
     .object({
-      kind: z.enum(['delegated', 'scheduled']),
+      kind: z.string(),
       user_id: z.string().nullable(),
       membership_id: uuidSchema.nullable(),
     })
@@ -67,10 +64,6 @@ async function origin(tx: AuthorizationTransaction, input: z.infer<typeof claimS
         ])
       ).rows[0],
     );
-  if (input.origin.kind === 'autonomous') {
-    if (run.kind !== 'scheduled') throw new AccessDenied();
-    return;
-  }
   const value = input.origin;
   if (run.kind !== 'delegated' || !run.user_id || !run.membership_id) throw new AccessDenied();
   await chatAccess(
@@ -99,11 +92,7 @@ async function root(tx: AuthorizationTransaction, input: z.infer<typeof claimSch
         ])
       ).rows[0],
     );
-  if (
-    !row ||
-    row.origin_conversation_id !== (input.origin.kind === 'linked' ? input.origin.conversationId : null) ||
-    row.origin_turn_id !== (input.origin.kind === 'linked' ? input.origin.turnId : null)
-  )
+  if (!row || row.origin_conversation_id !== input.origin.conversationId || row.origin_turn_id !== input.origin.turnId)
     throw new AccessDenied();
   return row;
 }
@@ -147,11 +136,7 @@ export function createInternalConversations(runtime: ConversationRuntime) {
         await origin(tx, input);
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_internal_conversations')} (id, origin_conversation_id, origin_turn_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [
-            input.runId,
-            input.origin.kind === 'linked' ? input.origin.conversationId : null,
-            input.origin.kind === 'linked' ? input.origin.turnId : null,
-          ],
+          [input.runId, input.origin.conversationId, input.origin.turnId],
         );
         await root(tx, input);
         const previous = claimRowSchema
@@ -268,7 +253,6 @@ export function createInternalConversations(runtime: ConversationRuntime) {
     const publication = z.strictObject({ producerId: uuidSchema, callId: uuidSchema }).parse(content);
     return transaction(input.workspaceId, async tx => {
       await fence(tx, input);
-      if (input.origin.kind !== 'linked') throw new AccessDenied();
       const previous = z
         .object({ call_id: uuidSchema, message_id: uuidSchema })
         .optional()

@@ -11,8 +11,6 @@ import { reserveTaskWork, settleTaskWork } from '../dist/task-activity.js';
 import { admitTaskCall } from '../dist/task-approval-gate.js';
 import { createAgentTasks } from '../dist/tasks.js';
 import { createTaskRuntime } from '../dist/task-runtime.js';
-import { createAgentSchedules } from '../dist/schedules.js';
-import { AgentTaskError } from '../dist/task-contracts.js';
 import { taskTelemetryCheckpoint, taskTransition, withTaskTelemetry } from '../dist/task-telemetry.js';
 
 const workspaceId = randomUUID(),
@@ -135,167 +133,102 @@ test('task telemetry reports actual transitions without private data or replay d
       );
     });
 
-    await t.test(
-      'ordinary and scheduled starts and owner pause emit once, excluding replay and failed commit',
-      async () => {
-        let task, receipt, digest;
-        let dueRows = [],
-          failMessage = false,
-          failNextRun = false;
-        const tx = transaction(async (sql, values = []) => {
-          if (sql.startsWith('SELECT s.id, s.activation_id')) return result(dueRows);
-          if (sql.includes('tf_agent_schedules') && sql.startsWith('UPDATE')) {
-            if (failNextRun && sql.includes('next_run_at')) throw new Error('schedule update rollback');
-            return result();
-          }
-          if (sql.includes('tf_authorization_lock')) return result([{ id: 1 }]);
-          if (sql.includes('tf_memberships'))
-            return result([{ id: membershipId, user_id: 'PRIVATE OWNER', role: 'admin' }]);
-          if (sql.startsWith('SELECT 1 FROM') && sql.includes('tf_agents')) return result([{ allowed: 1 }]);
-          if (sql.includes('SELECT input_digest,receipt'))
-            return result(receipt ? [{ input_digest: digest, receipt }] : []);
-          if (sql.includes('count(*)::integer')) return result([{ count: 0 }]);
-          if (sql.includes('SELECT a.id,a.definition_revision'))
-            return result([
-              {
-                id: activationId,
-                revision: 'a'.repeat(64),
-                definition: { name: 'PRIVATE AGENT', instructions: 'PRIVATE INSTRUCTIONS', tools: [] },
-                scope: [],
-                activated_at: new Date(),
-              },
-            ]);
-          if (sql.includes('SELECT task_limits')) return result();
-          if (sql.startsWith('SELECT r.id AS "runId"')) return result();
-          if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(sql)) return result();
-          if (
-            sql.startsWith('SELECT soul_revision') ||
-            sql.startsWith('SELECT d.sources') ||
-            sql.startsWith("SELECT definition->'skills'")
-          )
-            return result();
-          if (sql.includes("SET status='paused'")) {
-            assert.match(sql, /status IS DISTINCT FROM 'paused'/);
-            if (task.status === 'paused') return result();
-            task.status = 'paused';
-            return { rows: [], rowCount: 1 };
-          }
-          if (sql.startsWith('INSERT INTO') && sql.includes('tf_agent_tasks')) {
-            task = {
-              id: values[0],
-              agentId,
-              activationId,
-              definitionRevision: 'a'.repeat(64),
-              skills: [],
+    await t.test('starts and owner pause emit once, excluding replay and failed commit', async () => {
+      let task, receipt, digest;
+      const tx = transaction(async (sql, values = []) => {
+        if (sql.includes('tf_authorization_lock')) return result([{ id: 1 }]);
+        if (sql.includes('tf_memberships'))
+          return result([{ id: membershipId, user_id: 'PRIVATE OWNER', role: 'admin' }]);
+        if (sql.startsWith('SELECT 1 FROM') && sql.includes('tf_agents')) return result([{ allowed: 1 }]);
+        if (sql.includes('SELECT input_digest,receipt'))
+          return result(receipt ? [{ input_digest: digest, receipt }] : []);
+        if (sql.includes('count(*)::integer')) return result([{ count: 0 }]);
+        if (sql.includes('SELECT a.id,a.definition_revision'))
+          return result([
+            {
+              id: activationId,
+              revision: 'a'.repeat(64),
+              definition: { name: 'PRIVATE AGENT', instructions: 'PRIVATE INSTRUCTIONS', tools: [] },
               scope: [],
-              limits: values[11],
-              parentTaskId: null,
-              delegationDepth: 0,
-              delegationTools: null,
-              flowId: values[0],
-              generation: 0,
-              status: 'pending',
-              activeMilliseconds: '0',
-              toolCalls: 0,
-              createdAt: new Date().toISOString(),
-            };
-            return { rows: [], rowCount: 1 };
-          }
-          if (sql.includes('SELECT id, agent_id AS')) return result(task ? [task] : []);
-          if (sql.includes('tf_agent_task_messages') && sql.startsWith('INSERT')) {
-            if (failMessage) throw new AgentTaskError('task-limit');
-            return { rows: [], rowCount: 1 };
-          }
-          if (sql.includes('tf_agent_task_commands') && sql.startsWith('INSERT')) {
-            digest = values[2];
-            receipt = values[3];
-            return { rows: [], rowCount: 1 };
-          }
-          if (sql.includes('SET knowledge_root=')) return { rows: [], rowCount: 1 };
-          if (sql.includes('tf_audit_events')) return { rows: [], rowCount: 1 };
-          throw new Error(`Unexpected start query: ${sql}`);
-        });
-        const before = events.length;
-        let committedEvents = before;
-        const tasks = createAgentTasks(storage(tx, () => assert.equal(events.length, committedEvents)));
-        const input = { requestId: randomUUID(), agentId, text: 'PRIVATE REQUEST' };
-        const first = await tasks.start(workspaceId, 'PRIVATE OWNER', input);
-        committedEvents++;
-        assert.deepEqual(await tasks.start(workspaceId, 'PRIVATE OWNER', input), first);
-        assert.deepEqual(
-          events.slice(before).map(event => event.status),
-          ['started'],
-        );
-        await tasks.startScheduled(workspaceId, 'PRIVATE OWNER', {
-          scheduleId: randomUUID(),
-          agentId,
-          activationId,
-          scope: [],
-          limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
-          text: 'PRIVATE SCHEDULE',
-        });
-        committedEvents++;
-        assert.deepEqual(
-          events.slice(before).map(event => event.status),
-          ['started', 'started'],
-        );
-        await tasks.pause(workspaceId, 'PRIVATE OWNER', task.id, { expectedGeneration: 0 });
-        committedEvents++;
-        await tasks.pause(workspaceId, 'PRIVATE OWNER', task.id, { expectedGeneration: 0 });
-        assert.deepEqual(
-          events.slice(before).map(event => event.status),
-          ['started', 'started', 'paused'],
-        );
-        const failing = createAgentTasks(
-          storage(tx, () => {
-            throw new Error('commit rollback');
-          }),
-        );
-        await assert.rejects(
-          failing.startScheduled(workspaceId, 'PRIVATE OWNER', {
-            scheduleId: randomUUID(),
+              activated_at: new Date(),
+            },
+          ]);
+        if (sql.includes('SELECT task_limits')) return result();
+        if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(sql)) return result();
+        if (
+          sql.startsWith('SELECT soul_revision') ||
+          sql.startsWith('SELECT d.sources') ||
+          sql.startsWith("SELECT definition->'skills'")
+        )
+          return result();
+        if (sql.includes("SET status='paused'")) {
+          assert.match(sql, /status IS DISTINCT FROM 'paused'/);
+          if (task.status === 'paused') return result();
+          task.status = 'paused';
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.startsWith('INSERT INTO') && sql.includes('tf_agent_tasks')) {
+          task = {
+            id: values[0],
             agentId,
             activationId,
+            definitionRevision: 'a'.repeat(64),
+            skills: [],
             scope: [],
-            limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
-            text: 'PRIVATE SCHEDULE',
-          }),
-          /commit rollback/,
-        );
-        assert.equal(events.length, before + 3);
-        dueRows = [
-          {
-            id: randomUUID(),
-            activation_id: activationId,
-            agent_id: agentId,
-            definition_revision: 'a'.repeat(64),
-            membership_id: membershipId,
-            user_id: 'PRIVATE OWNER',
-            scope: [],
-            call: {
-              kind: 'task',
-              text: 'PRIVATE SCHEDULE',
-              limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
-            },
-            interval_minutes: 60,
-            cron_expression: null,
-            timezone: null,
-            now: new Date(),
-          },
-        ];
-        const schedules = createAgentSchedules(storage(tx, () => assert.equal(events.length, committedEvents)));
-        assert.deepEqual(await schedules.due(workspaceId), []);
-        committedEvents++;
-        assert.equal(events.length, before + 4, 'production bound scheduled start publishes only after outer commit');
-        failMessage = true;
-        assert.deepEqual(await schedules.due(workspaceId), []);
-        assert.equal(events.length, before + 4, 'rolled-back scheduled start is removed at its savepoint');
-        failMessage = false;
-        failNextRun = true;
-        await assert.rejects(schedules.due(workspaceId), /schedule update rollback/);
-        assert.equal(events.length, before + 4, 'outer rollback discards a successful inner scheduled start');
-      },
-    );
+            limits: values[11],
+            parentTaskId: null,
+            delegationDepth: 0,
+            delegationTools: null,
+            flowId: values[0],
+            generation: 0,
+            status: 'pending',
+            activeMilliseconds: '0',
+            toolCalls: 0,
+            createdAt: new Date().toISOString(),
+          };
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('SELECT id, agent_id AS')) return result(task ? [task] : []);
+        if (sql.includes('tf_agent_task_messages') && sql.startsWith('INSERT')) return { rows: [], rowCount: 1 };
+        if (sql.includes('tf_agent_task_commands') && sql.startsWith('INSERT')) {
+          digest = values[2];
+          receipt = values[3];
+          return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes('SET knowledge_root=')) return { rows: [], rowCount: 1 };
+        if (sql.includes('tf_audit_events')) return { rows: [], rowCount: 1 };
+        throw new Error(`Unexpected start query: ${sql}`);
+      });
+      const before = events.length;
+      let committedEvents = before;
+      const tasks = createAgentTasks(storage(tx, () => assert.equal(events.length, committedEvents)));
+      const input = { requestId: randomUUID(), agentId, text: 'PRIVATE REQUEST' };
+      const first = await tasks.start(workspaceId, 'PRIVATE OWNER', input);
+      committedEvents++;
+      assert.deepEqual(await tasks.start(workspaceId, 'PRIVATE OWNER', input), first);
+      assert.deepEqual(
+        events.slice(before).map(event => event.status),
+        ['started'],
+      );
+      await tasks.pause(workspaceId, 'PRIVATE OWNER', task.id, { expectedGeneration: 0 });
+      committedEvents++;
+      await tasks.pause(workspaceId, 'PRIVATE OWNER', task.id, { expectedGeneration: 0 });
+      assert.deepEqual(
+        events.slice(before).map(event => event.status),
+        ['started', 'paused'],
+      );
+      const failing = createAgentTasks(
+        storage(tx, () => {
+          throw new Error('commit rollback');
+        }),
+      );
+      receipt = undefined;
+      await assert.rejects(
+        failing.start(workspaceId, 'PRIVATE OWNER', { ...input, requestId: randomUUID() }),
+        /commit rollback/,
+      );
+      assert.equal(events.length, before + 2, 'a start publishes only after its commit');
+    });
 
     for (const initialStatus of ['completed', 'paused', 'failed', 'waiting-clarification']) {
       await t.test(`${initialStatus} task resumes with started only once after commit`, async () => {

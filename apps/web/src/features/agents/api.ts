@@ -19,7 +19,6 @@ import {
   retryModelSchema,
   retryModelReceiptSchema,
 } from '@tulipfarm/agents/chat-contracts';
-import { inspectionActivationSchema, scheduleInputSchema, scheduleSchema } from '@tulipfarm/agents/schedule-contracts';
 import { slackActionViewSchema, slackDecisionSchema } from '@tulipfarm/slack/action-contracts';
 import { webAgentDefinitionSchema } from './definition';
 import { definitionSharingCandidatesSchema } from '@tulipfarm/agents/saved-contracts';
@@ -42,11 +41,9 @@ type ExecutionSettings = z.infer<typeof executionPolicySchema>;
 const rejections: Partial<Record<string, string>> = {
   'trigger-sponsor-consent-required':
     'Sponsor each trigger that runs on its own before activating. Your input is retained.',
-  'task-schedule-interval': `Prompt schedules run at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.`,
+  'task-schedule-interval': `Scheduled triggers run this agent at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.`,
   'schedule-invalid':
     'This calendar schedule is invalid. Check the cron expression and IANA time zone. Your input is retained.',
-  'task-schedule-history-private':
-    'Each prompt schedule run is a private task for its sponsor, so it cannot share results with an audience. Your input is retained.',
 };
 
 export function agentApi(workspaceId: string) {
@@ -167,13 +164,6 @@ export function agentApi(workspaceId: string) {
       id: string,
       input: { requestId: string; revision: string; scope: AgentDetail['activations'][number]['scope'] },
     ) => z.object({ activationId: z.uuid() }).parse(await request(`/${id}/activations`, 'POST', input)),
-    activateInspection: async (id: string, input: z.infer<typeof inspectionActivationSchema>) =>
-      z.object({ activationId: z.uuid() }).parse(await request(`/${id}/inspection-activation`, 'PUT', input)),
-    schedules: async (id: string, signal: AbortSignal) =>
-      z.array(scheduleSchema).parse(await request(`/${id}/schedules`, 'GET', undefined, signal)),
-    schedule: async (id: string, input: z.infer<typeof scheduleInputSchema>) =>
-      request(`/${id}/schedules`, 'PUT', input),
-    revokeSchedule: async (id: string, scheduleId: string) => request(`/${id}/schedules/${scheduleId}`, 'DELETE'),
     chatAvailability: async (id: string, signal: AbortSignal) =>
       z.object({ configured: z.boolean() }).parse(await request(`/${id}/chat`, 'GET', undefined, signal)),
     chat: async (id: string, input: z.infer<typeof chatInputSchema>) =>

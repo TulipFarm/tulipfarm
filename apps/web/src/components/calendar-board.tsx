@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { CalendarDays, CheckSquare, ChevronDown, Clock3, Cpu, GitBranch } from 'lucide-react';
+import { CalendarDays, CheckSquare, ChevronDown, Clock3, GitBranch } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   calendarDays,
@@ -22,7 +22,7 @@ import './calendar-board.css';
 
 const minuteHeight = 1.2;
 export function CalendarKindIcon({ kind, marked = false }: { kind: CalendarKind; marked?: boolean }) {
-  const Icon = { meeting: CalendarDays, task: CheckSquare, agent: Cpu, workflow: GitBranch }[kind];
+  const Icon = { meeting: CalendarDays, task: CheckSquare, workflow: GitBranch }[kind];
   return marked ? (
     <span className="calendar-kind-mark" data-kind={kind}>
       <Icon size={14} aria-hidden="true" />

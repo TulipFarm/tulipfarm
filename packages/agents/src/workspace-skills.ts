@@ -81,10 +81,9 @@ export async function resolveProcedures(
 export async function resolveRunProcedures(tx: AgentTransaction, runId: string) {
   runId = uuidSchema.parse(runId);
   await requireCurrentActor(tx, { kind: 'agent', runId });
-  const sponsor = `LEFT JOIN ${relation(tx, 'tf_agent_schedules')} s ON s.id=r.schedule_id`;
   const row = (
     await tx.client.query(
-      `SELECT d.definition,d.agent_id,d.revision,m.id AS membership_id,m.user_id FROM ${relation(tx, 'tf_agent_runs')} r JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=r.agent_id AND d.revision=r.definition_revision ${sponsor} JOIN ${relation(tx, 'tf_memberships')} m ON m.id=${sponsor ? 'COALESCE(r.membership_id,s.sponsor_membership_id)' : 'r.membership_id'} AND m.removed_at IS NULL WHERE r.id=$1`,
+      `SELECT d.definition,d.agent_id,d.revision,m.id AS membership_id,m.user_id FROM ${relation(tx, 'tf_agent_runs')} r JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=r.agent_id AND d.revision=r.definition_revision JOIN ${relation(tx, 'tf_memberships')} m ON m.id=COALESCE(r.membership_id,r.sponsor_membership_id) AND m.removed_at IS NULL WHERE r.id=$1`,
       [runId],
     )
   ).rows[0];

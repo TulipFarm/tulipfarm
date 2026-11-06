@@ -8,7 +8,6 @@ import { AccessDenied } from '@tulipfarm/access';
 import { createWorkflows } from '../src/service.ts';
 import { activate } from './commands.fixture.mjs';
 import { savedTaskAgent, grantAgentManager, seedExecution } from '../../agents/test/task-fixture.mjs';
-import { createAgentSchedules } from '../../agents/src/schedules.ts';
 import { createAgentTasks } from '../../agents/src/tasks.ts';
 
 test(
@@ -76,30 +75,6 @@ test(
     const agent = await savedTaskAgent(db, w, runtime, user, member);
     await grantAgentManager(db, w, agent.agentId, member);
     await seedExecution(db, w, agent.agentId, [agent.teamId], []);
-    const schedules = createAgentSchedules(runtime),
-      scheduleId = randomUUID();
-    await schedules.save(w.id, user, agent.agentId, {
-      id: scheduleId,
-      activationId: agent.activationId,
-      trigger: { kind: 'interval', minutes: 60 },
-      action: {
-        kind: 'task',
-        text: 'Private prompt',
-        limits: { toolCalls: 5, activeMilliseconds: 60000, credits: 100 },
-      },
-      sponsorMembershipId: member,
-      historyAudience: [],
-    });
-    await db.platform.query(
-      `UPDATE ${table('tf_agent_schedules')} SET next_run_at='2030-01-07T09:00:00Z' WHERE id=$1`,
-      [scheduleId],
-    );
-    const feed = await schedules.calendar(w.id, user, range);
-    assert.equal(feed.schedules[0].times.length, 15);
-    assert.equal(JSON.stringify(feed).includes('Private prompt'), false);
-    assert.deepEqual((await schedules.calendar(w.id, w.userId, range)).schedules, []);
-    await db.platform.query(`UPDATE ${table('tf_agent_schedules')} SET paused_at=now() WHERE id=$1`, [scheduleId]);
-    assert.deepEqual((await schedules.calendar(w.id, user, range)).schedules, []);
     const tasks = createAgentTasks(runtime),
       taskIds = [randomUUID(), randomUUID(), randomUUID()].sort();
     for (let index = 0; index < taskIds.length; index++)

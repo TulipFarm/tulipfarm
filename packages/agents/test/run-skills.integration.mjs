@@ -21,7 +21,6 @@ import { createSavedAgentService } from '../src/saved-service.ts';
 import { createAgentExecutor } from '../src/executor.ts';
 import { createAgentChat } from '../src/chat.ts';
 import { nativeReply } from './native-fixture.mjs';
-import { createAgentSchedules } from '../src/schedules.ts';
 import { createAgentRecordTools } from '../src/record-tools.ts';
 import { createTableWithRows, tableDefinition, textField, textValues } from '../../tables/test/fixture.mjs';
 import { createChatTools } from '../src/tools.ts';
@@ -564,7 +563,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       }
     });
 
-    await t.test('record action and scheduled authority stay revoked after re-enable', async () => {
+    await t.test('record action and run authority stay revoked after re-enable', async () => {
       const field = textField('Name');
       const created = await createTableWithRows({
         db,
@@ -611,24 +610,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         sequence: 1,
         call: { ...call, values: textValues(field, 'Forbidden') },
       });
-      const schedules = createAgentSchedules(runtime);
-      const inspection = await schedules.activate(w.id, w.userId, id, {
-        id: randomUUID(),
-        revision: saved.definitionRevision,
-        tableId,
-      });
-      const scheduleId = randomUUID();
-      await schedules.save(w.id, w.userId, id, {
-        id: scheduleId,
-        activationId: inspection.activationId,
-        action: { kind: 'inspect', tableId },
-        trigger: { kind: 'interval', minutes: 60 },
-        sponsorMembershipId: w.membershipId,
-        historyAudience: [],
-      });
-      const due = await schedules.due(w.id);
-      assert.equal(due.length, 1);
-      assert.deepEqual(await skills.resolveRun(w.id, due[0].runId), [{ ...selection, ...original }]);
       await setEnabled(false);
       await setEnabled(true);
       assert.equal(await executor.execute(second), 'blocked');
@@ -636,27 +617,19 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         (await records.getRecord(w.id, admin, tableId, revision, record.id)).values,
         textValues(field, 'Alice'),
       );
-      assert.equal(await executor.execute(due[0]), 'blocked');
-      const schedule = await executor.authorizeSchedule(w.id, admin, { activationId: active.activationId, scope });
-      const scheduled = await executor.startScheduled(w.id, { scheduleId: schedule.scheduleId, runId: randomUUID() });
-      assert.deepEqual(await skills.resolveRun(w.id, scheduled.runId), [{ ...selection, ...original }]);
+      const delegated = await executor.startDelegated(w.id, admin, { activationId: active.activationId, scope });
+      assert.deepEqual(await skills.resolveRun(w.id, delegated.runId), [{ ...selection, ...original }]);
       await setEnabled(false);
       await assert.rejects(
-        executor.startScheduled(w.id, { scheduleId: schedule.scheduleId, runId: randomUUID() }),
+        executor.startDelegated(w.id, admin, { activationId: active.activationId, scope }),
         AccessDenied,
       );
-      await assert.rejects(skills.resolveRun(w.id, scheduled.runId), AccessDenied);
+      await assert.rejects(skills.resolveRun(w.id, delegated.runId), AccessDenied);
       await setEnabled(true);
       const fresh = await executor.startDelegated(w.id, admin, { activationId: active.activationId, scope });
       assert.deepEqual(await skills.resolveRun(w.id, fresh.runId), [{ ...selection, ...original }]);
       await executor.revokeActivation(w.id, admin, { agentId: id, activationId: active.activationId });
       await assert.rejects(skills.resolveRun(w.id, fresh.runId), AccessDenied);
-      await setEnabled(false);
-      await assert.rejects(
-        schedules.activate(w.id, w.userId, id, { id: randomUUID(), revision: saved.definitionRevision, tableId }),
-        AccessDenied,
-      );
-      await setEnabled(true);
     });
 
     await t.test('current invoke grants and original membership incarnation govern run resolution', async () => {

@@ -336,67 +336,29 @@ test(
 );
 
 test(
-  'scheduled agent runs mark file values their sponsor cannot open and fail closed without a sponsor',
+  'a scheduled run kept from before agent schedules were removed cannot read records',
   { timeout: 120000 },
   async t => {
-    const { db, ws, s, runtime, seed, team, member, reader, revision, files, tableId, ownFile, othersFile } =
-      await fileTable(t);
+    const { db, ws, s, runtime, seed, team, member, reader, revision, files, tableId, ownFile } = await fileTable(t);
     const scope = [{ assetId: tableId, permissions: ['table.row.read'] }];
     const agent = await savedTaskAgent(db, ws, runtime, reader, member, [], ['rows.list']);
     await seedExecution(db, ws, agent.agentId, [team], scope);
-    async function scheduledRun(sponsor) {
-      const activationId = randomUUID(),
-        scheduleId = randomUUID(),
-        runId = randomUUID();
-      await db.platform.query(
-        `INSERT INTO ${s}.tf_agent_activations(id,agent_id,definition_revision,scope) VALUES($1,$2,$3,$4)`,
-        [activationId, agent.agentId, agent.revision, JSON.stringify(scope)],
-      );
-      await db.platform.query(
-        `INSERT INTO ${s}.tf_agent_schedules(id,activation_id,scope,sponsor_membership_id) VALUES($1,$2,$3,$4)`,
-        [scheduleId, activationId, JSON.stringify(scope), sponsor],
-      );
-      await db.platform.query(
-        `INSERT INTO ${s}.tf_agent_runs(id,agent_id,activation_id,definition_revision,kind,schedule_id,scope,sponsor_membership_id) VALUES($1,$2,$3,$4,'scheduled',$5,$6,$7)`,
-        [runId, agent.agentId, activationId, agent.revision, scheduleId, JSON.stringify(scope), sponsor],
-      );
-      return { kind: 'agent', runId };
-    }
-    const visibleId = randomUUID(),
-      hiddenId = randomUUID();
+    const runId = randomUUID();
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_agent_runs(id,agent_id,activation_id,definition_revision,kind,status,scope,sponsor_membership_id) VALUES($1,$2,$3,$4,'scheduled','completed',$5,$6)`,
+      [runId, agent.agentId, agent.activationId, agent.revision, JSON.stringify(scope), member],
+    );
+    const recordId = randomUUID();
     await seed.mutate(ws.id, ws.userId, {
       kind: 'create',
       tableId,
       revision,
-      recordId: visibleId,
+      recordId,
       values: { [files.id]: { kind: 'file', fileIds: [ownFile] } },
     });
-    await seed.mutate(ws.id, ws.userId, {
-      kind: 'create',
-      tableId,
-      revision,
-      recordId: hiddenId,
-      values: { [files.id]: { kind: 'file', fileIds: [othersFile] } },
-    });
     const records = createAgentRecordTools(runtime);
-
-    const sponsored = await scheduledRun(member);
-    assert.deepEqual((await records.getRecord(ws.id, sponsored, tableId, revision, visibleId)).values[files.id], {
-      kind: 'file',
-      fileIds: [ownFile],
-    });
-    const hidden = await records.getRecord(ws.id, sponsored, tableId, revision, hiddenId);
-    assert.deepEqual(
-      [hidden.values[files.id], hidden.unavailableFileIds],
-      [{ kind: 'file', fileIds: [othersFile] }, [othersFile]],
-    );
-    const listed = (await records.listRecords(ws.id, sponsored, tableId, revision, {})).records;
-    assert.deepEqual(Object.fromEntries(listed.map(record => [record.id, record.unavailableFileIds ?? null])), {
-      [visibleId]: null,
-      [hiddenId]: [othersFile],
-    });
-    const unsponsored = await scheduledRun(null);
-    await assert.rejects(records.getRecord(ws.id, unsponsored, tableId, revision, visibleId), AccessDenied);
-    await assert.rejects(records.listRecords(ws.id, unsponsored, tableId, revision, {}), AccessDenied);
+    const scheduled = { kind: 'agent', runId };
+    await assert.rejects(records.getRecord(ws.id, scheduled, tableId, revision, recordId), AccessDenied);
+    await assert.rejects(records.listRecords(ws.id, scheduled, tableId, revision, {}), AccessDenied);
   },
 );

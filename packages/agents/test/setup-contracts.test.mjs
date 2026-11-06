@@ -8,14 +8,13 @@ import {
   publishAgentSetupSchema,
   saveAgentSetupDraftSchema,
 } from '../src/setup-contracts.ts';
-import { agentTriggerLabel } from '../src/agent-trigger-workflows.ts';
+import { agentTriggerLabel, previewAgentTriggerCadence } from '../src/agent-trigger-workflows.ts';
 import { agentSetupDigest } from '../src/setup.ts';
 import { authoringProposalSchema, draftDecisionSchema } from '../src/draft-contracts.ts';
 import { frameworkCallSchema, discoverTools } from '../src/tools.ts';
 import { agentContextSchema } from '../src/saved-contracts.ts';
 import { listSkills } from '../src/skills.ts';
 import { nativeChatTools } from '../src/native-tools.ts';
-import { previewAgentTaskSchedule } from '../src/schedules.ts';
 import { conversationToolNameAllowed } from '@tulipfarm/conversations/runtime';
 
 const member = randomUUID();
@@ -206,9 +205,9 @@ test('create agent discovery loads setup, Slack checks and publication status to
     }).success,
     true,
   );
-  assert.throws(() => previewAgentTaskSchedule({ kind: 'interval', minutes: 30 }), /task-schedule-interval/);
+  assert.throws(() => previewAgentTriggerCadence({ kind: 'interval', minutes: 30 }), /task-schedule-interval/);
   assert.equal(
-    previewAgentTaskSchedule({ kind: 'interval', minutes: 60 }, new Date('2026-10-12T00:00:00.000Z')).nextRunAt,
+    previewAgentTriggerCadence({ kind: 'interval', minutes: 60 }, new Date('2026-10-12T00:00:00.000Z')).nextRunAt,
     '2026-10-12T01:00:00.000Z',
   );
 });

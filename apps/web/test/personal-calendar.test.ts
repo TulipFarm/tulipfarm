@@ -70,7 +70,7 @@ test('overlap lanes share width only within each overlap group', () => {
   const run: CalendarItem = {
     ...items[0]!,
     id: 'run',
-    kind: 'agent',
+    kind: 'workflow',
     busy: false,
     time: { kind: 'point', at: '2026-10-05T09:30:00Z' },
   };
@@ -104,7 +104,7 @@ test('now and next use real time boundaries, selected items and local all-day da
   const run: CalendarItem = {
     ...current,
     id: 'run',
-    kind: 'agent',
+    kind: 'workflow',
     busy: false,
     time: { kind: 'point', at: '2026-10-05T09:45:00Z' },
   };
@@ -113,7 +113,7 @@ test('now and next use real time boundaries, selected items and local all-day da
   assert.deepEqual(
     calendarNowNext([run], new Date('2026-10-05T10:00:00Z'), 'UTC'),
     { current: [], next: null },
-    'a past start is not evidence an agent is running',
+    'a past start is not evidence a workflow is running',
   );
   const allDay: CalendarItem = { ...current, time: { kind: 'all-day', start: '2026-10-06', end: '2026-10-07' } };
   assert.deepEqual(calendarNowNext([allDay], new Date('2026-10-05T20:00:00Z'), 'Asia/Kolkata'), {
@@ -191,8 +191,8 @@ test('free time ignores automation and free events, but includes hidden busy cal
     meeting('free', '2026-10-05T10:00:00Z', '2026-10-05T11:00:00Z', false),
   ];
   items.push({
-    ...meeting('agent', '', '', false),
-    kind: 'agent',
+    ...meeting('workflow', '', '', false),
+    kind: 'workflow',
     time: { kind: 'point', at: '2026-10-05T10:00:00Z' },
   });
   const slots = freeSlots(items, '2026-10-05', 'UTC', 60, Date.parse('2026-10-05T08:00:00Z'));

@@ -60,14 +60,12 @@ export const taskDirectToolNames = [...sharedTools, ...taskOnlyTools] as const;
 const taskToolNames = [...taskDirectToolNames, ...taskProposalTools] as const;
 export const agentRuntimeToolNames = {
   task: taskToolNames,
-  schedule: taskToolNames,
   workflowStep: taskToolNames,
   slackChannel: slackChannelToolNames,
 } as const;
 
 const runtimeLabels = {
   task: 'private tasks',
-  schedule: 'schedules',
   workflowStep: 'workflow steps',
   slackChannel: 'Slack channel agents',
 } as const;

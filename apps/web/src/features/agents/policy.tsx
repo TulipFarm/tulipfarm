@@ -412,7 +412,7 @@ function PolicyForm({
               <CheckboxField
                 id="agent-enable-execution"
                 label="Enable execution"
-                helper="Applies to every task and schedule for this agent."
+                helper="Applies to every task and workflow run for this agent."
                 checked={enabled}
                 onCheckedChange={setEnabled}
               />

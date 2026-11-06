@@ -30,7 +30,6 @@ test(
         [legacyId, legacyRevision],
       ]) {
         const activationId = randomUUID();
-        const scheduleId = randomUUID();
         const runId = randomUUID();
         await f.owner.query(`UPDATE ${f.table('tf_agents')} SET enabled=true WHERE id=$1`, [id]);
         await f.owner.query(`INSERT INTO ${f.table('tf_agent_limits')} (agent_id,scope) VALUES ($1,'[]')`, [id]);
@@ -39,12 +38,8 @@ test(
           [activationId, id, revision],
         );
         await f.owner.query(
-          `INSERT INTO ${f.table('tf_agent_schedules')} (id,activation_id,scope,sponsor_membership_id) VALUES ($1,$2,'[]',$3)`,
-          [scheduleId, activationId, f.creator.membershipId],
-        );
-        await f.owner.query(
-          `INSERT INTO ${f.table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,schedule_id,scope,sponsor_membership_id) VALUES ($1,$2,$3,$4,'scheduled',$5,'[]',$6)`,
-          [runId, id, activationId, revision, scheduleId, f.creator.membershipId],
+          `INSERT INTO ${f.table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,user_id,membership_id,scope) VALUES ($1,$2,$3,$4,'delegated',$5,$6,'[]')`,
+          [runId, id, activationId, revision, f.creator.userId, f.creator.membershipId],
         );
         runs.push(runId);
       }

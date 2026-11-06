@@ -13,12 +13,11 @@ import { z } from 'zod';
 
 export const calendarViews = ['day', 'week', 'month', 'agenda'] as const;
 export type CalendarView = (typeof calendarViews)[number];
-export const calendarKinds = ['meeting', 'task', 'agent', 'workflow'] as const;
+export const calendarKinds = ['meeting', 'task', 'workflow'] as const;
 export type CalendarKind = (typeof calendarKinds)[number];
 export const kindLabels: Record<CalendarKind, string> = {
   meeting: 'Meetings',
   task: 'Tasks',
-  agent: 'Agent runs',
   workflow: 'Workflow runs',
 };
 export const zoneSchema = z.string().refine(value => {

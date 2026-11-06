@@ -14,9 +14,7 @@ import { createConversations } from '../../conversations/src/index.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
-import { createAgentSchedules } from '../src/schedules.ts';
-import { createAgentScheduleMigration } from '../src/schedule-migration.ts';
-import { agentTriggerDefinition, derivedId } from '../src/agent-trigger-workflows.ts';
+import { agentTriggerDefinition } from '../src/agent-trigger-workflows.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
@@ -212,11 +210,6 @@ test('draft choices persist inactive; publication has one Soul write and one act
       },
     ]);
   }
-  assert.equal(
-    (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agent_schedules')}`)).rows[0].n,
-    0,
-    'setup gives the agent no schedule of its own',
-  );
   assert.equal(f.writes(), 1);
   assert.equal(
     (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agent_commands')}`)).rows[0].n,
@@ -753,47 +746,4 @@ test('archiving an agent archives only its trigger workflows; restoring brings t
   assert.equal(restored.archived_with_agent, false);
   assert.equal(restored.enabled, false, 'a restored trigger waits for a manager to turn it on');
   assert.deepEqual(await unlinked(), { agent_id: null, archived_at: null, archived_with_agent: false });
-});
-
-test('agent task schedules move into pinned, sponsored trigger workflows and stop as schedules', async t => {
-  const f = await environment(t);
-  const { activationId } = await activeAgent(f);
-  const schedules = createAgentSchedules(f.runtime);
-  const running = randomUUID(),
-    paused = randomUUID();
-  for (const [id, trigger, text] of [
-    [running, { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' }, 'Prepare the weekly update.'],
-    [paused, { kind: 'interval', minutes: 120 }, 'Check the queue.'],
-  ])
-    await schedules.save(f.w.id, f.user, f.agentId, {
-      id,
-      activationId,
-      action: { kind: 'task', text, limits },
-      trigger,
-      sponsorMembershipId: f.member,
-      historyAudience: [],
-    });
-  await f.db.platform.query(`UPDATE ${f.table('tf_agent_schedules')} SET paused_at=now() WHERE id=$1`, [paused]);
-
-  assert.deepEqual(await createAgentScheduleMigration(f.runtime).migrate(f.w.id), { migrated: 2 });
-  assert.deepEqual(
-    (
-      await f.db.platform.query(
-        `SELECT id FROM ${f.table('tf_agent_schedules')} WHERE revoked_at IS NULL AND id = ANY($1::uuid[])`,
-        [[running, paused]],
-      )
-    ).rows,
-    [],
-  );
-  const rows = (await f.state()).workflows;
-  const moved = rows.find(row => row.id === derivedId('schedule', running));
-  assert.equal(moved.enabled, true);
-  assert.equal(moved.sponsor_membership_id, f.member);
-  assert.equal(moved.definition.name, 'Setup helper: Every Monday at 09:00 (Asia/Kolkata)');
-  assert.equal(moved.definition.steps[0].activationId, activationId);
-  assert.equal(moved.definition.steps[0].prompt.value, 'Prepare the weekly update.');
-  const stopped = rows.find(row => row.id === derivedId('schedule', paused));
-  assert.equal(stopped.enabled, false, 'a paused schedule moves without starting');
-  assert.equal(stopped.definition.name, 'Setup helper: Every 2 hours');
-  assert.deepEqual(await createAgentScheduleMigration(f.runtime).migrate(f.w.id), { migrated: 0 });
 });

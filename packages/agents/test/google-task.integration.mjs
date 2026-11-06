@@ -243,15 +243,10 @@ test(
       AccessDenied,
       'a run that is not the owner’s task run cannot read it',
     );
-    const scheduleId = randomUUID(),
-      scheduledRun = randomUUID();
-    await db.platform.query(`INSERT INTO ${table('tf_agent_schedules')} (id,activation_id,scope) VALUES ($1,$2,'[]')`, [
-      scheduleId,
-      agent.activationId,
-    ]);
+    const scheduledRun = randomUUID();
     await db.platform.query(
-      `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,schedule_id,scope) VALUES ($1,$2,$3,$4,'scheduled',$5,'[]')`,
-      [scheduledRun, agent.agentId, agent.activationId, agent.revision, scheduleId],
+      `INSERT INTO ${table('tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,status,scope) VALUES ($1,$2,$3,$4,'scheduled','completed','[]')`,
+      [scheduledRun, agent.agentId, agent.activationId, agent.revision],
     );
     await assert.rejects(
       tasks.checkSources(w.id, user, [binding(1)], scheduledRun),
