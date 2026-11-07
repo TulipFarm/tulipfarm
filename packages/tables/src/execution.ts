@@ -9,6 +9,7 @@ import {
   type HumanActor,
   type SourceDependency,
 } from '@tulipfarm/access';
+import { errorAttributes, errorSite, log } from '@tulipfarm/observability';
 import { withMaintenanceTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { canonicalJson } from './canonical.ts';
 import {
@@ -1064,6 +1065,13 @@ export function createTableExecution(
           ['proposal-redacted', 'proposal-not-approved', 'dependency-unfinished'].includes(error.code)
         )
           return 'blocked';
+        // The receipt only says storage-fault; keep the database's own code and the throwing frame for operators.
+        if (storageFault)
+          log('warn', 'activity', 'call_failed', {
+            operation: 'tables.execution',
+            ...errorAttributes(error),
+            'error.site': errorSite(error),
+          });
         await withMaintenanceTransaction({
           workspaceId,
           connectionString: await options.resolveMigrationCredential(workspaceId),
