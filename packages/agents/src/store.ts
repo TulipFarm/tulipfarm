@@ -25,7 +25,7 @@ import { requireExternalRun, type ExternalRunGuard } from './external-run.ts';
 import { resolveProcedures, resolveRunProcedures } from './workspace-skills.ts';
 import { requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import { isMcpCall } from './mcp-contracts.ts';
-import { requireAgentGrant, requireAgentRunHistory, requireTeamManager } from '@tulipfarm/access';
+import { requireAgentGrant, requireAgentRunHistory, requireTeamAssignment } from '@tulipfarm/access';
 import { requireAgentPermission } from './saved-policy.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 
@@ -149,7 +149,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         )
         .map(row => row.team_id);
       for (const teamId of value.teamIds)
-        if (!existingTeams.includes(teamId)) await requireTeamManager(transaction, actor, teamId);
+        if (!existingTeams.includes(teamId)) await requireTeamAssignment(transaction, actor, teamId);
       if (
         !(
           await transaction.client.query(

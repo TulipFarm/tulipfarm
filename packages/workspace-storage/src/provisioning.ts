@@ -335,6 +335,7 @@ export async function verifyWorkspaceIsolation(client: SqlClient, workspaceId: s
           AND p.proconfig = ARRAY['search_path=pg_catalog']
           AND ((p.proname = 'tf_table_proposal_capture_current' AND pg_get_function_identity_arguments(p.oid) = 'proposal uuid, resource uuid')
             OR (p.proname = 'tf_table_source_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, source jsonb')
+            OR (p.proname = 'tf_table_workflow_active' AND pg_get_function_identity_arguments(p.oid) = 'table_id uuid')
             OR (p.proname = 'tf_table_file_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, file_id uuid')
             OR (p.proname = 'tf_table_attachment_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, chat_id uuid, attachment_id uuid, content_digest text')
             OR (p.proname = 'tf_table_import_result_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, chat_id uuid, result_id uuid')))

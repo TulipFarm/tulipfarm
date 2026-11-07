@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AccessDenied,
   definitionGrantPredicate,
-  requireTeamManager,
+  requireTeamAssignment,
   requireTeamMember,
   uuidSchema,
   type HumanActor,
@@ -339,7 +339,7 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
             ).rows,
           );
         if (grant.permissions.some(permission => !previous.some(row => row.permission === permission)))
-          await requireTeamManager(transaction, actor, grant.teamId);
+          await requireTeamAssignment(transaction, actor, grant.teamId);
       }
       for (const grant of input.personGrants)
         if (

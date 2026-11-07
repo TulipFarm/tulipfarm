@@ -1848,7 +1848,7 @@ test(
 );
 
 test(
-  'creation admits a private chat reached through a workspace agent under the migration role',
+  'creation and archiving admit a private chat reached through a workspace agent under the migration role',
   { timeout: 120000 },
   async t => {
     const db = await fixture();
@@ -1925,33 +1925,36 @@ test(
         { kind: 'agent-definition', agentId: agent.agentId, revision: soul },
       ],
     };
-    const approve = async () => {
-      const table = randomUUID();
-      const proposal = await proposals.propose(ws.id, actor, randomUUID(), origin, {
-        plans: [
-          {
-            kind: 'schema',
-            tableId: table,
-            dependsOn: [],
-            expectedRevision: null,
-            target: {
-              formatVersion: 2,
-              id: table,
-              owningTeamId: team,
-              label: 'AC-table',
-              fields: [{ id: randomUUID(), label: 'Name', kind: 'text', required: false, maxLength: 200 }],
-              uniqueKeys: [],
-            },
-            transforms: { outputs: [] },
-          },
-        ],
-      });
+    const submit = async plans => {
+      const proposal = await proposals.propose(ws.id, actor, randomUUID(), origin, { plans });
       await decisions.decide(ws.id, ws.userId, chat, proposal.id, {
         digest: proposal.digest,
         commandId: randomUUID(),
         decision: 'approve',
       });
       return proposal;
+    };
+    let lastTable;
+    const approve = async () => {
+      const table = randomUUID();
+      lastTable = table;
+      return submit([
+        {
+          kind: 'schema',
+          tableId: table,
+          dependsOn: [],
+          expectedRevision: null,
+          target: {
+            formatVersion: 2,
+            id: table,
+            owningTeamId: team,
+            label: 'AC-table',
+            fields: [{ id: randomUUID(), label: 'Name', kind: 'text', required: false, maxLength: 200 }],
+            uniqueKeys: [],
+          },
+          transforms: { outputs: [] },
+        },
+      ]);
     };
     const finish = async proposal => {
       for (let i = 0; i < 100; i++) {
@@ -1968,6 +1971,47 @@ test(
 
     const created = await approve();
     assert.deepEqual([await finish(created), ...(await outcome(created))], ['completed', 'completed', null]);
+
+    // Archiving checks for workflows that use the table, which the migration role cannot read directly.
+    const archived = lastTable;
+    const revision = async () =>
+      (await db.platform.query(`SELECT applied_revision FROM ${s}.tf_table_catalog WHERE id=$1`, [archived])).rows[0]
+        .applied_revision;
+    const archive = async () =>
+      submit([{ kind: 'archive', tableId: archived, expectedRevision: await revision(), dependsOn: [] }]);
+    const workflow = randomUUID(),
+      workflowRevision = randomUUID();
+    const blockedArchive = await archive();
+    await db.platform.query('BEGIN');
+    await db.platform.query(`INSERT INTO ${s}.tf_workflows(id,revision) VALUES($1,$2)`, [workflow, workflowRevision]);
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_workflow_revisions(workflow_id,id,definition,author_membership_id) VALUES($1,$2,$3,$4)`,
+      [
+        workflow,
+        workflowRevision,
+        { version: 1, name: 'Uses AC-table', trigger: { kind: 'row', tableId: archived }, steps: [] },
+        ws.membershipId,
+      ],
+    );
+    await db.platform.query(`UPDATE ${s}.tf_workflows SET active_revision=$2, enabled=true WHERE id=$1`, [
+      workflow,
+      workflowRevision,
+    ]);
+    await db.platform.query('COMMIT');
+    assert.deepEqual(
+      [await finish(blockedArchive), ...(await outcome(blockedArchive))],
+      ['blocked', 'failed', 'workflow-active'],
+    );
+    await db.platform.query(`UPDATE ${s}.tf_workflows SET enabled=false WHERE id=$1`, [workflow]);
+    const allowedArchive = await archive();
+    assert.deepEqual(
+      [await finish(allowedArchive), ...(await outcome(allowedArchive))],
+      ['completed', 'completed', null],
+    );
+    assert.ok(
+      (await db.platform.query(`SELECT archived_at FROM ${s}.tf_table_catalog WHERE id=$1`, [archived])).rows[0]
+        .archived_at,
+    );
 
     // The requester must still be able to open the nested chat when the change runs.
     const deleted = await approve();

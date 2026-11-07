@@ -233,6 +233,19 @@ export async function archiveBlockers(tx: TableTransaction, tableId: string) {
     [id],
   );
   if (linked.rowCount) return 'table-linked';
+  const check = table(tx, 'tf_table_workflow_active');
+  // The storage worker cannot read workflows; workspaces before migration 44 lack the function that checks for it.
+  const checked = z
+    .object({ active: z.boolean().nullable() })
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT CASE WHEN to_regprocedure($2) IS NULL THEN NULL ELSE ${check}($1::uuid) END AS active`,
+          [id, `${check}(uuid)`],
+        )
+      ).rows[0],
+    ).active;
+  if (checked !== null) return checked ? 'workflow-active' : null;
   const workflows = await tx.client.query(
     `SELECT 1 FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND r.definition::text LIKE '%' || $1 || '%' LIMIT 1`,
     [id],
