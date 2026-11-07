@@ -37,7 +37,7 @@ import { requireDraftSources } from './draft-sources.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import { personalDefinitionSources, requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import { visiblePage } from './visible-page.ts';
-import { canManageSkill, definitionGrantPredicate, requireSkillGrant, requireTeamManager } from '@tulipfarm/access';
+import { canManageSkill, definitionGrantPredicate, requireSkillGrant, requireTeamAssignment } from '@tulipfarm/access';
 import { skillSharingSchema } from './workspace-skill-contracts.ts';
 import { requireAgentPermission } from './saved-policy.ts';
 import { requireStoredSkillPackage, skillPackageCompatibility } from './skill-objects.ts';
@@ -512,7 +512,7 @@ export function createWorkspaceSkills(storage: AgentStorage) {
             ).rows,
           );
         if (grant.permissions.some(permission => !previous.some(row => row.permission === permission)))
-          await requireTeamManager(tx, actor, grant.teamId);
+          await requireTeamAssignment(tx, actor, grant.teamId);
       }
       for (const grant of input.personGrants)
         if (

@@ -5,7 +5,7 @@ import {
   AccessDenied,
   canAccessAsset,
   lockAuthorization,
-  requireTeamManager,
+  requireTeamAssignment,
   requirePersistedIssueCall,
   resolveActor,
   type Actor,
@@ -90,7 +90,7 @@ export function createIntegrationService(options: Options) {
   }
   async function teamManager(tx: AuthorizationTransaction, actor: Actor, id: string) {
     if (actor.kind !== 'human') throw new AccessDenied();
-    await requireTeamManager(tx, actor, id);
+    await requireTeamAssignment(tx, actor, id);
   }
   async function permission(tx: AuthorizationTransaction, actor: Actor, id: string, action: 'read' | 'use' | 'manage') {
     if (!(await canAccessAsset(tx, actor, id, `integration.${action}`))) throw new AccessDenied();
