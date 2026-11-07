@@ -101,6 +101,7 @@ try {
     const runWrites = [];
     const activationWrites = [];
     let runStarted = false;
+    let detailHold = null;
     let responded = false;
     const currentRun = () => ({
       id: agentId,
@@ -278,14 +279,15 @@ try {
           teams,
           capabilities,
         };
-      else if (path.endsWith(`/tables/${tableId}`))
+      else if (path.endsWith(`/tables/${tableId}`)) {
+        await detailHold;
         json = {
           id: tableId,
           saved: null,
           applied: { revision: 'a'.repeat(40), definition: appliedTable, appliedAt: null },
           rowPermissions: { create: true, update: true, delete: true },
         };
-      else if (path.endsWith('/rows/page')) json = { records: [], total: '0', nextCursor: null };
+      } else if (path.endsWith('/rows/page')) json = { records: [], total: '0', nextCursor: null };
       else if (path.endsWith('/migrations')) json = [];
       else if (path.endsWith('/rows/query')) json = { records: [], total: '0', nextCursor: null };
       else if (path.endsWith('/agents/authoring-context'))
@@ -391,6 +393,31 @@ try {
         .first();
       await tablePrompt.waitFor();
       assert.match(await tablePrompt.innerText(), /^Help me create a new table\./);
+      await page.waitForURL(url => url.search === '');
+      await page.waitForFunction(() => window.getSelection()?.toString().startsWith('Help me create a new table.'));
+      await page.keyboard.type('Track vendor invoices');
+      assert.equal(
+        await tablePrompt.innerText(),
+        'Track vendor invoices',
+        'Typing replaces the suggested prompt instead of adding to it',
+      );
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Backspace');
+      let releaseDetail;
+      detailHold = new Promise(resolve => (releaseDetail = resolve));
+      await page.goto(`${origin}/acme?intent=edit-table&tableId=${tableId}`);
+      await tablePrompt.click();
+      await page.keyboard.type('Rename the status field');
+      releaseDetail();
+      detailHold = null;
+      await page.waitForURL(url => url.search === '');
+      assert.equal(
+        await tablePrompt.innerText(),
+        'Rename the status field',
+        'A table handoff that loads after typing never adds its prompt to the typed message',
+      );
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('Backspace');
       await page.goto(`${origin}/acme/tables/${tableId}`);
       await page.getByRole('heading', { name: 'Rows', exact: true }).waitFor();
       assert.equal(await page.getByRole('heading', { name: 'Saved fields', exact: true }).isVisible(), false);
