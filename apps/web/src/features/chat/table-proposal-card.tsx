@@ -261,6 +261,14 @@ function ValidTableProposalCard({
   useEffect(() => {
     if (dock && !dock.latest && pending) void refresh();
   }, [dock?.latest]);
+  const expiresAt = available?.manifest.expiresAt;
+  useEffect(() => {
+    if (!pending || !expiresAt) return;
+    const wait = Date.parse(expiresAt) - Date.now() + 1_000;
+    if (!(wait < 2 ** 31 - 1)) return;
+    const timer = setTimeout(() => void refresh(), Math.max(0, wait));
+    return () => clearTimeout(timer);
+  }, [pending, expiresAt]);
   const approvedHere = useRef(false);
   useEffect(() => {
     if (!approvedHere.current || loaded?.status !== 'completed' || !available) return;
@@ -298,6 +306,15 @@ function ValidTableProposalCard({
     [],
   );
   const locked = write.state.kind === 'sending' || write.state.kind === 'uncertain';
+  // A command whose response was lost or refused may still have been recorded, so read the proposal again.
+  const writeFailed = write.state.kind === 'uncertain' || write.state.kind === 'rejected';
+  useEffect(() => {
+    if (writeFailed) void refresh();
+  }, [writeFailed]);
+  const decided = !!loaded && loaded.status !== 'pending';
+  useEffect(() => {
+    if (writeFailed && decided) write.reset();
+  }, [writeFailed, decided]);
   const refreshing = read.state.kind === 'ready' && read.state.refreshing;
   const feedback = (view: ProposalView) => (
     <>
