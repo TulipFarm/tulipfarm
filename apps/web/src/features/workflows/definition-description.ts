@@ -1,4 +1,10 @@
-import type { Definition, GitHubTrigger, GitHubTriggerEvent, RecordFilter } from '@tulipfarm/workflows/contracts';
+import type {
+  Definition,
+  GitHubTrigger,
+  GitHubTriggerEvent,
+  RecordFilter,
+  SlackText,
+} from '@tulipfarm/workflows/contracts';
 
 export type WorkflowValue = Extract<Definition['steps'][number], { kind: 'transform' }>['fields'][string];
 
@@ -21,6 +27,16 @@ export function describeValue(value: WorkflowValue) {
     case 'step':
       return [`step ${value.step.replaceAll('_', ' ')} output`, value.path.join('.')].filter(Boolean).join(' ');
   }
+}
+export function describeSlackText(text: SlackText) {
+  return text.kind === 'template' ? JSON.stringify(text.template) : describeValue(text);
+}
+/** Where each placeholder of a Slack message template gets its value, or null for plain message text. */
+export function describeSlackFills(text: SlackText) {
+  if (text.kind !== 'template') return null;
+  return Object.entries(text.values)
+    .map(([key, value]) => `{{${key}}} from ${describeValue(value)}`)
+    .join('; ');
 }
 const orderedWords = {
   numeric: { lt: 'is less than', lte: 'is at most', gt: 'is more than', gte: 'is at least' },

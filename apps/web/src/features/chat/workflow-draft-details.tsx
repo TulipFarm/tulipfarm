@@ -4,6 +4,8 @@ import type { DraftView, WorkflowProposal } from '@tulipfarm/agents/draft-contra
 import {
   comparisonWords,
   describeGitHubTrigger,
+  describeSlackFills,
+  describeSlackText,
   describeValue,
   filterPhrase,
   recordScheduleDescription,
@@ -248,7 +250,10 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
           <>
             <ReviewValues
               values={[
-                { name: 'Message', value: describeValue(step.text) },
+                { name: 'Message', value: describeSlackText(step.text) },
+                ...(step.text.kind === 'template'
+                  ? [{ name: 'Fills in', value: describeSlackFills(step.text) ?? '' }]
+                  : []),
                 {
                   name: 'Posts as',
                   value: step.sender === 'app' ? 'TulipFarm app' : 'Slack account of the requester or sponsor',

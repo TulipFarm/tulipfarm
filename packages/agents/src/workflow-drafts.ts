@@ -168,7 +168,7 @@ export function workflowDefinitionProblem(
     return {
       error: 'slack-text-source-unsupported',
       instruction:
-        'Slack message text cannot come from an agent or HTTP step, including through a transform or code step, because such a message is refused when the run sends it. Use literal text, run input, or table step output, and tell the human what is not possible.',
+        'Slack message text cannot come from an agent or HTTP step, including through a transform or code step, because such a message is refused when the run sends it. Use literal text, run input, table step output, or a template of them, and tell the human what is not possible.',
     };
   try {
     nextWorkflowRun(trigger, now);

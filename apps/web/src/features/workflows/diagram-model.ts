@@ -10,6 +10,8 @@ import { workflowLayout } from './diagram-layout.ts';
 import {
   comparisonWords,
   describeGitHubTrigger,
+  describeSlackFills,
+  describeSlackText,
   describeValue,
   filterPhrase,
   githubInstallNote,
@@ -211,7 +213,8 @@ function stepFacts(step: Step, labels: WorkflowLabels): WorkflowStepDetails['fac
       return [{ label: 'Task', value: describeValue(step.prompt) }];
     case 'slack-message':
       return [
-        { label: 'Message', value: describeValue(step.text) },
+        { label: 'Message', value: describeSlackText(step.text) },
+        ...(step.text.kind === 'template' ? [{ label: 'Fills in', value: describeSlackFills(step.text) ?? '' }] : []),
         {
           label: 'Posts as',
           value: step.sender === 'app' ? 'TulipFarm app' : 'Slack account of the person running this workflow',

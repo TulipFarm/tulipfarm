@@ -236,3 +236,29 @@ test('delay and wait-until display readable times consistently in the inspector'
   );
   assert.equal(dynamic.nodes[1]?.summary, 'Date from an earlier input');
 });
+
+test('a Slack message template shows its text and where each placeholder comes from', () => {
+  const graph = workflowGraph(
+    definition([
+      {
+        id: 'notify',
+        kind: 'slack-message',
+        destinationId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11',
+        sender: 'app',
+        text: {
+          kind: 'template',
+          template: '⭐ {{who}} starred {{repo}}',
+          values: { who: { kind: 'input', path: ['sender'] }, repo: { kind: 'input', path: ['repository'] } },
+        },
+      },
+    ]),
+    labels,
+  );
+  assert.deepEqual(
+    graph.details.notify?.facts.filter(fact => ['Message', 'Fills in'].includes(fact.label)),
+    [
+      { label: 'Message', value: '"⭐ {{who}} starred {{repo}}"' },
+      { label: 'Fills in', value: '{{who}} from run input sender; {{repo}} from run input repository' },
+    ],
+  );
+});
