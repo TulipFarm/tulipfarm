@@ -49,6 +49,31 @@ export async function flaggedOffModels(tx: Pick<AgentTransaction, 'schema'>): Pr
   return new Set(flagged.filter(model => !on.has(model.featureFlag!)).map(model => model.id));
 }
 
+/**
+ * Models a new agent may prefer: selectable, served, unpaused and on for the workspace. Chat recommends one from these
+ * to fit the agent's job; `default` marks the model new agents use when none is chosen.
+ */
+export async function agentModelChoices(tx: AgentTransaction, catalog: ServedModelCatalog = loadModelCatalog()) {
+  const enabled = new Set((await modelAvailability(tx)).filter(row => row.enabled).map(row => row.familyId));
+  return catalog.models
+    .filter(model => model.selectable && !model.paused && enabled.has(model.id))
+    .map(model => {
+      const rate =
+        model.pricing === 'unmetered' ? undefined : model.rates.find(item => item.promptTokensAbove === null);
+      return {
+        id: model.id,
+        name: model.name,
+        vendor: model.vendor,
+        speed: model.speed,
+        quality: model.quality,
+        usdPerMillionTokens: rate
+          ? { input: rate.usdPerMillionTokens.input, output: rate.usdPerMillionTokens.output }
+          : null,
+        default: model.id === catalog.defaultModel.id,
+      };
+    });
+}
+
 export async function modelFamilyEnabled(tx: AgentTransaction, familyId: string) {
   return (await modelAvailability(tx)).some(row => row.familyId === familyId && row.enabled);
 }

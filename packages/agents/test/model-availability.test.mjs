@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { flaggedOffModels, modelAvailability, modelFamilyEnabled } from '../src/model-availability.ts';
+import {
+  agentModelChoices,
+  flaggedOffModels,
+  modelAvailability,
+  modelFamilyEnabled,
+} from '../src/model-availability.ts';
 
 const model = (id, overrides = {}) => ({
   id,
@@ -94,4 +99,23 @@ test('an image model whose workspace flag is on is available', async t => {
     FEATURE_FLAG_OPENAI_IMAGE_MODELS: 'true',
   });
   assert.equal(await modelFamilyEnabled(tx, 'gpt-image'), true);
+});
+
+test('agent model choices list enabled chat models with their price and mark the default', async t => {
+  withEnv(t, {
+    MODEL_CATALOG: catalog,
+    ANTHROPIC_API_KEY: 'test-placeholder',
+    OPENAI_API_KEY: 'test-placeholder',
+    FEATURE_FLAG_OPENAI_MODELS: 'false',
+    FEATURE_FLAG_ANTHROPIC_MODELS: 'true',
+  });
+  const choices = await agentModelChoices(tx);
+  assert.deepEqual(
+    choices.map(choice => [choice.id, choice.default]),
+    [
+      ['claude-sonnet', true],
+      ['claude-opus', false],
+    ],
+  );
+  assert.deepEqual(choices[0].usdPerMillionTokens, { input: 3, output: 15 });
 });

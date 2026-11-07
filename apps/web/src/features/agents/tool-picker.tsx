@@ -7,6 +7,7 @@ import { ChoiceGroup } from '@tulipfarm/sprout/field';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { MoreH } from 'reicon-react/icons/MoreH';
 import { useFlag } from '@/lib/feature-flags';
 import { toolLabels } from './labels';
 
@@ -101,6 +102,7 @@ export function AgentToolPicker({
   suggestions?: boolean;
 }) {
   const [search, setSearch] = useState('');
+  const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState(
     () =>
       new Set(
@@ -127,129 +129,174 @@ export function AgentToolPicker({
       .toLowerCase()
       .includes(search.trim().toLowerCase());
   const shown = toolApps.filter(app => [...app.read, ...app.change].some(tool => matches(tool, app.label)));
+  // An error is fixed by changing selections in the catalog, so it stays open while one shows.
+  const catalogOpen = adding || !!error;
   return (
     <div className="grid gap-4">
-      {suggestions && (
-        <section
-          aria-labelledby="agent-suggested-actions-title"
-          className="grid gap-3 rounded-lg border bg-muted/40 p-4"
-        >
-          <div className="grid gap-1">
-            <h3 id="agent-suggested-actions-title" className="text-sm font-medium text-foreground">
-              Suggested start: read tables
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              These let the agent find tables, read their fields, and find, read, and total rows. They cannot change
-              data, and the agent only reaches the tables a manager allows when activating it. Add more below only when
-              the job needs them.
-            </p>
-          </div>
-          <ul aria-label="Suggested actions" className="flex flex-wrap gap-1.5">
-            {suggestedTools.map(tool => (
-              <li key={tool}>
-                <Badge variant={value.includes(tool) ? 'secondary' : 'outline'}>{toolLabels[tool]}</Badge>
-              </li>
-            ))}
-          </ul>
-          <div>
-            <Button
-              variant="outline"
-              disabled={disabled || !missing.length}
-              onClick={() => {
-                onChange([...value, ...missing]);
-                toggle('tables', true);
-              }}
-            >
-              {missing.length
-                ? `Add ${missing.length} suggested read action${missing.length === 1 ? '' : 's'}`
-                : 'Suggested actions added'}
-            </Button>
-          </div>
-        </section>
-      )}
-      <SearchField
-        id="agent-action-search"
-        label="Find actions"
-        placeholder="Search apps and actions"
-        value={search}
-        maxLength={120}
-        onChange={setSearch}
-      />
-      {!shown.length && (
-        <div className="grid gap-2">
-          <p className="text-sm text-muted-foreground">No actions match this search. Your selections are kept.</p>
-          <div>
-            <Button variant="outline" onClick={() => setSearch('')}>
-              Clear search
-            </Button>
-          </div>
-        </div>
-      )}
-      <ul aria-label="Actions by app" className="grid divide-y rounded-lg border">
-        {shown.map(app => {
-          const tools = [...app.read, ...app.change];
-          const selected = tools.filter(tool => value.includes(tool));
-          const changing = selected.filter(tool => changingTools.has(tool)).length;
-          // Too many actions is fixed by unchecking some, so only groups holding selections show the error.
-          const flagged = error && selected.length ? error : undefined;
-          const expanded = open.has(app.key) || !!flagged || !!search.trim();
-          const reads = app.read.filter(tool => matches(tool, app.label));
-          const changes = app.change.filter(tool => matches(tool, app.label));
-          return (
-            <li key={app.key}>
-              <section aria-label={`${app.label} actions`}>
-                <Collapsible open={expanded} onOpenChange={next => toggle(app.key, next)}>
-                  <h3 id={`agent-tools-${app.key}`} className="grid">
-                    <CollapsibleTrigger render={<Button variant="ghost" size="lg" />}>
-                      <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                        <ToolAppIcon app={app.key} />
-                        {app.label}
-                      </span>
-                      <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                        <span>
-                          {selected.length
-                            ? `${selected.length} of ${tools.length} selected${changing ? `, ${changing} change data` : ''}`
-                            : `${tools.length} available`}
-                        </span>
-                        <ChevronDown aria-hidden="true" className={expanded ? 'size-4 rotate-180' : 'size-4'} />
-                      </span>
-                    </CollapsibleTrigger>
-                  </h3>
-                  <CollapsibleContent keepMounted>
-                    <div className="grid gap-4 px-3 pb-4 pt-1">
-                      {reads.length > 0 && (
-                        <ChoiceGroup
-                          type="checkbox"
-                          optional
-                          disabled={disabled}
-                          legend="Read and inspect"
-                          error={app.read.some(tool => value.includes(tool)) ? flagged : undefined}
-                          options={reads.map(option)}
-                          value={value.filter(tool => reads.includes(tool))}
-                          onValueChange={next => replace(reads, next)}
-                        />
-                      )}
-                      {changes.length > 0 && (
-                        <ChoiceGroup
-                          type="checkbox"
-                          optional
-                          disabled={disabled}
-                          legend="Create or change data"
-                          warning="Changes data"
-                          error={app.change.some(tool => value.includes(tool)) ? flagged : undefined}
-                          options={changes.map(option)}
-                          value={value.filter(tool => changes.includes(tool))}
-                          onValueChange={next => replace(changes, next)}
-                        />
-                      )}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              </section>
+      {value.length ? (
+        <ul aria-label="Chosen actions" className="grid divide-y rounded-lg border">
+          {value.map(tool => (
+            <li key={tool} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
+              <span className="flex min-w-0 flex-1 basis-48 items-start gap-2.5">
+                <ToolAppIcon app={appOf(tool)} />
+                <span className="grid min-w-0 gap-0.5">
+                  <span className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+                    {toolLabels[tool]}
+                    {changingTools.has(tool) && <Badge variant="warning">Changes data</Badge>}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{agentToolRuntimeDescription(tool)}</span>
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                aria-label={`Remove ${toolLabels[tool]}`}
+                onClick={() => onChange(value.filter(item => item !== tool))}
+              >
+                Remove
+              </Button>
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No actions chosen. Without actions, the agent can only reply with text. Add the actions its job needs.
+        </p>
+      )}
+      <Collapsible open={catalogOpen} onOpenChange={setAdding}>
+        <div>
+          <CollapsibleTrigger render={<Button variant="outline" disabled={!!error} />}>
+            <MoreH size={16} aria-hidden="true" />
+            {catalogOpen ? 'Hide more actions' : 'More actions'}
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent>
+          <div className="mt-4 grid gap-4">
+            {suggestions && (
+              <section
+                aria-labelledby="agent-suggested-actions-title"
+                className="grid gap-3 rounded-lg border bg-muted/40 p-4"
+              >
+                <div className="grid gap-1">
+                  <h3 id="agent-suggested-actions-title" className="text-sm font-medium text-foreground">
+                    Suggested start: read tables
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    These let the agent find tables, read their fields, and find, read, and total rows. They cannot
+                    change data, and the agent only reaches the tables a manager allows when activating it. Add more
+                    below only when the job needs them.
+                  </p>
+                </div>
+                <ul aria-label="Suggested actions" className="flex flex-wrap gap-1.5">
+                  {suggestedTools.map(tool => (
+                    <li key={tool}>
+                      <Badge variant={value.includes(tool) ? 'secondary' : 'outline'}>{toolLabels[tool]}</Badge>
+                    </li>
+                  ))}
+                </ul>
+                <div>
+                  <Button
+                    variant="outline"
+                    disabled={disabled || !missing.length}
+                    onClick={() => {
+                      onChange([...value, ...missing]);
+                      toggle('tables', true);
+                    }}
+                  >
+                    {missing.length
+                      ? `Add ${missing.length} suggested read action${missing.length === 1 ? '' : 's'}`
+                      : 'Suggested actions added'}
+                  </Button>
+                </div>
+              </section>
+            )}
+            <SearchField
+              id="agent-action-search"
+              label="Find actions"
+              placeholder="Search apps and actions"
+              value={search}
+              maxLength={120}
+              onChange={setSearch}
+            />
+            {!shown.length && (
+              <div className="grid gap-2">
+                <p className="text-sm text-muted-foreground">No actions match this search. Your selections are kept.</p>
+                <div>
+                  <Button variant="outline" onClick={() => setSearch('')}>
+                    Clear search
+                  </Button>
+                </div>
+              </div>
+            )}
+            <ul aria-label="Actions by app" className="grid divide-y rounded-lg border">
+              {shown.map(app => {
+                const tools = [...app.read, ...app.change];
+                const selected = tools.filter(tool => value.includes(tool));
+                const changing = selected.filter(tool => changingTools.has(tool)).length;
+                // Too many actions is fixed by unchecking some, so only groups holding selections show the error.
+                const flagged = error && selected.length ? error : undefined;
+                const expanded = open.has(app.key) || !!flagged || !!search.trim();
+                const reads = app.read.filter(tool => matches(tool, app.label));
+                const changes = app.change.filter(tool => matches(tool, app.label));
+                return (
+                  <li key={app.key}>
+                    <section aria-label={`${app.label} actions`}>
+                      <Collapsible open={expanded} onOpenChange={next => toggle(app.key, next)}>
+                        <h3 id={`agent-tools-${app.key}`} className="grid">
+                          <CollapsibleTrigger render={<Button variant="ghost" size="lg" />}>
+                            <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                              <ToolAppIcon app={app.key} />
+                              {app.label}
+                            </span>
+                            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                              <span>
+                                {selected.length
+                                  ? `${selected.length} of ${tools.length} selected${changing ? `, ${changing} change data` : ''}`
+                                  : `${tools.length} available`}
+                              </span>
+                              <ChevronDown aria-hidden="true" className={expanded ? 'size-4 rotate-180' : 'size-4'} />
+                            </span>
+                          </CollapsibleTrigger>
+                        </h3>
+                        <CollapsibleContent keepMounted>
+                          <div className="grid gap-4 px-3 pb-4 pt-1">
+                            {reads.length > 0 && (
+                              <ChoiceGroup
+                                type="checkbox"
+                                optional
+                                disabled={disabled}
+                                legend="Read and inspect"
+                                error={app.read.some(tool => value.includes(tool)) ? flagged : undefined}
+                                options={reads.map(option)}
+                                value={value.filter(tool => reads.includes(tool))}
+                                onValueChange={next => replace(reads, next)}
+                              />
+                            )}
+                            {changes.length > 0 && (
+                              <ChoiceGroup
+                                type="checkbox"
+                                optional
+                                disabled={disabled}
+                                legend="Create or change data"
+                                warning="Changes data"
+                                error={app.change.some(tool => value.includes(tool)) ? flagged : undefined}
+                                options={changes.map(option)}
+                                value={value.filter(tool => changes.includes(tool))}
+                                onValueChange={next => replace(changes, next)}
+                              />
+                            )}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </section>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }

@@ -5,6 +5,13 @@ import { unattendedTrigger, type PublishAgentSetup } from '@tulipfarm/agents/set
 import { Users } from 'reicon-react/icons/Users';
 import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField } from '@tulipfarm/sprout/field';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@tulipfarm/sprout/dropdown-menu';
+import { MoreH } from 'reicon-react/icons/MoreH';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { AgentSetupReview, setupTriggerLabel } from '@/features/agents/setup-review';
@@ -195,7 +202,7 @@ export function AgentSetupDraftCard({
         </fieldset>
       )}
       {(draft.status === 'pending' || receipt) && (
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             disabled={dirty || draft.status === 'preparing'}
@@ -206,6 +213,44 @@ export function AgentSetupDraftCard({
           >
             {draft.status === 'pending' ? 'Edit in builder' : 'Continue setup'}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={dirty || draft.status === 'preparing'}
+                  aria-label="More setup options"
+                />
+              }
+            >
+              <MoreH size={16} aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                render={
+                  <Link
+                    to="/$workspaceSlug/agents/new"
+                    params={{ workspaceSlug: workspace.slug }}
+                    search={{ ...handoff, step: 'access' }}
+                  />
+                }
+              >
+                Add actions
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                render={
+                  <Link
+                    to="/$workspaceSlug/agents/new"
+                    params={{ workspaceSlug: workspace.slug }}
+                    search={{ ...handoff, step: 'skills' }}
+                  />
+                }
+              >
+                Add skills
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
       <p className="text-xs text-muted-foreground">
