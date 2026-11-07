@@ -141,12 +141,13 @@ export function githubWorkflowPayload(event: GitHubTriggerEvent, body: Json) {
     action: text(body.action, 64),
     repository: text(object(body.repository).full_name, 140),
     sender: text(object(body.sender).login, 64),
+    senderUrl: text(object(body.sender).html_url),
   };
   switch (event) {
     case 'star':
-      return { ...base, starredAt: text(body.starred_at, 64) };
+      return { ...base, starredAt: text(body.starred_at, 64), stars: number(object(body.repository).stargazers_count) };
     case 'watch':
-      return base;
+      return { ...base, stars: number(object(body.repository).stargazers_count) };
     case 'issues': {
       const issue = object(body.issue);
       return {

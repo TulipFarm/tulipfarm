@@ -15,6 +15,7 @@ import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 import { workspaceRoute } from '@/router';
 import { ValueControl } from './table-step-controls';
+import { describeSlackFills } from './definition-description';
 
 type SlackStep = Extract<Definition['steps'][number], { kind: 'slack-message' }>;
 
@@ -107,15 +108,24 @@ export function SlackStepControls({
         </p>
       </>
       <Label>Message text</Label>
-      <ValueControl
-        id={`slack-text-${step.id}`}
-        value={step.text}
-        earlier={earlier}
-        onChange={text => onChange({ ...step, text })}
-      />
-      <p className="text-sm text-muted-foreground">
-        The value must be text, from 1 to 4,000 characters. Each run posts it to the channel straight away.
-      </p>
+      {step.text.kind === 'template' ? (
+        <>
+          <p className="whitespace-pre-wrap">{step.text.template}</p>
+          <p className="text-sm text-muted-foreground">Fills in {describeSlackFills(step.text)}. Change it in chat.</p>
+        </>
+      ) : (
+        <>
+          <ValueControl
+            id={`slack-text-${step.id}`}
+            value={step.text}
+            earlier={earlier}
+            onChange={text => onChange({ ...step, text })}
+          />
+          <p className="text-sm text-muted-foreground">
+            The value must be text, from 1 to 4,000 characters. Each run posts it to the channel straight away.
+          </p>
+        </>
+      )}
     </fieldset>
   );
 }

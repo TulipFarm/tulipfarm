@@ -37,7 +37,7 @@ The full shapes are in two references. Read them with `skills.read` and `resourc
 - `{"kind":"event","name"}`
 - `{"kind":"provider","integrationId","event":"created" or "updated","minutes":1 to 1440}`: first call `workflows.providers` and use a returned configured source. Only Sheets supports `updated`. Never invent integration IDs or ask for tokens in chat.
 - `{"kind":"record",...}` or `{"kind":"row",...}`: see `references/table-triggers.md`.
-- `{"kind":"github","repositoryId","event","actions"?}`: runs when GitHub sends that event for a connected repository. First call `workflows.providers` and copy a `repositoryId` from `githubRepositories`; never guess it. `event` and its `actions`: `star` (created, deleted), `watch` (started), `issues`, `pull_request`, `issue_comment`, `release`, `push` (no actions). Omit `actions` to run on every action. The run input has `event`, `action`, `repository` (owner/name) and `sender` (the GitHub login), plus `issue`, `pullRequest`, `comment` or `release` for those events. The TulipFarm GitHub App must be installed on the repository; the card says so.
+- `{"kind":"github","repositoryId","event","actions"?}`: runs when GitHub sends that event for a connected repository. First call `workflows.providers` and copy a `repositoryId` from `githubRepositories`; never guess it. `event` and its `actions`: `star` (created, deleted), `watch` (started), `issues`, `pull_request`, `issue_comment`, `release`, `push` (no actions). Omit `actions` to run on every action. The run input has `event`, `action`, `repository` (owner/name), `sender` (the GitHub login) and `senderUrl` (their profile), plus `stars` (the repository's star count after the event) for `star` and `watch`, and `issue`, `pullRequest`, `comment` or `release` for those events. The TulipFarm GitHub App must be installed on the repository; the card says so.
 
 Use the person's stated timezone. Ask when it is unknown; a wrong timezone silently runs the work at the wrong hour.
 
@@ -51,7 +51,7 @@ Get table and field IDs from `tables.definitions`.
 
 For connected-provider work, distinguish a native workflow step from an agent step and a generic HTTP request. Read the agent and HTTP sections of `references/steps.md` before declaring that no supported path exists. Inspect a suitable saved agent with `agents.list` and `agents.read`; do not assume its tools grant access or waive approvals. If the required action or setup is missing, name that gap rather than asking the person to enable a nonexistent workflow action.
 
-`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source, but that output can never become Slack message text.
+`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Before drafting one, write message options as `references/steps.md` describes under Message wording and ask which to use. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source, but that output can never become Slack message text.
 
 ## 4. Activation and review
 

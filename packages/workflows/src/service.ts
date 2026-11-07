@@ -48,6 +48,7 @@ import {
   payloadSchema,
   receiptSchema,
   withheldOutput,
+  resolveSlackText,
   resolveValue,
   runCondition,
   ConditionIncomparable,
@@ -318,7 +319,7 @@ export function createWorkflows(
       .string()
       .min(1)
       .max(4000)
-      .parse(resolveValue(next.step.text, payloadSchema.parse(run.input), outputs));
+      .parse(resolveSlackText(next.step.text, payloadSchema.parse(run.input), outputs));
     return {
       actor: {
         kind: 'human' as const,
@@ -358,7 +359,7 @@ export function createWorkflows(
     const step = definition.steps.find(step => step.id === stepId);
     if (step?.kind !== 'slack-message') throw new AccessDenied();
     const authored = (value: typeof step.text): boolean => {
-      if (value.kind === 'literal') return true;
+      if (value.kind === 'literal' || value.kind === 'template') return true;
       if (value.kind === 'input') return false;
       const source = definition.steps.find(step => step.id === value.step);
       if (!source) throw new AccessDenied();
@@ -2310,7 +2311,7 @@ export function createWorkflows(
           z.string()
             .min(1)
             .max(4000)
-            .parse(resolveValue(step.text, payloadSchema.parse(raw.input), outputs));
+            .parse(resolveSlackText(step.text, payloadSchema.parse(raw.input), outputs));
         } catch {
           return fail('slack-message-text-invalid');
         }

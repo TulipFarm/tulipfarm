@@ -87,6 +87,31 @@ export const valueSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('input'), path: z.array(z.string().max(100)).max(16) }),
   z.strictObject({ kind: z.literal('step'), step: name, path: z.array(z.string().max(100)).max(16) }),
 ]);
+const templatePlaceholder = /\{\{\s*([a-z][a-z0-9_]{0,47})\s*\}\}/g;
+/** Message text written when the workflow is drafted, with `{{name}}` placeholders filled from run values on each run. */
+export const slackTemplateSchema = z
+  .strictObject({
+    kind: z.literal('template'),
+    template: z.string().min(1).max(4000),
+    values: z
+      .record(name, valueSchema)
+      .refine(values => Object.keys(values).length >= 1 && Object.keys(values).length <= 16, 'Map 1 to 16 values'),
+  })
+  .superRefine((text, context) => {
+    const used = new Set(Array.from(text.template.matchAll(templatePlaceholder), match => match[1]!));
+    for (const key of used)
+      if (!Object.hasOwn(text.values, key))
+        context.addIssue({ code: 'custom', message: `Placeholder {{${key}}} has no value`, path: ['template'] });
+    for (const key of Object.keys(text.values))
+      if (!used.has(key))
+        context.addIssue({
+          code: 'custom',
+          message: `Value ${key} is not used in the template`,
+          path: ['values', key],
+        });
+  });
+export const slackTextSchema = z.union([valueSchema, slackTemplateSchema]);
+export type SlackText = z.infer<typeof slackTextSchema>;
 const requestHeaderNameSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
@@ -179,7 +204,7 @@ export const stepSchema = z.discriminatedUnion('kind', [
       id: name,
       kind: z.literal('slack-message'),
       destinationId: idSchema,
-      text: valueSchema,
+      text: slackTextSchema,
       sender: z.enum(['user', 'app']).optional(),
     })
     .refine(
@@ -215,7 +240,9 @@ export function stepValues(step: Step): z.infer<typeof valueSchema>[] {
   return stepValueEntries(step).map(entry => entry.value);
 }
 /** Whether Slack text resolves from agent or HTTP output, directly or through a transform or code step's input. Such text is never sent. */
-export function slackTextFromUnverifiedSource(steps: Step[], value: z.infer<typeof valueSchema>): boolean {
+export function slackTextFromUnverifiedSource(steps: Step[], value: SlackText): boolean {
+  if (value.kind === 'template')
+    return Object.values(value.values).some(field => slackTextFromUnverifiedSource(steps, field));
   if (value.kind !== 'step') return false;
   const source = steps.find(step => step.id === value.step);
   if (!source || source.kind === 'agent' || source.kind === 'http') return true;
@@ -773,6 +800,20 @@ export function resolveValue(
   }
   if (value === undefined) throw new Error('missing-value');
   return payloadSchema.parse(value);
+}
+/** The text a Slack step sends: its value, or its template with each placeholder replaced by a resolved text, number or boolean. */
+export function resolveSlackText(
+  text: SlackText,
+  input: z.infer<typeof payloadSchema>,
+  outputs: Map<string, z.infer<typeof payloadSchema>>,
+) {
+  if (text.kind !== 'template') return resolveValue(text, input, outputs);
+  return text.template.replace(templatePlaceholder, (_match, key: string) => {
+    const value = resolveValue(text.values[key]!, input, outputs);
+    if (value === null) return '';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+    throw new Error('template-value-not-text');
+  });
 }
 
 type Payload = z.infer<typeof payloadSchema>;

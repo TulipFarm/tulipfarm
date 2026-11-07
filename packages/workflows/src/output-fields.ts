@@ -31,7 +31,9 @@ export function stepValueEntries(step: Step): { value: Value; path: (string | nu
         ...(step.context ? [{ value: step.context, path: ['context'] }] : []),
       ];
     case 'slack-message':
-      return [{ value: step.text, path: ['text'] }];
+      return step.text.kind === 'template'
+        ? Object.entries(step.text.values).map(([key, value]) => ({ value, path: ['text', 'values', key] }))
+        : [{ value: step.text, path: ['text'] }];
     case 'http':
       return [...entries('headers', step.headers), ...(step.body ? [{ value: step.body, path: ['body'] }] : [])];
     case 'wait-until':

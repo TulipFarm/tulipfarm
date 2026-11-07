@@ -8,11 +8,14 @@ import {
   githubTriggerSchema,
   nextStep,
   recordFilterSchema,
+  resolveSlackText,
   runCondition,
   saveSchema,
+  slackTextFromUnverifiedSource,
   transform,
   waitUntilInstant,
 } from '../src/contracts.ts';
+import { githubWorkflowPayload } from '../src/github-triggers.ts';
 
 test('a GitHub trigger names only actions its event has, each once', () => {
   const trigger = actions =>
@@ -119,6 +122,71 @@ test('native Slack workflow messages require destination IDs and bounded text ma
     assert.equal(parse({ ...step, text: { kind: 'literal', value } }), false);
   assert.equal(parse({ ...step, text: { kind: 'literal', value: 'Ticket created' } }), true);
   assert.equal(parse({ ...step, text: { kind: 'step', step: 'later', path: [] } }), false);
+});
+
+test('a Slack message template fills each placeholder from run values and names every value it maps', () => {
+  const template = {
+    kind: 'template',
+    template: '⭐ [{{who}}]({{ url }}) starred **{{repo}}**, {{stars}} stars{{note}}',
+    values: {
+      who: { kind: 'input', path: ['sender'] },
+      url: { kind: 'input', path: ['senderUrl'] },
+      repo: { kind: 'input', path: ['repository'] },
+      stars: { kind: 'input', path: ['stars'] },
+      note: { kind: 'input', path: ['note'] },
+    },
+  };
+  const input = {
+    sender: 'octo$&cat',
+    senderUrl: 'https://github.com/octocat',
+    repository: 'acme/app',
+    stars: 12,
+    note: null,
+  };
+  assert.equal(
+    resolveSlackText(template, input, new Map()),
+    '⭐ [octo$&cat](https://github.com/octocat) starred **acme/app**, 12 stars',
+  );
+  assert.throws(
+    () => resolveSlackText(template, { ...input, stars: { count: 12 } }, new Map()),
+    /template-value-not-text/,
+  );
+  assert.throws(() => resolveSlackText(template, { sender: 'octocat' }, new Map()), /missing-value/);
+
+  const parse = text =>
+    definitionSchema.safeParse({
+      version: 1,
+      name: 'Stars',
+      trigger: { kind: 'manual' },
+      steps: [{ id: 'notify', kind: 'slack-message', destinationId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11', text }],
+    }).success;
+  assert.equal(parse(template), true);
+  assert.equal(parse({ ...template, template: `${template.template} {{missing}}` }), false);
+  assert.equal(parse({ ...template, values: { ...template.values, unused: { kind: 'literal', value: 'x' } } }), false);
+  assert.equal(
+    parse({ ...template, values: { who: { kind: 'step', step: 'later', path: [] } }, template: '{{who}}' }),
+    false,
+  );
+});
+
+test('a Slack message template is unverified when any of its values comes from agent output', () => {
+  const steps = [
+    {
+      id: 'ask',
+      kind: 'agent',
+      agentId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a12',
+      prompt: { kind: 'literal', value: 'x' },
+    },
+  ];
+  const template = values => ({ kind: 'template', template: 'Hi', values });
+  assert.equal(slackTextFromUnverifiedSource(steps, template({ who: { kind: 'input', path: ['sender'] } })), false);
+  assert.equal(
+    slackTextFromUnverifiedSource(
+      steps,
+      template({ who: { kind: 'input', path: ['sender'] }, answer: { kind: 'step', step: 'ask', path: ['result'] } }),
+    ),
+    true,
+  );
 });
 
 test('agent steps use a prior value as a bounded task prompt', () => {
@@ -525,4 +593,23 @@ test('conditions compare typed table values, dates and plain JSON, and walk past
     null,
   );
   assert.deepEqual(runCondition(steps[0], {}, new Map()), { matched: true, ran: ['inner'], skipped: ['other'] });
+});
+
+test('a GitHub star run carries the sender profile and the repository star count', () => {
+  const body = {
+    action: 'created',
+    starred_at: '2026-11-07T11:00:00Z',
+    repository: { id: 42, full_name: 'acme/app', stargazers_count: 12 },
+    sender: { login: 'octocat', html_url: 'https://github.com/octocat' },
+  };
+  assert.deepEqual(githubWorkflowPayload('star', body), {
+    event: 'star',
+    action: 'created',
+    repository: 'acme/app',
+    sender: 'octocat',
+    senderUrl: 'https://github.com/octocat',
+    starredAt: '2026-11-07T11:00:00Z',
+    stars: 12,
+  });
+  assert.equal(githubWorkflowPayload('watch', body).stars, 12);
 });

@@ -38,9 +38,36 @@ An HTTP response is not proof of provider success: the step records its status a
 
 ## Slack message
 
-`{"id","kind":"slack-message","destinationId","text":value,"sender"?:"app" or "user"}`
+`{"id","kind":"slack-message","destinationId","text":value or template,"sender"?:"app" or "user"}`
 
 `{"id":"notify","kind":"slack-message","destinationId":"existing destination UUID","text":{"kind":"input","path":["values","field UUID","value"]}}`
+
+A template is `{"kind":"template","template":text,"values":{name:value}}`. Each run
+replaces every `{{name}}` in `template` with its value, which must resolve to text,
+a number, a boolean or null (shown as nothing). Map 1 to 16 values, each used at
+least once, with names matching `^[a-z][a-z0-9_]{0,47}$`. The filled text must be 1 to
+4,000 characters. Values follow the same source rules as any message text.
+
+### Message wording
+
+A notification is read by people in a busy channel, so draft it rather than
+restating the trigger. Unless the person gave the exact wording, write two or three
+options in different styles, such as a short upbeat one with an emoji, a concise
+plain one, and a fuller one with links and details. Use the run's data through a
+template: who did it, what changed, a link to it, and a useful count or state.
+Write each option fresh for this workflow and its audience; do not reuse fixed
+example text.
+
+Show each option in chat as the channel would read it, filled with realistic
+sample values and labelled as a sample, and ask which to use in the same message
+as the sender question. Draft only the chosen option. Keep the message to one to
+three lines.
+
+The text is rendered as standard Markdown: `**bold**`, `_italic_`, `[label](url)`
+and line breaks. Write emoji as Unicode characters, at most two, and keep them
+relevant to the event. Never add `@channel`, `@here` or mentions the person did not
+ask for. A value from outside data, such as an issue title, is posted as written;
+keep it out of link URLs unless it is a URL field such as `url` or `senderUrl`.
 
 Resolve the destination with `slack.resolve`; never guess or use a raw
 Slack channel ID as `destinationId`. Map a text value (1–4,000 characters), not an
@@ -62,8 +89,8 @@ An unknown delivery is terminal: inspect Slack before making a new request.
 This step sends one message; it does not grant recurring send permission.
 Message text cannot come from agent or HTTP output, including through a
 transform or a code step's input: the send is refused when the run reaches it,
-and `workflows.draft` rejects such a draft. Use literal text, run input, or
-table step output. A report built from fetched or agent-written data cannot be
+and `workflows.draft` rejects such a draft. Use literal text, run input,
+table step output, or a template of them. A report built from fetched or agent-written data cannot be
 posted by a workflow Slack step; tell the person so instead of drafting one.
 
 ## Table steps
