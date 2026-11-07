@@ -183,6 +183,15 @@ export function createGovernanceService(dependencies: {
     if (!result.rowCount) throw new AccessDenied();
   }
 
+  // Grants may also go to the internal team of workspace admins, which is never a table owner or destination.
+  async function grantTeamExists(transaction: Transaction, id: string) {
+    const result = await transaction.client.query(
+      `SELECT id FROM ${table(transaction, 'tf_teams')} t WHERE t.id = $1 AND (${notInternal('t')} OR t.name = '_admin')`,
+      [z.uuid().parse(id)],
+    );
+    if (!result.rowCount) throw new AccessDenied();
+  }
+
   async function activeMember(transaction: Transaction, id: string) {
     const result = await transaction.client.query(
       `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`,
@@ -408,12 +417,12 @@ export function createGovernanceService(dependencies: {
             : [],
         );
       const tableTeams = z
-        .array(z.object({ id: z.uuid() }))
+        .array(z.object({ id: z.uuid(), name: z.string() }))
         .parse(
           admin
             ? (
                 await transaction.client.query(
-                  `SELECT t.id FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} ORDER BY t.id`,
+                  `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} OR t.name = '_admin' ORDER BY t.id`,
                 )
               ).rows
             : [],
@@ -434,7 +443,8 @@ export function createGovernanceService(dependencies: {
             })
           : [],
         directory: (await directory(transaction)).members,
-        tableTeamIds: tableTeams.map(team => team.id),
+        tableTeamIds: tableTeams.filter(team => team.name !== '_admin').map(team => team.id),
+        adminTeamId: tableTeams.find(team => team.name === '_admin')?.id ?? null,
         teams: teams.map(team => ({
           id: team.id,
           name: team.name,
@@ -741,7 +751,7 @@ export function createGovernanceService(dependencies: {
   async function setGrant(workspaceId: string, userId: string, input: unknown) {
     const { teamId, target, granted } = grantInputSchema.parse(input);
     return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
-      await teamExists(transaction, teamId);
+      await grantTeamExists(transaction, teamId);
       if (target.kind === 'collection') await teamExists(transaction, target.id);
       else if (
         !(

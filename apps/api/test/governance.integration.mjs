@@ -762,6 +762,38 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     assert.equal(await permission(member, 'table.row.read'), false);
     const grant = (teamId, permission, granted = true, id = tableId, kind = 'table') =>
       ok(admin, 'PUT', '/grants', { teamId, target: { kind, id, permission }, granted });
+    const adminSnapshot = await ok(admin, 'GET');
+    assert.equal(adminSnapshot.adminTeamId, adminTeamId);
+    assert.equal(adminSnapshot.tableTeamIds.includes(adminTeamId), false);
+    assert.equal((await ok(member, 'GET')).adminTeamId, null);
+    await grant(adminTeamId, 'table.row.read');
+    assert.deepEqual(
+      (await ok(admin, 'GET')).grants.filter(entry => entry.teamId === adminTeamId),
+      [{ teamId: adminTeamId, target: { kind: 'table', id: tableId, permission: 'table.row.read' } }],
+    );
+    await grant(adminTeamId, 'table.row.read', false);
+    assert.equal((await ok(admin, 'GET')).grants.filter(entry => entry.teamId === adminTeamId).length, 0);
+    assert.equal(
+      (
+        await http(member, 'PUT', '/grants', {
+          teamId: adminTeamId,
+          target: { kind: 'table', id: tableId, permission: 'table.row.read' },
+          granted: true,
+        })
+      ).statusCode,
+      404,
+    );
+    assert.equal(
+      (
+        await http(admin, 'PUT', '/grants', {
+          teamId,
+          target: { kind: 'collection', id: adminTeamId, permission: 'table.create' },
+          granted: true,
+        })
+      ).statusCode,
+      404,
+    );
+    assert.equal((await http(admin, 'PUT', `/tables/${tableId}/owner`, { teamId: adminTeamId })).statusCode, 404);
     const personGrant = (permission, granted = true, id = tableId, kind = 'table') =>
       ok(admin, 'PUT', '/person-grants', { membershipId: memberId, target: { kind, id, permission }, granted });
     const directRead = {

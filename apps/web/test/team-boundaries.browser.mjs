@@ -34,6 +34,7 @@ try {
   const actorId = ownMembership.membershipId,
     otherId = randomUUID(),
     hiddenTeam = randomUUID(),
+    adminTeam = randomUUID(),
     tableId = randomUUID();
   const directory = [
     { id: actorId, name: 'Ada', email: 'ada@example.com', image: null },
@@ -87,6 +88,7 @@ try {
                 canLeave: !t.managerIds.includes(actorId) || t.managerIds.length > 1,
               })),
             tableTeamIds: admin ? [hiddenTeam, ...teams.map(t => t.id)] : [],
+            adminTeamId: admin ? adminTeam : null,
             tables: admin ? [{ id: tableId, name: 'Invoices', owningTeamId: hiddenTeam }] : [],
             grants: admin ? grants : [],
           };
@@ -202,9 +204,18 @@ try {
   assert.equal(await page.getByText('Private operations', { exact: true }).count(), 0);
   assert.equal(await page.getByText('Renamed operations', { exact: true }).count(), 0);
   assert.equal(await page.getByLabel('Owning team', { exact: true }).innerText(), `Team ${hiddenTeam}`);
+  await page.getByLabel('Team receiving access').click();
+  await page.getByRole('option', { name: 'Workspace admins', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
+  for (let n = 0; grants.length < 2; n++) {
+    assert.ok(n < 100);
+    await setTimeout(50);
+  }
+  assert.equal(grants[1].teamId, adminTeam);
+  assert.equal(await page.getByText('Create tables owned by Workspace admins').count(), 0);
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Verified ordinary creator and manager controls, handoff, read-only team membership, directory, opaque table grants, loading/error recovery and mobile layout.\n',
+    'Verified ordinary creator and manager controls, handoff, read-only team membership, directory, opaque and workspace-admin table grants, loading/error recovery and mobile layout.\n',
   );
 } finally {
   await browser?.close();

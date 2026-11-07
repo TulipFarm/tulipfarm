@@ -32,6 +32,7 @@ import { InvitationList } from './invitation-list';
 import { InviteMembersDialog } from './invite-members-dialog';
 import { useInvitationAdministration } from './use-invitation-administration';
 import { PersonGrants } from '@/features/tables/person-grants';
+import { workspaceAdminsLabel } from '@/features/governance/team-labels';
 
 type Section = 'members' | 'teams' | 'grants';
 type LoadState =
@@ -396,7 +397,10 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const [teamId, setTeamId] = useState('');
   const [feedback, setFeedback] = useState('');
-  const selected = data.teams.find(team => team.id === teamId);
+  const recipients = data.adminTeamId
+    ? [{ id: data.adminTeamId, name: workspaceAdminsLabel }, ...data.teams]
+    : data.teams;
+  const selected = recipients.find(team => team.id === teamId);
   const granted = (target: GrantInput['target']) =>
     data.grants.some(
       grant =>
@@ -431,7 +435,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
           {feedback}
         </p>
       )}
-      {!data.teams.length ? (
+      {!recipients.length ? (
         <StatePanel
           kind="empty"
           heading="h3"
@@ -454,7 +458,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Select a team</SelectItem>
-              {data.teams.map(team => (
+              {recipients.map(team => (
                 <SelectItem key={team.id} value={team.id}>
                   {team.name}
                 </SelectItem>
@@ -465,26 +469,28 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
       )}
       {selected && (
         <>
-          <fieldset disabled={busy} className="flex flex-col gap-3">
-            <legend className="mb-3 text-base font-medium">Create tables in a destination team</legend>
-            {data.teams.map(team => {
-              const target = {
-                kind: 'collection',
-                id: team.id,
-                permission: 'table.create',
-              } satisfies GrantInput['target'];
-              return (
-                <div key={team.id} className="flex items-center gap-3">
-                  <Checkbox
-                    id={`collection-${team.id}`}
-                    checked={granted(target)}
-                    onCheckedChange={value => toggle(target, value)}
-                  />
-                  <Label htmlFor={`collection-${team.id}`}>Create tables owned by {team.name}</Label>
-                </div>
-              );
-            })}
-          </fieldset>
+          {data.teams.length > 0 && (
+            <fieldset disabled={busy} className="flex flex-col gap-3">
+              <legend className="mb-3 text-base font-medium">Create tables in a destination team</legend>
+              {data.teams.map(team => {
+                const target = {
+                  kind: 'collection',
+                  id: team.id,
+                  permission: 'table.create',
+                } satisfies GrantInput['target'];
+                return (
+                  <div key={team.id} className="flex items-center gap-3">
+                    <Checkbox
+                      id={`collection-${team.id}`}
+                      checked={granted(target)}
+                      onCheckedChange={value => toggle(target, value)}
+                    />
+                    <Label htmlFor={`collection-${team.id}`}>Create tables owned by {team.name}</Label>
+                  </div>
+                );
+              })}
+            </fieldset>
+          )}
           {!data.tables.length && (
             <StatePanel
               kind="empty"
@@ -495,7 +501,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
             />
           )}
           {data.tables.map(resource => {
-            const owner = data.teams.find(team => team.id === resource.owningTeamId);
+            const owner = recipients.find(team => team.id === resource.owningTeamId);
             return (
               <article key={resource.id} className="flex flex-col gap-4 border-t border-border pt-4">
                 <h3 className="text-base font-medium">{resource.name}</h3>
@@ -538,7 +544,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
                   <Label htmlFor={`owner-${resource.id}`}>Owning team</Label>
                   <Select
                     value={resource.owningTeamId}
-                    disabled={busy}
+                    disabled={busy || !data.teams.length}
                     onValueChange={value => {
                       if (value) void change(`/tables/${resource.id}/owner`, 'PUT', { teamId: value });
                     }}
