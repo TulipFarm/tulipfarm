@@ -19,6 +19,7 @@ import {
 } from '@tulipfarm/tables/workspace-members';
 import { requireTableImportReference, requireTableSources } from '../../../agents/src/table-sources.ts';
 import { createTableWithRows, text, textField } from '../fixture.mjs';
+import { storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 
 async function setup(t) {
   const db = await fixture();
@@ -412,5 +413,16 @@ test(
     assert.equal(await f.finish(approved), 'completed');
     assert.deepEqual((await read()).values[reviewer], link);
     assert.equal((await f.status(approved)).status, 'completed');
+    assert.equal(
+      await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
+        storedToolStatus(tx, {
+          id: randomUUID(),
+          tool: 'tables.propose',
+          status: 'completed',
+          output: { result: approved, sources: [] },
+        }),
+      ),
+      'completed',
+    );
   },
 );

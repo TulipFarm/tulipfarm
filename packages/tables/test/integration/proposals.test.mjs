@@ -17,6 +17,7 @@ import { canonicalJson } from '../../src/canonical.ts';
 import { createTableService } from '../../../tables/dist/service.js';
 import { createTableWithRows, tableDefinition, textField, textValues } from '../fixture.mjs';
 import { AccessDenied } from '@tulipfarm/access';
+import { storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 
 test(
   'table proposals persist exact effects and enforce requester decisions on restricted PostgreSQL roles',
@@ -106,6 +107,10 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     const decide = (proposal, decision = 'approve', commandId = randomUUID()) =>
       decisions.decide(workspace.id, actor.userId, chat, proposal.id, { digest: proposal.digest, decision, commandId });
     const status = proposal => proposals.status(workspace.id, actor.userId, chat, proposal.id);
+    const activity = output =>
+      runtime.transaction(workspace.id, commonCompatibility, tx =>
+        storedToolStatus(tx, { id: randomUUID(), tool: 'tables.propose', status: 'completed', output }),
+      );
     try {
       await setup.platform.query(`INSERT INTO ${s}.tf_teams(id,name) VALUES($1,'Support')`, [team]);
       await setup.platform.query(
@@ -524,8 +529,11 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         };
         const first = await create('Vendors');
         assert.equal((await status(first)).status, 'pending');
+        assert.equal(await activity({ result: first, sources: [] }), 'waiting');
         const second = await create(' vendors ');
         assert.equal((await status(first)).status, 'superseded');
+        assert.equal(await activity({ result: first, sources: [] }), 'cancelled');
+        assert.equal(await activity({ error: 'invalid-arguments', issues: [] }), 'cancelled');
         assert.equal((await status(second)).status, 'pending');
         await assert.rejects(decide(first), error => error.code === 'proposal-superseded');
 
@@ -535,6 +543,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         await decide(renamed, 'reject');
         assert.equal((await status(named)).status, 'pending');
         await decide(second, 'reject');
+        assert.equal(await activity(second), 'blocked');
         await decide(named, 'reject');
       });
       await t.test('expired approval and removed membership never execute', async () => {
@@ -545,6 +554,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
           [proposal.id],
         );
         assert.equal((await status(proposal)).status, 'expired');
+        assert.equal(await activity(proposal), 'cancelled');
         await setup.platform.query(`UPDATE ${s}.tf_memberships SET removed_at=now() WHERE id=$1`, [actor.membershipId]);
         const replacement = randomUUID();
         await setup.platform.query(`INSERT INTO ${s}.tf_memberships(id,user_id,role) VALUES($1,$2,'admin')`, [
