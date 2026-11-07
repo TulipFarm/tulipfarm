@@ -151,6 +151,7 @@ test(
           limits,
         };
         const configureWrites = [];
+        const dataScopeWrites = [];
         const policyWrites = [];
         let failPolicy = false;
         const destinationWrites = [];
@@ -225,6 +226,11 @@ test(
               enabled: body.enabled,
             });
             json = { saved: true };
+          } else if (path.endsWith(`/agents/${agentId}/data-scope`)) {
+            const body = request.postDataJSON();
+            dataScopeWrites.push(body);
+            Object.assign(policy, { version: body.version + 1, limits: body.scope });
+            json = { saved: true, reactivated: true };
           } else if (path.endsWith(`/agents/${agentId}/activations`)) {
             activationWrites.push(request.postDataJSON());
             return fulfill({ status: 500, json: { error: 'unexpected write' } });
@@ -321,7 +327,7 @@ test(
         assert.equal(await revokeDestination.getAttribute('aria-disabled'), 'true');
         assert.deepEqual(await describedTexts(revokeDestination), ['Choose a destination team below first.']);
         assert.equal(
-          await slack.getByRole('button', { name: 'Add Escalations to execution limits', exact: true }).isDisabled(),
+          await slack.getByRole('button', { name: 'Add Escalations to data access', exact: true }).isDisabled(),
           false,
         );
         await slack.getByRole('button', { name: 'Choose a team', exact: true }).click();
@@ -344,13 +350,18 @@ test(
         await slack.getByText('Unsaved changes', { exact: true }).waitFor();
         assert.deepEqual(destinationWrites, []);
 
-        await choose(execution, 'Add table read limit', 'Customers · Engineering · 55555555');
-        const tablePermissions = execution.getByRole('group', { name: 'Permissions for this table', exact: true });
-        const readRecords = tablePermissions.getByRole('checkbox', { name: 'Read rows', exact: true });
-        assert.equal(await readRecords.getAttribute('aria-checked'), 'true');
-        assert.equal(await readRecords.isDisabled(), true);
-        await tablePermissions.getByRole('checkbox', { name: 'Update rows', exact: true }).click();
-        await execution.getByText('Unsaved changes', { exact: true }).waitFor();
+        const dataScope = page.getByRole('region', { name: 'What data it can use', exact: true });
+        await choose(dataScope, 'Business table', 'Customers · Engineering · 55555555');
+        const tableAccess = dataScope.getByRole('group', { name: 'Table access', exact: true });
+        assert.equal(
+          await tableAccess.getByRole('checkbox', { name: 'Read rows', exact: true }).getAttribute('aria-checked'),
+          'true',
+        );
+        await tableAccess.getByRole('checkbox', { name: 'Update rows', exact: true }).click();
+        await dataScope.getByRole('button', { name: 'Add table access', exact: true }).click();
+        await dataScope.getByText('Unsaved changes', { exact: true }).waitFor();
+        assert.equal(await execution.getByText('Unsaved changes', { exact: true }).count(), 0);
+        assert.deepEqual(dataScopeWrites, []);
 
         assert.equal(
           await page
@@ -381,13 +392,17 @@ test(
         await enrollment.getByRole('checkbox', { name: 'Support', exact: true }).click();
         await enrollment.getByText('Unsaved changes', { exact: true }).waitFor();
         await openTab('Execution');
+        await dataScope.getByRole('button', { name: 'Save data access', exact: true }).click();
+        await dataScope.getByText('Administration saved.', { exact: true }).waitFor();
+        assert.deepEqual(dataScopeWrites, [{ version: 1, scope: widened }]);
+        assert.equal(await dataScope.getByText('Unsaved changes', { exact: true }).count(), 0);
         await execution.getByRole('button', { name: 'Save execution settings', exact: true }).click();
         await execution.getByText('Administration saved.', { exact: true }).waitFor();
         assert.equal(await page.getByText('Administration saved.', { exact: true }).count(), 1);
         // Cloud administration.ts:23,33 (3e124b0f #1004) sends task limits (schema default maximumTaskLimits) and the Slack sender.
         assert.deepEqual(configureWrites, [
           {
-            version: 1,
+            version: 2,
             teamIds: [engineering],
             limits: widened,
             taskLimits: maximumTaskLimits,
@@ -395,10 +410,7 @@ test(
             slackSender: 'user',
           },
         ]);
-        assert.equal(
-          await execution.getByRole('group', { name: 'Permissions for this table', exact: true }).count(),
-          0,
-        );
+        assert.equal(await dataScope.getByText('Unsaved changes', { exact: true }).count(), 0);
         await openTab('Access');
         await enrollment.getByText('Unsaved changes', { exact: true }).waitFor();
         assert.equal(
@@ -422,7 +434,7 @@ test(
         const review = page.getByRole('region', { name: 'Review agent administration', exact: true });
         await review.waitFor();
         assert.deepEqual(configureWrites.at(-1), {
-          version: 2,
+          version: 3,
           teamIds: [engineering, support],
           limits: widened,
           taskLimits: maximumTaskLimits,
@@ -459,7 +471,7 @@ test(
         await saveEnrollment.click();
         await enrollment.getByText('Administration saved.', { exact: true }).waitFor();
         assert.deepEqual(configureWrites.at(-1), {
-          version: 2,
+          version: 3,
           teamIds: [engineering, support],
           limits: widened,
           taskLimits: maximumTaskLimits,
@@ -474,7 +486,7 @@ test(
         await review.waitFor();
         assert.deepEqual(policyWrites, [
           {
-            version: 3,
+            version: 4,
             owningTeamId: engineering,
             grants: [
               { teamId: engineering, permissions: ['edit', 'invoke', 'read'] },

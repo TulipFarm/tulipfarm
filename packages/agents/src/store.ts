@@ -262,7 +262,8 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         [randomUUID(), actor.membershipId, value.agentId],
       );
       // Older activations stay live for workflows that pin them; the limits above still narrow them.
-      if (active && canonicalJson(active.scope) !== canonicalJson(value.scope)) {
+      const reactivated = !!active && canonicalJson(active.scope) !== canonicalJson(value.scope);
+      if (active && reactivated) {
         await resolveDefinitionProcedures(transaction, value.agentId, active.definition_revision);
         await transaction.client.query(
           `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope) VALUES ($1, $2, $3, $4)`,
@@ -274,7 +275,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         );
       }
       await recordDefinitionRecommendationChanges(transaction, 'agent', value.agentId, before);
-      return { saved: true as const, reactivated: !!active };
+      return { saved: true as const, reactivated };
     });
   }
 
