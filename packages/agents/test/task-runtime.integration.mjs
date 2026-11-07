@@ -586,6 +586,39 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(called, 1);
     assert.equal((await service.read(w.id, user, next.id)).status, 'completed');
   });
+  await t.test('a reply that only announces its next step continues once, then completes', async () => {
+    const next = await start();
+    const prompts = [];
+    const announcing = createTaskRuntime(runtime, {
+      ...model,
+      infer: async (_resolution, input) => {
+        prompts.push(JSON.parse(input.prompt));
+        return success({
+          kind: 'answer',
+          text: `Contacts has 1 row.\n\nI will now propose adding the row ${prompts.length}…`,
+        });
+      },
+    });
+    await announcing.process(w.id, next.id);
+    assert.equal(prompts.length, 1);
+    assert.equal('followThrough' in prompts[0], false);
+    assert.equal((await service.read(w.id, user, next.id)).status, 'pending');
+    assert.equal((await service.history(w.id, user, next.id)).messages.at(-1).text.endsWith('row 1…'), true);
+    await announcing.process(w.id, next.id);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1].followThrough, /tool calls/);
+    assert.equal((await service.read(w.id, user, next.id)).status, 'completed', 'a second announcement ends the task');
+    await announcing.process(w.id, next.id);
+    assert.equal(prompts.length, 2);
+
+    const paused = await start();
+    await announcing.process(w.id, paused.id);
+    assert.equal((await service.read(w.id, user, paused.id)).status, 'pending');
+    await service.pause(w.id, user, paused.id, { expectedGeneration: 0 });
+    await announcing.process(w.id, paused.id);
+    assert.equal(prompts.length, 3, 'an owner pause stops the extra step');
+    assert.equal((await service.read(w.id, user, paused.id)).status, 'paused');
+  });
   await t.test('credit reservation pauses before dispatch and cannot reset prior held cost', async () => {
     const next = await start({ toolCalls: 10, credits: 1, activeMilliseconds: 600000 });
     let called = 0;
