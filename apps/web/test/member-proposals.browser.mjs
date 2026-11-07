@@ -207,3 +207,138 @@ test('member proposal failures explain rejected resumes and retain completed wor
     await server.close();
   }
 });
+
+test('a pending proposal refreshes to expired when its review window ends', { timeout: 120000 }, async () => {
+  const server = await startWorkspaceMembersDemo({ port: 5796 });
+  const { origin } = server,
+    workspaceId = id(1),
+    chatId = id(70),
+    proposalId = id(71),
+    turnId = id(72),
+    tableId = id(11);
+  const root = `/v1/workspaces/${workspaceId}`,
+    base = `${root}/conversations/${chatId}/table-changes/${proposalId}`;
+  const date = '2026-10-14T00:00:00.000Z';
+  let browser, page;
+  try {
+    browser = await chromium.launch();
+    page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(15000);
+    const errors = [];
+    let reads = 0;
+    page.on('pageerror', error => errors.push(String(error)));
+    const { applied } = await (await fetch(`${origin}${root}/tables/${tableId}`)).json();
+    const effect = {
+      kind: 'update',
+      recordId: id(40),
+      before: { [id(14)]: null },
+      after: { [id(14)]: { kind: 'relationship', tableId: id(10), recordIds: [id(24)] } },
+    };
+    // The review window starts when the card first reads the proposal, so a slow page load can't use it up.
+    let expiresAt;
+    const view = () => {
+      expiresAt ??= new Date(Date.now() + 15_000).toISOString();
+      const expired = Date.now() >= Date.parse(expiresAt);
+      return proposalViewSchema.parse({
+        content: 'available',
+        id: proposalId,
+        digest: 'd'.repeat(64),
+        status: expired ? 'expired' : 'pending',
+        decision: null,
+        cancelled: false,
+        expired,
+        freshness: 'current',
+        plans: [{ tableId, receipt: null, importProgress: null }],
+        manifest: {
+          version: 1,
+          id: proposalId,
+          workspaceId,
+          requester: { kind: 'human', userId: id(3), membershipId: id(4) },
+          conversationId: chatId,
+          turnId,
+          sources: [],
+          expiresAt,
+          plans: [
+            {
+              input: {
+                kind: 'records',
+                tableId,
+                dependsOn: [],
+                expectedRevision: applied.revision,
+                changes: [{ kind: 'update', recordId: effect.recordId, values: effect.after }],
+              },
+              before: applied.definition,
+              after: applied.definition,
+              effectCount: 1,
+              effectsDigest: 'e'.repeat(64),
+              freshnessDigest: 'f'.repeat(64),
+              audience: null,
+              importSources: [],
+            },
+          ],
+        },
+      });
+    };
+    await page.route('**/*', async route => {
+      const url = new URL(route.request().url()),
+        path = url.pathname;
+      if (url.origin !== origin) return route.abort();
+      if (path.endsWith('/model-catalog')) return route.fulfill({ json: chatCatalog });
+      if (path === `${root}/github/chats/${chatId}/batches`) return route.fulfill({ json: { batches: [] } });
+      if (path.startsWith(base)) {
+        if (path.endsWith('/outcome')) return route.fulfill({ json: { kind: 'proposal' } });
+        if (path.endsWith('/effects'))
+          return route.fulfill({
+            json: { digest: 'd'.repeat(64), total: 1, items: [{ ordinal: 0, effect }], nextCursor: null },
+          });
+        reads++;
+        return route.fulfill({ json: view() });
+      }
+      if (path === `${root}/conversations/${chatId}/messages`)
+        return route.fulfill({
+          json: {
+            messages: [
+              {
+                id: id(73),
+                sequence: 1,
+                author: 'assistant',
+                createdAt: date,
+                parts: [{ kind: 'text', text: 'Review the member changes below.' }],
+                turn: { id: turnId, status: 'completed', generation: 0 },
+                tools: [{ id: proposalId, tool: 'tables.propose', status: 'completed' }],
+              },
+            ],
+            nextBefore: null,
+          },
+        });
+      if (path === `${root}/conversations/${chatId}`)
+        return route.fulfill({
+          json: {
+            id: chatId,
+            title: 'Expiring review',
+            titleRevision: 1,
+            archived: false,
+            activityAt: date,
+            createdAt: date,
+          },
+        });
+      return route.continue();
+    });
+    await page.goto(`${origin}/members-table-mock/chat/${chatId}`);
+    const card = page.getByRole('region', { name: 'Table change proposal' });
+    if (!(await card.isVisible())) await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+    await card.getByText('Ready for your approval', { exact: true }).waitFor();
+    const before = reads;
+    await card.getByText(/This review expired/).waitFor({ timeout: 30_000 });
+    assert.ok(reads > before, 'the card read the proposal again after it expired');
+    assert.equal(await card.getByText('Ready for your approval', { exact: true }).count(), 0);
+    await page.screenshot({ path: '/tmp/tf-accept/proposal-expired-refresh.png' });
+    assert.deepEqual(errors, []);
+  } catch (error) {
+    await page?.screenshot({ path: '/tmp/proposal-expiry-failure.png', fullPage: true });
+    throw error;
+  } finally {
+    await browser?.close();
+    await server.close();
+  }
+});
