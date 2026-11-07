@@ -4,6 +4,8 @@ import {
   agentCommandStatusSchema,
   agentPolicySchema,
   agentContextSchema,
+  agentDataScopeReceiptSchema,
+  type agentDataScopeSchema,
   agentDetailSchema,
   agentPolicyDetailSchema,
   agentListSchema,
@@ -161,6 +163,8 @@ export function agentApi(workspaceId: string) {
     archive: async (id: string) => request(`/${id}/archive`, 'POST', {}),
     restore: async (id: string) => request(`/${id}/restore`, 'POST', {}),
     configure: async (id: string, input: ExecutionSettings) => request(`/${id}/enrollment`, 'PUT', input),
+    updateDataScope: async (id: string, input: z.infer<typeof agentDataScopeSchema>) =>
+      agentDataScopeReceiptSchema.parse(await request(`/${id}/data-scope`, 'PUT', input)),
     revokeActivation: async (id: string, activationId: string) =>
       z.object({ saved: z.literal(true) }).parse(await request(`/${id}/activations/${activationId}`, 'DELETE')),
     activate: async (

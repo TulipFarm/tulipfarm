@@ -3,6 +3,7 @@ import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 import { z } from 'zod';
 import {
   AccessDenied,
+  canAccessAsset,
   currentMember,
   lockAuthorization,
   requireTaskInvocation,
@@ -16,6 +17,7 @@ import {
   agentDefinitionSchema,
   definitionRevisionSchema,
   executionPolicySchema,
+  maximumTaskLimits,
   scopeSchema,
   toolCallSchema,
 } from './contracts.ts';
@@ -191,6 +193,88 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         [randomUUID(), actor.membershipId, value.agentId],
       );
       await recordDefinitionRecommendationChanges(transaction, 'agent', value.agentId, before);
+    });
+  }
+
+  /**
+   * Replaces the data an existing agent may use. Runs need an asset in the agent's limits and in the scope of
+   * the activation they run under, so this updates the limits and re-activates the newest live revision with
+   * the same scope. Anything not already in effect needs the editor's own access, as in setup.
+   */
+  async function changeDataScope(workspaceId: string, actor: HumanActor, input: unknown) {
+    const value = z
+      .strictObject({ agentId: uuidSchema, version: z.number().int().nonnegative(), scope: scopeSchema })
+      .parse(input);
+    return mutation(workspaceId, actor, async transaction => {
+      await requireAgentPermission(transaction, actor, value.agentId, 'manage');
+      if (
+        !(
+          await transaction.client.query(
+            `SELECT 1 FROM ${relation(transaction, 'tf_agents')} WHERE id = $1 AND saved_revision IS NOT NULL AND deleted_at IS NULL`,
+            [value.agentId],
+          )
+        ).rowCount
+      )
+        throw new AccessDenied();
+      const limits = z
+        .object({ scope: scopeSchema })
+        .optional()
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT scope FROM ${relation(transaction, 'tf_agent_limits')} WHERE agent_id = $1`,
+              [value.agentId],
+            )
+          ).rows[0],
+        )?.scope;
+      const active = z
+        .object({ definition_revision: definitionRevisionSchema, scope: scopeSchema })
+        .optional()
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT a.definition_revision, a.scope FROM ${relation(transaction, 'tf_agent_activations')} a WHERE a.agent_id = $1 AND a.revoked_at IS NULL AND EXISTS (SELECT 1 FROM ${relation(transaction, 'tf_agent_saved_revisions')} s WHERE s.agent_id = a.agent_id AND s.definition_revision = a.definition_revision) ORDER BY a.activated_at DESC NULLS LAST, a.id DESC LIMIT 1`,
+              [value.agentId],
+            )
+          ).rows[0],
+        );
+      const permits = (scope: z.infer<typeof scopeSchema> | undefined, assetId: string, permission: string) =>
+        !!scope?.some(entry => entry.assetId === assetId && entry.permissions.some(item => item === permission));
+      for (const entry of value.scope)
+        for (const permission of entry.permissions) {
+          const inEffect =
+            permits(limits, entry.assetId, permission) && (!active || permits(active.scope, entry.assetId, permission));
+          if (!inEffect && !(await canAccessAsset(transaction, actor, entry.assetId, permission)))
+            throw new AccessDenied();
+        }
+      const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
+      const changed = await transaction.client.query(
+        `UPDATE ${relation(transaction, 'tf_agents')} SET policy_version = policy_version + 1 WHERE id = $1 AND policy_version = $2`,
+        [value.agentId, value.version],
+      );
+      if (!changed.rowCount) throw new AgentError('policy-version-conflict');
+      await transaction.client.query(
+        `INSERT INTO ${relation(transaction, 'tf_agent_limits')} (agent_id, scope, task_limits) VALUES ($1, $2, $3) ON CONFLICT (agent_id) DO UPDATE SET scope = EXCLUDED.scope`,
+        [value.agentId, JSON.stringify(value.scope), JSON.stringify(maximumTaskLimits)],
+      );
+      await transaction.client.query(
+        `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.configure',$3)`,
+        [randomUUID(), actor.membershipId, value.agentId],
+      );
+      // Older activations stay live for workflows that pin them; the limits above still narrow them.
+      if (active && canonicalJson(active.scope) !== canonicalJson(value.scope)) {
+        await resolveDefinitionProcedures(transaction, value.agentId, active.definition_revision);
+        await transaction.client.query(
+          `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope) VALUES ($1, $2, $3, $4)`,
+          [randomUUID(), value.agentId, active.definition_revision, JSON.stringify(value.scope)],
+        );
+        await transaction.client.query(
+          `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.activate',$3)`,
+          [randomUUID(), actor.membershipId, value.agentId],
+        );
+      }
+      await recordDefinitionRecommendationChanges(transaction, 'agent', value.agentId, before);
+      return { saved: true as const, reactivated: !!active };
     });
   }
 
@@ -449,6 +533,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     saveDefinition,
     activate,
     configure,
+    changeDataScope,
     revoke,
     revokeActivation,
     queueCall,

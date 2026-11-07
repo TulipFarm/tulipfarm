@@ -24,6 +24,8 @@ import {
   AgentError,
   agentCommandStatusSchema,
   agentContextSchema,
+  agentDataScopeReceiptSchema,
+  agentDataScopeSchema,
   agentListSchema,
   agentPolicySchema,
   saveAgentSchema,
@@ -454,6 +456,14 @@ export function registerAgents(
       request => {
         const p = agent.parse(request.params);
         return service.configure(p.workspaceId, user(request), p.agentId, request.body);
+      },
+    );
+    routes.put(
+      `${base}/:agentId/data-scope`,
+      { schema: schema('setAgentDataScopeV1', agent, agentDataScopeReceiptSchema, agentDataScopeSchema) },
+      request => {
+        const p = agent.parse(request.params);
+        return service.changeDataScope(p.workspaceId, user(request), p.agentId, request.body);
       },
     );
     const activationParams = agent.extend({ activationId: uuidSchema });

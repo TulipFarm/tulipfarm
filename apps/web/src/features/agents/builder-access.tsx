@@ -58,22 +58,14 @@ export function BuilderAccess({
   disabled: boolean;
   showErrors: boolean;
 }) {
-  const [table, setTable] = useState('');
-  const [tablePermissions, setTablePermissions] = useState<RecordPermission[]>(['table.row.read']);
   const [limitsOpen, setLimitsOpen] = useState(false);
   const parsedLimits = parseLimits(value.taskLimits, { kind: 'start' });
   const limitErrors = showErrors && !parsedLimits.ok ? parsedLimits.errors : {};
   function addScope(assetId: string, permissions: Policy['limits'][number]['permissions']) {
-    const add = (entries: Policy['limits']) => [
-      ...entries.filter(item => item.assetId !== assetId),
-      {
-        assetId,
-        permissions: [
-          ...new Set([...(entries.find(item => item.assetId === assetId)?.permissions ?? []), ...permissions]),
-        ],
-      },
-    ];
-    onChange({ limits: add(value.limits), scope: add(value.scope) });
+    onChange({
+      limits: withScopeEntry(value.limits, assetId, permissions),
+      scope: withScopeEntry(value.scope, assetId, permissions),
+    });
   }
   return (
     <>
@@ -104,70 +96,20 @@ export function BuilderAccess({
         title="What data it can use"
         description="These limits bound its access. They never grant access that a caller or the agent's teams do not have."
       >
-        <TablePicker
+        <AgentDataScope
           workspaceId={workspaceId}
           teams={teams}
           id="builder-read-table"
-          label="Business table"
-          required={false}
-          value={table}
+          value={value.limits}
           disabled={disabled}
-          onChange={setTable}
+          onAdd={addScope}
+          onRemove={assetId =>
+            onChange({
+              limits: value.limits.filter(item => item.assetId !== assetId),
+              scope: value.scope.filter(item => item.assetId !== assetId),
+            })
+          }
         />
-        {table && (
-          <>
-            <ChoiceGroup
-              type="checkbox"
-              optional
-              legend="Table access"
-              options={tableChoices}
-              value={tablePermissions}
-              onValueChange={setTablePermissions}
-            />
-            <div>
-              <Button
-                variant="outline"
-                disabled={disabled}
-                onClick={() => {
-                  addScope(table, tablePermissions);
-                  setTable('');
-                  setTablePermissions(['table.row.read']);
-                }}
-              >
-                <Plus aria-hidden="true" />
-                Add table access
-              </Button>
-            </div>
-          </>
-        )}
-        {!value.limits.length && (
-          <p className="text-sm text-muted-foreground">No business tables or outgoing Slack destinations allowed.</p>
-        )}
-        {value.limits.length > 0 && (
-          <ul aria-label="Data access limits" className="grid gap-3">
-            {value.limits.map(limit => (
-              <li key={limit.assetId} className="flex min-w-0 items-start gap-3">
-                <p className="min-w-0 flex-1 wrap-anywhere text-sm">
-                  <ScopeSummary workspaceId={workspaceId} scope={[limit]} />
-                </p>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Remove access limit"
-                  disabled={disabled}
-                  onClick={() =>
-                    onChange({
-                      limits: value.limits.filter(item => item.assetId !== limit.assetId),
-                      scope: value.scope.filter(item => item.assetId !== limit.assetId),
-                    })
-                  }
-                >
-                  <X aria-hidden="true" />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
         {tools.some(tool => tool.startsWith('slack.')) && (
           <OutgoingDestinations workspaceId={workspaceId} slug={slug} disabled={disabled} add={addScope} />
         )}
@@ -239,6 +181,108 @@ export function BuilderAccess({
       </Disclosure>
     </>
   );
+}
+
+/** Business tables and other assets an agent may use, as offered in the builder's "What data it can use" step. */
+export function AgentDataScope({
+  workspaceId,
+  teams,
+  id,
+  value,
+  disabled,
+  onAdd,
+  onRemove,
+}: {
+  workspaceId: string;
+  teams: AgentContext['teams'];
+  id: string;
+  value: Policy['limits'];
+  disabled: boolean;
+  onAdd: (assetId: string, permissions: Policy['limits'][number]['permissions']) => void;
+  onRemove: (assetId: string) => void;
+}) {
+  const [table, setTable] = useState('');
+  const [tablePermissions, setTablePermissions] = useState<RecordPermission[]>(['table.row.read']);
+  return (
+    <>
+      <TablePicker
+        workspaceId={workspaceId}
+        teams={teams}
+        id={id}
+        label="Business table"
+        required={false}
+        value={table}
+        disabled={disabled}
+        onChange={setTable}
+      />
+      {table && (
+        <>
+          <ChoiceGroup
+            type="checkbox"
+            optional
+            legend="Table access"
+            options={tableChoices}
+            value={tablePermissions}
+            onValueChange={setTablePermissions}
+          />
+          <div>
+            <Button
+              variant="outline"
+              disabled={disabled}
+              onClick={() => {
+                onAdd(table, tablePermissions);
+                setTable('');
+                setTablePermissions(['table.row.read']);
+              }}
+            >
+              <Plus aria-hidden="true" />
+              Add table access
+            </Button>
+          </div>
+        </>
+      )}
+      {!value.length && (
+        <p className="text-sm text-muted-foreground">No business tables or outgoing Slack destinations allowed.</p>
+      )}
+      {value.length > 0 && (
+        <ul aria-label="Data access limits" className="grid gap-3">
+          {value.map(limit => (
+            <li key={limit.assetId} className="flex min-w-0 items-start gap-3">
+              <p className="min-w-0 flex-1 wrap-anywhere text-sm">
+                <ScopeSummary workspaceId={workspaceId} scope={[limit]} />
+              </p>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Remove access limit"
+                disabled={disabled}
+                onClick={() => onRemove(limit.assetId)}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+/** Adds an asset's permissions to a scope, merging with any it already has. */
+export function withScopeEntry(
+  entries: Policy['limits'],
+  assetId: string,
+  permissions: Policy['limits'][number]['permissions'],
+) {
+  return [
+    ...entries.filter(item => item.assetId !== assetId),
+    {
+      assetId,
+      permissions: [
+        ...new Set([...(entries.find(item => item.assetId === assetId)?.permissions ?? []), ...permissions]),
+      ],
+    },
+  ];
 }
 
 function OutgoingDestinations({

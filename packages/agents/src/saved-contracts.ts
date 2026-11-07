@@ -67,6 +67,8 @@ export const agentPolicyDetailSchema = agentPolicySchema.extend({
   taskLimits: taskLimitsSchema.default(maximumTaskLimits),
   slackSender: z.enum(['user', 'app']).default('user'),
 });
+export const agentDataScopeSchema = z.strictObject({ version: z.number().int().nonnegative(), scope: scopeSchema });
+export const agentDataScopeReceiptSchema = z.object({ saved: z.literal(true), reactivated: z.boolean() });
 export const agentListSchema = z.object({
   agents: z.array(savedAgentSchema),
   count: z.number().optional(),

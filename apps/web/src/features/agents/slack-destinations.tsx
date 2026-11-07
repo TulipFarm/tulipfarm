@@ -159,7 +159,7 @@ export function SlackDestinations({
                         state={available}
                         variant="outline"
                         onClick={() => addLimit(item.id, item.permissions)}
-                      >{`Add ${item.name} to execution limits`}</Button>
+                      >{`Add ${item.name} to data access`}</Button>
                       <ActionGroup
                         state={withTeam}
                         actions={[{ label: 'Revoke destination', variant: 'outline', onClick: () => revoke(item) }]}

@@ -225,6 +225,8 @@ export function useAgentApi(workspaceId: string) {
       updatePolicy: (id: string, input: Parameters<Api['updatePolicy']>[1]) =>
         permissions(id, api.updatePolicy(id, input)),
       configure: (id: string, input: Parameters<Api['configure']>[1]) => permissions(id, api.configure(id, input)),
+      updateDataScope: (id: string, input: Parameters<Api['updateDataScope']>[1]) =>
+        permissions(id, api.updateDataScope(id, input)),
       remove: (id: string) => leaving(id, false, () => permissions(id, api.remove(id))),
       archive: (id: string) => leaving(id, false, () => permissions(id, api.archive(id))),
       restore: (id: string) => leaving(id, true, () => saved(id, api.restore(id))),
