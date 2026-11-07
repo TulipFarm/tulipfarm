@@ -51,7 +51,7 @@ Get table and field IDs from `tables.definitions`.
 
 For connected-provider work, distinguish a native workflow step from an agent step and a generic HTTP request. Read the agent and HTTP sections of `references/steps.md` before declaring that no supported path exists. Inspect a suitable saved agent with `agents.list` and `agents.read`; do not assume its tools grant access or waive approvals. If the required action or setup is missing, name that gap rather than asking the person to enable a nonexistent workflow action.
 
-`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Before drafting one, write message options as `references/steps.md` describes under Message wording and ask which to use. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source, but that output can never become Slack message text.
+`workflows.providers` lists only trigger sources and GitHub trigger repositories, not chat connections. An empty result never means Slack or GitHub is disconnected. To post to Slack, resolve the channel with `slack.resolve` and use a Slack message step. Before drafting one, offer message options as `references/steps.md` describes under Message wording: each preview is a `present.choice` option, at most four. Public data, such as public GitHub repositories, can be read with an HTTP step or an agent step without a connected source, but that output can never become Slack message text.
 
 ## 4. Activation and review
 
