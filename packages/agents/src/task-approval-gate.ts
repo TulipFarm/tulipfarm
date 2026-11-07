@@ -20,7 +20,7 @@ import { requireTaskDefinitionSources } from './draft-sources.ts';
 import type { TaskWork } from './task-activity.ts';
 import { githubTaskResultSchema } from './github-task-contracts.ts';
 import { requireDraftSources } from './draft-sources.ts';
-import { taskTransition } from './task-telemetry.ts';
+import { taskAccessCheck, taskTransition } from './task-telemetry.ts';
 
 // Nested domain operations retain the outer authorization, task, schema and record locks.
 export const boundRuntime = (tx: AgentTransaction & { commonVersion: number }, workspaceId: string): AgentStorage => ({
@@ -90,14 +90,19 @@ export async function taskOutputAllowed(
     throw new AccessDenied();
   const owner = await resolveHuman(tx, binding.owner_user_id);
   if (owner.membershipId !== binding.owner_membership_id) throw new AccessDenied();
-  await requireTaskDefinitionSources(tx, owner, binding.task_id, execute ? runId : undefined);
+  await taskAccessCheck('definition-sources', () =>
+    requireTaskDefinitionSources(tx, owner, binding.task_id, execute ? runId : undefined),
+  );
   const runtime = boundRuntime(tx, workspaceId);
   const tasks = createAgentTasks(runtime);
   let after: number | null = -1;
   while (after !== null) {
     const page = await tasks.history(workspaceId, owner.userId, binding.task_id, { after, limit: 100 });
     if (execute)
-      for (const message of page.messages) await tasks.checkSources(workspaceId, owner.userId, message.sources, runId);
+      for (const message of page.messages)
+        await taskAccessCheck('history-sources', () =>
+          tasks.checkSources(workspaceId, owner.userId, message.sources, runId),
+        );
     after = page.nextCursor;
   }
   const githubContext = await githubTaskContext(tx, binding.task_id);

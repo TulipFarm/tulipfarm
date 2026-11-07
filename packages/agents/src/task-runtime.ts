@@ -64,7 +64,13 @@ import { taskMcpSources, authorizeMcpSources } from './mcp-authority.ts';
 import type { GitHubTaskFactory } from './github-tasks.ts';
 import type { KnowledgeToolsFactory } from './tools.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { taskTelemetryCheckpoint, taskTransition, withTaskTelemetry } from './task-telemetry.ts';
+import {
+  taskAccessCheck,
+  taskAccessDenied,
+  taskTelemetryCheckpoint,
+  taskTransition,
+  withTaskTelemetry,
+} from './task-telemetry.ts';
 import { readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
 import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
@@ -258,7 +264,7 @@ export function createTaskRuntime(
     const local = boundRuntime(tx, workspaceId),
       tasks = createAgentTasks(local);
     const task = await tasks.read(workspaceId, owner.userId, taskId);
-    await requireTaskInvocation(tx, owner, task.agentId);
+    await taskAccessCheck('invoke', () => requireTaskInvocation(tx, owner, task.agentId));
     if (
       !(
         await tx.client.query(
@@ -278,8 +284,8 @@ export function createTaskRuntime(
       ? z.uuid().parse(run.run_id)
       : (await createTaskApprovals(local).bindRun(workspaceId, owner.userId, taskId, { generation: task.generation }))
           .runId;
-    const procedures = await resolveRunProcedures(tx, runId);
-    await requireTaskDefinitionSources(tx, owner, taskId, runId);
+    const procedures = await taskAccessCheck('procedures', () => resolveRunProcedures(tx, runId));
+    await taskAccessCheck('definition-sources', () => requireTaskDefinitionSources(tx, owner, taskId, runId));
     await taskOutputAllowed(tx, workspaceId, runId, true);
     const evidence = z
       .array(z.object({ source_tables: z.array(z.uuid()) }))
@@ -987,6 +993,7 @@ export function createTaskRuntime(
       // A context limit cannot clear on retry, so it pauses the task rather than escaping as a retryable step failure.
       const contextLimit = error instanceof AgentTaskError && error.code === 'context-limit';
       if (!(error instanceof AccessDenied) && !(error instanceof AgentError) && !contextLimit) throw error;
+      if (error instanceof AccessDenied) taskAccessDenied(taskId, error);
       await locked(workspaceId, taskId, async tx => {
         const status = error instanceof AccessDenied ? 'failed' : 'paused';
         const changed = await tx.client.query(
