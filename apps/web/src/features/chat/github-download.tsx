@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
+import { marketplacePackage } from '@tulipfarm/config/package-links';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
 import { apiOrigin } from '@/lib/auth';
@@ -91,6 +92,18 @@ export function GitHubChatResponse({
         if (href === githubReconnectHref && workspaceSlug)
           return (
             <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug }} hash="github-accounts">
+              {label}
+            </Link>
+          );
+        const listing = workspaceSlug ? marketplacePackage(href) : null;
+        if (listing && workspaceSlug)
+          return (
+            <Link
+              to="/$workspaceSlug/packages/catalog/$packageName/$packageVersion"
+              params={{ workspaceSlug, packageName: listing.name, packageVersion: listing.version }}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {label}
             </Link>
           );

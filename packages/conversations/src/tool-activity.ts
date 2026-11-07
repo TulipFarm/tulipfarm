@@ -97,6 +97,7 @@ export const toolActivityLabels = {
   'web.fetch': 'Reading a web page',
   'api.request': 'Calling an API',
   'packages.inspect': 'Inspecting a system package',
+  'packages.recommend': 'Finding ready-made packages',
   'conversation.messages.read': 'Rereading an earlier message',
   'files.read': 'Reading a file',
   'files.list': 'Looking through Files',

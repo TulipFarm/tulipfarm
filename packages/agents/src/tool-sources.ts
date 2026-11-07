@@ -482,6 +482,7 @@ export async function resultSources(
     case 'skills.restore':
     case 'skills.list':
     case 'packages.inspect':
+    case 'packages.recommend':
     case 'followups.schedule':
     case 'followups.list':
     case 'followups.cancel':

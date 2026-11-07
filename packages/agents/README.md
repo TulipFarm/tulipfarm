@@ -45,6 +45,14 @@ Import request IDs remain stable for one chat/package/version across retries
 and reloads, and differ between packages. A changed definition resets the card's
 input and validation state.
 
+`packages.recommend` is a read-only core chat tool. When a person asks to set up
+a new system, tracker or process, the chat calls it before designing tables,
+workflows or agents. It reads the public `catalog.json` through the same
+public-file reader, caches it for 10 minutes, ranks entries by word matches in
+name, tags, title, category and description, and returns up to 3 versioned
+package pages. Package links in replies open the in-app package page, where the
+person reviews and installs it.
+
 Inspected on 11 October 2026. `createChatTools(runtime, options)` takes named
 `ChatToolsOptions`; callers supply only the dependencies they use, such as
 `{ knowledge }` or `{ google, slack }`. An omitted or `undefined` dependency stays

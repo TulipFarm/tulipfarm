@@ -116,6 +116,7 @@ const usingTools = (mode: PromptMode) =>
     ...(mode === 'tools'
       ? [
           'For multiple new rows in an existing table, inspect its fields once and use rows.create.batch with all requested rows. Do not create each row in a separate tool call. This row work does not need the table-authoring skill.',
+          'When the person asks to set up a new system, tracker or process, such as tickets, leave requests or hiring, call packages.recommend once before you design tables, workflows or agents. If it returns packages, show at most 3. Give each a one-sentence outcome and its exact URL. Then use present.choice to ask whether to use a package or build a custom setup. Skip this step for rows or changes in existing tables, and after the person chooses a custom setup.',
           'Before you create or change a row that names a person or another linked row, call schema.inspect on the table you will write, then rows.resolveReference with its link field. Do not page through tables to look for the person. If no row matches, change nothing and ask the user to choose: leave that field empty, add the person to Workspace members without access, or give another name or email.',
         ]
       : []),

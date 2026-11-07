@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { marketplacePackage, marketplacePackagesInPrompt } from '../src/package-links.ts';
+import { marketplacePackage, marketplacePackagesInPrompt, parseMarketplaceCatalog } from '../src/package-links.ts';
 
 const page = 'https://packages.tulipfarm.ai/packages/leave-management/1.0.0';
 const link = { name: 'leave-management', version: '1.0.0', url: `${page}/package.json` };
@@ -42,4 +42,31 @@ test('prompt extraction handles Markdown, deduplicates links, and retains distin
     [link, { ...link, version: '1.1.0', url: link.url.replace('1.0.0', '1.1.0') }],
   );
   assert.deepEqual(marketplacePackagesInPrompt(`Inspect ${page.replace('https:', 'HTTPS:')}.`), [link]);
+});
+
+test('catalog entries accept unversioned and versioned pages and resolve to the exact version', () => {
+  const entry = (name, page) => ({
+    name,
+    version: '1.0.0',
+    title: name,
+    description: name,
+    license: 'MIT',
+    category: 'HR',
+    tags: [],
+    url: `/packages/${name}/1.0.0/package.json`,
+    page,
+  });
+  const schema = 'https://tulipfarm.ai/schemas/system-package.v1.json';
+  assert.deepEqual(
+    parseMarketplaceCatalog({
+      schema,
+      packages: [entry('leave-management', '/packages/leave-management/'), entry('hiring', '/packages/hiring/1.0.0/')],
+    }).map(({ page, url }) => ({ page, url })),
+    ['leave-management', 'hiring'].map(name => ({
+      page: `https://packages.tulipfarm.ai/packages/${name}/1.0.0/`,
+      url: `https://packages.tulipfarm.ai/packages/${name}/1.0.0/package.json`,
+    })),
+  );
+  for (const page of ['/packages/other/', 'https://example.com/packages/hiring/', '/packages/hiring/2.0.0/'])
+    assert.throws(() => parseMarketplaceCatalog({ schema, packages: [entry('hiring', page)] }), /links/, page);
 });
