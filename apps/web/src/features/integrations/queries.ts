@@ -167,6 +167,7 @@ export function useIntegrationChanges() {
           ],
         });
       },
+      slackSender: (chatId: string) => change({ keys: [integrationKeys.slackSender(chatId)] }),
       creation: () => change({ keys: [integrationKeys.creation(), ['integrations', 'github', 'creation-grants']] }),
       batches: (chatId: string, task = false) => change({ keys: [integrationKeys.batches(chatId, task)] }),
     }),

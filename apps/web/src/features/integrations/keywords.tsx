@@ -122,7 +122,8 @@ export function useIntegrationKeywords(
   async function selectSlack(chatId: string, sender: SlackChatSender['sender']) {
     const current = await slackSenderApi.read(workspaceId, chatId);
     if (current.sender !== sender) await slackSenderApi.select(workspaceId, chatId, sender, current.version);
-    await slackSender.refresh();
+    // By chat id: after a draft's first send, this closure's read still points at the draft.
+    await changes.slackSender(chatId);
   }
   const switchAccount = async (keyword: RichTextKeyword, accountId: string) => {
     if (!chat) return;
