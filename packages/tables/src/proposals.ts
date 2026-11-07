@@ -68,6 +68,10 @@ type InstallationOrigin = {
   installationId: string;
   sources: readonly SourceDependency[];
 };
+/** A person archiving one table from the Tables page, with no chat or package behind it. */
+type PageOrigin = { conversationId: null; turnId: null; sources: readonly SourceDependency[] };
+// Workspaces before this common migration reject proposals without a chat or package origin.
+export const pageArchiveVersion = 45;
 export type TableProposalOptions = {
   runtime: TableRuntime;
   requireSources(tx: TableTransaction, actor: HumanActor, sources: readonly SourceDependency[]): Promise<void>;
@@ -686,7 +690,7 @@ function operations(options: TableProposalOptions) {
     workspaceId: string,
     actor: HumanActor,
     id: string,
-    origin: Origin | InstallationOrigin,
+    origin: Origin | InstallationOrigin | PageOrigin,
     value: unknown,
   ) {
     const input = proposeTableSchema.parse(value);
@@ -699,7 +703,10 @@ function operations(options: TableProposalOptions) {
           : [{ kind: 'private-conversation', conversationId: origin.conversationId }, ...sources],
       );
       await lock(tx, id);
-      if (origin.conversationId === null) {
+      if (!('installationId' in origin) && origin.conversationId === null) {
+        if (input.plans.length !== 1 || input.plans[0]?.kind !== 'archive' || sources.length) throw new AccessDenied();
+        if (tx.commonVersion < pageArchiveVersion) throw new TableProposalError('proposal-storage-unavailable');
+      } else if (origin.conversationId === null) {
         if (input.plans.some(plan => !['schema', 'records'].includes(plan.kind))) throw new AccessDenied();
         if (
           !(
@@ -963,7 +970,7 @@ function operations(options: TableProposalOptions) {
           ...(unavailableFileIds.length ? { unavailableFileIds } : {}),
         };
       }),
-    status: (workspaceId: string, userId: string, chatId: string, id: string) =>
+    status: (workspaceId: string, userId: string, chatId: string | null, id: string) =>
       transaction(workspaceId, userId, async (tx, actor) => state(tx, await load(tx, actor, chatId, id))),
     effects: (workspaceId: string, userId: string, chatId: string, id: string, tableId: string, query: unknown) =>
       transaction(workspaceId, userId, async (tx, actor) => {

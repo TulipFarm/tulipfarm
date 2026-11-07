@@ -228,7 +228,9 @@ let deleted = false,
   deletedStatus = 200,
   schemaStatus = 200,
   restoreError = null,
-  detailStatus = 200;
+  detailStatus = 200,
+  archiveRefusal = 'workflow-active';
+const archiveRequests = [];
 let schemaSecondPage = false,
   deletedSecondPage = false;
 const schemaCursors = [],
@@ -454,6 +456,19 @@ try {
             ].filter(table => !search || table.definition.label.toLowerCase().includes(search)),
         nextCursor: null,
       };
+    } else if (path.includes(`/tables/${tableId}/archive/`)) {
+      archiveRequests.push({ method: request.method(), body: request.postDataJSON() });
+      if (request.method() === 'PUT' && archiveRefusal)
+        return route.fulfill({ status: 409, json: { error: archiveRefusal } });
+      json = {
+        id: path.split('/').at(-1),
+        digest: 'd'.repeat(64),
+        status: request.method() === 'PUT' ? 'approved' : 'completed',
+        decision: 'approve',
+        cancelled: false,
+        expired: false,
+        plans: [{ tableId, receipt: null, importProgress: null }],
+      };
     } else if (path.endsWith(`/tables/${tableId}`)) {
       if (detailStatus !== 200) return route.fulfill({ status: detailStatus, json: { error: 'proposal-unavailable' } });
       json = {
@@ -461,6 +476,7 @@ try {
         saved: savedDefinition,
         applied: activeDefinition,
         rowPermissions: { create: true, update: true, delete: true },
+        canArchive: true,
       };
     } else if (path.endsWith(`/tables/${customerId}`))
       json = {
@@ -972,6 +988,20 @@ try {
   await schemas.getByRole('button', { name: 'Previous schema history', exact: true }).click();
   schemaSecondPage = false;
   await closePanel();
+  // A refused archive keeps the table open and says what blocks it.
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Archive table', exact: true }).click();
+  const archiveDialog = page.getByRole('alertdialog', { name: /^Archive .+\?$/ });
+  await archiveDialog.getByRole('button', { name: 'Archive table', exact: true }).click();
+  await archiveDialog
+    .getByText('An enabled workflow uses this table. Disable or archive that workflow, then try again.', {
+      exact: true,
+    })
+    .waitFor();
+  assert.deepEqual(archiveRequests, [{ method: 'PUT', body: { expectedRevision: activeDefinition.revision } }]);
+  await archiveDialog.getByRole('button', { name: 'Keep table', exact: true }).click();
+  await archiveDialog.waitFor({ state: 'detached' });
+  archiveRequests.length = 0;
   await rowAction('Edit row');
   await page.getByLabel('Subject', { exact: true }).fill('Updated subject');
   await page.getByLabel('Amount', { exact: true }).fill('100000000000000000000');
@@ -1444,6 +1474,17 @@ try {
     editPrompt,
     /^Help me change the fields of the “[^”]+” table \(table ID [0-9a-f-]{36}, current revision [^)]+\)\. /,
     'The edit handoff names the table and its current revision without copy and paste',
+  );
+  // An accepted archive waits for the worker, then leaves the table for the list.
+  archiveRefusal = null;
+  await page.goto(`${origin}/acme/tables/${tableId}`);
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Archive table', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Archive table', exact: true }).click();
+  await page.waitForURL(`${origin}/acme/tables`);
+  assert.deepEqual(
+    archiveRequests.map(entry => entry.method),
+    ['PUT', 'GET'],
   );
   await page.goto(`${origin}/acme/tables/new`);
   assert.equal(

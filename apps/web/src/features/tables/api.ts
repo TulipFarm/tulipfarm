@@ -13,7 +13,13 @@ import {
   type TableQueryRequest,
 } from '@tulipfarm/tables/query';
 import { workspaceMembersStateSchema, workspaceMemberStateSchema } from '@tulipfarm/tables/workspace-members';
-import { executionReceiptSchema, tableDefinitionSchema, tableValuesSchema, type TableValues } from './review-contracts';
+import {
+  executionReceiptSchema,
+  proposalStatusSchema,
+  tableDefinitionSchema,
+  tableValuesSchema,
+  type TableValues,
+} from './review-contracts';
 
 const tableSchema = z.object({
   id: z.uuid(),
@@ -47,7 +53,24 @@ const definitionStateSchema = z.object({
   rowPermissions: z
     .object({ create: z.boolean(), update: z.boolean(), delete: z.boolean() })
     .default({ create: false, update: false, delete: false }),
+  canArchive: z.boolean().default(false),
 });
+export type ArchiveStatus = z.infer<typeof proposalStatusSchema>;
+const archiveMessages: Readonly<Record<string, string>> = {
+  'table-linked': 'Another table links to this table. Ask in chat to remove that link, then try again.',
+  'workflow-active': 'An enabled workflow uses this table. Disable or archive that workflow, then try again.',
+  'proposal-stale': 'This table changed since you opened it. Reload the table, then try again.',
+  'member-table-protected': 'Workspace members is a built-in table and cannot be archived.',
+  'proposal-storage-unavailable': 'Archiving tables is not available in this workspace yet. Try again later.',
+};
+export function archiveMessage(code: string, status = 409) {
+  return (
+    archiveMessages[code] ??
+    ([403, 404].includes(status) || code === 'access-denied'
+      ? 'This table is missing or your permission changed. A workspace admin can review your access.'
+      : 'Could not confirm the archive. Reload Tables to check whether the table is still listed.')
+  );
+}
 const deletedRecordSchema = z.object({
   id: z.uuid(),
   token: z.uuid(),
@@ -277,6 +300,18 @@ export function tableApi(workspaceId: string) {
                     : 'The search could not be completed. Check your connection and try again.';
     throw new TableRequestError(response.status, code, memberMessages[code] ?? message);
   }
+  async function archiveRequest(tableId: string, requestId: string, signal: AbortSignal, body?: unknown) {
+    const response = await jsonResponse(
+      `${base}/${encodeURIComponent(tableId)}/archive/${encodeURIComponent(requestId)}`,
+      { method: body === undefined ? 'GET' : 'PUT', body, signal, cache: 'no-store' },
+    );
+    const value = await readJson(response, true);
+    if (!response.ok) {
+      const code = responseError(value, 'table-operation-failed');
+      throw new TableRequestError(response.status, code, archiveMessage(code, response.status));
+    }
+    return proposalStatusSchema.parse(value);
+  }
   async function list(
     after: string | undefined,
     signal: AbortSignal,
@@ -297,6 +332,13 @@ export function tableApi(workspaceId: string) {
   return {
     list,
     detail,
+    /** Archives through the same checks as a chat archive. Reuse the request id to retry safely. */
+    archive(tableId: string, requestId: string, expectedRevision: string) {
+      return archiveRequest(tableId, requestId, AbortSignal.timeout(15_000), { expectedRevision });
+    },
+    archiveStatus(tableId: string, requestId: string, signal: AbortSignal) {
+      return archiveRequest(tableId, requestId, signal);
+    },
     async active(id: string, signal: AbortSignal): Promise<TableDefinition> {
       const state = await detail(id, signal);
       if (!state.applied)

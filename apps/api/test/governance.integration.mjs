@@ -823,6 +823,58 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     });
     assert.equal(await permission(member, 'table.row.read'), true);
     await personGrant('table.row.read', false);
+    {
+      // Archived tables leave Table access: they are not listed, take no new grants, and still block team deletion.
+      const archivedOwner = randomUUID(),
+        archivedTable = randomUUID();
+      await ok(admin, 'PUT', `/teams/${archivedOwner}`, { name: 'Archive owners' });
+      await f.platform.query(
+        `INSERT INTO "${a.names.schema}".tf_table_catalog (id, owning_team_id, physical_table, display_name, target_revision) VALUES ($1,$2,'old_invoices','Old invoices',$3)`,
+        [archivedTable, archivedOwner, 'b'.repeat(40)],
+      );
+      await grant(teamId, 'table.row.read', true, archivedTable);
+      await personGrant('table.row.read', true, archivedTable);
+      await f.platform.query(
+        `UPDATE "${a.names.schema}".tf_table_catalog SET archived_at = clock_timestamp() WHERE id = $1`,
+        [archivedTable],
+      );
+      const hidden = await ok(admin, 'GET');
+      assert.equal(
+        hidden.tables.some(entry => entry.id === archivedTable),
+        false,
+      );
+      assert.equal(
+        hidden.grants.some(entry => entry.target.id === archivedTable),
+        false,
+      );
+      assert.deepEqual(await ok(admin, 'GET', '/person-grants'), { grants: [] });
+      const archivedRead = { kind: 'table', id: archivedTable, permission: 'table.row.update' };
+      assert.equal(
+        (await http(admin, 'PUT', '/grants', { teamId, target: archivedRead, granted: true })).statusCode,
+        404,
+      );
+      assert.equal(
+        (await http(admin, 'PUT', '/person-grants', { membershipId: memberId, target: archivedRead, granted: true }))
+          .statusCode,
+        404,
+      );
+      await grant(teamId, 'table.row.read', false, archivedTable);
+      await personGrant('table.row.read', false, archivedTable);
+      assert.equal(
+        (
+          await f.platform.query(
+            `SELECT 1 FROM "${a.names.schema}".tf_grants WHERE asset_id = $1 UNION ALL SELECT 1 FROM "${a.names.schema}".tf_table_person_grants WHERE asset_id = $1`,
+            [archivedTable],
+          )
+        ).rowCount,
+        0,
+      );
+      assert.deepEqual((await http(admin, 'DELETE', `/teams/${archivedOwner}`)).json(), {
+        error: 'team-owns-archived-tables',
+      });
+      await ok(admin, 'PUT', `/tables/${archivedTable}/owner`, { teamId });
+      await ok(admin, 'DELETE', `/teams/${archivedOwner}`);
+    }
     await grant(teamId, 'table.row.create');
     await grant(teamId, 'table.row.update');
     assert.equal(await permission(member, 'table.row.create'), true);

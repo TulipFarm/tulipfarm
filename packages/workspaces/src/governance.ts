@@ -78,6 +78,7 @@ export class GovernanceConflict extends Error {
       | 'duplicate-team-name'
       | 'final-admin'
       | 'team-owns-tables'
+      | 'team-owns-archived-tables'
       | 'team-owns-agents'
       | 'team-owns-integrations'
       | 'team-id-conflict'
@@ -390,32 +391,32 @@ export function createGovernanceService(dependencies: {
           admin
             ? (
                 await transaction.client.query(
-                  `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} ORDER BY display_name, id`,
+                  `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL ORDER BY display_name, id`,
                 )
               ).rows
             : [],
         );
-      const grants = z
-        .array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string() }))
-        .parse(
-          admin
-            ? (
-                await transaction.client.query(
-                  `SELECT team_id, asset_id, permission FROM ${table(transaction, 'tf_grants')} WHERE permission = ANY($1::text[]) ORDER BY team_id, asset_id, permission`,
+      const grants = z.array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
+        admin
+          ? (
+              await transaction.client.query(
+                `SELECT g.team_id, g.asset_id, g.permission FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
+        ORDER BY g.team_id, g.asset_id, g.permission`,
+                [
                   [
-                    [
-                      'table.create',
-                      'table.schema.manage',
-                      'table.row.create',
-                      'table.row.read',
-                      'table.row.update',
-                      'table.row.delete',
-                    ],
+                    'table.create',
+                    'table.schema.manage',
+                    'table.row.create',
+                    'table.row.read',
+                    'table.row.update',
+                    'table.row.delete',
                   ],
-                )
-              ).rows
-            : [],
-        );
+                ],
+              )
+            ).rows
+          : [],
+      );
       const tableTeams = z
         .array(z.object({ id: z.uuid(), name: z.string() }))
         .parse(
@@ -594,15 +595,13 @@ export function createGovernanceService(dependencies: {
     return withHuman(workspaceId, userId, 'write', false, async (transaction, actor) => {
       await requireTeamManager(transaction, actor, teamId);
       const affected = await teamMembers(transaction, teamId);
-      if (
-        (
-          await transaction.client.query(
-            `SELECT id FROM ${table(transaction, 'tf_table_catalog')} WHERE owning_team_id = $1 LIMIT 1`,
-            [teamId],
-          )
-        ).rowCount
-      )
-        throw new GovernanceConflict('team-owns-tables');
+      const owned = (
+        await transaction.client.query(
+          `SELECT archived_at IS NOT NULL AS archived FROM ${table(transaction, 'tf_table_catalog')} WHERE owning_team_id = $1 ORDER BY archived_at IS NOT NULL LIMIT 1`,
+          [teamId],
+        )
+      ).rows[0];
+      if (owned) throw new GovernanceConflict(owned.archived ? 'team-owns-archived-tables' : 'team-owns-tables');
       await protectManagerHandoff(transaction, { kind: 'team', teamId });
       if (
         (
@@ -755,9 +754,10 @@ export function createGovernanceService(dependencies: {
       if (target.kind === 'collection') await teamExists(transaction, target.id);
       else if (
         !(
-          await transaction.client.query(`SELECT id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1`, [
-            target.id,
-          ])
+          await transaction.client.query(
+            `SELECT id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1 AND (archived_at IS NULL OR NOT $2::boolean)`,
+            [target.id, granted],
+          )
         ).rowCount
       )
         throw new AccessDenied();
@@ -800,6 +800,7 @@ export function createGovernanceService(dependencies: {
         (
           await transaction.client.query(`SELECT g.* FROM ${table(transaction, 'tf_table_person_grants')} g
         JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
+        WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
         ORDER BY g.membership_id, g.asset_id, g.permission`)
         ).rows,
       );
@@ -824,9 +825,10 @@ export function createGovernanceService(dependencies: {
       if (target.kind === 'collection') await teamExists(transaction, target.id);
       else if (
         !(
-          await transaction.client.query(`SELECT id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1`, [
-            target.id,
-          ])
+          await transaction.client.query(
+            `SELECT id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1 AND (archived_at IS NULL OR NOT $2::boolean)`,
+            [target.id, granted],
+          )
         ).rowCount
       )
         throw new AccessDenied();
