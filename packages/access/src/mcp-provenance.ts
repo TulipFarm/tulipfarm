@@ -58,12 +58,14 @@ export type ConversationSourcePrefetch = {
   conversations: Map<string, ConversationSourceRows>;
 };
 
+/** `drafts: false` leaves out the chats an agent, skill or workflow was drafted in. */
 export async function protectedSourceClosure(
   tx: AuthorizationTransaction,
   sources: unknown,
   prefetch?: ConversationSourcePrefetch,
+  { drafts = true }: { drafts?: boolean } = {},
 ): Promise<SourceDependency[]> {
-  return sourceClosure(tx, sources, true, prefetch);
+  return sourceClosure(tx, sources, true, prefetch, drafts);
 }
 
 async function tableInstalled(tx: AuthorizationTransaction, installed: Map<string, boolean>, name: string) {
@@ -146,6 +148,7 @@ async function sourceClosure(
   sources: unknown,
   full: boolean,
   prefetch?: ConversationSourcePrefetch,
+  drafts = true,
 ): Promise<SourceDependency[]> {
   const pending = referencesSchema.parse(sources);
   const visited = new Set<string>();
@@ -217,7 +220,7 @@ async function sourceClosure(
         ).rows[0];
         if (!row) throw new AccessDenied();
         append(row.definition.sources ?? []);
-        if (await has('tf_chat_authoring_drafts')) {
+        if (drafts && (await has('tf_chat_authoring_drafts'))) {
           const drafts = await tx.client.query(
             `SELECT d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d JOIN ${table(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id WHERE d.proposal->>'targetId'=$1 AND c.outcome->>'kind'='skill' AND c.outcome->'receipt'->>'savedRevision'=$2`,
             [source.skillId, source.revision],
@@ -227,7 +230,7 @@ async function sourceClosure(
         break;
       }
       case 'workflow-definition':
-        if (await has('tf_chat_authoring_drafts')) {
+        if (drafts && (await has('tf_chat_authoring_drafts'))) {
           const drafts = await tx.client.query(
             `SELECT d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d JOIN ${table(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id WHERE d.proposal->>'kind'='workflow' AND c.outcome->>'kind'='workflow' AND c.outcome->>'workflowId'=$1 AND c.outcome->>'revision'=$2`,
             [source.workflowId, source.revision],
@@ -250,7 +253,7 @@ async function sourceClosure(
               .map(skill => ({ kind: 'workspace-skill', skillId: skill.id, revision: skill.revision })),
           );
         }
-        if (await has('tf_chat_authoring_drafts')) {
+        if (drafts && (await has('tf_chat_authoring_drafts'))) {
           const drafts = await tx.client.query(
             `SELECT d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d JOIN ${table(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id JOIN ${table(tx, 'tf_agent_commands')} a ON a.id::text=c.outcome->'receipt'->>'commandId' LEFT JOIN ${table(tx, 'tf_agent_saved_revisions')} s ON s.agent_id=a.agent_id AND s.soul_revision=a.accepted_revision WHERE a.agent_id=$1 AND (a.accepted_revision=$2 OR s.definition_revision=$2) AND c.outcome->>'kind'='agent'`,
             [source.agentId, source.revision],

@@ -1787,6 +1787,104 @@ test('a later turn in the same chat can send to Slack again, unless an earlier t
   }
 });
 
+test('a chat can send to Slack while it cites a skill drafted in another private chat', async () => {
+  const f = await outboundFixture();
+  try {
+    const factory = runtime => createSlackActions({ ...f.settings, runtime });
+    const drafting = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId: drafting, commandId: randomUUID() });
+    const { turnId } = await f.store.send(f.workspace.id, f.alice.userId, drafting, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Write a skill from my notes' }],
+    });
+    const skillId = randomUUID(),
+      revision = 'c'.repeat(64),
+      draftId = randomUUID();
+    await f.db.platform.query('BEGIN');
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_workspace_skills')} (id,creator_id,saved_revision,active_revision,enabled) VALUES ($1,$2,$3,$3,true)`,
+      [skillId, f.alice.membershipId, revision],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_workspace_skill_revisions')} (skill_id,revision,definition,author_id) VALUES ($1,$2,$3,$4)`,
+      [skillId, revision, { name: 'Greeting', instructions: 'Say hey' }, f.alice.membershipId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_workspace_skill_reviews')} (skill_id,revision,reviewer_id) VALUES ($1,$2,$3)`,
+      [skillId, revision, f.alice.membershipId],
+    );
+    await f.db.platform.query('COMMIT');
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_skill_person_grants')} (skill_id,membership_id,permission) SELECT $1,$2,unnest(ARRAY['read','use','manage'])`,
+      [skillId, f.alice.membershipId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_conversation_tool_calls')} (id,conversation_id,turn_id,sequence,tool,status) VALUES ($1,$2,$3,1,'skill.draft','completed')`,
+      [draftId, drafting, turnId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_chat_authoring_drafts')} (id,conversation_id,turn_id,membership_id,user_id,proposal,digest,sources) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        draftId,
+        drafting,
+        turnId,
+        f.alice.membershipId,
+        f.alice.userId,
+        { kind: 'skill', targetId: skillId },
+        'c'.repeat(64),
+        JSON.stringify([{ kind: 'private-conversation', conversationId: drafting }]),
+      ],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$3,'{}',$4)`,
+      [draftId, f.alice.membershipId, randomUUID(), { kind: 'skill', receipt: { savedRevision: revision } }],
+    );
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.alice.userId, { chatId, commandId: randomUUID() });
+    let outcome;
+    const engine = createConversationExecutor(
+      f.runtime,
+      async ({ executeTool }) => {
+        const tools = context => createChatTools(context.runtime, { slack: factory });
+        const resolved = await executeTool('slack.resolve', false, context =>
+          tools(context).invokeWithSources(context, { tool: 'slack.resolve', kind: 'channel', name: 'HR' }),
+        );
+        const sent = await executeTool('slack.message.send', true, async context => {
+          const result = await tools(context).invokeWithSources(
+            {
+              ...context,
+              origin: {
+                ...context.origin,
+                sources: [...context.origin.sources, { kind: 'workspace-skill', skillId, revision }],
+              },
+            },
+            { tool: 'slack.message.send', destinationId: resolved.result.matches[0].destinationId, text: 'hey' },
+          );
+          return result;
+        });
+        outcome = sent.result.status ?? sent.result.error;
+        return { text: 'Sent', sources: [] };
+      },
+      undefined,
+      factory(f.runtime).resumeConversation,
+    );
+    const sent = await f.store.send(f.workspace.id, f.alice.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Send hey to HR on Slack' }],
+    });
+    assert.equal(
+      await engine.process({ workspaceId: f.workspace.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    assert.equal(outcome, 'sent', 'the chat a skill was drafted in stays out of the Slack check');
+    assert.equal(f.effects.length, 1);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a chat turn that fails after a Slack send retries from the send receipt and keeps its own reply', async () => {
   const f = await outboundFixture();
   try {
