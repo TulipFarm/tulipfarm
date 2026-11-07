@@ -158,6 +158,7 @@ export function GovernanceContent({
       if (
         error instanceof GovernanceRequestError &&
         (error.code === 'team-owns-tables' ||
+          error.code === 'team-owns-archived-tables' ||
           error.code === 'team-owns-agents' ||
           error.code === 'team-owns-integrations')
       )

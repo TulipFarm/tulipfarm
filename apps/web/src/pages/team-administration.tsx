@@ -180,11 +180,13 @@ export function TeamConfirmation({
                   setFailure(
                     result === 'team-owns-tables'
                       ? 'This team owns tables and cannot be deleted.'
-                      : result === 'team-owns-agents'
-                        ? 'This team owns active agents and cannot be deleted.'
-                        : result === 'team-owns-integrations'
-                          ? 'This team owns active integrations and cannot be deleted.'
-                          : 'The change was not confirmed. Close this dialog and refresh access before retrying.',
+                      : result === 'team-owns-archived-tables'
+                        ? 'This team owns archived tables and cannot be deleted. Ask in chat to restore them, then change their owning team in Table access.'
+                        : result === 'team-owns-agents'
+                          ? 'This team owns active agents and cannot be deleted.'
+                          : result === 'team-owns-integrations'
+                            ? 'This team owns active integrations and cannot be deleted.'
+                            : 'The change was not confirmed. Close this dialog and refresh access before retrying.',
                   );
               } finally {
                 lock.current = false;

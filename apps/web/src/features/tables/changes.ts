@@ -6,6 +6,7 @@ import { useFeatureContext } from '@/lib/query/provider';
 import type { ProposalView } from './review-contracts';
 import { concealTableQueries } from './authority';
 import { TableRequestError } from './request-state';
+import { governanceKeys } from '@/features/governance/queries';
 
 export const tableChangeKeys = {
   records: (tableId: string) => [
@@ -23,6 +24,11 @@ export const tableChangeKeys = {
     ['tables', 'authoring-context'],
     tableKeys.proposals,
   ],
+  archived: (tableId: string) => [
+    ...tableChangeKeys.definition(tableId),
+    tableKeys.grants,
+    governanceKeys.administration,
+  ],
   proposal: (identity: ProposalIdentity) => [tableKeys.proposal(identity)],
   proposalResult: (identity: ProposalIdentity, result: Pick<ProposalView, 'plans'>) => [
     tableKeys.proposal(identity),
@@ -36,6 +42,7 @@ export function useTableChanges() {
   return {
     records: (tableId: string) => change({ keys: tableChangeKeys.records(tableId) }),
     definition: (tableId: string) => change({ keys: tableChangeKeys.definition(tableId) }),
+    archived: (tableId: string) => change({ keys: tableChangeKeys.archived(tableId) }),
     proposal: (identity: ProposalIdentity) => change({ keys: tableChangeKeys.proposal(identity) }),
     proposalResult: (identity: ProposalIdentity, result: Pick<ProposalView, 'plans'>) =>
       change({ keys: tableChangeKeys.proposalResult(identity, result) }),

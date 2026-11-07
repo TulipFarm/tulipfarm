@@ -144,8 +144,10 @@ export const proposalManifestSchema = z
     value =>
       value.installationId
         ? value.conversationId === null && value.turnId === null
-        : value.conversationId !== null && value.turnId !== null,
-    'A table proposal has either a real conversation origin or an installation origin',
+        : value.conversationId !== null
+          ? value.turnId !== null
+          : value.turnId === null && value.plans.length === 1 && value.plans[0]?.input.kind === 'archive',
+    'A table proposal has a real conversation origin, an installation origin, or is a single direct archive',
   );
 export const proposalDecisionSchema = z.strictObject({
   commandId: z.uuid(),

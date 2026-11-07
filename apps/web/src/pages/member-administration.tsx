@@ -29,6 +29,7 @@ export type GovernanceChange = (
   | 'invalid-team-name'
   | 'invalid-team-description'
   | 'team-owns-tables'
+  | 'team-owns-archived-tables'
   | 'team-owns-agents'
   | 'team-owns-integrations'
 >;
