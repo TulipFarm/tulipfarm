@@ -18,6 +18,7 @@ import { skillApi } from '@/features/skills/api';
 import { filesApi } from '@/features/files/api';
 import { mcpApi } from '@/features/workspace-mcp/api';
 import { TableRequestError } from '@/features/tables/request-state';
+import { workspaceAdminsLabel } from '@/features/governance/team-labels';
 
 export type PackageImport = z.infer<typeof importSystemPackageSchema>;
 export type PackageReview = z.infer<typeof installationReviewSchema>;
@@ -185,5 +186,4 @@ export function systemPackageApi(workspaceId: string) {
     },
   };
 }
-const workspaceAdminsLabel = 'Workspace admins';
 export type SystemPackageApi = ReturnType<typeof systemPackageApi>;

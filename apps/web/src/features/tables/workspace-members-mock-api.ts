@@ -617,6 +617,7 @@ export function createWorkspaceMembersMock(scenario?: string) {
         tables: [],
         grants: [],
         tableTeamIds: [],
+        adminTeamId: null,
       });
     if (path.endsWith('/governance/invitations')) return Response.json({ items: [], nextCursor: null });
     return Response.json({ error: 'not-available-in-member-table-mock' }, { status: 404 });

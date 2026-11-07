@@ -10,6 +10,7 @@ import {
   type saveAgentSchema,
 } from '@tulipfarm/agents/saved-contracts';
 import { apiOrigin } from '@/lib/auth';
+import { teamLabel } from '@/features/governance/team-labels';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 import {
@@ -132,8 +133,10 @@ export function agentApi(workspaceId: string) {
           signal,
         ),
       ),
-    context: async (signal: AbortSignal) =>
-      agentContextSchema.parse(await request('/authoring-context', 'GET', undefined, signal)),
+    context: async (signal: AbortSignal) => {
+      const context = agentContextSchema.parse(await request('/authoring-context', 'GET', undefined, signal));
+      return { ...context, teams: context.teams.map(team => ({ ...team, name: teamLabel(team.name) })) };
+    },
     setupDraft: async (id: string, signal: AbortSignal) =>
       agentSetupDraftSchema.parse(await request(`/${id}/setup-draft`, 'GET', undefined, signal)),
     saveSetupDraft: async (id: string, input: SaveAgentSetupDraft) =>

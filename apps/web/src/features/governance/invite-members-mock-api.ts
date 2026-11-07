@@ -41,6 +41,7 @@ function installInviteMembersMock() {
     tables: [],
     grants: [],
     tableTeamIds: [],
+    adminTeamId: null,
   };
   const receipts = new Map<
     string,
