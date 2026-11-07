@@ -136,6 +136,13 @@ export const knowledgeUnavailableReply =
 const createdFileOutput = z.object({ result: z.object({ file: z.object({ id: uuidSchema }) }) });
 /** The first common migration with follow-ups. */
 const followUpsVersion = 27;
+/** The first common migration with chat pins. A workspace still on an older migration has no pins yet. */
+const pinsVersion = 43;
+const hasPins = (tx: object) => Number((tx as { commonVersion?: number }).commonVersion ?? 0) >= pinsVersion;
+const pinnedColumn = (tx: AuthorizationTransaction, membership: string) =>
+  hasPins(tx)
+    ? `EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = ${membership}) AS pinned`
+    : 'false AS pinned';
 function followUpOutput(row: { tool: string; status: string; output?: unknown }) {
   if (row.status !== 'completed' || row.tool !== 'followups.schedule') return {};
   const output = z.object({ result: z.object({ followUp: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
@@ -248,7 +255,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       await tx.client.query(
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
       (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
-      EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = $3) AS pinned,
+      ${pinnedColumn(tx, '$3')},
       (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder <> 'package-install-v1'
         ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
@@ -846,7 +853,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         (
           await tx.client.query(
             `SELECT ${chatColumns}, project_id AS "projectId",
-          EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = $2) AS pinned
+          ${pinnedColumn(tx, '$2')}
         FROM ${table(tx, 'tf_conversations')} c
         WHERE kind = 'private' AND deleted_at IS NULL AND (archived_at IS NOT NULL) = $3
         AND project_id IS NOT DISTINCT FROM $7::uuid AND ($7::uuid IS NOT NULL OR (owner_user_id = $1 AND owner_membership_id = $2))
@@ -929,6 +936,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   /** The requester's pinned, unarchived chats across their private chats and active projects, most recently pinned first. */
   async function pinned(workspaceId: string, userId: string) {
     return human(workspaceId, userId, async (tx, actor) => {
+      if (!hasPins(tx)) return { chats: [] };
       const rows = z.array(chatSchema).parse(
         (
           await tx.client.query(
@@ -1006,8 +1014,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function pin(workspaceId: string, userId: string, chatIdInput: string, value: unknown) {
     const chatId = uuidSchema.parse(chatIdInput);
     const input = pinChatSchema.parse(value);
-    return human(workspaceId, userId, (tx, actor) =>
-      command(tx, actor, chatId, input.commandId, 'pin', input, pinnedSchema, async () => {
+    return human(workspaceId, userId, (tx, actor) => {
+      if (!hasPins(tx)) throw new StorageUnavailableError('incompatible_version');
+      return command(tx, actor, chatId, input.commandId, 'pin', input, pinnedSchema, async () => {
         await tx.client.query(
           input.pinned
             ? `INSERT INTO ${table(tx, 'tf_conversation_pins')} (membership_id, conversation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
@@ -1015,8 +1024,8 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           [actor.membershipId, chatId],
         );
         return { pinned: input.pinned };
-      }),
-    );
+      });
+    });
   }
 
   async function remove(workspaceId: string, userId: string, chatIdInput: string, value: unknown) {
