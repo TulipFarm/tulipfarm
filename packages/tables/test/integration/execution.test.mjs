@@ -1907,11 +1907,12 @@ test(
       ...access,
       resolveMigrationCredential: async () => db.login(ws, 'migration'),
     });
+    let commits = 0;
     const publish = createTablePublication({
       runtime,
       ...access,
       prepareRevision: async input => ({
-        commit: '1'.repeat(40),
+        commit: (++commits).toString(16).padStart(40, '1'),
         parentCommit: input.expectedParentCommit,
         bundle: { key: `test/${input.commandId}`, sha256: 'b'.repeat(64) },
         projection: { definition: input.definition },
@@ -2010,6 +2011,54 @@ test(
     );
     assert.ok(
       (await db.platform.query(`SELECT archived_at FROM ${s}.tf_table_catalog WHERE id=$1`, [archived])).rows[0]
+        .archived_at,
+    );
+
+    // A person can archive from the table page with no chat behind it; the same workflow check still applies.
+    const paged = await approve();
+    assert.equal(await finish(paged), 'completed');
+    const pageTable = lastTable;
+    const pageOrigin = { conversationId: null, turnId: null, sources: [] };
+    const pageArchive = async () => {
+      const id = randomUUID();
+      const plans = [
+        {
+          kind: 'archive',
+          tableId: pageTable,
+          dependsOn: [],
+          expectedRevision: (
+            await db.platform.query(`SELECT applied_revision FROM ${s}.tf_table_catalog WHERE id=$1`, [pageTable])
+          ).rows[0].applied_revision,
+        },
+      ];
+      const proposal = await proposals.propose(ws.id, actor, id, pageOrigin, { plans });
+      // Retrying the same request returns the same proposal.
+      assert.equal((await proposals.propose(ws.id, actor, id, pageOrigin, { plans })).digest, proposal.digest);
+      await decisions.decide(ws.id, ws.userId, null, id, {
+        digest: proposal.digest,
+        commandId: id,
+        decision: 'approve',
+      });
+      const status = await finish(proposal);
+      const result = await proposals.status(ws.id, ws.userId, null, id);
+      return [status, result.status, result.plans[0].receipt?.code ?? null];
+    };
+    await assert.rejects(
+      proposals.propose(ws.id, actor, randomUUID(), pageOrigin, {
+        plans: [{ kind: 'restore', tableId: pageTable, dependsOn: [], expectedRevision: null }],
+      }),
+    );
+    await db.platform.query(`UPDATE ${s}.tf_workflow_revisions SET definition=$2 WHERE workflow_id=$1 AND id=$3`, [
+      workflow,
+      { version: 1, name: 'Uses AC-table', trigger: { kind: 'row', tableId: pageTable }, steps: [] },
+      workflowRevision,
+    ]);
+    await db.platform.query(`UPDATE ${s}.tf_workflows SET enabled=true WHERE id=$1`, [workflow]);
+    await assert.rejects(pageArchive(), { code: 'workflow-active' });
+    await db.platform.query(`UPDATE ${s}.tf_workflows SET enabled=false WHERE id=$1`, [workflow]);
+    assert.deepEqual(await pageArchive(), ['completed', 'completed', null]);
+    assert.ok(
+      (await db.platform.query(`SELECT archived_at FROM ${s}.tf_table_catalog WHERE id=$1`, [pageTable])).rows[0]
         .archived_at,
     );
 
