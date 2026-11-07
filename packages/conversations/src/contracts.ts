@@ -319,6 +319,8 @@ export const toolReceiptSchema = z.object({
   tool: z.string(),
   status: z.enum(['running', 'completed', 'blocked', 'failed']),
   activityStatus: activityStatusSchema.optional(),
+  /** Why the step ended as it did, when its status alone would mislead. */
+  activityDetail: z.string().max(200).optional(),
   activity: z.string().nullable().default(null),
   /** What the model wrote before this call; null when none was saved or it must stay hidden. */
   narration: z.string().nullable().default(null),

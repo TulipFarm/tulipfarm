@@ -17,7 +17,7 @@ import { canonicalJson } from '../../src/canonical.ts';
 import { createTableService } from '../../../tables/dist/service.js';
 import { createTableWithRows, tableDefinition, textField, textValues } from '../fixture.mjs';
 import { AccessDenied } from '@tulipfarm/access';
-import { storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
+import { storedToolActivity, storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
 
 test(
   'table proposals persist exact effects and enforce requester decisions on restricted PostgreSQL roles',
@@ -532,8 +532,20 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         assert.equal(await activity({ result: first, sources: [] }), 'waiting');
         const second = await create(' vendors ');
         assert.equal((await status(first)).status, 'superseded');
-        assert.equal(await activity({ result: first, sources: [] }), 'cancelled');
-        assert.equal(await activity({ error: 'invalid-arguments', issues: [] }), 'cancelled');
+        assert.equal(await activity({ result: first, sources: [] }), 'completed');
+        assert.equal(await activity({ error: 'invalid-arguments', issues: [] }), 'completed');
+        const detail = output =>
+          runtime.transaction(workspace.id, commonCompatibility, tx =>
+            storedToolActivity(tx, { id: randomUUID(), tool: 'tables.propose', status: 'completed', output }),
+          );
+        assert.deepEqual(await detail({ result: first, sources: [] }), {
+          status: 'completed',
+          detail: 'Replaced by a revision.',
+        });
+        assert.deepEqual(await detail({ error: 'invalid-arguments', issues: [] }), {
+          status: 'completed',
+          detail: 'Corrected and resubmitted.',
+        });
         assert.equal((await status(second)).status, 'pending');
         await assert.rejects(decide(first), error => error.code === 'proposal-superseded');
 

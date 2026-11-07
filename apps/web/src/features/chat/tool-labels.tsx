@@ -98,19 +98,21 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
     label,
     status,
     visual: toolVisual(tool.tool, brand),
-    detail: tool.tool.startsWith('web.')
-      ? webDetail(tool)
-      : tool.tool === 'api.request' && status === 'failed'
-        ? apiCallProblem(tool.api && 'error' in tool.api ? tool.api.error : undefined)
-        : status === 'blocked' || status === 'failed'
-          ? problems[status]
-          : status === 'unknown'
-            ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
-            : status === 'waiting'
-              ? tool.tool === 'api.request'
-                ? 'Waiting for your approval.'
-                : 'Waiting for approval or another action. Review the action details below.'
-              : undefined,
+    detail: tool.activityDetail
+      ? tool.activityDetail
+      : tool.tool.startsWith('web.')
+        ? webDetail(tool)
+        : tool.tool === 'api.request' && status === 'failed'
+          ? apiCallProblem(tool.api && 'error' in tool.api ? tool.api.error : undefined)
+          : status === 'blocked' || status === 'failed'
+            ? problems[status]
+            : status === 'unknown'
+              ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
+              : status === 'waiting'
+                ? tool.tool === 'api.request'
+                  ? 'Waiting for your approval.'
+                  : 'Waiting for approval or another action. Review the action details below.'
+                : undefined,
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }
       : {}),

@@ -138,3 +138,11 @@ test('grouped knowledge keeps truthful states and does not imply a Slides file e
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(cancelled.label, 'Knowledge retrieval cancelled');
 });
+
+test('a server-provided activity detail explains a step that ended without its own result', () => {
+  const [item] = toolActivityItems([
+    tool({ tool: 'tables.propose', activityStatus: 'completed', activityDetail: 'Corrected and resubmitted.' }),
+  ]);
+  assert.equal(item?.status, 'completed');
+  assert.equal(item?.detail, 'Corrected and resubmitted.');
+});
