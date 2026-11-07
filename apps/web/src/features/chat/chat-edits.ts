@@ -16,20 +16,28 @@ export function editChat(chat: Chat, edit: ChatEdit): Chat {
   return chat;
 }
 
+/** Applies `edit` to a cached chat read: a paged list (`{ chats }`), the pinned chats or the sidebar. */
 export function editList(data: unknown, key: readonly unknown[], chat: Chat, edit: ChatEdit) {
+  // The pinned read and the sidebar are both arrays under the list prefix; only the key tells them apart.
+  if (key[2] === 'pinned') return Array.isArray(data) ? editPinned(data as Chat[], chat, edit) : data;
   if (Array.isArray(data)) return editSidebar(data as RecentItem[], chat, edit);
   if (!data || typeof data !== 'object' || !('chats' in data) || !Array.isArray(data.chats)) return data;
   const chats = data.chats as Chat[];
-  const pinnedList = key[2] === 'pinned';
+  if (!chats.some(item => item.id === chat.id)) return data;
   const leaves =
     edit.kind === 'delete' ||
-    (edit.kind === 'archive' && chats.some(item => item.id === chat.id && item.archived !== edit.archived)) ||
-    (pinnedList && ((edit.kind === 'pin' && !edit.pinned) || (edit.kind === 'archive' && edit.archived)));
+    (edit.kind === 'archive' && chats.some(item => item.id === chat.id && item.archived !== edit.archived));
   if (leaves) return { ...data, chats: chats.filter(item => item.id !== chat.id) };
-  if (pinnedList && edit.kind === 'pin' && !chat.archived && !chats.some(item => item.id === chat.id))
-    return { ...data, chats: [editChat(chat, edit), ...chats] };
-  if (!chats.some(item => item.id === chat.id)) return data;
   return { ...data, chats: chats.map(item => (item.id === chat.id ? editChat(item, edit) : item)) };
+}
+
+function editPinned(chats: Chat[], chat: Chat, edit: ChatEdit) {
+  const listed = chats.some(item => item.id === chat.id);
+  const leaves =
+    edit.kind === 'delete' || (edit.kind === 'pin' && !edit.pinned) || (edit.kind === 'archive' && edit.archived);
+  if (leaves) return listed ? chats.filter(item => item.id !== chat.id) : chats;
+  if (edit.kind === 'pin' && !listed && !chat.archived) return [editChat(chat, edit), ...chats];
+  return listed ? chats.map(item => (item.id === chat.id ? editChat(item, edit) : item)) : chats;
 }
 
 function editSidebar(items: RecentItem[], chat: Chat, edit: ChatEdit) {
