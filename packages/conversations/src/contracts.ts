@@ -194,6 +194,8 @@ export const renameChatSchema = z.strictObject({
   title: chatTitleSchema,
 });
 export const archiveChatSchema = z.strictObject({ commandId: uuidSchema, archived: z.boolean() });
+/** Pins or unpins a chat for the requester only. */
+export const pinChatSchema = z.strictObject({ commandId: uuidSchema, pinned: z.boolean() });
 export const deleteChatSchema = z.strictObject({ commandId: uuidSchema });
 export const historyQuerySchema = z.strictObject({ before: z.number().int().positive().max(2147483647).optional() });
 export const cursorSchema = z.strictObject({ activityAt: z.iso.datetime({ precision: 6 }), id: uuidSchema });
@@ -209,6 +211,8 @@ export const chatSchema = z.object({
   titleRevision: z.number().int(),
   titleManual: z.boolean().default(false),
   archived: z.boolean(),
+  /** Pinned by the requester; pins are per member. */
+  pinned: z.boolean().default(false),
   isClosed: z.boolean().default(false),
   activityAt: z.string(),
   createdAt: z.string(),

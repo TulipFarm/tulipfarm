@@ -96,6 +96,7 @@ import {
   useProjectApi,
   useProjectCandidates,
   useProjectChanges,
+  useProjectOptimism,
   useProjects,
   useProjectSource,
 } from '@/features/projects/queries';
@@ -737,16 +738,25 @@ function ArchivedNotice({
 
 function ArchiveButton({ api, project, refresh }: { api: ProjectApi; project: Project; refresh: () => Promise<void> }) {
   const changed = useProjectChanges();
+  const optimism = useProjectOptimism();
   const archive = useTableWrite(
     async (archived: boolean) => {
-      const saved = await api.edit(project.id, {
+      const edit = {
         expectedRevision: project.revision,
         name: project.name,
         instructions: project.instructions,
         archived,
-      });
-      void changed(project.id);
-      return saved;
+      };
+      // The open project switches views on archive, so only the lists move early and this button keeps its feedback.
+      const undo = await optimism(project.id, edit, false);
+      try {
+        return await api.edit(project.id, edit);
+      } catch (error) {
+        undo();
+        throw error;
+      } finally {
+        void changed(project.id);
+      }
     },
     () => {},
   );
@@ -1374,11 +1384,18 @@ function ProjectInstructions({
   const [stored, setStored] = useState(() => startDraft(project));
   const { draft, conflicts } = rebaseDraft(stored, project);
   if (draft !== stored) setStored(draft);
+  const optimism = useProjectOptimism();
   const write = useTableWrite(
     async (edit: ProjectEdit) => {
-      const saved = await api.edit(project.id, edit);
-      void changed(project.id);
-      return saved;
+      const undo = await optimism(project.id, edit, true);
+      try {
+        return await api.edit(project.id, edit);
+      } catch (error) {
+        undo();
+        throw error;
+      } finally {
+        void changed(project.id);
+      }
     },
     saved => setStored(current => (saved.revision > current.base.revision ? startDraft(saved) : current)),
   );

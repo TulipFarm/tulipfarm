@@ -20,7 +20,6 @@ import { Users } from 'reicon-react/icons/Users';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from '@/features/agents/api';
 import { AgentRead } from '@/features/agents/feedback';
 import { KeepsEditsContext, samePage, WriteFeedback } from '@/features/tables/feedback';
-import { useTableWrite } from '@/features/tables/use-table-write';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
@@ -43,7 +42,7 @@ import { AgentBuilder } from '@/features/agents/builder';
 import { useFeatureRead } from '@/lib/query';
 import type { BuilderInitial } from '@/features/agents/builder-draft';
 import { conversationApi } from '@/features/chat/conversation-api';
-import { TableRequestError } from '@/features/tables/request-state';
+import { failedWrite, TableRequestError, type WriteState } from '@/features/tables/request-state';
 
 export function AgentsPage() {
   const { workspace, user } = workspaceRoute.useRouteContext();
@@ -54,6 +53,19 @@ export function AgentsPage() {
   const archived = shelf === 'archived';
   const read = useAgents(api, after, search, archived);
   const canCreate = read.state.kind === 'ready';
+  // Kept here because a restored row leaves the list at once and comes back only if the restore fails.
+  const [restores, setRestores] = useState<ReadonlyMap<string, WriteState<string>>>(new Map());
+  const setRestore = (id: string, state: WriteState<string>) => setRestores(current => new Map(current).set(id, state));
+  async function restore(id: string) {
+    if (restores.get(id)?.kind === 'sending') return;
+    setRestore(id, { kind: 'sending', input: id });
+    try {
+      await api.restore(id);
+      setRestore(id, { kind: 'accepted' });
+    } catch (error) {
+      setRestore(id, failedWrite(id, error));
+    }
+  }
   return (
     <PageContent>
       <PageHeader title="Agents" description="Private instructions you can share with people and teams." />
@@ -159,7 +171,14 @@ export function AgentsPage() {
             ) : archived ? (
               <DataList aria-label="Archived agents" columns="two" headings={['Name', 'Actions']}>
                 {page.agents.map(agent => (
-                  <ArchivedAgentRow key={agent.id} api={api} id={agent.id} name={agent.name} refresh={read.refresh} />
+                  <ArchivedAgentRow
+                    key={agent.id}
+                    id={agent.id}
+                    name={agent.name}
+                    state={restores.get(agent.id) ?? { kind: 'idle' }}
+                    restore={() => void restore(agent.id)}
+                    refresh={read.refresh}
+                  />
                 ))}
               </DataList>
             ) : (
@@ -220,20 +239,18 @@ export function AgentsPage() {
 }
 
 function ArchivedAgentRow({
-  api,
   id,
   name,
+  state,
+  restore,
   refresh,
 }: {
-  api: ReturnType<typeof useAgentApi>;
   id: string;
   name: string;
+  state: WriteState<string>;
+  restore: () => void;
   refresh: () => Promise<void>;
 }) {
-  const write = useTableWrite(
-    (agentId: string) => api.restore(agentId),
-    () => undefined,
-  );
   return (
     <DataListRow>
       <DataListCell>
@@ -245,11 +262,11 @@ function ArchivedAgentRow({
           size="sm"
           variant="outline"
           pendingLabel="Restoring agent…"
-          onClick={() => void write.submit(id)}
+          onClick={restore}
           state={
-            write.state.kind === 'sending'
+            state.kind === 'sending'
               ? { kind: 'busy' }
-              : write.state.kind === 'uncertain'
+              : state.kind === 'uncertain'
                 ? { kind: 'blocked', reason: 'Check whether the agent was restored before trying again.' }
                 : { kind: 'ready' }
           }
@@ -257,11 +274,7 @@ function ArchivedAgentRow({
           <ArchiveUp size={16} aria-hidden="true" />
           Restore
         </Button>
-        <WriteFeedback
-          state={write.state}
-          checkStatus={() => void refresh()}
-          retry={agentId => void write.submit(agentId)}
-        />
+        <WriteFeedback state={state} checkStatus={() => void refresh()} retry={restore} />
       </DataListActions>
     </DataListRow>
   );

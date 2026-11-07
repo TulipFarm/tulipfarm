@@ -4,6 +4,7 @@ import type { Chat } from './conversation-api';
 const patchSchema = z.union([
   z.object({ title: z.string(), expectedRevision: z.number().int() }),
   z.object({ archived: z.boolean() }),
+  z.object({ pinned: z.boolean() }),
 ]);
 
 export function createChatsMock(scenario: string) {
@@ -32,6 +33,7 @@ export function createChatsMock(scenario: string) {
       titleRevision: 1,
       titleManual: true,
       archived: false,
+      pinned: index === 1,
       isClosed: false,
       activityAt: date.toISOString(),
       createdAt: date.toISOString(),
@@ -44,6 +46,7 @@ export function createChatsMock(scenario: string) {
       id: '22222222-2222-4222-8222-222222222222',
       title: 'Last quarter’s planning notes',
       archived: true,
+      pinned: false,
     },
     { ...chats[0]!, id: '33333333-3333-4333-8333-333333333333', title: 'Launch readiness review', projectId },
   );
@@ -54,6 +57,10 @@ export function createChatsMock(scenario: string) {
       return Response.json([
         { id: projectId, name: 'Product launch', instructions: '', revision: 1, archived: false, manager: true },
       ]);
+    if (method === 'GET' && path.endsWith('/conversations/pinned'))
+      return Response.json({
+        chats: scenario === 'chats-empty' ? [] : chats.filter(chat => chat.pinned && !chat.archived),
+      });
     if (method === 'GET' && path.endsWith('/conversations')) {
       reads++;
       if (scenario === 'chats-loading') await new Promise(resolve => setTimeout(resolve, 2000));
@@ -104,6 +111,10 @@ export function createChatsMock(scenario: string) {
         typeof init?.body === 'string' ? JSON.parse(init.body) : input instanceof Request ? await input.json() : null;
       const parsed = patchSchema.safeParse(body);
       if (!parsed.success) return Response.json({ error: 'invalid-request' }, { status: 400 });
+      if ('pinned' in parsed.data) {
+        chat.pinned = parsed.data.pinned;
+        return Response.json({ pinned: chat.pinned });
+      }
       if ('archived' in parsed.data) {
         chat.archived = parsed.data.archived;
         return Response.json({ archived: chat.archived });

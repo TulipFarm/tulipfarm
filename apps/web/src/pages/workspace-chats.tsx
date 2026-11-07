@@ -1,4 +1,4 @@
-import { DataList, DataListActions, DataListButton, DataListCell, DataListRow } from '@/components/data-list';
+import { DataList, DataListActions, DataListCell, DataListLink, DataListRow } from '@/components/data-list';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
@@ -8,7 +8,7 @@ import { MoreH } from 'reicon-react/icons/MoreH';
 import { Edit } from 'reicon-react/icons/Edit';
 import { Archive } from 'reicon-react/icons/Archive';
 import { Trash } from 'reicon-react/icons/Trash';
-import { XIcon } from 'lucide-react';
+import { Pin, PinOff, XIcon } from 'lucide-react';
 import { workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -43,7 +43,13 @@ import {
 import { TableRequestError } from '@/features/tables/request-state';
 import { requestSignal } from '@/lib/http';
 import { ConversationRead } from '@/features/chat/conversation-feedback';
-import { useConversationList, useConversationPrefetch } from '@/features/chat/queries';
+import {
+  useChatOptimism,
+  useConversationChanges,
+  useConversationList,
+  useConversationPrefetch,
+  usePinnedChats,
+} from '@/features/chat/queries';
 import { ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { startNavigationMeasure } from '@/lib/navigation-performance';
 
@@ -87,10 +93,16 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
   }, [query, search]);
   const listHeading = useRef<HTMLHeadingElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const open = (id: string) => {
-    void navigate({ to: '/$workspaceSlug/chat/$chatId', params: { workspaceSlug, chatId: id } });
-  };
   const list = useConversationList(api, archived, search, pages, projectId);
+  // Pinned chats lead the active list; a search or the archive shows every match in place.
+  const showPinned = !archived && !search;
+  const pinnedRead = usePinnedChats(api, showPinned);
+  const pinned =
+    showPinned && pinnedRead.state.kind === 'ready'
+      ? pinnedRead.state.data.filter(chat => chat.projectId === projectId)
+      : [];
+  const changes = useConversationChanges();
+  const optimism = useChatOptimism();
   const prefetch = useConversationPrefetch(workspace.id);
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(intent.current), []);
@@ -119,79 +131,215 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
   }, []);
   const listReady = list.state.kind === 'ready' && !list.state.error && !list.state.refreshing;
   const titleValidation = editing ? titleError(title) : null;
+  const editingId = useRef<string | null>(null);
   const startEditing = (chat: Chat | null) => {
+    editingId.current = chat?.id ?? null;
     setEditing(chat);
     setTitle(chat?.title ?? '');
     setRenameError(null);
     setUnconfirmed(null);
   };
-  async function archive(chat: Chat, nextArchived: boolean) {
+  /** Shows the change at once, sends it, and puts the chat back if the server refuses it. */
+  async function apply(chat: Chat, command: ConversationCommand, edit: Parameters<typeof optimism>[1]) {
     setPending(chat.id);
-    setNotice(null);
+    const undo = await optimism(chat, edit);
     try {
-      await api.command(
-        { kind: 'archive', chatId: chat.id, commandId: crypto.randomUUID(), archived: nextArchived },
-        new AbortController().signal,
-      );
-      setNotice({
-        text: nextArchived ? `“${chat.title}” archived.` : `“${chat.title}” restored.`,
-        undo: { chat, archived: !nextArchived },
-      });
-      void list.refresh();
-    } catch {
+      await api.command(command, requestSignal());
+      return null;
+    } catch (error) {
+      undo();
+      return error;
+    } finally {
+      setPending(null);
+      void changes.command(command);
+    }
+  }
+  async function archive(chat: Chat, nextArchived: boolean) {
+    setNotice({
+      text: nextArchived ? `“${chat.title}” archived.` : `“${chat.title}” restored.`,
+      undo: { chat: { ...chat, archived: nextArchived }, archived: !nextArchived },
+    });
+    const command = {
+      kind: 'archive' as const,
+      chatId: chat.id,
+      commandId: crypto.randomUUID(),
+      archived: nextArchived,
+    };
+    if (await apply(chat, command, { kind: 'archive', archived: nextArchived }))
       setNotice({
         text: `Could not ${nextArchived ? 'archive' : 'restore'} “${chat.title}”. Refresh the list and try again.`,
         error: true,
       });
-    } finally {
-      setPending(null);
-    }
   }
   async function remove(chat: Chat) {
-    setPending(chat.id);
     setNotice(null);
-    try {
-      await api.command(
-        { kind: 'delete', chatId: chat.id, commandId: crypto.randomUUID() },
-        new AbortController().signal,
-      );
-      void list.refresh();
-    } catch {
+    const command = { kind: 'delete' as const, chatId: chat.id, commandId: crypto.randomUUID() };
+    if (await apply(chat, command, { kind: 'delete' }))
       setNotice({ text: `Could not delete “${chat.title}”. Refresh the list and try again.`, error: true });
-    } finally {
-      setPending(null);
-    }
+  }
+  async function pin(chat: Chat, nextPinned: boolean) {
+    setNotice(null);
+    const command = { kind: 'pin' as const, chatId: chat.id, commandId: crypto.randomUUID(), pinned: nextPinned };
+    if (await apply(chat, command, { kind: 'pin', pinned: nextPinned }))
+      setNotice({ text: `Could not ${nextPinned ? 'pin' : 'unpin'} “${chat.title}”. Try again.`, error: true });
   }
   async function rename(chat: Chat) {
     if (titleValidation) return;
-    setPending(chat.id);
     setNotice(null);
-    setRenameError(null);
     // Saving the same title again resends the unconfirmed command, so the server replays a rename that already landed instead of refusing it as stale.
-    const retry = unconfirmed?.chatId === chat.id && unconfirmed.title === title.trim();
+    const next = title.trim();
+    const retry = unconfirmed?.chatId === chat.id && unconfirmed.title === next;
     const command = retry
       ? unconfirmed
       : {
           kind: 'rename' as const,
           chatId: chat.id,
           commandId: crypto.randomUUID(),
-          title: title.trim(),
+          title: next,
           expectedRevision: chat.titleRevision,
         };
-    try {
-      await api.command(command, requestSignal());
-      startEditing(null);
-      void list.refresh();
-    } catch (error) {
-      const uncertain = !(error instanceof TableRequestError) || error.status >= 500;
-      if (uncertain) setUnconfirmed(command);
-      else if (retry) setUnconfirmed(null);
-      setRenameError(renameFailure(error, !retry && unconfirmed?.chatId === chat.id));
-      if (uncertain || error.status === 409) void list.refresh();
-    } finally {
-      setPending(null);
+    const earlierUnconfirmed = !retry && unconfirmed?.chatId === chat.id;
+    editingId.current = null;
+    setEditing(null);
+    const error = await apply(chat, command, { kind: 'rename', title: next });
+    if (!error) {
+      setUnconfirmed(null);
+      return;
     }
+    const uncertain = !(error instanceof TableRequestError) || error.status >= 500;
+    const message = renameFailure(error, earlierUnconfirmed);
+    // Reopen the editor with the typed title, unless another chat is being renamed by now.
+    if (editingId.current !== null && editingId.current !== chat.id) {
+      setNotice({ text: `Could not rename “${chat.title}”. ${message}`, error: true });
+      return;
+    }
+    editingId.current = chat.id;
+    setEditing(chat);
+    setTitle(next);
+    setUnconfirmed(uncertain ? command : retry ? null : unconfirmed);
+    setRenameError(message);
   }
+  const row = (chat: Chat) => (
+    <DataListRow key={chat.id}>
+      <DataListCell>
+        <div className="grid w-full min-w-0 gap-1">
+          {editing?.id === chat.id ? (
+            <form
+              className="grid min-w-0 gap-1"
+              onSubmit={event => {
+                event.preventDefault();
+                void rename(chat);
+              }}
+            >
+              <div className="flex min-w-0 flex-wrap gap-2">
+                <div className="min-w-0 flex-1 basis-40">
+                  <Input
+                    autoFocus
+                    aria-label="Chat title"
+                    value={title}
+                    maxLength={640}
+                    aria-invalid={!!(titleValidation ?? renameError)}
+                    aria-describedby={(titleValidation ?? renameError) ? 'chat-title-error' : undefined}
+                    onChange={event => {
+                      setTitle(event.target.value);
+                      setRenameError(null);
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        startEditing(null);
+                      }
+                    }}
+                  />
+                </div>
+                <Button type="submit" size="sm" disabled={pending === chat.id || !!titleValidation}>
+                  {renameError ? 'Save again' : 'Save'}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending === chat.id}
+                  onClick={() => startEditing(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+              {(titleValidation ?? renameError) && (
+                <p id="chat-title-error" role="alert" className="text-sm text-destructive">
+                  {titleValidation ?? renameError}
+                </p>
+              )}
+              {chat.titleRevision !== editing.titleRevision && (
+                <p className="break-words text-sm text-muted-foreground">Current title: “{chat.title}”</p>
+              )}
+            </form>
+          ) : (
+            <DataListLink
+              weight="strong"
+              render={<Link to="/$workspaceSlug/chat/$chatId" params={{ workspaceSlug, chatId: chat.id }} />}
+              onPointerEnter={() => hover(chat.id)}
+              onPointerLeave={() => hover(null)}
+              onFocus={() => prefetch(chat.id)}
+              title={chat.title}
+            >
+              {chat.title}
+            </DataListLink>
+          )}
+          <time
+            className="flex flex-wrap gap-x-2 text-xs text-muted-foreground tabular-nums"
+            dateTime={chat.activityAt}
+            title={new Date(chat.activityAt).toLocaleString()}
+            aria-label={`Last activity: ${new Date(chat.activityAt).toLocaleString()}`}
+          >
+            <span>{chatActivityDate(chat.activityAt)}</span>
+            <span>
+              {new Date(chat.activityAt).toLocaleTimeString(undefined, {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            </span>
+          </time>
+        </div>
+      </DataListCell>
+      <DataListActions>
+        {chat.pinned && !chat.archived && (
+          <span className="flex shrink-0 text-muted-foreground">
+            <Pin size={14} aria-label="Pinned" role="img" />
+          </span>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={pending === chat.id}
+            render={<Button variant="ghost" size="icon-sm" aria-label={`More actions for ${chat.title}`} />}
+          >
+            <MoreH size={16} aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" size="menu">
+            {!chat.archived && (
+              <DropdownMenuItem onClick={() => void pin(chat, !chat.pinned)}>
+                {chat.pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}
+                {chat.pinned ? 'Unpin' : 'Pin'}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => startEditing(chat)}>
+              <Edit size={14} aria-hidden="true" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void archive(chat, !chat.archived)}>
+              <Archive size={14} aria-hidden="true" />
+              {chat.archived ? 'Restore' : 'Archive'}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={() => setDeleting(chat)}>
+              <Trash size={14} aria-hidden="true" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </DataListActions>
+    </DataListRow>
+  );
   return (
     <div role="region" aria-label="Chat list" className="min-h-0 flex-1 overflow-y-auto pb-24">
       <PageContent>
@@ -331,206 +479,106 @@ function ConversationList({ api, projectId }: { api: ConversationApi; projectId:
               </AlertDescription>
             </Alert>
           )}
+          {pinned.length > 0 && (
+            <section aria-labelledby="pinned-chats-heading" className="space-y-2">
+              <h2 id="pinned-chats-heading" className="text-sm font-medium text-muted-foreground">
+                Pinned
+              </h2>
+              <DataList aria-label="Pinned chats" columns="chats" headings={['Chat', 'Actions']}>
+                {pinned.map(row)}
+              </DataList>
+            </section>
+          )}
           <ConversationRead state={list.state} refresh={list.refresh}>
-            {data => (
-              <>
-                {data.chats.length === 0 ? (
-                  search ? (
-                    <StatePanel
-                      kind="empty"
-                      icon={ChatRound}
-                      title="No matching chats"
-                      description="Try another title or clear your search."
-                    >
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setQuery('');
-                          setSearch('');
-                          setPages(1);
-                        }}
+            {data => {
+              const chats = showPinned ? data.chats.filter(chat => !chat.pinned) : data.chats;
+              return (
+                <>
+                  {pinned.length > 0 && (chats.length > 0 || data.nextCursor) && (
+                    <h2 className="text-sm font-medium text-muted-foreground">Recent</h2>
+                  )}
+                  {chats.length === 0 && pinned.length > 0 ? null : chats.length === 0 ? (
+                    search ? (
+                      <StatePanel
+                        kind="empty"
+                        icon={ChatRound}
+                        title="No matching chats"
+                        description="Try another title or clear your search."
                       >
-                        Clear search
-                      </Button>
-                    </StatePanel>
-                  ) : archived ? (
-                    <StatePanel
-                      kind="empty"
-                      icon={ChatRound}
-                      title="No archived chats"
-                      description="Chats you archive will appear here. Open one to restore it."
-                    >
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setArchived(false);
-                          setPages(1);
-                        }}
-                      >
-                        Show active chats
-                      </Button>
-                    </StatePanel>
-                  ) : projectId ? (
-                    <StatePanel
-                      kind="empty"
-                      icon={ChatRound}
-                      title="No chats in this project yet"
-                      description="Start a chat that everyone in this project can read, or move a personal chat here from its chat menu."
-                    >
-                      {!project?.archived && (
                         <Button
-                          nativeButton={false}
-                          render={
-                            <Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ project: projectId }} />
-                          }
+                          variant="outline"
+                          onClick={() => {
+                            setQuery('');
+                            setSearch('');
+                            setPages(1);
+                          }}
                         >
-                          <Add size={16} aria-hidden="true" />
-                          Start a project chat
+                          Clear search
                         </Button>
-                      )}
-                    </StatePanel>
+                      </StatePanel>
+                    ) : archived ? (
+                      <StatePanel
+                        kind="empty"
+                        icon={ChatRound}
+                        title="No archived chats"
+                        description="Chats you archive will appear here. Open one to restore it."
+                      >
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setArchived(false);
+                            setPages(1);
+                          }}
+                        >
+                          Show active chats
+                        </Button>
+                      </StatePanel>
+                    ) : projectId ? (
+                      <StatePanel
+                        kind="empty"
+                        icon={ChatRound}
+                        title="No chats in this project yet"
+                        description="Start a chat that everyone in this project can read, or move a personal chat here from its chat menu."
+                      >
+                        {!project?.archived && (
+                          <Button
+                            nativeButton={false}
+                            render={
+                              <Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ project: projectId }} />
+                            }
+                          >
+                            <Add size={16} aria-hidden="true" />
+                            Start a project chat
+                          </Button>
+                        )}
+                      </StatePanel>
+                    ) : (
+                      <StatePanel
+                        kind="empty"
+                        icon={ChatRound}
+                        title="No chats yet"
+                        description="Ask about your customers, orders, or invoices in plain language. Every private conversation is saved here so you can pick it up later."
+                        sample={<ChatsSample />}
+                      >
+                        <Button nativeButton={false} render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} />}>
+                          <Add size={16} aria-hidden="true" />
+                          Start a chat
+                        </Button>
+                      </StatePanel>
+                    )
                   ) : (
-                    <StatePanel
-                      kind="empty"
-                      icon={ChatRound}
-                      title="No chats yet"
-                      description="Ask about your customers, orders, or invoices in plain language. Every private conversation is saved here so you can pick it up later."
-                      sample={<ChatsSample />}
-                    >
-                      <Button nativeButton={false} render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} />}>
-                        <Add size={16} aria-hidden="true" />
-                        Start a chat
-                      </Button>
-                    </StatePanel>
-                  )
-                ) : (
-                  <DataList aria-label="Chats" columns="chats" headings={['Chat', 'Actions']}>
-                    {data.chats.map(chat => (
-                      <DataListRow key={chat.id}>
-                        <DataListCell>
-                          <div className="grid w-full min-w-0 gap-1">
-                            {editing?.id === chat.id ? (
-                              <form
-                                className="grid min-w-0 gap-1"
-                                onSubmit={event => {
-                                  event.preventDefault();
-                                  void rename(chat);
-                                }}
-                              >
-                                <div className="flex min-w-0 flex-wrap gap-2">
-                                  <div className="min-w-0 flex-1 basis-40">
-                                    <Input
-                                      autoFocus
-                                      aria-label="Chat title"
-                                      value={title}
-                                      maxLength={640}
-                                      aria-invalid={!!(titleValidation ?? renameError)}
-                                      aria-describedby={
-                                        (titleValidation ?? renameError) ? 'chat-title-error' : undefined
-                                      }
-                                      onChange={event => {
-                                        setTitle(event.target.value);
-                                        setRenameError(null);
-                                      }}
-                                      onKeyDown={event => {
-                                        if (event.key === 'Escape') {
-                                          event.preventDefault();
-                                          startEditing(null);
-                                        }
-                                      }}
-                                    />
-                                  </div>
-                                  <Button type="submit" size="sm" disabled={pending === chat.id || !!titleValidation}>
-                                    {pending === chat.id ? 'Saving…' : renameError ? 'Save again' : 'Save'}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="ghost"
-                                    disabled={pending === chat.id}
-                                    onClick={() => startEditing(null)}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                                {(titleValidation ?? renameError) && (
-                                  <p id="chat-title-error" role="alert" className="text-sm text-destructive">
-                                    {titleValidation ?? renameError}
-                                  </p>
-                                )}
-                                {chat.titleRevision !== editing.titleRevision && (
-                                  <p className="break-words text-sm text-muted-foreground">
-                                    Current title: “{chat.title}”
-                                  </p>
-                                )}
-                              </form>
-                            ) : (
-                              <DataListButton
-                                weight="strong"
-                                onClick={() => open(chat.id)}
-                                onPointerEnter={() => hover(chat.id)}
-                                onPointerLeave={() => hover(null)}
-                                onFocus={() => prefetch(chat.id)}
-                                aria-label={chat.title}
-                                title={chat.title}
-                              >
-                                {chat.title}
-                              </DataListButton>
-                            )}
-                            <time
-                              className="flex flex-wrap gap-x-2 text-xs text-muted-foreground tabular-nums"
-                              dateTime={chat.activityAt}
-                              title={new Date(chat.activityAt).toLocaleString()}
-                              aria-label={`Last activity: ${new Date(chat.activityAt).toLocaleString()}`}
-                            >
-                              <span>{chatActivityDate(chat.activityAt)}</span>
-                              <span>
-                                {new Date(chat.activityAt).toLocaleTimeString(undefined, {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                            </time>
-                          </div>
-                        </DataListCell>
-                        <DataListActions>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger
-                              disabled={pending === chat.id}
-                              render={
-                                <Button variant="ghost" size="icon-sm" aria-label={`More actions for ${chat.title}`} />
-                              }
-                            >
-                              <MoreH size={16} aria-hidden="true" />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" size="menu">
-                              <DropdownMenuItem onClick={() => startEditing(chat)}>
-                                <Edit size={14} aria-hidden="true" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => void archive(chat, !chat.archived)}>
-                                <Archive size={14} aria-hidden="true" />
-                                {chat.archived ? 'Restore' : 'Archive'}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem variant="destructive" onClick={() => setDeleting(chat)}>
-                                <Trash size={14} aria-hidden="true" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </DataListActions>
-                      </DataListRow>
-                    ))}
-                  </DataList>
-                )}
-                {data.nextCursor && (
-                  <Button variant="outline" disabled={!listReady} onClick={() => setPages(value => value + 1)}>
-                    Load more chats
-                  </Button>
-                )}
-              </>
-            )}
+                    <DataList aria-label="Chats" columns="chats" headings={['Chat', 'Actions']}>
+                      {chats.map(row)}
+                    </DataList>
+                  )}
+                  {data.nextCursor && (
+                    <Button variant="outline" disabled={!listReady} onClick={() => setPages(value => value + 1)}>
+                      Load more chats
+                    </Button>
+                  )}
+                </>
+              );
+            }}
           </ConversationRead>
         </div>
       </PageContent>

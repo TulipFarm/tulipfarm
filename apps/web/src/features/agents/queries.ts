@@ -1,5 +1,12 @@
 import { useMemo } from 'react';
-import { useFeatureChanges, useFeatureRead, type QueryKey } from '@/lib/query';
+import {
+  editListed,
+  editListedIn,
+  useFeatureChanges,
+  useFeatureRead,
+  useOptimisticUpdate,
+  type QueryKey,
+} from '@/lib/query';
 import { useQueryClient } from '@tanstack/react-query';
 import { featureKey, useFeatureScope } from '@/lib/query';
 import { agentApi, type AgentCommand, type AgentContext, type AgentDetail } from './api';
@@ -154,10 +161,21 @@ export function useAgentAccessChanges() {
   const { change } = useFeatureChanges();
   return useMemo(() => (keys: readonly QueryKey[]) => change({ kind: 'conceal', keys }), [change]);
 }
+/** Drops an agent from a cached list page on the `archived` shelf, and from the sidebar when it lists current agents. */
+function withoutAgent(data: unknown, key: readonly unknown[], id: string, archived: boolean) {
+  const shelf = key[2];
+  if (shelf === 'sidebar') return archived ? data : editListed(data, id, () => null);
+  if (!shelf || typeof shelf !== 'object' || !('archived' in shelf) || shelf.archived !== archived) return data;
+  const next = editListedIn(data, 'agents', id, () => null);
+  if (next === data || !next || typeof next !== 'object' || !('count' in next) || typeof next.count !== 'number')
+    return next;
+  return { ...next, count: next.count - 1 };
+}
 export function useAgentApi(workspaceId: string) {
   const changed = useAgentChanges();
   const accessChanged = useAgentAccessChanges();
   const { change } = useFeatureChanges();
+  const optimistic = useOptimisticUpdate();
   return useMemo(() => {
     const api = agentApi(workspaceId);
     async function modelCommand<T>(work: Promise<T>) {
@@ -181,6 +199,17 @@ export function useAgentApi(workspaceId: string) {
       void accessChanged(agentChangeKeys(id));
       return result;
     }
+    /** Shows the agent leaving its `archived` shelf at once; restores the lists if `send` fails. */
+    async function leaving<T>(id: string, archived: boolean, send: () => Promise<T>) {
+      const undo = await optimistic([agentKeys.lists], (data, key) => withoutAgent(data, key, id, archived));
+      try {
+        return await send();
+      } catch (error) {
+        undo();
+        void changed(id);
+        throw error;
+      }
+    }
     async function usage<T>(id: string, work: Promise<T>) {
       const result = await modelCommand(work);
       void change({ keys: [agentKeys.detail(id), ['credits', 'balance'], ['credits', 'usage']] });
@@ -196,14 +225,14 @@ export function useAgentApi(workspaceId: string) {
       updatePolicy: (id: string, input: Parameters<Api['updatePolicy']>[1]) =>
         permissions(id, api.updatePolicy(id, input)),
       configure: (id: string, input: Parameters<Api['configure']>[1]) => permissions(id, api.configure(id, input)),
-      remove: (id: string) => permissions(id, api.remove(id)),
-      archive: (id: string) => permissions(id, api.archive(id)),
-      restore: (id: string) => saved(id, api.restore(id)),
+      remove: (id: string) => leaving(id, false, () => permissions(id, api.remove(id))),
+      archive: (id: string) => leaving(id, false, () => permissions(id, api.archive(id))),
+      restore: (id: string) => leaving(id, true, () => saved(id, api.restore(id))),
       activate: (id: string, input: Parameters<Api['activate']>[1]) => saved(id, api.activate(id, input)),
       revokeActivation: (id: string, activationId: string) => permissions(id, api.revokeActivation(id, activationId)),
       chat: (id: string, input: Parameters<Api['chat']>[1]) => usage(id, api.chat(id, input)),
       retryModel: (id: string, turnId: string, input: Parameters<Api['retryModel']>[2]) =>
         usage(id, api.retryModel(id, turnId, input)),
     };
-  }, [workspaceId, changed, change, accessChanged]);
+  }, [workspaceId, changed, change, accessChanged, optimistic]);
 }

@@ -15,7 +15,7 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { failedWrite } from '@/features/tables/request-state';
 import { formatFileSize } from '@/lib/file-viewer';
 import { useFeatureRead } from '@/lib/query';
-import { fileKeys, maxUploadBytes, type FilesApi, type FileSummary } from './api';
+import { fileKeys, maxUploadBytes, useFilesChanges, useFilesOptimism, type FilesApi, type FileSummary } from './api';
 
 type FinalFocus = React.ComponentProps<typeof DialogContent>['finalFocus'];
 type Sending = { kind: 'idle' } | { kind: 'sending' } | { kind: 'failed'; message: string };
@@ -48,13 +48,18 @@ export function DeleteForeverDialog({
     load: signal => api.previewDeletion(item.id, signal),
   });
   const [sending, setSending] = useState<Sending>({ kind: 'idle' });
+  const optimism = useFilesOptimism();
+  const { changed } = useFilesChanges();
   const busy = sending.kind === 'sending';
   async function remove() {
     if (busy) return;
     setSending({ kind: 'sending' });
+    const undo = await optimism([item.id], () => null);
     try {
       onClose(await api.deleteForever(item.id));
     } catch (error) {
+      undo();
+      void changed();
       const outcome = failedWrite(null, error);
       setSending({
         kind: 'failed',

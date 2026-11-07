@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { featureReadOptions, freshness, useFeatureChanges, useFeatureRead, useLoadedWindow } from '@/lib/query';
+import {
+  featureReadOptions,
+  freshness,
+  useFeatureChanges,
+  useFeatureRead,
+  useLoadedWindow,
+  useOptimisticUpdate,
+} from '@/lib/query';
 import { replyBackoff } from '@/lib/query/polling';
 import { useFeatureContext } from '@/lib/query/provider';
 import { scopeKey } from '@/lib/query/scope';
 import { creditKeys } from '@/lib/credit-keys';
 import { modelKeys } from '@/features/models/queries';
+import { editChat, editList, type ChatEdit } from './chat-edits';
 import {
   conversationApi,
   hasPendingReplies,
+  type Chat,
   type ChatHistoryPage,
   type ChatListPage,
   type ConversationApi,
@@ -22,6 +31,8 @@ export const conversationKeys = {
   lists: () => ['conversations', 'list'] as const,
   list: (archived: boolean, search: string, pages: number, projectId: string | null) =>
     ['conversations', 'list', { archived, search, pages, projectId }] as const,
+  /** Under `lists()`, so every chat change refreshes it. */
+  pinned: () => ['conversations', 'list', 'pinned'] as const,
   detail: (id: string) => ['conversations', 'detail', id] as const,
   followUp: (chatId: string, id: string) => ['conversations', 'detail', chatId, 'follow-up', id] as const,
   histories: (id: string) => ['conversations', 'detail', id, 'history'] as const,
@@ -54,7 +65,7 @@ export function useConversationChanges() {
           keys: [
             conversationKeys.detail(command.chatId),
             conversationKeys.lists(),
-            ...(['rename', 'archive', 'create', 'move'].includes(command.kind) ? [] : [creditKeys.balance()]),
+            ...(['rename', 'archive', 'pin', 'create', 'move'].includes(command.kind) ? [] : [creditKeys.balance()]),
           ],
         }),
       progress: () => change({ keys: [conversationKeys.lists(), creditKeys.balance()] }),
@@ -121,6 +132,34 @@ export function useConversationList(
       conversationKeys.list(archived, search, pages, projectId),
     ),
   };
+}
+
+export function usePinnedChats(api: ConversationApi, enabled = true) {
+  return useFeatureRead({ key: conversationKeys.pinned(), load: signal => api.pinned(signal), enabled });
+}
+
+/**
+ * Shows a rename, archive, delete, or pin in every chat list, the sidebar, and the open chat before
+ * the server confirms it. Undo when the command fails; report the command as usual either way.
+ */
+export function useChatOptimism() {
+  const optimistic = useOptimisticUpdate();
+  return useCallback(
+    async (chat: Chat, edit: ChatEdit) => {
+      const undo = await Promise.all([
+        optimistic([conversationKeys.lists()], (data, key) => editList(data, key, chat, edit)),
+        optimistic([conversationKeys.histories(chat.id)], data =>
+          data && typeof data === 'object' && 'chat' in data && data.chat
+            ? { ...data, chat: editChat(data.chat as Chat, edit) }
+            : data,
+        ),
+      ]);
+      return () => {
+        for (const restore of undo) restore();
+      };
+    },
+    [optimistic],
+  );
 }
 
 /** Changes the chat lists also show: a settled turn, or a title that arrived after its reply. */

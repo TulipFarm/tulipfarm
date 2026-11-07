@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { useFeatureChanges, useFeatureRead } from '@/lib/query';
-import { skillApi, type SkillListView } from './api';
+import { editListedIn, useFeatureChanges, useFeatureRead, useOptimisticUpdate } from '@/lib/query';
+import { skillApi, type SkillLifecycleCommand, type SkillListView } from './api';
 import { useAgentAccessChanges } from '@/features/agents/queries';
 
 type Api = ReturnType<typeof skillApi>;
@@ -45,19 +45,50 @@ export function useSkillChanges() {
   const { change } = useFeatureChanges();
   return useMemo(() => (id: string) => change({ keys: affected(id) }), [change]);
 }
+/** A skill's expected place after a lifecycle change: off the lists it leaves, with its detail showing the new state. */
+function afterLifecycle(
+  data: unknown,
+  key: readonly unknown[],
+  id: string,
+  lifecycle: SkillLifecycleCommand['lifecycle'],
+) {
+  if (key[1] === 'detail')
+    return lifecycle !== 'deleted' && data && typeof data === 'object' && 'lifecycle' in data
+      ? { ...data, lifecycle }
+      : data;
+  const query = key[2];
+  if (!query || typeof query !== 'object' || !('view' in query)) return data;
+  if (lifecycle !== 'deleted' && (query.view === 'archived') !== (lifecycle === 'active')) return data;
+  return editListedIn(data, 'workspace', id, () => null);
+}
 export function useSkillApi(workspaceId: string) {
   const changed = useSkillChanges();
   const accessChanged = useAgentAccessChanges();
+  const optimistic = useOptimisticUpdate();
   return useMemo(() => {
     const api = skillApi(workspaceId);
     return {
       ...api,
       send: async (...args: Parameters<Api['send']>) => {
-        const result = await api.send(...args);
-        if (args[1].kind === 'enable' && !args[1].enabled) void accessChanged(affected(args[0]));
-        else void changed(args[0]);
+        const [id, command] = args;
+        const undo =
+          command.kind === 'lifecycle'
+            ? await optimistic([skillKeys.lists, skillKeys.detail(id)], (data, key) =>
+                afterLifecycle(data, key, id, command.lifecycle),
+              )
+            : () => {};
+        let result: Awaited<ReturnType<Api['send']>>;
+        try {
+          result = await api.send(...args);
+        } catch (error) {
+          undo();
+          void changed(id);
+          throw error;
+        }
+        if (command.kind === 'enable' && !command.enabled) void accessChanged(affected(id));
+        else void changed(id);
         return result;
       },
     };
-  }, [workspaceId, changed, accessChanged]);
+  }, [workspaceId, changed, accessChanged, optimistic]);
 }
