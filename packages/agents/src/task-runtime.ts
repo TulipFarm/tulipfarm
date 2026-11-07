@@ -107,14 +107,14 @@ const followThrough =
   'Earlier in this request you replied without a tool call but said that more work would follow, so the task kept running. Do any remaining work now with tool calls. Do only what the owner asked. If the work is done or you need the owner, reply in plain text without a tool call; that reply ends the task.';
 const furtherWork =
   /\b(?:i(?:'|’)ll|i will|i(?:'|’)m going to|i am going to|i(?:'|’)m about to|i am about to|let me(?! know))\b/i;
-/** Whether a reply's last paragraph announces a next step, such as "I will now propose the row", instead of ending the work. */
+// "I will propose again if needed" or "Once you approve, I'll add it" offers later work; it does not announce a next step.
+const conditional = /\b(?:if|once|when|whenever|after|unless)\b/i;
+/** Whether a reply's last sentence announces a next step, such as "I will now propose the row", instead of ending the work. */
 export function announcesFurtherWork(text: string) {
-  const ending =
-    text
-      .trim()
-      .split(/\n\s*\n/)
-      .at(-1) ?? '';
-  return /(?::|\.\.\.|…)$/.test(ending) || furtherWork.test(ending);
+  const ending = text.trim();
+  if (/(?::|\.\.\.|…)$/.test(ending)) return true;
+  const sentence = ending.split(/(?<=[.!?])\s+|\n/).at(-1) ?? '';
+  return furtherWork.test(sentence) && !conditional.test(sentence);
 }
 export type TaskAttachmentReader = (input: {
   workspaceId: string;
