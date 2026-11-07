@@ -51,17 +51,19 @@ least once, with names matching `^[a-z][a-z0-9_]{0,47}$`. The filled text must b
 ### Message wording
 
 A notification is read by people in a busy channel, so draft it rather than
-restating the trigger. Unless the person gave the exact wording, write two or three
+restating the trigger. Unless the person gave the exact wording, write two to four
 options in different styles, such as a short upbeat one with an emoji, a concise
 plain one, and a fuller one with links and details. Use the run's data through a
 template: who did it, what changed, a link to it, and a useful count or state.
 Write each option fresh for this workflow and its audience; do not reuse fixed
 example text.
 
-Show each option in chat as the channel would read it, filled with realistic
-sample values and labelled as a sample, and ask which to use in the same message
-as the sender question. Draft only the chosen option. Keep the message to one to
-three lines.
+Ask with `present.choice`, and make each choice label the preview itself: the
+message as the channel would read it, filled with realistic sample values, under
+256 characters. Offer at most four choices, recommended first. Say in the prompt
+that the values are samples. Do not also list the previews in prose, and do not
+combine the wording with another question such as the sender; ask that separately
+afterwards. Draft only the chosen option. Keep the message to one to three lines.
 
 The text is rendered as standard Markdown: `**bold**`, `_italic_`, `[label](url)`
 and line breaks. Write emoji as Unicode characters, at most two, and keep them
