@@ -212,9 +212,7 @@ const textDocument = (text: string): ChatDocument => ({
 });
 const createTablePrompt =
   'Help me create a new table. Ask me what kind of rows it holds (for example, customers or invoices) and which fields I need, then propose the table for my review.';
-const newChatPrefillKey = (workspaceId: string) => `tulipfarm:new-chat-prefill:${workspaceId}`;
 type NewChatPrefill = {
-  source: 'intent' | 'storage';
   prompt: string;
   autoSend?: boolean;
   skill?: { id: string; revision: string };
@@ -242,8 +240,6 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     version: searchIntent.skillVersion,
   };
   const intent = skillIntent.intent;
-  const prefillKey = newChatPrefillKey(workspace.id);
-  const storedPrefill = sessionStorage.getItem(prefillKey);
   const tableHandoff = useTableHandoff(
     workspace.id,
     intent === 'edit-table' || intent === 'add-rows' ? intent : null,
@@ -253,50 +249,38 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
   const prefill: NewChatPrefill | null =
     intent === 'install-package' && searchIntent.packageName && searchIntent.packageVersion
       ? {
-          source: 'intent',
           prompt: publicPackageInstallPrompt(searchIntent.packageName, searchIntent.packageVersion),
           autoSend: true,
         }
       : intent === 'create-agent'
         ? {
-            source: 'intent',
             prompt:
               'Help me create an agent. Read the authoring context and ask only what is still needed about its purpose, instructions, team, skills, access, Slack channels, and scheduled task prompts. Keep it private by default. Prepare the complete setup for my review; do not activate or install anything without my explicit approval.',
           }
         : intent === 'create-skill'
           ? {
-              source: 'intent',
               prompt:
                 'Help me create a reusable skill. Ask only what you need to know, then prepare a skill package for my review.',
             }
           : intent === 'edit-skill' && skillIntent.id && skillIntent.version
             ? {
-                source: 'intent',
                 prompt: `Help me edit skill ${skillIntent.id}, starting from saved version ${skillIntent.version}. Read the skill first, ask what I want to change, and preserve unrelated files. Prepare the changes for my review.`,
               }
             : intent === 'use-skill' && skillIntent.id && skillIntent.revision
-              ? { source: 'intent', prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
+              ? { prompt: '', skill: { id: skillIntent.id, revision: skillIntent.revision } }
               : intent === 'create-table'
-                ? { source: 'intent', prompt: createTablePrompt }
+                ? { prompt: createTablePrompt }
                 : intent === 'create-workflow'
                   ? {
-                      source: 'intent',
                       prompt:
                         'Help me create a workflow. Ask what should start it, which steps and agents it needs, and who should act. Use configured connected sources when needed. Prepare a workflow draft for my review, without saving or activating it.',
                     }
                   : workflowHandoff?.kind === 'ready'
-                    ? { source: 'intent', prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
+                    ? { prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
                     : tableHandoff?.kind === 'ready'
-                      ? { source: 'intent', prompt: tableHandoff.prompt }
-                      : storedPrefill === createTablePrompt
-                        ? { source: 'storage', prompt: storedPrefill }
-                        : null;
-  const consumePrefill = (source: NewChatPrefill['source']) => {
-    if (source === 'storage') {
-      sessionStorage.removeItem(prefillKey);
-      return;
-    }
-    if (intent === 'create-table') sessionStorage.setItem(prefillKey, createTablePrompt);
+                      ? { prompt: tableHandoff.prompt }
+                      : null;
+  const consumePrefill = () => {
     // Dropping the handled request from the link keeps this draft mounted, so the draft's leave guard does not apply.
     void navigate({
       to: '/$workspaceSlug',
@@ -414,7 +398,7 @@ function ConversationDetail({
   draftProjectId?: string | null;
   scope?: ((disabled: boolean) => ReactNode) | undefined;
   prefill?: NewChatPrefill | null;
-  onPrefillApplied?: (source: NewChatPrefill['source']) => void;
+  onPrefillApplied?: () => void;
   notice?: ReactNode;
   persistent?: boolean;
   visible?: boolean;
@@ -490,27 +474,30 @@ function ConversationDetail({
     setNavigationOpen(false);
   }, [canvas.open, chatId, compact, visible, setNavigationOpen]);
   const appliedComposer = useRef<string | null>(null);
-  const appliedPrefill = useRef<NewChatPrefill['source'] | null>(null);
+  const appliedPrefill = useRef(false);
+  // A link can open a new chat before its editor shows the prompt, so wait for it. Selecting the prompt lets the
+  // person send it as is, or type their own message over it instead of after it.
+  const selectPrefill = (prompt: string, frames = 10) =>
+    requestAnimationFrame(() => {
+      const editor = composerInput.current?.editor();
+      if (editor && editor.state.doc.textContent === prompt) editor.chain().focus().selectAll().run();
+      else if (frames > 1) selectPrefill(prompt, frames - 1);
+      else composerInput.current?.focus();
+    });
   const [skillHandoffError, setSkillHandoffError] = useState('');
   useEffect(() => {
     if (!prefill || prefill.skill || prefill.autoSend) {
-      appliedPrefill.current = null;
+      appliedPrefill.current = false;
       return;
     }
-    if (appliedPrefill.current !== prefill.source) {
-      appliedPrefill.current = prefill.source;
-      // A link's request that arrives after the person started typing, such as a table handoff they retried, goes before their text so neither is lost.
-      if (!text || prefill.source === 'intent') {
-        const prompt = textDocument(prefill.prompt);
-        setContent(current =>
-          text
-            ? { ...current, doc: { ...current.doc, content: [...prompt.doc.content, ...(current.doc.content ?? [])] } }
-            : prompt,
-        );
-        // A link can open a new chat before its editor exists; focus once the editor has rendered.
-        requestAnimationFrame(() => composerInput.current?.focus());
+    if (!appliedPrefill.current) {
+      appliedPrefill.current = true;
+      // A link's request that arrives after the person started typing, such as a slow table handoff, never joins their text.
+      if (!text.trim()) {
+        setContent(textDocument(prefill.prompt));
+        selectPrefill(prefill.prompt);
       }
-      onPrefillApplied?.(prefill.source);
+      onPrefillApplied?.();
       if (prefill.workflow) canvas.show(workflowCanvasItem(workspace.id, prefill.workflow));
     }
   }, [prefill, text, onPrefillApplied]);
@@ -585,12 +572,12 @@ function ConversationDetail({
             });
             composerInput.current?.focus();
           }
-          onPrefillApplied?.(prefill.source);
+          onPrefillApplied?.();
         },
         () => {
           if (!controller.signal.aborted) {
             setSkillHandoffError('Could not load the selected skill. Return to Skills and try again.');
-            onPrefillApplied?.(prefill.source);
+            onPrefillApplied?.();
           }
         },
       );
