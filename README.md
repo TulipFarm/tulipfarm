@@ -97,6 +97,9 @@ HTTP API (`apps/api`), the Temporal worker (`apps/worker`) and shared domain
 packages (`packages/`). It uses TypeScript, pnpm workspaces, Turborepo,
 PostgreSQL with pgvector, and Oxlint.
 
+This repository supports spawning and deployment via Spawnbox, and is maintained
+by the TulipFarm team.
+
 ## Research preview
 
 TulipFarm is early and changes quickly. Expect rough edges and breaking changes.
