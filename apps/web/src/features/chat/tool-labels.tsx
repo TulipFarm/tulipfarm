@@ -10,6 +10,7 @@ import type { ConversationMessage } from './conversation-api';
 import { apiCallProblem, isInternalTool, toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { knowledgeToolActivityItem, knowledgeToolLabel } from './knowledge-activity';
 import { BlockingWorkflows, StepNarration } from './step-details';
+import { ExecutionDetails } from './execution-activity';
 
 type Tool = ConversationMessage['tools'][number];
 
@@ -183,15 +184,17 @@ function toolActivityItem(tool: Tool, viewer: Viewer): ToolActivityItem {
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }
       : {}),
-    ...(tool.blockingWorkflows?.length || tool.narration
-      ? {
-          details: (
-            <div className="grid gap-1">
-              {tool.blockingWorkflows?.length ? <BlockingWorkflows workflows={tool.blockingWorkflows} /> : null}
-              {tool.narration && <StepNarration text={tool.narration} />}
-            </div>
-          ),
-        }
-      : {}),
+    ...(tool.execution
+      ? { details: <ExecutionDetails execution={tool.execution} narration={tool.narration ?? null} /> }
+      : tool.blockingWorkflows?.length || tool.narration
+        ? {
+            details: (
+              <div className="grid gap-1">
+                {tool.blockingWorkflows?.length ? <BlockingWorkflows workflows={tool.blockingWorkflows} /> : null}
+                {tool.narration && <StepNarration text={tool.narration} />}
+              </div>
+            ),
+          }
+        : {}),
   };
 }

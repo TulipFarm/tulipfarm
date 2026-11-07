@@ -499,6 +499,30 @@ export function apiCallReceipt(
     : { error: result.code, ...marked };
 }
 
+export const executionReceiptSchema = z.object({
+  language: z.enum(['python', 'javascript', 'bash']),
+  code: z.string().max(32768),
+  result: z
+    .object({
+      state: z.string().max(32),
+      exitCode: z.int().optional(),
+      stdout: z.string().max(65536),
+      stderr: z.string().max(65536),
+      truncated: z.boolean(),
+    })
+    .nullable(),
+});
+export type ExecutionReceipt = z.infer<typeof executionReceiptSchema>;
+const executionCallSchema = executionReceiptSchema.pick({ language: true, code: true });
+const executionOutputSchema = z.object({ result: executionReceiptSchema.shape.result.unwrap() });
+/** The code an `execution.run` call ran and, once it ended, what it printed. */
+export function executionReceipt(tool: string, call: unknown, output: unknown): ExecutionReceipt | null {
+  if (tool !== 'execution.run') return null;
+  const parsed = executionCallSchema.safeParse(call);
+  if (!parsed.success) return null;
+  return { ...parsed.data, result: executionOutputSchema.safeParse(output).data?.result ?? null };
+}
+
 const apiCallProblems = new Map(
   Object.entries({
     'approval-unavailable': 'Changes need your approval, which isn’t available here.',

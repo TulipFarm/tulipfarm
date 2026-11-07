@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   activityStatusSchema,
   apiCallReceiptSchema,
+  executionReceiptSchema,
   toolPresentationSchema,
   workflowReferenceSchema,
 } from '@tulipfarm/conversations/tool-activity';
@@ -131,6 +132,7 @@ const messageSchema = z.object({
         presentation: toolPresentationSchema.optional(),
         web: publicWebReceiptSchema.nullable().optional(),
         api: apiCallReceiptSchema.nullable().optional(),
+        execution: executionReceiptSchema.nullable().optional(),
         knowledge: knowledgeActivitySchema.nullable().optional(),
         fileId: z.uuid().optional(),
         fileIds: z.array(z.uuid()).max(64).optional(),

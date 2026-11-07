@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
 import { deniedProposalDetail, rowReviewDetail, storedToolActivity } from '../src/tool-activity-history.ts';
-import { apiCallProblem, apiCallReceipt, toolPresentation } from '../src/tool-activity.ts';
+import { apiCallProblem, apiCallReceipt, executionReceipt, toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
   assert.equal(
@@ -178,4 +178,21 @@ test('a chat row write held for approval names the rule in Tool activity', () =>
   assert.equal(rowReviewDetail('rows.create', { record: { id: 'r' } }), undefined);
   assert.equal(rowReviewDetail('rows.create', { draftId: 'd', status: 'review-required' }), undefined);
   assert.equal(rowReviewDetail('tables.propose', { error: 'review-required', reason: 'too-many-rows' }), undefined);
+});
+
+test('execution receipts show the code that ran and its output once it ended', () => {
+  const call = { tool: 'execution.run', language: 'python', code: 'print(1)' };
+  const result = { state: 'completed', exitCode: 0, stdout: '1\n', stderr: '', truncated: false };
+  assert.deepEqual(executionReceipt('execution.run', call, { result, sources: [] }), {
+    language: 'python',
+    code: 'print(1)',
+    result,
+  });
+  assert.deepEqual(executionReceipt('execution.run', call, undefined), {
+    language: 'python',
+    code: 'print(1)',
+    result: null,
+  });
+  assert.equal(executionReceipt('execution.run', { language: 'ruby', code: 'p 1' }, { result }), null);
+  assert.equal(executionReceipt('api.request', call, { result }), null);
 });

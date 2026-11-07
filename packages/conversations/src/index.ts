@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
 import { googleToolActivity } from './google-tool-activity.ts';
-import { apiCallReceipt, toolPresentation } from './tool-activity.ts';
+import { apiCallReceipt, executionReceipt, toolPresentation } from './tool-activity.ts';
 import { storedToolActivity, storedToolPresentation, waitingRowDraft } from './tool-activity-history.ts';
 import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
@@ -906,6 +906,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 api: hidden.size
                   ? null
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
+                execution: hidden.size ? null : executionReceipt(row.tool, row.call, row.output),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
