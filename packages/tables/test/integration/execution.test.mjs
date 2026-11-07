@@ -25,6 +25,7 @@ import {
   requireTableSources,
 } from '../../../agents/src/table-sources.ts';
 import { tableProposalOptions } from '../../../agents/src/table-proposals.ts';
+import { savedTaskAgent } from '../../../agents/test/task-fixture.mjs';
 
 const renameField = (definition, label) => ({
   ...definition,
@@ -1843,5 +1844,136 @@ test(
       ).rows[0],
       { operation: 'transform', values: null, before_values: null },
     );
+  },
+);
+
+test(
+  'creation admits a private chat reached through a workspace agent under the migration role',
+  { timeout: 120000 },
+  async t => {
+    const db = await fixture();
+    let runtime;
+    t.after(async () => {
+      await runtime?.close();
+      await db.close();
+    });
+    await loadPlatformBaseline(db.platform);
+    const ws = await db.create(await workspaceTableMigrations()),
+      s = `"${ws.names.schema}"`;
+    runtime = createWorkspaceRuntime({
+      resolveCredential: async () => ({ workspaceId: ws.id, generation: 1, connectionString: db.login(ws) }),
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 30,
+    });
+    const actor = { kind: 'human', userId: ws.userId, membershipId: ws.membershipId },
+      chat = randomUUID(),
+      authoringChat = randomUUID(),
+      turn = randomUUID(),
+      message = randomUUID(),
+      team = randomUUID();
+    await db.platform.query(`INSERT INTO ${s}.tf_teams(id,name) VALUES($1,'Support')`, [team]);
+    for (const id of [chat, authoringChat])
+      await db.platform.query(
+        `INSERT INTO ${s}.tf_conversations(id,owner_user_id,owner_membership_id) VALUES($1,$2,$3)`,
+        [id, ws.userId, ws.membershipId],
+      );
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_conversation_messages(id,conversation_id,sequence,author_kind,membership_id) VALUES($1,$2,1,'human',$3)`,
+      [message, chat, ws.membershipId],
+    );
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence) VALUES($1,$2,$3,1)`,
+      [turn, chat, message],
+    );
+    await db.platform.query(`UPDATE ${s}.tf_soul_head SET revision=$1`, ['a'.repeat(40)]);
+    // Every chat turn records the workspace's agents as sources; an agent authored in another chat carries that chat.
+    const agent = await savedTaskAgent(db, ws, runtime, ws.userId, ws.membershipId);
+    await db.platform.query(
+      `UPDATE ${s}.tf_agent_definitions SET definition=definition || $2::jsonb WHERE agent_id=$1`,
+      [agent.agentId, JSON.stringify({ sources: [{ kind: 'private-conversation', conversationId: authoringChat }] })],
+    );
+    const soul = (await db.platform.query(`SELECT saved_revision FROM ${s}.tf_agents WHERE id=$1`, [agent.agentId]))
+      .rows[0].saved_revision;
+    const access = { requireSources: requireTableSources };
+    const proposals = createTableProposals({ runtime, ...access, data: generationProposalData });
+    const decisions = createTableProposalDecisions({
+      runtime,
+      ...access,
+      data: generationProposalData,
+      resolveConfirmationCredential: async () => db.login(ws, 'confirmation'),
+    });
+    const advance = createTableExecution({
+      ...access,
+      resolveMigrationCredential: async () => db.login(ws, 'migration'),
+    });
+    const publish = createTablePublication({
+      runtime,
+      ...access,
+      prepareRevision: async input => ({
+        commit: '1'.repeat(40),
+        parentCommit: input.expectedParentCommit,
+        bundle: { key: `test/${input.commandId}`, sha256: 'b'.repeat(64) },
+        projection: { definition: input.definition },
+      }),
+    });
+    const origin = {
+      conversationId: chat,
+      turnId: turn,
+      sources: [
+        { kind: 'private-conversation', conversationId: chat },
+        { kind: 'agent-definition', agentId: agent.agentId, revision: soul },
+      ],
+    };
+    const approve = async () => {
+      const table = randomUUID();
+      const proposal = await proposals.propose(ws.id, actor, randomUUID(), origin, {
+        plans: [
+          {
+            kind: 'schema',
+            tableId: table,
+            dependsOn: [],
+            expectedRevision: null,
+            target: {
+              formatVersion: 2,
+              id: table,
+              owningTeamId: team,
+              label: 'AC-table',
+              fields: [{ id: randomUUID(), label: 'Name', kind: 'text', required: false, maxLength: 200 }],
+              uniqueKeys: [],
+            },
+            transforms: { outputs: [] },
+          },
+        ],
+      });
+      await decisions.decide(ws.id, ws.userId, chat, proposal.id, {
+        digest: proposal.digest,
+        commandId: randomUUID(),
+        decision: 'approve',
+      });
+      return proposal;
+    };
+    const finish = async proposal => {
+      for (let i = 0; i < 100; i++) {
+        const status = await advance(ws.id, proposal.id);
+        if (status === 'completed' || status === 'blocked') return status;
+        if (status === 'publish') await publish(ws.id, proposal.id);
+      }
+      assert.fail('execution did not converge');
+    };
+    const outcome = async proposal => {
+      const status = await proposals.status(ws.id, ws.userId, chat, proposal.id);
+      return [status.status, status.plans[0].receipt?.code ?? null];
+    };
+
+    const created = await approve();
+    assert.deepEqual([await finish(created), ...(await outcome(created))], ['completed', 'completed', null]);
+
+    // The requester must still be able to open the nested chat when the change runs.
+    const deleted = await approve();
+    await db.platform.query(`UPDATE ${s}.tf_conversations SET deleted_at=clock_timestamp() WHERE id=$1`, [
+      authoringChat,
+    ]);
+    assert.deepEqual([await finish(deleted), ...(await outcome(deleted))], ['blocked', 'failed', 'access-denied']);
   },
 );

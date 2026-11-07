@@ -18,6 +18,17 @@ export async function requireTableSources(
 ) {
   await lockAuthorization(tx);
   await requireNoMcpDerived(tx, sources);
+  // The storage worker cannot read these sources' tables, so a definer function checks them, at any depth.
+  const allowed = async (source: SourceDependency) => {
+    const row = (
+      await tx.client.query(`SELECT ${relation(tx, 'tf_table_source_allowed')}($1,$2,$3) AS allowed`, [
+        actor.membershipId,
+        actor.userId,
+        source,
+      ])
+    ).rows[0];
+    if (!z.object({ allowed: z.boolean() }).parse(row).allowed) throw new AccessDenied();
+  };
   for (const source of sources) {
     // Personal GitHub reads cannot be transferred into shared resource records or definitions.
     if (source.kind === 'github-personal') throw new AccessDenied();
@@ -29,16 +40,9 @@ export async function requireTableSources(
         'google-integration',
         'atlassian-source',
       ].includes(source.kind)
-    ) {
-      const row = (
-        await tx.client.query(`SELECT ${relation(tx, 'tf_table_source_allowed')}($1,$2,$3) AS allowed`, [
-          actor.membershipId,
-          actor.userId,
-          source,
-        ])
-      ).rows[0];
-      if (!z.object({ allowed: z.boolean() }).parse(row).allowed) throw new AccessDenied();
-    } else await requireDraftSources(tx, actor, [source]);
+    )
+      await allowed(source);
+    else await requireDraftSources(tx, actor, [source], new Set(), undefined, false, false, undefined, allowed);
   }
 }
 
