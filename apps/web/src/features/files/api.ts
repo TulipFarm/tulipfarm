@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { z } from 'zod';
 import {
   deletionOutcomeSchema,
@@ -23,7 +23,7 @@ import {
 } from '@tulipfarm/files/contracts';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal, responseError, writesAllowed } from '@/lib/http';
-import { useFeatureChanges } from '@/lib/query';
+import { editListed, editListedIn, useFeatureChanges, useOptimisticUpdate } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import type { FilesSearch } from './search.ts';
 export {
@@ -310,5 +310,37 @@ export function useFilesChanges() {
       concealed: () => change({ kind: 'conceal', keys: [fileKeys.all] }),
     }),
     [change],
+  );
+}
+
+type ItemEdit = (item: Record<string, unknown>) => Record<string, unknown> | null;
+function editCachedItem(
+  data: unknown,
+  key: readonly unknown[],
+  id: string,
+  edit: ItemEdit,
+  shows: (section: string) => boolean,
+) {
+  if (key[1] === 'item')
+    return key[2] === id && data && typeof data === 'object' ? (edit(data as Record<string, unknown>) ?? data) : data;
+  if (key[2] === 'sidebar') return editListed(data, id, edit);
+  const query = key[2];
+  if (!query || typeof query !== 'object' || !('section' in query) || typeof query.section !== 'string') return data;
+  if (!shows(query.section)) return data;
+  return editListedIn(editListedIn(data, 'items', id, edit), 'breadcrumbs', id, item => edit(item) ?? item);
+}
+/**
+ * Shows `edit` on each item in every cached library page in a section `shows` accepts, the sidebar, and the
+ * item's own read before the server confirms it. `edit` returning null removes the item from lists. Undo
+ * when the write fails, and report the change either way.
+ */
+export function useFilesOptimism() {
+  const optimistic = useOptimisticUpdate();
+  return useCallback(
+    (ids: readonly string[], edit: ItemEdit, shows: (section: string) => boolean = () => true) =>
+      optimistic([['files', 'library'], ...ids.map(fileKeys.item)], (data, key) =>
+        ids.reduce((value, id) => editCachedItem(value, key, id, edit, shows), data),
+      ),
+    [optimistic],
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { TableRequestError } from '@/features/tables/request-state';
-import { useConversationChanges } from './queries';
-import type { ConversationApi, ConversationCommand } from './conversation-api';
+import type { ChatEdit } from './chat-edits';
+import { useChatOptimism, useConversationChanges } from './queries';
+import type { Chat, ConversationApi, ConversationCommand } from './conversation-api';
 
 export type CommandState =
   | { kind: 'idle' }
@@ -12,6 +13,7 @@ export type CommandState =
 
 export function useConversationCommand(api: ConversationApi, accepted: (command: ConversationCommand) => void) {
   const changes = useConversationChanges();
+  const optimism = useChatOptimism();
   const [state, setState] = useState<CommandState>({ kind: 'idle' });
   const active = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -21,11 +23,14 @@ export function useConversationCommand(api: ConversationApi, accepted: (command:
       mounted.current = false;
     };
   }, []);
-  async function submit(command: ConversationCommand) {
+  /** With `chat`, a rename, archive, or pin shows at once and is undone if the server does not confirm it. */
+  async function submit(command: ConversationCommand, chat?: Chat) {
     if (active.current) return;
     const controller = new AbortController();
     active.current = controller;
     setState({ kind: 'sending', command });
+    const edit = chat && chatEdit(command);
+    const undo = edit ? await optimism(chat, edit) : null;
     try {
       await api.command(command, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
       await changes.command(command);
@@ -34,6 +39,10 @@ export function useConversationCommand(api: ConversationApi, accepted: (command:
         accepted(command);
       }
     } catch (error) {
+      if (undo) {
+        undo();
+        void changes.command(command);
+      }
       if (error instanceof TableRequestError) void changes.rejected(error.code);
       if (mounted.current && !controller.signal.aborted)
         setState(
@@ -54,4 +63,11 @@ export function useConversationCommand(api: ConversationApi, accepted: (command:
     reset: () => setState({ kind: 'idle' }),
     locked: ['sending', 'uncertain', 'rejected'].includes(state.kind),
   };
+}
+
+function chatEdit(command: ConversationCommand): ChatEdit | null {
+  if (command.kind === 'rename') return { kind: 'rename', title: command.title };
+  if (command.kind === 'archive') return { kind: 'archive', archived: command.archived };
+  if (command.kind === 'pin') return { kind: 'pin', pinned: command.pinned };
+  return null;
 }

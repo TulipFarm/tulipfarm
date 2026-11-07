@@ -8,6 +8,7 @@ import { AccessDenied } from '@tulipfarm/access';
 import { ConversationConflict, moveChatSchema, type createConversations } from '@tulipfarm/conversations';
 import {
   archiveChatSchema,
+  pinChatSchema,
   chatDestinationSchema,
   chatSchema,
   controlResultSchema,
@@ -71,7 +72,7 @@ const moveBody = moveChatSchema;
 // A message without a model uses the catalog's default model.
 const sendBody = (model = loadModelCatalog().defaultModel.id) =>
   sendMessageSchema.omit({ messageId: true }).extend({ model: conversationModelSchema.default(model) });
-const patchBody = z.union([renameChatSchema, archiveChatSchema]);
+const patchBody = z.union([renameChatSchema, archiveChatSchema, pinChatSchema]);
 const listQuery = z.strictObject({
   projectId: z.uuid().optional(),
   archived: z.enum(['true', 'false']).optional(),
@@ -642,6 +643,23 @@ export function registerConversations(
         });
       },
     );
+    routes.get(
+      `${base}/pinned`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'listPinnedConversationsV1',
+          'List chats the requester pinned',
+          workspaceParams,
+          z.object({ chats: z.array(chatSchema) }),
+        ),
+      },
+      async (request, reply) => {
+        const { workspaceId } = workspaceParams.parse(request.params);
+        reply.header('Cache-Control', 'no-store');
+        return service.pinned(workspaceId, user(request));
+      },
+    );
     routes.post(
       `${base}/:chatId/file-audience`,
       {
@@ -835,18 +853,22 @@ export function registerConversations(
         logLevel: 'silent',
         schema: schema(
           'updateConversationV1',
-          'Rename, archive, or restore a private chat',
+          'Rename, archive, restore, pin, or unpin a private chat',
           chatParams,
-          z.union([z.object({ titleRevision: z.number().int() }), z.object({ archived: z.boolean() })]),
+          z.union([
+            z.object({ titleRevision: z.number().int() }),
+            z.object({ archived: z.boolean() }),
+            z.object({ pinned: z.boolean() }),
+          ]),
           patchBody,
         ),
       },
       request => {
         const { workspaceId, chatId } = chatParams.parse(request.params);
         const input = patchBody.parse(request.body);
-        return 'title' in input
-          ? service.rename(workspaceId, user(request), chatId, input)
-          : service.archive(workspaceId, user(request), chatId, input);
+        if ('title' in input) return service.rename(workspaceId, user(request), chatId, input);
+        if ('pinned' in input) return service.pin(workspaceId, user(request), chatId, input);
+        return service.archive(workspaceId, user(request), chatId, input);
       },
     );
     routes.delete(

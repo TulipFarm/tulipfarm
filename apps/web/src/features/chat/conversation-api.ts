@@ -39,6 +39,7 @@ const chatSchema = z.object({
   titleRevision: z.number().int(),
   titleManual: z.boolean().default(false),
   archived: z.boolean(),
+  pinned: z.boolean().default(false),
   isClosed: z.boolean().default(false),
   activityAt: z.string(),
   createdAt: z.string(),
@@ -217,6 +218,7 @@ export type ConversationCommand =
     }
   | { kind: 'rename'; chatId: string; commandId: string; title: string; expectedRevision: number }
   | { kind: 'archive'; chatId: string; commandId: string; archived: boolean }
+  | { kind: 'pin'; chatId: string; commandId: string; pinned: boolean }
   | { kind: 'delete'; chatId: string; commandId: string }
   | { kind: 'resume-maintenance'; chatId: string; commandId: string }
   | { kind: 'retry' | 'cancel'; chatId: string; commandId: string; turnId: string; expectedGeneration: number };
@@ -513,6 +515,11 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
       }
       return { chats: [...chats.values()], nextCursor };
     },
+    /** The requester's pinned chats, personal and project, most recently pinned first. */
+    async pinned(signal: AbortSignal) {
+      return z.object({ chats: z.array(chatSchema) }).parse(await request('/pinned', 'GET', signal, undefined, true))
+        .chats;
+    },
     /** Unarchived chats the requester can post in, most recent first. */
     async destinations(query: string, signal: AbortSignal) {
       return z
@@ -667,6 +674,10 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           return z
             .object({ archived: z.boolean() })
             .parse(await request(path, 'PATCH', signal, { commandId, archived: command.archived }));
+        case 'pin':
+          return z
+            .object({ pinned: z.boolean() })
+            .parse(await request(path, 'PATCH', signal, { commandId, pinned: command.pinned }));
         case 'delete':
           return z.object({ deleted: z.literal(true) }).parse(await request(path, 'DELETE', signal, { commandId }));
         case 'resume-maintenance':
@@ -721,6 +732,7 @@ export function draftConversationApi(
           titleRevision: 0,
           titleManual: false,
           archived: false,
+          pinned: false,
           isClosed: false,
           activityAt: createdAt,
           createdAt,

@@ -1,4 +1,5 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
+import { Pin } from 'lucide-react';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   SidebarMenuSkeleton,
@@ -8,7 +9,7 @@ import {
   useSidebar,
 } from '@tulipfarm/sprout/sidebar';
 
-export type RecentEntry = { id: string; name: string; link: ReactElement; active: boolean };
+export type RecentEntry = { id: string; name: string; link: ReactElement; active: boolean; pinned?: boolean };
 export type RecentState = 'loading' | 'ready' | 'error' | 'unavailable';
 
 export function SidebarRecentItem({
@@ -88,7 +89,7 @@ export function SidebarRecentItem({
           </div>
         </SidebarMenuSubItem>
       ) : entries.length ? (
-        entries.slice(0, 3).map(entry => (
+        entries.map(entry => (
           <SidebarMenuSubItem key={entry.id}>
             <SidebarMenuSubButton
               nativeButton={false}
@@ -98,7 +99,10 @@ export function SidebarRecentItem({
               title={entry.name}
               onClick={() => setOpenMobile(false)}
             >
-              {entry.name}
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                {entry.pinned && <Pin size={12} role="img" aria-label="Pinned" className="shrink-0" />}
+              </span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
         ))

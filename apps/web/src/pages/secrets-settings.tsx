@@ -8,7 +8,7 @@ import { Copy } from 'reicon-react/icons/Copy';
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { X } from 'reicon-react/icons/X';
 import { workspaceRoute } from '@/router';
-import { useFeatureScope } from '@/lib/query';
+import { editListed, useFeatureScope, useOptimisticUpdate } from '@/lib/query';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
@@ -79,6 +79,7 @@ import {
   useSecretsApi,
   useSecretsCapabilities,
   useSecretsChanges,
+  secretsKeys,
 } from '@/features/secrets/queries';
 
 type Action =
@@ -285,28 +286,42 @@ function SecretActions({ secret, you, open }: { secret: SecretSummary; you: stri
   );
 }
 
+type SecretEdit = (secret: Record<string, unknown>) => Record<string, unknown> | null;
+
 /** Runs one change. Keeps the request ID across retries of the same change and refreshes the list after. */
 function useChange(close: () => void) {
   const changes = useSecretsChanges();
+  const optimistic = useOptimisticUpdate();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return {
     sending,
     error,
     clear: () => setError(null),
-    /** `handled` returns true when the dialog shows the failure itself, such as next to a field. */
-    run: async (change: () => Promise<unknown>, handled?: (failure: unknown) => boolean, succeeded?: () => void) => {
+    /**
+     * `handled` returns true when the dialog shows the failure itself, such as next to a field. `shown`
+     * applies `edit` to that secret in the list until the change settles.
+     */
+    run: async (
+      change: () => Promise<unknown>,
+      handled?: (failure: unknown) => boolean,
+      succeeded?: () => void,
+      shown?: { id: string; edit: SecretEdit },
+    ) => {
       if (sending) return;
       setSending(true);
       setError(null);
+      const undo = shown ? await optimistic([secretsKeys.list], data => editListed(data, shown.id, shown.edit)) : null;
       try {
         await change();
         succeeded?.();
         await changes.changed();
         close();
       } catch (failure) {
+        undo?.();
         if (!handled?.(failure)) setError(secretErrorMessage(failure));
-        if (failure instanceof TableRequestError && failure.code === 'secret-conflict') await changes.changed();
+        if (undo || (failure instanceof TableRequestError && failure.code === 'secret-conflict'))
+          await changes.changed();
       } finally {
         setSending(false);
       }
@@ -826,6 +841,8 @@ function RenameDialog({
               variableInput.current?.focus();
               return true;
             },
+            undefined,
+            { id: secret.id, edit: item => ({ ...item, ...changes }) },
           );
         }}
       >
@@ -1266,7 +1283,12 @@ function DeleteDialog({
             variant="destructive"
             disabled={change.sending}
             aria-busy={change.sending}
-            onClick={() => void change.run(() => api.remove(secret.id, secret.version))}
+            onClick={() =>
+              void change.run(() => api.remove(secret.id, secret.version), undefined, undefined, {
+                id: secret.id,
+                edit: () => null,
+              })
+            }
           >
             {change.sending ? 'Deleting…' : 'Delete secret'}
           </AlertDialogAction>

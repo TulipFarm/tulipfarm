@@ -313,7 +313,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
               f.state.modelGate = Promise.withResolvers();
               if (navigation) {
                 await f.page.goto(`${origin}/${workspace.slug}/chat`);
-                await f.page.getByRole('button', { name: chat.title, exact: true }).click();
+                await f.page.getByRole('link', { name: chat.title, exact: true }).click();
               } else await f.page.goto(`${origin}/${workspace.slug}/chat/${id}`);
               const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
               await input.click();

@@ -2,6 +2,7 @@ export { createFeatureClient, type FeatureClient, type FeatureChange } from './c
 export { SessionQueryProvider, WorkspaceQueryProvider, useFeatureScope } from './provider';
 export { useFeatureRead, useFeatureChanges, useCatalogRestoration } from './use-feature-read';
 export { useLoadedWindow } from './loaded-window';
+export { useOptimisticUpdate, editListed, editListedIn, type UndoOptimistic } from './optimistic';
 export { featureReadOptions, type FeatureReadOptions } from './options';
 export { featureKey, scopeKey, type FeatureScope, type WorkspaceScope, type SessionIdentity } from './scope';
 export { freshness } from './policy';

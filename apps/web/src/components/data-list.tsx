@@ -157,16 +157,23 @@ function DataListActions({ className, ...props }: React.ComponentProps<'div'>) {
   return <DataListCell data-slot="data-list-actions" className={cn('justify-end', className)} {...props} />;
 }
 
-function DataListLink({ className, render, ...props }: useRender.ComponentProps<'a'>) {
+function DataListLink({
+  className,
+  render,
+  weight = 'normal',
+  ...props
+}: useRender.ComponentProps<'a'> & { weight?: 'normal' | 'strong' }) {
   return useRender({
     defaultTagName: 'a',
     props: mergeProps<'a'>(
       {
+        'data-slot': 'data-list-link',
         className: cn(
-          'min-w-0 truncate font-medium outline-none after:absolute after:inset-0 focus-visible:underline',
+          'min-w-0 truncate outline-none after:absolute after:inset-0 focus-visible:underline',
+          weight === 'strong' ? 'font-semibold' : 'font-medium',
           className,
         ),
-      },
+      } as React.ComponentProps<'a'>,
       props,
     ),
     render,

@@ -22,12 +22,14 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
   };
   const table = page.getByRole('table', { name: 'Chats', exact: true });
   const firstTitle = 'Prepare the weekly customer update';
-  const first = page.getByRole('button', { name: firstTitle, exact: true });
+  const first = page.getByRole('link', { name: firstTitle, exact: true });
   const menu = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
   try {
     await open('chats');
     await first.waitFor();
-    assert.equal(await table.getByRole('row').count(), 13);
+    assert.equal(await table.getByRole('row').count(), 12);
+    assert.equal(await page.getByRole('table', { name: 'Pinned chats', exact: true }).getByRole('row').count(), 2);
+    assert.match(await first.getAttribute('href'), /^\/bud-mock\/chat\/[\w-]+$/);
     assert.equal((await table.locator('time').first().getAttribute('dateTime')) !== null, true);
     assert.match(await table.locator('time').first().innerText(), /Today\s+\d/);
     assert.equal(await page.getByRole('group', { name: 'Chat filters', exact: true }).count(), 1);
@@ -87,23 +89,23 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
       'Rename fits mobile',
     );
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByRole('button', { name: 'Customer update draft', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
 
     await menu('Customer update draft').click();
     await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
     await page.getByRole('button', { name: 'Undo', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await page.getByRole('button', { name: 'Customer update draft', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
-    await page.getByRole('button', { name: 'Last quarter’s planning notes', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Last quarter’s planning notes', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Active chats', exact: true }).click();
     await page.getByLabel('Search chat titles').fill('no matching title');
     await page.getByRole('heading', { name: 'No matching chats', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Clear search', exact: true }).first().click();
-    await page.getByRole('button', { name: 'Customer update draft', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Show chats from: Personal chats', exact: true }).click();
     await page.getByRole('option', { name: 'Product launch', exact: true }).click();
-    await page.getByRole('button', { name: 'Launch readiness review', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Launch readiness review', exact: true }).waitFor();
     assert.equal(
       await page
         .getByText('Shared with everyone in Product launch. Most recently active first.', { exact: true })

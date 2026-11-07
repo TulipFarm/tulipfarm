@@ -64,6 +64,7 @@ import {
   roleLabels,
   useFilesApi,
   useFilesChanges,
+  useFilesOptimism,
   viewerSearchSchema,
   type FilesSearch,
   type FilesView,
@@ -135,6 +136,7 @@ function Library({
   const navigate = filesRoute.useNavigate();
   const api = useFilesApi(workspaceId);
   const { changed } = useFilesChanges();
+  const optimism = useFilesOptimism();
   const view = search.section ?? 'mine';
   const query = search.q ?? '';
   const allSources = search.scope === 'all' && query !== '';
@@ -244,9 +246,13 @@ function Library({
   async function setTrashed(item: FileSummary, trashed: boolean) {
     setPending(item.id);
     setNotice(null);
+    const undo = await optimism(
+      [item.id],
+      () => null,
+      section => (section === 'trash') !== trashed,
+    );
     try {
       await api.trash(item.id, trashed);
-      void changed();
       setNotice({
         kind: 'done',
         text: trashed ? `“${item.name}” moved to Trash.` : `“${item.name}” restored to its original location.`,
@@ -254,6 +260,7 @@ function Library({
       });
       if (!trashed) focusNoticeSoon();
     } catch (error) {
+      undo();
       if (!trashed && error instanceof TableRequestError && error.code === 'file-restore-destination') {
         setDialog({ kind: 'restore', item });
         return;
@@ -264,14 +271,17 @@ function Library({
       });
     } finally {
       setPending(null);
+      void changed();
     }
   }
   async function retryDeletion(item: FileSummary) {
     setPending(item.id);
     setNotice(null);
+    const undo = await optimism([item.id], () => null);
     try {
       setNotice(deletionNotice(item, await api.deleteForever(item.id)));
     } catch (error) {
+      undo();
       const outcome = failedWrite(null, error);
       setNotice({
         kind: 'failed',
@@ -295,6 +305,12 @@ function Library({
   async function trashSelected(items: FileSummary[]) {
     setPending('selection');
     setNotice(null);
+    const outsideTrash = (section: string) => section !== 'trash';
+    const undo = await optimism(
+      items.map(item => item.id),
+      () => null,
+      outsideTrash,
+    );
     const failures: { item: FileSummary; message: string }[] = [];
     for (const item of items) {
       try {
@@ -309,6 +325,14 @@ function Library({
               : 'We couldn’t confirm whether it moved to Trash. Refresh the list to check.',
         });
       }
+    }
+    if (failures.length) {
+      undo();
+      await optimism(
+        items.filter(item => !failures.some(failure => failure.item.id === item.id)).map(item => item.id),
+        () => null,
+        outsideTrash,
+      );
     }
     void changed();
     setPending(null);
@@ -988,11 +1012,17 @@ function Library({
             }}
             refresh={() => void changed()}
             finalFocus={finalFocus}
-            submit={(name, id) =>
-              dialog.kind === 'rename'
-                ? api.rename(dialog.item.id, name)
-                : api.createFolder(id, name, dialog.destination.parentId)
-            }
+            submit={async (name, id) => {
+              if (dialog.kind !== 'rename') return api.createFolder(id, name, dialog.destination.parentId);
+              const undo = await optimism([dialog.item.id], item => ({ ...item, name }));
+              try {
+                return await api.rename(dialog.item.id, name);
+              } catch (error) {
+                undo();
+                void changed();
+                throw error;
+              }
+            }}
             done={item => {
               void changed();
               if (dialog.kind === 'folder') focusNotice.current = true;

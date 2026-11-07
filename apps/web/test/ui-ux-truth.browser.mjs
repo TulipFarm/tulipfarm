@@ -318,7 +318,7 @@ for (const outcome of ['conflict', 'unavailable', 'timeout', 'rejected']) {
     });
     await page.getByRole('button', { name: 'Save again', exact: true }).click();
     await input.waitFor({ state: 'detached' });
-    await page.getByRole('button', { name: 'Renewal follow-ups', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Renewal follow-ups', exact: true }).waitFor();
     assert.equal(state.renames.length, 2);
     assert.equal(state.renames[1].title, 'Renewal follow-ups');
     assert.equal(
@@ -396,7 +396,7 @@ test('saving again after a rename whose response was lost replays that rename in
   state.override = renameServer(state);
   state.releaseList();
   const { page, errors, close } = await open('/acme/chat', state);
-  await page.getByRole('button', { name: chat.title, exact: true }).waitFor();
+  await page.getByRole('link', { name: chat.title, exact: true }).waitFor();
   state.list = new Promise(() => {});
   const input = await renameUnconfirmed(page, 'Renewal follow-ups');
   await page.getByRole('button', { name: 'Save again', exact: true }).click();
@@ -420,7 +420,7 @@ test('a changed title after an unconfirmed rename is a new rename and a conflict
   state.override = renameServer(state);
   state.releaseList();
   const { page, errors, close } = await open('/acme/chat', state);
-  await page.getByRole('button', { name: chat.title, exact: true }).waitFor();
+  await page.getByRole('link', { name: chat.title, exact: true }).waitFor();
   let release = () => {};
   state.list = new Promise(resolve => {
     release = resolve;
@@ -440,7 +440,7 @@ test('a changed title after an unconfirmed rename is a new rename and a conflict
   await page.getByText('Current title: “Renewal follow-ups”', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Save again', exact: true }).click();
   await input.waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Renewal follow-ups for Q4', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'Renewal follow-ups for Q4', exact: true }).waitFor();
   assert.equal(state.renames.length, 3);
   assert.notEqual(state.renames[2].commandId, state.renames[1].commandId);
   assert.equal(state.renames[2].expectedRevision, 1, 'the replacement is based on the title the person was shown');
@@ -453,7 +453,7 @@ test('an unconfirmed rename that never landed reports a real conflict when its r
   state.override = renameServer(state);
   state.releaseList();
   const { page, errors, close } = await open('/acme/chat', state);
-  await page.getByRole('button', { name: chat.title, exact: true }).waitFor();
+  await page.getByRole('link', { name: chat.title, exact: true }).waitFor();
   let release = () => {};
   state.list = new Promise(resolve => {
     release = resolve;
@@ -469,7 +469,7 @@ test('an unconfirmed rename that never landed reports a real conflict when its r
   await page.getByText('Current title: “Q4 renewal outreach”', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Save again', exact: true }).click();
   await input.waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: 'Renewal follow-ups', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'Renewal follow-ups', exact: true }).waitFor();
   assert.equal(state.renames.length, 3);
   assert.notEqual(
     state.renames[2].commandId,

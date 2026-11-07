@@ -219,7 +219,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
         try {
           await run.started('/conversations', '/projects');
           run.membership.resolve();
-          await run.page.getByRole('button', { name: chats[0].title, exact: true }).first().waitFor();
+          await run.page.getByRole('link', { name: chats[0].title, exact: true }).first().waitFor();
           await delay(300);
           assert.equal(run.count('/conversations'), 1);
           assert.equal(run.count('/projects'), 1);
@@ -258,7 +258,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
         );
         discovery.resolve();
         run.membership.resolve();
-        await run.page.getByRole('button', { name: chats[0].title, exact: true }).first().waitFor();
+        await run.page.getByRole('link', { name: chats[0].title, exact: true }).first().waitFor();
         await delay(300);
         assert.equal(run.count('/conversations'), 1);
         assert.deepEqual(await hints(run.page), { [workspace.slug]: workspace.id });
@@ -292,7 +292,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
           [chats[0], button => button.hover()],
           [chats[1], button => button.focus()],
         ]) {
-          const button = run.page.getByRole('button', { name: chat.title, exact: true }).first();
+          const button = run.page.getByRole('link', { name: chat.title, exact: true }).first();
           await button.waitFor();
           const prefetched = run.started(`/conversations/${chat.id}/messages`, `/conversations/${chat.id}`);
           await intent(button);

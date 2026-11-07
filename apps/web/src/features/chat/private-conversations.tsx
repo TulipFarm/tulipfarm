@@ -660,9 +660,9 @@ function ConversationDetail({
     stream.retry();
     setRefreshed(true);
   });
-  const submit = (command: Parameters<typeof write.submit>[0]) => {
+  const submit = (...args: Parameters<typeof write.submit>) => {
     setRefreshed(false);
-    void write.submit(command);
+    void write.submit(...args);
   };
   const ready = read.state.kind === 'ready' && !read.state.error && !read.state.refreshing;
   // Background polls set refreshing; locking on them would flicker every control.
@@ -942,16 +942,37 @@ function ConversationDetail({
                         <DropdownMenuItem
                           disabled={locked}
                           onClick={() =>
-                            submit({
-                              kind: 'archive',
-                              chatId,
-                              commandId: crypto.randomUUID(),
-                              archived: !data.chat.archived,
-                            })
+                            submit(
+                              {
+                                kind: 'archive',
+                                chatId,
+                                commandId: crypto.randomUUID(),
+                                archived: !data.chat.archived,
+                              },
+                              data.chat,
+                            )
                           }
                         >
                           {data.chat.archived ? 'Restore chat' : 'Archive chat'}
                         </DropdownMenuItem>
+                        {!data.chat.archived && (
+                          <DropdownMenuItem
+                            disabled={locked}
+                            onClick={() =>
+                              submit(
+                                {
+                                  kind: 'pin',
+                                  chatId,
+                                  commandId: crypto.randomUUID(),
+                                  pinned: !data.chat.pinned,
+                                },
+                                data.chat,
+                              )
+                            }
+                          >
+                            {data.chat.pinned ? 'Unpin chat' : 'Pin chat'}
+                          </DropdownMenuItem>
+                        )}
                         {!data.chat.projectId && !persistent && (
                           <DropdownMenuItem disabled={locked} onClick={() => setMoving(true)}>
                             Move to project
@@ -1016,13 +1037,16 @@ function ConversationDetail({
                 onSubmit={event => {
                   event.preventDefault();
                   if (!locked && !titleValidation)
-                    submit({
-                      kind: 'rename',
-                      chatId,
-                      commandId: crypto.randomUUID(),
-                      title: editing.title.trim(),
-                      expectedRevision: editing.titleRevision,
-                    });
+                    submit(
+                      {
+                        kind: 'rename',
+                        chatId,
+                        commandId: crypto.randomUUID(),
+                        title: editing.title.trim(),
+                        expectedRevision: editing.titleRevision,
+                      },
+                      data?.chat,
+                    );
                 }}
               >
                 <Label htmlFor="chat-title">Chat title</Label>

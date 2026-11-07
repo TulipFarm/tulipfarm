@@ -64,6 +64,7 @@ import { insertSkillPart, type ChatSkills, type InvokedSkill } from './skill-inv
 import { turnImageModelsVersion, type TurnImageModels } from './turn-image-models.ts';
 import {
   archiveChatSchema,
+  pinChatSchema,
   chatDestinationSchema,
   chatSchema,
   deleteChatSchema,
@@ -95,6 +96,7 @@ export {
   sendMessageSchema,
   renameChatSchema,
   archiveChatSchema,
+  pinChatSchema,
   deleteChatSchema,
 } from './contracts.ts';
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -124,6 +126,9 @@ const sentSchema = z.object({
 });
 const revisionSchema = z.object({ titleRevision: z.number().int().nonnegative() });
 const archivedSchema = z.object({ archived: z.boolean() });
+const pinnedSchema = z.object({ pinned: z.boolean() });
+/** Pinned chats beyond this many stay pinned but are not listed. */
+const pinnedLimit = 50;
 const movedSchema = z.object({ projectId: uuidSchema });
 const hiddenReply = 'This reply is hidden because it uses information you cannot access.';
 export const knowledgeUnavailableReply =
@@ -243,6 +248,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       await tx.client.query(
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
       (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
+      EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = $3) AS pinned,
       (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder <> 'package-install-v1'
         ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
@@ -839,7 +845,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       const rows = z.array(chatSchema).parse(
         (
           await tx.client.query(
-            `SELECT ${chatColumns}, project_id AS "projectId" FROM ${table(tx, 'tf_conversations')} c
+            `SELECT ${chatColumns}, project_id AS "projectId",
+          EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = $2) AS pinned
+        FROM ${table(tx, 'tf_conversations')} c
         WHERE kind = 'private' AND deleted_at IS NULL AND (archived_at IS NOT NULL) = $3
         AND project_id IS NOT DISTINCT FROM $7::uuid AND ($7::uuid IS NOT NULL OR (owner_user_id = $1 AND owner_membership_id = $2))
         AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.conversation_id = c.id)
@@ -918,6 +926,42 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     });
   }
 
+  /** The requester's pinned, unarchived chats across their private chats and active projects, most recently pinned first. */
+  async function pinned(workspaceId: string, userId: string) {
+    return human(workspaceId, userId, async (tx, actor) => {
+      const rows = z.array(chatSchema).parse(
+        (
+          await tx.client.query(
+            `SELECT ${chatColumns}, c.project_id AS "projectId", true AS pinned
+          FROM ${table(tx, 'tf_conversation_pins')} pin
+          JOIN ${table(tx, 'tf_conversations')} c ON c.id = pin.conversation_id
+          WHERE pin.membership_id = $2 AND c.kind = 'private' AND c.deleted_at IS NULL AND c.archived_at IS NULL
+            AND ((c.project_id IS NULL AND c.owner_user_id = $1 AND c.owner_membership_id = $2)
+              OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_projects')} p JOIN ${table(tx, 'tf_project_members')} pm ON pm.project_id = p.id
+                WHERE p.id = c.project_id AND p.archived_at IS NULL AND pm.membership_id = $2 AND pm.removed_at IS NULL))
+            AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.conversation_id = c.id)
+          ORDER BY pin.pinned_at DESC, c.id DESC LIMIT ${pinnedLimit}`,
+            [actor.userId, actor.membershipId],
+          )
+        ).rows,
+      );
+      const prefetch = await prefetchConversationSources(
+        tx,
+        rows.map(chat => chat.id),
+      );
+      const chats = [];
+      for (const chat of rows) {
+        try {
+          await requireConversationMcpSources(tx, actor, chat.id, prefetch);
+          chats.push(chat);
+        } catch (error) {
+          if (!(error instanceof AccessDenied)) throw error;
+        }
+      }
+      return { chats };
+    });
+  }
+
   /** Before references enter a draft: can everyone who reads this chat open each file? Submission checks again. */
   async function fileAudience(workspaceId: string, userId: string, chatIdInput: string, value: unknown) {
     const chatId = uuidSchema.parse(chatIdInput);
@@ -955,6 +999,22 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           [chatId, input.archived],
         );
         return { archived: input.archived };
+      }),
+    );
+  }
+
+  async function pin(workspaceId: string, userId: string, chatIdInput: string, value: unknown) {
+    const chatId = uuidSchema.parse(chatIdInput);
+    const input = pinChatSchema.parse(value);
+    return human(workspaceId, userId, (tx, actor) =>
+      command(tx, actor, chatId, input.commandId, 'pin', input, pinnedSchema, async () => {
+        await tx.client.query(
+          input.pinned
+            ? `INSERT INTO ${table(tx, 'tf_conversation_pins')} (membership_id, conversation_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+            : `DELETE FROM ${table(tx, 'tf_conversation_pins')} WHERE membership_id = $1 AND conversation_id = $2`,
+          [actor.membershipId, chatId],
+        );
+        return { pinned: input.pinned };
       }),
     );
   }
@@ -1147,9 +1207,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     history,
     list,
     destinations,
+    pinned,
     fileAudience,
     rename,
     archive,
+    pin,
     remove,
     move,
     retry: (workspaceId: string, userId: string, chatId: string, turnId: string, value: unknown) =>
