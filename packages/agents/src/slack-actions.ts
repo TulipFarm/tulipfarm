@@ -5,6 +5,7 @@ import {
   canAccessAsset,
   currentMember,
   lockAuthorization,
+  protectedSourceClosure,
   requireCurrentActor,
   requireProtectedSource,
   requireTeamMember,
@@ -300,6 +301,15 @@ export function createSlackActions(options: Options) {
           // The requester's own earlier turns may inform the send; everything those turns read stays public-only.
           await requireProtectedSource(tx, actor, dependency);
           await requireDraftSources(tx, actor, [dependency], new Set([canonicalJson(dependency)]), undefined, true);
+        } else if (dependency.kind === 'agent-definition' || dependency.kind === 'workspace-skill') {
+          // Every chat turn cites the workspace's agents and skills, so the chats they were drafted in stay out of the send.
+          await currentMember(tx, actor);
+          await lockAuthorization(tx);
+          for (const source of await protectedSourceClosure(tx, [dependency], undefined, { drafts: false }))
+            if (source.kind === 'agent-definition' || source.kind === 'workspace-skill') {
+              await requireProtectedSource(tx, actor, source, undefined, true);
+              if (source.kind === 'agent-definition') await requireAgentPermission(tx, actor, source.agentId, 'read');
+            } else await requireDraftSources(tx, actor, [source], new Set(), undefined, true);
         } else await requireDraftSources(tx, actor, [dependency], new Set(), undefined, true);
       }
       const attachments = await tx.client.query(
