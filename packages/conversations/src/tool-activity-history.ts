@@ -127,10 +127,7 @@ export const tableProposalSupersededCondition = (table: (name: string) => string
             AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label')))))))`;
 
 // A proposal's tool result is saved as pending; its review happens later, so read its current state.
-async function tableProposalStatus(
-  tx: AuthorizationTransaction,
-  id: string,
-): Promise<z.infer<typeof activityStatusSchema> | null> {
+async function tableProposalActivity(tx: AuthorizationTransaction, id: string): Promise<StoredToolActivity | null> {
   const table = (name: string) => qualified(tx.schema, name);
   if (!(await tx.client.query('SELECT to_regclass($1) AS name', [table('tf_table_proposals')])).rows[0]?.name)
     return null;
@@ -160,30 +157,50 @@ async function tableProposalStatus(
     .safeParse(row);
   if (!proposal.success) return null;
   const value = proposal.data;
-  if (value.completed === value.plans) return 'completed';
-  if (value.decision === 'reject') return 'blocked';
-  if (value.control === 'cancel' || value.expired) return 'cancelled';
-  if (value.completed || value.failed) return 'failed';
-  if (value.decision === 'approve') return 'running';
-  return value.superseded ? 'cancelled' : 'waiting';
+  if (value.completed === value.plans) return { status: 'completed' };
+  if (value.decision === 'reject') return { status: 'blocked' };
+  if (value.control === 'cancel' || value.expired) return { status: 'cancelled' };
+  if (value.completed || value.failed) return { status: 'failed' };
+  if (value.decision === 'approve') return { status: 'running' };
+  return value.superseded ? { status: 'completed', detail: 'Replaced by a revision.' } : { status: 'waiting' };
+}
+
+type StoredToolRow = { id: string; tool: string; status: string; output?: unknown };
+export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string };
+
+/** The step's current status, and a note when its saved result alone would mislead. */
+export async function storedToolActivity(
+  tx: AuthorizationTransaction,
+  row: StoredToolRow,
+): Promise<StoredToolActivity> {
+  if (row.status === 'completed' && row.tool === 'tables.propose') {
+    const result = z.object({ result: z.unknown() }).safeParse(row.output);
+    const output = result.success ? result.data.result : row.output;
+    // No proposal exists; the assistant is told to correct its input and propose again.
+    if (z.object({ error: z.literal('invalid-arguments') }).safeParse(output).success)
+      return { status: 'completed', detail: 'Corrected and resubmitted.' };
+    const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
+    const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
+    if (activity) return activity;
+  }
+  return { status: await savedToolStatus(tx, row) };
 }
 
 export async function storedToolStatus(
   tx: AuthorizationTransaction,
-  row: { id: string; tool: string; status: string; output?: unknown },
+  row: StoredToolRow,
+): Promise<z.infer<typeof activityStatusSchema>> {
+  return (await storedToolActivity(tx, row)).status;
+}
+
+async function savedToolStatus(
+  tx: AuthorizationTransaction,
+  row: StoredToolRow,
 ): Promise<z.infer<typeof activityStatusSchema>> {
   const table = (name: string) => qualified(tx.schema, name);
   const result = z
     .object({ provider: z.never().optional(), result: z.unknown(), sources: z.array(z.unknown()) })
     .safeParse(row.output);
-  if (row.status === 'completed' && row.tool === 'tables.propose') {
-    const output = result.success ? result.data.result : row.output;
-    // No proposal exists; the assistant is told to correct its input and propose again.
-    if (z.object({ error: z.literal('invalid-arguments') }).safeParse(output).success) return 'cancelled';
-    const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
-    const status = proposal.success ? await tableProposalStatus(tx, proposal.data.id) : null;
-    if (status) return status;
-  }
   if (row.status === 'completed') return toolOutcomeStatus(result.success ? result.data.result : row.output);
   if (row.status === 'blocked' || row.status === 'failed') return row.status;
   if (

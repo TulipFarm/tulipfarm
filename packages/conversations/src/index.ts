@@ -11,7 +11,7 @@ import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
 import { googleToolActivity } from './google-tool-activity.ts';
 import { apiCallReceipt, toolPresentation } from './tool-activity.ts';
-import { storedToolPresentation, storedToolStatus } from './tool-activity-history.ts';
+import { storedToolActivity, storedToolPresentation } from './tool-activity-history.ts';
 import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
 import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
@@ -791,7 +791,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 rowChange,
                 workflows,
                 subagents,
-                activityStatus: await storedToolStatus(tx, row),
+                ...(await storedToolActivity(tx, row).then(({ status, detail }) => ({
+                  activityStatus: status,
+                  ...(detail ? { activityDetail: detail } : {}),
+                }))),
                 narration: hidden.size ? null : (row.narration ?? null),
                 presentation: hidden.size
                   ? toolPresentation(row.tool)
