@@ -15,7 +15,13 @@ import {
   scopeSchema,
   taskLimitsSchema,
 } from './contracts.ts';
-import { AgentError, agentPolicySchema, agentProjectionSchema, savedAgentSchema } from './saved-contracts.ts';
+import {
+  AgentError,
+  agentDataScopeSchema,
+  agentPolicySchema,
+  agentProjectionSchema,
+  savedAgentSchema,
+} from './saved-contracts.ts';
 import { requireAgentPermission, withHuman } from './saved-policy.ts';
 export { requireAgentPermission } from './saved-policy.ts';
 import { createAgentStore, relation, type AgentStorage, type AgentTransaction } from './store.ts';
@@ -517,6 +523,12 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
       const input = executionPolicySchema.parse(value);
       return administer(workspaceId, user, agentId, actor =>
         executor.configure(workspaceId, actor, { agentId, ...input }).then(() => ({ saved: true })),
+      );
+    },
+    changeDataScope: (workspaceId: string, user: string, agentId: string, value: unknown) => {
+      const input = agentDataScopeSchema.parse(value);
+      return administer(workspaceId, user, agentId, actor =>
+        executor.changeDataScope(workspaceId, actor, { agentId, ...input }),
       );
     },
   };

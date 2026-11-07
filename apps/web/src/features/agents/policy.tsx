@@ -1,11 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import { ActionGroup, type ButtonState } from '@tulipfarm/sprout/button';
-import { CheckboxField, ChoiceGroup, Field, type ChoiceOption } from '@tulipfarm/sprout/field';
+import { CheckboxField, ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { Form, FormFooter, FormSection } from '@tulipfarm/sprout/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { Input } from '@tulipfarm/sprout/input';
-import { Disclosure } from '@/components/disclosure';
-import { TablePicker } from '@/features/tables/table-picker';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { UnsavedChanges, WriteFeedback } from '@/features/tables/feedback';
 import { useAgentPolicy } from './queries';
@@ -13,6 +11,7 @@ import { AgentRead } from './feedback';
 import type { agentApi, AgentContext } from './api';
 import { SlackDestinations } from './slack-destinations';
 import { DefinitionSharing } from './sharing';
+import { AgentDataScope, withScopeEntry } from './builder-access';
 import {
   enrollmentInput,
   executionInput,
@@ -20,26 +19,18 @@ import {
   sameAccess,
   sameTeams,
   type Policy,
-  type RecordPermission,
   type TeamPermission,
 } from './administration';
 import { taskLimitFields } from '../tasks/limits';
-import { ScopeSummary } from './reference-names';
 
 type Api = ReturnType<typeof agentApi>;
 type Operation =
   | { kind: 'policy'; input: Parameters<Api['updatePolicy']>[1] }
-  | { kind: 'execution' | 'enrollment'; input: Parameters<Api['configure']>[1] };
+  | { kind: 'execution' | 'enrollment'; input: Parameters<Api['configure']>[1] }
+  | { kind: 'data'; input: Parameters<Api['updateDataScope']>[1] };
 type Section = Operation['kind'];
 
 const sharingPermissions: readonly TeamPermission[] = ['read', 'edit', 'delete', 'invoke', 'manage'];
-const recordPermissionOptions: ChoiceOption<RecordPermission>[] = [
-  { value: 'table.row.read', label: 'Read rows', disabled: true },
-  { value: 'table.row.create', label: 'Create rows' },
-  { value: 'table.row.update', label: 'Update rows' },
-  { value: 'table.row.delete', label: 'Delete rows' },
-];
-const readRecords: RecordPermission[] = ['table.row.read'];
 
 export type PolicyParts = { notice: ReactNode; access: ReactNode; execution: ReactNode };
 
@@ -123,9 +114,7 @@ function PolicyForm({
   const [personGrants, setPersonGrants] = useState(policy.personGrants);
   const [enrollment, setEnrollment] = useState(policy.enrollment);
   const [enabled, setEnabled] = useState(policy.enabled);
-  const [readTable, setReadTable] = useState('');
-  const [tablePermissions, setTablePermissions] = useState(readRecords);
-  const [limits, setLimits] = useState(policy.limits);
+  const [dataScope, setDataScope] = useState(policy.limits);
   const [taskLimits, setTaskLimits] = useState(policy.taskLimits);
   const [slackSender, setSlackSender] = useState(policy.slackSender);
   const [review, setReview] = useState<{ policy: Policy; reloaded: boolean } | null>(null);
@@ -136,6 +125,7 @@ function PolicyForm({
       try {
         if (operation.kind === 'policy') await api.updatePolicy(id, operation.input);
         if (operation.kind === 'execution' || operation.kind === 'enrollment') await api.configure(id, operation.input);
+        if (operation.kind === 'data') await api.updateDataScope(id, operation.input);
       } catch (error) {
         setReview({ policy, reloaded: false });
         throw error;
@@ -145,6 +135,10 @@ function PolicyForm({
     operation => {
       if (operation.kind === 'policy')
         setBase(previous => ({ ...previous, ...operation.input, version: operation.input.version + 1 }));
+      if (operation.kind === 'data') {
+        setBase(previous => ({ ...previous, version: operation.input.version + 1, limits: operation.input.scope }));
+        setDataScope(operation.input.scope);
+      }
       if (operation.kind === 'execution' || operation.kind === 'enrollment') {
         setBase(previous => ({
           ...previous,
@@ -156,11 +150,8 @@ function PolicyForm({
           slackSender: operation.input.slackSender ?? previous.slackSender,
         }));
         if (operation.kind === 'execution') {
-          setLimits(operation.input.limits);
           setTaskLimits(operation.input.taskLimits);
           setEnabled(operation.input.enabled);
-          setReadTable('');
-          setTablePermissions(readRecords);
         }
       }
       setReview(null);
@@ -174,14 +165,13 @@ function PolicyForm({
     enrollment: !sameTeams(enrollment, base.enrollment),
     execution:
       enabled !== base.enabled ||
-      !sameAccess(limits, base.limits, limit => limit.assetId) ||
       taskLimitFields.some(field => taskLimits[field.key] !== base.taskLimits[field.key]) ||
-      !!readTable ||
       slackSender !== base.slackSender,
+    data: !sameAccess(dataScope, base.limits, limit => limit.assetId),
   };
   const unsaved = (
     <UnsavedChanges
-      dirty={dirty.ownership || dirty.enrollment || dirty.execution || write.state.kind === 'uncertain'}
+      dirty={dirty.ownership || dirty.enrollment || dirty.execution || dirty.data || write.state.kind === 'uncertain'}
     />
   );
   if (concealed) return children({ notice: unsaved, access: status, execution: status });
@@ -239,7 +229,6 @@ function PolicyForm({
   };
   const keepDraft = () => {
     setBase(policy);
-    setLimits(policy.limits);
     setTaskLimits(policy.taskLimits);
     setReview(null);
     write.reset();
@@ -251,11 +240,9 @@ function PolicyForm({
     setPersonGrants(policy.personGrants);
     setEnrollment(policy.enrollment);
     setEnabled(policy.enabled);
-    setLimits(policy.limits);
+    setDataScope(policy.limits);
     setTaskLimits(policy.taskLimits);
     setSlackSender(policy.slackSender);
-    setReadTable('');
-    setTablePermissions(readRecords);
     setReview(null);
     write.reset();
   };
@@ -399,11 +386,11 @@ function PolicyForm({
                 kind: 'execution',
                 input: executionInput(base, {
                   enabled,
-                  limits,
+                  limits: base.limits,
                   taskLimits,
                   slackSender,
-                  resource: readTable,
-                  tablePermissions,
+                  resource: '',
+                  tablePermissions: [],
                 }),
               })
             }
@@ -416,32 +403,6 @@ function PolicyForm({
                 checked={enabled}
                 onCheckedChange={setEnabled}
               />
-              <TablePicker
-                workspaceId={workspaceId}
-                teams={teams}
-                id="agent-read-resource"
-                label="Add table read limit"
-                required={false}
-                value={readTable}
-                disabled={locked}
-                onChange={setReadTable}
-              />
-              {readTable && (
-                <ChoiceGroup
-                  type="checkbox"
-                  optional
-                  legend="Permissions for this table"
-                  helper="The agent's teams still need access to this table."
-                  options={recordPermissionOptions}
-                  value={tablePermissions}
-                  onValueChange={setTablePermissions}
-                />
-              )}
-              <Disclosure title={`Saved execution limits (${limits.length})`}>
-                <p className="break-words text-sm">
-                  <ScopeSummary workspaceId={workspaceId} scope={limits} />
-                </p>
-              </Disclosure>
               <div className="grid gap-4 sm:grid-cols-3">
                 {taskLimitFields.map(field => (
                   <Field
@@ -491,10 +452,7 @@ function PolicyForm({
                 dirty={dirty.execution}
                 cancel={discard(() => {
                   setEnabled(base.enabled);
-                  setLimits(base.limits);
                   setTaskLimits(base.taskLimits);
-                  setReadTable('');
-                  setTablePermissions(readRecords);
                   setSlackSender(base.slackSender);
                 })}
                 submit={save('execution', 'Save execution settings', 'Saving execution settings…')}
@@ -504,14 +462,44 @@ function PolicyForm({
             </div>
           </Form>
         </FormSection>
+        <FormSection
+          id="agent-data-scope"
+          title="What data it can use"
+          description="These limits bound its access. They never grant access that a caller or the agent's teams do not have."
+        >
+          <Form
+            disabled={locked}
+            onSubmit={() => submit({ kind: 'data', input: { version: base.version, scope: dataScope } })}
+          >
+            <div className="grid gap-5">
+              <AgentDataScope
+                workspaceId={workspaceId}
+                teams={teams}
+                id="agent-data-table"
+                value={dataScope}
+                disabled={locked}
+                onAdd={(assetId, permissions) =>
+                  setDataScope(previous => withScopeEntry(previous, assetId, permissions))
+                }
+                onRemove={assetId => setDataScope(previous => previous.filter(item => item.assetId !== assetId))}
+              />
+              <FormFooter
+                dirty={dirty.data}
+                note="Saving also updates the active version, so new runs use these tables. Removing a table also stops runs already in progress from using it."
+                cancel={discard(() => setDataScope(base.limits))}
+                submit={save('data', 'Save data access', 'Saving data access…')}
+              >
+                {feedback('data')}
+              </FormFooter>
+            </div>
+          </Form>
+        </FormSection>
         <SlackDestinations
           workspaceId={workspaceId}
           slug={slug}
           teams={teams}
           administration={state}
-          addLimit={(assetId, permissions) =>
-            setLimits(previous => [...previous.filter(item => item.assetId !== assetId), { assetId, permissions }])
-          }
+          addLimit={(assetId, permissions) => setDataScope(previous => withScopeEntry(previous, assetId, permissions))}
         />
       </div>
     ),

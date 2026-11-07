@@ -492,10 +492,9 @@ test('agent flows resolve permitted names without changing commands or approvals
       } else await removeContext();
       await page.goto(`${origin}/agent-proof/agents/${aid}`);
       await openTab('Execution');
-      await page.getByRole('button', { name: 'Saved execution limits (1)', exact: true }).click();
-      const execution = page.getByRole('region', { name: 'Execution', exact: true });
-      await execution.getByText('Customers', { exact: true }).waitFor();
-      assert.doesNotMatch(await execution.innerText(), new RegExp(tableId));
+      const dataScope = page.getByRole('region', { name: 'What data it can use', exact: true });
+      await dataScope.getByText('Customers', { exact: true }).waitFor();
+      assert.doesNotMatch(await dataScope.innerText(), new RegExp(tableId));
       await capture('saved-limits');
       const activations = page.getByRole('region', { name: 'Agent activations', exact: true });
       await activations.getByText('Customers', { exact: true }).first().waitFor();

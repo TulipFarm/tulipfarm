@@ -620,7 +620,7 @@ const descriptions: Record<ToolName, string> = {
   'google.execute':
     'Execute exactly the unchanged Google proposal that its owner approved; use google.propose to prepare a different write. Returns the durable execution state and cannot approve or alter payloads. It changes Google data, so never retry an executing or outcome-unknown proposal; read google.status instead.',
   'tables.list':
-    'List accessible tables with their applied schemas for whoever may operate on them; use tables.definitions for schema-authoring catalog entries. Returns a permission-filtered page ordered by table ID (limit 1–100, default 25; continue with after), total, and nextCursor—not rows or archived tables.',
+    'List accessible tables with their applied schemas for whoever may operate on them; use tables.definitions for schema-authoring catalog entries. Returns a permission-filtered page ordered by table ID (limit 1–100, default 25; continue with after), total, and nextCursor—not rows or archived tables. A saved agent can use only the tables in its data access. If a needed table is missing, tell the user it isn’t in this agent’s data access and that someone who manages the agent can add it under Execution › What data it can use.',
   'schema.context':
     'Read table-authoring context before proposing a schema: eligible owning teams, existing tables, capabilities for an optional existing table, and newIds, fresh UUIDs to use for new tables, fields and options. Omit tableId for a new table; tableFound false means the id is not an existing table you can see. Results do not create anything; null capabilityTableId is not a denial. Read skills.read(table-authoring) for payload rules rather than inferring them from this context.',
   'schema.inspect':
