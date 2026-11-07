@@ -8,6 +8,8 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { SearchField } from '@tulipfarm/sprout/search-field';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
+import { MoreH } from 'reicon-react/icons/MoreH';
 import { Disclosure } from '@/components/disclosure';
 import { useReviewedSkills, useSkillDetail } from '@/features/skills/queries';
 import { skillApi, type SkillDetail } from '@/features/skills/api';
@@ -36,6 +38,7 @@ export function AgentSkillPicker({
   const api = useMemo(() => skillApi(workspaceId), [workspaceId]);
   const [after, setAfter] = useState<string>();
   const [search, setSearch] = useState('');
+  const [adding, setAdding] = useState(false);
   const read = useReviewedSkills(api, after, search);
   const workspace = read.state.kind === 'ready' ? read.state.data.workspace : [];
   const available = [...builtins, ...workspace];
@@ -61,7 +64,7 @@ export function AgentSkillPicker({
       meta={`${value.length} of ${skillLimit}`}
       description="Step-by-step procedures this agent can follow."
     >
-      {value.length > 0 && (
+      {value.length > 0 ? (
         <ul aria-label="Selected skills" className="min-w-0 divide-y rounded-lg border">
           {value.map(selection => (
             <SelectedSkill
@@ -78,80 +81,46 @@ export function AgentSkillPicker({
             />
           ))}
         </ul>
-      )}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-0 flex-1">
-          <SearchField
-            id="agent-skill-search"
-            label="Find skills"
-            placeholder="Search skills"
-            maxLength={120}
-            value={search}
-            onChange={next => {
-              setSearch(next);
-              setAfter(undefined);
-            }}
-          />
-        </div>
-        {onImport && (
-          <Button variant="outline" disabled={disabled} onClick={onImport}>
-            Import skill
-          </Button>
-        )}
-      </div>
-      {matchedBuiltins.length > 0 && (
-        <ChoiceGroup
-          type="checkbox"
-          optional
-          legend="Built-in skills"
-          disabled={disabled}
-          helper="Included with TulipFarm. Skills guide the work; they do not grant access."
-          options={matchedBuiltins.map(item => ({
-            value: item.id,
-            label: item.name,
-            description: item.description,
-            disabled: full && !selected.includes(item.id),
-          }))}
-          value={selected}
-          onValueChange={choose}
-        />
-      )}
-      {read.state.kind === 'loading' ? (
-        <div role="status" aria-label="Loading reviewed skills" className="space-y-2">
-          <Skeleton />
-          <Skeleton />
-          <span className="sr-only">Loading reviewed skills…</span>
-        </div>
-      ) : read.state.kind === 'error' || read.state.kind === 'unavailable' ? (
-        <div className="space-y-3">
-          <Alert variant="destructive">
-            <AlertDescription>Could not load reviewed skills. Existing selections are retained.</AlertDescription>
-          </Alert>
-          <Button variant="outline" onClick={() => void read.refresh()}>
-            Retry skill catalog
-          </Button>
-        </div>
       ) : (
-        <div className="grid gap-3">
-          {read.state.error && (
-            <Alert variant="destructive">
-              <AlertDescription>The catalog refresh failed. Existing selections are retained.</AlertDescription>
-            </Alert>
-          )}
-          {workspace.length ? (
-            <div className="min-w-0 wrap-anywhere">
+        <p className="text-sm text-muted-foreground">No skills chosen. Add a skill when the job has a set procedure.</p>
+      )}
+      <Collapsible open={adding} onOpenChange={setAdding}>
+        <div>
+          <CollapsibleTrigger render={<Button variant="outline" />}>
+            <MoreH size={16} aria-hidden="true" />
+            {adding ? 'Hide more skills' : 'More skills'}
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent>
+          <div className="mt-4 grid gap-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-0 flex-1">
+                <SearchField
+                  id="agent-skill-search"
+                  label="Find skills"
+                  placeholder="Search skills"
+                  maxLength={120}
+                  value={search}
+                  onChange={next => {
+                    setSearch(next);
+                    setAfter(undefined);
+                  }}
+                />
+              </div>
+              {onImport && (
+                <Button variant="outline" disabled={disabled} onClick={onImport}>
+                  Import skill
+                </Button>
+              )}
+            </div>
+            {matchedBuiltins.length > 0 && (
               <ChoiceGroup
                 type="checkbox"
-                layout="columns"
                 optional
-                legend="Available skills"
-                disabled={catalogBlocked}
-                helper={
-                  full
-                    ? `You've chosen ${skillLimit} skills. Remove one to add another.`
-                    : `Choose up to ${skillLimit}.`
-                }
-                options={workspace.map(item => ({
+                legend="Built-in skills"
+                disabled={disabled}
+                helper="Included with TulipFarm. Skills guide the work; they do not grant access."
+                options={matchedBuiltins.map(item => ({
                   value: item.id,
                   label: item.name,
                   description: item.description,
@@ -160,43 +129,91 @@ export function AgentSkillPicker({
                 value={selected}
                 onValueChange={choose}
               />
-            </div>
-          ) : search ? (
-            <div className="grid gap-2">
-              <p className="text-sm text-muted-foreground">No reviewed workspace skills match this search.</p>
-              <div>
-                <Button variant="outline" onClick={() => setSearch('')}>
-                  Clear search
+            )}
+            {read.state.kind === 'loading' ? (
+              <div role="status" aria-label="Loading reviewed skills" className="space-y-2">
+                <Skeleton />
+                <Skeleton />
+                <span className="sr-only">Loading reviewed skills…</span>
+              </div>
+            ) : read.state.kind === 'error' || read.state.kind === 'unavailable' ? (
+              <div className="space-y-3">
+                <Alert variant="destructive">
+                  <AlertDescription>Could not load reviewed skills. Existing selections are retained.</AlertDescription>
+                </Alert>
+                <Button variant="outline" onClick={() => void read.refresh()}>
+                  Retry skill catalog
                 </Button>
               </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No reviewed workspace skills yet. Import a skill or review one in Skills.
-            </p>
-          )}
-          {(after || read.state.data.nextCursor) && (
-            <nav aria-label="Skill pages" className="flex flex-wrap gap-2">
-              {after && (
-                <Button variant="outline" size="sm" onClick={() => setAfter(undefined)}>
-                  First skill page
-                </Button>
-              )}
-              {read.state.data.nextCursor && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setAfter(read.state.kind === 'ready' ? (read.state.data.nextCursor ?? undefined) : undefined)
-                  }
-                >
-                  Next skill page
-                </Button>
-              )}
-            </nav>
-          )}
-        </div>
-      )}
+            ) : (
+              <div className="grid gap-3">
+                {read.state.error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>The catalog refresh failed. Existing selections are retained.</AlertDescription>
+                  </Alert>
+                )}
+                {workspace.length ? (
+                  <div className="min-w-0 wrap-anywhere">
+                    <ChoiceGroup
+                      type="checkbox"
+                      layout="columns"
+                      optional
+                      legend="Available skills"
+                      disabled={catalogBlocked}
+                      helper={
+                        full
+                          ? `You've chosen ${skillLimit} skills. Remove one to add another.`
+                          : `Choose up to ${skillLimit}.`
+                      }
+                      options={workspace.map(item => ({
+                        value: item.id,
+                        label: item.name,
+                        description: item.description,
+                        disabled: full && !selected.includes(item.id),
+                      }))}
+                      value={selected}
+                      onValueChange={choose}
+                    />
+                  </div>
+                ) : search ? (
+                  <div className="grid gap-2">
+                    <p className="text-sm text-muted-foreground">No reviewed workspace skills match this search.</p>
+                    <div>
+                      <Button variant="outline" onClick={() => setSearch('')}>
+                        Clear search
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No reviewed workspace skills yet. Import a skill or review one in Skills.
+                  </p>
+                )}
+                {(after || read.state.data.nextCursor) && (
+                  <nav aria-label="Skill pages" className="flex flex-wrap gap-2">
+                    {after && (
+                      <Button variant="outline" size="sm" onClick={() => setAfter(undefined)}>
+                        First skill page
+                      </Button>
+                    )}
+                    {read.state.data.nextCursor && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setAfter(read.state.kind === 'ready' ? (read.state.data.nextCursor ?? undefined) : undefined)
+                        }
+                      >
+                        Next skill page
+                      </Button>
+                    )}
+                  </nav>
+                )}
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </FormSection>
   );
 }

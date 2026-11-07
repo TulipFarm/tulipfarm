@@ -1286,6 +1286,7 @@ export const newAgentRoute = createRoute({
         setupAgentId: z.uuid().optional().catch(undefined),
         chatId: z.uuid().optional().catch(undefined),
         draftId: z.uuid().optional().catch(undefined),
+        step: z.enum(['skills', 'access']).optional().catch(undefined),
       })
       .parse(search),
   component: NewAgentPage,

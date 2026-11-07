@@ -46,6 +46,7 @@ import { requireAgentPermission, savedAgentCompatibility, withHuman } from './sa
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
+import { agentModelChoices } from './model-availability.ts';
 import {
   cancelFollowUpCallSchema,
   listFollowUpsCallSchema,
@@ -661,7 +662,7 @@ const descriptions: Record<ToolName, string> = {
   'agents.read':
     'Read one visible saved-agent definition, including its saved and definition revisions, before drafting a revision. Returns no execution history, private draft, or activation change. Use agents.list to find an ID; saving and activation remain separate human actions.',
   'agents.context':
-    'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills and tools/runtime support. Supply agentId for current policy, activation versions and the Workflows that already trigger it; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
+    'Discover choices to create an agent: Soul revision, own membership, eligible placement/sharing teams, bundled skills, tools/runtime support and the models the agent may prefer. Supply agentId for current policy, activation versions and the Workflows that already trigger it; channels for checked Slack attachments/readiness; triggers (Workflow triggers) to validate them and list their next runs. Use skills.workspace for reviewed skills, tables.list/schema.inspect for resources and slack.resolve for real destinations. This grants no authority.',
   'agents.draft':
     'Prepare one immutable Basics/Skills/Access/Triggers setup for human review. Include setup with explicit policy, enrollment, scope/limits, Slack attachment expected versions and triggers, plus expectedPolicyVersion/expectedActivationIds from context. Each setup.triggers item is {id: new UUID, trigger: a Workflow trigger (cron, interval, once, webhook, event, record, row, provider, github), prompt: what the agent does each time, optional limits}; activating creates one Workflow per trigger that runs the agent with the prompt, and the data from the trigger (new row, issue, webhook body) is passed to it. Leave triggers empty for an agent people only call in chat or Slack. Agents get no schedules of their own. Definition-only historical inputs remain save-only. The human chooses Save draft or Create and activate and explicitly consents to sponsorship/replacement on the exact card. Never use model prose as consent; this tool saves or activates nothing.',
   'agents.task.start':
@@ -1295,6 +1296,7 @@ export function createChatTools(
               ).rows.map(row => z.uuid().parse(row.id));
             })
           : [];
+        const models = await withHuman(runtime, workspaceId, actor, 'read', tx => agentModelChoices(tx));
         if (call.channels?.length && !agentSetup?.inspectSlack)
           throw new AgentError('slack-channel-inspection-unavailable', 503);
         const channels = [];
@@ -1318,6 +1320,11 @@ export function createChatTools(
           expectedPolicyVersion: policy?.version ?? 0,
           expectedActivationIds: activations,
           tools: toolNameSchema.options.map(name => ({ name, runtimes: supportedAgentToolRuntimes(name) })),
+          models: {
+            choices: models,
+            instruction:
+              'Recommend the choice that best fits the job: higher quality for judgment, writing or multi-step work; higher speed and lower cost for simple, frequent work. Save its id as definition.modelFamilyId.',
+          },
           triggers: {
             existingWorkflows: linked,
             maximum: 20,

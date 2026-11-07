@@ -57,6 +57,8 @@ test(
       const agentView = page.getByRole('complementary', { name: 'Agent view' });
       await agentView.getByRole('heading', { name: 'People Ops helper' }).waitFor();
       await step('Access');
+      await form.getByText('No actions chosen.', { exact: false }).waitFor();
+      await form.getByRole('button', { name: 'More actions', exact: true }).click();
       await form.getByRole('button', { name: /Tables.*available/ }).click();
       await form.getByRole('checkbox', { name: 'Find rows', exact: true }).check();
       await form.getByRole('checkbox', { name: 'Read a row', exact: true }).check();
@@ -68,7 +70,13 @@ test(
         true,
         'filtering never drops hidden selections',
       );
+      await form.getByRole('button', { name: 'Hide more actions', exact: true }).click();
+      await form.getByRole('searchbox', { name: 'Find actions' }).waitFor({ state: 'hidden' });
+      const chosen = form.getByRole('list', { name: 'Chosen actions' });
+      await chosen.getByRole('button', { name: 'Remove Read a row', exact: true }).waitFor();
+      assert.equal(await chosen.getByRole('listitem').count(), 1, 'only chosen actions stay in view');
       await step('Skills');
+      await form.getByRole('button', { name: 'More skills', exact: true }).click();
       await form.getByRole('checkbox', { name: 'Employee handbook answers', exact: true }).check();
       await form.getByRole('button', { name: 'Import skill', exact: true }).click();
       const importer = page.getByRole('dialog', { name: 'Import skills for this agent' });

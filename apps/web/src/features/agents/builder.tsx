@@ -54,6 +54,7 @@ export function AgentBuilder({
   membershipId,
   context,
   initial,
+  initialStep = 'basics',
   concealed,
   refresh,
   onPersisted,
@@ -65,14 +66,15 @@ export function AgentBuilder({
   membershipId: string;
   context: AgentContext;
   initial?: BuilderInitial | undefined;
+  initialStep?: BuilderStep | undefined;
   concealed: boolean;
   refresh: () => Promise<void>;
   onPersisted: () => void;
 }) {
   const [draft, setDraft] = useState(() => builderDraft(initial));
   const [base, setBase] = useState(initial);
-  const [step, setStep] = useState<BuilderStep>('basics');
-  const [visited, setVisited] = useState<ReadonlySet<BuilderStep>>(new Set(['basics']));
+  const [step, setStep] = useState<BuilderStep>(initialStep);
+  const [visited, setVisited] = useState<ReadonlySet<BuilderStep>>(new Set(['basics', initialStep]));
   const [tab, setTab] = useState<'summary' | 'test'>('summary');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showErrors, setShowErrors] = useState(false);

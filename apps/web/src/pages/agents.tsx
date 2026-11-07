@@ -320,7 +320,14 @@ export function NewAgentPage() {
   const [freshId] = useState(() => crypto.randomUUID());
   const id = search.setupAgentId ?? freshId;
   return (
-    <NewAgentBuilder key={id} id={id} resume={!!search.setupAgentId} chatId={search.chatId} draftId={search.draftId} />
+    <NewAgentBuilder
+      key={id}
+      id={id}
+      resume={!!search.setupAgentId}
+      chatId={search.chatId}
+      draftId={search.draftId}
+      step={search.step}
+    />
   );
 }
 function NewAgentBuilder({
@@ -328,11 +335,13 @@ function NewAgentBuilder({
   resume,
   chatId,
   draftId,
+  step,
 }: {
   id: string;
   resume: boolean;
   chatId?: string | undefined;
   draftId?: string | undefined;
+  step?: 'skills' | 'access' | undefined;
 }) {
   const { workspace, membershipId } = workspaceRoute.useRouteContext();
   const [resuming] = useState(resume);
@@ -386,6 +395,7 @@ function NewAgentBuilder({
       id={id}
       membershipId={membershipId}
       context={context}
+      initialStep={step}
       initial={loadingDraft && initial.state.kind === 'ready' ? initial.state.data : undefined}
       concealed={read.state.kind !== 'ready' || (loadingDraft && initial.state.kind !== 'ready')}
       refresh={read.refresh}

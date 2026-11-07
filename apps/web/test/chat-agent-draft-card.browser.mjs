@@ -397,6 +397,19 @@ test(
           await captureBuilderScreenshot(page, 'agent-builder-chat-review');
         }
         if (handoff) {
+          await card.getByRole('button', { name: 'More setup options', exact: true }).click();
+          for (const [name, step] of [
+            ['Add actions', 'access'],
+            ['Add skills', 'skills'],
+          ])
+            assert.equal(
+              new URL(
+                await page.getByRole('menuitem', { name, exact: true }).getAttribute('href'),
+                server.origin,
+              ).searchParams.get('step'),
+              step,
+            );
+          await page.keyboard.press('Escape');
           await card.getByRole('link', { name: 'Edit in builder', exact: true }).click();
           const form = page.getByRole('form', { name: 'Agent setup', exact: true });
           await form.getByLabel('Agent name', { exact: true }).waitFor();

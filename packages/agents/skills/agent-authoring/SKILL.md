@@ -25,7 +25,14 @@ Reuse decisions already made. Ask only unresolved questions that change the role
 
 ### Basics
 
-Write a focused name (at most 120 characters), instructions (at most 32,000 characters) and an optional model preference. Use `owningTeamId:null` for personal placement. A selected team is placement, not sharing, enrollment or borrowed authority.
+Write a focused name (at most 120 characters), instructions (at most 32,000 characters) and a model preference. Use `owningTeamId:null` for personal placement. A selected team is placement, not sharing, enrollment or borrowed authority.
+
+Before calling `agents.draft` for a new agent, settle the name and the model with `present.choice`, one question at a time:
+
+1. **Name.** If the person already named the agent, use that name and do not ask. Otherwise ask what to call it, offering two or three short names that describe the job, such as "Leave Request Assistant". Put your suggestion first, marked (Recommended). They can type their own.
+2. **Model.** If the person already chose a model, use it and do not ask. Otherwise ask which model the agent should use, offering the `models.choices` from `agents.context`. Put the one that best fits the job first, marked (Recommended), with a few words on why (for example, quality for judgment-heavy work, speed and cost for simple, frequent work). List the other choices after it. Save the chosen `id` as `definition.modelFamilyId`. If `models.choices` is empty, skip the question and leave the preference unset.
+
+When changing an existing agent, ask about the name or model only when the person wants to change it.
 
 ### Skills
 
@@ -35,7 +42,7 @@ For a supplied skills.sh, GitHub or supported URL, use `skills.import`, `skills.
 
 ### Access
 
-Use only real tool names and runtime support from `agents.context`. Select at most 20 relevant tools, not a generic table bundle. Discover data with `tables.list` and `schema.inspect`; preserve real IDs and bounded permissions. Keep `scope`, resource `limits`, `taskLimits`, team `enrollment` and sharing `policy` separate. Start with no extra access and name unresolved permissions.
+Use only real tool names and runtime support from `agents.context`. Select at most 20 tools, chosen from what the agent's job needs, not a generic bundle. For example, an agent that handles leave requests needs to read and update its leave-request rows and perhaps reply in Slack; it needs no GitHub tools and no tools that create or start other agents. Leave out tools the job does not use. The person sees the chosen tools and skills on the card and can add others from the builder. Discover data with `tables.list` and `schema.inspect`; preserve real IDs and bounded permissions. Keep `scope`, resource `limits`, `taskLimits`, team `enrollment` and sharing `policy` separate. Start with no extra access and name unresolved permissions.
 
 The policy must explicitly retain a manager. Use the context membership ID for the creator's reviewed personal grants; do not guess a person or team. Do not silently enroll the owning team. Explain any selected tool that cannot run in Slack or from an unattended trigger.
 
