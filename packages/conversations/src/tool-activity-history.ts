@@ -111,6 +111,63 @@ export async function storedToolPresentation(
   return toolPresentation(tool, call, activity);
 }
 
+/**
+ * True for proposal `p` when a newer, unrejected proposal from the same person
+ * in the same chat replaces it: it names `p` in `revises`, or redesigns the
+ * same table, or proposes a new table with the same title.
+ */
+export const tableProposalSupersededCondition = (table: (name: string) => string) =>
+  `EXISTS (SELECT 1 FROM ${table('tf_table_proposals')} n WHERE n.conversation_id=p.conversation_id AND n.membership_id=p.membership_id AND (n.created_at,n.id)>(p.created_at,p.id)
+    AND NOT EXISTS (SELECT 1 FROM ${table('tf_table_proposal_decisions')} nd WHERE nd.proposal_id=n.id AND nd.decision='reject')
+    AND (n.manifest->>'revises'=p.id::text OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(n.manifest->'plans') np, jsonb_array_elements(p.manifest->'plans') op
+      WHERE np->'input'->>'kind'='schema' AND op->'input'->>'kind'='schema'
+        AND (np->'input'->>'tableId'=op->'input'->>'tableId'
+          OR (jsonb_typeof(np->'before')='null' AND jsonb_typeof(op->'before')='null'
+            AND lower(btrim(np->'after'->>'label'))=lower(btrim(op->'after'->>'label')))))))`;
+
+// A proposal's tool result is saved as pending; its review happens later, so read its current state.
+async function tableProposalStatus(
+  tx: AuthorizationTransaction,
+  id: string,
+): Promise<z.infer<typeof activityStatusSchema> | null> {
+  const table = (name: string) => qualified(tx.schema, name);
+  if (!(await tx.client.query('SELECT to_regclass($1) AS name', [table('tf_table_proposals')])).rows[0]?.name)
+    return null;
+  const row = (
+    await tx.client.query(
+      `SELECT p.expires_at<=clock_timestamp() AS expired,jsonb_array_length(p.manifest->'plans') AS plans,
+        (SELECT decision FROM ${table('tf_table_proposal_decisions')} WHERE proposal_id=p.id) AS decision,
+        (SELECT operation FROM ${table('tf_table_proposal_controls')} WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1) AS control,
+        r.completed,r.failed,${tableProposalSupersededCondition(table)} AS superseded
+      FROM ${table('tf_table_proposals')} p
+      CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE receipt->>'status'='completed')::int AS completed,count(*) FILTER (WHERE receipt->>'status'='failed')::int AS failed
+        FROM (SELECT DISTINCT ON(table_id) receipt FROM ${table('tf_table_proposal_receipts')} WHERE proposal_id=p.id ORDER BY table_id,attempt DESC) latest) r
+      WHERE p.id=$1`,
+      [id],
+    )
+  ).rows[0];
+  const proposal = z
+    .object({
+      expired: z.boolean(),
+      plans: z.int(),
+      decision: z.enum(['approve', 'reject']).nullable(),
+      control: z.enum(['cancel', 'resume']).nullable(),
+      completed: z.int(),
+      failed: z.int(),
+      superseded: z.boolean(),
+    })
+    .safeParse(row);
+  if (!proposal.success) return null;
+  const value = proposal.data;
+  if (value.completed === value.plans) return 'completed';
+  if (value.decision === 'reject') return 'blocked';
+  if (value.control === 'cancel' || value.expired) return 'cancelled';
+  if (value.completed || value.failed) return 'failed';
+  if (value.decision === 'approve') return 'running';
+  return value.superseded ? 'cancelled' : 'waiting';
+}
+
 export async function storedToolStatus(
   tx: AuthorizationTransaction,
   row: { id: string; tool: string; status: string; output?: unknown },
@@ -119,6 +176,14 @@ export async function storedToolStatus(
   const result = z
     .object({ provider: z.never().optional(), result: z.unknown(), sources: z.array(z.unknown()) })
     .safeParse(row.output);
+  if (row.status === 'completed' && row.tool === 'tables.propose') {
+    const output = result.success ? result.data.result : row.output;
+    // No proposal exists; the assistant is told to correct its input and propose again.
+    if (z.object({ error: z.literal('invalid-arguments') }).safeParse(output).success) return 'cancelled';
+    const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
+    const status = proposal.success ? await tableProposalStatus(tx, proposal.data.id) : null;
+    if (status) return status;
+  }
   if (row.status === 'completed') return toolOutcomeStatus(result.success ? result.data.result : row.output);
   if (row.status === 'blocked' || row.status === 'failed') return row.status;
   if (
