@@ -29,6 +29,8 @@ office has the spreadsheet. Every answer means a copy and paste between them.
 workspace.** Ask in Slack or chat, and agents do the work from the same
 information as your team. You decide which actions wait for a person's OK.
 
+> **Runs on Spawnbox.**
+
 <div align="center">
 
 **⭐ If this is the kind of tool you want to exist, star the repo. It helps other teams find it.**
