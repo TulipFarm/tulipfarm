@@ -271,6 +271,7 @@ const logOnlyAttributes = new Set([
   'completion.reason',
   'layout.reason',
   'error.site',
+  'task.id',
 ]);
 // Where an error was thrown: up to eight "function@file:line" frames from TulipFarm's own code, innermost first.
 const errorSitePattern = /^[\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}( < [\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}){0,7}$/;
@@ -305,6 +306,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'response.rejection') return (responseRejections as readonly unknown[]).includes(value);
     if (key === 'usage.shape') return safeUsageShape(value);
     if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
+    if (key === 'task.id') return typeof value === 'string' && rowIdPattern.test(value);
     if (key === 'github.ratelimit_resource') return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value);
     if (key.startsWith('github.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     // The completion check's own model-written reason, at most 240 characters by its schema; it can quote the chat.

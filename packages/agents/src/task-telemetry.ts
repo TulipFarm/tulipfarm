@@ -1,5 +1,5 @@
 import { emitHook } from '@tulipfarm/extensions';
-import { recordTaskTransition, trackEvent } from '@tulipfarm/observability';
+import { log, recordTaskTransition, trackEvent } from '@tulipfarm/observability';
 import { afterCommit, workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentStorage, AgentTransaction } from './store.ts';
 
@@ -75,4 +75,26 @@ export function withTaskTelemetry(runtime: AgentStorage): AgentStorage {
       return result;
     },
   };
+}
+
+const denials = new WeakMap<object, string>();
+
+/** Runs a task access check and names it on any denial, so a failed task can say which check refused it. */
+export async function taskAccessCheck<T>(check: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof Error && !denials.has(error)) denials.set(error, check);
+    throw error;
+  }
+}
+
+/** Logs a task failed by an access denial, naming the check without any of the task's content. */
+export function taskAccessDenied(taskId: string, error: unknown) {
+  log('warn', 'task', 'call_failed', {
+    operation: 'task.access',
+    'error.type': 'AccessDenied',
+    'error.code': (error instanceof Error && denials.get(error)) || 'unnamed',
+    'task.id': taskId,
+  });
 }

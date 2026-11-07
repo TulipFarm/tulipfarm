@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  canAccessTable,
   currentMember,
   lockAuthorization,
   protectedSourceClosure,
@@ -74,8 +75,24 @@ export async function requireTaskDefinitionSources(
     `SELECT d.sources FROM ${relation(tx, 'tf_chat_authoring_drafts')} d JOIN ${relation(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id JOIN ${relation(tx, 'tf_agent_commands')} a ON a.id::text=c.outcome->'receipt'->>'commandId' JOIN ${relation(tx, 'tf_agent_saved_revisions')} s ON s.agent_id=a.agent_id AND s.soul_revision=a.accepted_revision WHERE a.agent_id=$1 AND s.definition_revision=$2 AND c.outcome->>'kind'='agent'`,
     [task.agent_id, task.definition_revision],
   );
-  for (const row of definitions.rows)
-    await requireDraftSources(tx, owner, sourceDependenciesSchema.parse(row.sources), new Set(), runId);
+  for (const row of definitions.rows) {
+    const sources = sourceDependenciesSchema.parse(row.sources);
+    // A chat draft retains the schema of every table in the requester's workspace inventory. The reviewed definition
+    // keeps a table's schema only while the task owner can still see that table; it neither pins the table's
+    // revision nor requires the agent's run to read its rows.
+    const schemas = (await protectedSourceClosure(tx, sources)).filter(source => source.kind === 'table-schema');
+    await requireDraftSources(tx, owner, sources, new Set(schemas.map(source => canonicalJson(source))), runId);
+    for (const tableId of new Set(schemas.map(source => source.tableId)))
+      if (
+        !(
+          (await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_table_catalog')} WHERE id=$1`, [tableId]))
+            .rowCount &&
+          ((await canAccessTable(tx, owner, tableId, 'table.row.read')) ||
+            (await canAccessTable(tx, owner, tableId, 'table.schema.manage')))
+        )
+      )
+        throw new AccessDenied();
+  }
 }
 
 export async function requireCommandDraftSources(tx: AgentTransaction, actor: HumanActor, commandId: string) {
