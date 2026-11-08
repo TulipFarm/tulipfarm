@@ -9,6 +9,7 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from './index.ts';
+import { protectedSourceClosure } from './mcp-provenance.ts';
 import { requireMcpSource, requireMcpTaskRun, requirePrivateTaskSource } from './mcp-source.ts';
 import type { SourceDependency } from './source-dependencies.ts';
 import { requireAgentGrant, requireSkillGrant } from './agent-permissions.ts';
@@ -411,4 +412,18 @@ export async function requireProtectedSource(
       return exhaustive;
     }
   }
+}
+
+/**
+ * Checks a workflow definition's sources. A revision saved from chat keeps that chat's sources, which include its owner's
+ * personal memory whenever the chat read it, so the owner can still read it.
+ */
+export async function requireWorkflowDefinitionSources(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+) {
+  for (const source of await protectedSourceClosure(tx, sources))
+    if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
+    else await requireProtectedSource(tx, actor, source);
 }

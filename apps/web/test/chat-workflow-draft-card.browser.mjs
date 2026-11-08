@@ -618,6 +618,8 @@ test(
             .getByText('Check this Slack destination before saving. The channel is not verified.', { exact: true })
             .waitFor();
           assert.equal(await slack.getByRole('button', { name: 'Save and activate' }).isDisabled(), true);
+          await slack.getByText(/^When a row is added to Tickets\. 1 step\./).waitFor();
+          await row.getByText(/^When a row in Orders changes\. 1 step\./).waitFor();
           await slack.getByRole('button', { name: 'Not now', exact: true }).and(slack.locator(':enabled')).waitFor();
           assert.doesNotMatch(
             await slack.innerText(),

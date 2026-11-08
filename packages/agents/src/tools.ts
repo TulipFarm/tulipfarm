@@ -734,7 +734,7 @@ const descriptions: Record<ToolName, string> = {
   'workflows.providers':
     'List enabled, authorized workflow trigger sources you may use for provider triggers and HTTP credentials. Returns safe source configuration, never credentials. Only Sheets supports updated events; all support created events. Also returns githubRepositories: the connected GitHub repositories a github trigger may name. List their repositoryId values in repositories, or use {organizationId: ownerId, includeFuture: true} for every repository of that account. It does not list chat connections: an empty result never means Slack or GitHub is disconnected, and Slack message steps resolve their channel with slack.resolve instead. Missing trigger sources must be set up outside chat.',
   'workflows.draft':
-    'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
+    'Prepare a workflow create/edit or enable/disable review for human approval; first read skills.read(workflow-authoring). Omit workflowId and revision to create a new workflow; pass them only when the human clearly asks to change that existing workflow. Reuse workspaceInventory for an existing ID and revision; call workflows.list only for absent inventory, missing summary details, or a stale response. Returns a draft and changes no workflow. A stale/error response requires rereading; do not treat an uncertain draft as an active workflow.',
   'workflows.archive':
     'Prepare an archive review for 1–20 workflows the human manages, using IDs and revisions from workspaceInventory or workflows.list. Archiving stops triggers and blocks unfinished runs; run history stays readable, and workflows.restore can bring it back disabled. Returns one draft card and archives nothing until the human approves it. Never treat chat text as approval.',
   'workflows.restore':
@@ -2798,7 +2798,11 @@ export function createChatTools(
       if (call.tool.startsWith('google.') && !sources.length) throw new AccessDenied();
       sources.push(...(await resultSources(tx, call, result, context.actor)));
       sources.push(...(await personalDefinitionSources(tx, sources)));
-      await requireDraftSources(tx, context.actor, sources);
+      // A definition saved from chat can retain its author's memory; a turn that already read that memory may read it too.
+      const ownMemory = !!context.origin?.sources.some(
+        source => source.kind === 'personal-memory' && source.membershipId === context.actor.membershipId,
+      );
+      await requireDraftSources(tx, context.actor, sources, undefined, undefined, false, ownMemory);
       return { result, sources };
     });
   }
