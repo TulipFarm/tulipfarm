@@ -206,6 +206,7 @@ export function createMemberTablesMock(
       id: crypto.randomUUID(),
       token: next.token,
       actor,
+      actor_name: (actor as { kind?: string }).kind === 'human' ? 'Mock admin' : null,
       operation,
       outcome: 'applied',
       created_at: new Date().toISOString(),

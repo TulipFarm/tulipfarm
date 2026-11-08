@@ -1,7 +1,14 @@
-import type { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
+import type { Pool } from 'pg';
 import { z } from 'zod';
-import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import {
+  AccessDenied,
+  currentMember,
+  definitionGrantPredicate,
+  lockAuthorization,
+  resolveHuman,
+} from '@tulipfarm/access';
+import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import {
   createTableProposals,
   createTableProposalDecisions,
@@ -70,6 +77,54 @@ export function registerTableChanges(
     executionCompatibility,
   );
   const recordRequests = createRecordRequests(dependencies.runtime);
+  const historyActorSchema = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('human'), userId: z.string() }),
+    z.object({ kind: z.literal('agent'), agentId: z.string() }),
+  ]);
+  /** Row history names people by their account name and agents the reader may see by their display name. */
+  async function historyActorNames(workspaceId: string, userId: string, actors: unknown[]) {
+    const parsed = actors.flatMap(actor => {
+      const result = historyActorSchema.safeParse(actor);
+      return result.success ? [result.data] : [];
+    });
+    const userIds = [...new Set(parsed.flatMap(actor => (actor.kind === 'human' ? [actor.userId] : [])))];
+    const agentIds = [...new Set(parsed.flatMap(actor => (actor.kind === 'agent' ? [actor.agentId] : [])))];
+    const names = new Map<string, string>();
+    if (userIds.length && dependencies.identity) {
+      const people = z
+        .array(z.object({ id: z.string(), name: z.string() }))
+        .parse(
+          (await dependencies.identity.query('SELECT id, name FROM app.users WHERE id = ANY($1)', [userIds])).rows,
+        );
+      for (const person of people) if (person.name.trim()) names.set(`human:${person.id}`, person.name);
+    }
+    if (agentIds.length) {
+      const agents = await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
+        await lockAuthorization(tx, 'read');
+        const reader = await resolveHuman(tx, userId);
+        const admin = (await currentMember(tx, reader)).role === 'admin';
+        const predicate = admin ? '' : `AND ${definitionGrantPredicate(tx, 'agent', 'a.id', '$2', "'read'")}`;
+        return z
+          .array(z.object({ id: z.string(), name: z.string().nullable() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT a.id::text AS id,a.display_name AS name FROM ${qualified(tx.schema, 'tf_agents')} a WHERE a.id::text = ANY($1::text[]) ${predicate}`,
+                admin ? [agentIds] : [agentIds, reader.membershipId],
+              )
+            ).rows,
+          );
+      });
+      for (const agent of agents) if (agent.name?.trim()) names.set(`agent:${agent.id}`, agent.name);
+    }
+    return (actor: unknown) => {
+      const result = historyActorSchema.safeParse(actor);
+      if (!result.success) return null;
+      return (
+        names.get(result.data.kind === 'human' ? `human:${result.data.userId}` : `agent:${result.data.agentId}`) ?? null
+      );
+    };
+  }
   const schemaHistory = createTableSchemaHistory(dependencies);
   const params = z.object({ workspaceId: z.uuid(), chatId: z.uuid(), proposalId: z.uuid() });
   const validation = routeValidation({
@@ -732,6 +787,7 @@ export function registerTableChanges(
       id: z.uuid(),
       token: z.uuid(),
       actor: z.unknown(),
+      actor_name: z.string().nullable(),
       operation: z.enum(['create', 'update', 'delete', 'restore', 'transform']),
       field_ids: z.array(z.uuid()),
       outcome: z.literal('applied'),
@@ -761,8 +817,14 @@ export function registerTableChanges(
           limit: query.limit,
           ...(query.after ? { after: query.after } : {}),
         });
+        const actorName = await historyActorNames(
+          p.workspaceId,
+          user(request),
+          entries.map(entry => entry.actor),
+        );
         return entries.map(entry => ({
           ...entry,
+          actor_name: actorName(entry.actor),
           created_at: entry.created_at.toISOString(),
           recoverable_until: entry.recoverable_until.toISOString(),
         }));

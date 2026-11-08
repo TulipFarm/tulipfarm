@@ -130,6 +130,7 @@ const historyEntrySchema = z.object({
   id: z.uuid(),
   token: z.uuid(),
   actor: z.unknown(),
+  actor_name: z.string().nullable().default(null),
   operation: z.enum(['create', 'update', 'delete', 'restore', 'transform']),
   field_ids: z.array(z.uuid()),
   outcome: z.literal('applied'),

@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { grantTargetSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { governancePath, governanceRequest, GovernanceRequestError, governanceError } from '@/lib/governance';
 import { TableRequestError } from './request-state';
-import { rowLabel } from './definition-view';
+import { rowLabel, rowTitle } from './definition-view';
 import type { TableValues } from './review-contracts';
 
 type Cursor = string | undefined;
@@ -73,6 +73,36 @@ export const tableKeys = {
   effects: (identity: ProposalIdentity, tableId: string, digest: string, total: number, after: number) =>
     [...tableKeys.proposal(identity), 'effects', tableId, { digest, total, after }] as const,
 };
+
+async function readableRows(
+  api: TableApi,
+  refs: LinkedRef[],
+  signal: AbortSignal,
+  name: (
+    definition: TableDefinition['definition'],
+    record: TableDataRow,
+    systemKind?: TableDefinition['systemKind'],
+  ) => string,
+) {
+  const names: Record<string, string> = {};
+  for (const { tableId, recordIds } of refs) {
+    try {
+      const { applied, systemKind } = await api.detail(tableId, signal);
+      if (!applied) continue;
+      for (let start = 0; start < recordIds.length; start += 100) {
+        for (const record of await api.rowsById(
+          { id: tableId, revision: applied.revision },
+          recordIds.slice(start, start + 100),
+          signal,
+        ))
+          names[record.id] = name(applied.definition, record, systemKind);
+      }
+    } catch (error) {
+      if (!(error instanceof TableRequestError && [403, 404].includes(error.status))) throw error;
+    }
+  }
+  return names;
+}
 
 export type LinkedRef = { tableId: string; recordIds: string[] };
 export function linkedRefs(values: readonly (TableValues | null)[]): LinkedRef[] {
@@ -198,26 +228,15 @@ export const tableQueries = {
   /** Labels of the linked rows the reader can see, by row id. A missing row, table, or permission leaves its id out. */
   linked: (api: TableApi, refs: LinkedRef[]) => ({
     key: [...tableKeys.linked, refs],
-    load: async (signal: AbortSignal) => {
-      const labels: Record<string, string> = {};
-      for (const { tableId, recordIds } of refs) {
-        try {
-          const { applied, systemKind } = await api.detail(tableId, signal);
-          if (!applied) continue;
-          for (let start = 0; start < recordIds.length; start += 100) {
-            for (const record of await api.rowsById(
-              { id: tableId, revision: applied.revision },
-              recordIds.slice(start, start + 100),
-              signal,
-            ))
-              labels[record.id] = rowLabel(applied.definition, record.values, systemKind);
-          }
-        } catch (error) {
-          if (!(error instanceof TableRequestError && [403, 404].includes(error.status))) throw error;
-        }
-      }
-      return labels;
-    },
+    load: (signal: AbortSignal) =>
+      readableRows(api, refs, signal, (definition, record, systemKind) =>
+        rowLabel(definition, record.values, systemKind),
+      ),
+  }),
+  /** V4 titles of one table's rows the reader can see, by row id. A missing row, table, or permission leaves its id out. */
+  titles: (api: TableApi, tableId: string, recordIds: string[]) => ({
+    key: [...tableKeys.linked, 'titles', tableId, recordIds],
+    load: (signal: AbortSignal) => readableRows(api, [{ tableId, recordIds }], signal, rowTitle),
   }),
   picker: (api: TableApi) => ({
     key: tableKeys.picker,

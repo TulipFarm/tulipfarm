@@ -12,6 +12,7 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table, type TableColumn } from '@tulipfarm/sprout/table';
 import { useCursorPages } from '@/lib/use-cursor-pages';
 import { fileIdsOf, ReferenceRetry, TableValueView, useFileNames, type TableWorkspace } from './references';
+import { rowTitle } from './definition-view';
 import { TableRead, UnsavedChanges } from './feedback';
 import { useLinkedRows, useTableRowHistory, useWorkspaceMembers } from './hooks';
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
@@ -26,12 +27,12 @@ const actorSchema = z.discriminatedUnion('kind', [
 /** Each column reads the field id; the cells look up current, historical and restored values. */
 type ValueRow = Record<'id' | 'field' | 'current' | 'historical' | 'restored', string>;
 
-function actorLabel(actor: unknown) {
+function actorLabel({ actor, actor_name }: RecordHistoryEntry) {
   const parsed = actorSchema.safeParse(actor);
   if (!parsed.success) return 'Actor details unavailable';
   if (parsed.data.kind === 'system')
     return parsed.data.operation === 'workspace-member-profile' ? 'TulipFarm profile sync' : 'Workspace access update';
-  return parsed.data.kind === 'human' ? `Person ${parsed.data.userId}` : `Agent ${parsed.data.agentId}`;
+  return actor_name ?? (parsed.data.kind === 'human' ? 'Former member' : 'An agent');
 }
 
 export function RecordHistory({
@@ -69,6 +70,14 @@ export function RecordHistory({
   const locked =
     disabled || mutation.locked || read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
   const currentValues = 'values' in record ? record.values : null;
+  const titleValues =
+    currentValues ??
+    (read.state.kind === 'ready'
+      ? read.state.data
+          .map(entry => entry.values ?? entry.before_values)
+          .reverse()
+          .find(item => item !== null)
+      : undefined);
   const isMember = table.systemKind === 'workspace-members';
   const members = useWorkspaceMembers(workspace.id, table.id, { ids: [record.id] }, isMember && currentValues !== null);
   const member =
@@ -106,9 +115,13 @@ export function RecordHistory({
     <section aria-label="Row history" className="space-y-4 rounded-xl border border-border p-4">
       <UnsavedChanges dirty={mutation.locked} />
       <div className="flex flex-wrap justify-between gap-2">
-        <h3 className="break-all text-base font-medium">
+        <h3 className="break-words text-base font-medium">
           History for{' '}
-          {isMember ? (currentValues ? workspaceMemberLabel(currentValues) : 'workspace member') : `row ${record.id}`}
+          {isMember
+            ? currentValues
+              ? workspaceMemberLabel(currentValues)
+              : 'workspace member'
+            : `“${rowTitle(table.definition, { id: record.id, values: titleValues ?? {} })}”`}
         </h3>
         <Button variant="outline" disabled={mutation.locked} onClick={close}>
           Close history
@@ -143,7 +156,7 @@ export function RecordHistory({
                     <p className="text-sm font-medium">
                       {entry.operation} · {new Date(entry.created_at).toLocaleString()} · {entry.outcome}
                     </p>
-                    <p className="break-all text-sm">{actorLabel(entry.actor)}</p>
+                    <p className="break-all text-sm">{actorLabel(entry)}</p>
                     <p className="break-all text-sm">
                       Changed fields{' '}
                       {entry.field_ids

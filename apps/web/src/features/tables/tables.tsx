@@ -42,6 +42,7 @@ import {
   useTableRow,
   useTableReverseFields,
   useTableReverseRecords,
+  useRowTitles,
 } from './hooks';
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import { RecordHistory } from './record-history';
@@ -59,7 +60,7 @@ import { rowTotal, useUrlDraft } from './row-query';
 import type { TableListOrder, TableListSearch } from './table-search';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
-import { rowLabel } from './definition-view';
+import { rowLabel, rowTitle } from './definition-view';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import {
   narrowed,
@@ -1410,7 +1411,12 @@ function IncomingField({
 }) {
   const pages = useCursorPages(field.fieldId);
   const links = useTableReverseRecords(api, table.id, record.id, field.fieldId, pages.after);
-  if (links.state.kind === 'loading') return <p className="text-sm">Loading {field.label}…</p>;
+  const titles = useRowTitles(api, field.tableId, links.state.kind === 'ready' ? links.state.data.recordIds : []);
+  if (
+    links.state.kind === 'loading' ||
+    (links.state.kind === 'ready' && links.state.data.recordIds.length > 0 && titles.state.kind === 'loading')
+  )
+    return <p className="text-sm">Loading {field.label}…</p>;
   if (links.state.kind === 'error' || (links.state.kind === 'ready' && links.state.error))
     return (
       <div className="space-y-2">
@@ -1435,7 +1441,7 @@ function IncomingField({
                 params={{ workspaceSlug, tableId: field.tableId }}
                 search={{ row: id }}
               >
-                Row {id.slice(0, 8)}
+                {(titles.state.kind === 'ready' && titles.state.data[id]) || `Row ${id.slice(0, 8)}`}
               </Link>
             </li>
           ))}
@@ -1498,7 +1504,7 @@ function RecordDelete({
       }}
     >
       <AlertDialogContent>
-        <AlertDialogTitle>Delete row {record.id.slice(0, 8)}?</AlertDialogTitle>
+        <AlertDialogTitle>Delete “{rowTitle(table.definition, record, table.systemKind)}”?</AlertDialogTitle>
         <AlertDialogDescription>
           The row leaves active rows. Its values stay recoverable for 30 days from Deleted rows in the ⋯ menu. A row
           that other rows still link to cannot be deleted.

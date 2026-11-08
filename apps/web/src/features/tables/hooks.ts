@@ -129,6 +129,9 @@ export function useLinkedRows(api: TableApi, values: readonly (TableValues | nul
   const read = useTableQuery({ ...tableQueries.linked(api, refs), enabled: refs.length > 0 });
   return refs.length ? read : { ...read, state: noLinks };
 }
+export function useRowTitles(api: TableApi, tableId: string, recordIds: string[]) {
+  return useTableQuery({ ...tableQueries.titles(api, tableId, recordIds), enabled: recordIds.length > 0 });
+}
 export function useTableSchemaHistory(api: TableApi, id: string, after?: string) {
   const read = useTableQuery(tableQueries.schemaHistory(api, id, after));
   const data = read.state.kind === 'ready' ? read.state.data : null;
