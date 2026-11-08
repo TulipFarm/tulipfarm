@@ -106,6 +106,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           nextBefore: null,
           sends: [],
           batchReads: 0,
+          chats: new Set([id]),
         };
         await page.route('**/v1/**', async route => {
           const request = route.request();
@@ -149,6 +150,11 @@ test('chat readiness and relevant GitHub approvals', async t => {
               status: state.batchStatus,
               json: state.batchStatus === 200 ? { batches: state.batches } : { error: 'batch-unavailable' },
             });
+          } else if (path.endsWith('/system-package-installations')) {
+            // Like the API, a chat that has not been created yet is not found.
+            const chatId = new URL(request.url()).searchParams.get('chatId');
+            if (chatId && !state.chats.has(chatId)) return route.fulfill({ status: 404, json: { error: 'not-found' } });
+            json = { installations: [], nextCursor: null };
           } else if (/\/messages\/[\w-]+$/.test(path)) {
             state.sends.push(request.postDataJSON());
             json = { messageId: path.split('/').at(-1), turnId: toolId, sequence: 2 };
@@ -166,6 +172,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
               await state.createGate?.promise;
               if (state.createStatus !== 200)
                 return route.fulfill({ status: state.createStatus, json: { error: 'create-unavailable' } });
+              state.chats.add(path.split('/').at(-1));
               json = { id: path.split('/').at(-1) };
             } else json = { ...chat, id: path.split('/').at(-1) };
           } else if (path.endsWith('/conversations')) json = { chats: [chat], nextCursor: null };
@@ -458,17 +465,63 @@ test('chat readiness and relevant GitHub approvals', async t => {
           await f.page.keyboard.type('Retry this chat');
           await f.page.keyboard.press('Enter');
           await f.page.waitForURL(/\/chat\/[\w-]+$/);
-          f.state.createStatus = 200;
-          await f.page.getByRole('button', { name: 'Retry same operation', exact: true }).click();
           await f.page
-            .getByRole('button', { name: 'Retry same operation', exact: true })
-            .waitFor({ state: 'detached' });
+            .getByText(
+              "We couldn't confirm your message was sent. Check your connection, then try again. Trying again won't send it twice.",
+            )
+            .waitFor();
+          assert.equal(
+            await f.page.getByText('Packages unavailable').count(),
+            0,
+            'a chat that is not created yet is not reported as inaccessible',
+          );
+          f.state.createStatus = 200;
+          await f.page.getByRole('button', { name: 'Try again', exact: true }).click();
+          await f.page.getByRole('button', { name: 'Try again', exact: true }).waitFor({ state: 'detached' });
           await f.page.waitForFunction(
             () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
           );
           assert.equal(f.state.creates, 2);
           assert.equal(f.state.sends.length, 1);
           assert.deepEqual(f.state.sends[0].parts, [textPart('Retry this chat')]);
+          assert.equal(await f.page.getByText('Packages unavailable').count(), 0);
+        } finally {
+          await f.close();
+        }
+      });
+
+      await t.test(`${mobile ? 'mobile' : 'desktop'} an offline send says so and sends once on reconnect`, async () => {
+        const f = await fixture();
+        try {
+          await f.page.goto(`${origin}/${workspace.slug}`);
+          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+          const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
+          await input.click();
+          await f.page.keyboard.type('Send me when online');
+          await f.page.context().setOffline(true);
+          await f.page.keyboard.press('Enter');
+          await f.page
+            .getByText(
+              "You're offline, so your message hasn't been sent. It's kept here and will send when you're back online.",
+            )
+            .waitFor({ timeout: 2000 });
+          assert.equal(await input.textContent(), 'Send me when online');
+          assert.equal(f.state.creates + f.state.sends.length, 0, 'nothing is sent while offline');
+          assert.equal(
+            await f.page.getByText(/may have changed|operation|submission|saved list/i).count(),
+            0,
+            'offline errors name the connection in plain words',
+          );
+          await f.page.context().setOffline(false);
+          await f.page.waitForFunction(
+            () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
+          );
+          await f.page.getByText("You're offline", { exact: false }).waitFor({ state: 'detached' });
+          assert.equal(f.state.creates, 1);
+          assert.equal(f.state.sends.length, 1, 'the message is sent once after reconnecting');
+          assert.deepEqual(f.state.sends[0].parts, [textPart('Send me when online')]);
+          assert.equal(await f.page.getByRole('button', { name: 'Try again', exact: true }).count(), 0);
+          assert.equal(await f.page.getByText('Packages unavailable').count(), 0, 'outage panels clear after the send');
         } finally {
           await f.close();
         }

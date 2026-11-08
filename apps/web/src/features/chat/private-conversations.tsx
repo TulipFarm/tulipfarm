@@ -291,6 +291,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     });
   };
   const [draftChatId, setDraftChatId] = useState(() => crypto.randomUUID());
+  const [createdDraftId, setCreatedDraftId] = useState<string | null>(null);
   const previousChatId = useRef(chatId);
   const changes = useConversationChanges();
   const projects = useWorkspaceProjects(workspace.id);
@@ -300,6 +301,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
         api,
         draftChatId,
         () => {
+          setCreatedDraftId(draftChatId);
           void changes.created(draftChatId);
         },
         project,
@@ -355,6 +357,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                 headerElement={headerElement}
                 models={models}
                 draft={draft}
+                unsaved={chatId === draftChatId && createdDraftId !== draftChatId}
                 draftProjectId={project}
                 scope={draft ? scope : undefined}
                 prefill={draft ? prefill : null}
@@ -381,6 +384,7 @@ function ConversationDetail({
   headerElement,
   models: workspaceModels,
   draft = false,
+  unsaved = false,
   draftProjectId = null,
   scope,
   prefill = null,
@@ -395,6 +399,8 @@ function ConversationDetail({
   headerElement: HTMLDivElement | null;
   models: ReturnType<typeof useChatModels>;
   draft?: boolean;
+  /** A new chat whose first send has not created it on the server yet, so it has nothing else to read. */
+  unsaved?: boolean;
   draftProjectId?: string | null;
   scope?: ((disabled: boolean) => ReactNode) | undefined;
   prefill?: NewChatPrefill | null;
@@ -424,7 +430,7 @@ function ConversationDetail({
   const packages = useChatPackages(
     workspace.id,
     chatId,
-    !draft,
+    !draft && !unsaved,
     savedData && !savedData.chat.projectId
       ? savedData.messages
           .filter(message => message.author === 'human')

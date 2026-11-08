@@ -416,7 +416,7 @@ for (const status of [408, 429, 503])
         api.state.sendStatus = status;
         api.state.commitUncertain = committed;
         await sendMessage(page);
-        const retry = page.getByRole('button', { name: 'Retry same operation', exact: true });
+        const retry = page.getByRole('button', { name: 'Try again', exact: true });
         await retry.waitFor();
         assert.equal(await editor.textContent(), 'Do not send this twice.');
         assert.equal(await editor.getAttribute('contenteditable'), 'false');
@@ -436,12 +436,12 @@ for (const status of [400, 503])
       await editor.fill('Create only one project chat.');
       await sendMessage(page);
       if (status === 400) await reviewProjectDraft(page);
-      else await page.getByRole('button', { name: 'Retry same operation', exact: true }).waitFor();
+      else await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
       assert.equal(await editor.textContent(), 'Create only one project chat.');
       assert.equal(api.state.sends.length, 0);
       api.state.createStatus = 200;
       if (status === 400) await sendMessage(page);
-      else await page.getByRole('button', { name: 'Retry same operation', exact: true }).click();
+      else await page.getByRole('button', { name: 'Try again', exact: true }).click();
       await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);
       assert.deepEqual(api.state.chatCreates[1], api.state.chatCreates[0]);
       assert.equal(api.state.chats.size, 1);

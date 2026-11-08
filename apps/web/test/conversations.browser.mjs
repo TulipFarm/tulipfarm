@@ -293,11 +293,11 @@ try {
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Hello 🌱');
   dropWrite = true;
   await page.getByRole('button', { name: 'Send message', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Retry same operation' }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
   const createRequest = writes[0];
   const chatId = chats[0].id;
   assert.equal(writes.length, 1, 'A double send creates only one chat');
-  await page.getByRole('button', { name: 'Retry same operation' }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.waitForURL(`${origin}/acme/chat/${chatId}`);
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   assert.deepEqual(writes[1], createRequest, 'A lost create response retries the same chat and command');
@@ -308,11 +308,11 @@ try {
   await page.getByLabel('Message', { exact: true }).fill('Hello 🌱');
   dropWrite = true;
   await page.getByRole('button', { name: 'Send message', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Retry same operation' }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Hello 🌱');
   assert.equal(await page.getByLabel('Message', { exact: true }).isDisabled(), true);
   const sent = writes.at(-1);
-  await page.getByRole('button', { name: 'Retry same operation' }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   assert.deepEqual(writes.at(-1), sent);
   assert.equal(sent.body.model, 'claude-sonnet');

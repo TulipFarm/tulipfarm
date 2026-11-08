@@ -418,9 +418,9 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
             button.click();
             button.click();
           });
-          await f.page.getByRole('button', { name: 'Retry same operation' }).waitFor();
+          await f.page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
           assert.equal(f.state.sends.length, 1);
-          await f.page.getByRole('button', { name: 'Retry same operation' }).click();
+          await f.page.getByRole('button', { name: 'Try again', exact: true }).click();
           await f.page.waitForURL(/\/chat\/[\w-]+$/);
           assert.equal(f.state.sends.length, 2);
           assert.deepEqual(f.state.sends[0], f.state.sends[1]);
