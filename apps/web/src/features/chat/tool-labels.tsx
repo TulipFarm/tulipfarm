@@ -57,12 +57,31 @@ export function toolLabel(tool: Tool) {
 }
 
 const problems = {
-  blocked: 'Access denied. Ask an administrator to review your permissions.',
   failed: 'Failed or interrupted. Check current rows before sending a new request.',
 };
 
+const tableAccessStep = 'Ask a workspace admin to grant it to you or your team in Table access, then ask again.';
+const rowPermissions: [RegExp, string][] = [
+  [/^rows\.create/, 'Create rows'],
+  [/^rows\.update/, 'Update rows'],
+  [/^rows\.delete/, 'Delete rows'],
+  [/^rows\./, 'Read rows'],
+];
+
+/** Names the permission a denied step needs and where to get it; the server never says which check failed. */
+export function deniedDetail(tool: string) {
+  if (tool === 'tables.propose' || tool.startsWith('tables.import.'))
+    return `Access denied. Preparing this review needs Manage schema for field changes, or Create rows and Update rows for row changes and imports, on the table. ${tableAccessStep}`;
+  const rows = rowPermissions.find(([pattern]) => pattern.test(tool))?.[1];
+  if (rows) return `Access denied. This step needs ${rows} on the table. ${tableAccessStep}`;
+  if (/^(tables|schema)\./.test(tool)) return `Access denied. This step needs access to the table. ${tableAccessStep}`;
+  if (tool === 'files.read')
+    return 'Access denied. You can’t open this file. Ask its owner to share it with you, then ask again.';
+  return 'Access denied. Your role doesn’t allow this step. Ask a workspace admin to give you the access it needs, or ask someone who has it to do it.';
+}
+
 function webDetail(tool: Tool) {
-  if (tool.status === 'blocked') return problems.blocked;
+  if (tool.status === 'blocked') return deniedDetail(tool.tool);
   const widened = tool.web?.widened ? ' Search widened from 24 hours to seven days.' : '';
   if (tool.status === 'failed' || tool.web?.status === 'failed')
     return `Public web retrieval failed. Retry or paste the text.${widened}`;
@@ -79,8 +98,38 @@ export function visibleActivityTools(tools: Tool[]): Tool[] {
   return tools.filter(tool => !tool.tool.startsWith('skills.') || !isInternalTool(tool.tool));
 }
 
+const recovered = new Set(['completed', 'waiting']);
+
+/**
+ * A denied step that a later call of the same tool in this reply got past is folded into that call,
+ * so the reply no longer reads as denied.
+ */
 export function toolActivityItems(tools: Tool[]): ToolActivityItem[] {
-  return visibleActivityTools(tools).map(toolActivityItem);
+  const visible = visibleActivityTools(tools);
+  const items = visible.map(toolActivityItem);
+  const retried = new Set<number>();
+  const denied = new Set<number>();
+  items.forEach((item, index) => {
+    if (item.status !== 'blocked') return;
+    const retry = items.findIndex(
+      (later, at) => at > index && visible[at]?.tool === visible[index]?.tool && recovered.has(later.status),
+    );
+    if (retry === -1) return;
+    denied.add(index);
+    retried.add(retry);
+  });
+  return items.flatMap((item, index) =>
+    denied.has(index)
+      ? []
+      : retried.has(index)
+        ? [
+            {
+              ...item,
+              detail: [item.detail, 'An earlier attempt was denied; this one went through.'].filter(Boolean).join(' '),
+            },
+          ]
+        : [item],
+  );
 }
 
 function toolActivityItem(tool: Tool): ToolActivityItem {
@@ -104,15 +153,17 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
         ? webDetail(tool)
         : tool.tool === 'api.request' && status === 'failed'
           ? apiCallProblem(tool.api && 'error' in tool.api ? tool.api.error : undefined)
-          : status === 'blocked' || status === 'failed'
-            ? problems[status]
-            : status === 'unknown'
-              ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
-              : status === 'waiting'
-                ? tool.tool === 'api.request'
-                  ? 'Waiting for your approval.'
-                  : 'Waiting for approval or another action. Review the action details below.'
-                : undefined,
+          : status === 'blocked'
+            ? deniedDetail(tool.tool)
+            : status === 'failed'
+              ? problems.failed
+              : status === 'unknown'
+                ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
+                : status === 'waiting'
+                  ? tool.tool === 'api.request'
+                    ? 'Waiting for your approval.'
+                    : 'Waiting for approval or another action. Review the action details below.'
+                  : undefined,
     ...(tool.web
       ? { urls: tool.web.urls, failedUrls: tool.web.failedUrls, sources: tool.web.sources, query: tool.web.query }
       : {}),

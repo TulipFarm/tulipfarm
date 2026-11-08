@@ -52,6 +52,14 @@ Archive and restore:
 - To restore, find the table with `tables.definitions` and `archived:true`, then propose the same shape with `kind:"restore"`.
 - Permanent table deletion is not supported.
 
+Imports from a CSV or XLSX file:
+
+1. Load the import tools with `tools_search`, then call `tables.import.attachments` to list this chat's files with their `attachmentId` and `contentDigest`.
+2. Call `tables.import.file` with one returned `attachmentId` and `contentDigest`, plus the format, header row, conversions, and the delimiter or sheet. It prepares the file for review in this reply and writes nothing.
+3. Propose `{kind:"import",tableId,expectedRevision,dependsOn:[],reference:{kind:"file",attachmentId,contentDigest},matchFieldIds,mappings}`. Copy the reference from step 2 unchanged; `matchFieldIds` must equal one of the table's unique keys, and each mapping pairs a source column with a field ID.
+
+Prepare the file again in each reply that proposes the import. Never invent an `attachmentId` or `contentDigest`, or reuse one from an earlier reply without preparing it again.
+
 Numeric record values are decimal strings inside typed values.
 
 Give every proposal a `label` of 2 to 5 words that names this version, such as
@@ -91,6 +99,7 @@ For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, 
 ## When a call fails
 
 - `invalid-arguments`: correct the payload and submit a new proposal.
+- `import-not-prepared`: the import plan names a file that was not prepared in this reply. This is not a permission denial. Prepare it with `tables.import.attachments` and `tables.import.file`, then propose again.
 - `table-title-immutable`: keep the original table title and prepare a new proposal
   for the requested field changes. Neither its title nor its readable name can be renamed.
 - `tool-failed`: the cause is unconfirmed. Do not say a permission is missing.

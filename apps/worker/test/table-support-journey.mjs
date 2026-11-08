@@ -248,6 +248,33 @@ export async function proveSupportJourney({
       payload: bytes,
     });
     assert.equal(uploaded.statusCode, 200, uploaded.body);
+    const importPlan = reference =>
+      JSON.stringify({
+        plans: [
+          {
+            kind: 'import',
+            tableId: tickets,
+            expectedRevision: revisions.get(tickets),
+            dependsOn: [],
+            reference,
+            matchFieldIds: [code],
+            mappings: [
+              { sourceColumn: 'number', fieldId: code },
+              { sourceColumn: 'title', fieldId: title },
+            ],
+          },
+        ],
+      });
+    const unprepared = async (reference, text) => {
+      const [result] = await chatTools([{ tool: 'tables.propose', input: importPlan(reference) }], text);
+      assert.equal(result.error, 'import-not-prepared', JSON.stringify(result));
+      assert.match(result.instruction, /not a permission denial.*tables\.import\.file/);
+    };
+    if (format === 'csv')
+      await unprepared(
+        { kind: 'file', attachmentId: id(), contentDigest },
+        'Import the tickets file without preparing it first.',
+      );
     const results = await chatTools(
       [
         { tool: 'tables.import.attachments' },
@@ -259,28 +286,15 @@ export async function proveSupportJourney({
         },
         () => ({
           tool: 'tables.propose',
-          input: JSON.stringify({
-            plans: [
-              {
-                kind: 'import',
-                tableId: tickets,
-                expectedRevision: revisions.get(tickets),
-                dependsOn: [],
-                reference: { kind: 'file', attachmentId, contentDigest },
-                matchFieldIds: [code],
-                mappings: [
-                  { sourceColumn: 'number', fieldId: code },
-                  { sourceColumn: 'title', fieldId: title },
-                ],
-              },
-            ],
-          }),
+          input: importPlan({ kind: 'file', attachmentId, contentDigest }),
         }),
       ],
       `Import the attached ${format.toUpperCase()} tickets by Ticket number. Preserve fields not mapped in the import.`,
       [attachmentId],
     );
     await complete(results.at(-1));
+    if (format === 'csv')
+      await unprepared({ kind: 'file', attachmentId, contentDigest }, 'Import the same tickets file again.');
   }
   const imported = await records(tickets);
   assert.deepEqual(imported.map(row => [row.values[code].value, row.values[title].value]).sort(), [

@@ -395,7 +395,9 @@ try {
     { id: randomUUID(), tool: 'web.fetch', status: 'failed' },
   );
   await notifyChange(page, workspace.id, userId, 'detail', chatId);
-  await page.getByText('Access denied. Ask an administrator to review your permissions.', { exact: false }).waitFor();
+  await page
+    .getByText('Access denied. This step needs Update rows on the table. Ask a workspace admin', { exact: false })
+    .waitFor();
   await openToolActivity();
   assert.match(await page.getByRole('list', { name: 'Tool activity' }).textContent(), /Completed/);
   // Cloud baac8cab (#1001) labels a failed page read by its outcome (tool-labels.tsx:50).

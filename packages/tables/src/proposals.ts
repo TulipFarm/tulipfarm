@@ -378,32 +378,30 @@ function operations(options: TableProposalOptions) {
     const open = await readable(tx, actor, [...new Set(referenced.flat())]);
     return referenced.map(ids => ids.filter(id => !open.has(id)));
   }
-  async function requireImportReference(
+  async function importReferenceKnown(
     tx: TableTransaction,
     actor: HumanActor,
     conversationId: string,
     plan: Extract<ProposalPlan, { kind: 'import' }>,
   ) {
     const reference = plan.reference;
-    if (reference.kind === 'file') {
-      if (
-        !(
-          await tx.client.query(
-            `SELECT 1 FROM ${table(tx, 'tf_conversation_attachments')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND sha256=$4 AND state='bound'`,
-            [reference.attachmentId, conversationId, actor.membershipId, reference.contentDigest],
-          )
-        ).rowCount
-      )
-        throw new AccessDenied();
-    } else if (
-      !(
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} WHERE id=$1 AND conversation_id=$2 AND status='completed' AND tool IN ('github.issue.read','google.read','atlassian.read')`,
-          [reference.resultId, conversationId],
+    return reference.kind === 'file'
+      ? Boolean(
+          (
+            await tx.client.query(
+              `SELECT 1 FROM ${table(tx, 'tf_conversation_attachments')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND sha256=$4 AND state='bound'`,
+              [reference.attachmentId, conversationId, actor.membershipId, reference.contentDigest],
+            )
+          ).rowCount,
         )
-      ).rowCount
-    )
-      throw new AccessDenied();
+      : Boolean(
+          (
+            await tx.client.query(
+              `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} WHERE id=$1 AND conversation_id=$2 AND status='completed' AND tool IN ('github.issue.read','google.read','atlassian.read')`,
+              [reference.resultId, conversationId],
+            )
+          ).rowCount,
+        );
   }
   async function preview(
     tx: TableTransaction,
@@ -487,7 +485,8 @@ function operations(options: TableProposalOptions) {
         throw new TableProposalError('invalid-import');
       const reference = plan.reference;
       if (origin.conversationId === null || origin.turnId === null) throw new AccessDenied();
-      await requireImportReference(tx, actor, origin.conversationId, plan);
+      if (!(await importReferenceKnown(tx, actor, origin.conversationId, plan)))
+        throw new TableProposalError('import-reference-unknown');
       const snapshot = importSnapshotSchema.parse(
         await options.imports.readSnapshot(
           tx,
@@ -589,7 +588,7 @@ function operations(options: TableProposalOptions) {
         await options.requireSources(tx, actor, await effectiveProposalSources(tx, manifest, plan.importSources));
         if (plan.input.kind === 'import') {
           if (manifest.conversationId === null) throw new AccessDenied();
-          await requireImportReference(tx, actor, manifest.conversationId, plan.input);
+          if (!(await importReferenceKnown(tx, actor, manifest.conversationId, plan.input))) throw new AccessDenied();
           if (canonicalJson(await destinationAudience(tx, plan.input.tableId)) !== canonicalJson(plan.audience))
             throw new TableProposalError('proposal-stale');
         }

@@ -256,6 +256,7 @@ export class TableProposalError extends Error {
     | 'invalid-transform'
     | 'invalid-import'
     | 'import-adapter-required'
+    | 'import-reference-unknown'
     | 'proposal-storage-unavailable'
     | 'proposal-too-large'
     | 'unsupported-definition'

@@ -158,6 +158,7 @@ const page = { after: z.uuid().optional(), limit: z.number().int().min(1).max(10
 const tableAuthoringConstraints = [
   ...tableProposalRules.map(({ rule, message }) => `${rule} Otherwise tables.propose reports "${message}".`),
   'Call tables.propose with input set to the plans as one JSON-encoded string.',
+  'An import plan needs a file prepared in this reply: call tables.import.attachments, then tables.import.file, and copy the attachmentId and contentDigest it returns unchanged. Otherwise tables.propose reports "import-not-prepared".',
 ].join('\n');
 const tableProposalInputSchema = tableProposalJsonSchema();
 const tableProposalInput = z
@@ -587,7 +588,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.import.attachments':
     'List up to 100 bound attachments from this chat when choosing a CSV or XLSX import source. Results contain IDs, names, media types, sizes, and SHA-256 digests, not file contents; ordering is by attachment ID. Use tables.import.file with one returned ID and digest.',
   'tables.import.file':
-    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. A new preparation is safe, but use the returned reference rather than assuming import success.',
+    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. Call it in the same reply as the tables.propose import plan that uses the reference. A new preparation is safe, but use the returned reference rather than assuming import success.',
   'tables.definitions':
     'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. Use tables.list when an agent needs schemas it may operate on.',
   'rows.page':

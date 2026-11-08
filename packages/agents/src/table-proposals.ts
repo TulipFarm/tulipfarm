@@ -1,7 +1,7 @@
 import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 import { generationProposalData } from '@tulipfarm/tables/store';
 import { readableTableFiles, requireTableSources } from './table-sources.ts';
-import { createTableImports, type TableImportOptions } from '@tulipfarm/tables/imports';
+import { createTableImports, TableImportError, type TableImportOptions } from '@tulipfarm/tables/imports';
 import { TableProposalError, TableProposalValidationError } from '@tulipfarm/tables/proposal-contracts';
 import { z } from 'zod';
 
@@ -11,6 +11,8 @@ const archiveBlocked = {
   'workflow-active':
     'No proposal was created: an enabled workflow uses this table, so it cannot be archived. Tell the person to archive or turn off the workflows that use it first; this is not a permission denial.',
 } as const;
+const importNotPrepared =
+  'No proposal was created. This is not a permission denial: the import plan does not name a source prepared in this reply. Load the import tools with tools_search, call tables.import.attachments, then tables.import.file for the chosen attachment in this same reply, and copy the attachmentId and contentDigest it returns into the plan unchanged. For an integration import, use the resultId of a completed read in this chat. Never invent or reuse references from earlier replies.';
 
 const planKinds = z.object({
   plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })),
@@ -55,6 +57,11 @@ export function createChatTableProposals(
       } catch (error) {
         if (error instanceof TableProposalError && (error.code === 'table-linked' || error.code === 'workflow-active'))
           return { error: error.code, instruction: archiveBlocked[error.code] };
+        if (
+          (error instanceof TableProposalError && error.code === 'import-reference-unknown') ||
+          (error instanceof TableImportError && error.code === 'snapshot-unavailable')
+        )
+          return { error: 'import-not-prepared', instruction: importNotPrepared };
         if (!(error instanceof TableProposalValidationError)) throw error;
         return error.validation;
       }
