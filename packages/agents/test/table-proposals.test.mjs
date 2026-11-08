@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { blockedArchive, missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
+import { blockedArchive, importPlanResult, missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
+import { TableImportPlanError } from '@tulipfarm/tables/proposal-contracts';
 
 const revision = 'a'.repeat(40);
 
@@ -73,4 +74,44 @@ test('a blocked archive names the readable workflows and otherwise keeps the gen
     assert.deepEqual(Object.keys(generic), ['error', 'instruction']);
     assert.match(generic.instruction, /an enabled workflow uses this table/);
   }
+});
+
+test('an import whose values don’t fit names the rows, field, value and next step, not a denial', () => {
+  const problem = (row, value) => ({
+    row,
+    column: 'State',
+    fieldId: randomUUID(),
+    field: 'Status',
+    code: 'unmapped-value',
+    value,
+    expected: ['Open', 'Done'],
+  });
+  const result = importPlanResult(
+    new TableImportPlanError([problem(2, 'Pending'), problem(7, 'Waiting'), problem(9, 'Hold')], 8),
+  );
+  assert.equal(result.error, 'import-values-invalid');
+  assert.equal(result.total, 8);
+  assert.equal(result.truncated, true);
+  assert.equal(
+    result.reason,
+    'No review prepared: 8 values in the file don’t fit the table. Row 2, column "State": "Pending" isn’t an option of Status (Open, Done). Row 7, column "State": "Waiting" isn’t an option of Status (Open, Done). Row 9, column "State": "Hold" isn’t an option of Status (Open, Done). And 5 more.',
+  );
+  assert.match(result.instruction, /not a permission denial/);
+  assert.match(result.instruction, /never drop, change or guess values/);
+  const mapping = importPlanResult(
+    new TableImportPlanError([
+      {
+        row: null,
+        column: 'Stat',
+        fieldId: randomUUID(),
+        field: 'Status',
+        code: 'unknown-column',
+        value: null,
+        expected: ['Name', 'State'],
+      },
+    ]),
+  );
+  assert.equal(mapping.error, 'import-mapping-invalid');
+  assert.match(mapping.reason, /The file has no column "Stat"\. Its columns are: Name, State\./);
+  assert.match(mapping.instruction, /propose again in this reply/);
 });

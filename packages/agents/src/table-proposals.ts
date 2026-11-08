@@ -4,8 +4,10 @@ import { readableTableFiles, requireTableSources } from './table-sources.ts';
 import { createTableImports, TableImportError, type TableImportOptions } from '@tulipfarm/tables/imports';
 import {
   proposeTableSchema,
+  TableImportPlanError,
   TableProposalError,
   TableProposalValidationError,
+  type ImportProblem,
 } from '@tulipfarm/tables/proposal-contracts';
 import { z } from 'zod';
 
@@ -16,7 +18,64 @@ const archiveBlocked = {
     'No proposal was created: an enabled workflow uses this table, so it cannot be archived. Tell the person to archive or turn off the workflows that use it first; this is not a permission denial.',
 } as const;
 const importNotPrepared =
-  'No proposal was created. This is not a permission denial: the import plan does not name a source prepared in this reply. Load the import tools with tools_search, call tables.import.attachments, then tables.import.file for the chosen attachment in this same reply, and copy the attachmentId and contentDigest it returns into the plan unchanged. For an integration import, use the resultId of a completed read in this chat. Never invent or reuse references from earlier replies.';
+  'No proposal was created. This is not a permission denial: the import plan does not name a source prepared in this reply. Call tables.import.attachments, then tables.import.file for the chosen attachment in this same reply, and copy the attachmentId and contentDigest it returns into the plan unchanged. For an integration import, use the resultId of a completed read in this chat. Never invent or reuse references from earlier replies.';
+
+const quoted = (value: string | null) => (value === null ? 'an empty value' : `"${value}"`);
+const choices = (expected: string[] | undefined) => (expected?.length ? ` (${expected.join(', ')})` : '');
+const list = (expected: string[] | undefined) => (expected?.length ? `: ${expected.join(', ')}` : ' unknown');
+const fieldName = (problem: ImportProblem) => problem.field ?? problem.fieldId ?? 'a field';
+const problemText: Record<ImportProblem['code'], (problem: ImportProblem) => string> = {
+  'unknown-column': p => `The file has no column "${p.column}". Its columns are${list(p.expected)}.`,
+  'unknown-field': p => `The table has no field ${p.fieldId}. Its fields are${list(p.expected)}.`,
+  'key-not-unique': p =>
+    `${fieldName(p)} isn’t a unique key of the table, so rows can’t be matched by it. Match by one of its unique keys${list(p.expected)}.`,
+  'key-unmapped': p => `No file column is mapped to the match field ${fieldName(p)}.`,
+  'missing-key': p => `Row ${p.row}: ${fieldName(p)} is empty, so the row can’t be matched.`,
+  'duplicate-key': p =>
+    `Row ${p.row}: ${fieldName(p)} ${quoted(p.value)} repeats a match value already used in ${p.expected?.[0] ?? 'an earlier row'}.`,
+  'existing-duplicate-key': p => `Several existing rows share the same ${fieldName(p)}, so the file can’t be matched.`,
+  'unmapped-value': p =>
+    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t an option of ${fieldName(p)}${choices(p.expected)}.`,
+  'conversion-failed': p =>
+    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t a valid ${fieldName(p)} value.`,
+  'type-mismatch': p =>
+    `column "${p.column}" can’t fill ${fieldName(p)}: file values can’t be imported into a link or file field.`,
+  'missing-field': p => `Row ${p.row}: ${fieldName(p)} is required but empty.`,
+  'invalid-output': p =>
+    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} doesn’t fit ${fieldName(p)}, for example it is too long or has too many digits.`,
+};
+const mappingCodes = new Set<ImportProblem['code']>([
+  'unknown-column',
+  'unknown-field',
+  'key-not-unique',
+  'key-unmapped',
+]);
+const importValuesInstruction =
+  'No proposal was created and nothing changed. This is not a permission denial, and the file was read. Tell the person, in your own words, every row, column, value and field listed in "problems", and the next step: correct those values in the file and attach it again, or ask you to add the missing options to the field first. When a value is an option label written differently, a mapping to another column may be the fix; otherwise never drop, change or guess values to make the import pass.';
+const importMappingInstruction =
+  'No proposal was created and nothing changed. This is not a permission denial: the import plan does not fit the file or the table. Fix the plan using "problems" (use only the listed file columns, field IDs from the table schema, and matchFieldIds equal to one unique key), then propose again in this reply. If the table has no unique key that the file can fill, tell the person.';
+
+/** What chat is told when an import plan's file values or mappings cannot become rows; names each problem. */
+export function importPlanResult(error: TableImportPlanError) {
+  const mapping = error.problems.some(problem => mappingCodes.has(problem.code));
+  const listed = error.problems.slice(0, 5).map(problem => problemText[problem.code](problem));
+  const more = error.total - listed.length;
+  const reason = `No review prepared: ${
+    mapping
+      ? 'the import plan doesn’t fit the file or table.'
+      : error.total === 1
+        ? '1 value in the file doesn’t fit the table.'
+        : `${error.total} values in the file don’t fit the table.`
+  } ${listed.join(' ')}${more > 0 ? ` And ${more} more.` : ''}`;
+  return {
+    error: mapping ? ('import-mapping-invalid' as const) : ('import-values-invalid' as const),
+    reason,
+    problems: error.problems,
+    total: error.total,
+    truncated: error.truncated,
+    instruction: mapping ? importMappingInstruction : importValuesInstruction,
+  };
+}
 
 const planKinds = z.object({
   plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })),
@@ -129,6 +188,7 @@ export function createChatTableProposals(
           (error instanceof TableImportError && error.code === 'snapshot-unavailable')
         )
           return { error: 'import-not-prepared', instruction: importNotPrepared };
+        if (error instanceof TableImportPlanError) return importPlanResult(error);
         if (!(error instanceof TableProposalValidationError)) throw error;
         return { ...error.validation, ...missingTransformNote(error.validation, args[4]) };
       }

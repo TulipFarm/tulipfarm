@@ -109,6 +109,9 @@ const coreChatTools = new Set(
     'schema.context',
     'schema.inspect',
     'tables.propose',
+    // Importing an attached file into a table must not depend on the model first finding these tools.
+    'tables.import.attachments',
+    'tables.import.file',
     'rows.create.batch',
     'skills.read',
     'knowledge.retrieve',

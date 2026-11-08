@@ -48,6 +48,7 @@ import {
   reviewedPlanSchema,
   TableProposalError,
   TableProposalValidationError,
+  TableImportPlanError,
   type InvalidProposalRecord,
   type ProposalManifest,
   type ProposalPlan,
@@ -479,12 +480,6 @@ function operations(options: TableProposalOptions) {
       changes.push(...recordEffects(plan, after, rows));
     } else if (plan.kind === 'import') {
       if (!options.imports) throw new TableProposalError('import-adapter-required');
-      if (
-        !after.uniqueKeys.some(
-          key => canonicalJson([...key.fieldIds].sort()) === canonicalJson([...plan.matchFieldIds].sort()),
-        )
-      )
-        throw new TableProposalError('invalid-import');
       const reference = plan.reference;
       if (origin.conversationId === null || origin.turnId === null) throw new AccessDenied();
       if (!(await importReferenceKnown(tx, actor, origin.conversationId, plan)))
@@ -612,7 +607,8 @@ function operations(options: TableProposalOptions) {
         continue;
       }
       const latest = await preview(tx, actor, manifest, plan.input, manifest.id).catch(error => {
-        if (error instanceof TableProposalValidationError) throw new TableProposalError('proposal-stale');
+        if (error instanceof TableProposalValidationError || error instanceof TableImportPlanError)
+          throw new TableProposalError('proposal-stale');
         throw error;
       });
       if (plan.input.kind === 'import') {

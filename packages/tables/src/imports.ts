@@ -32,6 +32,7 @@ export class TableImportError extends Error {
   constructor(
     readonly code:
       | 'invalid-selection'
+      | 'attachment-unknown'
       | 'snapshot-unavailable'
       | 'snapshot-conflict'
       | 'digest-mismatch'
@@ -53,7 +54,14 @@ export class TableImportError extends Error {
 }
 type ImportFailureCode = TableImportError['code'];
 /** Who can fix a failure: the assistant by correcting its selection, the person by fixing the file, or nobody now. */
-const importFailures: Record<ImportFailureCode, { reason: string; fix: 'selection' | 'value' | 'file' | 'retry' }> = {
+const importFailures: Record<
+  ImportFailureCode,
+  { reason: string; fix: 'reference' | 'selection' | 'value' | 'file' | 'retry' }
+> = {
+  'attachment-unknown': {
+    reason: 'The file reference doesn’t match a file attached to this chat.',
+    fix: 'reference',
+  },
   'invalid-selection': {
     reason:
       'The import settings don’t match the file. Check the format, delimiter, sheet name, header row and conversions.',
@@ -83,12 +91,15 @@ const importFailures: Record<ImportFailureCode, { reason: string; fix: 'selectio
   'import-unavailable': { reason: 'The file couldn’t be prepared because storage didn’t respond.', fix: 'retry' },
 };
 const personSteps = {
+  reference: 'Ask again and the assistant will pick the attached file again.',
   selection: 'Ask again and the assistant will correct the settings.',
   value: 'Correct the value in the file and attach it again.',
   file: 'Fix the file, attach it again and ask again.',
   retry: 'Try again in a moment.',
 };
 const assistantSteps = {
+  reference:
+    'Call tables.import.attachments in this reply, then call tables.import.file again with one returned attachmentId and its contentDigest copied exactly. If the file is not listed, ask the person to attach it to this chat.',
   value:
     'If the conversion for that column does not match its destination field type, correct the selection and call tables.import.file again in this reply. Otherwise ask the person to correct that value.',
   selection:
@@ -585,7 +596,10 @@ export function createTableImports(options: TableImportOptions) {
         const selection = validated(fileImportSelectionSchema, decision, 'invalid-selection');
         await runtime.transaction(workspaceId, commonCompatibility, async tx => {
           await owned(tx, actor, origin);
-          await attachment(tx, actor, origin, reference);
+          // The reference names no file of the requester's in this chat: a wrong ID or digest, not a denial.
+          await attachment(tx, actor, origin, reference).catch(error => {
+            throw error instanceof AccessDenied ? new TableImportError('attachment-unknown') : error;
+          });
           await reserve(tx, actor, origin, fileKey(tx, actor, origin, reference), 'file', reference.attachmentId);
         });
         return runtime.transaction(workspaceId, commonCompatibility, async tx => {

@@ -176,6 +176,8 @@ const proposalOutcomes = new Map(
     'import-not-prepared': 'No review prepared: the file wasn’t read first.',
   }),
 );
+// Import plans that don't fit the file or table explain every problem in their own `reason`.
+const importPlanOutcomes = new Set(['import-values-invalid', 'import-mapping-invalid']);
 const askTableAccess = 'Ask a workspace admin to grant';
 const proposalPlans = z.object({
   plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })).min(1),
@@ -219,12 +221,14 @@ export async function storedToolActivity(
   if (row.status === 'completed' && row.tool === 'tables.propose') {
     const result = z.object({ result: z.unknown() }).safeParse(row.output);
     const output = result.success ? result.data.result : row.output;
-    const outcome = z.object({ error: z.string() }).safeParse(output);
+    const outcome = z.object({ error: z.string(), reason: z.string().min(1).optional() }).safeParse(output);
     const error = outcome.success ? outcome.data.error : undefined;
     const detail =
       error === 'invalid-arguments' && !(await resubmitted(tx, row.id))
         ? 'No review prepared: the request wasn’t valid.'
-        : error && proposalOutcomes.get(error);
+        : error && importPlanOutcomes.has(error) && outcome.data?.reason
+          ? outcome.data.reason.slice(0, 400)
+          : error && proposalOutcomes.get(error);
     if (detail) return { status: 'completed', detail };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;

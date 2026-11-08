@@ -305,3 +305,43 @@ export class TableProposalValidationError extends TableProposalError {
     });
   }
 }
+
+export const importProblemCodes = [
+  'unknown-column',
+  'unknown-field',
+  'key-not-unique',
+  'key-unmapped',
+  'missing-key',
+  'duplicate-key',
+  'existing-duplicate-key',
+  'unmapped-value',
+  'conversion-failed',
+  'type-mismatch',
+  'missing-field',
+  'invalid-output',
+] as const;
+export const importProblemSchema = z.strictObject({
+  /** 1-based data row in the prepared file, counting from the first row after the header. */
+  row: z.int().min(1).nullable(),
+  column: z.string().max(120).nullable(),
+  fieldId: z.string().max(100).nullable(),
+  field: z.string().max(200).nullable(),
+  code: z.enum(importProblemCodes),
+  value: z.string().max(60).nullable(),
+  /** Valid choices the person can use instead, such as option labels or file columns. */
+  expected: z.array(z.string().max(200)).max(20).optional(),
+});
+export type ImportProblem = z.infer<typeof importProblemSchema>;
+/** An import plan whose file values or mappings cannot become the table's rows; it names each problem. */
+export class TableImportPlanError extends TableProposalError {
+  readonly problems: ImportProblem[];
+  readonly total: number;
+  constructor(problems: ImportProblem[], total = problems.length) {
+    super('invalid-import');
+    this.problems = z.array(importProblemSchema).max(100).parse(problems.slice(0, 100));
+    this.total = Math.max(total, this.problems.length);
+  }
+  get truncated() {
+    return this.total > this.problems.length;
+  }
+}
