@@ -56,6 +56,7 @@ const definitionStateSchema = z.object({
     .default({ create: false, update: false, delete: false }),
   archived: z.boolean().default(false),
   canArchive: z.boolean().default(false),
+  canRestore: z.boolean().default(false),
 });
 export type ArchiveStatus = z.infer<typeof proposalStatusSchema>;
 const archiveMessages: Readonly<Record<string, string>> = {
@@ -65,12 +66,20 @@ const archiveMessages: Readonly<Record<string, string>> = {
   'member-table-protected': 'Workspace members is a built-in table and cannot be archived.',
   'proposal-storage-unavailable': 'Archiving tables is not available in this workspace yet. Try again later.',
 };
-export function archiveMessage(code: string, status = 409) {
+const restoreMessages: Readonly<Record<string, string>> = {
+  'proposal-stale': 'This table changed since you opened it. Reload the table, then try again.',
+  'member-table-protected': 'Workspace members is a built-in table and cannot be archived or unarchived.',
+  'proposal-storage-unavailable': 'Unarchiving tables is not available in this workspace yet. Try again later.',
+};
+export type ArchiveKind = 'archive' | 'restore';
+export function archiveMessage(code: string, status = 409, kind: ArchiveKind = 'archive') {
   return (
-    archiveMessages[code] ??
+    (kind === 'archive' ? archiveMessages : restoreMessages)[code] ??
     ([403, 404].includes(status) || code === 'access-denied'
       ? 'This table is missing or your permission changed. A workspace admin can review your access.'
-      : 'Could not confirm the archive. Reload Tables to check whether the table is still listed.')
+      : kind === 'archive'
+        ? 'Could not confirm the archive. Reload Tables to check whether the table is still listed.'
+        : 'Could not confirm the unarchive. Reload the table to check whether it is still archived.')
   );
 }
 const deletedRecordSchema = z.object({
@@ -310,15 +319,21 @@ export function tableApi(workspaceId: string) {
                     : 'The search could not be completed. Check your connection and try again.';
     throw new TableRequestError(response.status, code, memberMessages[code] ?? message);
   }
-  async function archiveRequest(tableId: string, requestId: string, signal: AbortSignal, body?: unknown) {
+  async function archiveRequest(
+    kind: ArchiveKind,
+    tableId: string,
+    requestId: string,
+    signal: AbortSignal,
+    body?: unknown,
+  ) {
     const response = await jsonResponse(
-      `${base}/${encodeURIComponent(tableId)}/archive/${encodeURIComponent(requestId)}`,
+      `${base}/${encodeURIComponent(tableId)}/${kind}/${encodeURIComponent(requestId)}`,
       { method: body === undefined ? 'GET' : 'PUT', body, signal, cache: 'no-store' },
     );
     const value = await readJson(response, true);
     if (!response.ok) {
       const code = responseError(value, 'table-operation-failed');
-      throw new TableRequestError(response.status, code, archiveMessage(code, response.status));
+      throw new TableRequestError(response.status, code, archiveMessage(code, response.status, kind));
     }
     return proposalStatusSchema.parse(value);
   }
@@ -342,12 +357,12 @@ export function tableApi(workspaceId: string) {
   return {
     list,
     detail,
-    /** Archives through the same checks as a chat archive. Reuse the request id to retry safely. */
-    archive(tableId: string, requestId: string, expectedRevision: string) {
-      return archiveRequest(tableId, requestId, AbortSignal.timeout(15_000), { expectedRevision });
+    /** Archives or restores through the same checks as chat. Reuse the request id to retry safely. */
+    archive(tableId: string, requestId: string, expectedRevision: string, kind: ArchiveKind = 'archive') {
+      return archiveRequest(kind, tableId, requestId, AbortSignal.timeout(15_000), { expectedRevision });
     },
-    archiveStatus(tableId: string, requestId: string, signal: AbortSignal) {
-      return archiveRequest(tableId, requestId, signal);
+    archiveStatus(tableId: string, requestId: string, signal: AbortSignal, kind: ArchiveKind = 'archive') {
+      return archiveRequest(kind, tableId, requestId, signal);
     },
     async active(id: string, signal: AbortSignal): Promise<TableDefinition> {
       const state = await detail(id, signal);

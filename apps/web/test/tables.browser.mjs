@@ -233,7 +233,10 @@ let deleted = false,
   restoreError = null,
   detailStatus = 200,
   archiveRefusal = 'workflow-active';
-const archiveRequests = [];
+const archiveRequests = [],
+  restoreRequests = [];
+let archivedTableArchived = true,
+  archivedTableCanRestore = false;
 let schemaSecondPage = false,
   deletedSecondPage = false;
 const schemaCursors = [],
@@ -476,6 +479,34 @@ try {
           : tables.filter(table => !search || table.definition.label.toLowerCase().includes(search)),
         nextCursor: null,
       };
+    } else if (path.includes(`/tables/${archivedTableId}/restore/`)) {
+      restoreRequests.push({ method: request.method(), body: request.postDataJSON() });
+      if (request.method() === 'GET') archivedTableArchived = false;
+      json = {
+        id: path.split('/').at(-1),
+        digest: 'd'.repeat(64),
+        status: request.method() === 'PUT' ? 'approved' : 'completed',
+        decision: 'approve',
+        cancelled: false,
+        expired: false,
+        plans: [{ tableId: archivedTableId, receipt: null, importProgress: null }],
+      };
+    } else if (path.endsWith(`/tables/${archivedTableId}`)) {
+      json = {
+        id: archivedTableId,
+        saved: null,
+        applied: {
+          revision: 'e'.repeat(40),
+          definition: { ...customerDefinition, id: archivedTableId, label: 'Old invoices' },
+          appliedAt: null,
+        },
+        rowPermissions: { create: false, update: false, delete: false },
+        archived: archivedTableArchived,
+        canArchive: !archivedTableArchived && archivedTableCanRestore,
+        canRestore: archivedTableArchived && archivedTableCanRestore,
+      };
+    } else if (path.includes(`/tables/${archivedTableId}/rows`)) {
+      json = { records: [], total: '0', nextCursor: null };
     } else if (path.includes(`/tables/${tableId}/archive/`)) {
       archiveRequests.push({ method: request.method(), body: request.postDataJSON() });
       if (request.method() === 'PUT' && archiveRefusal)
@@ -944,6 +975,31 @@ try {
   await page.getByText('No archived tables match “missing”', { exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Archived', exact: true }).getAttribute('aria-pressed'), 'true');
   assert.equal(await sortTables.textContent(), 'Most records', 'Reload keeps the sort');
+  // An archived table's page says so; only people who can manage its fields are offered Unarchive.
+  await page.goto(`${origin}/acme/tables/${archivedTableId}`);
+  const archivedPanel = page.getByText('This table is archived', { exact: true });
+  await archivedPanel.waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Unarchive table', exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Unarchive table', exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
+  archivedTableCanRestore = true;
+  await page.reload();
+  await archivedPanel.waitFor();
+  assert.equal(await page.getByText('Check your connection').count(), 0, 'An archived table is not a connection error');
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Unarchive table', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Unarchive table', exact: true }).click();
+  const unarchiveDialog = page.getByRole('alertdialog', { name: 'Unarchive Old invoices?' });
+  await unarchiveDialog.getByRole('button', { name: 'Unarchive table', exact: true }).click();
+  await unarchiveDialog.waitFor({ state: 'detached' });
+  await archivedPanel.waitFor({ state: 'detached' });
+  await page.getByRole('link', { name: 'Change fields in chat' }).waitFor();
+  assert.deepEqual(restoreRequests, [
+    { method: 'PUT', body: { expectedRevision: 'e'.repeat(40) } },
+    { method: 'GET', body: null },
+  ]);
   await page.goto(`${origin}/acme/tables`);
   await tablesFirst('Support tickets');
   assert.deepEqual(listRequests.at(-1), { search: null, archived: false, sort: 'name', direction: 'asc' });
