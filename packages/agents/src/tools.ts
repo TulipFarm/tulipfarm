@@ -97,6 +97,7 @@ import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals } from './table-proposals.ts';
+import { chatRowWriteRefusal } from './chat-row-guard.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { TableValidationError } from '@tulipfarm/tables/definition';
@@ -2217,7 +2218,11 @@ export function createChatTools(
           !usedUntrustedContent(sources, actor) &&
           !(await importedSkillPackages(workspaceId, actor, origin.conversationId))
         )
-          return registry.invoke(context, call);
+          // Direct writes have no review card, so they must target a table named in the chat.
+          return (
+            (await chatRowWriteRefusal(runtime, workspaceId, actor, origin, call.tableId)) ??
+            registry.invoke(context, call)
+          );
         const turnAudience = sources.some(source => source.kind === 'shared-slack-turn')
           ? slack?.(runtime).turnAudience
           : undefined;

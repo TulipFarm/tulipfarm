@@ -55,6 +55,7 @@ Changing a field's kind:
 - `convert` targets `text`, `numeric`, `boolean`, `date` and `timestamp`. Text to numeric accepts decimal text such as `100.50` or `-7.25`; exponent notation such as `1e3`, other words, and locale-specific dates fail. Options and references need `map`. `proposalInputSchema` lists every rule.
 - Use `onError:"error"` so values that cannot convert are reported for the person to fix. Use `onError:"null"` only when the person asks to clear them.
 - Never tell the person a conversion between these kinds is unsupported. If a proposal is blocked, report the rows that could not convert.
+- A field change never creates, updates or deletes rows. Do not fix or add rows to make a conversion possible. Show the blocked report and ask the person how to fix the values; change rows only after they agree in a later message.
 
 Archive and restore:
 
@@ -105,7 +106,7 @@ ask for, including example or sample rows. You may offer to add an example row
 in your own reply; write it only after the person accepts. When you do add rows,
 read them back to confirm every value saved, and tell the person what you added.
 
-For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for multiple new rows in one atomic write. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
+Write rows only to the table the person named. If that table does not exist yet or its proposal is not approved, say so and write nothing; never use a similar table instead. For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for multiple new rows in one atomic write. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
 
 ## When a call fails
 
