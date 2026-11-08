@@ -57,7 +57,7 @@ after(async () => {
   await app?.close();
 });
 
-async function openPersonGrants(t, failWrite) {
+async function openPersonGrants(t, failWrite, refreshDelay = 0) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   t.after(async () => {
     if (t.passed === false) await captureBrowserFailure(page, `person-grants-${t.name}`);
@@ -65,10 +65,18 @@ async function openPersonGrants(t, failWrite) {
   });
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
-  const api = { grants: [], writes: [], errors };
+  const api = { grants: [], writes: [], errors, watching: false, refreshes: 0, events: [] };
   await page.route('**/v1/**', async route => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
+    // Reloading table authority refetches workspace integrations; access listeners then reload the workspace.
+    if (api.watching && request.method() === 'GET' && path.endsWith('/google-workspace')) {
+      api.events.push('refresh started');
+      api.refreshStarted?.();
+      await setTimeout(refreshDelay);
+      api.events.push('refresh loaded');
+    }
+    if (api.watching && request.method() === 'GET' && path === '/v1/workspaces/acme') api.refreshes += 1;
     let json;
     if (path === '/v1/auth/get-session')
       json = { session: { id: 'session', userId: 'ada' }, user: { id: 'ada', name: 'Ada', email: 'ada@example.com' } };
@@ -87,6 +95,7 @@ async function openPersonGrants(t, failWrite) {
     else if (path.endsWith('/governance/person-grants') && request.method() === 'PUT') {
       const body = request.postDataJSON();
       api.writes.push(body.target.permission);
+      api.events.push(`PUT ${body.target.permission}`);
       await setTimeout(300);
       if (failWrite?.(api.writes.length))
         return route.fulfill({ status: 503, json: { error: 'workspace-unavailable' } });
@@ -110,6 +119,30 @@ async function openPersonGrants(t, failWrite) {
     await page.keyboard.press('Space');
   };
   return { page, section, checkbox, toggle, api, mounted: await section.elementHandle() };
+}
+
+// Record whether the table list was ever replaced by its loading state.
+async function watchLoading(page, api) {
+  api.watching = true;
+  await page.evaluate(() => {
+    window.loadingSeen = false;
+    const check = () => {
+      if (
+        document.querySelector('[aria-label="Loading tables"]') ||
+        document.body.innerText.includes('Loading tables…')
+      )
+        window.loadingSeen = true;
+    };
+    new MutationObserver(check).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+}
+
+async function waitFor(condition, timeout = 10_000) {
+  const end = Date.now() + timeout;
+  while (!condition()) {
+    if (Date.now() > end) throw new Error('Timed out waiting for condition');
+    await setTimeout(50);
+  }
 }
 
 test('the individual section labels a table owned by the admin team as Workspace admins', async t => {
@@ -141,4 +174,58 @@ test('a failed grant for yourself says how many queued changes were not saved', 
   assert.equal(await checkbox('row.read').isChecked(), true);
   assert.equal(await checkbox('row.create').isChecked(), false);
   assert.equal(await checkbox('row.update').isChecked(), false);
+});
+
+test('several grants for yourself refresh table access once, in the background', async t => {
+  const { page, section, checkbox, toggle, api } = await openPersonGrants(t);
+  await watchLoading(page, api);
+  for (const permission of ['row.read', 'row.create', 'row.update']) {
+    await toggle(permission);
+    await section.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
+    await setTimeout(600);
+  }
+  await waitFor(() => api.refreshes > 0);
+  await setTimeout(2500);
+  assert.equal(api.refreshes, 1);
+  assert.equal(await page.evaluate(() => window.loadingSeen), false, 'the table list never showed Loading tables…');
+  for (const permission of ['row.read', 'row.create', 'row.update'])
+    assert.equal(await checkbox(permission).isChecked(), true, permission);
+});
+
+test('a click while your own access refreshes is queued and saved', async t => {
+  const { page, section, checkbox, toggle, api } = await openPersonGrants(t, undefined, 1000);
+  await watchLoading(page, api);
+  const read = section.getByRole('checkbox', { name: 'Read rows', exact: true }).first();
+  await read.evaluate(element => element.scrollIntoView({ block: 'center' }));
+  const box = await read.boundingBox();
+  await toggle('row.create');
+  await new Promise(resolve => (api.refreshStarted = resolve));
+  // Click where the checkbox was, as a person would while the refresh is running.
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await waitFor(() => api.writes.length === 2);
+  await section.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
+  assert.deepEqual(api.writes, ['table.row.create', 'table.row.read']);
+  assert.ok(
+    api.events.indexOf('PUT table.row.read') > api.events.indexOf('refresh loaded'),
+    `the click waited for the refresh: ${api.events}`,
+  );
+  assert.equal(await checkbox('row.read').isChecked(), true);
+  assert.equal(await page.evaluate(() => window.loadingSeen), false);
+});
+
+test('individual grant checkboxes stay in place while a change saves', async t => {
+  const { page, section, toggle } = await openPersonGrants(t);
+  const read = section.getByRole('checkbox', { name: 'Read rows', exact: true }).first();
+  await read.evaluate(element => {
+    window.positions = [];
+    const record = () => {
+      window.positions.push(element.getBoundingClientRect().top);
+      if (!window.stopRecording) requestAnimationFrame(record);
+    };
+    record();
+  });
+  await toggle('row.create');
+  await section.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
+  const positions = await page.evaluate(() => ((window.stopRecording = true), window.positions));
+  assert.deepEqual([...new Set(positions)], [positions[0]]);
 });
