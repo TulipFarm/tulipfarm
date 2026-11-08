@@ -285,7 +285,8 @@ export const optionTone = (label: string): OptionTone => {
   return optionTones.find(([pattern]) => pattern.test(words))?.[1] ?? 'secondary';
 };
 
-export const layoutIds = ['table', 'board', 'list', 'chart', 'timeline'] as const;
+/** Also the fixed order of the view tabs and the add-view menu. */
+export const layoutIds = ['table', 'list', 'board', 'chart', 'timeline'] as const;
 export type Layout = (typeof layoutIds)[number];
 export type SearchMode = 'text' | 'ai' | 'rsql';
 const layoutKey = (tableId: string) => `tulipfarm.tables.layout.${tableId}`;
@@ -312,6 +313,8 @@ export const openLayoutLimit = 3;
 /** Puts the current view first and keeps the most recent views up to the limit. */
 export const recentLayouts = (current: Layout, open: Layout[]): Layout[] =>
   [current, ...open.filter(id => id !== current)].slice(0, openLayoutLimit);
+/** The open views in the fixed layout order, so choosing a view never moves a tab. */
+export const tabLayouts = (open: Layout[]): Layout[] => layoutIds.filter(id => open.includes(id));
 /** The views open as tabs for this table on this browser, most recently used first. */
 export function storedOpenLayouts(tableId: string): Layout[] {
   try {

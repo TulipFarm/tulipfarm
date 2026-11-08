@@ -11,6 +11,9 @@ import {
   csvLine,
   filterChips,
   optionTone,
+  recentLayouts,
+  tabLayouts,
+  type Layout,
   rsqlToDraft,
   rulesWhere,
   tableRowsSearchSchema,
@@ -273,4 +276,16 @@ test('board columns add their option to the applied search', () => {
 test('CSV cells are quoted and formulas are neutralized', () => {
   assert.equal(csvLine(['a', 'b,c', 'say "hi"', 'two\nlines']), 'a,"b,c","say ""hi""","two\nlines"');
   assert.equal(csvLine(['=SUM(A1)', '-5', '-2.5', '+1', '@x']), "'=SUM(A1),-5,-2.5,'+1,'@x");
+});
+
+test('view tabs keep a fixed order whichever view is chosen', () => {
+  let recent: Layout[] = ['table', 'list', 'board'];
+  for (const chosen of ['list', 'board', 'table', 'board'] as const) {
+    recent = recentLayouts(chosen, recent);
+    assert.deepEqual(tabLayouts(recent), ['table', 'list', 'board']);
+  }
+  recent = recentLayouts('timeline', recent);
+  assert.deepEqual(recent, ['timeline', 'board', 'table']);
+  assert.deepEqual(tabLayouts(recent), ['table', 'board', 'timeline']);
+  assert.deepEqual(tabLayouts(recentLayouts('board', recent)), ['table', 'board', 'timeline']);
 });
