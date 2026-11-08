@@ -1,6 +1,7 @@
 import { Disclosure } from '@/components/disclosure';
 import { workspaceMemberLabel } from '@tulipfarm/tables/workspace-members';
 import type { TableDefinition, TableField, TableValue, TableValues } from './review-contracts';
+import { formatCalendarDate, formatTimestamp } from './value-format';
 
 type LabeledFields = {
   fields: ReadonlyArray<{ id: string; options?: ReadonlyArray<{ id: string; label: string }> | undefined }>;
@@ -13,9 +14,11 @@ export function formatTableValue(value: TableValue | undefined, definition: Labe
   switch (value.kind) {
     case 'text':
     case 'numeric':
-    case 'date':
-    case 'timestamp':
       return value.value;
+    case 'date':
+      return formatCalendarDate(value.value);
+    case 'timestamp':
+      return formatTimestamp(value.value);
     case 'boolean':
       return value.value ? 'Yes' : 'No';
     case 'single-select':
