@@ -27,7 +27,7 @@ import { proposalProgressing as progressing, type ProposalIdentity } from '@/fea
 import { proposalApi, type ProposalApi } from '@/features/tables/proposal-api';
 import { memberMessages, tableApi, type TableApi, type TableDataRow } from '@/features/tables/api';
 import { transformErrorHelp } from '@/features/tables/transform-errors';
-import { formatTableValue, rowLabel } from '@/features/tables/definition-view';
+import { formatTableValue, rowLabel, rowTitle } from '@/features/tables/definition-view';
 import { useOptionalCanvas, useResultAttention } from './canvas-state';
 import { schemaCanvasItem } from './schema-canvas';
 import { useApprovalDockEntry } from './approval-dock';
@@ -651,6 +651,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                   )}
                   <ProposalEffects
                     key={`${view.digest}/${plan.input.tableId}`}
+                    workspaceId={workspaceId}
                     api={api}
                     identity={identity}
                     plan={plan}
@@ -869,13 +870,38 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
   );
 }
 
+/** Titles existing rows the way the table names them, so a reviewed change isn't headed by the value it changes. */
+function useEffectRowTitles(workspaceId: string, tableId: string, recordIds: readonly string[]) {
+  const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  const detail = useTableDetail(api, tableId, recordIds.length > 0);
+  const applied = detail.state.kind === 'ready' ? detail.state.data.applied : null;
+  const systemKind = detail.state.kind === 'ready' ? detail.state.data.systemKind : undefined;
+  const rows = useTableRowsById(
+    api,
+    { id: tableId, revision: applied?.revision ?? '' },
+    recordIds,
+    !!applied && recordIds.length > 0,
+  );
+  return useMemo(
+    () =>
+      new Map(
+        applied && rows.state.kind === 'ready'
+          ? rows.state.data.map(row => [row.id, rowTitle(applied.definition, row, systemKind)] as const)
+          : [],
+      ),
+    [applied, rows.state, systemKind],
+  );
+}
+
 function ProposalEffects({
+  workspaceId,
   api,
   identity,
   plan,
   digest,
   onReady,
 }: {
+  workspaceId: string;
   api: ProposalApi;
   identity: ProposalIdentity;
   plan: ReviewedPlan;
@@ -886,6 +912,14 @@ function ProposalEffects({
   const after = cursors.at(-1) ?? -1;
   const read = useTableProposalEffects(api, identity, plan.input.tableId, digest, plan.effectCount, after);
   const ready = read.state.kind === 'ready' && !read.state.error && !read.state.refreshing;
+  const existing = useMemo(
+    () =>
+      read.state.kind === 'ready'
+        ? read.state.data.items.flatMap(({ effect }) => (effect.kind === 'create' ? [] : [effect.recordId]))
+        : [],
+    [read.state],
+  );
+  const titles = useEffectRowTitles(workspaceId, plan.input.tableId, existing);
   useEffect(() => {
     onReady(plan.input.tableId, ready);
     return () => onReady(plan.input.tableId, false);
@@ -903,10 +937,11 @@ function ProposalEffects({
               <section key={ordinal} className="space-y-2 border-t border-border pt-3">
                 <h4 className="break-words text-sm font-medium">
                   {effect.kind === 'create' ? 'Create' : effect.kind === 'delete' ? 'Delete' : 'Update'}{' '}
-                  {rowLabel(
-                    effect.after ? plan.after : (plan.before ?? plan.after),
-                    effect.after ?? effect.before ?? {},
-                  )}
+                  {titles.get(effect.recordId) ??
+                    rowLabel(
+                      effect.after ? plan.after : (plan.before ?? plan.after),
+                      effect.after ?? effect.before ?? {},
+                    )}
                 </h4>
                 <Table
                   aria-label={`Field changes for row ${ordinal}`}
