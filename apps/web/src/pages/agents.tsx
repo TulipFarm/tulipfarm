@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { workspaceRoute, agentDetailRoute, newAgentRoute } from '@/router';
 import { Button, jumpTo } from '@tulipfarm/sprout/button';
@@ -39,9 +39,8 @@ import { agentStatus, agentTabs, visibleTabs, type AgentTab, type ExecutionCheck
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { AgentBuilder } from '@/features/agents/builder';
+import { useBuilderInitial } from '@/features/agents/builder-initial';
 import { useFeatureRead } from '@/lib/query';
-import type { BuilderInitial } from '@/features/agents/builder-draft';
-import { conversationApi } from '@/features/chat/conversation-api';
 import { failedWrite, TableRequestError, type WriteState } from '@/features/tables/request-state';
 
 export function AgentsPage() {
@@ -347,45 +346,9 @@ function NewAgentBuilder({
   const [resuming] = useState(resume);
   const [handoff] = useState(chatId && draftId ? { chatId, draftId } : null);
   const api = useAgentApi(workspace.id);
-  const chat = useMemo(() => conversationApi(workspace.id, () => {}), [workspace.id]);
   const navigate = useNavigate();
   const read = useAgentPage(api, id, true);
-  const initial = useFeatureRead<BuilderInitial>({
-    key: ['agents', 'setup-draft', id, handoff],
-    enabled: resuming || !!handoff,
-    load: async signal => {
-      if (!handoff) return api.setupDraft(id, signal);
-      const view = await chat.draft(handoff.chatId, handoff.draftId, signal);
-      if (
-        view.status !== 'pending' ||
-        view.proposal.kind !== 'agent' ||
-        !view.proposal.input.setup ||
-        view.proposal.targetId !== id
-      )
-        throw new TableRequestError(
-          409,
-          'draft-stale',
-          'This chat draft is no longer available for editing. Return to chat and request a fresh setup.',
-        );
-      const input = view.proposal.input;
-      let version = 0;
-      try {
-        version = (await api.setupDraft(id, signal)).version;
-      } catch (error) {
-        if (!(error instanceof TableRequestError && error.code === 'setup-draft-not-found')) throw error;
-      }
-      return {
-        version,
-        expectedSoulRevision: input.expectedSoulRevision,
-        expectedSavedRevision: input.expectedSavedRevision,
-        expectedPolicyVersion: input.expectedPolicyVersion ?? 0,
-        expectedActivationIds: input.expectedActivationIds ?? [],
-        expectedWorkflowRevision: input.expectedWorkflowRevision ?? null,
-        expectedWorkflowGeneration: input.expectedWorkflowGeneration ?? null,
-        setup: { ...view.proposal.input.setup, definition: input.definition, owningTeamId: input.owningTeamId },
-      };
-    },
-  });
+  const initial = useBuilderInitial(api, workspace.id, id, resuming, handoff);
   const [context, setContext] = useState<AgentContext | null>(null);
   if (read.state.kind === 'ready' && context !== read.state.data.context) setContext(read.state.data.context);
   const loadingDraft = resuming || !!handoff;

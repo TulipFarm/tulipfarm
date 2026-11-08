@@ -14,7 +14,8 @@ export const authClient = createAuthClient({
     magicLinkClient(),
     inferAdditionalFields({ user: { lastModelFamilyId: { type: 'string', required: false } } }),
   ],
-  fetchOptions: { credentials: 'include' },
+  // Look fetch up per call so the dev mocks, which patch it after this module loads, also answer auth.
+  fetchOptions: { credentials: 'include', customFetchImpl: (input, init) => fetch(input, init) },
   sessionOptions: { refetchInterval: 300, refetchOnWindowFocus: true },
 });
 

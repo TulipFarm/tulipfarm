@@ -255,248 +255,149 @@ test(
 );
 
 test(
-  'full agent chat review requires human consent and exact retry; handoff retains complete setup',
+  'a chat setup draft opens the agent builder in the canvas, and saving there is not a chat approval',
   { timeout: 120000 },
   async () => {
     const fixture = agentBuilderFixture();
     const { workspace } = fixture;
     const server = await startBuiltApp();
     const browser = await chromium.launch(builderBrowserOptions());
-    let activePage;
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
     try {
-      for (const handoff of [false, true]) {
-        const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
-        activePage = page;
-        page.setDefaultTimeout(10000);
-        const targetId = randomUUID(),
-          draftId = randomUUID(),
-          triggerId = randomUUID();
-        const messageId = randomUUID(),
-          turnId = randomUUID();
-        const decisions = [],
-          errors = [];
-        let deny = false,
-          lose = true,
-          reads = 0;
-        page.on('pageerror', error => errors.push(error.message));
-        const setup = {
-          policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
-          enrollment: [fixture.team.id],
-          scope: [],
-          limits: [],
-          taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
-          slackSender: 'app',
-          slackChannels: [
-            {
-              channel: 'CPEOPLE',
-              expectedVersion: 3,
-              replaceAgentId: handoff ? targetId : existingAgent,
-              ...(handoff ? { detach: true } : {}),
+      const targetId = randomUUID(),
+        draftId = randomUUID(),
+        triggerId = randomUUID();
+      const decisions = [],
+        errors = [];
+      let deny = false;
+      page.on('pageerror', error => errors.push(error.message));
+      const setup = {
+        policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
+        enrollment: [fixture.team.id],
+        scope: [],
+        limits: [],
+        taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
+        slackSender: 'app',
+        slackChannels: [{ channel: 'CPEOPLE', expectedVersion: 3, replaceAgentId: targetId, detach: true }],
+        prompt: 'Prepare a weekly policy update.',
+        runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+        triggers: [
+          { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } },
+          { id: randomUUID(), trigger: { kind: 'event', name: 'policy_question' } },
+        ],
+      };
+      const view = {
+        id: draftId,
+        digest: 'd'.repeat(64),
+        status: 'pending',
+        outcome: null,
+        proposal: {
+          kind: 'agent',
+          targetId,
+          input: {
+            expectedSoulRevision: 'a'.repeat(40),
+            expectedSavedRevision: null,
+            expectedPolicyVersion: 0,
+            expectedActivationIds: [],
+            expectedWorkflowRevision: null,
+            expectedWorkflowGeneration: null,
+            owningTeamId: fixture.team.id,
+            definition: {
+              name: 'People Ops chat helper',
+              instructions: 'Answer policy questions without inventing policies.',
+              tools: [],
+              responseRule: 'tag',
             },
-          ],
-          prompt: 'Prepare a weekly policy update.',
-          runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
-          triggers: [
-            { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } },
-            { id: randomUUID(), trigger: { kind: 'event', name: 'policy_question' } },
-          ],
-        };
-        const view = {
-          id: draftId,
-          digest: 'd'.repeat(64),
-          status: 'pending',
-          outcome: null,
-          proposal: {
-            kind: 'agent',
-            targetId,
-            input: {
-              expectedSoulRevision: 'a'.repeat(40),
-              expectedSavedRevision: null,
-              expectedPolicyVersion: 0,
-              expectedActivationIds: [],
-              expectedWorkflowRevision: null,
-              expectedWorkflowGeneration: null,
-              owningTeamId: fixture.team.id,
-              definition: {
-                name: 'People Ops chat helper',
-                instructions: 'Answer policy questions without inventing policies.',
-                tools: [],
-                responseRule: 'tag',
-              },
-              setup,
-            },
+            setup,
           },
-        };
-        const chat = {
-          id: chatId,
-          title: 'People Ops setup',
-          titleRevision: 1,
-          titleManual: false,
-          archived: false,
-          activityAt: '2026-10-12T10:00:00Z',
-          createdAt: '2026-10-12T10:00:00Z',
-          projectId: null,
-        };
-        await page.route('**/v1/**', async route => {
-          const request = route.request(),
-            url = request.url(),
-            path = new URL(url).pathname,
-            method = request.method(),
-            body = request.postDataJSON();
-          if (path.endsWith(`/drafts/${draftId}`)) {
-            reads++;
-            return route.fulfill(deny ? { status: 403, json: { error: 'access-denied' } } : { json: view });
-          }
-          if (path.endsWith(`/drafts/${draftId}/decision`)) {
-            decisions.push(body);
-            assert.equal(body.digest, view.digest);
-            const { definition, owningTeamId, setup: _setup, ...expected } = view.proposal.input;
-            const staged = fixture.respond(
-              'PUT',
-              `${new URL(url).origin}/v1/workspaces/${workspace.id}/agents/${targetId}/setup-draft`,
-              {
-                requestId: body.commandId,
-                expectedVersion: 0,
-                ...expected,
-                setup: { ...setup, definition, owningTeamId },
-              },
-            );
-            const setupReceipt = fixture.respond(
-              'POST',
-              `${new URL(url).origin}/v1/workspaces/${workspace.id}/agents/${targetId}/setup`,
-              {
-                requestId: body.commandId,
-                version: staged.json.version,
-                digest: staged.json.digest,
-                decision: body.decision,
-                consent: body.consent,
-              },
-            ).json;
-            view.outcome = {
-              kind: 'agent',
-              receipt: {
-                commandId: setupReceipt.commandId,
-                agentId: targetId,
-                status: 'accepted',
-                savedRevision: setupReceipt.savedRevision,
-              },
-              setupReceipt,
-            };
-            view.status = 'saved';
-            if (lose) {
-              lose = false;
-              return route.fulfill({ status: 503, json: { error: 'unconfirmed' } });
-            }
-            return route.fulfill({ json: view.outcome });
-          }
-          if (path.endsWith(`/conversations/${chatId}/messages`))
-            return route.fulfill({
-              json: {
-                messages: [
-                  {
-                    id: messageId,
-                    sequence: 1,
-                    author: 'human',
-                    createdAt: '2026-10-12T10:00:00Z',
-                    parts: [{ kind: 'text', text: 'Create my People Ops helper.' }],
-                    turn: { id: turnId, status: 'completed', generation: 0 },
-                    tools: [tool(draftId)],
-                  },
-                ],
-                nextBefore: null,
-                hasGitHubProposals: false,
-              },
-            });
-          if (path.endsWith(`/conversations/${chatId}`)) return route.fulfill({ json: chat });
-          if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
-          return route.fulfill(fixture.respond(method, url, body));
-        });
-        if (!handoff) await page.clock.install();
-        await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
-        await page.getByRole('button', { name: 'Review agent', exact: true }).click();
-        const card = page.getByRole('region', { name: 'Review agent draft', exact: true });
-        await card.getByRole('button', { name: 'Create and activate', exact: true }).waitFor();
-        if (!handoff) {
-          await card.getByRole('button', { name: 'People Ops chat helper', exact: true }).scrollIntoViewIfNeeded();
-          await captureBuilderScreenshot(page, 'agent-builder-chat-review');
+        },
+      };
+      const chat = {
+        id: chatId,
+        title: 'People Ops setup',
+        titleRevision: 1,
+        titleManual: false,
+        archived: false,
+        activityAt: '2026-10-12T10:00:00Z',
+        createdAt: '2026-10-12T10:00:00Z',
+        projectId: null,
+      };
+      await page.route('**/v1/**', async route => {
+        const request = route.request(),
+          url = request.url(),
+          path = new URL(url).pathname,
+          method = request.method(),
+          body = request.postDataJSON();
+        if (path.endsWith(`/drafts/${draftId}`))
+          return route.fulfill(deny ? { status: 403, json: { error: 'access-denied' } } : { json: view });
+        if (path.endsWith(`/drafts/${draftId}/decision`)) {
+          decisions.push(body);
+          return route.fulfill({ status: 409, json: { error: 'unexpected-chat-decision' } });
         }
-        if (handoff) {
-          await card.getByRole('button', { name: 'More setup options', exact: true }).click();
-          for (const [name, step] of [
-            ['Add actions', 'access'],
-            ['Add skills', 'skills'],
-          ])
-            assert.equal(
-              new URL(
-                await page.getByRole('menuitem', { name, exact: true }).getAttribute('href'),
-                server.origin,
-              ).searchParams.get('step'),
-              step,
-            );
-          await page.keyboard.press('Escape');
-          await card.getByRole('link', { name: 'Edit in builder', exact: true }).click();
-          const form = page.getByRole('form', { name: 'Agent setup', exact: true });
-          await form.getByLabel('Agent name', { exact: true }).waitFor();
-          assert.equal(
-            await form.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
-            view.proposal.input.definition.instructions,
-          );
-          assert.equal(new URL(page.url()).searchParams.has('instructions'), false);
-          await form.getByRole('button', { name: 'Save draft', exact: true }).click();
-          await form
-            .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
-            .waitFor();
-          const saved = fixture.setups.get(targetId).setup;
-          assert.deepEqual(saved.policy, setup.policy);
-          assert.deepEqual(saved.enrollment, setup.enrollment);
-          assert.equal(saved.slackSender, 'app');
-          assert.deepEqual(saved.slackChannels, setup.slackChannels);
-          assert.deepEqual(saved.triggers, setup.triggers);
-          assert.equal(saved.prompt, setup.prompt);
-          assert.equal(decisions.length, 0, 'manual handoff is not chat approval');
-          deny = true;
-          await page.goto(
-            `${server.origin}/${workspace.slug}/agents/new?setupAgentId=${targetId}&chatId=${chatId}&draftId=${draftId}`,
-          );
-          await page.getByRole('heading', { name: /unavailable/i }).waitFor();
-          assert.equal(await page.getByRole('textbox', { name: 'Instructions', exact: true }).count(), 0);
-        } else {
-          assert.equal(await card.getByRole('button', { name: 'Create and activate', exact: true }).isDisabled(), true);
-          assert.equal(decisions.length, 0);
-          // A draft waiting for review uses up its automatic checks; deciding starts a fresh budget for the save.
-          const stopped = card.getByText(
-            'Automatic checks stopped after a few minutes. Use Check draft status to see the latest.',
-            { exact: true },
-          );
-          await page.clock.runFor(30 * 2000 + 60 * 5000 + 1000);
-          await stopped.waitFor();
-          const exhausted = reads;
-          await page.clock.runFor(30000);
-          assert.equal(reads, exhausted, 'checks stop once the budget is used');
-          const sponsor = card.getByRole('checkbox', { name: /^I sponsor / });
-          assert.equal(await sponsor.count(), 1, 'an event trigger needs no sponsor');
-          await sponsor.check();
-          await card.getByRole('checkbox', { name: /Replace the existing agent/ }).check();
-          await card.getByRole('button', { name: 'Create and activate', exact: true }).click();
-          await stopped.waitFor({ state: 'detached' });
-          await page.clock.runFor(2500);
-          for (let attempt = 0; reads === exhausted; attempt++) {
-            assert.ok(attempt < 50, 'a decision restarts automatic checks');
-            await page.waitForTimeout(100);
-          }
-          await card.getByRole('button', { name: 'Retry same decision', exact: true }).click();
-          await card
-            .getByText('Agent active. Its reviewed access and triggers are now in place.', { exact: true })
-            .waitFor();
-          assert.equal(decisions.length, 2);
-          assert.deepEqual(decisions[0], decisions[1]);
-          assert.deepEqual(decisions[0].consent, { sponsor: true, replaceChannels: ['CPEOPLE'] });
-        }
-        assert.deepEqual(errors, []);
-        await page.close();
-      }
+        if (path.endsWith(`/conversations/${chatId}/messages`))
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: randomUUID(),
+                  sequence: 1,
+                  author: 'human',
+                  createdAt: '2026-10-12T10:00:00Z',
+                  parts: [{ kind: 'text', text: 'Create my People Ops helper.' }],
+                  turn: { id: randomUUID(), status: 'completed', generation: 0 },
+                  tools: [tool(draftId)],
+                },
+              ],
+              nextBefore: null,
+              hasGitHubProposals: false,
+            },
+          });
+        if (path.endsWith(`/conversations/${chatId}`)) return route.fulfill({ json: chat });
+        if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
+        return route.fulfill(fixture.respond(method, url, body));
+      });
+      await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
+      await page.getByRole('button', { name: 'Review agent', exact: true }).click();
+      const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
+      const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
+      await form.getByLabel('Agent name', { exact: true }).waitFor();
+      assert.equal(
+        await form.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
+        view.proposal.input.definition.instructions,
+      );
+      assert.equal(await canvas.getByRole('region', { name: 'Review agent draft' }).count(), 0);
+      assert.equal(
+        await canvas.getByRole('tablist', { name: 'Agent setup sections' }).getByRole('tab').count(),
+        5,
+        'the canvas shows every setup step as a tab',
+      );
+      assert.equal(await canvas.getByRole('button', { name: 'View agent', exact: true }).count(), 0);
+      await canvas.getByRole('tab', { name: /Triggers/ }).click();
+      await canvas.getByText('Every Monday at 09:00 in Asia/Kolkata', { exact: true }).first().waitFor();
+      await captureBuilderScreenshot(page, 'agent-builder-chat-canvas');
+      await form.getByRole('button', { name: 'Save draft', exact: true }).click();
+      await form
+        .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
+        .waitFor();
+      assert.equal(new URL(page.url()).pathname, `/${workspace.slug}/chat/${chatId}`, 'saving keeps you in chat');
+      const saved = fixture.setups.get(targetId).setup;
+      assert.deepEqual(saved.policy, setup.policy);
+      assert.deepEqual(saved.enrollment, setup.enrollment);
+      assert.equal(saved.slackSender, 'app');
+      assert.deepEqual(saved.slackChannels, setup.slackChannels);
+      assert.deepEqual(saved.triggers, setup.triggers);
+      assert.equal(saved.prompt, setup.prompt);
+      assert.equal(decisions.length, 0, 'saving in the builder is not chat approval');
+      deny = true;
+      await page.goto(
+        `${server.origin}/${workspace.slug}/agents/new?setupAgentId=${targetId}&chatId=${chatId}&draftId=${draftId}`,
+      );
+      await page.getByRole('heading', { name: /unavailable/i }).waitFor();
+      assert.equal(await page.getByRole('textbox', { name: 'Instructions', exact: true }).count(), 0);
+      assert.deepEqual(errors, []);
     } catch (error) {
-      await captureBrowserFailure(activePage, 'agent-builder-chat');
+      await captureBrowserFailure(page, 'agent-builder-chat');
       throw error;
     } finally {
       await browser.close();
