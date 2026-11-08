@@ -103,7 +103,13 @@ import { TableValidationError } from '@tulipfarm/tables/definition';
 import { GenerationError } from '@tulipfarm/tables/store';
 import { WorkspaceMemberError, type workspaceMemberErrorCodeSchema } from '@tulipfarm/tables/workspace-members';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
-import { createTableImports, type TableImportOptions } from '@tulipfarm/tables/imports';
+import {
+  createTableImports,
+  fileImportSelectionSchema,
+  TableImportError,
+  tableImportFailure,
+  type TableImportOptions,
+} from '@tulipfarm/tables/imports';
 import { humanReadableTableFiles, requireTableSources } from './table-sources.ts';
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
 import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
@@ -166,6 +172,13 @@ const tableAuthoringConstraints = [
   'Call tables.propose with input set to the plans as one JSON-encoded string.',
   'An import plan needs a file prepared in this reply: call tables.import.attachments, then tables.import.file, and copy the attachmentId and contentDigest it returns unchanged. Otherwise tables.propose reports "import-not-prepared".',
 ].join('\n');
+const importSelectionExample = {
+  format: 'csv',
+  delimiter: ';',
+  header: { kind: 'row', row: 1 },
+  conversions: { Amount: 'numeric', 'Order date': 'date' },
+  empty: 'null',
+};
 const tableProposalInputSchema = tableProposalJsonSchema();
 const tableProposalInput = z
   .string()
@@ -194,7 +207,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
       .string()
       .max(16384)
       .describe(
-        'JSON file selection. CSV requires format, delimiter, header, conversions, empty. XLSX requires format, sheet, header, conversions, empty.',
+        `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. CSV needs delimiter (",", ";", "\\t" or "|"); XLSX needs sheet (the tab name) instead. conversions maps a column name to text, numeric, boolean, date or timestamp; match each mapped field's type.`,
       ),
   }),
   z.strictObject({ tool: z.literal('tables.definitions'), archived: z.boolean().default(false), ...page }),
@@ -594,7 +607,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.import.attachments':
     'List up to 100 bound attachments from this chat when choosing a CSV or XLSX import source. Results contain IDs, names, media types, sizes, and SHA-256 digests, not file contents; ordering is by attachment ID. Use tables.import.file with one returned ID and digest.',
   'tables.import.file':
-    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. Call it in the same reply as the tables.propose import plan that uses the reference. A new preparation is safe, but use the returned reference rather than assuming import success.',
+    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. Call it in the same reply as the tables.propose import plan that uses the reference. A new preparation is safe, but use the returned reference rather than assuming import success. A failure returns import-file-failed with the reason to report and a next step.',
   'tables.definitions':
     'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. Use tables.list when an agent needs schemas it may operate on.',
   'rows.page':
@@ -1180,14 +1193,37 @@ export function createChatTools(
       case 'tables.import.file': {
         if (!context.origin || !imports) throw new AccessDenied();
         const origin = context.origin;
-        return imports.prepareFile(
-          runtime,
-          workspaceId,
-          actor,
-          origin,
-          { kind: 'file', attachmentId: call.attachmentId, contentDigest: call.contentDigest },
-          JSON.parse(call.selection),
-        );
+        let selection: unknown;
+        try {
+          selection = JSON.parse(call.selection);
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+        }
+        const parsed = fileImportSelectionSchema.safeParse(selection);
+        if (!parsed.success)
+          return {
+            ...tableImportFailure(new TableImportError('invalid-selection')),
+            issues: parsed.error.issues
+              .slice(0, 20)
+              .map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) })),
+            example: importSelectionExample,
+          };
+        try {
+          return await imports.prepareFile(
+            runtime,
+            workspaceId,
+            actor,
+            origin,
+            { kind: 'file', attachmentId: call.attachmentId, contentDigest: call.contentDigest },
+            parsed.data,
+          );
+        } catch (error) {
+          if (!(error instanceof TableImportError)) throw error;
+          return {
+            ...tableImportFailure(error),
+            ...(error.code === 'invalid-selection' ? { example: importSelectionExample } : {}),
+          };
+        }
       }
       case 'tables.propose': {
         if (!context.origin) throw new AccessDenied();

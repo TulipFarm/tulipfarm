@@ -278,11 +278,17 @@ export async function proveSupportJourney({
     const results = await chatTools(
       [
         { tool: 'tables.import.attachments' },
+        { tool: 'tables.import.file', attachmentId, contentDigest, selection: JSON.stringify({ format }) },
         {
           tool: 'tables.import.file',
           attachmentId,
           contentDigest,
-          selection: JSON.stringify({ ...selection, header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' }),
+          // The XLSX selection relies on the default first-row header, no conversions and null empties.
+          selection: JSON.stringify(
+            format === 'csv'
+              ? { ...selection, header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' }
+              : selection,
+          ),
         },
         () => ({
           tool: 'tables.propose',
@@ -292,6 +298,13 @@ export async function proveSupportJourney({
       `Import the attached ${format.toUpperCase()} tickets by Ticket number. Preserve fields not mapped in the import.`,
       [attachmentId],
     );
+    const failed = results[1];
+    assert.equal(failed.error, 'import-file-failed', JSON.stringify(failed));
+    assert.equal(failed.code, 'invalid-selection');
+    assert.match(failed.reason, /settings don’t match the file.*Ask again/);
+    assert.match(failed.instruction, /not a permission denial, and tables\.import\.file is available/);
+    assert.ok(failed.issues.length && failed.example, JSON.stringify(failed));
+    assert.equal(results[2].kind, 'file', JSON.stringify(results[2]));
     await complete(results.at(-1));
     if (format === 'csv')
       await unprepared({ kind: 'file', attachmentId, contentDigest }, 'Import the same tickets file again.');
