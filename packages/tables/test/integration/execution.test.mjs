@@ -32,6 +32,28 @@ const renameField = (definition, label) => ({
   fields: definition.fields.map((field, index) => (index === 0 ? { ...field, label } : field)),
 });
 
+/** Whether the API's table dispatch sweep (apps/api/src/table-dispatch.ts) would start this proposal again. */
+const dispatchable = async (client, s, proposalId) =>
+  (
+    await client.query(
+      `SELECT p.id FROM ${s}.tf_table_proposals p
+      JOIN ${s}.tf_table_proposal_decisions d ON d.proposal_id=p.id AND d.digest=p.digest AND d.membership_id=p.membership_id
+      LEFT JOIN LATERAL (
+        SELECT sequence,operation,digest,membership_id FROM ${s}.tf_table_proposal_controls
+        WHERE proposal_id=p.id ORDER BY sequence DESC LIMIT 1
+      ) c ON true
+      WHERE p.id=$1 AND d.decision='approve' AND p.expires_at>clock_timestamp()
+        AND (c.sequence IS NULL OR (c.operation='resume' AND c.digest=p.digest AND c.membership_id=p.membership_id))
+        AND NOT EXISTS (
+          SELECT 1 FROM ${s}.tf_table_executions e
+          WHERE e.proposal_id=p.id AND e.phase='blocked' AND (c.sequence IS NULL OR c.sequence<=e.resumed_sequence)
+        )
+        AND (SELECT count(*) FROM ${s}.tf_table_proposal_receipts r
+          WHERE r.proposal_id=p.id AND r.receipt->>'status'='completed')<jsonb_array_length(p.manifest->'plans')`,
+      [proposalId],
+    )
+  ).rowCount === 1;
+
 test(
   'approved creation, reviewed records, online exact transforms and atomic receipts under restricted roles',
   { timeout: 120000 },
@@ -160,12 +182,34 @@ test(
       ['failed', 'storage-fault'],
     );
     assert.equal(await advance(ws.id, create.id), 'blocked');
+    const resume = proposal =>
+      decisions.control(ws.id, ws.userId, chat, proposal.id, {
+        digest: proposal.digest,
+        commandId: randomUUID(),
+        operation: 'resume',
+      });
+    await resume(create);
+    assert.equal(await dispatchable(db.platform, s, create.id), true);
+    assert.equal(await advance(ws.id, create.id), 'blocked', 'A resume while the fault persists ends blocked');
+    assert.equal(
+      await dispatchable(db.platform, s, create.id),
+      false,
+      'The blocked attempt consumes the resume so the dispatch sweep stops restarting the proposal',
+    );
+    assert.deepEqual(
+      (
+        await db.platform.query(
+          `SELECT receipt->>'status' status,receipt->>'code' code FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=$1 ORDER BY attempt`,
+          [create.id],
+        )
+      ).rows,
+      [
+        { status: 'failed', code: 'storage-fault' },
+        { status: 'failed', code: 'storage-fault' },
+      ],
+    );
     await db.platform.query(`GRANT ${provenanceGrant} TO ${executors}`);
-    await decisions.control(ws.id, ws.userId, chat, create.id, {
-      digest: create.digest,
-      commandId: randomUUID(),
-      operation: 'resume',
-    });
+    await resume(create);
     assert.equal(await finish(create), 'completed');
     assert.equal(
       (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}.tf_table_catalog WHERE id=$1`, [table])).rows[0]
@@ -188,6 +232,13 @@ test(
         },
       ],
     });
+    await db.platform.query('BEGIN');
+    await db.platform.query(`SELECT id FROM ${s}.tf_authorization_lock WHERE id=1 FOR UPDATE`);
+    try {
+      assert.equal(await advance(ws.id, records.id), 'wait', 'A held authorization lock asks the caller to back off');
+    } finally {
+      await db.platform.query('COMMIT');
+    }
     assert.equal(await finish(records), 'completed');
     assert.equal(
       (await proposals.status(ws.id, ws.userId, chat, records.id)).plans[0].importProgress,
@@ -1660,13 +1711,34 @@ test(
       for (let i = 0; i < 7; i++) assert.equal(await worker()(ws.id, stuck.id), 'more');
       assert.equal(await worker()(ws.id, stuck.id), 'blocked');
       assert.equal(await worker()(ws.id, stuck.id), 'blocked');
-      assert.equal(
+      const stuckReceipts = async () =>
         (
-          await db.platform.query(`SELECT count(*)::int n FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=$1`, [
-            stuck.id,
-          ])
-        ).rows[0].n,
-        1,
+          await db.platform.query(
+            `SELECT receipt->>'code' code FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=$1 ORDER BY attempt`,
+            [stuck.id],
+          )
+        ).rows.map(row => row.code);
+      assert.deepEqual(await stuckReceipts(), ['execution-timeout']);
+      await db.platform.query(
+        `CREATE FUNCTION ${s}.cleanup_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'persistent cleanup timeout' USING ERRCODE='57014'; END $$;
+        CREATE TRIGGER cleanup_failure BEFORE DELETE ON ${s}.tf_table_generation_links FOR EACH STATEMENT EXECUTE FUNCTION ${s}.cleanup_failure();
+        CREATE TRIGGER cleanup_failure BEFORE DELETE ON ${s}.tf_table_execution_checks FOR EACH STATEMENT EXECUTE FUNCTION ${s}.cleanup_failure()`,
+      );
+      await control(stuck, 'resume');
+      for (let i = 0; i < 7; i++) {
+        assert.equal(await worker()(ws.id, stuck.id), 'more', 'Cleanup for a resume times out');
+        assert.equal(await dispatchable(db.platform, s, stuck.id), true);
+      }
+      assert.equal(await worker()(ws.id, stuck.id), 'blocked', 'The eighth cleanup timeout blocks the resume');
+      assert.deepEqual(await stuckReceipts(), ['execution-timeout', 'execution-timeout']);
+      assert.equal(
+        await dispatchable(db.platform, s, stuck.id),
+        false,
+        'The timed-out resume is consumed so the dispatch sweep stops restarting the proposal',
+      );
+      assert.equal(await worker()(ws.id, stuck.id), 'blocked');
+      await db.platform.query(
+        `DROP TRIGGER cleanup_failure ON ${s}.tf_table_generation_links; DROP TRIGGER cleanup_failure ON ${s}.tf_table_execution_checks; DROP FUNCTION ${s}.cleanup_failure()`,
       );
       await db.platform.query(
         `DROP TRIGGER budget_failure ON ${s}.tf_table_execution_checks; DROP FUNCTION ${s}.budget_failure()`,
