@@ -1,5 +1,6 @@
 import {
   isScheduleTrigger,
+  onceTriggerName,
   type Trigger,
   type TriggerKind,
   type WorkflowTrigger,
@@ -26,13 +27,6 @@ export const triggerKindNames: Record<TriggerKind, string> = {
   event: 'App event',
 };
 
-const onceTime = (trigger: { at: string; timezone?: string | undefined }) =>
-  new Date(trigger.at).toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    ...(trigger.timezone ? { timeZone: trigger.timezone } : {}),
-  });
-
 /** A short description of a trigger's settings, such as "Every day at 09:00 in UTC" or "GitHub push". */
 export function triggerLine(trigger: TriggerBody | Trigger, tableNames?: ReadonlyMap<string, string>): string {
   switch (trigger.kind) {
@@ -43,7 +37,7 @@ export function triggerLine(trigger: TriggerBody | Trigger, tableNames?: Readonl
         ? cronSummary(trigger).replace(/\.$/, '')
         : `Schedule ${trigger.expression} in ${trigger.timezone.replaceAll('_', ' ')}`;
     case 'once':
-      return Number.isFinite(Date.parse(trigger.at)) ? `Once on ${onceTime(trigger)}` : 'One time';
+      return Number.isFinite(Date.parse(trigger.at)) ? onceTriggerName(trigger.at, trigger.timezone) : 'One time';
     case 'github':
       return githubShortSummary(trigger);
     case 'event':
