@@ -126,12 +126,11 @@ export function PersonGrants({
         Direct grants add to team permissions. Removing one grant does not remove access supplied by another team or
         grant. Grants belong to the current membership and do not return after leaving and rejoining.
       </p>
-      {status && (
-        <p role="status" className="flex items-center gap-2 text-sm">
-          <Spinner aria-hidden="true" />
-          {status}
-        </p>
-      )}
+      {/* Reserve the line so the saving status doesn't move the checkboxes below it. */}
+      <p role="status" className="flex min-h-5 items-center gap-2 text-sm">
+        {status && <Spinner aria-hidden="true" />}
+        {status}
+      </p>
       <TableRead state={read.state} refresh={read.refresh}>
         {() => {
           const toggle = (target: GrantInput['target'], granted: boolean) => {

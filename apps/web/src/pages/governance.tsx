@@ -249,13 +249,17 @@ export function GovernanceContent({
               {recovery}
             </div>
           )}
-          {notice && <p role="status">{notice}</p>}
-          {busy && (
-            <p role="status" className="flex items-center gap-2">
-              <Spinner aria-hidden="true" />
-              Saving access change…
-            </p>
-          )}
+          {/* Always rendered with a reserved line so saving and saved messages don't move the controls below. */}
+          <p role="status" className="flex min-h-6 items-center gap-2">
+            {busy ? (
+              <>
+                <Spinner aria-hidden="true" />
+                Saving access change…
+              </>
+            ) : (
+              notice
+            )}
+          </p>
           {state.kind === 'member' && section === 'members' && (
             <SettingsGroup title="My membership" titleId="my-membership-heading">
               <SettingsRow label="Role" description={`Your role is ${state.access.role}.`} />
@@ -471,12 +475,10 @@ function GrantAdministration({ data, busy, stale, change }: TableAdministrationP
         A person's table access combines their teams' grants with any individual grants below. Permissions apply to
         every row in the table. Owning a table does not grant row access.
       </p>
-      {status && (
-        <p role="status" className="flex items-center gap-2 text-base">
-          {grants.pending && <Spinner aria-hidden="true" />}
-          {status}
-        </p>
-      )}
+      <p role="status" className="flex min-h-6 items-center gap-2 text-base">
+        {grants.pending && <Spinner aria-hidden="true" />}
+        {status}
+      </p>
       {!recipients.length ? (
         <StatePanel
           kind="empty"
