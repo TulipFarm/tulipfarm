@@ -66,6 +66,9 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- Row changes in a table change review are now headed by the row's title, the
+  way the table names it, instead of by the value being changed, such as
+  "Update 5.000".
 - Reverting a schema change now gives every row nobody has written since its
   own value from before the change, including text a conversion cleared, such
   as `1e3` or `abc` after a change to number, and decimals keep their original

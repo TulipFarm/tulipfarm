@@ -29,8 +29,8 @@ export function useTableNames(api: TableApi, enabled = true) {
     [read.state],
   );
 }
-export function useTableDetail(api: TableApi, id: string) {
-  const read = useTableQuery(tableQueries.detail(api, id));
+export function useTableDetail(api: TableApi, id: string, enabled = true) {
+  const read = useTableQuery({ ...tableQueries.detail(api, id), enabled });
   const data = read.state.kind === 'ready' ? read.state.data : null;
   useTableTransition(
     tableKeys.definition(id),
@@ -68,8 +68,9 @@ export function useTableRowsById(
   api: TableApi,
   table: Pick<TableDefinition, 'id' | 'revision'>,
   recordIds: readonly string[],
+  enabled = true,
 ) {
-  return useTableQuery(tableQueries.recordsById(api, table, recordIds));
+  return useTableQuery({ ...tableQueries.recordsById(api, table, recordIds), enabled });
 }
 export function useTableRow(api: TableApi, table: TableDefinition, recordId: string) {
   return useTableQuery<TableDataRow | null>(tableQueries.record(api, table, recordId));
