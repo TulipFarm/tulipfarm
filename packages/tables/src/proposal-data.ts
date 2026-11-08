@@ -283,7 +283,12 @@ export function transformedEffect(
   row: { id: string; values: TableValues },
 ) {
   if (plan.expectedRevision === null) throw new TableProposalError('proposal-stale');
-  const result = evaluateTransforms({ transforms: plan.transforms, values: row.values, target: plan.target });
+  const result = evaluateTransforms({
+    transforms: plan.transforms,
+    values: row.values,
+    target: plan.target,
+    recordId: row.id,
+  });
   if (!result.ok)
     throw new TableProposalValidationError(
       plan.tableId,

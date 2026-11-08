@@ -411,7 +411,12 @@ async function copyRecord(
   const current = await store.identity(tx, source.table_id, id);
   if (!current) throw new store.GenerationError('stale-record');
   const result = row
-    ? evaluateTransforms({ transforms: plan.input.transforms, values: row.values, target: target.definition })
+    ? evaluateTransforms({
+        transforms: plan.input.transforms,
+        values: row.values,
+        target: target.definition,
+        recordId: id,
+      })
     : null;
   if (result && !result.ok) throw new TableProposalError('invalid-transform');
   if (Buffer.byteLength(canonicalJson(row)) + Buffer.byteLength(canonicalJson(result)) > 1048576)

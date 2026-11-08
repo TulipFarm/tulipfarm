@@ -66,6 +66,14 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- Reverting a schema change now gives every row nobody has written since its
+  own value from before the change, including text a conversion cleared, such
+  as `1e3` or `abc` after a change to number, and decimals keep their original
+  spelling, such as `100.50` rather than `100.500`. Up to 1,000 rows per revert
+  get their own value; the rest keep their current value. Schema transforms
+  gain a `rows` expression that gives listed rows their own value. In Schema
+  history, a revert entry is now headed by the summary of the change it
+  reversed instead of an execution ID.
 - The blocked schema change report in chat now wraps each row's problem and
   fix text inside the card instead of running past its edge, and on narrow
   screens shows each invalid row as a stacked card of row, field, value and

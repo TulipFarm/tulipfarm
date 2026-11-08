@@ -44,8 +44,6 @@ function baseExpression(before: TableField, after: TableField): TransformExpress
   return field;
 }
 
-type Group = { value: TableValue; wants: Map<string, { value: TableValue; rows: number }> };
-
 /**
  * Builds the reviewed revert of a completed schema change from the definitions on either side of it.
  * Feed every current row once through `add`, then call `finish`.
@@ -60,58 +58,52 @@ export function schemaRevertBuilder(input: {
   const targets = input.before.fields.flatMap(field => {
     const after = afterFields.get(field.id);
     if (!after || (after.kind === field.kind && !input.recomputed.includes(field.id))) return [];
-    return [{ field, base: baseExpression(field, after), groups: new Map<string, Group>(), failed: 0 }];
+    return [
+      {
+        field,
+        base: baseExpression(field, after),
+        cases: [] as { recordId: string; to: TableValue }[],
+        restored: 0,
+        kept: 0,
+      },
+    ];
   });
+  /** Rows the revert can give their own earlier value, across all fields, so the proposal stays reviewable. */
+  let budget = transformLimits.rows;
   return {
     /** Fields whose values the revert reads from retained history. */
     fieldIds: targets.map(target => target.field.id),
     /** Adds one current row and, when the change replaced its values and nobody has written them since, those earlier values. */
-    add(values: TableValues, retained?: Readonly<Record<string, TableValue>>) {
+    add(recordId: string, values: TableValues, retained?: Readonly<Record<string, TableValue>>) {
       for (const target of targets) {
-        const base = evaluateExpression(target.base, values);
-        if (!base.ok) {
-          target.failed++;
+        if (!retained || !Object.hasOwn(retained, target.field.id)) {
+          target.kept++;
           continue;
         }
-        const key = mappedValueKey(base.value);
-        const group = target.groups.get(key) ?? { value: base.value, wants: new Map() };
-        target.groups.set(key, group);
-        const wanted =
-          retained && Object.hasOwn(retained, target.field.id) ? (retained[target.field.id] ?? null) : base.value;
-        const want = group.wants.get(mappedValueKey(wanted));
-        if (want) want.rows++;
-        else group.wants.set(mappedValueKey(wanted), { value: wanted, rows: 1 });
+        const wanted = retained[target.field.id] ?? null;
+        const base = evaluateExpression(target.base, values, recordId);
+        if (base.ok && mappedValueKey(base.value) === mappedValueKey(wanted)) target.restored++;
+        // Several rows can share a current value but not an earlier one, such as texts a conversion cleared, so each row gets its own.
+        else if (budget > 0) {
+          budget--;
+          target.cases.push({ recordId, to: wanted });
+          target.restored++;
+        } else target.kept++;
       }
     },
     finish(expectedRevision: string): SchemaRevert {
-      const outputs = [];
-      const fields: SchemaRevertField[] = [];
-      for (const target of targets) {
-        const cases: { from: TableValue; to: TableValue }[] = [];
-        let restored = 0;
-        let kept = target.failed;
-        for (const group of target.groups.values()) {
-          const [only, ...others] = group.wants.values();
-          const rows = [...group.wants.values()].reduce((total, entry) => total + entry.rows, 0);
-          // A case changes every row with that value, so it is only safe when those rows all want the same earlier value.
-          if (
-            only &&
-            !others.length &&
-            mappedValueKey(only.value) !== mappedValueKey(group.value) &&
-            cases.length < transformLimits.cases
-          ) {
-            cases.push({ from: group.value, to: only.value });
-            restored += rows;
-          } else kept += rows;
-        }
-        outputs.push({
-          fieldId: target.field.id,
-          expression: cases.length
-            ? ({ op: 'map', input: target.base, cases, unmatched: 'preserve' } satisfies TransformExpression)
-            : target.base,
-        });
-        fields.push({ fieldId: target.field.id, label: target.field.label, restored, kept });
-      }
+      const outputs = targets.map(target => ({
+        fieldId: target.field.id,
+        expression: target.cases.length
+          ? ({ op: 'rows', input: target.base, cases: target.cases } satisfies TransformExpression)
+          : target.base,
+      }));
+      const fields: SchemaRevertField[] = targets.map(target => ({
+        fieldId: target.field.id,
+        label: target.field.label,
+        restored: target.restored,
+        kept: target.kept,
+      }));
       const beforeIds = new Set(input.before.fields.map(field => field.id));
       return {
         plan: {
