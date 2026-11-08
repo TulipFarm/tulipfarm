@@ -206,6 +206,7 @@ export const proposalEffectsSchema = z.object({
   ),
   nextCursor: z.number().int().nullable(),
 });
+export type TableProposalOutcome = z.infer<typeof tableProposalOutcomeSchema>;
 export type TableDefinition = z.infer<typeof tableDefinitionSchema>;
 export type TableField = z.infer<typeof tableFieldSchema>;
 export type TableValue = z.infer<typeof tableValueSchema>;

@@ -16,6 +16,8 @@ import { Disclosure } from '@/components/disclosure';
 import { Table } from '@tulipfarm/sprout/table';
 import { TableRead, WriteFeedback } from '@/features/tables/feedback';
 import {
+  useTableDetail,
+  useTableRowsById,
   useTableProposalOutcome,
   useTableProposal,
   useTableProposalEffects,
@@ -23,12 +25,20 @@ import {
 } from '@/features/tables/hooks';
 import { proposalProgressing as progressing, type ProposalIdentity } from '@/features/tables/queries';
 import { proposalApi, type ProposalApi } from '@/features/tables/proposal-api';
-import { memberMessages } from '@/features/tables/api';
+import { memberMessages, tableApi, type TableApi, type TableDataRow } from '@/features/tables/api';
+import { transformErrorHelp } from '@/features/tables/transform-errors';
 import { formatTableValue, rowLabel } from '@/features/tables/definition-view';
 import { useOptionalCanvas, useResultAttention } from './canvas-state';
 import { schemaCanvasItem } from './schema-canvas';
 import { useApprovalDockEntry } from './approval-dock';
-import type { ImportProgress, ProposalCommand, ProposalView, ReviewedPlan } from '@/features/tables/review-contracts';
+import type {
+  ImportProgress,
+  ProposalCommand,
+  ProposalView,
+  ReviewedPlan,
+  TableDefinition,
+  TableProposalOutcome,
+} from '@/features/tables/review-contracts';
 
 const statusLabels = {
   pending: 'Awaiting your review',
@@ -118,28 +128,9 @@ export function TableProposalCard({
               <p className="text-sm">
                 {outcome.report.total.toLocaleString()} invalid {outcome.report.total === 1 ? 'row' : 'rows'}. Showing{' '}
                 {outcome.report.records.length.toLocaleString()}
-                {outcome.report.truncated ? ' of them' : ''}, with the first error for each row.
+                {outcome.report.truncated ? ' of them' : ''}, with the first problem for each row.
               </p>
-              <Table
-                aria-label="Invalid rows"
-                data={outcome.report.records}
-                getRowId={record => record.recordId}
-                columns={[
-                  {
-                    key: 'recordId',
-                    header: 'Row ID',
-                    cell: record => <span className="break-all font-mono text-xs">{record.recordId}</span>,
-                  },
-                  {
-                    key: 'fieldId',
-                    header: 'Field ID',
-                    cell: record => (
-                      <span className="break-all font-mono text-xs">{record.fieldId ?? 'Row validation'}</span>
-                    ),
-                  },
-                  { key: 'code', header: 'Error', cell: record => <span className="break-words">{record.code}</span> },
-                ]}
-              />
+              <InvalidRows workspaceId={workspaceId} workspaceSlug={workspaceSlug} report={outcome.report} />
               <p className="text-sm text-muted-foreground">
                 Tell the assistant how to correct the values or conversion rules, then ask for a new proposal. Further
                 field errors may appear after these are corrected.
@@ -171,6 +162,132 @@ export function TableProposalCard({
         }
       </TableRead>
     </section>
+  );
+}
+
+type BlockedReport = Extract<TableProposalOutcome, { kind: 'blocked' }>['report'];
+type ReportTable = { definition: TableDefinition; systemKind?: 'workspace-members' | undefined };
+
+/** Names each invalid row and its failing value from the table as it is now; the stored report keeps IDs only. */
+function InvalidRows({
+  workspaceId,
+  workspaceSlug,
+  report,
+}: {
+  workspaceId: string;
+  workspaceSlug: string;
+  report: BlockedReport;
+}) {
+  const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  const detail = useTableDetail(api, report.tableId);
+  const applied = detail.state.kind === 'ready' ? detail.state.data.applied : null;
+  if (detail.state.kind === 'loading')
+    return <InvalidRowsTable workspaceSlug={workspaceSlug} report={report} loading />;
+  if (!applied || applied.revision !== report.revision)
+    return <InvalidRowsTable workspaceSlug={workspaceSlug} report={report} />;
+  return (
+    <InvalidRowsWithValues
+      api={api}
+      workspaceSlug={workspaceSlug}
+      report={report}
+      table={{
+        definition: applied.definition,
+        systemKind: detail.state.kind === 'ready' ? detail.state.data.systemKind : undefined,
+      }}
+    />
+  );
+}
+
+function InvalidRowsWithValues({
+  api,
+  workspaceSlug,
+  report,
+  table,
+}: {
+  api: TableApi;
+  workspaceSlug: string;
+  report: BlockedReport;
+  table: ReportTable;
+}) {
+  const recordIds = useMemo(() => report.records.map(record => record.recordId), [report.records]);
+  const rows = useTableRowsById(api, { id: report.tableId, revision: report.revision }, recordIds);
+  const found = useMemo(
+    () => new Map(rows.state.kind === 'ready' ? rows.state.data.map(row => [row.id, row]) : []),
+    [rows.state],
+  );
+  return (
+    <InvalidRowsTable
+      workspaceSlug={workspaceSlug}
+      report={report}
+      loading={rows.state.kind === 'loading'}
+      table={rows.state.kind === 'ready' ? table : undefined}
+      rows={found}
+    />
+  );
+}
+
+function InvalidRowsTable({
+  workspaceSlug,
+  report,
+  loading = false,
+  table,
+  rows,
+}: {
+  workspaceSlug: string;
+  report: BlockedReport;
+  loading?: boolean;
+  table?: ReportTable | undefined;
+  rows?: ReadonlyMap<string, TableDataRow>;
+}) {
+  const items = report.records.map(record => {
+    const row = rows?.get(record.recordId);
+    const field = record.fieldId === null ? null : table?.definition.fields.find(item => item.id === record.fieldId);
+    const value = table && row && field ? formatTableValue(row.values[field.id], table.definition, field.id) : null;
+    return {
+      recordId: record.recordId,
+      label: table && row ? rowLabel(table.definition, row.values, table.systemKind) : null,
+      field: record.fieldId === null ? 'Whole row' : (field?.label ?? (table ? 'New field' : record.fieldId)),
+      value: value ?? '—',
+      problem: transformErrorHelp(record.code, value),
+    };
+  });
+  return (
+    <Table
+      aria-label="Invalid rows"
+      aria-busy={loading || undefined}
+      data={items}
+      getRowId={item => item.recordId}
+      columns={[
+        {
+          key: 'label',
+          header: 'Row',
+          cell: item => (
+            <Button
+              variant="link"
+              nativeButton={false}
+              render={
+                <Link
+                  to="/$workspaceSlug/tables/$tableId"
+                  params={{ workspaceSlug, tableId: report.tableId }}
+                  search={{ row: item.recordId }}
+                />
+              }
+            >
+              <span className={item.label ? 'whitespace-normal break-words text-left' : 'break-all font-mono text-xs'}>
+                {item.label ?? (loading ? 'Loading row…' : item.recordId)}
+              </span>
+            </Button>
+          ),
+        },
+        { key: 'field', header: 'Field', cell: item => <span className="break-words">{item.field}</span> },
+        { key: 'value', header: 'Value', cell: item => <span className="break-words">{item.value}</span> },
+        {
+          key: 'problem',
+          header: 'Problem and fix',
+          cell: item => <span className="break-words">{item.problem}</span>,
+        },
+      ]}
+    />
   );
 }
 

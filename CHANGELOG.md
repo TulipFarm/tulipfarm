@@ -66,6 +66,11 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A blocked table schema change now lists each invalid row by its name, with
+  the field, the value that failed and a link that opens the row. Error codes
+  read in plain words with how to fix the value, for example that `1e3` is in
+  exponent notation and numbers must be plain decimals. Before, the report
+  showed only row IDs, field IDs and error codes.
 - The Upcoming meetings card no longer asks Google for calendar events when the
   connected Google account hasn't granted Calendar access. Before, every page
   load, window return and minute-long refresh sent a request that failed.
