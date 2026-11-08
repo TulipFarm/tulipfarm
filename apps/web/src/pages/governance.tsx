@@ -33,6 +33,14 @@ import { InviteMembersDialog } from './invite-members-dialog';
 import { useInvitationAdministration } from './use-invitation-administration';
 import { PersonGrants } from '@/features/tables/person-grants';
 import { workspaceAdminsLabel } from '@/features/governance/team-labels';
+import { tableLabels } from '@/features/governance/table-labels';
+import {
+  changesNotSaved,
+  othersNotSaved,
+  savingStatus,
+  useGrantQueue,
+  waitingStatus,
+} from '@/features/governance/grant-queue';
 
 type Section = 'members' | 'teams' | 'grants';
 type LoadState =
@@ -343,6 +351,7 @@ export function GovernanceContent({
                   data={state.data}
                   workspaceId={workspaceId}
                   busy={busy || refreshing || stale}
+                  stale={stale}
                   change={change}
                 />
               )}
@@ -370,7 +379,15 @@ const permissionLabels = {
   'table.row.delete': 'Delete rows',
 };
 
-function TableAdministration({ data, workspaceId, busy, change }: AdministrationProps & { workspaceId: string }) {
+type TableAdministrationProps = AdministrationProps & { stale: boolean };
+
+function TableAdministration({
+  data,
+  workspaceId,
+  busy,
+  stale,
+  change,
+}: TableAdministrationProps & { workspaceId: string }) {
   const tableData = {
     ...data,
     teams: data.tableTeamIds.map(
@@ -388,13 +405,13 @@ function TableAdministration({ data, workspaceId, busy, change }: Administration
   };
   return (
     <>
-      <GrantAdministration data={tableData} busy={busy} change={change} />
-      <PersonGrants workspaceId={workspaceId} data={tableData} disabled={busy} />
+      <GrantAdministration data={tableData} busy={busy} stale={stale} change={change} />
+      <PersonGrants workspaceId={workspaceId} data={tableData} busy={busy} stale={stale} />
     </>
   );
 }
 
-function GrantAdministration({ data, busy, change }: AdministrationProps) {
+function GrantAdministration({ data, busy, stale, change }: TableAdministrationProps) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const [teamId, setTeamId] = useState('');
   const [feedback, setFeedback] = useState('');
@@ -402,27 +419,50 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
     ? [{ id: data.adminTeamId, name: workspaceAdminsLabel }, ...data.teams]
     : data.teams;
   const selected = recipients.find(team => team.id === teamId);
-  const granted = (target: GrantInput['target']) =>
+  const names = tableLabels(data.tables, recipients);
+  const saved = (team: string, target: GrantInput['target']) =>
     data.grants.some(
       grant =>
-        grant.teamId === teamId &&
+        grant.teamId === team &&
         grant.target.kind === target.kind &&
         grant.target.id === target.id &&
         grant.target.permission === target.permission,
     );
-  const toggle = async (target: GrantInput['target'], granted: boolean) => {
-    const label =
+  const granted = (target: GrantInput['target']) => saved(teamId, target);
+  const grantLabel = (target: GrantInput['target'], lower = false) => {
+    const action = target.kind === 'table' ? permissionLabels[target.permission] : 'Create tables';
+    const object =
       target.kind === 'table'
-        ? `${permissionLabels[target.permission]} for ${data.tables.find(resource => resource.id === target.id)?.name ?? 'this table'}`
-        : `Create tables owned by ${data.teams.find(team => team.id === target.id)?.name ?? 'this team'}`;
-    setFeedback(`Saving ${label.toLowerCase()}…`);
-    const result = await change('/grants', 'PUT', { teamId, target, granted });
-    setFeedback(
-      result === 'saved'
-        ? `${label} ${granted ? 'granted to' : 'removed from'} ${selected?.name}.`
-        : `${label} was not confirmed. Reload access to check the saved permissions before changing it again.`,
-    );
+        ? `for ${names.get(target.id) ?? 'this table'}`
+        : `owned by ${data.teams.find(team => team.id === target.id)?.name ?? 'this team'}`;
+    return `${lower ? action.toLowerCase() : action} ${object}`;
   };
+  const grants = useGrantQueue({
+    saved,
+    save: async entry =>
+      (await change('/grants', 'PUT', { teamId: entry.holder, target: entry.target, granted: entry.granted })) ===
+      'saved',
+    wait: busy,
+    stale,
+    settled: result => {
+      if (!result.entry) return setFeedback(changesNotSaved(result.dropped));
+      const label = grantLabel(result.entry.target);
+      setFeedback(
+        result.ok
+          ? `${label} ${result.entry.granted ? 'granted to' : 'removed from'} ${result.entry.holderName}.`
+          : `${label} was not confirmed.${result.dropped ? ` ${othersNotSaved(result.dropped)}` : ''} Reload access to check the saved permissions before changing it again.`,
+      );
+    },
+  });
+  const checked = (target: GrantInput['target']) => grants.checked(teamId, target);
+  const toggle = (target: GrantInput['target'], value: boolean) => {
+    if (selected) grants.toggle(teamId, selected.name, target, value);
+  };
+  const status = grants.saving
+    ? savingStatus(grantLabel(grants.saving.target, true), grants.waiting)
+    : grants.waiting
+      ? waitingStatus(grants.waiting)
+      : feedback;
   return (
     <section className="flex flex-col gap-6">
       <h2 className="text-sm font-medium">Team table grants</h2>
@@ -431,9 +471,10 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
         A person's table access combines their teams' grants with any individual grants below. Permissions apply to
         every row in the table. Owning a table does not grant row access.
       </p>
-      {feedback && (
-        <p role="status" className="text-base">
-          {feedback}
+      {status && (
+        <p role="status" className="flex items-center gap-2 text-base">
+          {grants.pending && <Spinner aria-hidden="true" />}
+          {status}
         </p>
       )}
       {!recipients.length ? (
@@ -471,7 +512,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
       {selected && (
         <>
           {data.teams.length > 0 && (
-            <fieldset disabled={busy} className="flex flex-col gap-3">
+            <fieldset disabled={stale} className="flex flex-col gap-3">
               <legend className="mb-3 text-base font-medium">Create tables in a destination team</legend>
               {data.teams.map(team => {
                 const target = {
@@ -483,7 +524,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
                   <div key={team.id} className="flex items-center gap-3">
                     <Checkbox
                       id={`collection-${team.id}`}
-                      checked={granted(target)}
+                      checked={checked(target)}
                       onCheckedChange={value => toggle(target, value)}
                     />
                     <Label htmlFor={`collection-${team.id}`}>Create tables owned by {team.name}</Label>
@@ -503,9 +544,25 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
           )}
           {data.tables.map(resource => {
             const owner = recipients.find(team => team.id === resource.owningTeamId);
+            const name = names.get(resource.id) ?? resource.name;
+            const pendingHere = grants.tablePending(teamId, resource.id);
             return (
-              <article key={resource.id} className="flex flex-col gap-4 border-t border-border pt-4">
-                <h3 className="text-base font-medium">{resource.name}</h3>
+              <article
+                key={resource.id}
+                aria-labelledby={`table-${resource.id}-heading`}
+                className="flex flex-col gap-4 border-t border-border pt-4"
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 id={`table-${resource.id}-heading`} className="min-w-0 text-base font-medium wrap-anywhere">
+                    {name}
+                  </h3>
+                  {pendingHere && (
+                    <span className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+                      <Spinner aria-hidden="true" />
+                      Saving…
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {selected.name} grants:{' '}
                   {tableGrantPermissionSchema.options
@@ -514,8 +571,8 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
                     .join(', ') || 'None'}
                   . Other team grants still apply.
                 </p>
-                <fieldset disabled={busy} className="flex flex-wrap gap-6">
-                  <legend className="sr-only">Permissions for {resource.name}</legend>
+                <fieldset disabled={stale} aria-busy={pendingHere} className="flex flex-wrap gap-6">
+                  <legend className="sr-only">Permissions for {name}</legend>
                   {tableGrantPermissionSchema.options.map(permission => {
                     const target = { kind: 'table', id: resource.id, permission } satisfies GrantInput['target'];
                     return (
@@ -523,8 +580,8 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
                         <div className="flex items-center gap-3">
                           <Checkbox
                             id={`${resource.id}-${permission}`}
-                            checked={granted(target)}
-                            onCheckedChange={value => void toggle(target, value)}
+                            checked={checked(target)}
+                            onCheckedChange={value => toggle(target, value)}
                             aria-describedby={
                               permission === 'table.row.create' || permission === 'table.row.update'
                                 ? `${resource.id}-read-dependency`
@@ -545,7 +602,7 @@ function GrantAdministration({ data, busy, change }: AdministrationProps) {
                   <Label htmlFor={`owner-${resource.id}`}>Owning team</Label>
                   <Select
                     value={resource.owningTeamId}
-                    disabled={busy || !data.teams.length}
+                    disabled={busy || grants.pending || !data.teams.length}
                     onValueChange={value => {
                       if (value) void change(`/tables/${resource.id}/owner`, 'PUT', { teamId: value });
                     }}

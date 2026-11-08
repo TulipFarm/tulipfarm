@@ -9,6 +9,15 @@ import { Label } from '@tulipfarm/sprout/label';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { SettingsGroup, SettingsRow } from '@tulipfarm/sprout/settings-list';
+import { Spinner } from '@tulipfarm/sprout/spinner';
+import { tableLabels } from '@/features/governance/table-labels';
+import {
+  changesNotSaved,
+  othersNotSaved,
+  savingStatus,
+  useGrantQueue,
+  waitingStatus,
+} from '@/features/governance/grant-queue';
 import { changeGovernance, GovernanceRequestError, governanceError } from '@/lib/governance';
 import { TableRequestError } from './request-state';
 import { TableRead, WriteFeedback } from './feedback';
@@ -28,13 +37,16 @@ type PersonGrant = { membershipId: string; target: GrantInput['target']; granted
 export function PersonGrants({
   workspaceId,
   data,
-  disabled,
+  busy,
+  stale,
 }: {
   workspaceId: string;
   data: GovernanceSnapshot;
-  disabled: boolean;
+  busy: boolean;
+  stale: boolean;
 }) {
   const [membershipId, setMembershipId] = useState('');
+  const [feedback, setFeedback] = useState('');
   const read = useTablePersonGrants(workspaceId);
   const changes = useTableChanges();
   const write = useTableWrite(
@@ -53,13 +65,37 @@ export function PersonGrants({
     () => {},
   );
   const selected = data.members.find(member => member.id === membershipId);
-  const locked =
-    disabled ||
-    write.state.kind === 'sending' ||
-    write.state.kind === 'uncertain' ||
-    read.state.kind !== 'ready' ||
-    !!read.state.error ||
-    read.state.refreshing;
+  const names = tableLabels(data.tables, data.teams);
+  const saved = (holder: string, target: GrantInput['target']) =>
+    read.state.kind === 'ready' &&
+    read.state.data.grants.some(
+      grant =>
+        grant.membershipId === holder &&
+        grant.target.kind === target.kind &&
+        grant.target.id === target.id &&
+        grant.target.permission === target.permission,
+    );
+  const grantLabel = (target: GrantInput['target']) =>
+    target.kind === 'table'
+      ? `${labels[target.permission].toLowerCase()} for ${names.get(target.id) ?? 'this table'}`
+      : `create tables owned by ${data.teams.find(team => team.id === target.id)?.name ?? 'this team'}`;
+  const unavailable = stale || write.state.kind === 'uncertain' || read.state.kind !== 'ready' || !!read.state.error;
+  const grantQueue = useGrantQueue({
+    saved,
+    save: entry => write.submit({ membershipId: entry.holder, target: entry.target, granted: entry.granted }),
+    wait: busy || write.state.kind === 'sending' || (read.state.kind === 'ready' && read.state.refreshing),
+    stale: unavailable,
+    settled: result =>
+      setFeedback(
+        !result.entry ? changesNotSaved(result.dropped) : result.dropped ? othersNotSaved(result.dropped) : '',
+      ),
+  });
+  const locked = unavailable || grantQueue.pending;
+  const status = grantQueue.saving
+    ? savingStatus(grantLabel(grantQueue.saving.target), grantQueue.waiting)
+    : grantQueue.waiting
+      ? waitingStatus(grantQueue.waiting)
+      : '';
   return (
     <section className="space-y-4 border-t border-border pt-6">
       <h2 className="text-sm font-medium">Individual table grants</h2>
@@ -67,18 +103,16 @@ export function PersonGrants({
         Direct grants add to team permissions. Removing one grant does not remove access supplied by another team or
         grant. Grants belong to the current membership and do not return after leaving and rejoining.
       </p>
+      {status && (
+        <p role="status" className="flex items-center gap-2 text-sm">
+          <Spinner aria-hidden="true" />
+          {status}
+        </p>
+      )}
       <TableRead state={read.state} refresh={read.refresh}>
-        {({ grants }) => {
-          const has = (target: GrantInput['target']) =>
-            grants.some(
-              grant =>
-                grant.membershipId === membershipId &&
-                grant.target.kind === target.kind &&
-                grant.target.id === target.id &&
-                grant.target.permission === target.permission,
-            );
+        {() => {
           const toggle = (target: GrantInput['target'], granted: boolean) => {
-            void write.submit({ membershipId, target, granted });
+            if (selected) grantQueue.toggle(membershipId, selected.name, target, granted);
           };
           return (
             <div className="space-y-6">
@@ -123,8 +157,8 @@ export function PersonGrants({
                         >
                           <Checkbox
                             id={`person-create-${team.id}`}
-                            checked={has(target)}
-                            disabled={locked}
+                            checked={grantQueue.checked(membershipId, target)}
+                            disabled={unavailable}
                             onCheckedChange={value => toggle(target, value)}
                           />
                         </SettingsRow>
@@ -132,7 +166,24 @@ export function PersonGrants({
                     })}
                   </SettingsGroup>
                   {data.tables.map(table => (
-                    <SettingsGroup key={table.id} title={table.name}>
+                    <SettingsGroup
+                      key={table.id}
+                      title={
+                        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="min-w-0 wrap-anywhere">{names.get(table.id) ?? table.name}</span>
+                          {grantQueue.tablePending(membershipId, table.id) && (
+                            <span
+                              aria-hidden="true"
+                              className="flex shrink-0 items-center gap-2 font-normal text-muted-foreground"
+                            >
+                              <Spinner />
+                              Saving…
+                            </span>
+                          )}
+                        </span>
+                      }
+                      titleId={`person-table-${table.id}-heading`}
+                    >
                       {tableGrantPermissionSchema.options.map(permission => {
                         const target = { kind: 'table', id: table.id, permission } satisfies GrantInput['target'];
                         return (
@@ -147,8 +198,8 @@ export function PersonGrants({
                           >
                             <Checkbox
                               id={`person-${table.id}-${permission}`}
-                              checked={has(target)}
-                              disabled={locked}
+                              checked={grantQueue.checked(membershipId, target)}
+                              disabled={unavailable}
                               onCheckedChange={value => toggle(target, value)}
                             />
                           </SettingsRow>
@@ -162,12 +213,19 @@ export function PersonGrants({
           );
         }}
       </TableRead>
-      <WriteFeedback
-        state={write.state}
-        checkStatus={() => void read.refresh()}
-        retry={input => void write.submit(input)}
-      />
-      {write.state.kind === 'accepted' && (
+      {write.state.kind !== 'sending' && (
+        <WriteFeedback
+          state={write.state}
+          checkStatus={() => void read.refresh()}
+          retry={input => void write.submit(input)}
+        />
+      )}
+      {feedback && !grantQueue.pending && (
+        <p role="status" className="text-sm">
+          {feedback}
+        </p>
+      )}
+      {write.state.kind === 'accepted' && !grantQueue.pending && (
         <p role="status" className="text-sm">
           Individual grant saved.
         </p>

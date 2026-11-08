@@ -11,8 +11,8 @@ export function useTableWrite<T, R>(send: (input: T) => Promise<R>, accepted: (r
       mounted.current = false;
     };
   }, []);
-  async function submit(input: T) {
-    if (sending.current) return;
+  async function submit(input: T): Promise<boolean> {
+    if (sending.current) return false;
     sending.current = true;
     setState({ kind: 'sending', input });
     try {
@@ -21,8 +21,10 @@ export function useTableWrite<T, R>(send: (input: T) => Promise<R>, accepted: (r
         setState({ kind: 'accepted' });
         accepted(result);
       }
+      return true;
     } catch (error) {
       if (mounted.current) setState(failedWrite(input, error));
+      return false;
     } finally {
       sending.current = false;
     }
