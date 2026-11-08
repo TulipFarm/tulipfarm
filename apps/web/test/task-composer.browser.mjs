@@ -186,7 +186,6 @@ async function open(device) {
   });
   return { context, page };
 }
-const focusedId = page => page.evaluate(() => document.activeElement?.id);
 const describedBy = (locator, page) =>
   locator.getAttribute('aria-describedby').then(ids =>
     page.evaluate(
@@ -319,21 +318,18 @@ try {
   await delay(300);
   assert.equal(commands.length, 2, 'a blocked Start task sends nothing');
 
+  // Activations arrive newest first; an unpinned task uses the newest one's data without asking for a scope.
   await page.goto(`${origin}/acme/agents/${scopedId}`);
-  await region.getByText('Choose a task data scope first.', { exact: true }).waitFor();
-  assert.equal(
-    await region.getByRole('button', { name: 'Start task', exact: true }).getAttribute('aria-disabled'),
-    'true',
-  );
-  await region.getByRole('button', { name: 'Go to Task data scope', exact: true }).click();
-  assert.equal(await focusedId(page), 'task-scope');
-  await region.getByRole('combobox', { name: 'Task data scope', exact: true }).click();
-  await page.getByRole('option', { name: 'No table access', exact: true }).click();
-  assert.notEqual(
-    await region.getByRole('button', { name: 'Start task', exact: true }).getAttribute('aria-disabled'),
-    'true',
-  );
-  assert.equal(await region.getByText('Choose a task data scope first.', { exact: true }).count(), 0);
+  await region.getByText(/^Data this task may use:/).waitFor();
+  assert.equal(await region.getByRole('combobox', { name: 'Task data scope', exact: true }).count(), 0);
+  await region.getByRole('textbox', { name: 'What should this agent do?', exact: true }).fill('Use the newest data.');
+  await region.getByRole('button', { name: 'Start task', exact: true }).click();
+  await page.waitForURL(`**/acme/agent-tasks/${taskId}`);
+  assert.equal(commands.length, 3);
+  assert.equal(commands[2].body.agentId, scopedId);
+  assert.deepEqual(commands[2].body.scope, scope);
+  assert.equal(Object.hasOwn(commands[2].body, 'activationId'), false);
+  await page.goto(`${origin}/acme/agents/${scopedId}`);
 
   await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   const deletion = page.getByRole('region', { name: 'Delete agent', exact: true });
@@ -408,7 +404,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    'PASS task composer: inline message and limit errors with focus, limits reopen, one command per double click, reply minimums, blocked reasons with focus and a jump fix, responsive sections.',
+    'PASS task composer: inline message and limit errors with focus, limits reopen, one command per double click, reply minimums, blocked reasons with focus, newest activation data without a scope choice, responsive sections.',
   );
 } catch (error) {
   console.error(

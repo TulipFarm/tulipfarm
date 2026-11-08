@@ -599,7 +599,7 @@ test(
           await record.getByRole('button', { name: 'Save and activate' }).waitFor();
           const rowViewer = await openDraft(row, rowDefinition.name);
           const rowTrigger = await assertConfiguration(rowViewer, 0, rowDefinition.trigger);
-          await rowTrigger.getByText('Orders / updated', { exact: true }).first().waitFor();
+          await rowTrigger.getByText('When a row in Orders changes', { exact: true }).first().waitFor();
           await rowTrigger.getByText('Amount', { exact: true }).waitFor();
           await rowTrigger.getByText('Amount is at least 1000', { exact: true }).waitFor();
           const slackViewer = await openDraft(slack, slackDefinition.name);

@@ -6,6 +6,7 @@ import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAgentExecutor } from '../src/executor.ts';
+import { createSavedAgentService } from '../src/saved-service.ts';
 import { grantAgentManager, savedTaskAgent } from './task-fixture.mjs';
 
 test('a manager changes an existing agent data scope within their own table access', async t => {
@@ -65,6 +66,22 @@ test('a manager changes an existing agent data scope within their own table acce
       { revision: agent.revision, scope: usable, live: true },
     ],
   });
+  await db.platform.query(
+    `UPDATE ${table('tf_agent_saved_revisions')} SET projection=jsonb_build_object('workspaceId',$2::text,'commit',soul_revision,'kind','agent','id',agent_id,'path','agent.json','bucket','fixture','key','fixture','sha256',definition_revision) WHERE agent_id=$1`,
+    [agent.agentId, w.id],
+  );
+  const saved = createSavedAgentService(runtime, async () => ({
+    formatVersion: 1,
+    id: agent.agentId,
+    name: 'Private assistant',
+    instructions: 'Reviewed definition',
+    tools: ['tables.list'],
+  }));
+  assert.deepEqual(
+    (await saved.detail(w.id, user, agent.agentId)).activations.map(item => item.scope),
+    [usable, []],
+    'the run form lists the newest activation first',
+  );
 
   await assert.rejects(change(1, [...usable, other]), AccessDenied);
   await assert.rejects(

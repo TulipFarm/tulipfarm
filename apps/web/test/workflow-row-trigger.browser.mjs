@@ -166,7 +166,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const originalRow = await saved('Large order check');
       let viewer = await openWorkflow(page, originalRow);
       let inspector = await assertConfiguration(viewer, 0, rowTrigger);
-      await inspector.getByText('Orders / updated', { exact: true }).first().waitFor();
+      await inspector.getByText('When a row in Orders changes', { exact: true }).first().waitFor();
       const editedRow = await saveWorkflow(
         service,
         w,

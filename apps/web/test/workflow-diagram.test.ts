@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { definitionSchema, nextStep, runCondition, type Definition, type Step } from '@tulipfarm/workflows/contracts';
-import { workflowDuration, workflowGraph } from '../src/features/workflows/diagram-model.ts';
+import { rowTriggerLine, workflowDuration, workflowGraph } from '../src/features/workflows/diagram-model.ts';
 import {
   mockPhases,
   mockScenarios,
@@ -216,6 +216,24 @@ test('app identities and authorized agent avatars travel with the shared graph',
     undefined,
     'unavailable agents do not leak an avatar',
   );
+});
+
+test('row triggers name their event and table, with a fallback while the table name is unknown', () => {
+  const tableId = '11111111-1111-4111-8111-111111111111';
+  const row = (event: 'created' | 'updated' | 'deleted') => ({ kind: 'row' as const, tableId, event });
+  assert.equal(rowTriggerLine(row('created'), 'Orders'), 'When a row is added to Orders');
+  assert.equal(rowTriggerLine(row('updated'), 'Orders'), 'When a row in Orders changes');
+  assert.equal(rowTriggerLine(row('deleted'), 'Orders'), 'When a row is deleted from Orders');
+  assert.equal(rowTriggerLine(row('created'), undefined), 'When a row is added');
+  assert.equal(rowTriggerLine(row('updated'), undefined), 'When a row changes');
+  assert.equal(rowTriggerLine(row('deleted'), undefined), 'When a row is deleted');
+  const graph = workflowGraph(
+    definitionSchema.parse({ version: 1, name: 'Order cleanup', trigger: row('deleted'), steps: [step('a')] }),
+    { ...labels, tables: { [tableId]: 'Orders' } },
+  );
+  assert.equal(graph.nodes[0]?.title, 'When a row is deleted from Orders');
+  assert.equal(graph.nodes[0]?.summary, 'Orders');
+  assert.equal(graph.details.$trigger?.facts[0]?.value, 'When a row is deleted from Orders');
 });
 
 test('delay and wait-until display readable times consistently in the inspector', () => {

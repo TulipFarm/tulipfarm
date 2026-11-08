@@ -351,14 +351,20 @@ test(
         assert.deepEqual(destinationWrites, []);
 
         const dataScope = page.getByRole('region', { name: 'What data it can use', exact: true });
+        const noData = dataScope.getByText('No business tables or outgoing Slack destinations allowed.', {
+          exact: true,
+        });
+        await dataScope.getByRole('button', { name: 'Remove access limit', exact: true }).click();
+        await noData.waitFor();
         await choose(dataScope, 'Business table', 'Customers · Engineering · 55555555');
+        assert.equal(await noData.count(), 0, 'a picked table replaces the empty text');
         const tableAccess = dataScope.getByRole('group', { name: 'Table access', exact: true });
         assert.equal(
           await tableAccess.getByRole('checkbox', { name: 'Read rows', exact: true }).getAttribute('aria-checked'),
           'true',
         );
         await tableAccess.getByRole('checkbox', { name: 'Update rows', exact: true }).click();
-        await dataScope.getByRole('button', { name: 'Add table access', exact: true }).click();
+        // Saving includes the picked table even when Add table access was never clicked.
         await dataScope.getByText('Unsaved changes', { exact: true }).waitFor();
         assert.equal(await execution.getByText('Unsaved changes', { exact: true }).count(), 0);
         assert.deepEqual(dataScopeWrites, []);

@@ -256,7 +256,8 @@ test(
         const decisions = [],
           errors = [];
         let deny = false,
-          lose = true;
+          lose = true,
+          reads = 0;
         page.on('pageerror', error => errors.push(error.message));
         const setup = {
           policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
@@ -323,8 +324,10 @@ test(
             path = new URL(url).pathname,
             method = request.method(),
             body = request.postDataJSON();
-          if (path.endsWith(`/drafts/${draftId}`))
+          if (path.endsWith(`/drafts/${draftId}`)) {
+            reads++;
             return route.fulfill(deny ? { status: 403, json: { error: 'access-denied' } } : { json: view });
+          }
           if (path.endsWith(`/drafts/${draftId}/decision`)) {
             decisions.push(body);
             assert.equal(body.digest, view.digest);
@@ -389,6 +392,7 @@ test(
           if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
           return route.fulfill(fixture.respond(method, url, body));
         });
+        if (!handoff) await page.clock.install();
         await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
         const card = page.getByRole('region', { name: 'Review agent draft', exact: true });
         await card.getByRole('button', { name: 'Create and activate', exact: true }).waitFor();
@@ -438,11 +442,27 @@ test(
         } else {
           assert.equal(await card.getByRole('button', { name: 'Create and activate', exact: true }).isDisabled(), true);
           assert.equal(decisions.length, 0);
+          // A draft waiting for review uses up its automatic checks; deciding starts a fresh budget for the save.
+          const stopped = card.getByText(
+            'Automatic checks stopped after a few minutes. Use Check draft status to see the latest.',
+            { exact: true },
+          );
+          await page.clock.runFor(30 * 2000 + 60 * 5000 + 1000);
+          await stopped.waitFor();
+          const exhausted = reads;
+          await page.clock.runFor(30000);
+          assert.equal(reads, exhausted, 'checks stop once the budget is used');
           const sponsor = card.getByRole('checkbox', { name: /^I sponsor trigger/ });
           assert.equal(await sponsor.count(), 1, 'a trigger run by hand needs no sponsor');
           await sponsor.check();
           await card.getByRole('checkbox', { name: /Replace the existing agent/ }).check();
           await card.getByRole('button', { name: 'Create and activate', exact: true }).click();
+          await stopped.waitFor({ state: 'detached' });
+          await page.clock.runFor(2500);
+          for (let attempt = 0; reads === exhausted; attempt++) {
+            assert.ok(attempt < 50, 'a decision restarts automatic checks');
+            await page.waitForTimeout(100);
+          }
           await card.getByRole('button', { name: 'Retry same decision', exact: true }).click();
           await card
             .getByText('Agent active. Its reviewed access and triggers are now in place.', { exact: true })
