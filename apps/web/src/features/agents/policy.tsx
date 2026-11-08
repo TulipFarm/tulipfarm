@@ -11,7 +11,7 @@ import { AgentRead } from './feedback';
 import type { agentApi, AgentContext } from './api';
 import { SlackDestinations } from './slack-destinations';
 import { DefinitionSharing } from './sharing';
-import { AgentDataScope, withScopeEntry } from './builder-access';
+import { AgentDataScope, noPendingTable, withScopeEntry } from './builder-access';
 import {
   enrollmentInput,
   executionInput,
@@ -115,6 +115,12 @@ function PolicyForm({
   const [enrollment, setEnrollment] = useState(policy.enrollment);
   const [enabled, setEnabled] = useState(policy.enabled);
   const [dataScope, setDataScope] = useState(policy.limits);
+  const [pendingTable, setPendingTable] = useState(noPendingTable);
+  // Saving includes a table that was picked but not added with "Add table access".
+  const savedScope =
+    pendingTable.assetId && pendingTable.permissions.length
+      ? withScopeEntry(dataScope, pendingTable.assetId, pendingTable.permissions)
+      : dataScope;
   const [taskLimits, setTaskLimits] = useState(policy.taskLimits);
   const [slackSender, setSlackSender] = useState(policy.slackSender);
   const [review, setReview] = useState<{ policy: Policy; reloaded: boolean } | null>(null);
@@ -167,7 +173,7 @@ function PolicyForm({
       enabled !== base.enabled ||
       taskLimitFields.some(field => taskLimits[field.key] !== base.taskLimits[field.key]) ||
       slackSender !== base.slackSender,
-    data: !sameAccess(dataScope, base.limits, limit => limit.assetId),
+    data: !sameAccess(savedScope, base.limits, limit => limit.assetId),
   };
   const unsaved = (
     <UnsavedChanges
@@ -241,6 +247,7 @@ function PolicyForm({
     setEnrollment(policy.enrollment);
     setEnabled(policy.enabled);
     setDataScope(policy.limits);
+    setPendingTable(noPendingTable);
     setTaskLimits(policy.taskLimits);
     setSlackSender(policy.slackSender);
     setReview(null);
@@ -469,7 +476,11 @@ function PolicyForm({
         >
           <Form
             disabled={locked}
-            onSubmit={() => submit({ kind: 'data', input: { version: base.version, scope: dataScope } })}
+            onSubmit={() => {
+              setDataScope(savedScope);
+              setPendingTable(noPendingTable);
+              submit({ kind: 'data', input: { version: base.version, scope: savedScope } });
+            }}
           >
             <div className="grid gap-5">
               <AgentDataScope
@@ -482,11 +493,16 @@ function PolicyForm({
                   setDataScope(previous => withScopeEntry(previous, assetId, permissions))
                 }
                 onRemove={assetId => setDataScope(previous => previous.filter(item => item.assetId !== assetId))}
+                pending={pendingTable}
+                onPendingChange={setPendingTable}
               />
               <FormFooter
                 dirty={dirty.data}
                 note="Saving also updates the active version, so new runs use these tables. Removing a table also stops runs already in progress from using it."
-                cancel={discard(() => setDataScope(base.limits))}
+                cancel={discard(() => {
+                  setDataScope(base.limits);
+                  setPendingTable(noPendingTable);
+                })}
                 submit={save('data', 'Save data access', 'Saving data access…')}
               >
                 {feedback('data')}

@@ -150,12 +150,13 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
           if (!(error instanceof AccessDenied)) throw error;
         }
       }
+      // Newest first, the order task admission uses when a task does not pin an activation.
       const activations = z
         .array(z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema }))
         .parse(
           (
             await transaction.client.query(
-              `SELECT id, definition_revision AS revision, scope FROM ${relation(transaction, 'tf_agent_activations')} WHERE agent_id = $1 AND revoked_at IS NULL ORDER BY id`,
+              `SELECT id, definition_revision AS revision, scope FROM ${relation(transaction, 'tf_agent_activations')} WHERE agent_id = $1 AND revoked_at IS NULL ORDER BY activated_at DESC NULLS LAST, id DESC`,
               [agentId],
             )
           ).rows,

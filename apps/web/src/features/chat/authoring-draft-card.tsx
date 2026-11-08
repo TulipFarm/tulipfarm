@@ -107,6 +107,8 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
   ) => {
     if (locked || (decision === 'save' && slackUnchecked)) return;
     submitted.current = true;
+    // Checks made while the draft waited for review must not use up the budget for saving it.
+    read.restart();
     void write.submit({
       kind: 'draft-decision',
       chatId,
@@ -153,7 +155,7 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
       )}
       {read.delayed && (
         <p className="text-sm text-muted-foreground">
-          Automatic checks stopped after a minute. Check draft status for an update.
+          Automatic checks stopped after a few minutes. Use Check draft status to see the latest.
         </p>
       )}
     </>

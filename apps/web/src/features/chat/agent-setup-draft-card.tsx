@@ -14,7 +14,7 @@ import {
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
-import { AgentSetupReview, setupTriggerLabel } from '@/features/agents/setup-review';
+import { AgentSetupReview, setupTriggerLabel, useTriggerTableNames } from '@/features/agents/setup-review';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
 
@@ -42,6 +42,7 @@ export function AgentSetupDraftCard({
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsorTriggerIds: [], replaceChannels: [] });
+  const tableNames = useTriggerTableNames(workspace.id, proposal.input.setup?.triggers ?? []);
   if (!proposal.input.setup) return null;
   const setup = {
     ...proposal.input.setup,
@@ -128,7 +129,7 @@ export function AgentSetupDraftCard({
                           />
                         }
                       >
-                        {`Workflow ${index + 1}${trigger ? `: ${setupTriggerLabel(trigger.trigger)}` : ''}`}
+                        {`Workflow ${index + 1}${trigger ? `: ${setupTriggerLabel(trigger.trigger, tableNames)}` : ''}`}
                       </Button>
                     </li>
                   );
@@ -169,7 +170,7 @@ export function AgentSetupDraftCard({
             <CheckboxField
               key={item.id}
               id={`draft-${draft.id}-trigger-${item.id}`}
-              label={`I sponsor trigger ${index + 1}: ${setupTriggerLabel(item.trigger)}`}
+              label={`I sponsor trigger ${index + 1}: ${setupTriggerLabel(item.trigger, tableNames)}`}
               helper="Activating creates a workflow that runs this agent with your current permissions and creates private tasks."
               checked={consent.sponsorTriggerIds.includes(item.id)}
               onCheckedChange={checked =>

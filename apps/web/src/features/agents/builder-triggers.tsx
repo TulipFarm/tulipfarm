@@ -11,6 +11,7 @@ export type BuilderTrigger = AgentSetup['triggers'][number] & { sponsorConsent: 
 
 export function BuilderTriggers({
   slug,
+  tableNames,
   value,
   onChange,
   disabled,
@@ -18,6 +19,7 @@ export function BuilderTriggers({
   activating,
 }: {
   slug: string;
+  tableNames: ReadonlyMap<string, string>;
   value: BuilderTrigger[];
   onChange: (value: BuilderTrigger[]) => void;
   disabled: boolean;
@@ -51,7 +53,7 @@ export function BuilderTriggers({
           <div className="flex items-start gap-3">
             <TriggerIcon trigger={item.trigger} />
             <div className="grid min-w-0 flex-1 gap-1 text-sm">
-              <h3 className="font-medium">{setupTriggerLabel(item.trigger)}</h3>
+              <h3 className="font-medium">{setupTriggerLabel(item.trigger, tableNames)}</h3>
               <p className="whitespace-pre-wrap wrap-anywhere">{item.prompt}</p>
             </div>
             <Button
