@@ -15,6 +15,7 @@ import {
 import { definitionSchema, valuesSchema } from '../../src/definition.ts';
 import { canonicalJson } from '../../src/canonical.ts';
 import { createTableService } from '../../../tables/dist/service.js';
+import { TableImportError, tableImportFailure } from '../../../tables/dist/imports.js';
 import { createTableWithRows, tableDefinition, textField, textValues } from '../fixture.mjs';
 import { AccessDenied } from '@tulipfarm/access';
 import { storedToolActivity, storedToolStatus } from '@tulipfarm/conversations/tool-activity-history';
@@ -555,6 +556,18 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
           status: 'completed',
           detail: 'Corrected and resubmitted.',
         });
+        const importFailure = tableImportFailure(new TableImportError('malformed-file'));
+        assert.deepEqual(
+          await runtime.transaction(workspace.id, commonCompatibility, tx =>
+            storedToolActivity(tx, {
+              id: randomUUID(),
+              tool: 'tables.import.file',
+              status: 'completed',
+              output: { result: importFailure, sources: [] },
+            }),
+          ),
+          { status: 'failed', detail: importFailure.reason },
+        );
         assert.equal((await status(second)).status, 'pending');
         await assert.rejects(decide(first), error => error.code === 'proposal-superseded');
 

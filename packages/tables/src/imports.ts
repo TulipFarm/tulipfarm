@@ -45,9 +45,75 @@ export class TableImportError extends Error {
       | 'unsupported-cell'
       | 'invalid-value'
       | 'import-unavailable',
+    /** Where a row or value failed: the 1-based file row and the header column, never the cell value. */
+    readonly location?: { row: number; column?: string },
   ) {
     super(code);
   }
+}
+type ImportFailureCode = TableImportError['code'];
+/** Who can fix a failure: the assistant by correcting its selection, the person by fixing the file, or nobody now. */
+const importFailures: Record<ImportFailureCode, { reason: string; fix: 'selection' | 'value' | 'file' | 'retry' }> = {
+  'invalid-selection': {
+    reason:
+      'The import settings don’t match the file. Check the format, delimiter, sheet name, header row and conversions.',
+    fix: 'selection',
+  },
+  'invalid-header': {
+    reason: 'The header row is missing, or a column name in it is blank or too long.',
+    fix: 'selection',
+  },
+  'duplicate-header': { reason: 'Two columns in the header row have the same name.', fix: 'file' },
+  'malformed-row': { reason: 'A row has a different number of cells than the header.', fix: 'selection' },
+  'invalid-value': { reason: 'A value doesn’t fit its column’s conversion.', fix: 'value' },
+  'unsupported-cell': {
+    reason: 'The sheet has merged cells, formulas or rich text, which can’t be imported.',
+    fix: 'file',
+  },
+  'malformed-file': {
+    reason: 'The file couldn’t be read. A CSV must be UTF-8 text and an XLSX an unprotected workbook.',
+    fix: 'file',
+  },
+  'byte-limit': { reason: 'The file is empty or larger than 10 MB.', fix: 'file' },
+  'row-limit': { reason: 'The file has more than 100,000 rows.', fix: 'file' },
+  'column-limit': { reason: 'The file has more than 64 columns.', fix: 'file' },
+  'digest-mismatch': { reason: 'The file changed after it was listed.', fix: 'selection' },
+  'snapshot-unavailable': { reason: 'The prepared file couldn’t be saved.', fix: 'retry' },
+  'snapshot-conflict': { reason: 'The prepared file couldn’t be saved.', fix: 'retry' },
+  'import-unavailable': { reason: 'The file couldn’t be prepared because storage didn’t respond.', fix: 'retry' },
+};
+const personSteps = {
+  selection: 'Ask again and the assistant will correct the settings.',
+  value: 'Correct the value in the file and attach it again.',
+  file: 'Fix the file, attach it again and ask again.',
+  retry: 'Try again in a moment.',
+};
+const assistantSteps = {
+  value:
+    'If the conversion for that column does not match its destination field type, correct the selection and call tables.import.file again in this reply. Otherwise ask the person to correct that value.',
+  selection:
+    'Correct the selection and call tables.import.file again in this reply with the same attachmentId and contentDigest from tables.import.attachments.',
+  file: 'The file itself must change. Tell the person the reason and ask them to fix and reattach it; do not retry with the same file.',
+  retry:
+    'Call tables.import.file once more in this reply; if it fails again, tell the person preparation failed and to try later.',
+};
+
+/**
+ * A tool result for a failed file preparation: the reason with the person's next step, which
+ * activity shows as the step detail, and the assistant's own next step. It never contains cell values.
+ */
+export function tableImportFailure(error: TableImportError) {
+  const { reason, fix } = importFailures[error.code];
+  const where = error.location
+    ? ` (row ${error.location.row}${error.location.column ? `, column "${error.location.column.slice(0, 40)}"` : ''})`
+    : '';
+  return {
+    error: 'import-file-failed' as const,
+    code: error.code,
+    reason: `${reason.replace(/\.$/, '')}${where}. ${personSteps[fix]}`,
+    ...(error.location ? { location: error.location } : {}),
+    instruction: `No file was prepared and no review was created. This is not a permission denial, and tables.import.file is available. ${assistantSteps[fix]} Tell the person this reason, not a guessed one.`,
+  };
 }
 // Stored keys and the tf_table_import_objects object_key CHECK use this prefix.
 const objectPrefix = 'resource-imports';
@@ -73,9 +139,21 @@ const headerSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('provided'), names: z.array(nameSchema).min(1).max(64) }),
 ]);
 const tabular = { header: headerSchema, conversions: conversionsSchema, empty: z.enum(['null', 'text']) };
+// Files usually start with a header row, so a file selection may omit it or give the row number alone.
+const fileTabular = {
+  header: z
+    .preprocess(
+      value =>
+        value === true ? { kind: 'row', row: 1 } : typeof value === 'number' ? { kind: 'row', row: value } : value,
+      headerSchema,
+    )
+    .default({ kind: 'row', row: 1 }),
+  conversions: conversionsSchema.default({}),
+  empty: tabular.empty.default('null'),
+};
 export const fileImportSelectionSchema = z.discriminatedUnion('format', [
-  z.strictObject({ format: z.literal('csv'), delimiter: z.enum([',', ';', '\t', '|']), ...tabular }),
-  z.strictObject({ format: z.literal('xlsx'), sheet: z.string().min(1).max(31), ...tabular }),
+  z.strictObject({ format: z.literal('csv'), delimiter: z.enum([',', ';', '\t', '|']), ...fileTabular }),
+  z.strictObject({ format: z.literal('xlsx'), sheet: z.string().min(1).max(31), ...fileTabular }),
 ]);
 export type FileImportSelection = z.infer<typeof fileImportSelectionSchema>;
 export const integrationImportSelectionSchema = z.discriminatedUnion('format', [
@@ -187,17 +265,25 @@ function collector(selection: Pick<FileImportSelection, 'header' | 'conversions'
       }
       if (rows.length >= importLimits.rows) throw new TableImportError('row-limit');
       if (cells.length > names.length || (!spreadsheet && cells.length !== names.length))
-        throw new TableImportError('malformed-row');
+        throw new TableImportError('malformed-row', { row: ordinal });
       rows.push(
         Object.fromEntries(
-          names.map((name, index) => [
-            name,
-            value(
-              cells[index] ?? null,
-              Object.hasOwn(selection.conversions, name) ? (selection.conversions[name] ?? 'text') : 'text',
-              selection.empty,
-            ),
-          ]),
+          names.map((name, index) => {
+            try {
+              return [
+                name,
+                value(
+                  cells[index] ?? null,
+                  Object.hasOwn(selection.conversions, name) ? (selection.conversions[name] ?? 'text') : 'text',
+                  selection.empty,
+                ),
+              ];
+            } catch (error) {
+              if (error instanceof TableImportError)
+                throw new TableImportError(error.code, { row: ordinal, column: name });
+              throw error;
+            }
+          }),
         ),
       );
     },

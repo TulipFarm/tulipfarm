@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { test } from 'node:test';
 import ExcelJS from 'exceljs';
-import { parseImportFile, TableImportError } from '../../tables/dist/imports.js';
+import { parseImportFile, TableImportError, tableImportFailure } from '../../tables/dist/imports.js';
 
 const csv = { format: 'csv', delimiter: ',', header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' };
 const xlsx = {
@@ -67,6 +67,36 @@ test('CSV rejects duplicate headers, missing decisions, malformed widths, invali
   await rejects(parseImportFile(bytes('a\nb'), { format: 'csv' }), 'invalid-selection');
   await rejects(parseImportFile(bytes('a\nb'), { ...csv, conversions: { missing: 'date' } }), 'invalid-selection');
   await rejects(parseImportFile(bytes(',b\n1,2'), csv), 'invalid-header');
+});
+
+test('a file selection defaults to a first-row header, no conversions and empty cells as null', async () => {
+  const expected = [{ 'Order ID': { kind: 'text', value: 'A-1' }, Amount: null }];
+  const file = bytes('Order ID;Amount\nA-1;\n');
+  assert.deepEqual(await parseImportFile(file, { format: 'csv', delimiter: ';' }), expected);
+  assert.deepEqual(await parseImportFile(file, { format: 'csv', delimiter: ';', header: true }), expected);
+  assert.deepEqual(await parseImportFile(file, { format: 'csv', delimiter: ';', header: 1 }), expected);
+});
+
+test('a failed preparation names the reason, the row and column, and both next steps without the value', async () => {
+  const error = await parseImportFile(bytes('Order ID,Amount\nA-1,12.50\nA-2,private-secret\n'), {
+    ...csv,
+    conversions: { Amount: 'numeric' },
+  }).catch(error => error);
+  assert.ok(error instanceof TableImportError);
+  assert.equal(error.code, 'invalid-value');
+  assert.deepEqual(error.location, { row: 3, column: 'Amount' });
+  const failure = tableImportFailure(error);
+  assert.equal(failure.error, 'import-file-failed');
+  assert.equal(
+    failure.reason,
+    'A value doesn’t fit its column’s conversion (row 3, column "Amount"). Correct the value in the file and attach it again.',
+  );
+  assert.match(failure.instruction, /not a permission denial, and tables\.import\.file is available/);
+  assert.doesNotMatch(JSON.stringify(failure), /private-secret/);
+  for (const code of ['invalid-selection', 'malformed-file', 'import-unavailable']) {
+    const { reason } = tableImportFailure(new TableImportError(code));
+    assert.ok(reason.length <= 200 && /\. (Ask again|Fix the file|Try again)/.test(reason), reason);
+  }
 });
 
 test('real XLSX selects exact sheet, preserves blanks and requires explicit native date conversion', async () => {
