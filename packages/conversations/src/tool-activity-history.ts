@@ -165,17 +165,45 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
   return value.superseded ? { status: 'completed', detail: 'Replaced by a revision.' } : { status: 'waiting' };
 }
 
-type StoredToolRow = { id: string; tool: string; status: string; output?: unknown };
+type StoredToolRow = { id: string; tool: string; status: string; call?: unknown; output?: unknown };
 // Expected answers that prepare no review: the reply explains each one, so the step itself did not fail.
 const proposalOutcomes = new Map(
   Object.entries({
     'invalid-arguments': 'Corrected and resubmitted.',
-    'workflow-active': 'Not archived: active workflows use this table.',
+    'workflow-active': 'Not archived: an active workflow uses this table.',
     'table-linked': 'Not archived: another table links to this table.',
-    'invalid-transform': 'No review prepared: some current values don’t fit the new fields.',
-    'import-not-prepared': 'No review prepared yet: the file must be read first.',
+    'invalid-transform': 'No review prepared: some row values don’t fit the changed fields.',
+    'import-not-prepared': 'No review prepared: the file wasn’t read first.',
   }),
 );
+const askTableAccess = 'Ask a workspace admin to grant';
+const proposalPlans = z.object({
+  plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })).min(1),
+});
+
+/** Names the permissions a denied `tables.propose` call needed, from the kinds of change it asked for. */
+function deniedProposalDetail(call: unknown) {
+  const input = z.object({ input: z.string() }).safeParse(call);
+  if (!input.success) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(input.data.input);
+  } catch {
+    return undefined;
+  }
+  const parsed = proposalPlans.safeParse(value);
+  if (!parsed.success) return undefined;
+  const plans = parsed.data.plans;
+  if (plans.every(plan => plan.kind === 'schema' && plan.expectedRevision === null))
+    return `Access denied. Adding this table needs Create tables for its owning team. ${askTableAccess} it to you or your team in Table access, then ask again.`;
+  if (
+    plans.every(plan => ['archive', 'restore'].includes(plan.kind) || (plan.kind === 'schema' && plan.expectedRevision))
+  )
+    return `Access denied. This change needs Read rows and Manage schema on the table. ${askTableAccess} them to you or your team in Table access, then ask again.`;
+  if (plans.every(plan => plan.kind === 'records' || plan.kind === 'import'))
+    return `Access denied. This change needs Read rows plus Create rows, Update rows or Delete rows on the table, depending on the change. ${askTableAccess} them to you or your team in Table access, then ask again.`;
+  return undefined;
+}
 /** `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed. */
 export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string; proposal?: true };
 
@@ -184,12 +212,17 @@ export async function storedToolActivity(
   tx: AuthorizationTransaction,
   row: StoredToolRow,
 ): Promise<StoredToolActivity> {
+  if (row.status === 'blocked' && row.tool === 'tables.propose') {
+    const detail = deniedProposalDetail(row.call);
+    if (detail) return { status: 'blocked', detail };
+  }
   if (row.status === 'completed' && row.tool === 'tables.propose') {
     const result = z.object({ result: z.unknown() }).safeParse(row.output);
     const output = result.success ? result.data.result : row.output;
     const outcome = z.object({ error: z.string() }).safeParse(output);
     const detail = outcome.success ? proposalOutcomes.get(outcome.data.error) : undefined;
-    if (detail) return { status: 'completed', detail };
+    if (detail && (outcome.data?.error !== 'invalid-arguments' || (await resubmitted(tx, row.id))))
+      return { status: 'completed', detail };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
     if (activity) return { ...activity, proposal: true };
@@ -202,6 +235,16 @@ export async function storedToolActivity(
     if (failure.success) return { status: 'failed', detail: failure.data.reason.slice(0, 200) };
   }
   return { status: await savedToolStatus(tx, row) };
+}
+
+/** Whether chat called `tables.propose` again later in the same reply, after this call's invalid arguments. */
+async function resubmitted(tx: AuthorizationTransaction, callId: string) {
+  const table = qualified(tx.schema, 'tf_conversation_tool_calls');
+  const result = await tx.client.query(
+    `SELECT 1 FROM ${table} later JOIN ${table} call ON call.id=$1 WHERE later.turn_id=call.turn_id AND later.tool='tables.propose' AND later.sequence>call.sequence LIMIT 1`,
+    [callId],
+  );
+  return Boolean(result.rowCount);
 }
 
 export async function storedToolStatus(
