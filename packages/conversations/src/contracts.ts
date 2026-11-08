@@ -165,6 +165,25 @@ export const chatTitleSchema = unicodeText
   .min(1)
   .max(640)
   .refine(value => [...segmenter.segment(value)].length <= chatTitleLimit, 'Title exceeds 50 characters');
+const wordSegmenter = new Intl.Segmenter('und', { granularity: 'word' });
+const titleFits = (value: string) => value.length <= 640 && [...segmenter.segment(value)].length <= chatTitleLimit;
+/** Fits text within the title limits, cutting at the last word boundary that fits and marking the cut with an ellipsis. */
+export function shortenTitle(text: string) {
+  if (titleFits(text)) return text;
+  let kept = '';
+  let cut = '';
+  for (const { segment, isWordLike } of wordSegmenter.segment(text)) {
+    if (!titleFits(`${kept}${segment}…`)) break;
+    kept += segment;
+    if (isWordLike) cut = kept;
+  }
+  if (!cut)
+    for (const { segment } of segmenter.segment(text)) {
+      if (!titleFits(`${cut}${segment}…`)) break;
+      cut += segment;
+    }
+  return `${cut.trimEnd()}…`;
+}
 export function initialTitle(parts: readonly z.infer<typeof inputPartSchema>[], skillName = '') {
   const collapse = (value: string) =>
     value
@@ -173,14 +192,8 @@ export function initialTitle(parts: readonly z.infer<typeof inputPartSchema>[], 
       .trim();
   const text =
     collapse(parts.flatMap(part => (part.kind === 'text' ? [part.text] : [])).join('')) || collapse(skillName);
-  let title = '';
-  let count = 0;
-  for (const { segment } of segmenter.segment(text)) {
-    if (++count > chatTitleLimit || title.length + segment.length > 640) break;
-    title += segment;
-  }
   return (
-    title ||
+    shortenTitle(text) ||
     (parts.some(part => part.kind === 'attachment')
       ? 'Attachments'
       : parts.some(part => part.kind === 'file' || part.kind === 'google-file')

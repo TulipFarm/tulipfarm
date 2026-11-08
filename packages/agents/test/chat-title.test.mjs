@@ -102,7 +102,29 @@ test('an unusable title is absent, a failed request throws, and long Unicode tit
   title = new Response('Busy', { status: 503 });
   await assert.rejects(inferChatTitle(nativeRoutes.anthropic, 'Hello'), { message: 'model-unavailable' });
   title = `  ${'👨‍👩‍👧‍👦'.repeat(51)}  `;
-  assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Hello'), '👨‍👩‍👧‍👦'.repeat(50));
+  assert.equal(await inferChatTitle(nativeRoutes.anthropic, 'Hello'), `${'👨‍👩‍👧‍👦'.repeat(49)}…`);
+  title = 'Compare quarterly revenue by region against last year and explain';
+  assert.equal(
+    await inferChatTitle(nativeRoutes.anthropic, 'Hello'),
+    'Compare quarterly revenue by region against last…',
+  );
+});
+
+test('a generated title drops labels the model adds unless the request asked for a summary', async t => {
+  let title;
+  t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('anthropic', { text: title })));
+  for (const [text, request, expected] of [
+    ['Count won leads summary', 'Count the won leads', 'Count won leads'],
+    ['Count won leads - Summary', 'Count the won leads', 'Count won leads'],
+    ['Count won leads (summary)', 'Count the won leads', 'Count won leads'],
+    ['Title: Count won leads', 'Count the won leads', 'Count won leads'],
+    ['Summary: Count won leads', 'Count the won leads', 'Count won leads'],
+    ['Article summary', 'Summarize this article', 'Article summary'],
+    ['Executive Summary', 'Hello', 'Executive Summary'],
+  ]) {
+    title = text;
+    assert.equal(await inferChatTitle(nativeRoutes.anthropic, request), expected, text);
+  }
 });
 
 test('a refused credit reservation stops the title before the provider is called', async t => {
