@@ -209,9 +209,8 @@ test(
         await card.locator('a').filter({ hasText: 'View table' }).getAttribute('href'),
         `/${workspace.slug}/tables/${views[0].plans[0].tableId}`,
       );
-      for (let attempt = 0; sent.length === 0 && attempt < 50; attempt++) await delay(100);
-      assert.equal(sent.length, 1, 'creation asks the assistant for an example row once');
-      assert.match(sent[0], /the table "Customers" was created\. Add one realistic example row/);
+      await delay(1_000);
+      assert.deepEqual(sent, [], "approval sends no message in the person's name");
       await capture('approval-completed');
       await load();
       await page.getByRole('button', { name: 'Review changes', exact: true }).waitFor();
