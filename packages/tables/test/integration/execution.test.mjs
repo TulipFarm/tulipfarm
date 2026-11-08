@@ -2116,24 +2116,23 @@ test(
         .archived_at,
     );
     // An archived table's rows stay readable, but no row can change.
-    const archivedRevision = await revision();
+    const readRevision = await revision();
     assert.equal(
-      (await service.read(ws.id, ws.userId, { tableId: archived, revision: archivedRevision, recordId: kept.id })).id,
+      (await service.read(ws.id, ws.userId, { tableId: archived, revision: readRevision, recordId: kept.id })).id,
       kept.id,
     );
     assert.deepEqual(
-      (await service.list(ws.id, ws.userId, { tableId: archived, revision: archivedRevision })).map(row => row.id),
+      (await service.list(ws.id, ws.userId, { tableId: archived, revision: readRevision })).map(row => row.id),
       [kept.id],
     );
-    assert.equal((await service.capabilities(ws.id, ws.userId, { tableId: archived })).revision, archivedRevision);
+    assert.equal((await service.capabilities(ws.id, ws.userId, { tableId: archived })).revision, readRevision);
     for (const change of [
       { kind: 'create', recordId: randomUUID(), values: {} },
       { kind: 'update', recordId: kept.id, expectedToken: kept.token, values: {} },
     ])
-      await assert.rejects(
-        service.mutate(ws.id, ws.userId, { ...change, tableId: archived, revision: archivedRevision }),
-        { code: 'not-active' },
-      );
+      await assert.rejects(service.mutate(ws.id, ws.userId, { ...change, tableId: archived, revision: readRevision }), {
+        code: 'not-active',
+      });
 
     // A person can archive from the table page with no chat behind it; the same workflow check still applies.
     const paged = await approve();
