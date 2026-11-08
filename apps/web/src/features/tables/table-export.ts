@@ -76,6 +76,7 @@ async function downloadCsv(
     const value = values[fieldId];
     if (value == null) return '';
     if (value.kind === 'relationship') return value.recordIds.map(id => names[id] ?? id).join(', ');
+    if (value.kind === 'date' || value.kind === 'timestamp') return value.value;
     return formatTableValue(value, table.definition, fieldId);
   };
   const lines = [
