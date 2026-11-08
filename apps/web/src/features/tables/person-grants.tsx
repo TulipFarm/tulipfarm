@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   tableGrantPermissionSchema,
   type GovernanceSnapshot,
@@ -49,8 +49,12 @@ export function PersonGrants({
   const [feedback, setFeedback] = useState('');
   const read = useTablePersonGrants(workspaceId);
   const changes = useTableChanges();
+  // Applying your own authority change reloads workspace access, so it waits until queued grants are saved.
+  const ownChanged = useRef(false);
   const write = useTableWrite(
     async (input: PersonGrant) => {
+      const own = changes.own(input.membershipId);
+      if (own) ownChanged.current = true;
       try {
         await changeGovernance(workspaceId, '/person-grants', 'PUT', input);
       } catch (error) {
@@ -58,14 +62,14 @@ export function PersonGrants({
           throw new TableRequestError(error.status, error.code, governanceError(error));
         throw error;
       }
-      await changes.grants(input.membershipId);
+      await changes.grants();
       await read.refresh();
-      window.dispatchEvent(new Event('tulipfarm:workspace-access-changed'));
+      if (!own) window.dispatchEvent(new Event('tulipfarm:workspace-access-changed'));
     },
     () => {},
   );
   const selected = data.members.find(member => member.id === membershipId);
-  const names = tableLabels(data.tables, data.teams);
+  const names = tableLabels(data.tables, data.teams, data.adminTeamId);
   const saved = (holder: string, target: GrantInput['target']) =>
     read.state.kind === 'ready' &&
     read.state.data.grants.some(
@@ -90,6 +94,15 @@ export function PersonGrants({
         !result.entry ? changesNotSaved(result.dropped) : result.dropped ? othersNotSaved(result.dropped) : '',
       ),
   });
+  const applyOwnChange = useEffectEvent(() => {
+    if (!ownChanged.current) return;
+    ownChanged.current = false;
+    void changes.ownGrants().then(() => window.dispatchEvent(new Event('tulipfarm:workspace-access-changed')));
+  });
+  useEffect(() => {
+    if (!grantQueue.pending) applyOwnChange();
+  }, [grantQueue.pending]);
+  useEffect(() => () => applyOwnChange(), []);
   const locked = unavailable || grantQueue.pending;
   const status = grantQueue.saving
     ? savingStatus(grantLabel(grantQueue.saving.target), grantQueue.waiting)

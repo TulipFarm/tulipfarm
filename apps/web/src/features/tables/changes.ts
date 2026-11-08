@@ -6,7 +6,7 @@ import { useFeatureContext } from '@/lib/query/provider';
 import type { ProposalView } from './review-contracts';
 import { concealTableQueries } from './authority';
 import { TableRequestError } from './request-state';
-import { governanceKeys } from '@/features/governance/queries';
+import { governanceKeys, governanceTableDependents } from '@/features/governance/queries';
 
 export const tableChangeKeys = {
   records: (tableId: string) => [
@@ -56,10 +56,15 @@ export function useTableChanges() {
           error,
         );
     },
-    grants: async (membershipId: string) => {
+    own: (membershipId: string) => scope.kind === 'workspace' && scope.membershipId === membershipId,
+    grants: async () => {
       if (!current() || scope.kind !== 'workspace') return;
-      if (scope.membershipId === membershipId) runtime.revoke(scope, true);
-      else await change({ keys: [tableKeys.grants, tableKeys.proposals] });
+      await change({ keys: [tableKeys.grants, tableKeys.proposals] });
+    },
+    // Your own grants change your table authority. Conceal what it protects, as a team grant does.
+    ownGrants: async () => {
+      if (!current() || scope.kind !== 'workspace') return;
+      await change({ kind: 'conceal', keys: [governanceKeys.tableAuthority, ...governanceTableDependents] });
     },
   };
 }
