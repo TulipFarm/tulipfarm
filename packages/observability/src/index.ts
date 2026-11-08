@@ -1645,6 +1645,9 @@ type ChatReplyClock = {
   final?: ChatReplyFinal | undefined;
   /** Bounded code of this attempt's failure, used when the turn stores only a generic code. */
   cause?: string | undefined;
+  /** Route model of the first reply request that streamed output, else of the first reply request; labels `first_text`. */
+  model?: string | undefined;
+  requested?: string | undefined;
 };
 type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
@@ -1747,10 +1750,18 @@ function finishChatReply(clock: ChatReplyClock) {
     advice: { explicitBucketBoundaries: [...chatReplyBuckets] },
   });
   const fields: Attributes = {};
+  const model = clock.model ?? clock.requested ?? 'unknown';
   for (const segment of chatReplySegments) {
     const value = values[segment];
     if (value === undefined) continue;
-    histogram.record(value, { ...dimensions, segment, outcome, tools });
+    // Only first_text is split by model, so its p95 can be compared per model without multiplying every segment.
+    histogram.record(value, {
+      ...dimensions,
+      segment,
+      outcome,
+      tools,
+      ...(segment === 'first_text' ? { 'gen_ai.request.model': model } : {}),
+    });
     fields[`chat.reply.${segment}_seconds`] = value;
   }
   log('info', 'activity', 'call_completed', {
@@ -1758,6 +1769,7 @@ function finishChatReply(clock: ChatReplyClock) {
     outcome,
     'chat.reply.tools': tools,
     'chat.reply.attempts': attempts,
+    'gen_ai.request.model': model,
     ...fields,
   });
   if (status === 'failed') recordChatReplyStopped(clock.final.errorCode, clock.final.runtime ?? 'chat', clock.cause);
@@ -2790,6 +2802,9 @@ export async function observeInference<T>(
     'gen_ai.request.model': model.model,
     'gen_ai.operation.name': model.operation,
   };
+  const measured = chatMeasurement.getStore();
+  const reply = model.operation === 'chat' && measured?.purpose === 'reply' ? measured.reply : undefined;
+  if (reply) reply.requested ??= model.model;
   return trace
     .getTracer(scope)
     .startActiveSpan(
@@ -2847,6 +2862,7 @@ export async function observeInference<T>(
             firstToken() {
               if (firstToken) return;
               firstToken = true;
+              if (reply) reply.model ??= model.model;
               meter
                 .createHistogram('gen_ai_client_time_to_first_token', { unit: 's' })
                 .record((performance.now() - start) / 1000, { ...dimensions, ...attributes });
