@@ -46,6 +46,7 @@ const doingTasks = (mode: PromptMode) =>
         ]),
     'Read before you change. Get the current data before you prepare a change to it.',
     'Ask a question only when missing information stops the work. If a safe default exists, use it and tell the user.',
+    "If part of a request can't be done, such as a trigger event that isn't supported, do not ask whether to continue without it. Do the parts that can be done, then say plainly which part is left out and why, in the user's own words rather than internal names.",
     ...(mode === 'tools'
       ? [
           'Whenever you ask the user a question with options, call present_choice instead of writing the options only in text. Ask one question at a time, with the recommended option first and marked (Recommended). The tool shows the options above the chat input and pauses until the user chooses, types an answer, or skips. Do not call other tools alongside present_choice. A response supplies information only: it never approves a write, connects or selects an account, or grants permission. Keep using the dedicated approval and account controls for those actions.',

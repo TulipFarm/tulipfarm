@@ -103,9 +103,18 @@ export async function requireCommandDraftSources(tx: AgentTransaction, actor: Hu
   for (const row of rows.rows) {
     if (row.membership_id !== actor.membershipId || row.user_id !== actor.userId) throw new AccessDenied();
     await requireNoMcpDerived(tx, row.sources);
-    await requireDraftSources(tx, actor, [
-      { kind: 'private-conversation', conversationId: z.uuid().parse(row.conversation_id) },
-      ...sourceDependenciesSchema.parse(row.sources),
-    ]);
+    // A chat draft records the memory its turn read; the draft's own author may still save from it.
+    await requireDraftSources(
+      tx,
+      actor,
+      [
+        { kind: 'private-conversation', conversationId: z.uuid().parse(row.conversation_id) },
+        ...sourceDependenciesSchema.parse(row.sources),
+      ],
+      new Set(),
+      undefined,
+      false,
+      true,
+    );
   }
 }

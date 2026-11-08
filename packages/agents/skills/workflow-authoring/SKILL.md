@@ -27,19 +27,20 @@ The full shapes are in two references. Read them with `skills.read` and `resourc
 
 ## 3. Build the definition
 
-`workflows.draft` takes `definition` as a JSON string `{"version":1,"name","trigger","steps"}`.
+`workflows.draft` takes `definition` as a JSON string `{"version":1,"name","triggers":[...],"steps"}`.
 
-`trigger` is one of:
+`triggers` lists 0 to 20 triggers, and any of them can start a run, so one workflow can mix kinds, for example a daily cron, two one-time dates and a webhook. Use one trigger per schedule, date or event source rather than one workflow each. An empty list is a workflow people only start by hand. Each trigger is `{"id","label"?,"kind",...}`: `id` matches `^[a-z][a-z0-9_]{0,47}$` and is unique in the workflow, such as `"daily_digest"`; when editing, keep each existing trigger's `id`. `label` is an optional short name people see. The kinds:
 
-- `{"kind":"cron","expression":five numeric fields "minute hour day-of-month month day-of-week","timezone":IANA zone}`
-- `{"kind":"once","at":future ISO datetime}`
-- `{"kind":"interval","minutes"}`
-- `{"kind":"manual"}`
-- `{"kind":"webhook"}`
-- `{"kind":"event","name"}`
-- `{"kind":"provider","integrationId","event":"created" or "updated","minutes":1 to 1440}`: first call `workflows.providers` and use a returned configured source. Only Sheets supports `updated`. Never invent integration IDs or ask for tokens in chat.
-- `{"kind":"record",...}` or `{"kind":"row",...}`: see `references/table-triggers.md`.
-- `{"kind":"github","repositoryId","event","actions"?}`: runs when GitHub sends that event for a connected repository. First call `workflows.providers` and copy a `repositoryId` from `githubRepositories`; never guess it. `event` and its `actions`: `star` (created, deleted), `watch` (started), `issues`, `pull_request`, `issue_comment`, `release`, `push` (no actions). Omit `actions` to run on every action. The run input has `event`, `action`, `repository` (owner/name), `sender` (the GitHub login) and `senderUrl` (their profile), plus `stars` (the repository's star count after the event) for `star` and `watch`, and `issue`, `pullRequest`, `comment` or `release` for those events. The TulipFarm GitHub App must be installed on the repository; the card says so.
+- `{"id","kind":"cron","expression":five numeric fields "minute hour day-of-month month day-of-week","timezone":IANA zone}`
+- `{"id","kind":"once","at":future ISO datetime,"timezone"?:IANA zone}`
+- `{"id","kind":"interval","minutes"}`
+- `{"id","kind":"webhook"}`
+- `{"id","kind":"event","name"}`
+- `{"id","kind":"provider","integrationId","event":"created" or "updated","minutes":1 to 1440}`: first call `workflows.providers` and use a returned configured source. Only Sheets supports `updated`. Never invent integration IDs or ask for tokens in chat.
+- `{"id","kind":"record",...}` or `{"id","kind":"row",...}`: see `references/table-triggers.md`.
+- `{"id","kind":"github","repositories","events":[{"event","actions"?}]}`: runs when GitHub sends one of those events for a connected repository. First call `workflows.providers`; `repositories` is a list of `repositoryId` values from `githubRepositories`, or `{"organizationId":ownerId,"includeFuture":true}` for every repository of that account. Never guess IDs. List 1 to 8 events, each once: `star` (created, deleted), `watch` (started), `issues`, `pull_request`, `issue_comment`, `release`, `push` (no actions). Omit `actions` to run on every action. The run input has `event`, `action`, `repository` (owner/name), `sender` (the GitHub login) and `senderUrl` (their profile), plus `stars` (the repository's star count after the event) for `star` and `watch`, and `issue`, `pullRequest`, `comment` or `release` for those events. Other GitHub events, such as pull request reviews or check runs, are not supported. The TulipFarm GitHub App must be installed on the repository; the card says so.
+
+A run's input is the data of the trigger that started it. To act differently per trigger, use a condition on `{"kind":"trigger","path":["id"]}` (compared with a trigger `id`) or `{"kind":"trigger","path":["kind"]}` (compared with a kind, or `"manual"` for a run started by hand).
 
 Use the person's stated timezone. Ask when it is unknown; a wrong timezone silently runs the work at the wrong hour.
 
@@ -61,4 +62,4 @@ Set `activate` to true when the person wants the workflow running. Scheduled, re
 
 Only `workflows.draft` creates a draft, and its review card is the only proof one exists. Never say a draft is ready, pending review or created unless `workflows.draft` returned it in this turn; if you still need answers, ask them and say no draft exists yet.
 
-Then ask the person to review the trigger, the next run, and the read-only diagram in Canvas. Edits stay in the chat composer; the chat card records explicit saving and activation approval. Chat text never approves. Webhook keys, new provider integrations, and secret rotation stay on the Workflows setup page. Existing connected-app triggers can be edited through chat using the authorized sources above.
+Then ask the person to review each trigger, its next run, and the read-only diagram in Canvas. Edits stay in the chat composer; the chat card records explicit saving and activation approval. Chat text never approves. Webhook keys, new provider integrations, and secret rotation stay on the Workflows setup page. Existing connected-app triggers can be edited through chat using the authorized sources above.
