@@ -109,13 +109,29 @@ export async function proveBlockedTableBrowser(input) {
     await input.deny(false);
     await page.reload();
     await rowLink(blocked).waitFor();
-    for (const theme of ['light', 'dark']) {
+    for (const [theme, width] of [
+      ['light', 1440],
+      ['light', 1280],
+      ['dark', 375],
+    ]) {
       await page.evaluate(theme => {
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(theme);
       }, theme);
-      await page.setViewportSize({ width: theme === 'dark' ? 390 : 1440, height: 1000 });
+      await page.setViewportSize({ width, height: 1000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      const clipped = await invalidRows.evaluate(table => {
+        const box = table.parentElement.getBoundingClientRect();
+        const outside = [...table.querySelectorAll('td, td *')].filter(element => {
+          const rect = element.getBoundingClientRect();
+          const cell = element.closest('td').getBoundingClientRect();
+          return rect.left < Math.max(box.left, cell.left) - 1 || rect.right > Math.min(box.right, cell.right) + 1;
+        });
+        return { scrolls: table.parentElement.scrollWidth > table.parentElement.clientWidth, outside: outside.length };
+      });
+      assert.deepEqual(clipped, { scrolls: false, outside: 0 }, `Invalid rows fit without scrolling at ${width}px`);
+      await invalidRows.getByText(problem).waitFor();
+      await rowLink(invalidRows).waitFor();
       await blocked.getByRole('button', { name: 'Continue in chat' }).click();
       assert.equal(
         await page

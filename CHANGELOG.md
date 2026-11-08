@@ -66,6 +66,10 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- The blocked schema change report in chat now wraps each row's problem and
+  fix text inside the card instead of running past its edge, and on narrow
+  screens shows each invalid row as a stacked card of row, field, value and
+  problem.
 - A blocked table schema change now lists each invalid row by its name, with
   the field, the value that failed and a link that opens the row. Error codes
   read in plain words with how to fix the value, for example that `1e3` is in
