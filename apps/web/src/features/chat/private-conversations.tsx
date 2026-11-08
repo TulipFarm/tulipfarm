@@ -643,6 +643,7 @@ function ConversationDetail({
   };
   const write = useConversationCommand(api, command => {
     if (command.kind === 'send') {
+      if (command.model) models.sent(command.model);
       setContent(emptyRichDocument());
       uploads.clear();
       mentions.clear();

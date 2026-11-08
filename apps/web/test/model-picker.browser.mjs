@@ -119,6 +119,7 @@ try {
       assert.equal(preferences.get('ada'), 'grok-fast');
       await page.reload();
       await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      assert.equal(await page.getByText(/Your last model is no longer available/).count(), 0);
       await page.goto(`${origin}/other`);
       await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
       userId = 'grace';
@@ -132,6 +133,11 @@ try {
       await page
         .getByText('Your last model is no longer available. New messages use Claude Sonnet.', { exact: true })
         .waitFor();
+      await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+      await page.getByText(/Your last model is no longer available/).waitFor({ state: 'hidden' });
+      await page.reload();
+      await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
+      assert.equal(await page.getByText(/Your last model is no longer available/).count(), 0);
       userId = 'ada';
       await page.goto(`${origin}/acme`);
       await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();
