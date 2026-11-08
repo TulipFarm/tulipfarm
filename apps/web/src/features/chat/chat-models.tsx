@@ -29,6 +29,16 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
   };
 }
 
+const dismissedKey = (workspaceId: string) => `tulipfarm:replaced-model-notice:${workspaceId}`;
+
+function dismissedNotice(workspaceId: string) {
+  try {
+    return window.localStorage.getItem(dismissedKey(workspaceId));
+  } catch {
+    return null;
+  }
+}
+
 export function useChatModels(
   workspaceId: string,
   user: Pick<typeof authClient.$Infer.Session.user, 'lastModelFamilyId'>,
@@ -36,27 +46,30 @@ export function useChatModels(
   const catalog = useModelCatalog(workspaceId);
   const [selected, setSelected] = useState<ComposerModel | null>(null);
   const [preferenceSave, setPreferenceSave] = useState<'idle' | 'saving' | 'error'>('idle');
+  // The remembered model the member already acknowledged here, by dismissing the notice, choosing or sending.
+  const [acknowledged, setAcknowledged] = useState(() => dismissedNotice(workspaceId));
   const saving = useRef(false);
   const { state } = catalog;
   const families = state.kind === 'ready' ? state.data.families : [];
+  const saved = user.lastModelFamilyId ?? null;
   useEffect(() => {
     if (state.kind !== 'ready') return;
-    const saved = user.lastModelFamilyId;
     const listed = (id: string | null | undefined) => state.data.families.find(family => family.id === id);
     const savedFamily = listed(saved);
     const first =
-      (savedFamily?.unavailableReason === 'model-family-paused' ? undefined : savedFamily) ??
+      (savedFamily?.available ? savedFamily : undefined) ??
       state.data.families.find(family => family.id === state.data.defaultChatFamilyId && family.available) ??
       state.data.families.find(family => family.available);
     setSelected(current => (current && listed(current.id) ? current : first ? composerModel(first) : null));
-  }, [state, user.lastModelFamilyId]);
+  }, [state, saved]);
+  useEffect(() => setAcknowledged(dismissedNotice(workspaceId)), [workspaceId]);
   const current = families.find(family => family.id === selected?.id);
   const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;
   const ready = state.kind === 'ready';
   const choices = families.map(composerModel).sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled));
-  // The operator removed the person's saved model, so new messages use another one until they choose.
-  const savedRemoved =
-    ready && !!user.lastModelFamilyId && !families.some(family => family.id === user.lastModelFamilyId);
+  // The member's remembered model can no longer be used here, so new messages use another one until they choose.
+  const savedUnavailable =
+    ready && !!saved && saved !== acknowledged && !families.some(family => family.id === saved && family.available);
   async function savePreference(id: string) {
     if (saving.current) return;
     saving.current = true;
@@ -78,13 +91,31 @@ export function useChatModels(
       if (selected) void savePreference(selected.id);
     },
     choices: ready && preferenceSave !== 'saving' ? choices : [],
-    replacedModel: savedRemoved && model && !model.disabled ? model.label : null,
+    replacedModel: savedUnavailable && model && !model.disabled && model.id !== saved ? model.label : null,
     usable: ready && !!current?.available,
     select: (id: string) => {
       const family = families.find(item => item.id === id && item.available);
       if (ready && family && !saving.current) {
         setSelected(composerModel(family));
+        setAcknowledged(saved);
         void savePreference(id);
+      }
+    },
+    /** A sent message makes its model the member's last model. */
+    sent: (id: string) => {
+      setAcknowledged(saved);
+      if (id !== saved && !saving.current)
+        void authClient
+          .updateUser({ lastModelFamilyId: id }, { signal: AbortSignal.timeout(15_000) })
+          .catch(() => undefined);
+    },
+    dismissReplacedModel: () => {
+      if (!saved) return;
+      setAcknowledged(saved);
+      try {
+        window.localStorage.setItem(dismissedKey(workspaceId), saved);
+      } catch {
+        /* Storage can be disabled by the browser; the notice then stays hidden until reload. */
       }
     },
   };
@@ -150,9 +181,12 @@ export function ChatModelStatus({
   return (
     <>
       {replaced && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {replaced}
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <p role="status">{replaced}</p>
+          <Button size="sm" variant="ghost" onClick={catalog.dismissReplacedModel}>
+            Dismiss
+          </Button>
+        </div>
       )}
       {message && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">

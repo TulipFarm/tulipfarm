@@ -620,7 +620,8 @@ function ProjectComposer({ project }: { project: Project }) {
   const input = useRef<RichTextEditorHandle>(null);
   const reviewing = useRef(false);
   const allowNavigation = useRef(false);
-  const write = useConversationCommand(api, () => {
+  const write = useConversationCommand(api, command => {
+    if (command.kind === 'send' && command.model) models.sent(command.model);
     setContent(emptyRichDocument());
     uploads.clear();
     allowNavigation.current = true;

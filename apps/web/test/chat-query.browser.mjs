@@ -346,14 +346,104 @@ test('chat model selection uses the configured default, then the first available
             model('without-default', { lastModelFamilyId: null }),
             model('saved', { lastModelFamilyId: 'claude-haiku' }),
             model('removed', { lastModelFamilyId: 'retired-model' }),
+            model('unavailable', { lastModelFamilyId: 'gemini-pro' }),
           ),
         ),
       );
     });
     await page.waitForFunction(
       expected => [...document.querySelectorAll('output')].map(output => output.textContent).join(',') === expected,
-      'claude-sonnet,gpt-sol,claude-haiku,claude-sonnet (replaced: Claude Sonnet)',
+      'claude-sonnet,gpt-sol,claude-haiku,claude-sonnet (replaced: Claude Sonnet),claude-sonnet (replaced: Claude Sonnet)',
     );
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
+test('the last-model notice shows only for an unavailable last model and stops after a send or dismissal', async () => {
+  const server = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    server: { port: 0 },
+    plugins: [
+      {
+        name: 'chat-model-notice-test',
+        configureServer(server) {
+          server.middlewares.use('/chat-model-notice-test', async (_request, response) => {
+            response.setHeader('Content-Type', 'text/html');
+            response.end(await server.transformIndexHtml('/chat-model-notice-test', '<html><body></body></html>'));
+          });
+        },
+      },
+    ],
+  });
+  await server.listen();
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    const saves = [];
+    await page.route('**/v1/**/model-catalog', route =>
+      route.fulfill({ json: { families: chatCatalog.families, defaultChatFamilyId: 'claude-sonnet' } }),
+    );
+    await page.route('**/v1/auth/**', route => {
+      if (route.request().url().endsWith('/update-user')) saves.push(route.request().postDataJSON().lastModelFamilyId);
+      return route.fulfill({ json: { status: true } });
+    });
+    await page.goto(`${server.resolvedUrls.local[0]}chat-model-notice-test`);
+    const mount = () =>
+      page.evaluate(async () => {
+        const f = await import('/test/chat-query-browser-fixture.tsx');
+        const { React, createRoot, SessionQueryProvider, WorkspaceQueryProvider } = f;
+        const identity = { userId: 'notice-user', sessionId: 'notice-session' };
+        function Model({ workspaceId, user }) {
+          const models = f.useChatModels(workspaceId, user);
+          return React.createElement(
+            'section',
+            { 'aria-label': workspaceId },
+            React.createElement('output', null, `${models.model?.id}:${models.replacedModel ?? 'none'}`),
+            React.createElement('button', { onClick: () => models.model && models.sent(models.model.id) }, 'Send'),
+            React.createElement('button', { onClick: models.dismissReplacedModel }, 'Dismiss'),
+          );
+        }
+        const model = (workspaceId, user) =>
+          React.createElement(
+            WorkspaceQueryProvider,
+            {
+              scope: { kind: 'workspace', userId: identity.userId, workspaceId, membershipId: `m-${workspaceId}` },
+              admitted: () => true,
+              subscribe: () => () => {},
+            },
+            React.createElement(Model, { workspaceId, user }),
+          );
+        document.body.replaceChildren();
+        createRoot(document.body.appendChild(document.createElement('div'))).render(
+          React.createElement(
+            SessionQueryProvider,
+            { identity },
+            model('current', { lastModelFamilyId: 'claude-haiku' }),
+            model('sent', { lastModelFamilyId: 'retired-model' }),
+            model('dismissed', { lastModelFamilyId: 'retired-model' }),
+          ),
+        );
+      });
+    const output = workspace => page.getByRole('region', { name: workspace }).locator('output');
+    const button = (workspace, name) => page.getByRole('region', { name: workspace }).getByRole('button', { name });
+    await mount();
+    await output('current').filter({ hasText: 'claude-haiku:none' }).waitFor();
+    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
+    await output('dismissed').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
+    // Sending with the model that is already the last one needs no notice and no save.
+    await button('current', 'Send').click();
+    await button('sent', 'Send').click();
+    await output('sent').filter({ hasText: 'claude-sonnet:none' }).waitFor();
+    await button('dismissed', 'Dismiss').click();
+    await output('dismissed').filter({ hasText: 'claude-sonnet:none' }).waitFor();
+    for (let wait = 0; !saves.length && wait < 50; wait++) await page.waitForTimeout(100);
+    assert.deepEqual(saves, ['claude-sonnet']);
+    // A dismissal is kept for this workspace, so the next new chat does not repeat the notice.
+    await mount();
+    await output('dismissed').filter({ hasText: 'claude-sonnet:none' }).waitFor();
+    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
   } finally {
     await browser.close();
     await server.close();
