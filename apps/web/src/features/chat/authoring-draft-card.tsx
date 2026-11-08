@@ -43,7 +43,18 @@ import { changingTools } from '@/features/agents/tool-picker';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { useResultAttention } from './canvas-state';
 
-export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; chatId: string; id: string }) {
+export function AuthoringDraftCard({
+  api,
+  chatId,
+  id,
+  inCanvas = false,
+}: {
+  api: ConversationApi;
+  chatId: string;
+  id: string;
+  /** In the canvas the review is already in view, so it never points back to the chat. */
+  inCanvas?: boolean;
+}) {
   const { workspace } = workspaceRoute.useRouteContext();
   const write = useConversationCommand(api, () => {});
   const result = useRef<HTMLDivElement>(null);
@@ -57,7 +68,7 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
   const denied = write.state.kind === 'rejected' && [401, 403, 404].includes(write.state.status);
   const read = useAuthoringDraft(api, chatId, id, !denied);
   const draft = read.state.kind === 'ready' ? read.state.data : null;
-  useResultAttention(`draft:${id}`, draft?.status === 'pending', 'A draft needs your review');
+  useResultAttention(`draft:${id}`, !inCanvas && draft?.status === 'pending', 'A draft needs your review');
   useEffect(() => {
     if (submitted.current && draft && !pending(draft)) {
       result.current?.focus();

@@ -34,6 +34,7 @@ export type CanvasContent =
   | { kind: 'github-batch'; workspaceId: string; chatId: string; batchId: string; task: boolean }
   | { kind: 'slack-action'; workspaceId: string; actionId: string }
   | { kind: 'workflow'; workspaceId: string; reference: WorkflowReference }
+  | { kind: 'agent-draft'; workspaceId: string; chatId: string; draftId: string }
   | { kind: 'records'; reference: RowView }
   | { kind: 'record-changes'; change: RecordChanges }
   | { kind: 'calendar-read'; result: CalendarHistoryResult }

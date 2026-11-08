@@ -29,7 +29,7 @@ import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
 import { CanvasProvider, useCanvas, useResultAttention } from './canvas-state';
-import { NewWorkflowDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
+import { NewChatDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
 import { RecordChangesCard, RowViewCard, RowViewResponse } from './records-canvas';
@@ -96,6 +96,7 @@ import {
 } from '@/features/packages/chat-packages';
 import { InteractionCard } from './interaction-card';
 import { AuthoringDraftCard } from './authoring-draft-card';
+import { AgentDraftLink } from './agent-draft-canvas';
 import { FollowUpCard } from './follow-up-card';
 import { Welcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
@@ -1367,7 +1368,7 @@ function ConversationDetail({
                     />
                   )}
                   {!draft && !empty && (
-                    <NewWorkflowDrafts
+                    <NewChatDrafts
                       workspaceId={workspace.id}
                       chatId={chatId}
                       tools={history.messages.flatMap(message => message.tools)}
@@ -1949,9 +1950,13 @@ function ConversationTools({
             ].includes(tool.tool) ||
               tool.rowDraftId === tool.id),
         )
-        .map(tool => (
-          <AuthoringDraftCard key={tool.id} api={api} chatId={chatId} id={tool.id} />
-        ))}
+        .map(tool =>
+          tool.tool === 'agents.draft' ? (
+            <AgentDraftLink key={tool.id} api={api} workspaceId={workspace.id} chatId={chatId} id={tool.id} />
+          ) : (
+            <AuthoringDraftCard key={tool.id} api={api} chatId={chatId} id={tool.id} />
+          ),
+        )}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.integration)
         .map(tool => (

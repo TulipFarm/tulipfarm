@@ -164,35 +164,30 @@ test(
         try {
           await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
           assert.equal(await page.getByRole('region', { name: 'Canvas', exact: true }).count(), 0);
-          const cards = page.getByRole('region', { name: 'Review agent draft' });
-          await cards.nth(1).waitFor();
-          const created = cards.filter({ hasText: 'qa-second-chat-helper' }),
-            updated = cards.filter({ hasText: 'qa-chat-created-helper instructions.' });
+          const links = page.getByRole('button', { name: 'Review agent', exact: true });
+          await links.nth(1).waitFor();
+          assert.equal(
+            await page.getByRole('region', { name: 'Review agent draft' }).count(),
+            0,
+            'chat links to agent drafts instead of showing the full review',
+          );
+          await page.getByText('Draft · Waiting for your review', { exact: true }).nth(1).waitFor();
+          const review = page.getByRole('region', { name: 'Review agent draft' });
+          await links.nth(0).click();
+          const created = review.filter({ hasText: 'qa-second-chat-helper' });
           await created.getByText('Creates a new agent', { exact: true }).waitFor();
+          assert.equal(await review.count(), 1, 'the canvas shows only the opened draft');
           assert.equal(
             await created.getByText(/Updates existing agent|Existing agent/).count(),
             0,
             'a create card never names an existing agent',
           );
-          await updated.getByText('Updates existing agent “qa-chat-created-helper”', { exact: true }).waitFor();
-          await updated.getByText('Instructions, Tools', { exact: true }).waitFor();
           await created
             .getByText(
               'Saving does not activate this agent. An agent manager must turn on execution and activate its exact saved revision separately.',
               { exact: true },
             )
             .waitFor();
-          await updated
-            .getByText(
-              'Saving does not activate these changes. An agent manager must activate the exact saved revision separately.',
-              { exact: true },
-            )
-            .waitFor();
-          assert.equal(
-            await updated.getByText(/turn on execution/).count(),
-            0,
-            'an update never claims the agent starts off',
-          );
           await created.getByText('Support', { exact: true }).waitFor();
           assert.deepEqual(
             await created
@@ -211,6 +206,23 @@ test(
             await created.getByText('Agent ID', { exact: true }).count(),
             0,
             'a create card has no existing agent ID',
+          );
+          assert.equal(await page.getByText('A draft needs your review').count(), 0, 'the review is already in view');
+          if (mobile) await page.getByRole('button', { name: 'Back to chat' }).first().click();
+          await links.nth(1).click();
+          const updated = review.filter({ hasText: 'qa-chat-created-helper instructions.' });
+          await updated.getByText('Updates existing agent “qa-chat-created-helper”', { exact: true }).waitFor();
+          await updated.getByText('Instructions, Tools', { exact: true }).waitFor();
+          await updated
+            .getByText(
+              'Saving does not activate these changes. An agent manager must activate the exact saved revision separately.',
+              { exact: true },
+            )
+            .waitFor();
+          assert.equal(
+            await updated.getByText(/turn on execution/).count(),
+            0,
+            'an update never claims the agent starts off',
           );
           await updated.getByRole('button', { name: 'Technical details' }).click();
           const technical = updated.getByRole('definition').filter({ hasText: existingAgent });
@@ -401,6 +413,7 @@ test(
         });
         if (!handoff) await page.clock.install();
         await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
+        await page.getByRole('button', { name: 'Review agent', exact: true }).click();
         const card = page.getByRole('region', { name: 'Review agent draft', exact: true });
         await card.getByRole('button', { name: 'Create and activate', exact: true }).waitFor();
         if (!handoff) {
