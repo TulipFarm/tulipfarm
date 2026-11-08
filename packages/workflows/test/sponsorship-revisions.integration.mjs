@@ -90,7 +90,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const workflowDefinition = value => ({
         version: 1,
         name: 'Consented write',
-        trigger: { kind: 'interval', minutes: 1 },
+        triggers: [{ id: 'interval', kind: 'interval', minutes: 1 }],
         steps: [
           {
             id: 'create',
@@ -163,7 +163,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(unchanged.sponsorshipAccepted, true, 'saving an identical definition keeps consent');
       await service.activate(w.id, manager.userId, id, { ...activation, expectedGeneration: accepted.generation });
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [id],
       );
       await service.due(w.id);

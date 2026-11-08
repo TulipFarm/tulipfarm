@@ -28,7 +28,8 @@ import { BuilderTestChat, useBuilderTestChat } from './builder-test-chat';
 import { AgentRead } from './feedback';
 import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
-import { AgentSetupReview, setupTriggerLabel, useTriggerTableNames } from './setup-review';
+import { AgentSetupReview, useSetupTriggerNames } from './setup-review';
+import { useSlackDestinationNames } from './reference-names';
 import type { agentApi, AgentContext } from './api';
 
 type Operation = {
@@ -90,7 +91,8 @@ export function AgentBuilder({
   const submitIntent = useRef<'save' | null>(null);
   const changed = useAgentChanges();
   const catalog = useModelCatalog(workspaceId);
-  const tableNames = useTriggerTableNames(workspaceId, draft.triggers);
+  const triggerName = useSetupTriggerNames(workspaceId, draft.triggers);
+  const slack = useSlackDestinationNames(workspaceId, draft.access.scope);
   const chat = useBuilderTestChat(workspaceId, builderDefinition(draft), draft.source);
   const write = useTableWrite(
     async (operation: Operation) => {
@@ -173,7 +175,8 @@ export function AgentBuilder({
       skills={draft.definition.skills ?? []}
       tools={draft.definition.tools}
       channelNames={draft.channels.filter(channel => !channel.detach).map(channel => channel.name)}
-      triggerLabels={draft.triggers.map(item => setupTriggerLabel(item.trigger, tableNames))}
+      postsTo={slack.postsTo}
+      triggerLabels={draft.triggers.map(triggerName)}
       onEdit={chooseStep}
     />
   );
@@ -201,12 +204,14 @@ export function AgentBuilder({
         expectedSavedRevision: base?.expectedSavedRevision ?? null,
         expectedPolicyVersion: base?.expectedPolicyVersion ?? 0,
         expectedActivationIds: base?.expectedActivationIds ?? [],
+        expectedWorkflowRevision: base?.expectedWorkflowRevision ?? null,
+        expectedWorkflowGeneration: base?.expectedWorkflowGeneration ?? null,
         setup: parsed.setup,
       },
       publicationId: crypto.randomUUID(),
       decision,
       consent: {
-        sponsorTriggerIds: draft.triggers.filter(trigger => trigger.sponsorConsent).map(trigger => trigger.id),
+        sponsor: draft.sponsorConsent,
         replaceChannels: draft.channels.filter(channel => channel.replaceConsent).map(channel => channel.channel),
       },
     });
@@ -359,9 +364,12 @@ export function AgentBuilder({
         />
         <BuilderTriggers
           slug={slug}
-          tableNames={tableNames}
+          workspaceId={workspaceId}
           value={draft.triggers}
+          prompt={draft.prompt}
+          sponsor={draft.sponsorConsent}
           onChange={triggers => update({ triggers })}
+          onSponsor={sponsorConsent => update({ sponsorConsent })}
           disabled={locked}
           showErrors={showErrors}
           activating={activating}

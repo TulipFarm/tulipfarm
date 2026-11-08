@@ -16,6 +16,7 @@ import {
   filterPhrase,
   githubInstallNote,
   recordScheduleDescription,
+  type GitHubNames,
   type WorkflowValue,
 } from './definition-description.ts';
 
@@ -30,12 +31,13 @@ export type WorkflowLabels = {
   destinations?: Record<string, string>;
   provider?: string;
   providerBrand?: Brand;
+  github?: GitHubNames;
 };
 export type WorkflowStepDetails = {
   facts: { label: string; value: string }[];
   gates: { stepId: string; label: string; choice: 'Yes' | 'No' }[];
   references: { stepId: string; label: string }[];
-  configuration: Trigger | Step;
+  configuration: readonly Trigger[] | Step;
 };
 export type WorkflowGraph = {
   nodes: WorkflowDiagramNode[];
@@ -58,7 +60,6 @@ const stepTitles: Record<Step['kind'], string> = {
   'update-row': 'Update a row',
 };
 export const triggerTitles: Record<Trigger['kind'], string> = {
-  manual: 'Started by a person',
   webhook: 'Webhook received',
   event: 'Event received',
   provider: 'Connected app event',
@@ -70,7 +71,7 @@ export const triggerTitles: Record<Trigger['kind'], string> = {
   row: 'When a row changes',
 };
 
-export function rowTriggerLine(trigger: Extract<Trigger, { kind: 'row' }>, table: string | undefined) {
+export function rowTriggerLine(trigger: Pick<Extract<Trigger, { kind: 'row' }>, 'event'>, table: string | undefined) {
   if (trigger.event === 'created') return table ? `When a row is added to ${table}` : 'When a row is added';
   if (trigger.event === 'deleted') return table ? `When a row is deleted from ${table}` : 'When a row is deleted';
   return table ? `When a row in ${table} changes` : triggerTitles.row;
@@ -124,8 +125,6 @@ function sourceText(step: Step, labels: WorkflowLabels, timezone: string): strin
 
 function triggerText(trigger: Trigger, labels: WorkflowLabels) {
   switch (trigger.kind) {
-    case 'manual':
-      return 'A person with run access starts it';
     case 'webhook':
       return 'An authenticated incoming event';
     case 'event':
@@ -133,7 +132,7 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
     case 'provider':
       return `${labels.provider ?? 'Connected source'} / every ${workflowDuration(trigger.minutes * 60)}`;
     case 'github':
-      return describeGitHubTrigger(trigger);
+      return describeGitHubTrigger(trigger, labels.github);
     case 'once':
       return runTime(trigger.at, trigger.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
     case 'interval':
@@ -174,11 +173,7 @@ function triggerFacts(trigger: Trigger, labels: WorkflowLabels): WorkflowStepDet
   }
   if (trigger.kind === 'provider')
     return [{ label: 'Starts for', value: trigger.event === 'updated' ? 'Updated rows' : 'New items' }];
-  if (trigger.kind === 'github')
-    return [
-      { label: 'Repository ID', value: trigger.repositoryId },
-      { label: 'Delivery', value: githubInstallNote },
-    ];
+  if (trigger.kind === 'github') return [{ label: 'Delivery', value: githubInstallNote }];
   if (trigger.kind !== 'row' && trigger.kind !== 'record') return [];
   const facts =
     trigger.kind === 'record'
@@ -261,26 +256,47 @@ export function workflowGraph(
   const state = (id: string): WorkflowStepState => (states ? (states[id] ?? 'unknown') : 'definition');
   const title = (step: Step) => labels.steps?.[step.id]?.title ?? stepTitles[step.kind];
   const gates = stepGates(definition.steps);
-  const trigger = definition.trigger;
+  const triggers = definition.triggers;
+  const only = triggers.length === 1 ? triggers[0] : undefined;
   const timezone =
-    ('timezone' in trigger
-      ? trigger.timezone
-      : trigger.kind === 'record' && 'timezone' in trigger.field
-        ? trigger.field.timezone
-        : undefined) ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    triggers
+      .map(trigger =>
+        'timezone' in trigger
+          ? trigger.timezone
+          : trigger.kind === 'record' && 'timezone' in trigger.field
+            ? trigger.field.timezone
+            : undefined,
+      )
+      .find(Boolean) ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const kinds = new Set(triggers.map(trigger => trigger.kind));
   const triggerBrand =
     labels.trigger?.brand ??
-    (trigger.kind === 'provider' ? labels.providerBrand : trigger.kind === 'github' ? 'github' : undefined);
+    (kinds.size === 1 && kinds.has('provider')
+      ? labels.providerBrand
+      : kinds.size === 1 && kinds.has('github')
+        ? 'github'
+        : undefined);
+  const rowLine = (trigger: Extract<Trigger, { kind: 'row' }>) =>
+    rowTriggerLine(trigger, labels.tables?.[trigger.tableId]);
+  const name = (trigger: Trigger) =>
+    trigger.label ?? (trigger.kind === 'row' ? rowLine(trigger) : triggerTitles[trigger.kind]);
+  // A labelled row trigger still says which change to which table starts it.
+  const starts = (trigger: Trigger) =>
+    trigger.kind === 'row' && trigger.label ? rowLine(trigger) : triggerText(trigger, labels);
   const nodes: WorkflowDiagramNode[] = [
     {
       id: '$trigger',
       kind: 'trigger',
       title:
         labels.trigger?.title ??
-        (trigger.kind === 'row'
-          ? rowTriggerLine(trigger, labels.tables?.[trigger.tableId])
-          : triggerTitles[trigger.kind]),
-      summary: labels.trigger?.summary ?? triggerText(definition.trigger, labels),
+        (only ? name(only) : triggers.length ? `${triggers.length} triggers` : 'Started by a person'),
+      summary:
+        labels.trigger?.summary ??
+        (only
+          ? triggerText(only, labels)
+          : triggers.length
+            ? triggers.map(name).join(', ')
+            : 'A person with run access starts it'),
       actor: `Runs as ${labels.actor}`,
       ordinal: 0,
       state: state('$trigger'),
@@ -292,19 +308,20 @@ export function workflowGraph(
   const details: WorkflowGraph['details'] = {
     $trigger: {
       facts: [
-        {
-          label: 'Starts',
-          value:
-            trigger.kind === 'row'
-              ? rowTriggerLine(trigger, labels.tables?.[trigger.tableId])
-              : triggerText(trigger, labels),
-        },
+        ...(triggers.length
+          ? triggers.flatMap(trigger => [
+              { label: name(trigger), value: starts(trigger) },
+              ...triggerFacts(trigger, labels).map(fact => ({
+                ...fact,
+                label: only ? fact.label : `${name(trigger)}: ${fact.label}`,
+              })),
+            ])
+          : [{ label: 'Starts', value: 'A person with run access starts it' }]),
         { label: 'Runs as', value: labels.actor },
-        ...triggerFacts(trigger, labels),
       ],
       gates: [],
       references: [],
-      configuration: definition.trigger,
+      configuration: triggers,
     },
   };
   for (const [index, step] of definition.steps.entries()) {

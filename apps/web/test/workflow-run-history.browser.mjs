@@ -56,7 +56,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Nightly copy',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [{ id: 'copy', kind: 'transform', fields: { n: { kind: 'input', path: ['n'] } } }],
         },
       });
@@ -202,7 +202,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.waitForFunction(() => document.querySelectorAll('article[id^="workflow-run-"]').length === 1);
       assert.deepEqual(await shown(), [runIds[0]]);
       await choose(page, page.getByLabel('Show', { exact: true }), 'Failed');
-      await page.getByText('No runs in your history for this workflow match Failed.', { exact: true }).waitFor();
+      await page.getByText('No runs in your history for this workflow match these filters.', { exact: true }).waitFor();
       if (process.env.RUN_HISTORY_SCREENSHOTS)
         await page.screenshot({ path: `${process.env.RUN_HISTORY_SCREENSHOTS}/run-history-no-match.png` });
       await page.getByRole('button', { name: 'Clear filter' }).click();
@@ -217,7 +217,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Changed saved copy',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [{ id: 'copy', kind: 'transform', fields: { n: { kind: 'literal', value: 99 } } }],
         },
       });
@@ -274,7 +274,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Review ticket',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [{ id: 'review', kind: 'agent', agentId, prompt: { kind: 'literal', value: 'Review this ticket.' } }],
         },
       });

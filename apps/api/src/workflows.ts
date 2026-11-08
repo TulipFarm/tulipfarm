@@ -27,6 +27,8 @@ import {
   saveSchema,
   startSchema,
   workflowSchema,
+  triggerIdSchema,
+  triggerSwitchSchema,
   providerIntegrationInputSchema,
   providerIntegrationSchema,
   providerStatusSchema,
@@ -63,6 +65,8 @@ import {
 
 const workspace = z.strictObject({ workspaceId: idSchema });
 const workflow = workspace.extend({ workflowId: idSchema });
+const workflowTrigger = workflow.extend({ triggerId: triggerIdSchema });
+const triggerSwitchBodySchema = triggerSwitchSchema.omit({ triggerId: true });
 const run = workflow.extend({ runId: idSchema });
 const validation = routeValidation({ missing: 'Missing workflow validator', invalid: error => error });
 const { json } = validation;
@@ -89,7 +93,11 @@ function schema(operationId: string, summary: string, params: z.ZodType, respons
   };
 }
 const receiveOperation = 'receiveWorkflowWebhookV1',
-  testOperation = 'sendWorkflowWebhookTestV1';
+  testOperation = 'sendWorkflowWebhookTestV1',
+  triggerReceiveOperation = 'receiveWorkflowTriggerWebhookV1',
+  triggerTestOperation = 'sendWorkflowTriggerWebhookTestV1';
+const receiveOperations = new Set([receiveOperation, triggerReceiveOperation]),
+  testOperations = new Set([testOperation, triggerTestOperation]);
 function errorCode(payload: unknown) {
   if (typeof payload !== 'string') return null;
   try {
@@ -113,7 +121,7 @@ export function registerWorkflows(
     routes.removeContentTypeParser('text/plain');
     const user = authenticateRoutes(routes, dependencies.auth, {
       origin: () => authConfig().webOrigin,
-      publicOperation: receiveOperation,
+      publicOperation: receiveOperations,
     });
     routes.setErrorHandler((failure, request, reply) => {
       if (failure instanceof WebhookRejected) rejections.set(request, failure);
@@ -198,6 +206,18 @@ export function registerWorkflows(
         ),
       },
       request => service.recent(workspace.parse(request.params).workspaceId, user(request)),
+    );
+    routes.get(
+      `${base}/github-repositories`,
+      {
+        schema: schema(
+          'workflowGitHubRepositoriesV1',
+          'List the GitHub repositories a GitHub trigger may watch',
+          workspace,
+          z.array(z.object({ repositoryId: z.string(), fullName: z.string(), ownerId: z.string().nullable() })),
+        ),
+      },
+      request => service.githubRepositories(workspace.parse(request.params).workspaceId, user(request)),
     );
     const saved = z.object({ saved: z.boolean() });
     const integration = workspace.extend({ integrationId: idSchema });
@@ -525,6 +545,26 @@ export function registerWorkflows(
       },
     );
     routes.post(
+      `${base}/:workflowId/triggers/:triggerId/switch`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'switchWorkflowTriggerV1',
+          'Switch one trigger on or off without a new revision; switching on starts from its next occurrence',
+          workflowTrigger,
+          workflowSchema,
+          triggerSwitchBodySchema,
+        ),
+      },
+      request => {
+        const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+        return service.switchTrigger(workspaceId, user(request), workflowId, {
+          ...triggerSwitchBodySchema.parse(request.body),
+          triggerId,
+        });
+      },
+    );
+    routes.post(
       `${base}/:workflowId/runs`,
       {
         logLevel: 'silent',
@@ -652,6 +692,56 @@ export function registerWorkflows(
         return service.webhookDeliveries(workspaceId, user(request), workflowId);
       },
     );
+    routes.put(
+      `${base}/:workflowId/triggers/:triggerId/webhook-key`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'rotateWorkflowTriggerWebhookV1',
+          "Generate a bearer or HMAC signing key for one webhook trigger, returned once, and keep the trigger's previous key valid for a grace period",
+          workflowTrigger,
+          webhookKeyIssuedSchema,
+          webhookKeySchema,
+        ),
+      },
+      request => {
+        const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+        return service.webhookKey(workspaceId, user(request), workflowId, request.body, triggerId);
+      },
+    );
+    routes.post(
+      `${base}/:workflowId/triggers/:triggerId/webhook-key/revoke-previous`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'revokePreviousWorkflowTriggerWebhookKeyV1',
+          "Stop accepting one webhook trigger's previous key before its grace period ends",
+          workflowTrigger,
+          workflowSchema,
+          commandSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+        return service.revokePreviousWebhookKey(workspaceId, user(request), workflowId, request.body, triggerId);
+      },
+    );
+    routes.get(
+      `${base}/:workflowId/triggers/:triggerId/webhook-deliveries`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'workflowTriggerWebhookDeliveriesV1',
+          "Read one webhook trigger's recent delivery log: time, outcome, request ID, body size, and run",
+          workflowTrigger,
+          webhookDeliveryLogSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+        return service.webhookDeliveries(workspaceId, user(request), workflowId, triggerId);
+      },
+    );
     routes.register(async receiver => {
       // HMAC signatures cover the exact bytes sent, so the parsed body keeps its raw source beside it.
       const raw = new WeakMap<FastifyRequest, Buffer>(),
@@ -661,10 +751,13 @@ export function registerWorkflows(
       // Source and workspace budgets refuse before any key check, so logging those would let anyone write to workspace storage with made-up workflow IDs.
       const quietUntil = new Map<string, number>();
       receiver.addHook('onSend', async (request, reply, payload) => {
-        const operation = request.routeOptions.schema?.operationId,
-          target = workflow.safeParse(request.params);
-        if ((operation !== receiveOperation && operation !== testOperation) || !target.success) return payload;
-        const test = operation === testOperation,
+        const operation = request.routeOptions.schema?.operationId ?? '',
+          perTrigger = operation === triggerReceiveOperation || operation === triggerTestOperation,
+          target = perTrigger
+            ? workflowTrigger.safeParse(request.params)
+            : workflow.extend({ triggerId: z.undefined().optional() }).safeParse(request.params);
+        if ((!receiveOperations.has(operation) && !testOperations.has(operation)) || !target.success) return payload;
+        const test = testOperations.has(operation),
           status = reply.statusCode,
           refusal = webhookRefusal(request);
         if (refusal && refusal !== 'workflow-webhook') return payload;
@@ -689,19 +782,24 @@ export function registerWorkflows(
         if (outcome === 'workflows-unavailable') return payload;
         const length = Number(request.headers['content-length']);
         try {
-          await service.recordWebhookDelivery(workspaceId, workflowId, {
-            status,
-            outcome,
-            test,
-            runId: run?.runId ?? null,
-            bodyBytes: test
-              ? null
-              : (raw.get(request)?.length ??
-                (Number.isSafeInteger(length) && length >= 0 ? Math.min(length, 2147483647) : null)),
-            ...(test
-              ? { requestId: webhookTestSchema.safeParse(request.body).data?.requestId ?? null }
-              : { sent: { body: request.body, headers: request.headers } }),
-          });
+          await service.recordWebhookDelivery(
+            workspaceId,
+            workflowId,
+            {
+              status,
+              outcome,
+              test,
+              runId: run?.runId ?? null,
+              bodyBytes: test
+                ? null
+                : (raw.get(request)?.length ??
+                  (Number.isSafeInteger(length) && length >= 0 ? Math.min(length, 2147483647) : null)),
+              ...(test
+                ? { requestId: webhookTestSchema.safeParse(request.body).data?.requestId ?? null }
+                : { sent: { body: request.body, headers: request.headers } }),
+            },
+            target.data.triggerId,
+          );
         } catch {
           receiver.log.error('A webhook delivery could not be recorded in the delivery log');
         }
@@ -741,7 +839,7 @@ export function registerWorkflows(
           bodyLimit: 65536,
           schema: schema(
             receiveOperation,
-            'Receive a workflow event authenticated with a bearer key or provider signature, as a JSON or form-encoded requestId envelope or raw trigger payload',
+            "Receive an event for the workflow's webhook trigger with ID webhook, kept for URLs issued before triggers had their own; authenticated with a bearer key or provider signature, as a JSON or form-encoded requestId envelope or raw trigger payload",
             workflow,
             z.object({ runId: idSchema }),
             z.json(),
@@ -775,6 +873,56 @@ export function registerWorkflows(
         async request => {
           const { workspaceId, workflowId } = workflow.parse(request.params);
           const run = await service.testWebhook(workspaceId, user(request), workflowId, request.body);
+          admitted.set(request, run);
+          return { runId: run.runId };
+        },
+      );
+      receiver.post(
+        `${base}/:workflowId/triggers/:triggerId/webhook`,
+        {
+          logLevel: 'silent',
+          bodyLimit: 65536,
+          schema: schema(
+            triggerReceiveOperation,
+            "Receive an event for one webhook trigger, authenticated with that trigger's bearer key or provider signature, as a JSON or form-encoded requestId envelope or raw trigger payload",
+            workflowTrigger,
+            z.object({ runId: idSchema }),
+            z.json(),
+          ),
+        },
+        async request => {
+          const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+          const body = raw.get(request);
+          const run = await service.webhook(
+            workspaceId,
+            workflowId,
+            {
+              body: request.body,
+              headers: request.headers,
+              ...(body ? { raw: body } : {}),
+            },
+            triggerId,
+          );
+          admitted.set(request, run);
+          return { runId: run.runId };
+        },
+      );
+      receiver.post(
+        `${base}/:workflowId/triggers/:triggerId/webhook-test`,
+        {
+          logLevel: 'silent',
+          bodyLimit: 1024,
+          schema: schema(
+            triggerTestOperation,
+            "Send a sample event shaped for one active webhook trigger through webhook admission, recorded in that trigger's delivery log as a test",
+            workflowTrigger,
+            z.object({ runId: idSchema }),
+            webhookTestSchema,
+          ),
+        },
+        async request => {
+          const { workspaceId, workflowId, triggerId } = workflowTrigger.parse(request.params);
+          const run = await service.testWebhook(workspaceId, user(request), workflowId, request.body, triggerId);
           admitted.set(request, run);
           return { runId: run.runId };
         },

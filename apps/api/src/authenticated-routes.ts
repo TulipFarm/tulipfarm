@@ -8,14 +8,14 @@ export function authenticateRoutes(
   auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> },
   options: {
     origin?: string | (() => string);
-    publicOperation?: string;
+    publicOperation?: ReadonlySet<string>;
     userSchema?: z.ZodType<string>;
   } = {},
 ) {
   const users = new WeakMap<FastifyRequest, string>();
   routes.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    if (options.publicOperation && request.routeOptions.schema?.operationId === options.publicOperation) return;
+    if (options.publicOperation?.has(request.routeOptions.schema?.operationId ?? '')) return;
     if (options.origin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = typeof options.origin === 'function' ? options.origin() : options.origin;
       if (request.headers.origin !== origin) return reply.code(403).send({ error: 'untrusted-origin' });

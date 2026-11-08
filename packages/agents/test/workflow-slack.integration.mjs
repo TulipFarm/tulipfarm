@@ -73,7 +73,7 @@ test('native Slack workflow: Tickets chat draft, row event, direct send, restart
   const definition = {
     version: 1,
     name: 'Tickets to Slack',
-    trigger: { kind: 'row', tableId, event: 'created' },
+    triggers: [{ id: 'row', kind: 'row', tableId, event: 'created' }],
     steps: [
       {
         id: 'notify',
@@ -124,9 +124,10 @@ test('native Slack workflow: Tickets chat draft, row event, direct send, restart
     recordId: randomUUID(),
     values: { [title]: { kind: 'text', value: 'Synthetic ticket' } },
   });
-  await f.db.databaseAdmin.query(`UPDATE ${f.table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1`, [
-    saved.workflowId,
-  ]);
+  await f.db.databaseAdmin.query(
+    `UPDATE ${f.table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1`,
+    [saved.workflowId],
+  );
   const [work] = await workflows.due(w.id);
   assert.ok(work);
   const progress = await workflows.advance(work);
@@ -194,7 +195,7 @@ test('native Slack workflow: retry, expiry while retrying, revoke, disabled outb
       definition: {
         version: 1,
         name: 'Slack safety',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           {
             id: 'send',
@@ -312,7 +313,7 @@ test('native Slack workflow recovery follows only its current waiting step and r
     definition: {
       version: 1,
       name: 'Two Slack sends',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'first',
@@ -417,7 +418,7 @@ test('native Slack workflow action prepared under per-send approval keeps it and
     definition: {
       version: 1,
       name: 'Notification recovery',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'send',
@@ -485,7 +486,7 @@ test('native Slack workflow does not export private history through authored lit
   const definition = {
     version: 1,
     name: 'Private literal guard',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       {
         id: 'send',
@@ -533,7 +534,7 @@ test('native Slack workflow step saved to post as the TulipFarm app sends with t
   const definition = {
     version: 1,
     name: 'App announcement',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       {
         id: 'announce',

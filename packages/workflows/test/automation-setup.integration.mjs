@@ -23,7 +23,7 @@ async function setupFixture() {
     await db.platform.query(
       `INSERT INTO ${table('tf_workflow_revisions')}(workflow_id,id,definition,author_membership_id)
       VALUES($1,$2,$3,$4)`,
-      [workflowId, revision, { version: 1, name: 'Fixture', trigger: { kind: 'manual' }, steps: [] }, w.membershipId],
+      [workflowId, revision, { version: 1, name: 'Fixture', triggers: [], steps: [] }, w.membershipId],
     );
     await db.platform.query(
       `UPDATE ${table('tf_workflows')} SET sponsor_membership_id=$3,sponsorship_revision=$2,sponsorship_id=$4

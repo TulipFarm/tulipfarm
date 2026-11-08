@@ -118,36 +118,32 @@ test(
       assert.equal(setup.slackChannels.length, 2);
       assert.deepEqual(setup.triggers, []);
       assert.deepEqual(setup.policy, { grants: [], personGrants: [] }, 'placement never silently shares');
-      assert.deepEqual(saves[0].body.consent.sponsorTriggerIds, [], 'saving needs no sponsor approval');
+      assert.equal(saves[0].body.consent.sponsor, false, 'saving needs no sponsor approval');
       // Triggers come from chat; the builder reviews and sponsors those already on the draft.
       const trigger = {
         id: randomUUID(),
         trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
-        prompt: 'Prepare the weekly People Ops update.',
       };
-      [...fixture.setups.values()][0].setup.triggers = [trigger];
+      const prompt = 'Prepare the weekly People Ops update.';
+      Object.assign([...fixture.setups.values()][0].setup, { triggers: [trigger], prompt });
       await page.reload();
       await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
       await step('Triggers');
       assert.equal(await form.getByText('Check needed', { exact: true }).count(), 2);
       for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
         await recheck.click();
-      await form
-        .getByRole('region', { name: 'Trigger 1' })
-        .getByText('Prepare the weekly People Ops update.', { exact: true })
-        .waitFor();
-      await form.getByRole('checkbox', { name: 'I sponsor this trigger', exact: true }).check();
+      await form.getByRole('region', { name: 'Trigger 1' }).waitFor();
+      await form.getByText(prompt, { exact: true }).first().waitFor();
+      await form.getByRole('checkbox', { name: /^I sponsor / }).check();
       await step('Review');
-      await form
-        .getByRole('region', { name: 'Reviewed triggers' })
-        .getByText('Prepare the weekly People Ops update.', { exact: true })
-        .waitFor();
+      await form.getByRole('region', { name: 'Reviewed triggers' }).getByText(prompt, { exact: true }).waitFor();
       await form.getByRole('button', { name: 'Create and activate', exact: true }).click();
       await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).waitFor();
       assert.equal(fixture.publications.size, 2);
       const activation = [...fixture.publications.values()].find(item => item.body.decision === 'activate');
-      assert.deepEqual(activation.body.consent.sponsorTriggerIds, [trigger.id]);
+      assert.equal(activation.body.consent.sponsor, true);
       assert.deepEqual([...fixture.setups.values()][0].setup.triggers, [trigger]);
+      assert.equal([...fixture.setups.values()][0].setup.prompt, prompt);
       assert.deepEqual(errors, []);
     } catch (error) {
       await captureBrowserFailure(page, 'agent-builder-form');

@@ -40,7 +40,7 @@ test(
     const definition = {
       version: 1,
       name: 'Weekly review',
-      trigger: { kind: 'interval', minutes: 60 },
+      triggers: [{ id: 'interval', kind: 'interval', minutes: 60 }],
       steps: [{ id: 'review', kind: 'human', prompt: 'Private decision', timeoutSeconds: 60 }],
     };
     await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
@@ -49,7 +49,10 @@ test(
       historyAudience: [w.membershipId],
     });
     await activate(service, w.id, w.userId, id, revision, true);
-    await db.platform.query(`UPDATE ${table('tf_workflows')} SET next_run_at='2030-01-07T09:00:00Z' WHERE id=$1`, [id]);
+    await db.platform.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at='2030-01-07T09:00:00Z' WHERE workflow_id=$1`,
+      [id],
+    );
     const range = { from: '2030-01-07T00:00:00Z', to: '2030-01-08T00:00:00Z' };
     assert.equal((await service.calendar(w.id, w.userId, range)).workflows[0].occurrences.length, 15);
     assert.deepEqual((await service.calendar(w.id, user, range)).workflows, []);

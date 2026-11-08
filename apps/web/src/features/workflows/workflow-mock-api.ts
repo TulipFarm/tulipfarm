@@ -1,4 +1,11 @@
-import { definitionSchema, stepGates, type Definition, type Step, type Trigger } from '@tulipfarm/workflows/contracts';
+import {
+  definitionSchema,
+  stepGates,
+  type Definition,
+  type Step,
+  type Trigger,
+  type TriggerKind,
+} from '@tulipfarm/workflows/contracts';
 import type { WorkflowLabels } from './diagram-model';
 import type { WorkflowView } from './workflow-viewer';
 import type { WorkflowStepState } from '../../components/workflow-diagram';
@@ -37,6 +44,7 @@ export const mockScenarios = {
   nested: 'Nested conditions',
   waiting: 'Scheduled follow-up',
   provider: 'Connected app',
+  mixed: 'Several triggers',
   catalog: 'Every step type',
   long: '32 steps / long names',
 };
@@ -68,16 +76,21 @@ export const isMockScenario = (value: unknown): value is MockScenario =>
 export const isMockPhase = (value: unknown): value is MockPhase =>
   typeof value === 'string' && Object.hasOwn(mockPhases, value);
 
-export const mockTriggers: Record<Trigger['kind'], Trigger> = {
-  manual: { kind: 'manual' },
-  webhook: { kind: 'webhook' },
-  event: { kind: 'event', name: 'review_requested' },
-  provider: { kind: 'provider', integrationId: destinationId, event: 'created', minutes: 5 },
-  github: { kind: 'github', repositoryId: '1296269', event: 'star', actions: ['created'] },
-  once: { kind: 'once', at: '2027-01-12T03:30:00Z', timezone: 'Asia/Kolkata' },
-  interval: { kind: 'interval', minutes: 60 },
-  cron: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },
+export const mockTriggers: Record<TriggerKind, Trigger> = {
+  webhook: { id: 'webhook', kind: 'webhook' },
+  event: { id: 'event', kind: 'event', name: 'review_requested' },
+  provider: { id: 'provider', kind: 'provider', integrationId: destinationId, event: 'created', minutes: 5 },
+  github: {
+    id: 'github',
+    kind: 'github',
+    repositories: ['1296269'],
+    events: [{ event: 'issues', actions: ['opened'] }],
+  },
+  once: { id: 'once', kind: 'once', at: '2027-01-12T03:30:00Z', timezone: 'Asia/Kolkata' },
+  interval: { id: 'interval', kind: 'interval', minutes: 60 },
+  cron: { id: 'cron', kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },
   record: {
+    id: 'record',
     kind: 'record',
     tableId,
     field: {
@@ -88,8 +101,14 @@ export const mockTriggers: Record<Trigger['kind'], Trigger> = {
       timezone: 'Asia/Kolkata',
     },
   },
-  row: { kind: 'row', tableId, event: 'deleted' },
+  row: { id: 'row', kind: 'row', tableId, event: 'deleted' },
 };
+/** GitHub repositories the mock user has connected, two accounts deep. */
+export const mockGitHubRepositories = [
+  { repositoryId: '1296269', fullName: 'octocat/Hello-World', ownerId: '583231' },
+  { repositoryId: '1300192', fullName: 'octocat/Spoon-Knife', ownerId: '583231' },
+  { repositoryId: '724712', fullName: 'tulipfarm/sprout', ownerId: '9919' },
+];
 
 const defaults: WorkflowLabels = {
   actor: 'Mira Patel',
@@ -157,7 +176,7 @@ const definitions: Record<MockScenario, Definition> = {
   pr: {
     version: 1,
     name: 'Pull request updates',
-    trigger: mockTriggers.webhook,
+    triggers: [mockTriggers.webhook],
     steps: [
       transform('prepare'),
       {
@@ -169,13 +188,13 @@ const definitions: Record<MockScenario, Definition> = {
       },
     ],
   },
-  approval: { version: 1, name: 'Approve purchase requests', trigger: mockTriggers.manual, steps: approvalSteps },
-  'branch-no': { version: 1, name: 'Approve purchase requests', trigger: mockTriggers.manual, steps: approvalSteps },
-  agent: { version: 1, name: 'Review with an operations assistant', trigger: mockTriggers.manual, steps: agentSteps },
+  approval: { version: 1, name: 'Approve purchase requests', triggers: [], steps: approvalSteps },
+  'branch-no': { version: 1, name: 'Approve purchase requests', triggers: [], steps: approvalSteps },
+  agent: { version: 1, name: 'Review with an operations assistant', triggers: [], steps: agentSteps },
   nested: {
     version: 1,
     name: 'Regional purchase approvals',
-    trigger: mockTriggers.manual,
+    triggers: [],
     steps: [
       condition('budget', ['region', 'review'], ['record']),
       condition('region', ['review'], ['notify']),
@@ -187,7 +206,7 @@ const definitions: Record<MockScenario, Definition> = {
   waiting: {
     version: 1,
     name: 'Follow up on open requests',
-    trigger: mockTriggers.cron,
+    triggers: [mockTriggers.cron],
     steps: [
       { id: 'find', kind: 'find-rows', tableId, filters: [], limit: 10 },
       { id: 'pause', kind: 'delay', seconds: 1800 },
@@ -195,12 +214,23 @@ const definitions: Record<MockScenario, Definition> = {
       slack('notify'),
     ],
   },
-  provider: { version: 1, name: 'Review new sheet requests', trigger: mockTriggers.provider, steps: agentSteps },
-  catalog: { version: 1, name: 'Workflow step library', trigger: mockTriggers.record, steps: allSteps },
+  provider: { version: 1, name: 'Review new sheet requests', triggers: [mockTriggers.provider], steps: agentSteps },
+  mixed: {
+    version: 1,
+    name: 'Triage requests from every source',
+    triggers: [
+      { ...mockTriggers.cron, label: 'Weekday digest' },
+      mockTriggers.webhook,
+      mockTriggers.github,
+      { id: 'launch', kind: 'once', at: '2026-01-05T03:30:00Z', timezone: 'Asia/Kolkata' },
+    ],
+    steps: approvalSteps,
+  },
+  catalog: { version: 1, name: 'Workflow step library', triggers: [mockTriggers.record], steps: allSteps },
   long: {
     version: 1,
     name: 'Review regional purchase requests across operations, finance, and delivery',
-    trigger: mockTriggers.row,
+    triggers: [mockTriggers.row],
     steps: Array.from({ length: 32 }, (_, index) => transform(`prepare_${index + 1}`)),
   },
 };
@@ -226,12 +256,16 @@ export function mockWorkflowView(scenario: MockScenario, phase: MockPhase, trigg
   const original = definitions[scenario];
   const definition = definitionSchema.parse({
     ...original,
-    ...(trigger ? { trigger } : {}),
+    ...(trigger ? { triggers: [trigger] } : {}),
     ...(phase === 'historical' ? { name: `${original.name} (earlier version)` } : {}),
   });
   const viewLabels: WorkflowLabels = {
     ...defaults,
-    ...(['manual', 'event'].includes(definition.trigger.kind) ? { actor: 'Run requester' } : {}),
+    ...(definition.triggers.every(item => item.kind === 'event') ? { actor: 'Run requester' } : {}),
+    github: {
+      repositories: Object.fromEntries(mockGitHubRepositories.map(item => [item.repositoryId, item.fullName])),
+      accounts: { '583231': 'octocat', '9919': 'tulipfarm' },
+    },
     ...(scenario === 'pr'
       ? { trigger: { title: 'Pull request opened', summary: 'GitHub / webhook event', brand: 'github' } as const }
       : {}),
@@ -250,7 +284,7 @@ export function mockWorkflowView(scenario: MockScenario, phase: MockPhase, trigg
         : {}),
   };
   const base: WorkflowView = {
-    key: `${scenario}:${definition.trigger.kind}:${phase === 'historical' ? 'earlier' : 'current'}`,
+    key: `${scenario}:${definition.triggers.map(item => item.kind).join('+')}:${phase === 'historical' ? 'earlier' : 'current'}`,
     definition,
     labels: viewLabels,
     source: phase === 'active' ? 'Active' : ['saved', 'stale'].includes(phase) ? 'Saved' : 'Draft',

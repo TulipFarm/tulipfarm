@@ -34,7 +34,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = trigger => ({
       version: 1,
       name: 'Clock check',
-      trigger,
+      triggers: [{ id: trigger.kind, ...trigger }],
       steps: [{ id: 'done', kind: 'transform', fields: { done: { kind: 'literal', value: true } } }],
     });
     const nextRunAt = async id =>
@@ -51,7 +51,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       definition: {
         version: 1,
         name: 'Reminder',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'start', kind: 'wait-until', at: { kind: 'input', path: ['start'] } }],
       },
     });
@@ -95,7 +95,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     );
 
     await db.databaseAdmin.query(
-      `UPDATE "${w.names.schema}".tf_workflows SET next_run_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+      `UPDATE "${w.names.schema}".tf_workflow_triggers SET next_run_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
       [hourly],
     );
     const sweptAt = await databaseNow();

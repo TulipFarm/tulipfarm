@@ -38,7 +38,7 @@ function detail(
   receipts: ReturnType<typeof receipt>[] = [],
 ): RunDetail {
   return runDetailSchema.parse({
-    definition: definitionSchema.parse({ version: 1, name: 'Review', trigger: { kind: 'manual' }, steps }),
+    definition: definitionSchema.parse({ version: 1, name: 'Review', triggers: [], steps }),
     actor: null,
     canManage: true,
     run: {

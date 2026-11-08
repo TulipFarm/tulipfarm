@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { activate } from './commands.fixture.mjs';
+import { activate, switchTrigger } from './commands.fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
@@ -75,7 +75,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'New orders',
-        trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+        triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
         steps: [{ id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: [] } } }],
       };
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
@@ -113,6 +113,21 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.providers.poll(w.id);
       await service.due(w.id);
       assert.equal((await service.history(w.id, w.userId, id).then(page => page.runs)).length, 1);
+      await switchTrigger(service, w.id, w.userId, id, 'provider', false);
+      rows.push(['while-off', 'not run']);
+      await due();
+      await service.providers.poll(w.id);
+      await switchTrigger(service, w.id, w.userId, id, 'provider', true);
+      await service.providers.poll(w.id);
+      await service.due(w.id);
+      assert.equal(
+        (await service.history(w.id, w.userId, id).then(page => page.runs)).length,
+        1,
+        'a row added while the trigger was off never runs once it is switched back on',
+      );
+      rows.pop();
+      await due();
+      await service.providers.poll(w.id);
       await db.platform.query(
         `CREATE FUNCTION ${table('reject_provider_cursor')}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture cursor failure'; END $$; CREATE TRIGGER reject_cursor BEFORE UPDATE OF cursor ON ${table('tf_provider_polls')} FOR EACH ROW EXECUTE FUNCTION ${table('reject_provider_cursor')}()`,
       );
@@ -295,7 +310,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'New orders',
-          trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
           steps: [{ id: 'copy', kind: 'transform', fields: {} }],
         },
       });
@@ -305,11 +320,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       });
       await activate(service, w.id, w.userId, id, revision, true);
       await db.platform.query(
-        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload) SELECT $1,$2,'backlog-'||n,'{}' FROM generate_series(1,1000) n`,
+        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) SELECT $1,$2,'provider','{provider}','backlog-'||n,'{}' FROM generate_series(1,1000) n`,
         [id, revision],
       );
       await db.platform.query(
-        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload,admitted) VALUES ($1,$2,'started','{}',true)`,
+        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload,admitted) VALUES ($1,$2,'provider','{provider}','started','{}',true)`,
         [id, revision],
       );
       const admitted = async () =>
@@ -432,7 +447,7 @@ test(
         definition: {
           version: 1,
           name: 'Forms',
-          trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
           steps: [{ id: 'copy', kind: 'transform', fields: {} }],
         },
       });
@@ -514,7 +529,7 @@ test(
         definition: {
           version: 1,
           name: 'Forms',
-          trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
           steps: [{ id: 'copy', kind: 'transform', fields: {} }],
         },
       });

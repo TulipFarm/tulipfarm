@@ -73,8 +73,8 @@ export async function requireWorkflowSource(
     integrationId: z.uuid().optional(),
     credential: z.object({ integrationId: z.uuid() }).optional(),
   });
-  const definition = z.object({ trigger: target, steps: z.array(target) }).parse(row.definition);
-  for (const item of [definition.trigger, ...definition.steps]) {
+  const definition = z.object({ triggers: z.array(target), steps: z.array(target) }).parse(row.definition);
+  for (const item of [...definition.triggers, ...definition.steps]) {
     if (item.tableId && !(await canAccessTable(tx, actor, item.tableId, 'table.row.read'))) throw new AccessDenied();
     if (item.agentId) await requireTaskInvocation(tx, actor, item.agentId);
     const integrationId = item.integrationId ?? item.credential?.integrationId;

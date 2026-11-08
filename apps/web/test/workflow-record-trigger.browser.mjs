@@ -195,7 +195,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       };
       const workflow = await saveWorkflow(service, w, reviewDefinition('Renewal reminder', trigger));
       const viewer = await openWorkflow(page, workflow);
-      const inspector = await assertConfiguration(viewer, 0, trigger);
+      const inspector = await assertConfiguration(viewer, 0, workflow.definition.triggers);
       await inspector.getByText('Contracts', { exact: true }).first().waitFor();
 
       await service.sponsorship(w.id, w.userId, workflow.id, {
@@ -254,7 +254,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         await activateGeneration(tx, { generationId: next.id, expectedActiveGenerationId: current.id });
       });
       await db.databaseAdmin.query(
-        `UPDATE "${w.names.schema}".tf_workflows SET next_run_at=clock_timestamp() WHERE id=$1`,
+        `UPDATE "${w.names.schema}".tf_workflow_triggers SET next_run_at=clock_timestamp() WHERE workflow_id=$1 AND trigger_id='record'`,
         [workflow.id],
       );
       await service.due(w.id);

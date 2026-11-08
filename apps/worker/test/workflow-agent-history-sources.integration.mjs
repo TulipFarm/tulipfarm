@@ -132,7 +132,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Report secret',
-          trigger: { kind: 'once', at: new Date(Date.now() + 3600000).toISOString() },
+          triggers: [{ id: 'once', kind: 'once', at: new Date(Date.now() + 3600000).toISOString() }],
           steps: [
             {
               id: 'read',
@@ -155,7 +155,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       });
       await activate(workflows, workspace.id, sponsor.userId, workflowId, workflowRevision, true);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
         [workflowId],
       );
       const [work] = await workflows.due(workspace.id);

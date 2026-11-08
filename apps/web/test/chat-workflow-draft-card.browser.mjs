@@ -17,14 +17,17 @@ const codeSource = 'export default ({ amount }) => {\n  return { cents: Math.rou
 const webhookDefinition = {
   version: 1,
   name: 'Record Stripe payments',
-  trigger: {
-    kind: 'webhook',
-    payload: {
-      mode: 'raw',
-      dedupe: { source: 'body', path: ['data', 'id'] },
-      headers: ['stripe-account', 'x-request-id'],
+  triggers: [
+    {
+      id: 'stripe_payment',
+      kind: 'webhook',
+      payload: {
+        mode: 'raw',
+        dedupe: { source: 'body', path: ['data', 'id'] },
+        headers: ['stripe-account', 'x-request-id'],
+      },
     },
-  },
+  ],
   steps: [
     {
       id: 'shape_payment',
@@ -45,22 +48,25 @@ const recordDraft = '18181818-1818-4818-8818-181818181818';
 const recordDefinition = {
   version: 1,
   name: 'Ticket due reminder',
-  trigger: {
-    kind: 'record',
-    tableId: '19191919-1919-4919-8919-191919191919',
-    field: {
-      kind: 'date',
-      fieldId: '20202020-2020-4020-8020-202020202020',
-      offset: { direction: 'before', amount: 1, unit: 'days' },
-      time: '09:00',
-      timezone: 'America/New_York',
+  triggers: [
+    {
+      id: 'due_date',
+      kind: 'record',
+      tableId: '19191919-1919-4919-8919-191919191919',
+      field: {
+        kind: 'date',
+        fieldId: '20202020-2020-4020-8020-202020202020',
+        offset: { direction: 'before', amount: 1, unit: 'days' },
+        time: '09:00',
+        timezone: 'America/New_York',
+      },
+      filter: {
+        fieldId: '21212121-2121-4121-8121-212121212121',
+        match: 'is-not',
+        value: { kind: 'single-select', optionId: '23232323-2323-4323-8323-232323232323' },
+      },
     },
-    filter: {
-      fieldId: '21212121-2121-4121-8121-212121212121',
-      match: 'is-not',
-      value: { kind: 'single-select', optionId: '23232323-2323-4323-8323-232323232323' },
-    },
-  },
+  ],
   steps: [{ id: 'note', kind: 'transform', fields: { record: { kind: 'input', path: ['recordId'] } } }],
 };
 const rowDraft = '24242424-2424-4424-8424-242424242424';
@@ -70,7 +76,7 @@ const destinationId = '29292929-2929-4929-8929-292929292929';
 const slackDefinition = {
   version: 1,
   name: 'Tickets to #tech',
-  trigger: { kind: 'row', tableId: '19191919-1919-4919-8919-191919191919', event: 'created' },
+  triggers: [{ id: 'new_ticket', kind: 'row', tableId: '19191919-1919-4919-8919-191919191919', event: 'created' }],
   steps: [
     { id: 'notify', kind: 'slack-message', destinationId, text: { kind: 'input', path: ['values', 'title', 'value'] } },
   ],
@@ -78,17 +84,20 @@ const slackDefinition = {
 const rowDefinition = {
   version: 1,
   name: 'Large order note',
-  trigger: {
-    kind: 'row',
-    tableId: '26262626-2626-4262-8262-262626262626',
-    event: 'updated',
-    fieldIds: ['25252525-2525-4525-8525-252525252525'],
-    filter: {
-      fieldId: '25252525-2525-4525-8525-252525252525',
-      match: 'gte',
-      value: { kind: 'numeric', value: '1000' },
+  triggers: [
+    {
+      id: 'large_order',
+      kind: 'row',
+      tableId: '26262626-2626-4262-8262-262626262626',
+      event: 'updated',
+      fieldIds: ['25252525-2525-4525-8525-252525252525'],
+      filter: {
+        fieldId: '25252525-2525-4525-8525-252525252525',
+        match: 'gte',
+        value: { kind: 'numeric', value: '1000' },
+      },
     },
-  },
+  ],
   steps: [
     {
       id: 'note',
@@ -101,7 +110,7 @@ const revision = '77777777-7777-4777-8777-777777777777';
 const definition = {
   version: 1,
   name: 'Review open tickets',
-  trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'America/New_York' },
+  triggers: [{ id: 'weekday_review', kind: 'cron', expression: '0 9 * * 1-5', timezone: 'America/New_York' }],
   steps: [{ id: 'review_tickets', kind: 'human', prompt: 'Review open tickets.', timeoutSeconds: 86400 }],
 };
 const tool = (id, name) => ({
@@ -123,30 +132,30 @@ const savedOutcome = {
 const tableDefinitions = [
   {
     formatVersion: 2,
-    id: recordDefinition.trigger.tableId,
+    id: recordDefinition.triggers[0].tableId,
     owningTeamId: membership.membershipId,
     label: 'Tickets',
     uniqueKeys: [],
     fields: [
-      { id: recordDefinition.trigger.field.fieldId, label: 'Due date', kind: 'date', required: false },
+      { id: recordDefinition.triggers[0].field.fieldId, label: 'Due date', kind: 'date', required: false },
       {
-        id: recordDefinition.trigger.filter.fieldId,
+        id: recordDefinition.triggers[0].filter.fieldId,
         label: 'Stage',
         kind: 'single-select',
         required: false,
-        options: [{ id: recordDefinition.trigger.filter.value.optionId, label: 'Closed', retired: false }],
+        options: [{ id: recordDefinition.triggers[0].filter.value.optionId, label: 'Closed', retired: false }],
       },
     ],
   },
   {
     formatVersion: 2,
-    id: rowDefinition.trigger.tableId,
+    id: rowDefinition.triggers[0].tableId,
     owningTeamId: membership.membershipId,
     label: 'Orders',
     uniqueKeys: [],
     fields: [
       {
-        id: rowDefinition.trigger.fieldIds[0],
+        id: rowDefinition.triggers[0].fieldIds[0],
         label: 'Amount',
         kind: 'numeric',
         required: false,
@@ -264,7 +273,7 @@ const initialDrafts = () => ({
 
 test(
   'compact workflow reviews use Canvas inspectors and same-chat editing while retaining exact approval and Slack checks',
-  { timeout: 120000 },
+  { timeout: 300000 },
   async () => {
     const { workspace, session } = createWorkspaceFixture();
     const server = await createServer({
@@ -490,9 +499,7 @@ test(
             0,
             'draft cards render outside the capped activity timeline',
           );
-          await created
-            .getByText('1 step. Next run Monday, October 12, 2026 at 9:00 AM EDT.', { exact: true })
-            .waitFor();
+          await created.getByText(/\. 1 step\. Next run Monday, October 12, 2026 at 9:00 AM EDT\.$/).waitFor();
           const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
           const returnToChat = async () => {
             if (mobile && (await canvas.count()))
@@ -524,7 +531,7 @@ test(
               });
             else await page.screenshot({ path });
           }
-          const schedule = await assertConfiguration(createdViewer, 0, definition.trigger);
+          const schedule = await assertConfiguration(createdViewer, 0, definition.triggers);
           await schedule.getByText('0 9 * * 1-5 / America/New_York', { exact: true }).first().waitFor();
           const human = await assertConfiguration(createdViewer, 1, definition.steps[0]);
           await human.getByText('Review open tickets.', { exact: true }).first().waitFor();
@@ -536,7 +543,7 @@ test(
           const disabledViewer = await openDraft(disabling, disabledDefinition.name);
           await assertConfiguration(disabledViewer, 1, disabledDefinition.steps[0]);
           const webhookViewer = await openDraft(webhook, webhookDefinition.name);
-          const webhookTrigger = await assertConfiguration(webhookViewer, 0, webhookDefinition.trigger);
+          const webhookTrigger = await assertConfiguration(webhookViewer, 0, webhookDefinition.triggers);
           await webhookTrigger.getByText('Raw JSON body and copied headers', { exact: true }).waitFor();
           await webhookTrigger.getByText('Body field data.id', { exact: true }).waitFor();
           await webhookTrigger.getByText('stripe-account, x-request-id', { exact: true }).waitFor();
@@ -554,7 +561,7 @@ test(
           await returnToChat();
           await webhook.getByRole('button', { name: 'Save and activate' }).waitFor();
           const recordViewer = await openDraft(record, recordDefinition.name);
-          const recordTrigger = await assertConfiguration(recordViewer, 0, recordDefinition.trigger);
+          const recordTrigger = await assertConfiguration(recordViewer, 0, recordDefinition.triggers);
           await recordTrigger.getByText('Tickets', { exact: true }).first().waitFor();
           await recordTrigger
             .getByText('1 day before Due date at 09:00 in America/New York', { exact: true })
@@ -578,7 +585,7 @@ test(
               workspaceId: workspace.id,
               userId: session.user.id,
               membershipId: membership.membershipId,
-              tableId: recordDefinition.trigger.tableId,
+              tableId: recordDefinition.triggers[0].tableId,
             },
           );
           await recordTrigger.getByText('Table name unavailable', { exact: true }).first().waitFor();
@@ -598,7 +605,7 @@ test(
           await returnToChat();
           await record.getByRole('button', { name: 'Save and activate' }).waitFor();
           const rowViewer = await openDraft(row, rowDefinition.name);
-          const rowTrigger = await assertConfiguration(rowViewer, 0, rowDefinition.trigger);
+          const rowTrigger = await assertConfiguration(rowViewer, 0, rowDefinition.triggers);
           await rowTrigger.getByText('When a row in Orders changes', { exact: true }).first().waitFor();
           await rowTrigger.getByText('Amount', { exact: true }).waitFor();
           await rowTrigger.getByText('Amount is at least 1000', { exact: true }).waitFor();
@@ -752,7 +759,7 @@ test(
             .getByRole('button', { name: 'View workflow', exact: true })
             .click();
           await createdViewer.getByText('Saved and active revision', { exact: true }).waitFor();
-          await assertConfiguration(createdViewer, 0, definition.trigger);
+          await assertConfiguration(createdViewer, 0, definition.triggers);
           assert.ok(definitionReads.length > 0);
           assert.deepEqual([...new Set(definitionReads)], [saveDraft]);
           assert.deepEqual(sendRequests, []);

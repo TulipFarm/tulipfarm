@@ -100,7 +100,7 @@ export function webhookSignature(key: string, timestamp: number, raw: Buffer) {
 export class WebhookKeyUnavailable extends Error {}
 /** Answered to the sender like any missing workflow; the reason reaches only the delivery log. */
 export class WebhookRejected extends AccessDenied {
-  readonly reason: 'key-missing' | 'key-rejected' | 'workflow-inactive';
+  readonly reason: 'key-missing' | 'key-rejected' | 'workflow-inactive' | 'trigger-disabled';
   constructor(reason: WebhookRejected['reason']) {
     super();
     this.reason = reason;

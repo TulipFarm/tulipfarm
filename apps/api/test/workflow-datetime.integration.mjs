@@ -43,9 +43,17 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         headers = { origin: 'http://localhost:5173', cookie: 'test-session=admin' };
       const schema = `"${w.names.schema}"`;
       const steps = [{ id: 'copy', kind: 'transform', fields: { at: { kind: 'literal', value: 'fired' } } }];
-      const once = at => ({ version: 1, name: 'One-time example', trigger: { kind: 'once', at }, steps });
+      const once = at => ({
+        version: 1,
+        name: 'One-time example',
+        triggers: [{ id: 'once', kind: 'once', at }],
+        steps,
+      });
       const elapse = (id, instant) =>
-        db.platform.query(`UPDATE ${schema}.tf_workflows SET next_run_at=$2 WHERE id=$1`, [id, instant]);
+        db.platform.query(`UPDATE ${schema}.tf_workflow_triggers SET next_run_at=$2 WHERE workflow_id=$1`, [
+          id,
+          instant,
+        ]);
       const scheduled = async id =>
         (await service.history(w.id, w.userId, id).then(page => page.runs)).filter(run => run.source === 'schedule');
       const nextRunAt = async id => (await service.list(w.id, w.userId)).find(item => item.id === id)?.nextRunAt;
@@ -132,13 +140,32 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: { ...once(at), name: 'One-time example, revised' },
       });
       await sponsor(id);
-      assert.equal((await activate(service, w.id, w.userId, id, second, true)).nextRunAt, at);
+      assert.equal(
+        (await activate(service, w.id, w.userId, id, second, true)).nextRunAt,
+        null,
+        'An unchanged once trigger stays fired across revisions',
+      );
+      await service.due(w.id);
+      assert.deepEqual(
+        (await scheduled(id)).map(run => run.revision),
+        [first],
+      );
+
+      const third = randomUUID(),
+        later = new Date(Date.parse(at) + 3600000).toISOString();
+      await service.save(w.id, w.userId, id, {
+        revision: third,
+        expectedRevision: second,
+        definition: { ...once(later), name: 'One-time example, rescheduled' },
+      });
+      await sponsor(id);
+      assert.equal((await activate(service, w.id, w.userId, id, third, true)).nextRunAt, later);
       await elapse(id, elapsed);
       await service.due(w.id);
       assert.deepEqual(
         (await scheduled(id)).map(run => run.revision).sort(),
-        [first, second].sort(),
-        'A new revision due at the same instant gets its own run',
+        [first, third].sort(),
+        'A once trigger whose time changed fires again',
       );
       assert.equal(await nextRunAt(id), null);
 
@@ -146,18 +173,17 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         late = randomUUID();
       await service.save(w.id, w.userId, lateId, { revision: late, expectedRevision: null, definition: once(at) });
       await db.platform.query(
-        `UPDATE ${schema}.tf_workflow_revisions SET definition=jsonb_set(definition,'{trigger,at}',to_jsonb($2::text)) WHERE workflow_id=$1`,
+        `UPDATE ${schema}.tf_workflow_revisions SET definition=jsonb_set(definition,'{triggers,0,at}',to_jsonb($2::text)) WHERE workflow_id=$1`,
         [lateId, elapsed],
       );
       await sponsor(lateId);
-      assert.equal(
-        (await activate(service, w.id, w.userId, lateId, late, true)).nextRunAt,
-        elapsed,
-        'Activating a revision whose instant passed before it ever ran fires it once',
+      await assert.rejects(
+        activate(service, w.id, w.userId, lateId, late, true),
+        { message: 'schedule-in-past' },
+        'Enabling a new once trigger whose instant passed before it ever ran is rejected',
       );
       await service.due(w.id);
-      await service.due(w.id);
-      assert.equal((await scheduled(lateId)).length, 1);
+      assert.deepEqual(await scheduled(lateId), []);
 
       const waitId = randomUUID(),
         wait = randomUUID();

@@ -193,7 +193,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const scheduled = await saveWorkflow(
         service,
         author,
-        { ...current.definition, trigger: { kind: 'interval', minutes: 60 } },
+        { ...current.definition, triggers: [{ id: 'hourly', kind: 'interval', minutes: 60 }] },
         current,
       );
       await openWorkflow(page, scheduled);
@@ -207,7 +207,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1 AND trigger_id='hourly'`,
         [current.id],
       );
       await service.due(w.id);
@@ -234,7 +234,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('heading', { name: current.definition.name, exact: true }).first().waitFor();
       assert.equal(await page.getByRole('region', { name: 'Workflow sharing', exact: true }).count(), 0);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1 AND trigger_id='hourly'`,
         [current.id],
       );
       await service.due(w.id);

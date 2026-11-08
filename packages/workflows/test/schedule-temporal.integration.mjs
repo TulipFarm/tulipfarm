@@ -36,7 +36,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Hourly digest',
-          trigger: { kind: 'cron', expression: '0 * * * *', timezone: 'Europe/London' },
+          triggers: [{ id: 'cron', kind: 'cron', expression: '0 * * * *', timezone: 'Europe/London' }],
           steps: [
             { id: 'pause', kind: 'delay', seconds: 2 },
             { id: 'result', kind: 'transform', fields: { done: { kind: 'literal', value: true } } },
@@ -50,7 +50,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await activate(service, w.id, w.userId, id, revision, true);
       const elapse = () =>
         db.databaseAdmin.query(
-          `UPDATE "${w.names.schema}".tf_workflows SET next_run_at=clock_timestamp()-interval '2 hours' WHERE id=$1`,
+          `UPDATE "${w.names.schema}".tf_workflow_triggers SET next_run_at=clock_timestamp()-interval '2 hours' WHERE workflow_id=$1`,
           [id],
         );
       native = await NativeConnection.connect({ address: '127.0.0.1:7233' });
@@ -90,7 +90,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await service.history(w.id, w.userId, id).then(page => page.runs))[0].status, 'waiting');
       await elapse();
       const duringRun = await dispatch();
-      const suppressed = await service.history(w.id, w.userId, id).then(page => page.runs);
+      // History lists skipped runs only when asked for them.
+      const suppressed = [
+        ...(await service.history(w.id, w.userId, id).then(page => page.runs)),
+        ...(await service.history(w.id, w.userId, id, { status: 'skipped' }).then(page => page.runs)),
+      ];
       assert.deepEqual(
         suppressed.filter(run => run.status !== 'skipped').map(run => run.source),
         ['schedule'],

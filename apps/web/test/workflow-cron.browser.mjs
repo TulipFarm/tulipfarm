@@ -140,12 +140,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('heading', { name: 'No workflows yet' }).waitFor();
       const hourly = await saveWorkflow(service, w, reviewDefinition('Hourly sync', { kind: 'interval', minutes: 15 }));
       let viewer = await openWorkflow(page, hourly);
-      await assertConfiguration(viewer, 0, hourly.definition.trigger);
+      await assertConfiguration(viewer, 0, hourly.definition.triggers);
       await sponsor('Hourly sync');
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       const interval = await saved('Hourly sync');
-      assert.deepEqual(interval.definition.trigger, { kind: 'interval', minutes: 15 });
+      assert.deepEqual(interval.definition.triggers, [{ id: 'interval', kind: 'interval', minutes: 15 }]);
       assert.ok(Math.abs(Date.parse(interval.nextRunAt) - Date.now() - 15 * 60000) < 60000, interval.nextRunAt);
       await page
         .getByRole('region', { name: 'Workflow summary', exact: true })
@@ -154,28 +154,26 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const savedCronOverInterval = await saveWorkflow(
         service,
         w,
-        { ...interval.definition, trigger: { kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' } },
+        { ...interval.definition, triggers: [{ id: 'cron', kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' }] },
         interval,
       );
       viewer = await openWorkflow(page, savedCronOverInterval);
-      await assertConfiguration(viewer, 0, savedCronOverInterval.definition.trigger);
+      await assertConfiguration(viewer, 0, savedCronOverInterval.definition.triggers);
       await page
         .getByRole('region', { name: 'Workflow summary', exact: true })
         .getByText(`Next run ${formatted(interval.nextRunAt)}`, { exact: false })
         .waitFor();
-      assert.deepEqual(savedCronOverInterval.definition.trigger, {
-        kind: 'cron',
-        expression: '30 8 * * 1',
-        timezone: 'UTC',
-      });
-      assert.deepEqual(savedCronOverInterval.activeTrigger, { kind: 'interval', minutes: 15 });
+      assert.deepEqual(savedCronOverInterval.definition.triggers, [
+        { id: 'cron', kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' },
+      ]);
+      assert.deepEqual(savedCronOverInterval.activeTriggers, [{ id: 'interval', kind: 'interval', minutes: 15 }]);
       const revisions = page.getByRole('group', { name: 'Displayed revision', exact: true });
       await revisions.getByRole('button', { name: 'Active', exact: true }).click();
       await page.waitForFunction(
         () =>
           document.querySelector('[aria-label="Displayed revision"] [aria-pressed="true"]')?.textContent === 'Active',
       );
-      await assertConfiguration(viewer, 0, interval.definition.trigger);
+      await assertConfiguration(viewer, 0, interval.definition.triggers);
 
       const monday = await saveWorkflow(
         service,
@@ -183,12 +181,14 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         reviewDefinition('Monday report', { kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' }),
       );
       viewer = await openWorkflow(page, monday);
-      await assertConfiguration(viewer, 0, monday.definition.trigger);
+      await assertConfiguration(viewer, 0, monday.definition.triggers);
       await sponsor('Monday report');
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       const cron = await saved('Monday report');
-      assert.deepEqual(cron.definition.trigger, { kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' });
+      assert.deepEqual(cron.definition.triggers, [
+        { id: 'cron', kind: 'cron', expression: '30 8 * * 1', timezone: 'UTC' },
+      ]);
       const next = new Date(cron.nextRunAt);
       assert.deepEqual([next.getUTCDay(), next.getUTCHours(), next.getUTCMinutes()], [1, 8, 30]);
       assert.ok(next.getTime() > Date.now() && next.getTime() - Date.now() <= 7 * 86400000, cron.nextRunAt);
@@ -212,7 +212,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           body: JSON.stringify({
             revision: randomUUID(),
             expectedRevision: cron.revision,
-            definition: { ...cron.definition, trigger },
+            definition: { ...cron.definition, triggers: [{ id: 'cron', ...trigger }] },
           }),
         });
         assert.equal(rejected.status, status);
@@ -222,18 +222,18 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const weekdays = await saveWorkflow(
         service,
         w,
-        { ...cron.definition, trigger: { kind: 'cron', expression: '30 7 * * 1-5', timezone: 'UTC' } },
+        { ...cron.definition, triggers: [{ id: 'cron', kind: 'cron', expression: '30 7 * * 1-5', timezone: 'UTC' }] },
         cron,
       );
       viewer = await openWorkflow(page, weekdays);
-      await assertConfiguration(viewer, 0, weekdays.definition.trigger);
+      await assertConfiguration(viewer, 0, weekdays.definition.triggers);
 
-      const schedules = `"${w.names.schema}".tf_workflows`;
+      const schedules = `"${w.names.schema}".tf_workflow_triggers`;
       const elapse = async (id, interval) =>
         new Date(
           (
             await db.databaseAdmin.query(
-              `UPDATE ${schedules} SET next_run_at=clock_timestamp()-$2::interval WHERE id=$1 RETURNING next_run_at`,
+              `UPDATE ${schedules} SET next_run_at=clock_timestamp()-$2::interval WHERE workflow_id=$1 AND trigger_id='interval' RETURNING next_run_at`,
               [id, interval],
             )
           ).rows[0].next_run_at,
@@ -270,7 +270,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         .click();
       const pinned = page.getByRole('region', { name: 'Selected run diagram', exact: true });
       await pinned.getByText('Definition used by this run', { exact: true }).waitFor();
-      await assertConfiguration(pinned, 0, interval.definition.trigger);
+      await assertConfiguration(pinned, 0, interval.definition.triggers);
       assert.equal(
         (await service.runDetail(w.id, w.userId, interval.id, scheduled.id)).run.revision,
         interval.revision,

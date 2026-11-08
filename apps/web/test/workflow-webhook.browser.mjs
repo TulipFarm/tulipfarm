@@ -58,7 +58,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Order intake',
-          trigger: { kind: 'webhook' },
+          triggers: [{ id: 'orders', kind: 'webhook' }],
           steps: [{ id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: [] } } }],
         },
       });
@@ -131,11 +131,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       page.setDefaultTimeout(15000);
       const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
-      const setup = page.getByRole('region', { name: 'Webhook setup' });
+      const setup = page.getByRole('region', { name: /^Webhook setup for / });
       const keyStatus = setup.getByLabel('Webhook key status'),
         endpointStatus = setup.getByLabel('Webhook endpoint status'),
         previousStatus = setup.getByLabel('Previous webhook key status');
-      const hookUrl = `${apiOrigin}/v1/workspaces/${w.id}/workflows/${id}/webhook`;
+      const hookUrl = `${apiOrigin}/v1/workspaces/${w.id}/workflows/${id}/triggers/orders/webhook`;
       const signed = (secret, order) => {
         const body = JSON.stringify({ order }),
           timestamp = Math.floor(Date.now() / 1000);
@@ -171,26 +171,29 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         w,
         {
           ...workflow.definition,
-          trigger: {
-            kind: 'webhook',
-            payload: { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' } },
-          },
+          triggers: [
+            {
+              id: 'orders',
+              kind: 'webhook',
+              payload: { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' } },
+            },
+          ],
         },
         workflow,
       );
       let viewer = await openWorkflow(page, workflow);
-      await assertConfiguration(viewer, 0, workflow.definition.trigger);
+      await assertConfiguration(viewer, 0, workflow.definition.triggers);
       await showWorkflowSettings(page);
       if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
         await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
-      assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTrigger.payload, {
+      assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTriggers[0].payload, {
         mode: 'raw',
         dedupe: { source: 'header', name: 'x-github-delivery' },
       });
       const example = await setup.getByRole('region', { name: 'curl example' }).textContent();
-      assert.match(example, new RegExp(`/v1/workspaces/${w.id}/workflows/${id}/webhook`));
+      assert.match(example, new RegExp(`/v1/workspaces/${w.id}/workflows/${id}/triggers/orders/webhook`));
       assert.match(
         example,
         /openssl dgst -sha256 -hmac "\$TULIPFARM_WEBHOOK_KEY"/,
@@ -246,21 +249,26 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         w,
         {
           ...workflow.definition,
-          trigger: { kind: 'webhook', payload: { mode: 'raw', dedupe: { source: 'body', path: ['order'] } } },
+          triggers: [
+            { id: 'orders', kind: 'webhook', payload: { mode: 'raw', dedupe: { source: 'body', path: ['order'] } } },
+          ],
         },
         workflow,
       );
       viewer = await openWorkflow(page, workflow);
-      await assertConfiguration(viewer, 0, workflow.definition.trigger);
+      await assertConfiguration(viewer, 0, workflow.definition.triggers);
       await showWorkflowSettings(page);
       if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
         await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
-      assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTrigger.payload.dedupe, {
-        source: 'body',
-        path: ['order'],
-      });
+      assert.deepEqual(
+        (await service.list(w.id, w.userId)).find(item => item.id === id).activeTriggers[0].payload.dedupe,
+        {
+          source: 'body',
+          path: ['order'],
+        },
+      );
 
       await setup.getByRole('button', { name: 'Stripe signature' }).click();
       const stripeSecret = 'whsec_browser_fixture_signing_secret';
@@ -284,15 +292,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal(stripeResponse.status, 200);
       assert.equal(await setup.getByLabel('Stripe endpoint signing secret').inputValue(), '');
 
-      workflow = await saveWorkflow(service, w, { ...workflow.definition, trigger: { kind: 'manual' } }, workflow);
+      workflow = await saveWorkflow(service, w, { ...workflow.definition, triggers: [] }, workflow);
       viewer = await openWorkflow(page, workflow);
-      await assertConfiguration(viewer, 0, { kind: 'manual' });
+      await assertConfiguration(viewer, 0, []);
       await showWorkflowSettings(page);
       await setup
         .getByRole('note')
-        .getByText(
-          'The saved revision uses a manual trigger. Activating it stops this endpoint and deletes the webhook key.',
-        )
+        .getByText('The saved revision removes this trigger. Activating it stops this endpoint and deletes its key.')
         .waitFor();
       await endpointStatus.getByText('Receiving', { exact: true }).waitFor();
 
@@ -300,15 +306,16 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       assert.equal(await setup.count(), 0);
 
-      workflow = await saveWorkflow(service, w, { ...workflow.definition, trigger: { kind: 'webhook' } }, workflow);
+      workflow = await saveWorkflow(
+        service,
+        w,
+        { ...workflow.definition, triggers: [{ id: 'orders', kind: 'webhook' }] },
+        workflow,
+      );
       await openWorkflow(page, workflow);
       await showWorkflowSettings(page);
       await keyStatus.getByText('Not configured', { exact: true }).waitFor();
-      await endpointStatus
-        .getByText(
-          'Not receiving requests. The active revision uses a manual trigger. Activate the saved revision to accept calls.',
-        )
-        .waitFor();
+      await endpointStatus.getByText('Not receiving requests. Activate the saved revision to accept calls.').waitFor();
       // A webhook revision runs unattended, so its named sponsor accepts the new revision before activation.
       await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Accept sponsorship' }).waitFor({ state: 'detached' });
@@ -362,7 +369,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Order intake',
-          trigger: { kind: 'webhook' },
+          triggers: [{ id: 'orders', kind: 'webhook' }],
           steps: [{ id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: [] } } }],
         },
       });
@@ -376,11 +383,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         revision,
         enabled: true,
       });
-      const { key } = await service.webhookKey(w.id, w.userId, id, {
-        commandId: randomUUID(),
-        expectedGeneration: 3,
-        mode: 'bearer',
-      });
+      const { key } = await service.webhookKey(
+        w.id,
+        w.userId,
+        id,
+        { commandId: randomUUID(), expectedGeneration: 3, mode: 'bearer' },
+        'orders',
+      );
       const workspace = {
         id: w.id,
         name: 'Webhook log proof',
@@ -441,7 +450,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const errors = [];
       page.on('pageerror', error => errors.push(String(error)));
       const log = page.getByRole('region', { name: 'Recent deliveries' });
-      const hookUrl = `${apiOrigin}/v1/workspaces/${w.id}/workflows/${id}/webhook`;
+      const hookUrl = `${apiOrigin}/v1/workspaces/${w.id}/workflows/${id}/triggers/orders/webhook`;
       const call = (authorization, requestId) =>
         fetch(hookUrl, {
           method: 'POST',
@@ -506,7 +515,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await showWorkflowSettings(page);
       await page.getByRole('button', { name: 'Disable workflow' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).waitFor();
-      await log.getByText('Activate the webhook revision to send a test event.').waitFor();
+      await log.getByText('Activate the revision with this webhook to send a test event.').waitFor();
       assert.equal(await log.getByRole('button', { name: 'Send test event' }).isDisabled(), true);
 
       await page.setViewportSize({ width: 390, height: 844 });

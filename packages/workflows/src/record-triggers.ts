@@ -218,16 +218,17 @@ export async function reconcileRecordOccurrences(
   const filter = filterPredicate(trigger.filter, fieldOperand(generation, columnOperand), 4 + parameters.length);
   const lastRead = `LEAST(clock_timestamp(), $${4 + parameters.length + filter.parameters.length}::timestamptz - interval '${sweepInterval}')`;
   const occurrences = table(tx, 'tf_workflow_record_occurrences');
+  const triggerParameter = 5 + parameters.length + filter.parameters.length;
   await tx.client.query(
     `WITH desired AS (
       SELECT p.id AS record_id, ${dueAt} AS due_at FROM ${table(tx, generation.physical_table)} p
       JOIN ${table(tx, 'tf_table_identities')} i ON i.table_id=$3 AND i.row_id=p.id AND i.live WHERE ${value} IS NOT NULL${filter.sql}
     ), stale AS (
-      DELETE FROM ${occurrences} o WHERE o.workflow_id=$1 AND o.fired_at IS NULL AND (o.revision<>$2 OR NOT EXISTS (SELECT 1 FROM desired d WHERE d.record_id=o.record_id AND d.due_at=o.due_at))
+      DELETE FROM ${occurrences} o WHERE o.workflow_id=$1 AND o.fired_at IS NULL AND (o.revision<>$2 OR (o.trigger_id=$${triggerParameter} AND NOT EXISTS (SELECT 1 FROM desired d WHERE d.record_id=o.record_id AND d.due_at=o.due_at)))
     )
-    INSERT INTO ${occurrences} (workflow_id,revision,record_id,due_at)
-    SELECT $1,$2,d.record_id,d.due_at FROM desired d
-    WHERE d.due_at < '10000-01-01T00:00:00Z' AND d.due_at > GREATEST((SELECT activated_at FROM ${table(tx, 'tf_workflows')} WHERE id=$1), ${lastRead} - interval '${lateness}')
+    INSERT INTO ${occurrences} (workflow_id,revision,trigger_id,record_id,due_at)
+    SELECT $1,$2,$${triggerParameter},d.record_id,d.due_at FROM desired d
+    WHERE d.due_at < '10000-01-01T00:00:00Z' AND d.due_at > GREATEST((SELECT activated_at FROM ${table(tx, 'tf_workflows')} WHERE id=$1), (SELECT switched_on_at FROM ${table(tx, 'tf_workflow_triggers')} WHERE workflow_id=$1 AND trigger_id=$${triggerParameter}), ${lastRead} - interval '${lateness}')
     ON CONFLICT DO NOTHING`,
     [
       idSchema.parse(workflowId),
@@ -236,6 +237,7 @@ export async function reconcileRecordOccurrences(
       ...parameters,
       ...filter.parameters,
       z.iso.datetime().parse(sweepDue),
+      trigger.id,
     ],
   );
 }
@@ -245,32 +247,36 @@ export async function settleMissedRecordOccurrences(
   tx: AuthorizationTransaction,
   workflowId: string,
   revision: string,
+  triggerId: string,
   now: Date,
 ) {
   const row = (
     await tx.client.query(
       `WITH missed AS (
-      UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND revision=$2 AND fired_at IS NULL AND due_at<$3::timestamptz - interval '${catchUp}' RETURNING due_at
+      UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND revision=$2 AND trigger_id=$4 AND fired_at IS NULL AND due_at<$3::timestamptz - interval '${catchUp}' RETURNING due_at
     ) SELECT ${utcInstant('min(due_at)')} AS "scheduledFor",${utcInstant('max(due_at)')} AS "missedThrough",count(*)::integer AS "missedCount" FROM missed`,
-      [workflowId, revision, now.toISOString()],
+      [workflowId, revision, now.toISOString(), triggerId],
     )
   ).rows[0];
   return row.missedCount ? missedSchema.parse(row) : null;
 }
 
+/** Due occurrences of the given record triggers, one entry per record and due time with every trigger that has it. */
 export async function dueRecordOccurrences(
   tx: AuthorizationTransaction,
   workflowId: string,
   revision: string,
+  triggerIds: readonly string[],
   now: Date,
 ) {
   return occurrenceSchema
+    .extend({ triggerIds: z.array(z.string()).min(1) })
     .array()
     .parse(
       (
         await tx.client.query(
-          `SELECT record_id AS "recordId",${utcInstant('due_at')} AS "dueAt" FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND fired_at IS NULL AND due_at<=$3::timestamptz ORDER BY due_at,record_id LIMIT 20`,
-          [workflowId, revision, now.toISOString()],
+          `SELECT record_id AS "recordId",${utcInstant('due_at')} AS "dueAt",array_agg(trigger_id) AS "triggerIds" FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND trigger_id=ANY($4::text[]) AND fired_at IS NULL AND due_at<=$3::timestamptz GROUP BY record_id,due_at ORDER BY due_at,record_id LIMIT 20`,
+          [workflowId, revision, now.toISOString(), [...triggerIds]],
         )
       ).rows,
     );
@@ -287,7 +293,7 @@ export async function upcomingRecordOccurrences(
     .parse(
       (
         await tx.client.query(
-          `SELECT record_id AS "recordId",${utcInstant('due_at')} AS "dueAt" FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND fired_at IS NULL AND due_at>=clock_timestamp() - interval '${catchUp}' ORDER BY due_at,record_id LIMIT $3`,
+          `SELECT DISTINCT record_id AS "recordId",${utcInstant('due_at')} AS "dueAt",due_at FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND fired_at IS NULL AND due_at>=clock_timestamp() - interval '${catchUp}' ORDER BY due_at,"recordId" LIMIT $3`,
           [workflowId, revision, limit],
         )
       ).rows,
@@ -298,20 +304,27 @@ export async function markRecordOccurrenceFired(
   tx: AuthorizationTransaction,
   workflowId: string,
   revision: string,
+  triggerIds: readonly string[],
   occurrence: z.infer<typeof occurrenceSchema>,
 ) {
   await tx.client.query(
-    `UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND revision=$2 AND record_id=$3 AND due_at=$4::timestamptz`,
-    [workflowId, revision, occurrence.recordId, occurrence.dueAt],
+    `UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND revision=$2 AND trigger_id=ANY($5::text[]) AND record_id=$3 AND due_at=$4::timestamptz`,
+    [workflowId, revision, occurrence.recordId, occurrence.dueAt, [...triggerIds]],
   );
 }
 
 /** The sweep returns at the earliest unfired occurrence, and at least every minute to pick up record edits. It never schedules before this sweep, which is when it last read the table. */
-export async function nextRecordSweep(tx: AuthorizationTransaction, workflowId: string, revision: string, now: Date) {
+export async function nextRecordSweep(
+  tx: AuthorizationTransaction,
+  workflowId: string,
+  revision: string,
+  triggerId: string,
+  now: Date,
+) {
   const row = (
     await tx.client.query(
-      `SELECT ${utcInstant(`GREATEST($3::timestamptz, LEAST(min(due_at), $3::timestamptz + interval '${sweepInterval}'))`)} AS next FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND fired_at IS NULL`,
-      [workflowId, revision, now.toISOString()],
+      `SELECT ${utcInstant(`GREATEST($3::timestamptz, LEAST(min(due_at), $3::timestamptz + interval '${sweepInterval}'))`)} AS next FROM ${table(tx, 'tf_workflow_record_occurrences')} WHERE workflow_id=$1 AND revision=$2 AND trigger_id=$4 AND fired_at IS NULL`,
+      [workflowId, revision, now.toISOString(), triggerId],
     )
   ).rows[0];
   return z.iso.datetime().parse(row.next);

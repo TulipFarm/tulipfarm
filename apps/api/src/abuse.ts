@@ -24,6 +24,11 @@ const webhookWorkspacePolicy: Policy = { name: 'workflow-webhook-workspace', max
 const webhookPolicy: Policy = { name: 'workflow-webhook', max: 120, windowMs: 60_000 };
 const webhookSourcePolicy: Policy = { name: 'workflow-webhook-source', max: 60, windowMs: 60_000 };
 const webhookTarget = z.object({ workspaceId: idSchema, workflowId: idSchema });
+/** Public webhook receivers: the workflow URL kept for a migrated webhook trigger, and each trigger's own URL. */
+export const workflowWebhookOperations: ReadonlySet<string> = new Set([
+  'receiveWorkflowWebhookV1',
+  'receiveWorkflowTriggerWebhookV1',
+]);
 const mutations = new Map<string, Policy>([
   ['slackinstallV1', { name: 'slack-install', max: 5, windowMs: 60_000 }],
   ['slackdisconnectV1', { name: 'slack-install', max: 5, windowMs: 60_000 }],
@@ -31,6 +36,7 @@ const mutations = new Map<string, Policy>([
   ['startWorkflowV1', { name: 'workflow-run', max: 30, windowMs: 60_000 }],
   ['emitWorkflowEventV1', { name: 'workflow-run', max: 30, windowMs: 60_000 }],
   ['sendWorkflowWebhookTestV1', { name: 'workflow-run', max: 30, windowMs: 60_000 }],
+  ['sendWorkflowTriggerWebhookTestV1', { name: 'workflow-run', max: 30, windowMs: 60_000 }],
   ['respondWorkflowV1', { name: 'workflow-input', max: 30, windowMs: 60_000 }],
   ['createWorkspaceV1', { name: 'workspace-create', max: 3, windowMs: 3_600_000 }],
   ['completeOnboardingV1', { name: 'workspace-create', max: 3, windowMs: 3_600_000 }],
@@ -176,7 +182,7 @@ export function registerAbuseHooks(
     if (['saveOnboardingV1', 'resumeOnboardingV1'].includes(request.routeOptions.schema?.operationId ?? '')) {
       if (!(await enforce(reply, onboardingPolicy, normalizeIP(request.ip)))) return reply;
     }
-    if (request.routeOptions.schema?.operationId === 'receiveWorkflowWebhookV1') {
+    if (workflowWebhookOperations.has(request.routeOptions.schema?.operationId ?? '')) {
       const target = webhookTarget.safeParse(request.params);
       if (!target.success) return;
       // Only a delivery whose key passed spends the workflow and workspace budgets, so a sender without the key cannot exhaust them.

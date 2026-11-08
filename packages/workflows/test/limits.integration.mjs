@@ -47,7 +47,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'Review',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'review', kind: 'human', prompt: 'Decide', timeoutSeconds: 60 }],
       };
       const save = (who, id = randomUUID(), revision = randomUUID()) =>
@@ -139,7 +139,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.save(w.id, w.userId, id, {
           revision,
           expectedRevision: null,
-          definition: { version: 1, name: 'Follow up', trigger: { kind: 'webhook' }, steps },
+          definition: { version: 1, name: 'Follow up', triggers: [{ id: 'webhook', kind: 'webhook' }], steps },
         });
         await service.sponsorship(w.id, w.userId, id, {
           sponsorMembershipId: w.membershipId,
@@ -285,7 +285,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'New orders',
-        trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+        triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
         steps: [{ id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: [] } } }],
       };
       async function workflow(events) {
@@ -299,7 +299,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await activate(service, w.id, w.userId, id, revision, true);
         for (let n = 0; n < events; n++)
           await db.platform.query(
-            `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload) VALUES ($1,$2,$3,$4)`,
+            `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,'provider','{provider}',$3,$4)`,
             [id, revision, `row-${n}`, JSON.stringify({ values: [String(n)] })],
           );
         return id;
@@ -371,7 +371,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Order follow-up',
-          trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
           steps: [{ id: 'later', kind: 'delay', seconds: 30 * 86400 }],
         },
       });
@@ -382,7 +382,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await activate(service, w.id, w.userId, id, revision, true);
       for (let n = 0; n < 30; n++)
         await db.platform.query(
-          `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload) VALUES ($1,$2,$3,$4)`,
+          `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,'provider','{provider}',$3,$4)`,
           [id, revision, `row-${n}`, JSON.stringify({ values: [String(n)] })],
         );
       for (let sweep = 0; sweep < 3; sweep++) for (const work of await service.due(w.id)) await service.advance(work);

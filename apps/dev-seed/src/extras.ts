@@ -183,7 +183,7 @@ async function ensureWorkflows(context: SeedContext, target: Target) {
       definition: {
         version: 1,
         name: 'Weekly order digest',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           { id: 'collect', kind: 'transform', fields: { period: { kind: 'literal', value: 'last 7 days' } } },
           {
@@ -203,7 +203,7 @@ async function ensureWorkflows(context: SeedContext, target: Target) {
       definition: {
         version: 1,
         name: 'Refund approval',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           { id: 'request', kind: 'transform', fields: { amount: { kind: 'literal', value: 640 } } },
           {
@@ -221,7 +221,7 @@ async function ensureWorkflows(context: SeedContext, target: Target) {
       definition: {
         version: 1,
         name: 'Supplier reminder (draft)',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           {
             id: 'compose',

@@ -36,7 +36,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Private workflow',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             { id: 'copy', kind: 'transform', fields: { value: { kind: 'input', path: ['secret'] } } },
             { id: 'pause', kind: 'delay', seconds: 3 },

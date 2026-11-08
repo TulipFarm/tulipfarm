@@ -31,9 +31,9 @@ import { createWorkspaceSkills, resolveProcedures } from './workspace-skills.ts'
 import { createSkillObjects } from './skill-objects.ts';
 import { inspectSkillFiles } from './skill-package-review.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
-import { agentSetupWorkflowId } from './agent-trigger-workflows.ts';
+import { agentLinkedWorkflowId } from './agent-trigger-workflows.ts';
 import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
-import { unattendedTrigger } from './setup-contracts.ts';
+import { agentWorkflowTriggerId, unattendedTrigger } from './setup-contracts.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import { requireAgentCreation, requireAgentPermission } from './saved-policy.ts';
 import { createAgentRecordTools } from './record-tools.ts';
@@ -371,8 +371,8 @@ export function createSystemPackages(options: Options) {
               'sponsor-required',
               'Native workflow history audience requires an explicitly selected sponsor.',
             );
-          if (resource.trigger.kind === 'provider')
-            await workflows.providers.check(workspaceId, actor.userId, compiler.workflow(resource).trigger);
+          for (const trigger of compiler.workflow(resource).triggers)
+            if (trigger.kind === 'provider') await workflows.providers.check(workspaceId, actor.userId, trigger);
           for (const step of resource.steps) {
             if (step.kind === 'http' && step.credential)
               await workflows.providers.authorizeIntegration(
@@ -659,20 +659,25 @@ export function createSystemPackages(options: Options) {
         row.nodes.filter(node => node.revision).map(node => [node.key, node.revision!]),
       );
       const previous = await operation(tx, row, node.key, 'prepare');
-      input = previous?.input ?? {
-        requestId: commandId(row, node.key, 'prepare'),
-        expectedVersion: 0,
-        expectedSoulRevision: z
-          .string()
-          .parse(
-            (await tx.client.query(`SELECT revision FROM ${relation(tx, 'tf_soul_head')} WHERE id=1`)).rows[0]
-              ?.revision,
-          ),
-        expectedSavedRevision: null,
-        expectedPolicyVersion: 0,
-        expectedActivationIds: [],
-        setup: compiler.agent(resource, revisions),
-      };
+      // A new agent has no linked Workflow yet; inputs prepared before that binding read the same way.
+      input = previous?.input
+        ? { expectedWorkflowRevision: null, expectedWorkflowGeneration: null, ...(previous.input as object) }
+        : {
+            requestId: commandId(row, node.key, 'prepare'),
+            expectedVersion: 0,
+            expectedSoulRevision: z
+              .string()
+              .parse(
+                (await tx.client.query(`SELECT revision FROM ${relation(tx, 'tf_soul_head')} WHERE id=1`)).rows[0]
+                  ?.revision,
+              ),
+            expectedSavedRevision: null,
+            expectedPolicyVersion: 0,
+            expectedActivationIds: [],
+            expectedWorkflowRevision: null,
+            expectedWorkflowGeneration: null,
+            setup: compiler.agent(resource, revisions),
+          };
       const selected = saveAgentSetupDraftSchema.parse(input);
       if (!previous)
         for (const channel of selected.setup.slackChannels) {
@@ -972,9 +977,7 @@ export function createSystemPackages(options: Options) {
         digest: draft.digest,
         decision: resource.requestedState === 'active' ? 'activate' : 'save',
         consent: {
-          sponsorTriggerIds: draft.setup.triggers
-            .filter(trigger => unattendedTrigger(trigger.trigger))
-            .map(trigger => trigger.id),
+          sponsor: draft.setup.triggers.some(trigger => unattendedTrigger(trigger.trigger)),
           replaceChannels: draft.setup.slackChannels
             .filter(channel => channel.replaceAgentId !== null)
             .map(channel => channel.channel),
@@ -1209,18 +1212,29 @@ export function createSystemPackages(options: Options) {
                   [id],
                 )
           ).rows;
-          if (linked.length !== prepared.setup.triggers.length)
-            throw new SystemPackageError(`verification-drift:${resource.key}`);
-          for (const expected of prepared.setup.triggers) {
-            const actual = linked.find(row => row.id === agentSetupWorkflowId(command.commandId, expected.id));
+          const setup = prepared.setup;
+          const hasLinked = setup.triggers.length > 0 || setup.prompt !== undefined;
+          if (linked.length !== (hasLinked ? 1 : 0)) throw new SystemPackageError(`verification-drift:${resource.key}`);
+          if (hasLinked) {
+            const [actual] = linked;
             const step = actual?.definition?.steps?.[0];
             if (
-              !actual?.enabled ||
-              actual.sponsorMembershipId !== (unattendedTrigger(expected.trigger) ? actor.membershipId : null) ||
-              !same(actual.definition.trigger, expected.trigger) ||
+              actual?.id !== agentLinkedWorkflowId(id) ||
+              command.workflowId !== actual.id ||
+              !actual.enabled ||
+              actual.sponsorMembershipId !==
+                (setup.triggers.some(item => unattendedTrigger(item.trigger)) ? actor.membershipId : null) ||
+              !same(
+                actual.definition.triggers,
+                setup.triggers.map(item => ({
+                  ...item.trigger,
+                  id: agentWorkflowTriggerId(item.id),
+                  ...(item.label ? { label: item.label } : {}),
+                })),
+              ) ||
               step?.kind !== 'agent' ||
               step.agentId !== id ||
-              !same(step.prompt, { kind: 'literal', value: expected.prompt })
+              !same(step.prompt, { kind: 'literal', value: setup.prompt })
             )
               throw new SystemPackageError(`verification-drift:${resource.key}`);
           }
@@ -1243,8 +1257,8 @@ export function createSystemPackages(options: Options) {
         }
       } else if (resource.kind === 'workflow') {
         const actual = await s.workflows.definition(workspaceId, actor.userId, id);
-        if (actual.definition.trigger.kind === 'provider')
-          await s.workflows.providers.check(workspaceId, actor.userId, actual.definition.trigger);
+        for (const trigger of actual.definition.triggers)
+          if (trigger.kind === 'provider') await s.workflows.providers.check(workspaceId, actor.userId, trigger);
         for (const step of actual.definition.steps) {
           if (step.kind === 'http' && step.credential)
             await s.workflows.providers.authorizeIntegration(tx, step.credential.integrationId, actor.membershipId);

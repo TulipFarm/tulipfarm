@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   definitionViewSchema,
   runDetailSchema,
@@ -14,9 +14,16 @@ import {
 import { featureKey, useFeatureRead, useFeatureChanges, useLoadedWindow } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
 import { useProviderAuthority } from '@/features/integrations/query-authority';
+import { tableApi } from '@/features/tables/api';
+import { useTableNames } from '@/features/tables/hooks';
 import { workflowRequest } from './api';
+import type { GitHubNames } from './definition-description';
 
 export type RunStatus = z.infer<typeof statusSchema>;
+const githubRepositoryListSchema = z.array(
+  z.object({ repositoryId: z.string(), fullName: z.string(), ownerId: z.string().nullable() }),
+);
+export type WorkflowGitHubRepository = z.infer<typeof githubRepositoryListSchema>[number];
 type RunHistoryPage = z.infer<typeof runHistoryPageSchema>;
 type RunHistory = { pages: RunHistoryPage[]; runs: RunHistoryPage['runs']; nextCursor: string | null };
 
@@ -30,10 +37,15 @@ async function readRunPage(
   workspaceId: string,
   id: string,
   status: RunStatus | null,
+  triggerId: string | null,
   before: string | null,
   signal: AbortSignal,
 ) {
-  const params = new URLSearchParams({ ...(status ? { status } : {}), ...(before ? { before } : {}) });
+  const params = new URLSearchParams({
+    ...(status ? { status } : {}),
+    ...(triggerId ? { triggerId } : {}),
+    ...(before ? { before } : {}),
+  });
   return runHistoryPageSchema.parse(
     await workflowRequest(
       `/workspaces/${workspaceId}/workflows/${id}/runs${params.size ? `?${params}` : ''}`,
@@ -49,13 +61,15 @@ export const workflowKeys = {
   list: () => ['workflows', 'list'] as const,
   archived: () => ['workflows', 'archived'] as const,
   detail: (id: string) => ['workflows', 'detail', id] as const,
-  runs: (id: string, status: RunStatus | null, pages: number) =>
-    ['workflows', 'detail', id, 'runs', { status, pages }] as const,
+  runs: (id: string, status: RunStatus | null, triggerId: string | null, pages: number) =>
+    ['workflows', 'detail', id, 'runs', { status, triggerId, pages }] as const,
   providers: () => ['workflows', 'providers'] as const,
   authority: () => ['workflows', 'provider-authority'] as const,
   details: () => ['workflows', 'detail'] as const,
   status: (id: string) => ['workflows', 'detail', id, 'provider-status'] as const,
-  deliveries: (id: string) => ['workflows', 'detail', id, 'webhook-deliveries'] as const,
+  githubRepositories: () => ['workflows', 'github-repositories'] as const,
+  deliveries: (id: string, triggerId: string) =>
+    ['workflows', 'detail', id, 'triggers', triggerId, 'webhook-deliveries'] as const,
 };
 export const workflowQueries = {
   definition: (workspaceId: string, id: string, revision = 'saved') => ({
@@ -92,9 +106,10 @@ export const workflowQueries = {
         .parse(await workflowRequest(`/workspaces/${workspaceId}/workflows?archived=true`, 'GET', undefined, signal))
         .filter(workflow => workflow.archivedAt !== null),
   }),
-  runs: (workspaceId: string, id: string, status: RunStatus | null) => ({
-    key: workflowKeys.runs(id, status, 1),
-    load: async (signal: AbortSignal) => flattenRunPages([await readRunPage(workspaceId, id, status, null, signal)]),
+  runs: (workspaceId: string, id: string, status: RunStatus | null, triggerId: string | null) => ({
+    key: workflowKeys.runs(id, status, triggerId, 1),
+    load: async (signal: AbortSignal) =>
+      flattenRunPages([await readRunPage(workspaceId, id, status, triggerId, null, signal)]),
   }),
   providers: (workspaceId: string) => ({
     key: workflowKeys.providers(),
@@ -105,16 +120,23 @@ export const workflowQueries = {
           await workflowRequest(`/workspaces/${workspaceId}/workflows/provider-integrations`, 'GET', undefined, signal),
         ),
   }),
-  deliveries: (workspaceId: string, id: string) => ({
-    key: workflowKeys.deliveries(id),
+  deliveries: (workspaceId: string, id: string, triggerId: string) => ({
+    key: workflowKeys.deliveries(id, triggerId),
     load: async (signal: AbortSignal) =>
       webhookDeliveryLogSchema.parse(
         await workflowRequest(
-          `/workspaces/${workspaceId}/workflows/${id}/webhook-deliveries`,
+          `/workspaces/${workspaceId}/workflows/${id}/triggers/${triggerId}/webhook-deliveries`,
           'GET',
           undefined,
           signal,
         ),
+      ),
+  }),
+  githubRepositories: (workspaceId: string) => ({
+    key: workflowKeys.githubRepositories(),
+    load: async (signal: AbortSignal) =>
+      githubRepositoryListSchema.parse(
+        await workflowRequest(`/workspaces/${workspaceId}/workflows/github-repositories`, 'GET', undefined, signal),
       ),
   }),
   status: (workspaceId: string, id: string) => ({
@@ -166,28 +188,34 @@ export function useArchivedWorkflows(workspaceId: string, enabled: boolean) {
 function useWorkflowAuthority() {
   useProviderAuthority(workflowKeys.authority(), [workflowKeys.providers()], [workflowKeys.details()]);
 }
-export function useWorkflowRuns(workspaceId: string, id: string | null, status: RunStatus | null, pages: number) {
+export function useWorkflowRuns(
+  workspaceId: string,
+  id: string | null,
+  status: RunStatus | null,
+  pages: number,
+  triggerId: string | null = null,
+) {
   useWorkflowAuthority();
   const { runtime, scope } = useFeatureContext();
-  const query = workflowQueries.runs(workspaceId, id ?? '', status);
+  const query = workflowQueries.runs(workspaceId, id ?? '', status, triggerId);
   const first = useWorkflowRead({
     ...query,
     enabled: id !== null,
     pollWhile: page => page.runs.some(run => unfinishedStatuses.some(live => live === run.status)),
   });
   // Disabled observers still set a query's loader, so the older-page loader must not replace the first page's.
-  const olderKey = workflowKeys.runs(id ?? '', status, Math.max(2, pages));
+  const olderKey = workflowKeys.runs(id ?? '', status, triggerId, Math.max(2, pages));
   const older = useWorkflowRead({
     key: olderKey,
     enabled: id !== null && pages > 1,
     load: async signal => {
       const previous = runtime.client.getQueryData<RunHistory>(
-        featureKey(scope, workflowKeys.runs(id ?? '', status, pages - 1)),
+        featureKey(scope, workflowKeys.runs(id ?? '', status, triggerId, pages - 1)),
       );
       if (!previous?.nextCursor) throw new Error('The previous run-history page is unavailable.');
       return flattenRunPages([
         ...previous.pages,
-        await readRunPage(workspaceId, id ?? '', status, previous.nextCursor, signal),
+        await readRunPage(workspaceId, id ?? '', status, triggerId, previous.nextCursor, signal),
       ]);
     },
   });
@@ -208,7 +236,7 @@ export function useWorkflowRuns(workspaceId: string, id: string | null, status: 
         : older.state.kind === 'loading' || older.state.kind === 'error'
           ? (() => {
               const previous = runtime.client.getQueryData<RunHistory>(
-                featureKey(scope, workflowKeys.runs(id ?? '', status, pages - 1)),
+                featureKey(scope, workflowKeys.runs(id ?? '', status, triggerId, pages - 1)),
               );
               return previous
                 ? {
@@ -232,8 +260,39 @@ export function useWorkflowRuns(workspaceId: string, id: string | null, status: 
           : ('idle' as const),
   };
 }
-export function useWebhookDeliveries(workspaceId: string, id: string) {
-  return useWorkflowRead(workflowQueries.deliveries(workspaceId, id));
+export function useWebhookDeliveries(workspaceId: string, id: string, triggerId: string) {
+  return useWorkflowRead(workflowQueries.deliveries(workspaceId, id, triggerId));
+}
+export function useWorkflowGitHubRepositories(workspaceId: string, enabled = true) {
+  useWorkflowAuthority();
+  return useWorkflowRead({ ...workflowQueries.githubRepositories(workspaceId), enabled });
+}
+/** Repository and account names for the GitHub triggers in a list, so people never see raw GitHub IDs. */
+export function useGitHubNames(workspaceId: string, triggers: readonly { kind: string }[]): GitHubNames {
+  const read = useWorkflowGitHubRepositories(
+    workspaceId,
+    triggers.some(trigger => trigger.kind === 'github'),
+  );
+  const repositories = read.state.kind === 'ready' ? read.state.data : [];
+  return useMemo(() => githubNames(repositories), [repositories]);
+}
+/** Names of the tables that row triggers watch, loaded only when a trigger needs one. */
+export function useRowTableNames(workspaceId: string, triggers: readonly { kind: string }[]) {
+  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  return useTableNames(
+    tables,
+    triggers.some(trigger => trigger.kind === 'row'),
+  );
+}
+export function githubNames(repositories: readonly WorkflowGitHubRepository[]): GitHubNames {
+  return {
+    repositories: Object.fromEntries(repositories.map(item => [item.repositoryId, item.fullName])),
+    accounts: Object.fromEntries(
+      repositories.flatMap(item =>
+        item.ownerId ? [[item.ownerId, item.fullName.split('/')[0] ?? item.fullName]] : [],
+      ),
+    ),
+  };
 }
 export function useWorkflowProviders(workspaceId: string) {
   useWorkflowAuthority();

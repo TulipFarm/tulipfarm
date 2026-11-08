@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { calendarOccurrences, missedOccurrences, nextCronOccurrences, nextOccurrence } from '../src/schedule.ts';
-import { triggerSchema } from '../src/contracts.ts';
+import { triggerVariantSchema } from '../src/contracts.ts';
 
 test('cron uses IANA timezones and skips missed occurrences instead of replaying a backlog', () => {
   assert.equal(
@@ -106,12 +106,12 @@ test('interval occurrences preserve the activation-time grid across delayed swee
 
 test('only recurring and one-time triggers have a next run', () => {
   const now = new Date('2026-09-28T12:00:00Z');
-  assert.equal(nextOccurrence({ kind: 'manual' }, now), null);
+  assert.equal(nextOccurrence({ kind: 'event', name: 'invoice_paid' }, now), null);
   assert.equal(nextOccurrence({ kind: 'webhook' }, now), null);
 });
 
 test('cron accepts day and month names and macros by saving their numeric form', () => {
-  const cron = expression => triggerSchema.parse({ kind: 'cron', expression, timezone: 'UTC' }).expression;
+  const cron = expression => triggerVariantSchema.parse({ kind: 'cron', expression, timezone: 'UTC' }).expression;
   assert.equal(cron('0 9 * * MON-FRI'), '0 9 * * 1-5');
   assert.equal(cron('0 9 * * mon,Wed,FRI'), '0 9 * * 1,3,5');
   assert.equal(cron('0 9 1 JAN-MAR,dec *'), '0 9 1 1-3,12 *');
@@ -137,7 +137,7 @@ test('cron accepts day and month names and macros by saving their numeric form',
     '0 9 15W * *',
   ])
     assert.equal(
-      triggerSchema.safeParse({ kind: 'cron', expression: invalid, timezone: 'UTC' }).success,
+      triggerVariantSchema.safeParse({ kind: 'cron', expression: invalid, timezone: 'UTC' }).success,
       false,
       invalid,
     );
@@ -146,7 +146,7 @@ test('cron accepts day and month names and macros by saving their numeric form',
 test('cron schedules the last day, last weekday and nth weekday of a month', () => {
   const next = expression =>
     nextOccurrence(
-      triggerSchema.parse({ kind: 'cron', expression, timezone: 'UTC' }),
+      triggerVariantSchema.parse({ kind: 'cron', expression, timezone: 'UTC' }),
       new Date('2026-10-08T12:00:00Z'),
     );
   assert.equal(next('0 9 L * *'), '2026-10-31T09:00:00.000Z');
@@ -158,11 +158,14 @@ test('cron schedules the last day, last weekday and nth weekday of a month', () 
 
 test('a one-time trigger keeps its chosen time zone for display and rejects unknown zones', () => {
   const now = new Date('2026-10-04T12:00:00Z');
-  const once = triggerSchema.parse({ kind: 'once', at: '2026-10-05T07:30:00Z', timezone: 'Europe/London' });
+  const once = triggerVariantSchema.parse({ kind: 'once', at: '2026-10-05T07:30:00Z', timezone: 'Europe/London' });
   assert.deepEqual(once, { kind: 'once', at: '2026-10-05T07:30:00Z', timezone: 'Europe/London' });
   assert.equal(nextOccurrence(once, now), '2026-10-05T07:30:00.000Z');
   assert.throws(() => nextOccurrence({ kind: 'once', at: '2026-10-05T07:30:00Z', timezone: 'Not/AZone' }, now));
-  assert.equal(triggerSchema.safeParse({ kind: 'once', at: '2026-10-05T07:30:00Z', timezone: '' }).success, false);
+  assert.equal(
+    triggerVariantSchema.safeParse({ kind: 'once', at: '2026-10-05T07:30:00Z', timezone: '' }).success,
+    false,
+  );
 });
 
 test('missed occurrences name the first and last skipped time between the late due time and the sweep', () => {

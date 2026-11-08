@@ -13,6 +13,12 @@ import type { WorkflowRuntime } from './service.ts';
 import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm/workspace-storage/recommendations';
 
 export type WorkflowTransaction = AuthorizationTransaction & { commonVersion: number };
+/** The common migration that gives workflows a list of triggers; workflow code reads only that shape. */
+export const workflowTriggersCommonVersion = 48;
+export const workflowCompatibility = Object.freeze({
+  minimum: workflowTriggersCommonVersion,
+  maximum: commonCompatibility.maximum,
+});
 
 export function workflowTransaction<T>(
   runtime: WorkflowRuntime,
@@ -20,7 +26,7 @@ export function workflowTransaction<T>(
   operation: (tx: WorkflowTransaction) => Promise<T>,
   mode: 'read' | 'write' = 'write',
 ) {
-  return runtime.transaction(idSchema.parse(workspaceId), commonCompatibility, async tx => {
+  return runtime.transaction(idSchema.parse(workspaceId), workflowCompatibility, async tx => {
     await lockAuthorization(tx, mode);
     return operation(tx);
   });

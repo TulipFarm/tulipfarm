@@ -101,12 +101,12 @@ const workflow = {
   generation: 1,
   capabilities: { read: true, invoke: true, manage: true },
   nextRunAt: null,
-  activeTrigger: null,
-  webhookConfigured: false,
+  activeTriggers: null,
+  triggers: [],
   definition: {
     version: 1,
     name: 'Customer review',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [{ id: 'review', kind: 'human', prompt: 'Review the customer request.', timeoutSeconds: 86400 }],
   },
 };
@@ -244,7 +244,7 @@ function fixture(state) {
         ...state.workflows[0],
         enabled: true,
         activeRevision: state.workflows[0].revision,
-        activeTrigger: state.workflows[0].definition.trigger,
+        activeTriggers: state.workflows[0].definition.triggers,
       };
       return send(state.workflows[0]);
     }

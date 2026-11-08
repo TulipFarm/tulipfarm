@@ -119,7 +119,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Saved code',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'javascript_total',

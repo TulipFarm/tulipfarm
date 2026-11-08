@@ -48,7 +48,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const definition = {
         version: 1,
         name: 'Old intake',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'review', kind: 'human', prompt: 'Approve?', timeoutSeconds: 86400 }],
       };
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });

@@ -96,6 +96,8 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
         expectedSavedRevision: null,
         expectedPolicyVersion: 0,
         expectedActivationIds: [],
+        expectedWorkflowRevision: null,
+        expectedWorkflowGeneration: null,
         setup: {
           definition: {
             name,
@@ -115,16 +117,18 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
           taskLimits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
           slackSender: 'user',
           slackChannels: [],
-          triggers: active
-            ? []
-            : [
-                {
-                  id: stableId(id, 'weekly'),
-                  trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
-                  prompt: 'Prepare the weekly People Ops update. List questions that need a human decision.',
-                  limits: { toolCalls: 20, activeMilliseconds: 120000, credits: 20 },
-                },
-              ],
+          ...(active
+            ? { triggers: [] }
+            : {
+                prompt: 'Prepare the weekly People Ops update. List questions that need a human decision.',
+                runLimits: { toolCalls: 20, activeMilliseconds: 120000, credits: 20 },
+                triggers: [
+                  {
+                    id: stableId(id, 'weekly'),
+                    trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
+                  },
+                ],
+              }),
         },
       });
       const command = await setup.publish(workspace.id, owner.id, id, {
@@ -132,7 +136,7 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
         version: draft.version,
         digest: draft.digest,
         decision: active ? 'activate' : 'save',
-        consent: { sponsorTriggerIds: [], replaceChannels: [] },
+        consent: { sponsor: false, replaceChannels: [] },
       });
       const definition = await setup.definitionCommand(workspace.id, owner.id, command.commandId);
       let status = definition.status;

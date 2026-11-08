@@ -26,6 +26,7 @@ import { slackActionViewSchema, slackDecisionSchema } from '@tulipfarm/slack/act
 import { webAgentDefinitionSchema } from './definition';
 import { definitionSharingCandidatesSchema } from '@tulipfarm/agents/saved-contracts';
 import {
+  agentLinkedWorkflowSchema,
   agentSetupDraftSchema,
   agentSetupReceiptSchema,
   type SaveAgentSetupDraft,
@@ -43,7 +44,8 @@ type ExecutionSettings = z.infer<typeof executionPolicySchema>;
 
 const rejections: Partial<Record<string, string>> = {
   'trigger-sponsor-consent-required':
-    'Sponsor each trigger that runs on its own before activating. Your input is retained.',
+    'Sponsor the triggers that run on their own before activating. Your input is retained.',
+  'setup-draft-outdated': 'This setup was saved before triggers were combined. Save it again before activating.',
   'task-schedule-interval': `Scheduled triggers run this agent at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.`,
   'schedule-invalid':
     'This calendar schedule is invalid. Check the cron expression and IANA time zone. Your input is retained.',
@@ -145,6 +147,8 @@ export function agentApi(workspaceId: string) {
       agentSetupDraftSchema.parse(await request(`/${id}/setup-draft`, 'PUT', input)),
     publishSetup: async (id: string, input: PublishAgentSetup) =>
       agentSetupReceiptSchema.parse(await request(`/${id}/setup`, 'POST', input)),
+    linkedWorkflow: async (id: string, signal: AbortSignal) =>
+      agentLinkedWorkflowSchema.parse(await request(`/${id}/linked-workflow`, 'GET', undefined, signal)),
     setupCommand: async (id: string, signal: AbortSignal) =>
       agentSetupReceiptSchema.parse(await request(`/setup-commands/${id}`, 'GET', undefined, signal)),
     retrySetupCommand: async (id: string) =>

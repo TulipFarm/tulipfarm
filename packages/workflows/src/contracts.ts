@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { sourceSchema, snippetPayloadSchema } from '@tulipfarm/workflow-snippets/protocol';
 import { canonical } from '@tulipfarm/workflow-snippets/canonical';
-import { githubEventIdSchema } from '@tulipfarm/github/event-contracts';
 import { providerTriggerSchema } from './provider-contracts.ts';
 import { outputPathIssues, stepValueEntries } from './output-fields.ts';
 export {
@@ -60,6 +59,11 @@ export const commandSchema = z.strictObject({
   expectedGeneration: z.number().int().positive().max(2147483646),
 });
 export const activationSchema = commandSchema.extend({ revision: idSchema, enabled: z.boolean() });
+/** Switches one trigger of the active revision on or off without saving a revision. */
+export const triggerSwitchSchema = commandSchema.extend({
+  triggerId: z.string().regex(/^[a-z][a-z0-9_]{0,47}$/),
+  enabled: z.boolean(),
+});
 export const webhookModeSchema = z.enum(['bearer', 'signed', 'github', 'stripe']);
 export const webhookKeyValueSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const webhookSigningSecretSchema = z.string().min(1).max(256);
@@ -86,6 +90,10 @@ export const valueSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('literal'), value: payloadSchema }),
   z.strictObject({ kind: z.literal('input'), path: z.array(z.string().max(100)).max(16) }),
   z.strictObject({ kind: z.literal('step'), step: name, path: z.array(z.string().max(100)).max(16) }),
+  z.strictObject({
+    kind: z.literal('trigger'),
+    path: z.array(z.enum(['id', 'kind'])).max(1),
+  }),
 ]);
 const templatePlaceholder = /\{\{\s*([a-z][a-z0-9_]{0,47})\s*\}\}/g;
 /** Message text written when the workflow is drafted, with `{{name}}` placeholders filled from run values on each run. */
@@ -194,6 +202,8 @@ export const stepSchema = z.discriminatedUnion('kind', [
     prompt: valueSchema,
     /** Trigger or step data appended to the prompt as JSON, marked as data rather than instructions. */
     context: valueSchema.optional(),
+    /** Appends the starting trigger, and for event-driven triggers the resolved `context` as its event, instead of `context` alone. */
+    triggerContext: z.boolean().optional(),
     /** Runs this exact activation instead of the agent's newest; a revoked one fails the step. */
     activationId: idSchema.optional(),
     limits: agentTaskLimitsSchema.default({ toolCalls: 100, activeMilliseconds: 300000, credits: 100 }),
@@ -484,42 +494,183 @@ export const githubTriggerEvents = {
   release: ['published', 'unpublished', 'created', 'edited', 'deleted', 'prereleased', 'released'],
 } as const satisfies Record<string, readonly string[]>;
 export type GitHubTriggerEvent = keyof typeof githubTriggerEvents;
-export const githubTriggerSchema = z
+/** A GitHub repository, account or organization ID as GitHub numbers it. */
+export const githubIdSchema = z.string().regex(/^[1-9][0-9]{0,19}$/);
+export const githubEventFilterSchema = z
   .strictObject({
-    kind: z.literal('github'),
-    repositoryId: githubEventIdSchema,
     event: z.enum(Object.keys(githubTriggerEvents) as [GitHubTriggerEvent, ...GitHubTriggerEvent[]]),
     actions: z.array(z.string()).min(1).max(16).optional(),
   })
   .refine(
-    trigger =>
-      trigger.actions === undefined ||
-      (new Set(trigger.actions).size === trigger.actions.length &&
-        trigger.actions.every(action => (githubTriggerEvents[trigger.event] as readonly string[]).includes(action))),
+    filter =>
+      filter.actions === undefined ||
+      (new Set(filter.actions).size === filter.actions.length &&
+        filter.actions.every(action => (githubTriggerEvents[filter.event] as readonly string[]).includes(action))),
     { message: 'Name each action once, and only actions this event has', path: ['actions'] },
   );
+export type GitHubEventFilter = z.infer<typeof githubEventFilterSchema>;
+/** Listed repositories, or every repository of one account including ones it creates later. */
+export const githubRepositoriesSchema = z.union([
+  z
+    .array(githubIdSchema)
+    .min(1)
+    .max(1000)
+    .refine(ids => new Set(ids).size === ids.length, { message: 'Name each repository once' }),
+  z.strictObject({ organizationId: githubIdSchema, includeFuture: z.literal(true) }),
+]);
+export type GitHubRepositories = z.infer<typeof githubRepositoriesSchema>;
+export const githubTriggerSchema = z
+  .strictObject({
+    kind: z.literal('github'),
+    repositories: githubRepositoriesSchema,
+    events: z.array(githubEventFilterSchema).min(1).max(8),
+  })
+  .refine(trigger => new Set(trigger.events.map(item => item.event)).size === trigger.events.length, {
+    message: 'Name each event once',
+    path: ['events'],
+  });
 export type GitHubTrigger = z.infer<typeof githubTriggerSchema>;
+/** A trigger's identity across revisions; a namespace separate from step IDs. */
+export const triggerIdSchema = name;
+export const maxTriggers = 20;
+const triggerIdentity = { id: triggerIdSchema, label: z.string().trim().min(1).max(100).optional() };
+export const identifiedProviderTriggerSchema = providerTriggerSchema.extend(triggerIdentity);
 export const triggerSchema = z.discriminatedUnion('kind', [
+  recordTriggerSchema.extend(triggerIdentity),
+  rowTriggerSchema.safeExtend(triggerIdentity),
+  identifiedProviderTriggerSchema,
+  githubTriggerSchema.safeExtend(triggerIdentity),
+  z.strictObject({ ...triggerIdentity, kind: z.literal('webhook'), payload: rawWebhookSchema.optional() }),
+  z.strictObject({ ...triggerIdentity, kind: z.literal('event'), name }),
+  z.strictObject({
+    ...triggerIdentity,
+    kind: z.literal('once'),
+    at: z.iso.datetime(),
+    timezone: timezoneSchema.optional(),
+  }),
+  intervalTriggerSchema.extend(triggerIdentity),
+  cronTriggerSchema.extend(triggerIdentity),
+]);
+export type Trigger = z.infer<typeof triggerSchema>;
+/** A trigger's settings without its ID and label, for callers that assign identity themselves. */
+export const triggerVariantSchema = z.discriminatedUnion('kind', [
   recordTriggerSchema,
   rowTriggerSchema,
   providerTriggerSchema,
   githubTriggerSchema,
-  z.strictObject({ kind: z.literal('manual') }),
   z.strictObject({ kind: z.literal('webhook'), payload: rawWebhookSchema.optional() }),
   z.strictObject({ kind: z.literal('event'), name }),
   z.strictObject({ kind: z.literal('once'), at: z.iso.datetime(), timezone: timezoneSchema.optional() }),
   intervalTriggerSchema,
   cronTriggerSchema,
 ]);
-export type Trigger = z.infer<typeof triggerSchema>;
+export type TriggerVariant = z.infer<typeof triggerVariantSchema>;
+export type TriggerKind = Trigger['kind'];
+export const triggerKinds = [
+  'record',
+  'row',
+  'provider',
+  'github',
+  'webhook',
+  'event',
+  'once',
+  'interval',
+  'cron',
+] as const satisfies readonly TriggerKind[];
+export const triggerKindSchema = z.enum(triggerKinds);
+/** Kinds the scheduler fires at a time; due ones coalesce into one run per Workflow. */
+export const scheduleTriggerKinds = ['once', 'interval', 'cron'] as const satisfies readonly TriggerKind[];
+/** Kinds whose run input is the payload of the event that started the run. */
+export const eventDrivenTriggerKinds = [
+  'record',
+  'row',
+  'provider',
+  'github',
+  'webhook',
+  'event',
+] as const satisfies readonly TriggerKind[];
+export const isScheduleTrigger = (
+  trigger: Trigger,
+): trigger is Extract<Trigger, { kind: 'once' | 'interval' | 'cron' }> =>
+  (scheduleTriggerKinds as readonly string[]).includes(trigger.kind);
+/** Kinds that start runs without a member, so they run as the sponsor. A named event is started by a member. */
+export const isUnattendedTrigger = (trigger: Trigger) => trigger.kind !== 'event';
+/** The trigger that started a run as the `trigger` expression sees it; a manual start has no trigger. */
+export type RunTrigger = { id: string | null; kind: TriggerKind | 'manual' };
+export const manualRunTrigger: RunTrigger = { id: null, kind: 'manual' };
+/** Run values hold the starting trigger under a key no step ID can take. */
+export const runTriggerKey = '$trigger';
+function onceSummary(at: string, timezone = 'UTC') {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: timezone,
+    })
+      .formatToParts(new Date(at))
+      .map(part => [part.type, part.value]),
+  );
+  return `Once on ${parts.day} ${parts.month} ${parts.year} at ${parts.hour}:${parts.minute} (${timezone.replaceAll('_', ' ')})`;
+}
+/** A short readable description of a trigger's settings, used where it has no label. */
+export function triggerSummary(trigger: Trigger): string {
+  switch (trigger.kind) {
+    case 'once':
+      return onceSummary(trigger.at, trigger.timezone);
+    case 'interval':
+      return trigger.minutes === 1 ? 'Every minute' : `Every ${trigger.minutes} minutes`;
+    case 'cron':
+      return `Cron ${trigger.expression} (${trigger.timezone})`;
+    case 'webhook':
+      return 'Webhook';
+    case 'event':
+      return `Event ${trigger.name}`;
+    case 'record':
+      return 'Record date';
+    case 'row':
+      return `Row ${trigger.event}`;
+    case 'provider':
+      return `Provider ${trigger.event}`;
+    case 'github':
+      return `GitHub ${trigger.events
+        .map(item => `${item.event}${item.actions ? ` (${item.actions.join(', ')})` : ''}`)
+        .join(', ')}`;
+    default: {
+      const exhaustive: never = trigger;
+      return exhaustive;
+    }
+  }
+}
+/** A direct loop: the step makes the row change that starts the next run. */
+function rowLoop(trigger: Trigger, step: Step) {
+  return (
+    trigger.kind === 'row' &&
+    'tableId' in step &&
+    step.tableId === trigger.tableId &&
+    ((step.kind === 'create-row' && trigger.event === 'created') ||
+      (step.kind === 'update-row' &&
+        trigger.event === 'updated' &&
+        (!trigger.fieldIds || trigger.fieldIds.some(id => id in step.fields))))
+  );
+}
 export const definitionSchema = z
   .strictObject({
     version: z.literal(1),
     name: z.string().trim().min(1).max(100),
-    trigger: triggerSchema,
+    triggers: z.array(triggerSchema).max(maxTriggers, 'too-many-triggers'),
     steps: z.array(stepSchema).min(1).max(32),
   })
   .superRefine((definition, context) => {
+    const triggerIds = new Set<string>();
+    for (const [index, trigger] of definition.triggers.entries()) {
+      if (triggerIds.has(trigger.id))
+        context.addIssue({ code: 'custom', message: 'Duplicate trigger ID', path: ['triggers', index, 'id'] });
+      triggerIds.add(trigger.id);
+    }
     const known = new Set<string>();
     const positions = new Map(definition.steps.map((step, index) => [step.id, index]));
     const gates = stepGates(definition.steps);
@@ -559,17 +710,24 @@ export const definitionSchema = z
           message: 'Wait time must be an ISO date or date-time',
           path: ['steps', index, 'at'],
         });
+      if (step.kind === 'condition') {
+        const sides = 'right' in step.when ? [step.when.left, step.when.right] : [];
+        for (const [side, other] of [sides, [...sides].reverse()]) {
+          if (side?.kind !== 'trigger' || other?.kind !== 'literal' || !side.path.length) continue;
+          const named =
+            side.path[0] === 'id'
+              ? typeof other.value === 'string' && triggerIds.has(other.value)
+              : other.value === 'manual' || triggerKindSchema.safeParse(other.value).success;
+          if (!named)
+            context.addIssue({
+              code: 'custom',
+              message: side.path[0] === 'id' ? 'No trigger has this ID' : 'Not a trigger kind',
+              path: ['steps', index, 'when'],
+            });
+        }
+      }
       // Each run would make the change that starts the next one.
-      const { trigger } = definition;
-      if (
-        trigger.kind === 'row' &&
-        'tableId' in step &&
-        step.tableId === trigger.tableId &&
-        ((step.kind === 'create-row' && trigger.event === 'created') ||
-          (step.kind === 'update-row' &&
-            trigger.event === 'updated' &&
-            (!trigger.fieldIds || trigger.fieldIds.some(id => id in step.fields))))
-      )
+      if (definition.triggers.some(trigger => rowLoop(trigger, step)))
         context.addIssue({
           code: 'custom',
           message: 'A step cannot make the row change that triggers this workflow',
@@ -581,15 +739,16 @@ export const definitionSchema = z
 export type Definition = z.infer<typeof definitionSchema>;
 export const authoredDefinitionSchema = definitionSchema.superRefine((definition, context) => {
   for (const issue of outputPathIssues(definition)) context.addIssue(issue);
-  if (definition.trigger.kind === 'webhook')
-    for (const [index, header] of (definition.trigger.payload?.headers ?? []).entries()) {
-      if (isSecretHeader(header))
-        context.addIssue({
-          code: 'custom',
-          message: 'Signature and secret headers cannot be copied',
-          path: ['trigger', 'payload', 'headers', index],
-        });
-    }
+  for (const [triggerIndex, trigger] of definition.triggers.entries())
+    if (trigger.kind === 'webhook')
+      for (const [index, header] of (trigger.payload?.headers ?? []).entries()) {
+        if (isSecretHeader(header))
+          context.addIssue({
+            code: 'custom',
+            message: 'Signature and secret headers cannot be copied',
+            path: ['triggers', triggerIndex, 'payload', 'headers', index],
+          });
+      }
   for (const [index, step] of definition.steps.entries()) {
     if (step.kind === 'code' && !sourceSchema.safeParse(step.source).success)
       context.addIssue({
@@ -639,20 +798,34 @@ export const rowQueueSchema = z.object({
     }),
   ),
 });
+export const triggerWebhookSchema = z.object({
+  configured: z.boolean(),
+  mode: webhookModeSchema.nullable().default(null),
+  rotation: z.boolean().default(false),
+  previous: z.object({ mode: webhookModeSchema, expiresAt: z.string() }).nullable().default(null),
+});
+/** One trigger of the active revision with the state kept outside revisions. */
+export const workflowTriggerSchema = z.object({
+  id: triggerIdSchema,
+  kind: triggerKindSchema,
+  enabled: z.boolean(),
+  summary: z.string(),
+  nextRunAt: z.string().nullable(),
+  webhook: triggerWebhookSchema.nullable(),
+});
+export type WorkflowTrigger = z.infer<typeof workflowTriggerSchema>;
 export const workflowSchema = z.object({
   id: idSchema,
   revision: idSchema,
   activeRevision: idSchema.nullable(),
   enabled: z.boolean(),
   generation: z.number().int().positive(),
+  /** The earliest due time across switched-on schedule triggers. */
   nextRunAt: z.string().nullable(),
   definition: definitionSchema,
-  activeTrigger: triggerSchema.nullable(),
+  activeTriggers: z.array(triggerSchema).nullable(),
+  triggers: z.array(workflowTriggerSchema).default([]),
   disabledReason: disabledReasonSchema.nullable().default(null),
-  webhookConfigured: z.boolean(),
-  webhookMode: webhookModeSchema.nullable().default(null),
-  webhookRotation: z.boolean().default(false),
-  webhookPrevious: z.object({ mode: webhookModeSchema, expiresAt: z.string() }).nullable().default(null),
   capabilities: z
     .object({ read: z.boolean(), invoke: z.boolean(), manage: z.boolean() })
     .default({ read: false, invoke: false, manage: false }),
@@ -707,6 +880,10 @@ export const runSchema = z.object({
   revision: idSchema,
   status: statusSchema,
   source: runSourceSchema,
+  /** The trigger that started the run; null for a manual start. */
+  triggerId: triggerIdSchema.nullable().default(null),
+  /** Every trigger that started this run together, in definition order. */
+  firedTriggerIds: z.array(triggerIdSchema).default([]),
   input: payloadSchema,
   createdAt: z.string(),
   scheduledFor: z.string().nullable().default(null),
@@ -738,6 +915,7 @@ export const runHistoryCursorSchema = z
 export const runHistoryQuerySchema = z.strictObject({
   status: statusSchema.optional(),
   before: runHistoryCursorSchema.optional(),
+  triggerId: triggerIdSchema.optional(),
 });
 export type RunHistoryQuery = z.infer<typeof runHistoryQuerySchema>;
 export const runHistoryPageSchema = z.object({
@@ -793,7 +971,12 @@ export function resolveValue(
   outputs: Map<string, z.infer<typeof payloadSchema>>,
 ) {
   if (expression.kind === 'literal') return expression.value;
-  let value = expression.kind === 'input' ? input : outputs.get(expression.step);
+  let value: unknown =
+    expression.kind === 'input'
+      ? input
+      : expression.kind === 'trigger'
+        ? (outputs.get(runTriggerKey) ?? manualRunTrigger)
+        : outputs.get(expression.step);
   for (const part of expression.path) {
     if (value === null || typeof value !== 'object' || !Object.hasOwn(value, part)) throw new Error('missing-value');
     value = Reflect.get(value, part);

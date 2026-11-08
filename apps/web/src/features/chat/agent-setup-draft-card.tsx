@@ -14,7 +14,7 @@ import {
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
-import { AgentSetupReview, setupTriggerLabel, useTriggerTableNames } from '@/features/agents/setup-review';
+import { AgentSetupReview, useSetupTriggerNames } from '@/features/agents/setup-review';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
 
@@ -41,8 +41,8 @@ export function AgentSetupDraftCard({
   checkStatus: ReactNode;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
-  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsorTriggerIds: [], replaceChannels: [] });
-  const tableNames = useTriggerTableNames(workspace.id, proposal.input.setup?.triggers ?? []);
+  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsor: false, replaceChannels: [] });
+  const triggerName = useSetupTriggerNames(workspace.id, proposal.input.setup?.triggers ?? []);
   if (!proposal.input.setup) return null;
   const setup = {
     ...proposal.input.setup,
@@ -55,7 +55,7 @@ export function AgentSetupDraftCard({
   );
   const sponsored = setup.triggers.filter(item => unattendedTrigger(item.trigger));
   const ready =
-    sponsored.every(item => consent.sponsorTriggerIds.includes(item.id)) &&
+    (!sponsored.length || consent.sponsor) &&
     replacements.every(channel => consent.replaceChannels.includes(channel.channel));
   const updating = proposal.input.expectedSavedRevision !== null;
   const handoff = {
@@ -65,21 +65,23 @@ export function AgentSetupDraftCard({
   const badge =
     receipt?.status === 'active'
       ? { label: 'Active', variant: 'success' as const }
-      : receipt?.status === 'blocked'
-        ? { label: 'Setup incomplete', variant: 'warning' as const }
-        : {
-            label:
-              draft.status === 'pending'
-                ? 'Draft'
-                : draft.status === 'preparing'
-                  ? 'Saving'
-                  : draft.status === 'saved'
-                    ? 'Saved draft'
-                    : draft.status === 'dismissed'
-                      ? 'Dismissed'
-                      : 'Needs review',
-            variant: 'secondary' as const,
-          };
+      : receipt?.status === 'conflict'
+        ? { label: 'Out of date', variant: 'warning' as const }
+        : receipt?.status === 'blocked'
+          ? { label: 'Setup incomplete', variant: 'warning' as const }
+          : {
+              label:
+                draft.status === 'pending'
+                  ? 'Draft'
+                  : draft.status === 'preparing'
+                    ? 'Saving'
+                    : draft.status === 'saved'
+                      ? 'Saved draft'
+                      : draft.status === 'dismissed'
+                        ? 'Dismissed'
+                        : 'Needs review',
+              variant: 'secondary' as const,
+            };
   return (
     <ReviewCard
       label="Review agent draft"
@@ -112,29 +114,26 @@ export function AgentSetupDraftCard({
             {receipt?.status === 'active' && (
               <p role="status">Agent active. Its reviewed access and triggers are now in place.</p>
             )}
-            {receipt?.status === 'active' && !!receipt.workflows.length && (
-              <ul aria-label="Workflows that run this agent" className="mt-2 grid gap-1">
-                {receipt.workflows.map((item, index) => {
-                  const trigger = setup.triggers.find(candidate => candidate.id === item.triggerId);
-                  return (
-                    <li key={item.workflowId}>
-                      <Button
-                        variant="link"
-                        size="sm"
-                        nativeButton={false}
-                        render={
-                          <Link
-                            to="/$workspaceSlug/workflows/$workflowId"
-                            params={{ workspaceSlug: workspace.slug, workflowId: item.workflowId }}
-                          />
-                        }
-                      >
-                        {`Workflow ${index + 1}${trigger ? `: ${setupTriggerLabel(trigger.trigger, tableNames)}` : ''}`}
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
+            {receipt?.status === 'active' && receipt.workflowId && (
+              <Button
+                variant="link"
+                size="sm"
+                nativeButton={false}
+                render={
+                  <Link
+                    to="/$workspaceSlug/workflows/$workflowId"
+                    params={{ workspaceSlug: workspace.slug, workflowId: receipt.workflowId }}
+                  />
+                }
+              >
+                Open this agent&apos;s workflow
+              </Button>
+            )}
+            {receipt?.status === 'conflict' && (
+              <p role="status">
+                This agent&apos;s workflow changed after this draft was made. Nothing was changed. Ask chat for a fresh
+                draft.
+              </p>
             )}
             {receipt?.status === 'saved' && (
               <p role="status">Draft saved. No new triggers were started. Any earlier active revision is unchanged.</p>
@@ -148,7 +147,7 @@ export function AgentSetupDraftCard({
             {draft.status === 'stale' && (
               <p role="status">This proposal is out of date. Ask chat for a fresh draft before approving changes.</p>
             )}
-            {draft.status === 'failed' && receipt?.status !== 'blocked' && (
+            {draft.status === 'failed' && receipt?.status !== 'blocked' && receipt?.status !== 'conflict' && (
               <p role="status">Setup did not finish. Check its status before trying again.</p>
             )}
             {draft.status === 'dismissed' && <p role="status">Draft dismissed. Nothing was saved or activated.</p>}
@@ -166,23 +165,15 @@ export function AgentSetupDraftCard({
       {draft.status === 'pending' && (
         <fieldset disabled={locked} className="grid gap-3">
           <legend className="sr-only">Activation consent</legend>
-          {sponsored.map((item, index) => (
+          {sponsored.length > 0 && (
             <CheckboxField
-              key={item.id}
-              id={`draft-${draft.id}-trigger-${item.id}`}
-              label={`I sponsor trigger ${index + 1}: ${setupTriggerLabel(item.trigger, tableNames)}`}
-              helper="Activating creates a workflow that runs this agent with your current permissions and creates private tasks."
-              checked={consent.sponsorTriggerIds.includes(item.id)}
-              onCheckedChange={checked =>
-                setConsent(previous => ({
-                  ...previous,
-                  sponsorTriggerIds: checked
-                    ? [...previous.sponsorTriggerIds, item.id]
-                    : previous.sponsorTriggerIds.filter(id => id !== item.id),
-                }))
-              }
+              id={`draft-${draft.id}-sponsor`}
+              label={`I sponsor ${sponsored.length === 1 ? triggerName(sponsored[0]!) : `these ${sponsored.length} triggers`}`}
+              helper="Runs use your current permissions and create private tasks."
+              checked={consent.sponsor}
+              onCheckedChange={sponsor => setConsent(previous => ({ ...previous, sponsor }))}
             />
-          ))}
+          )}
           {replacements.map((channel, index) => (
             <CheckboxField
               key={channel.channel}

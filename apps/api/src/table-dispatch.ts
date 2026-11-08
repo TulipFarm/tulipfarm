@@ -6,6 +6,8 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { createTemporalClient } from './temporal.ts';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
+import type { AgentWorkflowOptions } from '@tulipfarm/agents/agent-trigger-workflows';
+import { createAgentWorkflowCombine } from '@tulipfarm/agents/agent-workflow-combine';
 import { errorAttributes } from '@tulipfarm/observability';
 
 export function registerTableDispatch(
@@ -14,9 +16,11 @@ export function registerTableDispatch(
     pool: Pool;
     runtime: WorkspaceRuntime;
     temporal: ReturnType<typeof createTemporalClient>;
+    agentWorkflows?: AgentWorkflowOptions;
   },
 ) {
   const { pool, runtime, temporal } = dependencies;
+  const agentWorkflows = createAgentWorkflowCombine(runtime, dependencies.agentWorkflows);
   let after: string | null = null;
   async function sweep(stopped: () => boolean) {
     const rows = await readyWorkspaces(pool, after, 100);
@@ -94,6 +98,20 @@ export function registerTableDispatch(
         }
       } catch (error) {
         app.log.error({ workspaceId: row.workspace_id, ...errorAttributes(error) }, 'Agent dispatch will retry');
+      }
+      try {
+        // Each agent's older per-trigger Workflows become its one linked Workflow.
+        await agentWorkflows.combine(row.workspace_id, (agentId, error) =>
+          app.log.error(
+            { workspaceId: row.workspace_id, agentId, ...errorAttributes(error) },
+            'Agent Workflows stay separate; they could not be combined',
+          ),
+        );
+      } catch (error) {
+        app.log.error(
+          { workspaceId: row.workspace_id, ...errorAttributes(error) },
+          'Agent Workflow combine will retry',
+        );
       }
       after = row.workspace_id;
     }

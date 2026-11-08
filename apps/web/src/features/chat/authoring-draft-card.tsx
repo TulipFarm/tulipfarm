@@ -1,3 +1,4 @@
+import { triggersLine } from '@/features/workflows/triggers';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BookOpen } from 'reicon-react/icons/BookOpen';
@@ -406,12 +407,13 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
         <div className="space-y-3">
           <p className="text-sm">{workflowChange(workflow)}</p>
           <p className="text-sm">
-            {workflow.input.definition.steps.length} {workflow.input.definition.steps.length === 1 ? 'step' : 'steps'}.{' '}
+            {triggersLine(workflow.input.definition.triggers)}. {workflow.input.definition.steps.length}{' '}
+            {workflow.input.definition.steps.length === 1 ? 'step' : 'steps'}.{' '}
             {draft.workflowNextRunAt
-              ? `Next run ${formatRun(draft.workflowNextRunAt, workflow.input.definition.trigger)}.`
+              ? `Next run ${formatRun(draft.workflowNextRunAt, workflow.input.definition.triggers)}.`
               : 'Review the trigger, actors, and steps in Canvas.'}
           </p>
-          {workflow.input.definition.trigger.kind === 'github' && (
+          {workflow.input.definition.triggers.some(trigger => trigger.kind === 'github') && (
             <p className="text-sm">
               <GitHubInstallNote workspaceId={workspace.id} />
             </p>
@@ -576,6 +578,9 @@ function AgentDraftRows({
   );
 }
 
+const hasTrigger = (proposal: WorkflowProposal, kind: string) =>
+  proposal.input.definition.triggers.some(trigger => trigger.kind === kind);
+
 function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, proposal: WorkflowProposal) {
   switch (outcome.activation) {
     case 'not-requested':
@@ -584,12 +589,12 @@ function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, pr
         : 'Workflow saved. It is not active. Activate it from chat or the Workflows page.';
     case 'activated':
       return outcome.nextRunAt
-        ? `Workflow active. Next run ${formatRun(outcome.nextRunAt, proposal.input.definition.trigger)}.`
-        : proposal.input.definition.trigger.kind === 'record'
+        ? `Workflow active. Next run ${formatRun(outcome.nextRunAt, proposal.input.definition.triggers)}.`
+        : hasTrigger(proposal, 'record')
           ? 'Workflow active. Upcoming record dates appear on the Workflows page within a minute.'
-          : proposal.input.definition.trigger.kind === 'row'
+          : hasTrigger(proposal, 'row')
             ? 'Workflow active. Runs start within about a minute of each matching row change.'
-            : proposal.input.definition.trigger.kind === 'github'
+            : hasTrigger(proposal, 'github')
               ? 'Workflow active. Runs start when GitHub sends a matching event.'
               : 'Workflow active.';
     case 'disabled':

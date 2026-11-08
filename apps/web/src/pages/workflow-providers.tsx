@@ -7,7 +7,7 @@ import {
   providerTestInputSchema,
   providerTestResultSchema,
   providerResourceInputSchema,
-  type Definition,
+  type Trigger,
 } from '@tulipfarm/workflows/contracts';
 import { workflowRequest as request, WorkflowRequestError as ProviderRequestError } from '@/features/workflows/api';
 import { Button } from '@tulipfarm/sprout/button';
@@ -21,6 +21,7 @@ import { workflowSources as examples } from '@/features/workflows/provider-sourc
 import { providerFieldHelp, providerIssues, type ProviderField } from '@/features/workflows/provider-fields';
 import { useWorkflowProviders, useWorkflowProviderStatus, useWorkflowChanges } from '@/features/workflows/queries';
 import { WorkflowSharing } from '@/features/workflows/sharing';
+import type { TriggerBody } from '@/features/workflows/triggers';
 import { ProviderResourcePicker, providerFailureMessage } from '@/features/workflows/provider-discovery';
 
 type Source = z.infer<typeof providerSourceSchema>;
@@ -43,14 +44,14 @@ export function WorkflowProviders({
   workspaceId: string;
   workflowId: string | null;
   initialProvider?: Source['provider'] | undefined;
-  trigger: Definition['trigger'];
+  trigger: TriggerBody | null;
   disabled: boolean;
-  onTrigger?: (trigger: Definition['trigger']) => void;
+  onTrigger?: (trigger: TriggerBody<Extract<Trigger, { kind: 'provider' }>>) => void;
   onDenied: () => void;
 }) {
   const base = `/workspaces/${workspaceId}/workflows`;
   const read = useWorkflowProviders(workspaceId);
-  const statusRead = useWorkflowProviderStatus(workspaceId, trigger.kind === 'provider' ? workflowId : null);
+  const statusRead = useWorkflowProviderStatus(workspaceId, trigger?.kind === 'provider' ? workflowId : null);
   const changes = useWorkflowChanges();
   const [denied, setDenied] = useState(false);
   const state: ReadState =
@@ -607,7 +608,7 @@ export function WorkflowProviders({
               </li>
             ))}
           </ul>
-          {onTrigger && trigger.kind === 'provider' && (
+          {onTrigger && trigger?.kind === 'provider' && (
             <fieldset disabled={blocked} className="space-y-3">
               <legend className="text-sm font-medium">Selected provider trigger</legend>
               <p>
@@ -647,7 +648,7 @@ export function WorkflowProviders({
               </p>
             </fieldset>
           )}
-          {workflowId && trigger.kind === 'provider' && (
+          {workflowId && trigger?.kind === 'provider' && (
             <div className="space-y-2">
               <Button variant="outline" onClick={() => void readStatus()}>
                 Check provider status

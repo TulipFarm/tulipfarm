@@ -164,8 +164,17 @@ test(
           enabled: true,
           generation: 1,
           nextRunAt: '2026-10-10T09:00:00Z',
-          activeTrigger: { kind: 'interval', minutes: 60 },
-          webhookConfigured: false,
+          activeTriggers: [{ id: 'interval', kind: 'interval', minutes: 60 }],
+          triggers: [
+            {
+              id: 'interval',
+              kind: 'interval',
+              enabled: true,
+              summary: 'Every hour',
+              nextRunAt: '2026-10-10T09:00:00Z',
+              webhook: null,
+            },
+          ],
           capabilities: { read: true, invoke: true, manage: true },
           definition: reviewDefinition(name, { kind: 'interval', minutes: 60 }),
           agentId: agent,
@@ -235,6 +244,14 @@ test(
             activationWrites.push(request.postDataJSON());
             return fulfill({ status: 500, json: { error: 'unexpected write' } });
           } else if (path === `/v1/workspaces/${workspace.id}/workflows`) json = workflowList;
+          else if (path.endsWith(`/agents/${agentId}/linked-workflow`))
+            json = {
+              workflowId: workflowList[0].id,
+              revision: workflowList[0].revision,
+              generation: 1,
+              archived: false,
+              separateWorkflowIds: [],
+            };
           else if (path.endsWith(`/agents/${agentId}/chat`)) json = { configured: true };
           else if (path.endsWith('/slack/destinations')) {
             if (request.method() === 'PUT') {
@@ -558,10 +575,14 @@ test(
         assert.equal(destinationWrites.length, 1);
 
         await openTab('Triggers');
-        const triggerWorkflows = page.getByRole('region', { name: 'Agent workflow triggers', exact: true });
-        const linked = triggerWorkflows.getByRole('list', { name: 'Workflows that run this agent', exact: true });
+        const triggerWorkflows = page.getByRole('region', { name: 'Agent triggers', exact: true });
+        const linked = triggerWorkflows.getByRole('list', { name: "This agent's workflow", exact: true });
         await linked.getByRole('link', { name: 'Customer reviewer: Every hour', exact: true }).waitFor();
         assert.equal(await linked.getByRole('link').count(), 1);
+        assert.equal(await triggerWorkflows.getByRole('list', { name: 'Workflows to combine' }).count(), 0);
+        const hourly = triggerWorkflows.getByRole('list', { name: 'Triggers', exact: true }).getByRole('switch');
+        assert.equal(await hourly.count(), 1);
+        assert.equal(await hourly.isChecked(), true, 'the linked workflow lists its trigger with its switch state');
         assert.equal(
           await page.getByRole('region', { name: 'Agent table inspection schedules', exact: true }).count(),
           0,

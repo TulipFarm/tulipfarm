@@ -32,7 +32,7 @@ test(
         definition: {
           version: 1,
           name: 'Copy input',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [{ id: 'copy', kind: 'transform', fields: { n: { kind: 'input', path: ['n'] } } }],
         },
       });

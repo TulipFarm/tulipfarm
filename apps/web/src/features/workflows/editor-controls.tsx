@@ -6,6 +6,7 @@ import {
   rawWebhookSchema,
   type ConditionStep,
   type Definition,
+  type Trigger,
   type valueSchema,
 } from '@tulipfarm/workflows/contracts';
 import { tableApi, type TableDefinition } from '@/features/tables/api';
@@ -24,8 +25,7 @@ import { workspaceRoute } from '@/router';
 import { fromZonedInput, zonedInput } from './zoned-time';
 import { cronDayChoices, ordinaryCron, validateCron } from './calendar-schedule';
 import { OutputPathControl } from './output-picker';
-import { describeGitHubTrigger } from './definition-description';
-import { GitHubInstallNote } from './github-install-note';
+import type { TriggerBody } from './triggers';
 
 export function stepTitle(step: Definition['steps'][number]) {
   switch (step.kind) {
@@ -62,6 +62,12 @@ export function stepTitle(step: Definition['steps'][number]) {
 
 export function valueDescription(value: z.infer<typeof valueSchema>, steps: Definition['steps']) {
   if (value.kind === 'literal') return `the fixed value ${JSON.stringify(value.value)}`;
+  if (value.kind === 'trigger')
+    return value.path[0] === 'kind'
+      ? 'the kind of the trigger that started the run'
+      : value.path[0] === 'id'
+        ? 'the ID of the trigger that started the run'
+        : 'the trigger that started the run';
   const source =
     value.kind === 'input' ? 'the workflow input' : `step ${steps.findIndex(step => step.id === value.step) + 1}`;
   return value.path.length ? `${source}, field ${value.path.join(' / ')}` : source;
@@ -91,59 +97,62 @@ export function conditionDescription(step: ConditionStep, steps: Definition['ste
   };
 }
 
-export function WorkflowTrigger({
+type Body<K extends Trigger['kind']> = Omit<Extract<Trigger, { kind: K }>, 'id' | 'label'>;
+/** Settings of a new trigger of each kind. Record and row triggers have none until a table is chosen. */
+export function defaultTriggerBody(kind: Trigger['kind']): TriggerBody | null {
+  switch (kind) {
+    case 'once':
+      return {
+        kind,
+        at: new Date(Math.ceil((Date.now() + 3600000) / 60000) * 60000).toISOString(),
+        timezone: browserZone(),
+      };
+    case 'interval':
+      return { kind, minutes: 60 };
+    case 'cron':
+      return { kind, expression: '0 9 * * 1-5', timezone: browserZone() };
+    case 'webhook':
+      return { kind };
+    case 'event':
+      return { kind, name: 'request_submitted' };
+    default:
+      return null;
+  }
+}
+
+/** Edits one trigger's settings. Its kind is fixed; a different kind is a different trigger. */
+export function TriggerSettings({
   workspaceId,
+  kind,
   trigger,
   disabled,
   onChange,
-  onProvider,
   onValidityChange,
 }: {
   workspaceId: string;
-  trigger: Definition['trigger'];
+  kind: 'once' | 'interval' | 'cron' | 'record' | 'row' | 'webhook' | 'event';
+  trigger: TriggerBody | null;
   disabled: boolean;
-  onChange: (trigger: Definition['trigger']) => void;
-  onProvider: () => void;
+  onChange: (trigger: TriggerBody) => void;
   onValidityChange?: (valid: boolean, problem?: string) => void;
 }) {
   const [intervalText, setIntervalText] = useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(
-    () =>
-      trigger.kind === 'webhook' ||
-      trigger.kind === 'event' ||
-      (trigger.kind === 'cron' && !ordinaryCron(trigger.expression)),
-  );
-  // A record trigger needs a table and field, so the choice stays local until both exist and the saved trigger is left untouched.
-  const [recordPending, setRecordPending] = useState(false);
-  const [rowPending, setRowPending] = useState(false);
-  const choose = (next?: Definition['trigger']) => {
-    setRecordPending(false);
-    setRowPending(false);
-    setAdvancedOpen(
-      !!next &&
-        (next.kind === 'webhook' || next.kind === 'event' || (next.kind === 'cron' && !ordinaryCron(next.expression))),
-    );
-    onValidityChange?.(true);
-    if (next) onChange(next);
-  };
-  const recordShown = recordPending || trigger.kind === 'record';
-  const rowShown = rowPending || trigger.kind === 'row';
-  const tableTriggerShown = recordShown || rowShown;
-  const expression = trigger.kind === 'cron' ? normalizeCronExpression(trigger.expression) : '';
+  const [advancedOpen, setAdvancedOpen] = useState(() => trigger?.kind === 'cron' && !ordinaryCron(trigger.expression));
+  const expression = trigger?.kind === 'cron' ? normalizeCronExpression(trigger.expression) : '';
   const parts = expression.split(' ');
-  const ordinary = trigger.kind === 'cron' && ordinaryCron(trigger.expression);
-  const intervalShown = trigger.kind === 'interval' ? (intervalText ?? String(trigger.minutes)) : '';
+  const ordinary = trigger?.kind === 'cron' && ordinaryCron(trigger.expression);
+  const intervalShown = trigger?.kind === 'interval' ? (intervalText ?? String(trigger.minutes)) : '';
   const intervalValid =
-    trigger.kind !== 'interval' ||
+    trigger?.kind !== 'interval' ||
     (/^\d+$/.test(intervalShown) && Number(intervalShown) >= 1 && Number(intervalShown) <= 525600);
-  const cronFeedback = trigger.kind === 'cron' ? validateCron(trigger) : null;
-  const updateCron = (next: Extract<Definition['trigger'], { kind: 'cron' }>) => {
+  const cronFeedback = trigger?.kind === 'cron' ? validateCron(trigger) : null;
+  const updateCron = (next: Body<'cron'>) => {
     const feedback = validateCron(next);
     onValidityChange?.(!feedback.problem, feedback.problem ?? undefined);
     onChange(next);
   };
-  const changeWebhookPayload = (payload: Extract<Definition['trigger'], { kind: 'webhook' }>['payload']) => {
-    if (trigger.kind !== 'webhook') return;
+  const changeWebhookPayload = (payload: Body<'webhook'>['payload']) => {
+    if (trigger?.kind !== 'webhook') return;
     const valid = payload === undefined || rawWebhookSchema.safeParse(payload).success;
     onValidityChange?.(
       valid,
@@ -151,355 +160,265 @@ export function WorkflowTrigger({
     );
     onChange(payload ? { ...trigger, payload } : { kind: 'webhook' });
   };
+  if (kind === 'record')
+    return (
+      <RecordDate
+        workspaceId={workspaceId}
+        trigger={trigger?.kind === 'record' ? trigger : null}
+        onChange={onChange}
+        onValidityChange={onValidityChange}
+      />
+    );
+  if (kind === 'row')
+    return (
+      <RowChange
+        workspaceId={workspaceId}
+        trigger={trigger?.kind === 'row' ? trigger : null}
+        onChange={onChange}
+        onValidityChange={onValidityChange}
+      />
+    );
+  if (!trigger) return null;
   return (
     <fieldset disabled={disabled} className="space-y-3">
-      <legend className="text-sm font-medium">When should it start?</legend>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={!tableTriggerShown && trigger.kind === 'manual' ? 'secondary' : 'outline'}
-          onClick={() => choose({ kind: 'manual' })}
-        >
-          Manual only
-        </Button>
-        <Button
-          variant={!tableTriggerShown && trigger.kind === 'once' ? 'secondary' : 'outline'}
-          onClick={() =>
-            choose({
-              kind: 'once',
-              at: new Date(Math.ceil((Date.now() + 3600000) / 60000) * 60000).toISOString(),
-              timezone: browserZone(),
-            })
-          }
-        >
-          One time
-        </Button>
-        <Button
-          variant={!tableTriggerShown && trigger.kind === 'interval' ? 'secondary' : 'outline'}
-          onClick={() => {
-            setIntervalText(null);
-            choose({ kind: 'interval', minutes: 60 });
-          }}
-        >
-          Repeat
-        </Button>
-        <Button
-          variant={!tableTriggerShown && trigger.kind === 'cron' ? 'secondary' : 'outline'}
-          onClick={() => choose({ kind: 'cron', expression: '0 9 * * 1-5', timezone: browserZone() })}
-        >
-          Weekly schedule
-        </Button>
-        <Button
-          variant={recordShown ? 'secondary' : 'outline'}
-          onClick={() => {
-            if (trigger.kind !== 'record') {
-              setRowPending(false);
-              setRecordPending(true);
-              onValidityChange?.(false, recordIncomplete);
-            }
-          }}
-        >
-          Record date
-        </Button>
-        <Button
-          variant={rowShown ? 'secondary' : 'outline'}
-          onClick={() => {
-            if (trigger.kind !== 'row') {
-              setRecordPending(false);
-              setRowPending(true);
-              onValidityChange?.(false, rowIncomplete);
-            }
-          }}
-        >
-          Row change
-        </Button>
-        <Button
-          variant={!tableTriggerShown && trigger.kind === 'provider' ? 'secondary' : 'outline'}
-          onClick={() => {
-            choose();
-            onProvider();
-          }}
-        >
-          Connected service
-        </Button>
-      </div>
-      {recordShown ? (
-        <RecordDate
-          workspaceId={workspaceId}
-          trigger={trigger.kind === 'record' ? trigger : null}
-          onChange={next => {
-            setRecordPending(false);
-            onChange(next);
-          }}
-          onValidityChange={onValidityChange}
-        />
-      ) : (
+      {trigger.kind === 'interval' && (
         <>
-          {trigger.kind === 'manual' && (
-            <p className="text-sm text-muted-foreground">You start each run. No integration or schedule is needed.</p>
-          )}
-          {trigger.kind === 'interval' && (
-            <>
-              <Label htmlFor="interval">Repeat every, in minutes</Label>
-              <Input
-                id="interval"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={525600}
-                value={intervalShown}
-                disabled={disabled}
-                aria-invalid={!intervalValid}
-                aria-describedby="interval-help"
-                onChange={event => {
-                  const value = event.target.value,
-                    minutes = Number(value);
-                  if (/^\d+$/.test(value) && minutes >= 1 && minutes <= 525600) {
-                    onValidityChange?.(true);
-                    setIntervalText(null);
-                    onChange({ kind: 'interval', minutes });
-                  } else {
-                    onValidityChange?.(false, 'Enter repeat minutes from 1 to 525600 before saving.');
-                    setIntervalText(value);
-                  }
-                }}
-              />
-              <p id="interval-help" className="text-sm text-muted-foreground">
-                Runs every {trigger.minutes} minutes after activation. Enter a whole number from 1 to 525600.
-              </p>
-              {!intervalValid && (
-                <p role="alert">
-                  Enter repeat minutes from 1 to 525600. The workflow keeps its last valid interval of {trigger.minutes}{' '}
-                  minutes.
-                </p>
-              )}
-            </>
-          )}
-          {trigger.kind === 'once' && <OnceTime trigger={trigger} onChange={onChange} />}
-          {ordinary && trigger.kind === 'cron' && !advancedOpen && (
-            <>
-              <Label htmlFor="schedule-days">Days</Label>
-              <Select
-                value={parts[4]}
-                onValueChange={value => {
-                  if (value) onChange({ ...trigger, expression: `${parts[0]} ${parts[1]} * * ${value}` });
-                }}
-              >
-                <SelectTrigger id="schedule-days">
-                  <SelectValue>{cronDayChoices.find(([option]) => option === parts[4])?.[1] ?? parts[4]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {cronDayChoices.map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Label htmlFor="schedule-time">Time</Label>
-              <Input
-                id="schedule-time"
-                type="time"
-                value={`${parts[1]?.padStart(2, '0')}:${parts[0]?.padStart(2, '0')}`}
-                onChange={event => {
-                  const [hour, minute] = event.target.value.split(':');
-                  if (hour && minute)
-                    onChange({ ...trigger, expression: `${Number(minute)} ${Number(hour)} * * ${parts[4]}` });
-                }}
-              />
-              <TimeZone
-                id="schedule-zone"
-                value={trigger.timezone}
-                onChange={timezone => onChange({ ...trigger, timezone })}
-              />
-              <p className="text-sm text-muted-foreground">
-                {parts[4] === '*'
-                  ? 'Every day'
-                  : parts[4] === '1-5'
-                    ? 'Every weekday'
-                    : `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(parts[4])]}`}{' '}
-                at {parts[1]?.padStart(2, '0')}:{parts[0]?.padStart(2, '0')} in {trigger.timezone.replaceAll('_', ' ')}.
-              </p>
-            </>
-          )}
-          {rowShown && (
-            <RowChange
-              workspaceId={workspaceId}
-              trigger={trigger.kind === 'row' ? trigger : null}
-              onChange={next => {
-                setRowPending(false);
-                onChange(next);
-              }}
-              onValidityChange={onValidityChange}
-            />
-          )}
-          {(trigger.kind === 'once' || trigger.kind === 'interval' || trigger.kind === 'cron') && (
-            <p className="text-sm text-muted-foreground">
-              Each scheduled run starts with the input {'{ "scheduledFor": "<scheduled time>" }'}. Steps read it as the
-              workflow input, field scheduledFor.
+          <Label htmlFor="interval">Repeat every, in minutes</Label>
+          <Input
+            id="interval"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={525600}
+            value={intervalShown}
+            disabled={disabled}
+            aria-invalid={!intervalValid}
+            aria-describedby="interval-help"
+            onChange={event => {
+              const value = event.target.value,
+                minutes = Number(value);
+              if (/^\d+$/.test(value) && minutes >= 1 && minutes <= 525600) {
+                onValidityChange?.(true);
+                setIntervalText(null);
+                onChange({ ...trigger, minutes });
+              } else {
+                onValidityChange?.(false, 'Enter repeat minutes from 1 to 525600 before saving.');
+                setIntervalText(value);
+              }
+            }}
+          />
+          <p id="interval-help" className="text-sm text-muted-foreground">
+            Runs every {trigger.minutes} minutes after activation. Enter a whole number from 1 to 525600.
+          </p>
+          {!intervalValid && (
+            <p role="alert">
+              Enter repeat minutes from 1 to 525600. The workflow keeps its last valid interval of {trigger.minutes}{' '}
+              minutes.
             </p>
           )}
         </>
       )}
-      <Disclosure title="Advanced triggers" open={advancedOpen} onOpenChange={setAdvancedOpen}>
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => choose({ kind: 'webhook' })}>
-              Webhook
-            </Button>
-            <Button variant="outline" onClick={() => choose({ kind: 'event', name: 'request_submitted' })}>
-              App event
-            </Button>
-          </div>
-          {trigger.kind === 'github' && (
-            <p className="text-sm text-muted-foreground">
-              {describeGitHubTrigger(trigger)}. Change it in chat. <GitHubInstallNote workspaceId={workspaceId} />
-            </p>
-          )}
-          {trigger.kind === 'event' && (
-            <>
-              <Label htmlFor="event">Event name</Label>
-              <Input
-                id="event"
-                value={trigger.name}
-                onChange={event => onChange({ ...trigger, name: event.target.value })}
-              />
-            </>
-          )}
-          {trigger.kind === 'cron' && cronFeedback && (
-            <>
-              <Label htmlFor="cron">Cron expression</Label>
-              <Input
-                id="cron"
-                value={trigger.expression}
-                aria-invalid={cronFeedback.field === 'expression'}
-                aria-describedby="cron-help"
-                onChange={event => updateCron({ ...trigger, expression: event.target.value })}
-              />
-              <Label htmlFor="timezone">IANA time zone</Label>
-              <Input
-                id="timezone"
-                value={trigger.timezone}
-                aria-invalid={cronFeedback.field === 'timezone'}
-                aria-describedby="cron-help"
-                onChange={event => updateCron({ ...trigger, timezone: event.target.value })}
-              />
-              {cronFeedback.problem ? (
-                <p id="cron-help" role="alert">
-                  {cronFeedback.problem}
-                </p>
-              ) : (
-                <>
-                  <p id="cron-help" className="text-sm text-muted-foreground">
-                    Next three runs in {trigger.timezone.replaceAll('_', ' ')}:
-                  </p>
-                  <ol className="list-inside list-decimal space-y-1 text-sm">
-                    {cronFeedback.runs.map(run => (
-                      <li key={run}>
-                        <time dateTime={run}>
-                          {new Date(run).toLocaleString(undefined, {
-                            timeZone: trigger.timezone,
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            timeZoneName: 'short',
-                          })}
-                        </time>
-                      </li>
-                    ))}
-                  </ol>
-                </>
-              )}
-            </>
-          )}
-          {trigger.kind === 'webhook' && (
-            <fieldset className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="webhook-raw"
-                  checked={!!trigger.payload}
-                  onCheckedChange={checked =>
-                    changeWebhookPayload(checked ? { mode: 'raw', dedupe: { source: 'hash' } } : undefined)
-                  }
+      {trigger.kind === 'once' && <OnceTime trigger={trigger} onChange={onChange} />}
+      {ordinary && trigger.kind === 'cron' && (
+        <>
+          <Label htmlFor="schedule-days">Days</Label>
+          <Select
+            value={parts[4]}
+            onValueChange={value => {
+              if (value) onChange({ ...trigger, expression: `${parts[0]} ${parts[1]} * * ${value}` });
+            }}
+          >
+            <SelectTrigger id="schedule-days">
+              <SelectValue>{cronDayChoices.find(([option]) => option === parts[4])?.[1] ?? parts[4]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {cronDayChoices.map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Label htmlFor="schedule-time">Time</Label>
+          <Input
+            id="schedule-time"
+            type="time"
+            value={`${parts[1]?.padStart(2, '0')}:${parts[0]?.padStart(2, '0')}`}
+            onChange={event => {
+              const [hour, minute] = event.target.value.split(':');
+              if (hour && minute)
+                onChange({ ...trigger, expression: `${Number(minute)} ${Number(hour)} * * ${parts[4]}` });
+            }}
+          />
+          <TimeZone
+            id="schedule-zone"
+            value={trigger.timezone}
+            onChange={timezone => onChange({ ...trigger, timezone })}
+          />
+          <p className="text-sm text-muted-foreground">
+            {parts[4] === '*'
+              ? 'Every day'
+              : parts[4] === '1-5'
+                ? 'Every weekday'
+                : `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(parts[4])]}`}{' '}
+            at {parts[1]?.padStart(2, '0')}:{parts[0]?.padStart(2, '0')} in {trigger.timezone.replaceAll('_', ' ')}.
+          </p>
+        </>
+      )}
+      {(trigger.kind === 'once' || trigger.kind === 'interval' || trigger.kind === 'cron') && (
+        <p className="text-sm text-muted-foreground">
+          Each scheduled run starts with the input {'{ "scheduledFor": "<scheduled time>" }'}. Steps read it as the
+          workflow input, field scheduledFor.
+        </p>
+      )}
+      {trigger.kind === 'event' && (
+        <>
+          <Label htmlFor="event">Event name</Label>
+          <Input
+            id="event"
+            value={trigger.name}
+            onChange={event => onChange({ ...trigger, name: event.target.value })}
+          />
+        </>
+      )}
+      {trigger.kind === 'cron' && (
+        <Disclosure title="Cron expression" open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <div className="space-y-3">
+            {trigger.kind === 'cron' && cronFeedback && (
+              <>
+                <Label htmlFor="cron">Cron expression</Label>
+                <Input
+                  id="cron"
+                  value={trigger.expression}
+                  aria-invalid={cronFeedback.field === 'expression'}
+                  aria-describedby="cron-help"
+                  onChange={event => updateCron({ ...trigger, expression: event.target.value })}
                 />
-                <Label htmlFor="webhook-raw">Use the provider payload as the workflow input</Label>
-              </div>
-              {trigger.payload && (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Raw mode passes the request body to the workflow without the TulipFarm request envelope. Choose how
-                    retries identify the same event.
+                <Label htmlFor="timezone">IANA time zone</Label>
+                <Input
+                  id="timezone"
+                  value={trigger.timezone}
+                  aria-invalid={cronFeedback.field === 'timezone'}
+                  aria-describedby="cron-help"
+                  onChange={event => updateCron({ ...trigger, timezone: event.target.value })}
+                />
+                {cronFeedback.problem ? (
+                  <p id="cron-help" role="alert">
+                    {cronFeedback.problem}
                   </p>
-                  <Label htmlFor="webhook-dedupe">Retry identity</Label>
-                  <Select
-                    value={trigger.payload.dedupe.source}
-                    onValueChange={source => {
-                      const dedupe =
-                        source === 'header'
-                          ? { source, name: 'x-github-delivery' }
-                          : source === 'body'
-                            ? { source, path: ['id'] }
-                            : { source: 'hash' as const };
-                      changeWebhookPayload({ ...trigger.payload, mode: 'raw', dedupe });
-                    }}
-                  >
-                    <SelectTrigger id="webhook-dedupe">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="header">Request header</SelectItem>
-                      <SelectItem value="body">Body field</SelectItem>
-                      <SelectItem value="hash">Identical body</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {trigger.payload.dedupe.source === 'header' && (
-                    <>
-                      <Label htmlFor="webhook-dedupe-header">Header name</Label>
-                      <Input
-                        id="webhook-dedupe-header"
-                        value={trigger.payload.dedupe.name}
-                        aria-invalid={!rawWebhookSchema.safeParse(trigger.payload).success}
-                        onChange={event =>
-                          changeWebhookPayload({
-                            ...trigger.payload,
-                            mode: 'raw',
-                            dedupe: { source: 'header', name: event.target.value.trim().toLowerCase() },
-                          })
-                        }
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        For GitHub, use x-github-delivery. The same value makes a provider retry return its original
-                        run.
-                      </p>
-                    </>
-                  )}
-                  {trigger.payload.dedupe.source === 'body' && (
-                    <>
-                      <Label htmlFor="webhook-dedupe-path">Body field path</Label>
-                      <Input
-                        id="webhook-dedupe-path"
-                        value={trigger.payload.dedupe.path.join('.')}
-                        aria-invalid={!rawWebhookSchema.safeParse(trigger.payload).success}
-                        onChange={event =>
-                          changeWebhookPayload({
-                            ...trigger.payload,
-                            mode: 'raw',
-                            dedupe: { source: 'body', path: event.target.value.split('.').map(part => part.trim()) },
-                          })
-                        }
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Use periods between field names, such as id or data.object.id for a Stripe event.
-                      </p>
-                    </>
-                  )}
+                ) : (
+                  <>
+                    <p id="cron-help" className="text-sm text-muted-foreground">
+                      Next three runs in {trigger.timezone.replaceAll('_', ' ')}:
+                    </p>
+                    <ol className="list-inside list-decimal space-y-1 text-sm">
+                      {cronFeedback.runs.map(run => (
+                        <li key={run}>
+                          <time dateTime={run}>
+                            {new Date(run).toLocaleString(undefined, {
+                              timeZone: trigger.timezone,
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                              timeZoneName: 'short',
+                            })}
+                          </time>
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </Disclosure>
+      )}
+      {trigger.kind === 'webhook' && (
+        <fieldset className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="webhook-raw"
+              checked={!!trigger.payload}
+              onCheckedChange={checked =>
+                changeWebhookPayload(checked ? { mode: 'raw', dedupe: { source: 'hash' } } : undefined)
+              }
+            />
+            <Label htmlFor="webhook-raw">Use the provider payload as the workflow input</Label>
+          </div>
+          {trigger.payload && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Raw mode passes the request body to the workflow without the TulipFarm request envelope. Choose how
+                retries identify the same event.
+              </p>
+              <Label htmlFor="webhook-dedupe">Retry identity</Label>
+              <Select
+                value={trigger.payload.dedupe.source}
+                onValueChange={source => {
+                  const dedupe =
+                    source === 'header'
+                      ? { source, name: 'x-github-delivery' }
+                      : source === 'body'
+                        ? { source, path: ['id'] }
+                        : { source: 'hash' as const };
+                  changeWebhookPayload({ ...trigger.payload, mode: 'raw', dedupe });
+                }}
+              >
+                <SelectTrigger id="webhook-dedupe">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="header">Request header</SelectItem>
+                  <SelectItem value="body">Body field</SelectItem>
+                  <SelectItem value="hash">Identical body</SelectItem>
+                </SelectContent>
+              </Select>
+              {trigger.payload.dedupe.source === 'header' && (
+                <>
+                  <Label htmlFor="webhook-dedupe-header">Header name</Label>
+                  <Input
+                    id="webhook-dedupe-header"
+                    value={trigger.payload.dedupe.name}
+                    aria-invalid={!rawWebhookSchema.safeParse(trigger.payload).success}
+                    onChange={event =>
+                      changeWebhookPayload({
+                        ...trigger.payload,
+                        mode: 'raw',
+                        dedupe: { source: 'header', name: event.target.value.trim().toLowerCase() },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    For GitHub, use x-github-delivery. The same value makes a provider retry return its original run.
+                  </p>
                 </>
               )}
-            </fieldset>
+              {trigger.payload.dedupe.source === 'body' && (
+                <>
+                  <Label htmlFor="webhook-dedupe-path">Body field path</Label>
+                  <Input
+                    id="webhook-dedupe-path"
+                    value={trigger.payload.dedupe.path.join('.')}
+                    aria-invalid={!rawWebhookSchema.safeParse(trigger.payload).success}
+                    onChange={event =>
+                      changeWebhookPayload({
+                        ...trigger.payload,
+                        mode: 'raw',
+                        dedupe: { source: 'body', path: event.target.value.split('.').map(part => part.trim()) },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use periods between field names, such as id or data.object.id for a Stripe event.
+                  </p>
+                </>
+              )}
+            </>
           )}
-        </div>
-      </Disclosure>
+        </fieldset>
+      )}
     </fieldset>
   );
 }
@@ -533,9 +452,8 @@ function TimeZone({ id, value, onChange }: { id: string; value: string; onChange
   );
 }
 
-type RecordTrigger = Extract<Definition['trigger'], { kind: 'record' }>;
+type RecordTrigger = Body<'record'>;
 type RecordField = RecordTrigger['field'];
-const recordIncomplete = 'Choose a table and a date or timestamp field for the record date trigger before saving.';
 const recordUnits = { date: ['days', 'weeks'], timestamp: ['minutes', 'hours', 'days'] } as const;
 const recordUnitMax = { minutes: 527040, hours: 8784, days: 366, weeks: 52 } as const;
 type TableField = TableDefinition['definition']['fields'][number];
@@ -1167,8 +1085,7 @@ function RecordDate({
   );
 }
 
-type RowTrigger = Extract<Definition['trigger'], { kind: 'row' }>;
-const rowIncomplete = 'Choose a table for the row change trigger before saving.';
+type RowTrigger = Body<'row'>;
 
 function RowChange({
   workspaceId,
@@ -1346,17 +1263,11 @@ function RowChange({
   );
 }
 
-export function onceInPast(trigger: Definition['trigger']) {
-  return trigger.kind === 'once' && Date.parse(trigger.at) <= Date.now();
+export function onceInPast(trigger: Pick<Trigger, 'kind'> & { at?: string }) {
+  return trigger.kind === 'once' && !!trigger.at && Date.parse(trigger.at) <= Date.now();
 }
 
-function OnceTime({
-  trigger,
-  onChange,
-}: {
-  trigger: Extract<Definition['trigger'], { kind: 'once' }>;
-  onChange: (trigger: Definition['trigger']) => void;
-}) {
+function OnceTime({ trigger, onChange }: { trigger: Body<'once'>; onChange: (trigger: Body<'once'>) => void }) {
   const time = Date.parse(trigger.at);
   const known = Number.isFinite(time);
   const past = known && time <= Date.now();
@@ -1556,7 +1467,9 @@ export function WaitUntil({
                 ? 'A fixed date and time'
                 : at.kind === 'input'
                   ? 'The workflow input'
-                  : `The output of ${at.step.replaceAll('_', ' ')}`}
+                  : at.kind === 'trigger'
+                    ? 'The trigger that started the run'
+                    : `The output of ${at.step.replaceAll('_', ' ')}`}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -1596,7 +1509,7 @@ export function WaitUntil({
             }}
           />
         </Field>
-      ) : (
+      ) : at.kind === 'trigger' ? null : (
         <>
           <OutputPathControl
             key={source}

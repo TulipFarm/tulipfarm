@@ -87,7 +87,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.save(w.id, w.userId, id, {
           revision,
           expectedRevision: null,
-          definition: { version: 1, name: 'Snippet proof', trigger: { kind: 'manual' }, steps: selectedSteps },
+          definition: { version: 1, name: 'Snippet proof', triggers: [], steps: selectedSteps },
         });
         await activate(service, w.id, w.userId, id, revision, true);
         const { runId } = await service.start(w.id, w.userId, id, {

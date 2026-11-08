@@ -159,7 +159,7 @@ test(
               definition: {
                 version: 1,
                 name: 'Derived workflow',
-                trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'UTC' },
+                triggers: [{ id: 'cron', kind: 'cron', expression: '0 9 * * 1-5', timezone: 'UTC' }],
                 steps: [{ id: 'review', kind: 'human', prompt: 'Review', timeoutSeconds: 86400 }],
               },
             },

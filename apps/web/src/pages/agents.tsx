@@ -380,6 +380,8 @@ function NewAgentBuilder({
         expectedSavedRevision: input.expectedSavedRevision,
         expectedPolicyVersion: input.expectedPolicyVersion ?? 0,
         expectedActivationIds: input.expectedActivationIds ?? [],
+        expectedWorkflowRevision: input.expectedWorkflowRevision ?? null,
+        expectedWorkflowGeneration: input.expectedWorkflowGeneration ?? null,
         setup: { ...view.proposal.input.setup, definition: input.definition, owningTeamId: input.owningTeamId },
       };
     },
@@ -724,10 +726,9 @@ function AgentPage({
                           {can('manage') && (
                             <li className="grid gap-2 rounded-lg border p-3">
                               <div className="grid gap-1">
-                                <p className="text-sm font-medium text-foreground">Workflow triggers</p>
+                                <p className="text-sm font-medium text-foreground">Triggers</p>
                                 <p className="text-sm text-muted-foreground">
-                                  Workflows run this agent on a schedule, from a webhook, or when a connected app
-                                  changes.
+                                  Start this agent on a schedule, from a webhook, or when a connected app changes.
                                 </p>
                               </div>
                               <div>

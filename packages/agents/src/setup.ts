@@ -15,9 +15,10 @@ import { WorkflowConflict } from '@tulipfarm/workflows';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import {
-  agentSetupWorkflowId,
-  agentTriggerDefinition,
-  createAgentTriggerWorkflow,
+  agentLinkedWorkflow,
+  agentLinkedWorkflowId,
+  applyAgentLinkedWorkflow,
+  LinkedWorkflowConflict,
   requireAgentTriggerCadence,
   type AgentWorkflowOptions,
 } from './agent-trigger-workflows.ts';
@@ -29,14 +30,18 @@ import { boundRuntime } from './task-approval-gate.ts';
 import { requireCommandDraftSources } from './draft-sources.ts';
 import type { ModelFamilyEligibility } from './model-policy-contracts.ts';
 import {
+  agentLinkedWorkflowSchema,
   agentSetupDraftSchema,
   agentSetupReceiptSchema,
+  legacySetupState,
   publishAgentSetupSchema,
   saveAgentSetupDraftSchema,
+  sponsorConsented,
+  storedAgentSetupDraftSchema,
   type AgentSetupDraft,
   type AgentSetupReceipt,
   type SaveAgentSetupDraft,
-  unattendedTrigger,
+  type StoredAgentSetupDraft,
 } from './setup-contracts.ts';
 
 export type AgentSetupOptions = AgentWorkflowOptions & {
@@ -72,9 +77,19 @@ const draftRowSchema = z.object({
   membership_id: uuidSchema,
   user_id: z.string(),
   version: z.number().int(),
-  input: saveAgentSetupDraftSchema,
+  input: storedAgentSetupDraftSchema,
+  /** The draft as stored, to tell an earlier shape apart. */
+  raw: z.unknown(),
   digest: z.string(),
 });
+const draftRow = (row: unknown) =>
+  row === undefined
+    ? undefined
+    : draftRowSchema.parse(row && typeof row === 'object' ? { ...row, raw: (row as { input?: unknown }).input } : row);
+const draftLegacy = (row: z.infer<typeof draftRowSchema>) => {
+  const state = legacySetupState((row.raw as { setup?: unknown } | null)?.setup);
+  return state === 'current' && row.input.expectedWorkflowRevision === undefined ? 'legacy' : state;
+};
 const commandRowSchema = z.object({
   id: uuidSchema,
   agent_id: uuidSchema,
@@ -95,9 +110,15 @@ const installed = (tx: AgentTransaction & { commonVersion: number }) => {
 };
 const draftView = (row: z.infer<typeof draftRowSchema>): AgentSetupDraft => {
   const { requestId: _requestId, expectedVersion: _expectedVersion, ...input } = row.input;
-  return agentSetupDraftSchema.parse({ agentId: row.agent_id, version: row.version, digest: row.digest, ...input });
+  return agentSetupDraftSchema.parse({
+    agentId: row.agent_id,
+    version: row.version,
+    digest: row.digest,
+    ...input,
+    legacy: draftLegacy(row),
+  });
 };
-const receipt = (row: Command, draft: z.infer<typeof draftRowSchema>): AgentSetupReceipt =>
+const receipt = (row: Command, workflowId: string | null = null): AgentSetupReceipt =>
   agentSetupReceiptSchema.parse({
     commandId: row.id,
     agentId: row.agent_id,
@@ -107,15 +128,9 @@ const receipt = (row: Command, draft: z.infer<typeof draftRowSchema>): AgentSetu
     savedRevision: row.saved_revision,
     activationId: row.activation_id,
     error: row.error,
-    workflows:
-      row.status === 'active'
-        ? draft.input.setup.triggers.map(selected => ({
-            triggerId: selected.id,
-            workflowId: agentSetupWorkflowId(row.id, selected.id),
-          }))
-        : [],
+    workflowId,
   });
-export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft) {
+export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft | StoredAgentSetupDraft) {
   const { requestId: _requestId, expectedVersion, ...reviewed } = input;
   return createHash('sha256')
     .update(canonicalJson({ agentId, version: expectedVersion + 1, ...reviewed }))
@@ -124,6 +139,7 @@ export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft) {
 function setupFailure(error: unknown) {
   if (error instanceof AgentError) return error.code;
   if (error instanceof AccessDenied) return 'setup-access-denied';
+  if (error instanceof LinkedWorkflowConflict) return error.message;
   if (error instanceof WorkflowConflict && /^[a-z0-9-]{1,64}$/.test(error.message)) return `workflow-${error.message}`;
   if (
     error instanceof Error &&
@@ -131,6 +147,14 @@ function setupFailure(error: unknown) {
   )
     return error.message;
   return 'setup-operation-unavailable';
+}
+/** An active setup names the agent's linked Workflow when it has one. */
+async function linkedWorkflowFor(tx: AgentTransaction, command: Command) {
+  if (command.status !== 'active') return null;
+  const id = agentLinkedWorkflowId(command.agent_id);
+  return (await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_workflows')} WHERE id=$1`, [id])).rows.length
+    ? id
+    : null;
 }
 export function createAgentSetup(
   runtime: AgentStorage,
@@ -141,7 +165,7 @@ export function createAgentSetup(
     tx: AgentTransaction,
     actor: HumanActor,
     agentId: string,
-    input: SaveAgentSetupDraft,
+    input: Pick<SaveAgentSetupDraft, 'setup'>,
     permission: 'read' | 'edit' | 'manage' = 'edit',
   ) {
     const current = (
@@ -164,18 +188,16 @@ export function createAgentSetup(
     return current;
   }
   async function loadDraft(tx: AgentTransaction, actor: HumanActor, agentId: string, version?: number) {
-    const row = draftRowSchema
-      .optional()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT * FROM ${relation(tx, 'tf_agent_setup_drafts')} WHERE agent_id=$1 AND membership_id=$2 AND user_id=$3 ${version === undefined ? 'ORDER BY version DESC LIMIT 1' : 'AND version=$4'}`,
-            version === undefined
-              ? [agentId, actor.membershipId, actor.userId]
-              : [agentId, actor.membershipId, actor.userId, version],
-          )
-        ).rows[0],
-      );
+    const row = draftRow(
+      (
+        await tx.client.query(
+          `SELECT * FROM ${relation(tx, 'tf_agent_setup_drafts')} WHERE agent_id=$1 AND membership_id=$2 AND user_id=$3 ${version === undefined ? 'ORDER BY version DESC LIMIT 1' : 'AND version=$4'}`,
+          version === undefined
+            ? [agentId, actor.membershipId, actor.userId]
+            : [agentId, actor.membershipId, actor.userId, version],
+        )
+      ).rows[0],
+    );
     if (!row) throw new AgentError('setup-draft-not-found', 404);
     return row;
   }
@@ -185,16 +207,14 @@ export function createAgentSetup(
     return withHuman(runtime, workspaceId, user, 'write', async (tx, actor) => {
       installed(tx);
       await authorize(tx, actor, agentId, input);
-      const previous = draftRowSchema
-        .optional()
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT * FROM ${relation(tx, 'tf_agent_setup_drafts')} WHERE membership_id=$1 AND request_id=$2`,
-              [actor.membershipId, input.requestId],
-            )
-          ).rows[0],
-        );
+      const previous = draftRow(
+        (
+          await tx.client.query(
+            `SELECT * FROM ${relation(tx, 'tf_agent_setup_drafts')} WHERE membership_id=$1 AND request_id=$2`,
+            [actor.membershipId, input.requestId],
+          )
+        ).rows[0],
+      );
       if (previous) {
         if (previous.agent_id !== agentId || canonicalJson(previous.input) !== canonicalJson(input))
           throw new AgentError('idempotency-conflict');
@@ -209,7 +229,7 @@ export function createAgentSetup(
         ).rows[0]?.version,
       );
       if (version !== input.expectedVersion) throw new AgentError('setup-version-conflict');
-      const row = draftRowSchema.parse(
+      const row = draftRow(
         (
           await tx.client.query(
             `INSERT INTO ${relation(tx, 'tf_agent_setup_drafts')} (agent_id,membership_id,user_id,version,request_id,input,digest) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
@@ -224,7 +244,7 @@ export function createAgentSetup(
             ],
           )
         ).rows[0],
-      );
+      )!;
       return draftView(row);
     });
   }
@@ -283,14 +303,15 @@ export function createAgentSetup(
       if (previous) {
         if (previous.agent_id !== agentId || canonicalJson(previous.input) !== canonicalJson(input))
           throw new AgentError('idempotency-conflict');
-        return receipt(previous, draft);
+        return receipt(previous, await linkedWorkflowFor(tx, previous));
       }
       const latest = await loadDraft(tx, actor, agentId);
       if (latest.version !== input.version) throw new AgentError('setup-version-conflict');
+      // A draft from before one linked Workflow per agent did not review that Workflow; saving it again does.
+      if (draftLegacy(draft) !== 'current') throw new AgentError('setup-draft-outdated');
       if (input.decision === 'activate') {
-        for (const selected of draft.input.setup.triggers)
-          if (unattendedTrigger(selected.trigger) && !input.consent.sponsorTriggerIds.includes(selected.id))
-            throw new AgentError('trigger-sponsor-consent-required', 400);
+        if (!sponsorConsented(input.consent, draft.input.setup.triggers))
+          throw new AgentError('trigger-sponsor-consent-required', 400);
         for (const channel of draft.input.setup.slackChannels) {
           if (channel.detach && channel.replaceAgentId !== agentId) throw new AgentError('slack-detachment-conflict');
           if (
@@ -340,7 +361,7 @@ export function createAgentSetup(
           )
         ).rows[0],
       );
-      return receipt(command, draft);
+      return receipt(command);
     });
   }
   async function apply(
@@ -429,26 +450,23 @@ export function createAgentSetup(
     for (const id of draft.expectedActivationIds)
       await store.revokeActivation(workspaceId, actor, { agentId: command.agent_id, activationId: id });
     if (setup.triggers.length) await requireTaskInvocation(tx, actor, command.agent_id);
-    // Each trigger becomes a Workflow that runs this agent; setup no longer gives agents schedules of their own.
-    for (const selected of setup.triggers) {
-      requireAgentTriggerCadence(selected.trigger);
-      await createAgentTriggerWorkflow(
-        tx,
-        bound,
-        workspaceId,
-        actor,
-        {
-          id: agentSetupWorkflowId(command.id, selected.id),
-          agentId: command.agent_id,
-          definition: agentTriggerDefinition(
-            { id: command.agent_id, name: setup.definition.name },
-            { ...selected, limits: selected.limits ?? setup.taskLimits },
-          ),
-          enabled: true,
-        },
-        options,
-      );
-    }
+    for (const selected of setup.triggers) requireAgentTriggerCadence(selected.trigger);
+    // All triggers run through the agent's one linked Workflow; setup gives agents no schedules of their own.
+    await applyAgentLinkedWorkflow(
+      tx,
+      bound,
+      workspaceId,
+      actor,
+      {
+        agentId: command.agent_id,
+        agentName: setup.definition.name,
+        setup: { ...setup, runLimits: setup.runLimits ?? setup.taskLimits },
+        expectedRevision: draft.expectedWorkflowRevision,
+        expectedGeneration: draft.expectedWorkflowGeneration,
+        commandId: command.id,
+      },
+      options,
+    );
     for (const selected of setup.slackChannels) {
       if (!options.attachSlack) throw new AgentError('slack-channel-setup-unavailable', 503);
       const attached = await options.attachSlack(tx, workspaceId, actor.userId, {
@@ -477,13 +495,14 @@ export function createAgentSetup(
           : 'read',
       );
       await requireCommandDraftSources(tx, actor, command.definition_command_id);
-      if (!['preparing', 'blocked'].includes(command.status)) return receipt(command, draft);
+      if (!['preparing', 'blocked'].includes(command.status))
+        return receipt(command, await linkedWorkflowFor(tx, command));
       const definition = await createAgentAuthoring(boundRuntime(tx, workspaceId), eligible).commandStatus(
         workspaceId,
         actor,
         command.definition_command_id,
       );
-      if (definition.status === 'preparing') return receipt(command, draft);
+      if (definition.status === 'preparing') return receipt(command, await linkedWorkflowFor(tx, command));
       const saveStatus = definition.status === 'accepted' ? 'saved' : definition.status;
       command = {
         ...command,
@@ -503,7 +522,8 @@ export function createAgentSetup(
           await tx.client.query('ROLLBACK TO SAVEPOINT tf_agent_setup');
           await tx.client.query('RELEASE SAVEPOINT tf_agent_setup');
           queued.drop();
-          command.status = 'blocked';
+          // A linked Workflow that changed after review needs a new review, not a retry.
+          command.status = error instanceof LinkedWorkflowConflict ? 'conflict' : 'blocked';
           command.error = setupFailure(error);
         }
       }
@@ -511,7 +531,7 @@ export function createAgentSetup(
         `UPDATE ${relation(tx, 'tf_agent_setup_commands')} SET status=$2,saved_revision=$3,error=$4,updated_at=clock_timestamp() WHERE id=$1`,
         [command.id, command.status, command.saved_revision, command.error],
       );
-      return receipt(command, draft);
+      return receipt(command, await linkedWorkflowFor(tx, command));
     });
   }
   async function readCommand(workspaceId: string, user: string | HumanActor, commandId: string) {
@@ -521,7 +541,7 @@ export function createAgentSetup(
         draft = await loadDraft(tx, actor, command.agent_id, command.version);
       await authorize(tx, actor, command.agent_id, draft.input, 'read');
       await requireCommandDraftSources(tx, actor, command.definition_command_id);
-      return receipt(command, draft);
+      return receipt(command, await linkedWorkflowFor(tx, command));
     });
   }
   async function definitionCommand(workspaceId: string, user: string | HumanActor, commandId: string) {
@@ -550,5 +570,32 @@ export function createAgentSetup(
         ),
     );
   }
-  return { saveDraft, readDraft, publish, advance, readCommand, definitionCommand, pending };
+  async function linkedWorkflow(workspaceId: string, user: string | HumanActor, agentIdInput: string) {
+    const agentId = uuidSchema.parse(agentIdInput);
+    return withHuman(runtime, workspaceId, user, 'read', async (tx, actor) => {
+      installed(tx);
+      const agent = (
+        await tx.client.query(`SELECT deleted_at FROM ${relation(tx, 'tf_agents')} WHERE id=$1`, [agentId])
+      ).rows[0];
+      if (agent?.deleted_at) throw new AccessDenied();
+      if (agent) await requireAgentPermission(tx, actor, agentId, 'read');
+      const linked = agent ? await agentLinkedWorkflow(tx, agentId) : null;
+      const separate = agent
+        ? (
+            await tx.client.query(
+              `SELECT id FROM ${relation(tx, 'tf_workflows')} WHERE agent_id=$1 AND id<>$2 AND archived_at IS NULL ORDER BY id`,
+              [agentId, agentLinkedWorkflowId(agentId)],
+            )
+          ).rows.map(row => uuidSchema.parse(row.id))
+        : [];
+      return agentLinkedWorkflowSchema.parse({
+        workflowId: agentLinkedWorkflowId(agentId),
+        revision: linked?.revision ?? null,
+        generation: linked?.generation ?? null,
+        archived: linked?.archived ?? false,
+        separateWorkflowIds: separate,
+      });
+    });
+  }
+  return { saveDraft, readDraft, publish, advance, readCommand, definitionCommand, pending, linkedWorkflow };
 }

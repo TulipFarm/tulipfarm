@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { z } from 'zod';
-import { grantsSchema, sharingCandidatesSchema, workflowSchema } from '@tulipfarm/workflows/contracts';
+import {
+  grantsSchema,
+  isUnattendedTrigger,
+  sharingCandidatesSchema,
+  workflowSchema,
+} from '@tulipfarm/workflows/contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Label } from '@tulipfarm/sprout/label';
@@ -237,7 +242,7 @@ export function WorkflowSharing({
                   </ul>
                 )}
               </div>
-              {workflow && !['manual', 'event'].includes(workflow.definition.trigger.kind) && (
+              {workflow && workflow.definition.triggers.some(isUnattendedTrigger) && (
                 <section aria-label="Scheduled runs" className="space-y-4 border-t border-border pt-6">
                   <div className="space-y-0.5">
                     <h2 className="font-medium">Scheduled runs</h2>

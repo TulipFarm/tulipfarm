@@ -113,7 +113,11 @@ export function stepOutputShapes(steps: readonly Step[], tables: readonly Output
       ? literalShape(value.value)
       : value.kind === 'input'
         ? unknown
-        : (outputAt(outputs.get(value.step) ?? unknown, value.path) ?? unknown);
+        : value.kind === 'trigger'
+          ? value.path.length
+            ? scalar
+            : object({ id: scalar, kind: scalar })
+          : (outputAt(outputs.get(value.step) ?? unknown, value.path) ?? unknown);
   for (const step of steps) {
     let shape: OutputShape;
     switch (step.kind) {

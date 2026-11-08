@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { workflowCompatibility } from './authorization.ts';
 import {
   githubTriggerEvents,
   idSchema,
@@ -8,17 +9,19 @@ import {
   type GitHubTriggerEvent,
 } from './contracts.ts';
 
-type Pool = { query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
+type Client = { query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> };
+type Pool = Client & { connect(): Promise<Client & { release(): void }> };
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 type Json = Record<string, unknown>;
 
 export type GitHubSubscriptions = {
+  /** Replaces the subscriptions of a workflow with one for each GitHub trigger of the activated revision. */
   replace(subscription: {
     workspaceId: string;
     workflowId: string;
     revision: string;
     generation: number;
-    trigger: GitHubTrigger;
+    triggers: readonly (GitHubTrigger & { id: string })[];
   }): Promise<void>;
   remove(workspaceId: string, workflowId: string, generation: number): Promise<void>;
 };
@@ -29,15 +32,55 @@ const pendingLimit = 1000;
 /** Keeps app.github_workflow_subscriptions in step with workflow activation. A lower generation never overwrites a higher one. */
 export function createGitHubSubscriptions(pool: Pool): GitHubSubscriptions {
   return {
-    async replace({ workspaceId, workflowId, revision, generation, trigger }) {
-      await pool.query(
-        `INSERT INTO app.github_workflow_subscriptions (workspace_id,workflow_id,revision,generation,repository_id,event,actions)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
-        ON CONFLICT (workspace_id,workflow_id) DO UPDATE SET revision=EXCLUDED.revision,generation=EXCLUDED.generation,
-          repository_id=EXCLUDED.repository_id,event=EXCLUDED.event,actions=EXCLUDED.actions
-        WHERE app.github_workflow_subscriptions.generation<=EXCLUDED.generation`,
-        [workspaceId, workflowId, revision, generation, trigger.repositoryId, trigger.event, trigger.actions ?? null],
-      );
+    async replace({ workspaceId, workflowId, revision, generation, triggers }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+          `github-workflow-subscriptions:${workspaceId}:${workflowId}`,
+        ]);
+        const newer = await client.query(
+          'SELECT 1 FROM app.github_workflow_subscriptions WHERE workspace_id=$1 AND workflow_id=$2 AND generation>$3 LIMIT 1',
+          [workspaceId, workflowId, generation],
+        );
+        if (newer.rows.length) {
+          await client.query('ROLLBACK');
+          return;
+        }
+        await client.query('DELETE FROM app.github_workflow_subscriptions WHERE workspace_id=$1 AND workflow_id=$2', [
+          workspaceId,
+          workflowId,
+        ]);
+        for (const trigger of triggers) {
+          const account = Array.isArray(trigger.repositories) ? null : trigger.repositories.organizationId;
+          await client.query(
+            `INSERT INTO app.github_workflow_subscriptions (workspace_id,workflow_id,trigger_id,revision,generation,organization_id,include_future,events)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [
+              workspaceId,
+              workflowId,
+              trigger.id,
+              revision,
+              generation,
+              account,
+              account !== null,
+              JSON.stringify(trigger.events),
+            ],
+          );
+          if (Array.isArray(trigger.repositories))
+            await client.query(
+              `INSERT INTO app.github_workflow_subscription_repositories (workspace_id,workflow_id,trigger_id,repository_id)
+              SELECT $1,$2,$3,unnest($4::text[])`,
+              [workspaceId, workflowId, trigger.id, trigger.repositories],
+            );
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async remove(workspaceId, workflowId, generation) {
       await pool.query(
@@ -56,13 +99,24 @@ const subscriptionSchema = z.object({
 });
 const deliverySchema = z.looseObject({
   action: z.string().optional(),
-  repository: z.looseObject({ id: z.number().int().positive() }),
+  repository: z.looseObject({
+    id: z.number().int().positive(),
+    owner: z.looseObject({ id: z.number().int().positive() }).optional(),
+  }),
 });
+/** Whether a trigger stored in a revision matches a delivery's repository, owner account, event and action. */
+const triggerMatches = (trigger: string, repository: string, owner: string, event: string, action: string) =>
+  `${trigger}->>'kind'='github'
+  AND (CASE WHEN jsonb_typeof(${trigger}->'repositories')='array' THEN ${trigger}->'repositories' ? ${repository}
+    ELSE ${trigger}->'repositories'->>'organizationId'=${owner} END)
+  AND EXISTS (SELECT 1 FROM jsonb_array_elements(${trigger}->'events') e
+    WHERE e->>'event'=${event} AND (NOT e ? 'actions' OR e->'actions' ? ${action}))`;
 
 /**
- * Queues one verified GitHub delivery for every workflow subscribed to its repository, event and action. Each workspace
- * gets the event in its own transaction, so one failing workspace does not stop the others; failures are thrown together
- * after every workspace was tried. A subscription whose workflow has since stopped is deleted.
+ * Queues one verified GitHub delivery for every workflow with a GitHub trigger on its repository, or on the account that
+ * owns it, and on its event and action. Each workspace gets the event in its own transaction, so one failing workspace
+ * does not stop the others; failures are thrown together after every workspace was tried. A subscription whose workflow
+ * has since stopped is deleted.
  */
 export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
   return async (delivery: { event: string; deliveryId: string; body: unknown }) => {
@@ -70,13 +124,23 @@ export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
     const event = delivery.event as GitHubTriggerEvent;
     const body = deliverySchema.safeParse(delivery.body);
     if (!body.success) return;
+    const repositoryId = String(body.data.repository.id),
+      ownerId = body.data.repository.owner ? String(body.data.repository.owner.id) : '',
+      action = body.data.action ?? '';
     const subscriptions = z.array(subscriptionSchema).parse(
       (
         await pool.query(
-          `SELECT workspace_id,workflow_id,revision,generation FROM app.github_workflow_subscriptions
-          WHERE repository_id=$1 AND event=$2 AND (actions IS NULL OR $3::text=ANY(actions))
-          ORDER BY workspace_id,workflow_id LIMIT $4`,
-          [String(body.data.repository.id), event, body.data.action ?? null, fanOutLimit],
+          `WITH matched AS (
+            SELECT workspace_id,workflow_id,trigger_id FROM app.github_workflow_subscription_repositories WHERE repository_id=$1
+            UNION SELECT workspace_id,workflow_id,trigger_id FROM app.github_workflow_subscriptions
+              WHERE include_future AND organization_id=$2
+          )
+          SELECT DISTINCT s.workspace_id,s.workflow_id,s.revision,s.generation
+          FROM matched m JOIN app.github_workflow_subscriptions s USING (workspace_id,workflow_id,trigger_id)
+          WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(s.events) e
+            WHERE e->>'event'=$3 AND (NOT e ? 'actions' OR e->'actions' ? $4::text))
+          ORDER BY s.workspace_id,s.workflow_id LIMIT $5`,
+          [repositoryId, ownerId, event, action, fanOutLimit],
         )
       ).rows,
     );
@@ -85,15 +149,46 @@ export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
     const failures: unknown[] = [];
     for (const subscription of subscriptions) {
       try {
-        const stopped = await runtime.transaction(subscription.workspace_id, commonCompatibility, async tx => {
+        const stopped = await runtime.transaction(subscription.workspace_id, workflowCompatibility, async tx => {
           const workflows = qualified(tx.schema, 'tf_workflows');
+          const revisions = qualified(tx.schema, 'tf_workflow_revisions');
+          const triggers = qualified(tx.schema, 'tf_workflow_triggers');
           const events = qualified(tx.schema, 'tf_provider_events');
+          const repositories = qualified(tx.schema, 'tf_knowledge_github_repositories');
+          // A verified delivery names the repository's owner, so connected repositories stored without one learn it.
+          if (ownerId)
+            await tx.client.query(
+              `UPDATE ${repositories} r SET owner_id=$2 FROM (
+                SELECT source_id FROM ${repositories} WHERE repository_id=$1 AND owner_id IS NULL
+                ORDER BY source_id FOR UPDATE SKIP LOCKED
+              ) c WHERE r.source_id=c.source_id AND r.repository_id=$1`,
+              [repositoryId, ownerId],
+            );
+          // One delivery queues one event per workflow, listing every switched-on GitHub trigger it matches in definition order.
           await tx.client.query(
-            `INSERT INTO ${events} (workflow_id,revision,event_key,payload)
-            SELECT w.id,w.active_revision,$3,$4 FROM ${workflows} w WHERE w.id=$1 AND w.enabled AND w.active_revision=$2
+            `INSERT INTO ${events} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload,github_repository_id)
+            SELECT w.id,w.active_revision,m.ids[1],m.ids,$3,$4,$6 FROM ${workflows} w
+            JOIN ${revisions} d ON d.workflow_id=w.id AND d.id=w.active_revision
+            CROSS JOIN LATERAL (
+              SELECT array_agg(t.value->>'id' ORDER BY t.ordinality) AS ids
+              FROM jsonb_array_elements(d.definition->'triggers') WITH ORDINALITY t
+              JOIN ${triggers} s ON s.workflow_id=w.id AND s.trigger_id=t.value->>'id' AND s.enabled
+              WHERE ${triggerMatches('t.value', '$6', '$7', '$8', '$9::text')}
+            ) m
+            WHERE w.id=$1 AND w.enabled AND w.active_revision=$2 AND m.ids IS NOT NULL
               AND (SELECT count(*) FROM ${events} e WHERE e.workflow_id=$1 AND e.revision=$2 AND NOT e.admitted)<$5
             ON CONFLICT DO NOTHING`,
-            [subscription.workflow_id, subscription.revision, delivery.deliveryId, payload, pendingLimit],
+            [
+              subscription.workflow_id,
+              subscription.revision,
+              delivery.deliveryId,
+              payload,
+              pendingLimit,
+              repositoryId,
+              ownerId,
+              event,
+              action,
+            ],
           );
           // The subscription is written before its activation commits, so only a workflow state at least as new as the subscription proves it stale.
           const workflow = z

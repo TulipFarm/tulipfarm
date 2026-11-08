@@ -1,7 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
-import type { Definition } from './contracts.ts';
+import type { Trigger } from './contracts.ts';
 
-export function nextOccurrence(trigger: Definition['trigger'], now: Date): string | null {
+export function nextOccurrence(trigger: Trigger, now: Date): string | null {
   switch (trigger.kind) {
     case 'once':
       if (trigger.timezone) new Intl.DateTimeFormat('en', { timeZone: trigger.timezone }).format(now);
@@ -23,7 +23,6 @@ export function nextOccurrence(trigger: Definition['trigger'], now: Date): strin
     // The sweep reads changes when this comes due, then every minute after.
     case 'row':
       return now.toISOString();
-    case 'manual':
     case 'webhook':
     case 'event':
     case 'provider':
@@ -36,7 +35,7 @@ export function nextOccurrence(trigger: Definition['trigger'], now: Date): strin
   }
 }
 
-export function nextCronOccurrences(trigger: Extract<Definition['trigger'], { kind: 'cron' }>, now: Date): string[] {
+export function nextCronOccurrences(trigger: Extract<Trigger, { kind: 'cron' }>, now: Date): string[] {
   new Intl.DateTimeFormat('en', { timeZone: trigger.timezone }).format(now);
   const expression = CronExpressionParser.parse(trigger.expression, { currentDate: now, tz: trigger.timezone });
   return [expression.next().toDate(), expression.next().toDate(), expression.next().toDate()].map(date =>
@@ -44,13 +43,7 @@ export function nextCronOccurrences(trigger: Extract<Definition['trigger'], { ki
   );
 }
 
-export function calendarOccurrences(
-  trigger: Definition['trigger'],
-  nextRunAt: string,
-  from: string,
-  to: string,
-  limit = 250,
-) {
+export function calendarOccurrences(trigger: Trigger, nextRunAt: string, from: string, to: string, limit = 250) {
   const start = Math.max(Date.parse(from), Date.parse(nextRunAt)),
     end = Date.parse(to);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= Date.parse(from) || limit < 1)
@@ -86,7 +79,7 @@ export type MissedOccurrences = {
 };
 export const missedCountLimit = 1000;
 
-export function missedOccurrences(trigger: Definition['trigger'], due: Date, now: Date): MissedOccurrences | null {
+export function missedOccurrences(trigger: Trigger, due: Date, now: Date): MissedOccurrences | null {
   if (trigger.kind === 'interval') {
     const step = trigger.minutes * 60000,
       count = Math.floor((now.getTime() - due.getTime()) / step);

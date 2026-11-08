@@ -49,7 +49,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Draft support reply',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'draft',
@@ -181,7 +181,7 @@ test(
       definition: {
         version: 1,
         name: 'Triage new issue',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           {
             id: 'run_agent',
@@ -228,7 +228,7 @@ test('a scheduled agent workflow skips its occurrence while any of its runs is l
         definition: {
           version: 1,
           name: 'Hourly check',
-          trigger: { kind: 'interval', minutes: 60 },
+          triggers: [{ id: 'interval', kind: 'interval', minutes: 60 }],
           steps: [
             {
               id: 'run_agent',
@@ -250,7 +250,7 @@ test('a scheduled agent workflow skips its occurrence while any of its runs is l
     // A run started by hand is still live when the schedule comes due.
     await service.start(workspace.id, workspace.userId, id, { requestId: randomUUID(), input: {} });
     await db.platform.query(
-      `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
       [id],
     );
     return id;

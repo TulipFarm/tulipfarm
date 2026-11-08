@@ -26,7 +26,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const code = {
       version: 1,
       name: 'Arithmetic',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'javascript_total',

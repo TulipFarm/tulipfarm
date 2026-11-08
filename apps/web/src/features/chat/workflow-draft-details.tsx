@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { CodeBlock } from '@tulipfarm/sprout/code-block';
 import { ReviewRow, ReviewRows, ReviewSteps, ReviewValues, type ReviewStep } from '@tulipfarm/sprout/review-card';
 import type { DraftView, WorkflowProposal } from '@tulipfarm/agents/draft-contracts';
@@ -9,12 +10,15 @@ import {
   describeValue,
   filterPhrase,
   recordScheduleDescription,
+  type GitHubNames,
 } from '@/features/workflows/definition-description';
+import { useGitHubNames } from '@/features/workflows/queries';
+import { triggerName } from '@/features/workflows/triggers';
 import { AgentName } from '@/features/agents/reference-names';
 import { WorkflowSlackDestinationLabel } from '@/features/workflows/slack-step';
 
 type Definition = WorkflowProposal['input']['definition'];
-type Trigger = Definition['trigger'];
+type Trigger = Definition['triggers'][number];
 type Step = Definition['steps'][number];
 type Value = Extract<Step, { kind: 'transform' }>['fields'][string];
 type RecordSource = DraftView['workflowRecordSource'];
@@ -45,56 +49,76 @@ export function WorkflowDraftDetails({
   tableStepSources: TableStepSources;
   onSlackReady: (id: string, ready: boolean) => void;
 }) {
-  const { trigger, steps } = proposal.input.definition;
+  const { triggers, steps } = proposal.input.definition;
   const runs = proposal.kind === 'workflow' ? proposal.input.activate : proposal.input.enabled;
+  const github = useGitHubNames(workspaceId, triggers);
+  // Table labels describe the first record and row trigger; others name their table by a short ID.
+  const firstRecord = triggers.find(trigger => trigger.kind === 'record')?.id;
+  const firstRow = triggers.find(trigger => trigger.kind === 'row')?.id;
+  const many = triggers.length > 1;
   return (
     <>
       <ReviewRows>
         <ReviewRow label="Change">
           <span>{workflowChange(proposal)}</span>
         </ReviewRow>
-        <ReviewRow label="Trigger">
-          <span>{describeTrigger(trigger, recordSource, rowSource)}</span>
-        </ReviewRow>
-        {trigger.kind === 'row' && trigger.fieldIds && (
-          <ReviewRow label="Watched fields">
-            <span>
-              {rowSource
-                ? rowSource.fields.map(field => `“${field}”`).join(', ')
-                : `${trigger.fieldIds.length} unavailable ${trigger.fieldIds.length === 1 ? 'field' : 'fields'}`}
-            </span>
+        {!triggers.length && (
+          <ReviewRow label="Trigger">
+            <span>Runs only when started by hand</span>
           </ReviewRow>
         )}
-        {(trigger.kind === 'record' || trigger.kind === 'row') && trigger.filter && (
-          <ReviewRow label="Only rows where">
-            <span>
-              {describeFilter(trigger.filter, (trigger.kind === 'record' ? recordSource : rowSource)?.filter ?? null)}
-            </span>
-          </ReviewRow>
-        )}
-        {trigger.kind === 'webhook' && (
-          <>
-            <ReviewRow label="Duplicate check">
-              <span>{describeDedupe(trigger)}</span>
-            </ReviewRow>
-            <ReviewRow label="Copied headers">
-              <span>{trigger.payload?.headers?.length ? trigger.payload.headers.join(', ') : 'None'}</span>
-            </ReviewRow>
-          </>
-        )}
+        {triggers.map(trigger => {
+          const record = trigger.id === firstRecord ? recordSource : null;
+          const row = trigger.id === firstRow ? rowSource : null;
+          const name = many ? triggerName(trigger) : null;
+          const label = (text: string) => (name ? `${name}: ${text.toLowerCase()}` : text);
+          return (
+            <Fragment key={trigger.id}>
+              <ReviewRow label={many ? name! : 'Trigger'}>
+                <span>{describeTrigger(trigger, record, row, github)}</span>
+              </ReviewRow>
+              {trigger.kind === 'row' && trigger.fieldIds && (
+                <ReviewRow label={label('Watched fields')}>
+                  <span>
+                    {row
+                      ? row.fields.map(field => `“${field}”`).join(', ')
+                      : `${trigger.fieldIds.length} unavailable ${trigger.fieldIds.length === 1 ? 'field' : 'fields'}`}
+                  </span>
+                </ReviewRow>
+              )}
+              {(trigger.kind === 'record' || trigger.kind === 'row') && trigger.filter && (
+                <ReviewRow label={label('Only rows where')}>
+                  <span>
+                    {describeFilter(trigger.filter, (trigger.kind === 'record' ? record : row)?.filter ?? null)}
+                  </span>
+                </ReviewRow>
+              )}
+              {trigger.kind === 'webhook' && (
+                <>
+                  <ReviewRow label={label('Duplicate check')}>
+                    <span>{describeDedupe(trigger)}</span>
+                  </ReviewRow>
+                  <ReviewRow label={label('Copied headers')}>
+                    <span>{trigger.payload?.headers?.length ? trigger.payload.headers.join(', ') : 'None'}</span>
+                  </ReviewRow>
+                </>
+              )}
+            </Fragment>
+          );
+        })}
         <ReviewRow label="Next run">
           <span>
-            {trigger.kind === 'record' && (runs || proposal.kind === 'workflow')
-              ? `Each row’s own date${runs ? '. Upcoming dates appear on the Workflows page once it is active.' : ', once activated'}`
-              : trigger.kind === 'row' && (runs || proposal.kind === 'workflow')
-                ? `Within about a minute of each matching change${runs ? '' : ', once activated'}`
-                : !nextRunAt
-                  ? runs
-                    ? 'No scheduled run'
-                    : 'None while inactive'
+            {nextRunAt
+              ? runs
+                ? formatRun(nextRunAt, triggers)
+                : `${formatRun(nextRunAt, triggers)} once activated`
+              : triggers.some(trigger => trigger.kind === 'record') && (runs || proposal.kind === 'workflow')
+                ? `Each row’s own date${runs ? '. Upcoming dates appear on the Workflows page once it is active.' : ', once activated'}`
+                : triggers.some(trigger => trigger.kind === 'row') && (runs || proposal.kind === 'workflow')
+                  ? `Within about a minute of each matching change${runs ? '' : ', once activated'}`
                   : runs
-                    ? formatRun(nextRunAt, trigger)
-                    : `${formatRun(nextRunAt, trigger)} once activated`}
+                    ? 'No scheduled run'
+                    : 'None while inactive'}
           </span>
         </ReviewRow>
       </ReviewRows>
@@ -123,7 +147,18 @@ export function WorkflowDraftDetails({
   );
 }
 
-export function formatRun(iso: string, trigger: Trigger) {
+/** Formats a run time in the time zone of the given trigger, or of the first trigger in a list that has one. */
+export function formatRun(iso: string, triggers?: Trigger | readonly Trigger[]) {
+  const list: readonly Trigger[] = !triggers ? [] : Array.isArray(triggers) ? triggers : [triggers as Trigger];
+  const timeZone = list
+    .map(trigger =>
+      (trigger.kind === 'cron' || trigger.kind === 'once') && trigger.timezone
+        ? trigger.timezone
+        : trigger.kind === 'record' && trigger.field.kind === 'date'
+          ? trigger.field.timezone
+          : undefined,
+    )
+    .find(Boolean);
   return new Date(iso).toLocaleString(undefined, {
     weekday: 'long',
     year: 'numeric',
@@ -132,11 +167,7 @@ export function formatRun(iso: string, trigger: Trigger) {
     hour: 'numeric',
     minute: '2-digit',
     timeZoneName: 'short',
-    ...((trigger.kind === 'cron' || trigger.kind === 'once') && trigger.timezone
-      ? { timeZone: trigger.timezone }
-      : trigger.kind === 'record' && trigger.field.kind === 'date'
-        ? { timeZone: trigger.field.timezone }
-        : {}),
+    ...(timeZone ? { timeZone } : {}),
   });
 }
 
@@ -153,7 +184,7 @@ export function workflowChange(proposal: WorkflowProposal) {
     : `${saved}. The active revision does not change.`;
 }
 
-function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource: RowSource) {
+function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource: RowSource, github: GitHubNames) {
   switch (trigger.kind) {
     case 'cron':
       return `Schedule “${trigger.expression}” in ${trigger.timezone}`;
@@ -161,8 +192,6 @@ function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource
       return `Once at ${formatRun(trigger.at, trigger)}`;
     case 'interval':
       return `Every ${trigger.minutes} ${trigger.minutes === 1 ? 'minute' : 'minutes'}`;
-    case 'manual':
-      return 'Started manually';
     case 'webhook':
       return `Webhook request. ${!trigger.payload ? 'Run input is the input field of a request ID envelope' : trigger.payload.headers?.length ? 'Run input is { body, headers } with the raw JSON body and copied headers' : 'Run input is the raw JSON body'}. Create its key on the Workflows page.`;
     case 'event':
@@ -170,7 +199,7 @@ function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource
     case 'provider':
       return `Connected provider records ${trigger.event}, checked every ${trigger.minutes} minutes`;
     case 'github':
-      return `${describeGitHubTrigger(trigger)}, repository ID ${trigger.repositoryId}. Run input holds a short summary of the GitHub event`;
+      return `${describeGitHubTrigger(trigger, github)}. Run input holds a short summary of the GitHub event`;
     case 'record':
       return recordSource
         ? `${recordScheduleDescription(trigger.field, `“${recordSource.field}”`)}, once for each row of “${recordSource.table}”. Run input holds the row ID and values`

@@ -19,7 +19,7 @@ import { webhookCurl, webhookInstructions, webhookPayload, webhookStatus, type W
 
 type Workflow = z.infer<typeof workflowSchema>;
 /** A key the server returned for this workflow. `key` is null when a retried request had already created it. */
-export type IssuedWebhookKey = { workflowId: string; key: string | null };
+export type IssuedWebhookKey = { workflowId: string; triggerId: string; key: string | null };
 
 const modeLabel: Record<WebhookMode, string> = {
   signed: 'Signed requests (HMAC-SHA256)',
@@ -31,6 +31,8 @@ const modeLabel: Record<WebhookMode, string> = {
 export function WebhookSetup({
   hidden,
   workflow,
+  triggerId,
+  title,
   url,
   blocked,
   issued,
@@ -42,6 +44,8 @@ export function WebhookSetup({
 }: {
   hidden: boolean;
   workflow: Workflow;
+  triggerId: string;
+  title: string;
   url: string;
   blocked: boolean;
   issued: IssuedWebhookKey | null;
@@ -51,20 +55,18 @@ export function WebhookSetup({
   onCopied: () => void;
   onCopyFailed: () => void;
 }) {
-  const webhook = webhookStatus(workflow);
-  const [mode, setMode] = useState<WebhookMode>(
-    workflow.webhookRotation ? (workflow.webhookMode ?? 'signed') : 'bearer',
-  );
+  const webhook = webhookStatus(workflow, triggerId);
+  const [mode, setMode] = useState<WebhookMode>(webhook.rotation ? (webhook.mode ?? 'signed') : 'bearer');
   const [stripeSecret, setStripeSecret] = useState('');
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   useEffect(() => {
-    if (workflow.webhookMode === 'stripe') setStripeSecret('');
-  }, [workflow.generation, workflow.webhookMode]);
-  const shown = issued?.workflowId === workflow.id ? issued : null;
-  const payload = webhookPayload(workflow);
-  const instructionsMode = workflow.webhookMode ?? mode;
+    if (webhook.mode === 'stripe') setStripeSecret('');
+  }, [workflow.generation, webhook.mode]);
+  const shown = issued?.workflowId === workflow.id && issued.triggerId === triggerId ? issued : null;
+  const payload = webhookPayload(workflow, triggerId);
+  const instructionsMode = webhook.mode ?? mode;
   return (
-    <section hidden={hidden} className="max-w-3xl space-y-3" aria-label="Webhook setup">
+    <section hidden={hidden} className="max-w-3xl space-y-3" aria-label={`Webhook setup for ${title}`}>
       <AlertDialog open={confirmRevoke} onOpenChange={setConfirmRevoke}>
         <AlertDialogContent>
           <AlertDialogTitle>Revoke the previous webhook key?</AlertDialogTitle>
@@ -86,7 +88,7 @@ export function WebhookSetup({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <h2 className="text-lg font-medium">Webhook setup</h2>
+      <h2 className="text-lg font-medium">{title}</h2>
       <dl className="space-y-2 text-sm">
         <div aria-label="Webhook key status">
           <dt className="font-medium">Key</dt>
@@ -94,15 +96,15 @@ export function WebhookSetup({
             <Badge variant={webhook.configured ? 'success' : 'warning'}>
               {webhook.configured ? 'Configured' : 'Not configured'}
             </Badge>
-            {workflow.webhookMode ? `${modeLabel[workflow.webhookMode]}.` : 'No key is saved.'}
+            {webhook.mode ? `${modeLabel[webhook.mode]}.` : 'No key is saved.'}
           </dd>
         </div>
-        {workflow.webhookPrevious && (
+        {webhook.previous && (
           <div aria-label="Previous webhook key status">
             <dt className="font-medium">Previous key</dt>
             <dd className="flex flex-wrap items-center gap-2">
               <Badge variant="warning">Still accepted</Badge>
-              {`The previous ${modeLabel[workflow.webhookPrevious.mode].toLowerCase()} keeps working until ${formatTime(workflow.webhookPrevious.expiresAt)}.`}
+              {`The previous ${modeLabel[webhook.previous.mode].toLowerCase()} keeps working until ${formatTime(webhook.previous.expiresAt)}.`}
               <Button variant="outline" disabled={blocked} onClick={() => setConfirmRevoke(true)}>
                 Revoke previous key now
               </Button>
@@ -133,8 +135,8 @@ export function WebhookSetup({
       {shown &&
         (shown.key ? (
           <div className="space-y-2">
-            <Label htmlFor="webhook-key">New webhook key</Label>
-            <Input id="webhook-key" readOnly spellCheck={false} autoComplete="off" value={shown.key} />
+            <Label htmlFor={`webhook-key-${triggerId}`}>New webhook key</Label>
+            <Input id={`webhook-key-${triggerId}`} readOnly spellCheck={false} autoComplete="off" value={shown.key} />
             <Button
               variant="outline"
               onClick={() => void navigator.clipboard.writeText(shown.key ?? '').then(onCopied, onCopyFailed)}
@@ -145,7 +147,7 @@ export function WebhookSetup({
               Copy this key into your sender now. It is shown only once and cannot be read again.
             </p>
           </div>
-        ) : workflow.webhookMode === 'stripe' ? (
+        ) : webhook.mode === 'stripe' ? (
           <p role="note" className="text-sm">
             The Stripe signing secret was saved encrypted and is not shown again.
           </p>
@@ -156,7 +158,7 @@ export function WebhookSetup({
             that key first.
           </p>
         ))}
-      {workflow.webhookRotation && (
+      {webhook.rotation && (
         <fieldset disabled={blocked} className="space-y-2">
           <legend className="text-sm font-medium">How senders prove they have the key</legend>
           <div className="flex flex-wrap gap-2">
@@ -182,9 +184,9 @@ export function WebhookSetup({
           </p>
           {mode === 'stripe' && (
             <>
-              <Label htmlFor="stripe-signing-secret">Stripe endpoint signing secret</Label>
+              <Label htmlFor={`stripe-signing-secret-${triggerId}`}>Stripe endpoint signing secret</Label>
               <Input
-                id="stripe-signing-secret"
+                id={`stripe-signing-secret-${triggerId}`}
                 type="password"
                 spellCheck={false}
                 autoComplete="off"
@@ -209,7 +211,7 @@ export function WebhookSetup({
           ? 'The Stripe signing secret is stored encrypted and cannot be read again.'
           : !webhook.configured
             ? 'The server creates the key and shows it once.'
-            : workflow.webhookRotation
+            : webhook.rotation
               ? 'The server creates the new key. The current key keeps working for 24 hours so you can update senders, or revoke it sooner.'
               : 'The server creates the new key. The current key stops working at once; this workspace cannot keep it during a grace period until its storage update finishes.'}{' '}
         {mode === 'bearer'

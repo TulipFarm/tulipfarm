@@ -34,7 +34,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = {
       version: 1,
       name: 'Historical Unicode',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'code',

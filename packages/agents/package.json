@@ -263,6 +263,10 @@
       "types": "./dist/agent-trigger-workflows.d.ts",
       "default": "./dist/agent-trigger-workflows.js"
     },
+    "./agent-workflow-combine": {
+      "types": "./dist/agent-workflow-combine.d.ts",
+      "default": "./dist/agent-workflow-combine.js"
+    },
     "./follow-ups": {
       "types": "./dist/follow-ups.d.ts",
       "default": "./dist/follow-ups.js"

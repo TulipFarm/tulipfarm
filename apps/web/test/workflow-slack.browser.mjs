@@ -37,7 +37,7 @@ test(
         definition: {
           version: 1,
           name: 'Tickets to Slack',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'notify',

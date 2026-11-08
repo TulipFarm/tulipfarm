@@ -12,18 +12,21 @@ import {
   webhookInstructions,
   webhookPayload,
   webhookStatus,
+  webhookTriggers,
 } from '../src/features/workflows/webhook-status.ts';
 import { githubWebhookSignature, webhookSignature } from '../../../packages/workflows/src/webhook-keys.ts';
 
 const id = '00000000-0000-4000-8000-000000000001',
   older = '00000000-0000-4000-8000-000000000002';
-const definition = trigger => ({
+const definition = triggers => ({
   version: 1,
   name: 'Webhook',
-  trigger,
+  triggers,
   steps: [{ id: 'copy', kind: 'transform', fields: {} }],
 });
-const workflow = (saved, active, { enabled = true, configured = true } = {}) => ({
+const hook = (id: string, extra = {}) => ({ id, kind: 'webhook', ...extra });
+// Trigger state exists only for the active revision; `off` lists triggers switched off and `unkeyed` those without a key.
+const workflow = (saved, active, { enabled = true, off = [] as string[], unkeyed = [] as string[] } = {}) => ({
   id,
   revision: id,
   activeRevision: active ? older : null,
@@ -31,55 +34,75 @@ const workflow = (saved, active, { enabled = true, configured = true } = {}) => 
   generation: 1,
   nextRunAt: null,
   definition: definition(saved),
-  activeTrigger: active,
-  webhookConfigured: configured,
+  activeTriggers: active,
+  triggers: (active ?? []).map(trigger => ({
+    id: trigger.id,
+    kind: trigger.kind,
+    enabled: !off.includes(trigger.id),
+    summary: trigger.kind,
+    nextRunAt: null,
+    webhook:
+      trigger.kind === 'webhook'
+        ? { configured: !unkeyed.includes(trigger.id), mode: 'bearer', rotation: false, previous: null }
+        : null,
+  })),
 });
+const receiving = 'Receiving requests. Calls that use the current key start the active revision.';
 
 test('webhook status follows the active trigger, not the saved one', () => {
-  assert.deepEqual(webhookStatus(workflow({ kind: 'webhook' }, { kind: 'webhook' })), {
-    visible: true,
+  assert.deepEqual(webhookStatus(workflow([hook('orders')], [hook('orders')]), 'orders'), {
+    active: true,
     configured: true,
     receiving: true,
-    endpoint: 'Receiving requests. Calls that use the current key start the active revision.',
+    endpoint: receiving,
+    mode: 'bearer',
+    rotation: false,
+    previous: null,
     change: null,
   });
   assert.equal(
-    webhookStatus(workflow({ kind: 'webhook' }, { kind: 'webhook' }, { configured: false })).endpoint,
+    webhookStatus(workflow([hook('orders')], [hook('orders')], { unkeyed: ['orders'] }), 'orders').endpoint,
     'Not receiving requests. Create a key to start accepting calls.',
   );
-  assert.deepEqual(webhookStatus(workflow({ kind: 'manual' }, { kind: 'webhook' })), {
-    visible: true,
-    configured: true,
-    receiving: true,
-    endpoint: 'Receiving requests. Calls that use the current key start the active revision.',
-    change: 'The saved revision uses a manual trigger. Activating it stops this endpoint and deletes the webhook key.',
-  });
-  assert.deepEqual(
-    webhookStatus(workflow({ kind: 'webhook' }, { kind: 'interval', minutes: 5 }, { configured: false })),
-    {
-      visible: true,
-      configured: false,
-      receiving: false,
-      endpoint:
-        'Not receiving requests. The active revision uses a repeating trigger. Activate the saved revision to accept calls.',
-      change: null,
-    },
-  );
+  const removed = webhookStatus(workflow([], [hook('orders')]), 'orders');
+  assert.equal(removed.receiving, true);
   assert.equal(
-    webhookStatus(workflow({ kind: 'webhook' }, null, { enabled: false, configured: false })).endpoint,
-    'Not receiving requests. Activate the saved revision to accept calls.',
+    removed.change,
+    'The saved revision removes this trigger. Activating it stops this endpoint and deletes its key.',
   );
-  assert.deepEqual(webhookStatus(workflow({ kind: 'webhook' }, { kind: 'webhook' }, { enabled: false })), {
-    visible: true,
-    configured: true,
+  const notYetActive = webhookStatus(
+    workflow([hook('orders')], [{ id: 'poll', kind: 'interval', minutes: 5 }]),
+    'orders',
+  );
+  assert.equal(notYetActive.active, false);
+  assert.equal(notYetActive.receiving, false);
+  assert.equal(notYetActive.endpoint, 'Not receiving requests. Activate the saved revision to accept calls.');
+  assert.equal(webhookStatus(workflow([hook('orders')], null), 'orders').configured, false);
+  assert.deepEqual(pick(webhookStatus(workflow([hook('orders')], [hook('orders')], { enabled: false }), 'orders')), {
     receiving: false,
-    endpoint: 'Not receiving requests. The workflow is disabled. Activate the saved revision to accept calls.',
-    change: null,
+    endpoint: 'Not receiving requests. The workflow is turned off.',
   });
-  assert.equal(
-    webhookStatus(workflow({ kind: 'manual' }, { kind: 'cron', expression: '0 9 * * *', timezone: 'UTC' })).visible,
-    false,
+});
+
+const pick = ({ receiving, endpoint }: { receiving: boolean; endpoint: string }) => ({ receiving, endpoint });
+
+test('each webhook trigger has its own switch and endpoint state', () => {
+  const both = [hook('orders'), hook('refunds')];
+  const current = workflow(both, both, { off: ['refunds'] });
+  assert.deepEqual(pick(webhookStatus(current, 'orders')), { receiving: true, endpoint: receiving });
+  assert.deepEqual(pick(webhookStatus(current, 'refunds')), {
+    receiving: false,
+    endpoint: 'Not receiving requests. This trigger is switched off.',
+  });
+  assert.equal(webhookStatus(current, 'refunds').configured, true, 'switching a trigger off keeps its key');
+  assert.deepEqual(
+    webhookTriggers(
+      workflow([hook('orders'), { id: 'daily', kind: 'interval', minutes: 60 }], [hook('legacy'), hook('orders')]),
+    ).map(trigger => trigger.id),
+    ['orders', 'legacy'],
+    'saved webhook triggers come first, then active ones the saved revision removes, each once',
   );
+  assert.deepEqual(webhookTriggers(workflow([], null)), []);
 });
 
 test('curl example reads the key from the environment and generates the request ID', async () => {
@@ -134,15 +157,16 @@ test('raw webhook triggers explain and demonstrate the active dedupe source', as
   const url = 'https://api.example.com/v1/workspaces/w/workflows/f/webhook',
     requestId = '3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f';
   const githubShaped = {
+    id: 'github',
     kind: 'webhook',
     payload: { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' }, headers: ['x-github-event'] },
   };
   assert.deepEqual(
-    webhookPayload(workflow({ kind: 'manual' }, githubShaped)),
+    webhookPayload(workflow([], [githubShaped]), 'github'),
     githubShaped.payload,
     'The endpoint follows the active revision',
   );
-  assert.equal(webhookPayload(workflow({ kind: 'webhook' }, { kind: 'webhook' })), undefined);
+  assert.equal(webhookPayload(workflow([hook('plain')], [hook('plain')]), 'plain'), undefined);
   assert.match(
     webhookInstructions(githubShaped.payload, 'bearer'),
     /request body is limited to 64 KiB.*run input to 32 KiB/,

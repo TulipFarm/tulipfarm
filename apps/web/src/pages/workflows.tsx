@@ -1,9 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { RefreshCwIcon } from 'lucide-react';
 import { z } from 'zod';
-import { statusSchema, webhookKeyIssuedSchema, workflowSchema } from '@tulipfarm/workflows/contracts';
+import {
+  isUnattendedTrigger,
+  statusSchema,
+  webhookKeyIssuedSchema,
+  workflowSchema,
+} from '@tulipfarm/workflows/contracts';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -30,8 +35,6 @@ import { Disclosure } from '@/components/disclosure';
 import { workspaceRoute, workspaceWorkflowsRoute } from '@/router';
 import { apiOrigin } from '@/lib/auth';
 import { UnsavedChanges, samePage } from '@/features/tables/feedback';
-import { tableApi } from '@/features/tables/api';
-import { useTableNames } from '@/features/tables/hooks';
 import { workflowRequest as request, WorkflowRequestError as RequestError } from '@/features/workflows/api';
 import type { WorkflowLink } from '@/features/workflows/page-search';
 import { useWorkflowEditingSession } from '@/features/workflows/editing-session';
@@ -40,25 +43,28 @@ import {
   useArchivedWorkflows,
   useWorkflowRuns,
   useWorkflowChanges,
+  useRowTableNames,
   type RunStatus,
 } from '@/features/workflows/queries';
 import { WorkflowDefinition, WorkflowRun } from '@/features/workflows/workflow-detail';
 import { WorkflowSlackAction } from '@/features/workflows/slack-step';
 import { AgentStepStatus } from '@/features/workflows/agent-step-status';
 import { runErrorNote, runNote, stepNote } from '@/features/workflows/run-notes';
-import { webhookStatus } from '@/features/workflows/webhook-status';
+import { webhookTriggers } from '@/features/workflows/webhook-status';
+import { TriggerList } from '@/features/workflows/trigger-list';
+import {
+  knownTriggers,
+  liveTriggers,
+  runTriggerName,
+  triggerName,
+  triggerState,
+  triggersLine,
+} from '@/features/workflows/triggers';
 import { WebhookSetup, type IssuedWebhookKey } from '@/features/workflows/webhook-setup';
 import { WebhookDeliveries } from '@/features/workflows/webhook-deliveries';
 import { RowEventQueue } from '@/features/workflows/row-event-queue';
 import { WorkflowSharing, AcceptWorkflowSponsorship, recordSourceDenied } from '@/features/workflows/sharing';
-import {
-  TriggerIcon,
-  WorkflowRow,
-  disabledReasons,
-  liveTrigger,
-  triggerLine,
-  workflowState,
-} from '@/features/workflows/workflow-summary';
+import { TriggerIcon, WorkflowRow, disabledReasons, workflowState } from '@/features/workflows/workflow-summary';
 
 type Workflow = z.infer<typeof workflowSchema>;
 type Command = { path: string; method: string; body: unknown };
@@ -121,6 +127,7 @@ function WorkflowPage({
     [inputJson, setInputJson] = useState(false);
   const [revision, setRevision] = useState<'saved' | 'active'>('saved');
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null),
+    [runTrigger, setRunTrigger] = useState<string | null>(null),
     [runPages, setRunPages] = useState(1),
     [runDiagram, setRunDiagram] = useState<string | null>(null);
   const [busy, setBusy] = useState(false),
@@ -131,13 +138,14 @@ function WorkflowPage({
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [focusTarget, setFocusTarget] = useState<'workflow-views' | 'workflow-run-diagram' | 'run-input' | null>(null);
   const [webhookKey, setWebhookKey] = useState<IssuedWebhookKey | null>(null);
-  const [testRun, setTestRun] = useState<{ workflowId: string; runId: string } | null>(null);
+  const [testRun, setTestRun] = useState<{ workflowId: string; triggerId: string; runId: string } | null>(null);
   const loadMoreStart = useRef<number | null>(null),
     accessVersion = useRef(0);
   const workflows = read.state.kind === 'ready' ? read.state.data : null;
   const archivedWorkflows = archivedRead.state.kind === 'ready' ? archivedRead.state.data : null;
-  const filterRuns = (status: RunStatus | null) => {
+  const filterRuns = (status: RunStatus | null, trigger: string | null = null) => {
     setRunStatus(status);
+    setRunTrigger(trigger);
     setRunPages(1);
   };
   const selection = useWorkflowEditingSession({
@@ -174,6 +182,7 @@ function WorkflowPage({
     view === 'runs' ? (selected?.id ?? null) : null,
     runStatus,
     runPages,
+    runTrigger,
   );
   const runs = historyRead.state.kind === 'ready' ? historyRead.state.data.runs : null;
   const olderRuns = historyRead.state.kind === 'ready' && historyRead.state.data.nextCursor !== null;
@@ -243,23 +252,32 @@ function WorkflowPage({
       let notice = 'Workflow updated.';
       if (command.path.endsWith('/webhook-key')) {
         const issued = webhookKeyIssuedSchema.parse(result);
+        const triggerId = command.path.split('/').at(-2)!;
+        const state = issued.workflow.triggers.find(item => item.id === triggerId)?.webhook;
         selection.observed(issued.workflow);
-        setWebhookKey({ workflowId: issued.workflow.id, key: issued.key });
+        setWebhookKey({ workflowId: issued.workflow.id, triggerId, key: issued.key });
         notice =
-          issued.workflow.webhookMode === 'stripe' && !issued.key
+          state?.mode === 'stripe' && !issued.key
             ? 'Stripe signing secret saved encrypted.'
             : !issued.key
               ? 'Webhook key replaced by an earlier attempt.'
-              : issued.workflow.webhookPrevious
+              : state?.previous
                 ? 'Webhook key created. Copy it now. The previous key keeps working until its grace period ends.'
                 : 'Webhook key created. Copy it now.';
       } else if (command.path.endsWith('/webhook-test')) {
         const sent = z.object({ runId: z.string() }).parse(result);
-        setTestRun({ workflowId: command.path.slice(base.length + 1).split('/')[0]!, runId: sent.runId });
+        setTestRun({
+          workflowId: command.path.slice(base.length + 1).split('/')[0]!,
+          triggerId: command.path.split('/').at(-2)!,
+          runId: sent.runId,
+        });
         notice = 'Test event sent. Open its run from the webhook panel.';
       } else if (command.path.endsWith('/revoke-previous')) {
         selection.observed(workflowSchema.parse(result));
         notice = 'Previous webhook key revoked. Only the current key works now.';
+      } else if (command.path.endsWith('/switch')) {
+        selection.observed(workflowSchema.parse(result));
+        notice = 'Trigger updated.';
       } else if (command.path.endsWith('/activation')) {
         selection.observed(workflowSchema.parse(result));
         notice = 'Workflow activation updated. Check the active revision below.';
@@ -317,17 +335,14 @@ function WorkflowPage({
   const shelfWorkflows = shelf === 'archived' ? archivedWorkflows : workflows;
   const matches = (workflow: Workflow) => workflow.definition.name.toLowerCase().includes(search.trim().toLowerCase());
   const shownWorkflows = shelfWorkflows?.filter(matches);
-  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
-  const tableNames = useTableNames(
-    tables,
-    [...(shownWorkflows ?? []), ...(selected ? [selected] : [])].some(
-      workflow => liveTrigger(workflow).kind === 'row' || workflow.definition.trigger.kind === 'row',
-    ),
+  const tableNames = useRowTableNames(
+    workspaceId,
+    [...(shownWorkflows ?? []), ...(selected ? [selected] : [])].flatMap(knownTriggers),
   );
   const detail = view !== 'list' ? selected : null;
   const listHref = `/${encodeURIComponent(workspaceSlug)}/workflows`;
   const unavailable = denied || read.state.kind === 'unavailable';
-  const webhook = selected ? webhookStatus(selected) : null;
+  const triggerChoices = selected ? knownTriggers(selected) : [];
   return (
     <PageContent>
       <UnsavedChanges dirty={pending !== null} allowNavigation={leaving} keepsEdits={samePage} />
@@ -542,7 +557,7 @@ function WorkflowPage({
             <div className="space-y-6">
               <section aria-label="Workflow summary" className="flex flex-col gap-4 sm:flex-row sm:items-start">
                 <div className="flex min-w-0 flex-1 items-start gap-4">
-                  <TriggerIcon trigger={liveTrigger(selected)} size="lg" />
+                  <TriggerIcon triggers={liveTriggers(selected)} size="lg" />
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <p className="text-xl font-semibold tracking-tight break-words sm:text-2xl">
                       {selected.definition.name}
@@ -553,7 +568,7 @@ function WorkflowPage({
                     </p>
                     <p className="text-sm text-muted-foreground">
                       {[
-                        `${pendingChanges(selected) ? 'Live: ' : ''}${triggerLine(liveTrigger(selected), tableNames)}`,
+                        `${pendingChanges(selected) ? 'Live: ' : ''}${triggersLine(liveTriggers(selected), tableNames)}`,
                         workflowState(selected).detail,
                         pendingSchedule(selected, tableNames) && `Saved: ${pendingSchedule(selected, tableNames)}`,
                       ]
@@ -684,6 +699,31 @@ function WorkflowPage({
                   </TabsList>
                 </div>
                 <TabsContent value="definition">
+                  <div className="max-w-3xl pt-6">
+                    <TriggerList
+                      key={`${selected.id}/${selected.revision}`}
+                      workspaceId={workspaceId}
+                      workflow={selected}
+                      blocked={blocked}
+                      onDenied={deny}
+                      onSaved={workflow => {
+                        selection.observed(workflow);
+                        void changes.saved(workflow.id);
+                        setError('');
+                        setMessage(
+                          workflow.enabled
+                            ? 'Triggers saved. Activate the saved revision to use them.'
+                            : 'Triggers saved.',
+                        );
+                      }}
+                      onSwitched={workflow => {
+                        selection.observed(workflow);
+                        void changes.saved(workflow.id);
+                        setError('');
+                        setMessage('Trigger updated.');
+                      }}
+                    />
+                  </div>
                   <section aria-label="Workflow definition" className="min-w-0 pt-6">
                     <WorkflowDefinition
                       workspaceId={workspaceId}
@@ -712,7 +752,7 @@ function WorkflowPage({
                 </TabsContent>
                 <TabsContent value="runs">
                   <div className="space-y-6 pt-6">
-                    {selected.enabled && selected.activeTrigger?.kind === 'record' && (
+                    {selected.enabled && selected.activeTriggers?.some(trigger => trigger.kind === 'record') && (
                       <section aria-label="Upcoming record dates" className="space-y-1">
                         <h3 className="text-sm font-medium">Upcoming record dates</h3>
                         {selected.upcomingRecords === null ? (
@@ -752,7 +792,7 @@ function WorkflowPage({
                         </Button>
                       </section>
                     )}
-                    {(selected.activeTrigger?.kind === 'row' ||
+                    {(!!selected.activeTriggers?.some(trigger => trigger.kind === 'row') ||
                       (!!selected.rowQueue &&
                         selected.rowQueue.pending + selected.rowQueue.blocked + selected.rowQueue.cancelled > 0)) && (
                       <RowEventQueue
@@ -838,7 +878,7 @@ function WorkflowPage({
                         <Label htmlFor="workflow-run-status">Show</Label>
                         <Select
                           value={runStatus ?? ''}
-                          onValueChange={value => filterRuns(value ? statusSchema.parse(value) : null)}
+                          onValueChange={value => filterRuns(value ? statusSchema.parse(value) : null, runTrigger)}
                         >
                           <SelectTrigger id="workflow-run-status" size="sm">
                             <SelectValue>{runStatus ? runStatusLabel[runStatus] : 'All runs'}</SelectValue>
@@ -852,6 +892,28 @@ function WorkflowPage({
                             ))}
                           </SelectContent>
                         </Select>
+                        {(triggerChoices.length > 0 || runTrigger !== null) && (
+                          <Select
+                            value={runTrigger ?? ''}
+                            onValueChange={value => filterRuns(runStatus, value || null)}
+                          >
+                            <SelectTrigger aria-label="Filter runs by trigger" size="sm">
+                              <SelectValue>
+                                {runTrigger === null
+                                  ? 'Any trigger'
+                                  : runTriggerName(runTrigger, triggerChoices, tableNames)}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">Any trigger</SelectItem>
+                              {triggerChoices.map(trigger => (
+                                <SelectItem key={trigger.id} value={trigger.id}>
+                                  {triggerName(trigger, tableNames)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                         <Button variant="outline" size="sm" onClick={() => void historyRead.refresh()}>
                           <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
                           Check run history
@@ -869,9 +931,9 @@ function WorkflowPage({
                         <p role="status" className="text-sm text-muted-foreground">
                           Run history has not loaded.
                         </p>
-                      ) : !runs.length && runStatus ? (
+                      ) : !runs.length && (runStatus || runTrigger) ? (
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border p-4 text-sm">
-                          <p>No runs in your history for this workflow match {runStatusLabel[runStatus]}.</p>
+                          <p>No runs in your history for this workflow match these filters.</p>
                           <Button variant="outline" size="sm" onClick={() => filterRuns(null)}>
                             Clear filter
                           </Button>
@@ -897,8 +959,15 @@ function WorkflowPage({
                                   {runStatusLabel[run.status]}
                                 </h3>
                                 <p className="ps-4.5 text-xs text-muted-foreground">
-                                  {runSourceLabel[run.source]} /{' '}
-                                  <time dateTime={run.createdAt}>Created {formatTime(run.createdAt)}</time>
+                                  {run.triggerId === null
+                                    ? runSourceLabel[run.source]
+                                    : `Trigger: ${runTriggerName(run.triggerId, triggerChoices, tableNames)}`}
+                                  {run.firedTriggerIds.length > 1 &&
+                                    ` (also fired: ${run.firedTriggerIds
+                                      .filter(id => id !== run.triggerId)
+                                      .map(id => runTriggerName(id, triggerChoices, tableNames))
+                                      .join(', ')})`}{' '}
+                                  / <time dateTime={run.createdAt}>Created {formatTime(run.createdAt)}</time>
                                   {run.scheduledFor && (
                                     <>
                                       {' '}
@@ -1102,61 +1171,80 @@ function WorkflowPage({
                           />
                         </div>
                       )}
-                      {selected.capabilities.manage && webhook?.visible && (
-                        <div className="rounded-xl border border-border bg-card p-4">
-                          <WebhookSetup
-                            key={selected.id}
-                            hidden={false}
-                            workflow={selected}
-                            url={`${apiOrigin}/v1${base}/${selected.id}/webhook`}
-                            blocked={blocked}
-                            issued={webhookKey}
-                            onRotate={(mode, secret) =>
-                              void execute({
-                                path: `${base}/${selected.id}/webhook-key`,
-                                method: 'PUT',
-                                body: {
-                                  commandId: crypto.randomUUID(),
-                                  expectedGeneration: selected.generation,
-                                  mode,
-                                  ...(secret ? { secret } : {}),
-                                },
-                              })
-                            }
-                            onRevokePrevious={() =>
-                              void execute({
-                                path: `${base}/${selected.id}/webhook-key/revoke-previous`,
-                                method: 'POST',
-                                body: { commandId: crypto.randomUUID(), expectedGeneration: selected.generation },
-                              })
-                            }
-                            onCopied={() => setMessage('Webhook key copied. Save it in your sender before leaving.')}
-                            onCopyFailed={() => setError('Clipboard access failed. Select and copy the key.')}
-                          >
-                            <WebhookDeliveries
-                              workspaceId={workspaceId}
-                              workflow={selected}
-                              testRun={testRun?.workflowId === selected.id ? testRun.runId : null}
-                              onDenied={deny}
-                              onOpenRun={openRun}
-                              test={
-                                blocked
-                                  ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
-                                  : !(selected.enabled && selected.activeTrigger?.kind === 'webhook')
-                                    ? { kind: 'blocked', reason: 'Activate the webhook revision to send a test event.' }
-                                    : { kind: 'ready' }
-                              }
-                              onTest={() =>
-                                void execute({
-                                  path: `${base}/${selected.id}/webhook-test`,
-                                  method: 'POST',
-                                  body: { requestId: crypto.randomUUID() },
-                                })
-                              }
-                            />
-                          </WebhookSetup>
-                        </div>
-                      )}
+                      {selected.capabilities.manage &&
+                        webhookTriggers(selected).map(trigger => {
+                          const state = triggerState(selected, trigger.id);
+                          const triggerPath = `${base}/${selected.id}/triggers/${trigger.id}`;
+                          return (
+                            <div key={trigger.id} className="rounded-xl border border-border bg-card p-4">
+                              <WebhookSetup
+                                key={`${selected.id}/${trigger.id}`}
+                                hidden={false}
+                                workflow={selected}
+                                triggerId={trigger.id}
+                                title={triggerName(trigger, tableNames)}
+                                url={`${apiOrigin}/v1${triggerPath}/webhook`}
+                                blocked={blocked}
+                                issued={webhookKey}
+                                onRotate={(mode, secret) =>
+                                  void execute({
+                                    path: `${triggerPath}/webhook-key`,
+                                    method: 'PUT',
+                                    body: {
+                                      commandId: crypto.randomUUID(),
+                                      expectedGeneration: selected.generation,
+                                      mode,
+                                      ...(secret ? { secret } : {}),
+                                    },
+                                  })
+                                }
+                                onRevokePrevious={() =>
+                                  void execute({
+                                    path: `${triggerPath}/webhook-key/revoke-previous`,
+                                    method: 'POST',
+                                    body: { commandId: crypto.randomUUID(), expectedGeneration: selected.generation },
+                                  })
+                                }
+                                onCopied={() =>
+                                  setMessage('Webhook key copied. Save it in your sender before leaving.')
+                                }
+                                onCopyFailed={() => setError('Clipboard access failed. Select and copy the key.')}
+                              >
+                                <WebhookDeliveries
+                                  workspaceId={workspaceId}
+                                  workflow={selected}
+                                  triggerId={trigger.id}
+                                  testRun={
+                                    testRun?.workflowId === selected.id && testRun.triggerId === trigger.id
+                                      ? testRun.runId
+                                      : null
+                                  }
+                                  onDenied={deny}
+                                  onOpenRun={openRun}
+                                  test={
+                                    blocked
+                                      ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                                      : !selected.enabled || !state
+                                        ? {
+                                            kind: 'blocked',
+                                            reason: 'Activate the revision with this webhook to send a test event.',
+                                          }
+                                        : !state.enabled
+                                          ? { kind: 'blocked', reason: 'Switch this trigger on to send a test event.' }
+                                          : { kind: 'ready' }
+                                  }
+                                  onTest={() =>
+                                    void execute({
+                                      path: `${triggerPath}/webhook-test`,
+                                      method: 'POST',
+                                      body: { requestId: crypto.randomUUID() },
+                                    })
+                                  }
+                                />
+                              </WebhookSetup>
+                            </div>
+                          );
+                        })}
                       {selected.capabilities.manage && (
                         <section
                           aria-label="Danger zone"
@@ -1201,7 +1289,7 @@ function WorkflowPage({
 /** Whether activating would start unattended runs that no sponsor has accepted yet. */
 function activationNeedsSponsor(workflow: Workflow) {
   const enabling = !workflow.enabled || workflow.activeRevision !== workflow.revision;
-  return enabling && !['manual', 'event'].includes(workflow.definition.trigger.kind) && !workflow.sponsorshipAccepted;
+  return enabling && workflow.definition.triggers.some(isUnattendedTrigger) && !workflow.sponsorshipAccepted;
 }
 function commandError(error: RequestError) {
   const errors: Record<string, string> = {
@@ -1209,7 +1297,7 @@ function commandError(error: RequestError) {
       'The sponsor must accept this revision before it can be activated. Once they accept, try again.',
     'sponsor-access-lost':
       'The sponsor can no longer run this workflow. Choose another sponsor in Settings, under Scheduled runs, or restore their access.',
-    'schedule-in-past': 'The scheduled time has passed. Edit the workflow in chat before activating it.',
+    'schedule-in-past': 'A one-time trigger is in the past. Change or remove it before activating.',
     'invalid-schedule': 'The schedule is invalid. Check its expression and time zone in chat.',
     'record-trigger-unavailable': 'Record date triggers are unavailable until this workspace finishes updating.',
     'record-field-unavailable': 'The table, fields or filter are no longer available. Edit the trigger in chat.',
@@ -1222,6 +1310,11 @@ function commandError(error: RequestError) {
     'webhook-signing-unavailable':
       'Signed webhook keys are unavailable until the storage update finishes. Create a bearer key for now.',
     'workflow-inactive': 'Activate the webhook revision before sending a test event.',
+    'trigger-disabled': 'Switch this trigger on before sending a test event.',
+    'trigger-not-found': 'The active revision has no such trigger. Refresh workflows.',
+    'too-many-triggers': 'A workflow can have at most 20 triggers.',
+    'trigger-kind-changed': 'A trigger cannot change kind. Remove it and add a new one.',
+    'sponsor-required': 'This trigger runs without you. Accept sponsorship before switching it on.',
     'stale-generation': 'This workflow changed. Refresh workflows and try again.',
     'github-repository-not-connected':
       'This GitHub repository is not in your GitHub Knowledge. Connect it in the GitHub Knowledge picker, then try again.',
@@ -1241,7 +1334,7 @@ const runStatusLabel = {
   skipped: 'Skipped',
 } as const;
 const runSourceLabel = {
-  manual: 'Started manually',
+  manual: 'Started by hand',
   webhook: 'Started by webhook',
   schedule: 'Started by schedule',
   event: 'Started by event',
@@ -1269,9 +1362,9 @@ function disabledExplanation(workflow: Workflow) {
 const pendingChanges = (workflow: Workflow) =>
   workflow.enabled && !!workflow.activeRevision && workflow.activeRevision !== workflow.revision;
 function pendingSchedule(workflow: Workflow, tableNames: ReadonlyMap<string, string>) {
-  if (!pendingChanges(workflow) || !workflow.activeTrigger) return undefined;
-  const saved = triggerLine(workflow.definition.trigger, tableNames);
-  return saved === triggerLine(workflow.activeTrigger, tableNames) ? undefined : saved;
+  if (!pendingChanges(workflow) || !workflow.activeTriggers) return undefined;
+  const saved = triggersLine(workflow.definition.triggers, tableNames);
+  return saved === triggersLine(workflow.activeTriggers, tableNames) ? undefined : saved;
 }
 function Count({ value }: { value: number | undefined }) {
   return <span className="min-w-4 text-muted-foreground tabular-nums">{value ?? ''}</span>;

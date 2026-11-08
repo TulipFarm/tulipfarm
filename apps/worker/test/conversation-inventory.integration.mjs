@@ -138,7 +138,7 @@ test(
     const definition = name => ({
       version: 1,
       name,
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'review', kind: 'human', prompt: 'WORKFLOW_BODY_NOT_IN_INDEX', timeoutSeconds: 60 }],
     });
     const workflow = await workflows.save(w.id, actor.userId, randomUUID(), {

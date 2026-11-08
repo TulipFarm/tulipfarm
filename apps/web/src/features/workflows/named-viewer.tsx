@@ -29,12 +29,15 @@ function useWorkflowLabels(workspaceId: string, definition: Definition) {
   useSyncExternalStore(runtime.subscribeAuthority, runtime.authoritySnapshot, runtime.authoritySnapshot);
   const agentIds = [...new Set(definition.steps.flatMap(step => (step.kind === 'agent' ? [step.agentId] : [])))];
   const tableIds = [
-    ...new Set([definition.trigger, ...definition.steps].flatMap(item => ('tableId' in item ? [item.tableId] : []))),
+    ...new Set(
+      [...definition.triggers, ...definition.steps].flatMap(item => ('tableId' in item ? [item.tableId] : [])),
+    ),
   ];
   const destinationIds = [
     ...new Set(definition.steps.flatMap(step => (step.kind === 'slack-message' ? [step.destinationId] : []))),
   ];
-  const integrationId = definition.trigger.kind === 'provider' ? definition.trigger.integrationId : null;
+  const integrationId =
+    definition.triggers.flatMap(trigger => (trigger.kind === 'provider' ? [trigger.integrationId] : []))[0] ?? null;
   const agents = useQueries({
     queries: agentIds.map(id =>
       featureReadOptions(runtime, scope, { ...agentReads.detail(agentApi(workspaceId), id), staleTime: 0 }, current),

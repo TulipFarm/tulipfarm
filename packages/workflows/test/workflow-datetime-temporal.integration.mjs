@@ -33,7 +33,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       definition: {
         version: 1,
         name: 'Scheduled pause',
-        trigger: { kind: 'once', at: new Date(Date.now() + 3600000).toISOString() },
+        triggers: [{ id: 'once', kind: 'once', at: new Date(Date.now() + 3600000).toISOString() }],
         steps: [
           { id: 'pause', kind: 'delay', seconds: 2 },
           { id: 'result', kind: 'transform', fields: { done: { kind: 'literal', value: true } } },
@@ -46,7 +46,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     await activate(service, w.id, w.userId, id, revision, true);
     await db.platform.query(
-      `UPDATE "${w.names.schema}".tf_workflows SET next_run_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+      `UPDATE "${w.names.schema}".tf_workflow_triggers SET next_run_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
       [id],
     );
     const [work] = await service.due(w.id);

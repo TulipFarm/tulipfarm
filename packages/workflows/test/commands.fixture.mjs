@@ -9,3 +9,13 @@ export async function activate(service, workspaceId, userId, workflowId, revisio
     enabled,
   });
 }
+
+export async function switchTrigger(service, workspaceId, userId, workflowId, triggerId, enabled) {
+  const current = (await service.list(workspaceId, userId)).find(item => item.id === workflowId);
+  return service.switchTrigger(workspaceId, userId, workflowId, {
+    commandId: randomUUID(),
+    expectedGeneration: current.generation,
+    triggerId,
+    enabled,
+  });
+}

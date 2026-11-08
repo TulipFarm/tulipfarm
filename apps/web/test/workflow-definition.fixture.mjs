@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
-export function reviewDefinition(name, trigger = { kind: 'manual' }) {
+// A trigger without an ID takes its kind as ID; no trigger means people start the workflow by hand.
+export function reviewDefinition(name, trigger) {
   return {
     version: 1,
     name,
-    trigger,
+    triggers: trigger ? [{ id: trigger.kind, ...trigger }] : [],
     steps: [
       { id: 'request', kind: 'transform', fields: { request: { kind: 'input', path: [] } } },
       { id: 'review', kind: 'human', prompt: 'Review this request and provide your decision.', timeoutSeconds: 86400 },

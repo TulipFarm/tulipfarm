@@ -14,7 +14,12 @@ import { registerSecurity, securityServerOptions } from '../src/security.ts';
 import { createAbuseLimiter, registerAbuseHooks } from '../src/abuse.ts';
 
 const steps = [{ id: 'copy', kind: 'transform', fields: { event: { kind: 'input', path: [] } } }];
-const definition = trigger => ({ version: 1, name: 'Webhook proof', trigger, steps });
+const definition = trigger => ({
+  version: 1,
+  name: 'Webhook proof',
+  triggers: trigger.kind === 'manual' ? [] : [{ id: trigger.kind, ...trigger }],
+  steps,
+});
 const key = () => randomBytes(32).toString('hex');
 
 test(
@@ -114,9 +119,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       const webhookRevision = await save({ kind: 'webhook' });
       const saved = await read();
-      assert.equal(saved.webhookConfigured, false);
-      assert.equal(saved.activeTrigger, null);
-      assert.equal((await activate(webhookRevision)).activeTrigger?.kind, 'webhook');
+      assert.equal(
+        saved.triggers.some(trigger => trigger.webhook?.configured),
+        false,
+      );
+      assert.equal(saved.activeTriggers, null);
+      assert.equal((await activate(webhookRevision)).activeTriggers?.[0]?.kind, 'webhook');
       const chosen = await app.inject({
         method: 'PUT',
         url: `${base}/${id}/webhook-key`,
@@ -129,7 +137,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         'The server generates every key',
       );
       const { workflow: keyed, key: firstKey } = await setKey();
-      assert.equal(keyed.webhookConfigured, true);
+      assert.equal(
+        keyed.triggers.some(trigger => trigger.webhook?.configured),
+        true,
+      );
       const bearer = `Bearer ${firstKey}`;
       const preflight = await app.inject({
         method: 'OPTIONS',
@@ -258,7 +269,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
 
       await activate(webhookRevision, false);
-      assert.equal((await read()).webhookConfigured, true);
+      assert.equal(
+        (await read()).triggers.some(trigger => trigger.webhook?.configured),
+        true,
+      );
       const disabled = await send(event(), bearer);
       assert.equal(disabled.statusCode, 404, disabled.body);
       assert.deepEqual((await send(original, bearer)).statusCode, 404);
@@ -267,9 +281,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       const manualRevision = await save({ kind: 'manual' });
       const pending = await read();
-      assert.equal(pending.definition.trigger.kind, 'manual');
-      assert.equal(pending.activeTrigger?.kind, 'webhook');
-      assert.equal(pending.webhookConfigured, true);
+      assert.deepEqual(pending.definition.triggers, []);
+      assert.equal(pending.activeTriggers?.[0]?.kind, 'webhook');
+      assert.equal(
+        pending.triggers.some(trigger => trigger.webhook?.configured),
+        true,
+      );
       assert.equal(
         (await send(event(), bearer)).statusCode,
         200,
@@ -282,8 +299,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         'The previous key keeps working during its grace period',
       );
       const switched = await activate(manualRevision);
-      assert.equal(switched.activeTrigger?.kind, 'manual');
-      assert.equal(switched.webhookConfigured, false);
+      assert.deepEqual(switched.activeTriggers, []);
+      assert.equal(
+        switched.triggers.some(trigger => trigger.webhook?.configured),
+        false,
+      );
       assert.equal((await send(event(), bearer)).statusCode, 404);
 
       const strayKey = key();
@@ -303,14 +323,17 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
 
       assert.equal(
-        (await activate(manualRevision, false)).webhookConfigured,
+        (await activate(manualRevision, false)).triggers.some(trigger => trigger.webhook?.configured),
         false,
         'Disabling a non-webhook revision also clears the key',
       );
       const returned = await save({ kind: 'webhook' });
       const revived = await activate(returned);
-      assert.equal(revived.activeTrigger?.kind, 'webhook');
-      assert.equal(revived.webhookConfigured, false);
+      assert.equal(revived.activeTriggers?.[0]?.kind, 'webhook');
+      assert.equal(
+        revived.triggers.some(trigger => trigger.webhook?.configured),
+        false,
+      );
       for (const stale of [firstKey, rotated.key, strayKey])
         assert.equal(
           (await send(event(), `Bearer ${stale}`)).statusCode,
@@ -638,7 +661,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         'github',
       );
       await db.databaseAdmin.query(
-        `UPDATE ${escapeIdentifier(w.names.schema)}.tf_workflow_revisions SET definition=jsonb_set(definition,'{trigger,payload,headers}','["x-github-event","x-hub-signature-256","x-hub-signature"]') WHERE workflow_id=$1`,
+        `UPDATE ${escapeIdentifier(w.names.schema)}.tf_workflow_revisions SET definition=jsonb_set(definition,'{triggers,0,payload,headers}','["x-github-event","x-hub-signature-256","x-hub-signature"]') WHERE workflow_id=$1`,
         [legacy.id],
       );
       const legacyPush = await legacy.send(push, {
@@ -660,7 +683,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const signedDeliveryId = randomUUID();
       const signedPush = await githubSigned.send(push, { 'x-github-delivery': signedDeliveryId });
       assert.equal(signedPush.statusCode, 200, signedPush.body);
-      assert.equal((await read(githubSigned.id)).webhookMode, 'github');
+      assert.equal((await read(githubSigned.id)).triggers[0].webhook.mode, 'github');
       assert.equal(
         (
           await githubSigned.send(push, {
@@ -681,7 +704,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const signedStripeEvent = { id: 'evt_native_123', object: 'event', type: 'payment_intent.succeeded' };
       const signedStripe = await stripeSigned.send(signedStripeEvent);
       assert.equal(signedStripe.statusCode, 200, signedStripe.body);
-      assert.equal((await read(stripeSigned.id)).webhookMode, 'stripe');
+      assert.equal((await read(stripeSigned.id)).triggers[0].webhook.mode, 'stripe');
       assert.deepEqual(
         (await stripeSigned.send(signedStripeEvent)).json(),
         signedStripe.json(),
@@ -1072,8 +1095,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       const old = await rotate('bearer');
       const current = await rotate('signed');
-      assert.equal(current.workflow.webhookMode, 'signed');
-      assert.equal(current.workflow.webhookPrevious.mode, 'bearer');
+      assert.equal(current.workflow.triggers[0].webhook.mode, 'signed');
+      assert.equal(current.workflow.triggers[0].webhook.previous.mode, 'bearer');
       const raw = '{ "order" :  42,\n "note": "caf\u00e9" }';
       const accepted = await send(raw, signature(current.key, now() - 10, raw));
       assert.equal(
@@ -1128,7 +1151,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         payload: { commandId: randomUUID(), expectedGeneration: (await read()).generation },
       });
       assert.equal(revoked.statusCode, 200, revoked.body);
-      assert.equal(revoked.json().webhookPrevious, null);
+      assert.equal(revoked.json().triggers[0].webhook.previous, null);
       assert.equal(
         (await send('{"order":8}', { authorization: `Bearer ${old.key}` })).statusCode,
         404,
