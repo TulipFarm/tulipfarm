@@ -222,6 +222,7 @@ const schemaEntry = {
   savedAt: workspace.createdAt,
   appliedAt: workspace.createdAt,
   definition,
+  definitionWithheld: null,
   receipt: { status: 'completed', executionId, revision: 'a'.repeat(40) },
 };
 let savedDefinition = schemaEntry,
@@ -1347,24 +1348,31 @@ try {
     appliedAt: null,
     receipt: null,
     definition: null,
+    definitionWithheld: 'source-access',
   };
   await tableChange();
   await page.getByText(/A field change is still applying/).waitFor();
   await openPanel('Schema history');
   await page.getByText(/latest saved definition is not active/).waitFor();
   await page.getByRole('button', { name: 'Latest saved fields', exact: true }).click();
-  await page.getByText(/Saved fields are hidden/).waitFor();
+  await page.getByText(/The person who approved the change can review it in their originating chat/).waitFor();
   await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
   await schemas.getByText('Migrating rows', { exact: true }).waitFor();
-  await schemas.getByText(/Historical fields are hidden/).waitFor();
+  await schemas.getByText(/come from a source you can’t access/).waitFor();
+  savedDefinition = { ...savedDefinition, definitionWithheld: 'retention' };
+  await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
+  await schemas.getByText(/removed after their retention period/).waitFor();
   savedDefinition = {
     ...savedDefinition,
     phase: 'blocked',
+    savedAt: null,
+    definitionWithheld: 'blocked-before-save',
     receipt: { status: 'failed', executionId, code: 'stale-generation' },
   };
   await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
   await schemas.getByText('Migration blocked', { exact: true }).waitFor();
   await schemas.getByText(/Execution failed/).waitFor();
+  await schemas.getByText(/blocked before its definition was saved/).waitFor();
   await closePanel();
   const applied = activeDefinition;
   activeDefinition = null;

@@ -55,6 +55,21 @@ function ExecutionDetails({ entry }: { entry: SchemaHistoryEntry }) {
   );
 }
 
+const withheldMessages = {
+  'blocked-before-save': 'This change was blocked before its definition was saved, so there are no fields to show.',
+  retention: 'The fields for this change were removed after their retention period.',
+  'source-access':
+    'The fields for this change come from a source you can’t access. The person who approved the change can review it in their originating chat.',
+};
+
+function WithheldDefinition({ entry }: { entry: SchemaHistoryEntry }) {
+  return (
+    <p className="mt-3 text-sm">
+      {withheldMessages[entry.definitionWithheld ?? 'source-access']} Execution status remains visible.
+    </p>
+  );
+}
+
 export function DefinitionStatus({ state }: { state: DefinitionState }) {
   return (
     <section aria-label="Definition status" className="space-y-4">
@@ -83,9 +98,7 @@ export function DefinitionStatus({ state }: { state: DefinitionState }) {
           {state.saved.definition ? (
             <DefinitionView definition={state.saved.definition} title="Saved definition" />
           ) : (
-            <p className="mt-3 text-sm">
-              Saved fields are hidden because their source is unavailable to you. Execution status remains visible.
-            </p>
+            <WithheldDefinition entry={state.saved} />
           )}
         </Disclosure>
       )}
@@ -128,10 +141,7 @@ export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi
                         <DefinitionView definition={entry.definition} title="Historical definition" />
                       </Disclosure>
                     ) : (
-                      <p className="text-sm">
-                        Historical fields are hidden because their source is unavailable to you. Execution status
-                        remains visible.
-                      </p>
+                      <WithheldDefinition entry={entry} />
                     )}
                   </li>
                 ))}

@@ -40,6 +40,7 @@ const schemaHistoryEntrySchema = z.object({
   savedAt: z.iso.datetime().nullable(),
   appliedAt: z.iso.datetime().nullable(),
   definition: tableDefinitionSchema.nullable(),
+  definitionWithheld: z.enum(['blocked-before-save', 'retention', 'source-access']).nullable().default(null),
   receipt: executionReceiptSchema.nullable(),
 });
 const schemaHistorySchema = z.object({ entries: z.array(schemaHistoryEntrySchema), nextCursor: z.uuid().nullable() });
