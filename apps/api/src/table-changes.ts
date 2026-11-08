@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
@@ -57,6 +58,8 @@ export function registerTableChanges(
   dependencies: TableProposalOptions & {
     auth: ReturnType<typeof registerAuth>['auth'];
     resolveConfirmationCredential(workspaceId: string): Promise<string>;
+    /** Resolves the names of people who approved schema changes. */
+    identity?: Pick<Pool, 'query'>;
   },
 ) {
   const proposals = createTableProposals(dependencies);

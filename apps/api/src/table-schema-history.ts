@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -15,6 +16,7 @@ import {
   redactedManifestSchema,
 } from '@tulipfarm/tables/proposal-contracts';
 import { pageArchiveVersion, pageRestoreVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
+import { summarizeSchemaChange } from '@tulipfarm/tables/schema-summary';
 
 const phaseSchema = z.enum(['publishing', 'copying', 'reconciling', 'completed', 'blocked']);
 /** Why an entry's definition is not shown. Null when the definition is shown. */
@@ -28,6 +30,9 @@ export const schemaHistoryEntrySchema = z.object({
   appliedAt: z.iso.datetime().nullable(),
   definition: definitionSchema.nullable(),
   definitionWithheld: definitionWithheldSchema.nullable(),
+  /** Plain-language lines describing what the change did; null when its definition is withheld. */
+  changes: z.array(z.string()).nullable(),
+  approval: z.object({ name: z.string(), formerMember: z.boolean(), approvedAt: z.iso.datetime() }).nullable(),
   receipt: executionReceiptSchema.nullable(),
 });
 export const schemaHistorySchema = z.object({
@@ -47,7 +52,19 @@ export const definitionStateSchema = z.object({
   canRestore: z.boolean(),
 });
 
-export function createTableSchemaHistory(options: TableProposalOptions) {
+export function createTableSchemaHistory(
+  options: TableProposalOptions & {
+    /** Resolves approver names. */
+    identity?: Pick<Pool, 'query'>;
+  },
+) {
+  async function names(userIds: string[]) {
+    if (!options.identity || !userIds.length) return new Map<string, string>();
+    const rows = z
+      .array(z.object({ id: z.string(), name: z.string() }))
+      .parse((await options.identity.query('SELECT id, name FROM app.users WHERE id = ANY($1)', [userIds])).rows);
+    return new Map(rows.map(row => [row.id, row.name.trim() || 'Unnamed member']));
+  }
   const rowSchema = z.object({
     id: z.uuid(),
     revision: z.string().nullable(),
@@ -58,6 +75,9 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
     published_definition: definitionSchema.nullable(),
     manifest: z.union([proposalManifestSchema, redactedManifestSchema]),
     receipt: executionReceiptSchema.nullable(),
+    approved_at: z.date().nullable(),
+    approver_user_id: z.string().nullable(),
+    approver_removed_at: z.date().nullable(),
   });
   async function authorized<T>(
     workspaceId: string,
@@ -87,33 +107,49 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
         await tx.client.query(
           `
       SELECT e.id,e.revision,e.phase,e.created_at,r.accepted_at AS saved_at,g.activated_at,g.definition AS published_definition,p.manifest,
-        (SELECT receipt FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=e.proposal_id AND table_id=e.table_id ORDER BY attempt DESC LIMIT 1) AS receipt
+        (SELECT receipt FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=e.proposal_id AND table_id=e.table_id ORDER BY attempt DESC LIMIT 1) AS receipt,
+        d.created_at AS approved_at,m.user_id AS approver_user_id,m.removed_at AS approver_removed_at
       FROM ${s}.tf_table_executions e JOIN ${s}.tf_table_proposals p ON p.id=e.proposal_id
       LEFT JOIN ${s}.tf_soul_revisions r ON r.table_execution_id=e.publication_id
       LEFT JOIN ${s}.tf_table_generations g ON g.table_id=e.table_id AND g.revision=e.revision
-      WHERE e.table_id=$1 AND ($2::uuid IS NULL OR e.id>$2)
+      LEFT JOIN ${s}.tf_table_proposal_decisions d ON d.proposal_id=e.proposal_id AND d.decision='approve'
+      LEFT JOIN ${s}.tf_memberships m ON m.id=d.membership_id
+      WHERE e.table_id=$1
+        AND ($2::uuid IS NULL OR (e.created_at,e.id)<(SELECT created_at,id FROM ${s}.tf_table_executions WHERE id=$2))
         AND EXISTS(SELECT 1 FROM jsonb_array_elements(p.manifest->'plans') plan WHERE plan->'input'->>'tableId'=e.table_id::text AND plan->'input'->>'kind'='schema')
         ${query.latest ? 'AND r.revision IS NOT NULL' : ''}
-      ORDER BY ${query.latest ? 'r.accepted_at DESC,e.id DESC' : 'e.id'} LIMIT $3`,
+      ORDER BY ${query.latest ? 'r.accepted_at DESC,e.id DESC' : 'e.created_at DESC,e.id DESC'} LIMIT $3`,
           [tableId, query.after ?? null, query.limit],
         )
       ).rows,
     );
+    const approvers = await names([
+      ...new Set(rows.flatMap(row => (row.approver_user_id ? [row.approver_user_id] : []))),
+    ]);
     const result = [];
     for (const row of rows) {
       // A saved definition was published to the Soul, so it is table schema rather than proposal content.
       let definition = row.published_definition;
+      let changes = null;
       const redacted = 'redactedAt' in row.manifest;
-      if (!definition && !('redactedAt' in row.manifest)) {
+      if (!('redactedAt' in row.manifest)) {
         const plan = row.manifest.plans.find(plan => plan.input.tableId === tableId);
-        if (row.saved_at) definition = plan?.after ?? null;
-        else
+        let visible = row.saved_at !== null;
+        if (!visible)
           try {
             await options.requireSources(tx, actor, [...row.manifest.sources, ...(plan?.importSources ?? [])]);
-            definition = plan?.after ?? null;
+            visible = true;
           } catch (error) {
             if (!(error instanceof AccessDenied)) throw error;
           }
+        if (visible && plan) {
+          definition ??= plan.after;
+          changes = summarizeSchemaChange(
+            plan.before,
+            plan.after,
+            plan.input.kind === 'schema' ? plan.input.transforms.outputs.map(output => output.fieldId) : [],
+          );
+        }
       }
       const definitionWithheld = definition
         ? null
@@ -131,6 +167,15 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
         appliedAt: row.activated_at?.toISOString() ?? null,
         definition,
         definitionWithheld,
+        changes,
+        approval:
+          row.approved_at && row.approver_user_id
+            ? {
+                name: approvers.get(row.approver_user_id) ?? 'Workspace member',
+                formerMember: row.approver_removed_at !== null,
+                approvedAt: row.approved_at.toISOString(),
+              }
+            : null,
         receipt: row.receipt,
       });
     }

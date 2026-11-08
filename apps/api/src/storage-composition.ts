@@ -238,6 +238,7 @@ export function registerStorageComposition(
     ...tableProposalOptions(runtime, chatObjects ? { attachments: chatObjects, snapshots: chatObjects } : undefined),
     auth: dependencies.auth,
     resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+    identity: dependencies.pool,
   });
   registerTableQueryTranslations(app, { runtime, auth: dependencies.auth });
   registerSlackActions(app, {
