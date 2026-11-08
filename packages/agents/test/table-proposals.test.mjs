@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { structureOnlyNote } from '../src/table-proposals.ts';
+import { missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
 
 const revision = 'a'.repeat(40);
 
@@ -21,4 +21,41 @@ test('proposals that bring rows or change an existing table carry no structure-o
     [{ kind: 'archive', expectedRevision: revision }],
   ])
     assert.deepEqual(structureOnlyNote({ plans }), {}, JSON.stringify(plans));
+});
+
+const tableId = 'a1111111-1111-4111-8111-111111111111';
+const amount = 'b2222222-2222-4222-8222-222222222222';
+const status = 'c3333333-3333-4333-8333-333333333333';
+const blocked = (...records) => ({
+  status: 'blocked',
+  error: 'invalid-transform',
+  tableId,
+  records: records.map(([fieldId, code], index) => ({ recordId: `d${index}`, fieldId, code })),
+});
+const schemaPlan = outputs => ({
+  plans: [{ kind: 'schema', tableId, expectedRevision: revision, transforms: { outputs } }],
+});
+const convert = fieldId => ({
+  fieldId,
+  expression: { op: 'convert', input: { op: 'field', fieldId }, to: 'numeric', timezone: 'UTC', onError: 'error' },
+});
+
+test('a blocked kind change without a transform output tells the agent to add a conversion', () => {
+  const note = missingTransformNote(
+    blocked([amount, 'invalid-output'], [amount, 'invalid-output'], [status, 'conversion-failed']),
+    schemaPlan([convert(status)]),
+  );
+  assert.deepEqual(note.fieldsWithoutTransform, [amount]);
+  assert.match(note.transformInstruction, /"op":"convert"/);
+  assert.match(note.transformInstruction, /never tell the person that conversion is unsupported/);
+});
+
+test('rows that fail an attached conversion carry no missing-transform note', () => {
+  for (const [report, input] of [
+    [blocked([amount, 'conversion-failed']), schemaPlan([convert(amount)])],
+    [blocked([amount, 'invalid-output']), schemaPlan([convert(amount)])],
+    [blocked([null, 'invalid-output']), schemaPlan([])],
+    [blocked([amount, 'invalid-output']), { plans: [{ kind: 'import', tableId }] }],
+  ])
+    assert.deepEqual(missingTransformNote(report, input), {}, JSON.stringify({ report, input }));
 });

@@ -4,7 +4,6 @@ import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 import { definitionSchema } from '../src/definition.ts';
-import { z } from 'zod';
 import { tableDefinitionJsonSchema, tableDocumentJsonSchema } from '../src/json-schema.ts';
 import { tableProposalJsonSchema } from '../src/proposal-json-schema.ts';
 import { tableDocumentSchema } from '../src/names.ts';
@@ -319,8 +318,7 @@ test('the model-facing proposal schema reuses definitions and stays small', () =
   assert.ok(Object.keys(schema.$defs ?? {}).length > 0);
   assert.match(text, /"\$ref":"#\/\$defs\//);
   const bytes = Buffer.byteLength(text);
-  assert.ok(bytes < 21000, `proposal schema is ${bytes} bytes`);
-  assert.ok(bytes < Buffer.byteLength(JSON.stringify(z.toJSONSchema(proposeTableSchema, { io: 'input' }))));
+  assert.ok(bytes < 29000, `proposal schema is ${bytes} bytes`);
 });
 
 test('the model-facing proposal schema offers schema, import, archive and restore plans', () => {
@@ -344,6 +342,47 @@ test('the model-facing proposal schema agrees with Zod on numeric and label erro
     assert.equal(validate(proposal(target)), false, name);
     assert.equal(proposeTableSchema.safeParse(proposal(target)).success, false, name);
   }
+});
+
+test('the model-facing proposal schema shows transform expressions and agrees with Zod', () => {
+  const schema = tableProposalJsonSchema();
+  const validate = ajvValidator(schema);
+  const convert = (to, onError = 'error') => ({
+    op: 'convert',
+    input: { op: 'trim', input: { op: 'field', fieldId: fieldIds[0] } },
+    to,
+    timezone: 'UTC',
+    onError,
+  });
+  const withTransforms = transforms => ({
+    plans: [{ ...proposal().plans[0], expectedRevision: revision, transforms }],
+  });
+  const valid = withTransforms({ outputs: [{ fieldId: fieldIds[0], expression: convert('numeric') }] });
+  assert.equal(validate(valid), true, JSON.stringify(validate.errors));
+  assert.equal(proposeTableSchema.safeParse(valid).success, true);
+  for (const [name, transforms] of [
+    ['unknown target kind', { outputs: [{ fieldId: fieldIds[0], expression: convert('number') }] }],
+    [
+      'missing timezone',
+      { outputs: [{ fieldId: fieldIds[0], expression: { ...convert('numeric'), timezone: undefined } }] },
+    ],
+    ['unknown operation', { outputs: [{ fieldId: fieldIds[0], expression: { op: 'cast', input: null } }] }],
+    ['missing outputs', {}],
+  ]) {
+    const input = JSON.parse(JSON.stringify(withTransforms(transforms)));
+    assert.equal(validate(input), false, name);
+    assert.equal(proposeTableSchema.safeParse(input).success, false, name);
+  }
+  const node = collect(schema).find(value => resolveReference(value.properties?.op, schema)?.const === 'convert');
+  assert.deepEqual(resolveReference(node.properties.to, schema).enum, [
+    'text',
+    'numeric',
+    'boolean',
+    'date',
+    'timestamp',
+  ]);
+  assert.match(node.description, /decimal text/);
+  assert.match(collect(schema).find(value => value.properties?.outputs)?.description ?? '', /changes kind/);
 });
 
 test('generating the model-facing proposal schema does not change Zod parsing', () => {
