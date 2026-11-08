@@ -39,6 +39,8 @@ export const schemaHistoryEntrySchema = z.object({
   revert: z.enum(['available', 'later-changes']).nullable(),
   /** The earlier change this change reverted. */
   reverts: z.uuid().nullable(),
+  /** The summary of the change this change reverted. */
+  revertedChanges: z.array(z.string()).nullable(),
 });
 export const schemaHistorySchema = z.object({
   entries: z.array(schemaHistoryEntrySchema),
@@ -191,9 +193,12 @@ export function createTableSchemaHistory(
       return authorized(workspaceId, userId, tableId, async (tx, actor) => {
         const rows = await entries(tx, actor, tableId, { ...query, limit: query.limit + 1 });
         const links = await schemaRevertLinks(tx, actor, tableId);
-        const page = rows
-          .slice(0, query.limit)
-          .map(entry => ({ ...entry, revert: links.revert(entry.id), reverts: links.reverts(entry.id) }));
+        const page = rows.slice(0, query.limit).map(entry => ({
+          ...entry,
+          revert: links.revert(entry.id),
+          reverts: links.reverts(entry.id),
+          revertedChanges: links.revertedChanges(entry.id),
+        }));
         return { entries: page, nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null };
       });
     },
@@ -210,7 +215,14 @@ export function createTableSchemaHistory(
         const latest = (await entries(tx, actor, tableId, { limit: 1, latest: true }))[0];
         const links = latest && (await schemaRevertLinks(tx, actor, tableId));
         const saved =
-          latest && links ? { ...latest, revert: links.revert(latest.id), reverts: links.reverts(latest.id) } : null;
+          latest && links
+            ? {
+                ...latest,
+                revert: links.revert(latest.id),
+                reverts: links.reverts(latest.id),
+                revertedChanges: links.revertedChanges(latest.id),
+              }
+            : null;
         const applied = z
           .object({ revision: z.string(), definition: definitionSchema, activated_at: z.date().nullable() })
           .nullable()

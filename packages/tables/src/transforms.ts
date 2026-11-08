@@ -14,7 +14,7 @@ import {
   type TableValues,
 } from './definition.ts';
 
-export const transformLimits = Object.freeze({ depth: 16, expressions: 256, outputs: 64, cases: 256 });
+export const transformLimits = Object.freeze({ depth: 16, expressions: 256, outputs: 64, cases: 256, rows: 1000 });
 const separatorSchema = z.string().max(100);
 const boundedInputSchema = z.unknown().superRefine((input, context) => {
   const pending = [{ value: input, depth: 0, expressionDepth: 0 }];
@@ -106,6 +106,22 @@ const mapExpression = z.strictObject({
     ),
   unmatched: z.enum(['error', 'null', 'preserve']),
 });
+const rowsExpression = z
+  .strictObject({
+    op: z.literal('rows'),
+    get input(): ExpressionSchema {
+      return expressionNodeSchema;
+    },
+    cases: z
+      .array(z.strictObject({ recordId: z.uuid(), to: valueSchema }))
+      .min(1)
+      .max(transformLimits.rows)
+      .refine(cases => new Set(cases.map(entry => entry.recordId)).size === cases.length, 'Duplicate row'),
+  })
+  .meta({
+    description:
+      'Gives the listed rows, by row id, their own value; every other row gets the input value. Use it to restore earlier values of particular rows.',
+  });
 type ExpressionSchema = z.ZodDiscriminatedUnion<
   [
     typeof fieldExpression,
@@ -116,6 +132,7 @@ type ExpressionSchema = z.ZodDiscriminatedUnion<
     typeof defaultExpression,
     typeof convertExpression,
     typeof mapExpression,
+    typeof rowsExpression,
   ],
   'op'
 >;
@@ -128,6 +145,7 @@ const expressionNodeSchema: ExpressionSchema = z.discriminatedUnion('op', [
   defaultExpression,
   convertExpression,
   mapExpression,
+  rowsExpression,
 ]);
 
 export const expressionSchema = boundedInputSchema.pipe(expressionNodeSchema);
@@ -258,31 +276,34 @@ function convert(
   }
 }
 
-function evaluate(expression: TransformExpression, values: TableValues): TableValue {
-  const result = valueSchema.safeParse(evaluateNode(expression, values));
+type Row = { id: string | null; values: TableValues };
+const rowCases = new WeakMap<readonly { recordId: string }[], Map<string, TableValue>>();
+
+function evaluate(expression: TransformExpression, row: Row): TableValue {
+  const result = valueSchema.safeParse(evaluateNode(expression, row));
   if (!result.success) throw new EvaluationError('invalid-output', 'Intermediate value exceeds supported bounds');
   return result.data;
 }
 
-function evaluateNode(expression: TransformExpression, values: TableValues): TableValue {
+function evaluateNode(expression: TransformExpression, row: Row): TableValue {
   switch (expression.op) {
     case 'field': {
-      const value = values[expression.fieldId];
+      const value = row.values[expression.fieldId];
       if (value === undefined) throw new EvaluationError('missing-field', 'Source field is missing');
       return value;
     }
     case 'literal':
       return expression.value;
     case 'default': {
-      const value = evaluate(expression.input, values);
-      return value === null ? evaluate(expression.fallback, values) : value;
+      const value = evaluate(expression.input, row);
+      return value === null ? evaluate(expression.fallback, row) : value;
     }
     case 'trim': {
-      const value = evaluate(expression.input, values);
+      const value = evaluate(expression.input, row);
       return value === null ? null : { kind: 'text', value: text(value).trim() };
     }
     case 'split': {
-      const value = evaluate(expression.input, values);
+      const value = evaluate(expression.input, row);
       if (value === null) return null;
       const part = text(value).split(expression.separator, expression.index + 1)[expression.index];
       if (part !== undefined) return { kind: 'text', value: part };
@@ -290,20 +311,27 @@ function evaluateNode(expression: TransformExpression, values: TableValues): Tab
       throw new EvaluationError('split-index', 'Split part is missing');
     }
     case 'join': {
-      const parts = expression.inputs.map(input => evaluate(input, values));
+      const parts = expression.inputs.map(input => evaluate(input, row));
       const texts = parts.map(value => (value === null ? null : text(value)));
       return texts.includes(null) ? null : { kind: 'text', value: texts.join(expression.separator) };
     }
     case 'map': {
-      const value = evaluate(expression.input, values);
+      const value = evaluate(expression.input, row);
       const mapped = expression.cases.find(entry => valueKey(entry.from) === valueKey(value));
       if (mapped) return mapped.to;
       if (expression.unmatched === 'null') return null;
       if (expression.unmatched === 'preserve') return value;
       throw new EvaluationError('unmapped-value', 'No mapping for source value');
     }
+    case 'rows': {
+      const cases =
+        rowCases.get(expression.cases) ?? new Map(expression.cases.map(entry => [entry.recordId, entry.to]));
+      rowCases.set(expression.cases, cases);
+      const restored = row.id === null ? undefined : cases.get(row.id);
+      return restored === undefined ? evaluate(expression.input, row) : restored;
+    }
     case 'convert': {
-      const value = evaluate(expression.input, values);
+      const value = evaluate(expression.input, row);
       if (value === null) return null;
       try {
         return convert(value, expression.to);
@@ -324,9 +352,10 @@ function evaluateNode(expression: TransformExpression, values: TableValues): Tab
 export function evaluateExpression(
   expression: TransformExpression,
   values: TableValues,
+  recordId: string | null = null,
 ): { ok: true; value: TableValue } | { ok: false; code: TransformError['code'] } {
   try {
-    return { ok: true, value: evaluate(expression, values) };
+    return { ok: true, value: evaluate(expression, { id: recordId, values }) };
   } catch (error) {
     if (!(error instanceof EvaluationError)) throw error;
     return { ok: false, code: error.code };
@@ -338,10 +367,25 @@ export function mappedValueKey(value: TableValue) {
   return valueKey(value);
 }
 
+const parsed = new WeakMap<object, ReturnType<typeof transformsSchema.safeParse>>();
+/** Parses each transforms object once, since one schema change evaluates the same transforms for every row. */
+function parsedTransforms(input: unknown) {
+  if (typeof input !== 'object' || input === null) return transformsSchema.safeParse(input);
+  const result = parsed.get(input) ?? transformsSchema.safeParse(input);
+  parsed.set(input, result);
+  return result;
+}
+
 // Every output reads the same source snapshot. Output order never creates dependencies.
 // Unassigned fields carry through only when present in the target definition.
-export function evaluateTransforms(input: { transforms: unknown; values: unknown; target: unknown }): TransformResult {
-  const transforms = transformsSchema.safeParse(input.transforms);
+export function evaluateTransforms(input: {
+  transforms: unknown;
+  values: unknown;
+  target: unknown;
+  /** The row being transformed, for expressions that give particular rows their own value. */
+  recordId?: string;
+}): TransformResult {
+  const transforms = parsedTransforms(input.transforms);
   const source = boundedInputSchema.pipe(valuesSchema).safeParse(input.values);
   const target = boundedInputSchema.pipe(definitionSchema).safeParse(input.target);
   if (!transforms.success || !source.success || !target.success)
@@ -358,7 +402,7 @@ export function evaluateTransforms(input: { transforms: unknown; values: unknown
     if (!target.data.fields.some(field => field.id === output.fieldId))
       return { ok: false, error: { code: 'invalid-output', message: 'Unknown target field', fieldId: output.fieldId } };
     try {
-      values[output.fieldId] = evaluate(output.expression, source.data);
+      values[output.fieldId] = evaluate(output.expression, { id: input.recordId ?? null, values: source.data });
     } catch (error) {
       if (!(error instanceof EvaluationError)) throw error;
       return { ok: false, error: { code: error.code, message: error.message, fieldId: output.fieldId } };

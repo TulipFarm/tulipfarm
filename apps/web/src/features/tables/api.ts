@@ -49,6 +49,7 @@ const schemaHistoryEntrySchema = z.object({
   receipt: executionReceiptSchema.nullable(),
   revert: z.enum(['available', 'later-changes']).nullable().default(null),
   reverts: z.uuid().nullable().default(null),
+  revertedChanges: z.array(z.string()).nullable().default(null),
 });
 const schemaHistorySchema = z.object({ entries: z.array(schemaHistoryEntrySchema), nextCursor: z.uuid().nullable() });
 const definitionStateSchema = z.object({

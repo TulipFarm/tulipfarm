@@ -216,6 +216,21 @@ function RevertChange({
   );
 }
 
+/** Names a revert by the change it reversed, linking to that change's entry. */
+function RevertedHeading({ id, changes }: { id: string; changes: string[] | null }) {
+  const shown = changes?.slice(0, 3) ?? [];
+  const more = (changes?.length ?? 0) - shown.length;
+  return (
+    <p className="text-sm font-medium">
+      Reverted{' '}
+      <a className="break-words underline" href={`#schema-change-${id}`}>
+        {shown.length ? shown.join('; ') : 'an earlier change'}
+        {more > 0 && ` and ${more} more ${more === 1 ? 'change' : 'changes'}`}
+      </a>
+    </p>
+  );
+}
+
 export function SchemaHistory({
   tableId,
   api,
@@ -250,14 +265,7 @@ export function SchemaHistory({
               <ol className="space-y-4">
                 {data.entries.map(entry => (
                   <li key={entry.id} id={`schema-change-${entry.id}`} className="space-y-3 border-t border-border pt-4">
-                    {entry.reverts && (
-                      <p className="text-sm font-medium">
-                        Reverted{' '}
-                        <a className="break-all underline" href={`#schema-change-${entry.reverts}`}>
-                          execution {entry.reverts.slice(0, 8)}
-                        </a>
-                      </p>
-                    )}
+                    {entry.reverts && <RevertedHeading id={entry.reverts} changes={entry.revertedChanges} />}
                     <ChangeSummary entry={entry} />
                     <ExecutionDetails entry={entry} />
                     {!entry.definition && <WithheldDefinition entry={entry} />}

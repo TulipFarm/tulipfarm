@@ -263,6 +263,57 @@ test(
       assert.equal(values.get(empty.id) ?? null, null);
     });
 
+    await t.test('reverting text to numeric restores texts the conversion cleared or reformatted', async () => {
+      const amount = { id: randomUUID(), label: 'Amount', kind: 'text', required: false, maxLength: 1000 };
+      const texts = { [title.id]: text('Pay') };
+      assert.equal(await change({ ...tasks, fields: [title, due, amount] }), 'completed');
+      const rows = [];
+      for (const value of ['1e3', 'abc', '100.50', '5'])
+        rows.push([value, await create({ ...texts, [amount.id]: text(value) })]);
+      const numeric = { id: amount.id, label: 'Amount', kind: 'numeric', required: false, precision: 12, scale: 3 };
+      const convert = {
+        fieldId: amount.id,
+        expression: {
+          op: 'convert',
+          input: { op: 'field', fieldId: amount.id },
+          to: 'numeric',
+          timezone: 'UTC',
+          onError: 'null',
+        },
+      };
+      assert.equal(await change({ ...tasks, fields: [title, due, numeric] }, { outputs: [convert] }), 'completed');
+      const conversion = await latest();
+      const read = async recordId =>
+        (await service.read(ws.id, ws.userId, { tableId: tasks.id, revision: await revision(), recordId })).values[
+          amount.id
+        ] ?? null;
+      assert.deepEqual(
+        await Promise.all(rows.map(([, row]) => read(row.id))),
+        [null, null, { kind: 'numeric', value: '100.500' }, { kind: 'numeric', value: '5.000' }],
+        'The conversion cleared unparseable text and padded decimals to the field scale',
+      );
+      const { chatId, proposal } = await proposeRevert(conversion.id);
+      const reply = (
+        await db.platform.query(
+          `SELECT p.text FROM ${s}.tf_conversation_parts p JOIN ${s}.tf_conversation_messages m ON m.id=p.message_id
+        WHERE m.conversation_id=$1 AND m.sequence=2`,
+          [chatId],
+        )
+      ).rows[0].text;
+      assert.match(
+        reply,
+        /Amount: 4 rows get back their values from before the change; 3 rows keep their current values\./,
+      );
+      assert.equal(await finish(chatId, proposal), 'completed');
+      assert.deepEqual(
+        await Promise.all(rows.map(([, row]) => read(row.id))),
+        rows.map(([value]) => text(value)),
+        'Every unchanged row gets its own original text back',
+      );
+      const reverted = (await entries()).find(entry => entry.reverts === conversion.id);
+      assert.deepEqual(reverted.revertedChanges, ['Amount: text to number', 'Recomputed values of Amount']);
+    });
+
     await t.test('revert is offered only on the latest change, to schema managers, on active tables', async () => {
       const all = await entries();
       assert.deepEqual(

@@ -10,7 +10,6 @@ import {
 } from '@tulipfarm/access';
 import { recordConversationActivity } from '@tulipfarm/conversations/activity';
 import { notifyConversationChange } from '@tulipfarm/conversations/event-publisher';
-import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { definitionSchema, valuesSchema, type TableValue } from '@tulipfarm/tables/definition';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import {
@@ -20,7 +19,9 @@ import {
   TableProposalValidationError,
 } from '@tulipfarm/tables/proposal-contracts';
 import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tables/proposals';
+import { mappedValueKey } from '@tulipfarm/tables/transforms';
 import { schemaRevertBuilder, type SchemaRevert } from '@tulipfarm/tables/schema-revert';
+import { summarizeSchemaChange } from '@tulipfarm/tables/schema-summary';
 import { generationProposalData, workspaceMembersTable } from '@tulipfarm/tables/store';
 
 type Transaction = Parameters<TableProposalOptions['requireSources']>[0];
@@ -107,25 +108,51 @@ export async function schemaRevertLinks(tx: Transaction, actor: HumanActor, tabl
   const { manages, latestId, latest } = await revertable(tx, actor, tableId);
   const s = `"${tx.schema}"`;
   // A completed change reverts an earlier one when it swaps that change's definitions back.
-  const changes = z.array(z.object({ id: z.uuid(), reverts: z.uuid().nullable() })).parse(
-    (
-      await tx.client.query(
-        `WITH changes AS (
-          SELECT e.id,g.activated_at,plan->'before' AS before,plan->'after' AS after
+  const changes = z
+    .array(
+      z.object({
+        id: z.uuid(),
+        reverts: z.uuid().nullable(),
+        reverted_before: definitionSchema.nullable(),
+        reverted_after: definitionSchema.nullable(),
+        reverted_outputs: z.array(z.object({ fieldId: z.string() })).nullable(),
+      }),
+    )
+    .parse(
+      (
+        await tx.client.query(
+          `WITH changes AS (
+          SELECT e.id,g.activated_at,plan->'before' AS before,plan->'after' AS after,plan->'input'->'transforms'->'outputs' AS outputs
           FROM ${s}.tf_table_executions e JOIN ${s}.tf_table_proposals p ON p.id=e.proposal_id
           JOIN ${s}.tf_table_generations g ON g.table_id=e.table_id AND g.revision=e.revision AND g.activated_at IS NOT NULL
           CROSS JOIN LATERAL jsonb_array_elements(p.manifest->'plans') plan
           WHERE e.table_id=$1 AND e.phase='completed' AND plan->'input'->>'tableId'=e.table_id::text AND plan->'input'->>'kind'='schema'
             AND jsonb_typeof(plan->'before')='object'
         )
-        SELECT c.id,(SELECT o.id FROM changes o WHERE o.activated_at<c.activated_at AND o.after=c.before AND o.before=c.after
-          ORDER BY o.activated_at DESC,o.id DESC LIMIT 1) AS reverts
-        FROM changes c`,
-        [tableId],
-      )
-    ).rows,
+        SELECT c.id,o.id AS reverts,o.before AS reverted_before,o.after AS reverted_after,o.outputs AS reverted_outputs
+        FROM changes c LEFT JOIN LATERAL (SELECT o.id,o.before,o.after,o.outputs FROM changes o
+          WHERE o.activated_at<c.activated_at AND o.after=c.before AND o.before=c.after
+          ORDER BY o.activated_at DESC,o.id DESC LIMIT 1) o ON true`,
+          [tableId],
+        )
+      ).rows,
+    );
+  const links = new Map(
+    changes.map(row => [
+      row.id,
+      row.reverts && row.reverted_after
+        ? {
+            id: row.reverts,
+            // The definitions were published as table schema, so anyone who reads the table may see this summary.
+            changes: summarizeSchemaChange(
+              row.reverted_before,
+              row.reverted_after,
+              (row.reverted_outputs ?? []).map(output => output.fieldId),
+            ),
+          }
+        : null,
+    ]),
   );
-  const links = new Map(changes.map(row => [row.id, row.reverts]));
   return {
     /** `available` for the change that can be reverted now, `later-changes` for older changes. */
     revert(id: string) {
@@ -135,7 +162,11 @@ export async function schemaRevertLinks(tx: Transaction, actor: HumanActor, tabl
     },
     /** The earlier change this one reverted. */
     reverts(id: string) {
-      return links.get(id) ?? null;
+      return links.get(id)?.id ?? null;
+    },
+    /** The summary of the earlier change this one reverted, to head its Schema history entry. */
+    revertedChanges(id: string) {
+      return links.get(id)?.changes ?? null;
     },
   };
 }
@@ -195,11 +226,13 @@ async function prepare(
     const page = await data.records(tx, tableId, cursor);
     for (const row of page) {
       const current: Record<string, TableValue> = row.values;
-      // A value written after the change stays current, even when it was later set back.
+      // A value written after the change stays current, even when it was later set back. Decimals are read back
+      // padded to the field's scale, so values compare by meaning rather than spelling.
       const unchanged = [...(retained.get(row.id) ?? [])].filter(
-        ([id, value]) => canonicalJson(current[id] ?? null) === canonicalJson(value.after),
+        ([id, value]) => mappedValueKey(current[id] ?? null) === mappedValueKey(value.after),
       );
       builder.add(
+        row.id,
         row.values,
         unchanged.length ? Object.fromEntries(unchanged.map(([id, value]) => [id, value.before])) : undefined,
       );

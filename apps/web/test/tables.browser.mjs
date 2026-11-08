@@ -1188,7 +1188,13 @@ try {
   schemaSecondPage = false;
   // Only the latest completed change offers a revert; older ones explain the order, and a revert links to its original.
   schemaEntries = [
-    { ...schemaEntry, id: revertedExecutionId, revert: 'available', reverts: executionId },
+    {
+      ...schemaEntry,
+      id: revertedExecutionId,
+      revert: 'available',
+      reverts: executionId,
+      revertedChanges: ['Renamed Notes to Remarks', 'Start: text to timestamp'],
+    },
     { ...schemaEntry, revert: 'later-changes' },
   ];
   await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
@@ -1201,7 +1207,9 @@ try {
     )
     .waitFor();
   assert.equal(
-    await schemas.getByRole('link', { name: `execution ${executionId.slice(0, 8)}`, exact: true }).getAttribute('href'),
+    await schemas
+      .getByRole('link', { name: 'Renamed Notes to Remarks; Start: text to timestamp', exact: true })
+      .getAttribute('href'),
     `#schema-change-${executionId}`,
   );
   assert.equal(await schemas.getByRole('button', { name: 'Propose revert', exact: true }).count(), 1);
