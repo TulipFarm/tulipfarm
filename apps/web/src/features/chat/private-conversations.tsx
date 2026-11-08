@@ -118,7 +118,7 @@ import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
-import { fallbackNote, replyFailure, replyRetrying, retryLabel } from './reply-failure-copy';
+import { fallbackNote, proposalKeptNote, replyFailure, replyRetrying, retryLabel } from './reply-failure-copy';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
@@ -1732,6 +1732,7 @@ function ConversationEntry({
   const skill = message.parts.find(part => part.kind === 'skill');
   const retrying = message.turn ? replyRetrying(message.turn.status, message.turn.errorCode) : null;
   const answeredBy = message.turn ? fallbackNote(message.turn.status, message.turn.errorCode) : null;
+  const proposalKept = message.turn?.status === 'failed' ? proposalKeptNote(message.tools) : null;
   const quiet =
     !message.turn ||
     (['queued', 'processing', 'completed', 'cancelled'].includes(message.turn.status) && !retrying && !answeredBy);
@@ -1876,7 +1877,11 @@ function ConversationEntry({
                 {!quiet &&
                   !answeredBy &&
                   !retrying &&
-                  (message.turn.status === 'failed' ? (
+                  (message.turn.status === 'failed' && proposalKept ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {proposalKept}
+                    </p>
+                  ) : message.turn.status === 'failed' ? (
                     <p role="status" className="flex items-center gap-1.5 text-sm text-destructive">
                       <Danger size={14} aria-hidden="true" />
                       {turnLabels.failed}

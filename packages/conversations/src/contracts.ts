@@ -335,6 +335,8 @@ export const toolReceiptSchema = z.object({
   /** The follow-up a `followups.schedule` call saved. */
   followUpId: uuidSchema.optional(),
   googleProposalId: uuidSchema.optional(),
+  /** A `tables.propose` call that saved a proposal, whose review card stays valid even when the reply failed. */
+  tableProposal: z.literal(true).optional(),
   integration: integrationCardSchema.optional(),
   rowDraftId: uuidSchema.optional(),
   rowView: rowViewSchema.optional(),

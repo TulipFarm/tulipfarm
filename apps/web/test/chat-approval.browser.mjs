@@ -139,8 +139,21 @@ test(
               author: 'assistant',
               createdAt: workspace.createdAt,
               parts: [{ kind: 'text', text: `Review the ${view.manifest.plans[0].after.label} table changes.` }],
-              turn: { id: view.manifest.turnId, status: 'completed', generation: 0 },
-              tools: [{ id: view.id, tool: 'tables.propose', status: 'completed' }],
+              // The provider failed the first reply after it saved its proposal, so only the reply text is missing.
+              turn:
+                index === 0
+                  ? { id: view.manifest.turnId, status: 'failed', generation: 0, errorCode: 'model-rate-limit' }
+                  : { id: view.manifest.turnId, status: 'completed', generation: 0 },
+              tools: [
+                {
+                  id: view.id,
+                  tool: 'tables.propose',
+                  status: 'completed',
+                  tableProposal: true,
+                  activityStatus:
+                    view.status === 'pending' ? 'waiting' : view.status === 'completed' ? 'completed' : 'running',
+                },
+              ],
             })),
             nextBefore: null,
             hasGitHubProposals: false,
@@ -169,8 +182,15 @@ test(
           await promisify(execFile)('agent-browser', ['--cdp', process.env.APPROVAL_CDP_PORT, 'screenshot', path]);
         else await page.screenshot({ path });
       };
+      const conversation = page.getByRole('region', { name: 'Conversation', exact: true });
+      const waiting = conversation.getByRole('button', { name: /Waiting for input/ });
       await load();
       await card.getByRole('button', { name: 'Approve & create', exact: true }).waitFor();
+      await conversation
+        .getByText('Reply text missing. The table change proposal from this reply is still valid.', { exact: true })
+        .waitFor();
+      assert.equal(await conversation.getByText('Reply failed', { exact: true }).count(), 0);
+      await waiting.waitFor();
       assert.equal(await dock.getByRole('button', { name: 'Approve & create', exact: true }).count(), 1);
       assert.equal(
         await page
@@ -209,6 +229,8 @@ test(
         await card.locator('a').filter({ hasText: 'View table' }).getAttribute('href'),
         `/${workspace.slug}/tables/${views[0].plans[0].tableId}`,
       );
+      await waiting.waitFor({ state: 'detached' });
+      assert.equal(await conversation.getByText('Reply failed', { exact: true }).count(), 0);
       await delay(1_000);
       assert.deepEqual(sent, [], "approval sends no message in the person's name");
       await capture('approval-completed');

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   fallbackNote,
+  proposalKeptNote,
   replyFailure,
   replyRetrying,
   retryLabel,
@@ -87,4 +88,13 @@ test('a completed reply answered by the fallback names the model that answered',
   assert.equal(fallbackNote('completed', 'model-fallback:'), null);
   assert.equal(fallbackNote('failed', 'model-fallback:kimi'), null);
   assert.equal(fallbackNote('completed', null), null);
+});
+
+test('a failed reply that saved a table proposal says only its text is missing', () => {
+  assert.equal(
+    proposalKeptNote([{}, { tableProposal: true }]),
+    'Reply text missing. The table change proposal from this reply is still valid.',
+  );
+  assert.equal(proposalKeptNote([{}]), null);
+  assert.equal(proposalKeptNote([]), null);
 });

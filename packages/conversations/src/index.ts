@@ -797,9 +797,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 rowChange,
                 workflows,
                 subagents,
-                ...(await storedToolActivity(tx, row).then(({ status, detail }) => ({
+                ...(await storedToolActivity(tx, row).then(({ status, detail, proposal }) => ({
                   activityStatus: status,
                   ...(detail ? { activityDetail: detail } : {}),
+                  ...(proposal ? { tableProposal: true } : {}),
                 }))),
                 narration: hidden.size ? null : (row.narration ?? null),
                 presentation: hidden.size
