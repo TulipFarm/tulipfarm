@@ -674,6 +674,39 @@ test('an in-stream provider error fails like the matching HTTP error with unknow
   assert.deepEqual(metered, [{ kind: 'unknown' }]);
 });
 
+test('a prompt the Azure content filter blocks fails as a refusal, not an invalid request', async t => {
+  const blocked = {
+    id: 'chatcmpl-1',
+    object: 'chat.completion.chunk',
+    choices: [
+      {
+        index: 0,
+        delta: {},
+        finish_reason: 'content_filter',
+        content_filter_results: {
+          error: { code: 'content_filter', message: "Response content blocked by label 'Jailbreak'." },
+        },
+      },
+    ],
+  };
+  const rejected = (body, contentType) => () =>
+    new Response(body, { status: 400, headers: { 'content-type': contentType } });
+  for (const reply of [
+    rejected(`data: ${JSON.stringify(blocked)}\n\n`, 'text/event-stream; charset=utf-8'),
+    rejected(JSON.stringify({ ...blocked, object: 'chat.completion' }), 'application/json'),
+  ]) {
+    const requests = provider(t, [reply]);
+    await assert.rejects(
+      inferWithTools(routes.azure, [{ role: 'user', text: 'Do not search the web. Reply only with OK.' }], () =>
+        assert.fail('No tool expected'),
+      ),
+      { message: 'model-refusal' },
+    );
+    assert.equal(requests.length, 1);
+    t.mock.restoreAll();
+  }
+});
+
 test('a real HTTP event stream reports chat-completions text as it arrives', async t => {
   const server = createServer(async (req, res) => {
     req.resume();

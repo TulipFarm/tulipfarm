@@ -118,7 +118,14 @@ import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
-import { fallbackNote, proposalKeptNote, replyFailure, replyRetrying, retryLabel } from './reply-failure-copy';
+import {
+  fallbackNote,
+  proposalKeptNote,
+  replyFailure,
+  replyRetrying,
+  retryHelps,
+  retryLabel,
+} from './reply-failure-copy';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
@@ -1912,7 +1919,7 @@ function ConversationEntry({
                       workspace admin to enable it, then retry, or send a new message without it.
                     </p>
                   )}
-                  {message.turn.status === 'failed' && (
+                  {message.turn.status === 'failed' && retryHelps(message.turn.errorCode) && (
                     <Button size="sm" variant="outline" disabled={disabled} onClick={() => control('retry')}>
                       {retryLabel(
                         message.turn.errorCode,

@@ -455,18 +455,38 @@ const assemblers: Record<StreamFormat, () => Assembler> = {
   gemini: geminiAssembler,
 };
 
+/**
+ * The body of a rejected request, so its error can be classified. Azure Foundry answers a streamed request it blocks
+ * with an HTTP error whose body is an event stream, so a body that is not JSON yields its last JSON event.
+ */
+async function rejectionBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const events = text
+      .split(/\r\n|\r|\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trim());
+    for (const data of events.reverse()) {
+      try {
+        return JSON.parse(data);
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+}
+
 /** Reads an SSE model response into its non-streaming body shape, reporting each change of the visible answer. Other responses parse as JSON. */
 export async function readModelResponse(
   response: Response,
   format: StreamFormat | null,
   options: { onText: ((text: string) => void) | undefined; onFirstToken?: () => void; onEvent?: () => void },
 ): Promise<StreamedResponse> {
-  if (
-    !format ||
-    !response.ok ||
-    !response.body ||
-    !/^text\/event-stream\b/i.test(response.headers.get('content-type') ?? '')
-  )
+  if (!response.ok) return { body: await rejectionBody(response), error: null };
+  if (!format || !response.body || !/^text\/event-stream\b/i.test(response.headers.get('content-type') ?? ''))
     return { body: await response.json(), error: null };
   const assembler = assemblers[format]();
   let shown = '';
