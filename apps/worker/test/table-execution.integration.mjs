@@ -539,7 +539,14 @@ test(
     assert.equal(trash.json().records[0].id, directId);
     assert.equal(trash.json().records[0].token, deleted.json().token);
     assert.ok(Date.parse(trash.json().records[0].recoverableUntil) > Date.now());
-    assert.deepEqual(Object.keys(trash.json().records[0]).sort(), ['deletedAt', 'id', 'recoverableUntil', 'token']);
+    assert.deepEqual(Object.keys(trash.json().records[0]).sort(), [
+      'deletedAt',
+      'id',
+      'lastValues',
+      'recoverableUntil',
+      'token',
+    ]);
+    assert.deepEqual(trash.json().records[0].lastValues[field], { kind: 'text', value: 'Direct write' });
     const restored = await app.inject({
       method: 'POST',
       url: `${recordBase}/rows`,

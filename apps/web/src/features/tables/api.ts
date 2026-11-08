@@ -94,6 +94,7 @@ const deletedRecordSchema = z.object({
   token: z.uuid(),
   deletedAt: z.iso.datetime(),
   recoverableUntil: z.iso.datetime().nullable(),
+  lastValues: tableValuesSchema.nullable(),
 });
 const deletedRecordsSchema = z.object({ records: z.array(deletedRecordSchema), nextCursor: z.uuid().nullable() });
 const reverseFieldsSchema = z.object({

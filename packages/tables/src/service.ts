@@ -515,7 +515,13 @@ export function createTableService(
       await permit(tx, actor, request.tableId, 'table.row.read');
       const rows = z
         .array(
-          z.object({ id: recordIdSchema, token: z.uuid(), deletedAt: z.date(), recoverableUntil: z.date().nullable() }),
+          z.object({
+            id: recordIdSchema,
+            token: z.uuid(),
+            deletedAt: z.date(),
+            recoverableUntil: z.date().nullable(),
+            lastValues: valuesSchema.nullable(),
+          }),
         )
         .parse(
           (
@@ -524,7 +530,11 @@ export function createTableService(
         SELECT i.row_id AS id,i.token,i.updated_at AS "deletedAt",
           (SELECT max(h.recoverable_until) FROM ${table(tx, 'tf_table_row_history')} h
            WHERE h.table_id=i.table_id AND h.row_id=i.row_id
-             AND h.recoverable_until>clock_timestamp() AND (h.values IS NOT NULL OR h.before_values IS NOT NULL)) AS "recoverableUntil"
+             AND h.recoverable_until>clock_timestamp() AND (h.values IS NOT NULL OR h.before_values IS NOT NULL)) AS "recoverableUntil",
+          (SELECT coalesce(h.values,h.before_values) FROM ${table(tx, 'tf_table_row_history')} h
+           WHERE h.table_id=i.table_id AND h.row_id=i.row_id
+             AND h.recoverable_until>clock_timestamp() AND (h.values IS NOT NULL OR h.before_values IS NOT NULL)
+           ORDER BY h.id DESC LIMIT 1) AS "lastValues"
         FROM ${table(tx, 'tf_table_identities')} i
         WHERE i.table_id=$1 AND NOT i.live AND ($2::uuid IS NULL OR i.row_id>$2)
         ORDER BY i.row_id LIMIT $3`,

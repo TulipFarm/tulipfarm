@@ -235,6 +235,7 @@ try {
           token: row.token,
           deletedAt: workspace.createdAt,
           recoverableUntil: '2099-10-02T12:00:00.000Z',
+          lastValues: { [subjectId]: { kind: 'text', value: 'Deleted subject' } },
         })),
         nextCursor: null,
       };
@@ -694,10 +695,10 @@ try {
     'Focus moves to the rows heading after the deleted row disappears',
   );
   await openPanel('Deleted rows');
-  await page
-    .getByRole('region', { name: 'Deleted rows', exact: true })
-    .getByRole('button', { name: `Review deleted row ${short}`, exact: true })
-    .waitFor();
+  const deletedRows = page.getByRole('region', { name: 'Deleted rows', exact: true });
+  await deletedRows.getByRole('button', { name: 'Review deleted row “Deleted subject”', exact: true }).waitFor();
+  await deletedRows.getByRole('cell', { name: 'Deleted subject', exact: true }).waitFor();
+  assert.equal(await deletedRows.getByText(target.id).count(), 0, 'Deleted rows are named by title, not ID');
   await closePanel();
 
   const changed = [...records.values()][0],
@@ -800,7 +801,7 @@ try {
   };
   const reviewDeleted = async () => {
     await openPanel('Deleted rows');
-    await deletedPanel.getByRole('button', { name: `Review deleted row ${short}`, exact: true }).click();
+    await deletedPanel.getByRole('button', { name: 'Review deleted row “Deleted subject”', exact: true }).click();
     await history.getByRole('heading', { name: 'History for “Deleted subject”', exact: true }).waitFor();
     await history.getByRole('button', { name: 'Review values before delete', exact: true }).click();
     await history.getByRole('cell', { name: 'Deleted subject', exact: true }).waitFor();

@@ -446,6 +446,7 @@ export function registerTableChanges(
                   token: z.uuid(),
                   deletedAt: z.iso.datetime(),
                   recoverableUntil: z.iso.datetime().nullable(),
+                  lastValues: valuesSchema.nullable(),
                 }),
               ),
               nextCursor: z.uuid().nullable(),
