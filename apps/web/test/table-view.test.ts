@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import {
   draftToRsql,
   emptyDraft,
+  fixedGroups,
   fromDraft,
+  groupLink,
   linkQueryCharacters,
   boardColumnRequest,
   boardCountRequest,
@@ -20,6 +22,7 @@ import {
   type QueryDefinition,
 } from '../src/features/tables/table-view.ts';
 import {
+  linkGroupFields,
   tableRowsSearchSchema as routeSearchSchema,
   tableListSearchSchema,
 } from '../src/features/tables/table-search.ts';
@@ -73,7 +76,7 @@ test('lightweight route schemas retain the same view schema and query-engine lim
   assert.equal(parse({ where: 'x'.repeat(linkQueryCharacters + 1) }).where, undefined);
   for (const [key, item, max] of [
     ['order', title, queryLimits.sortKeys],
-    ['group', title, queryLimits.groupBy],
+    ['group', title, linkGroupFields],
     ['calc', 'count', queryLimits.metrics],
     ['cols', title, 64],
   ] as const) {
@@ -139,6 +142,25 @@ test('grouping without calculations counts rows, and summaries ignore columns', 
   assert.ok('options' in request && request.options.mode === 'summary');
   assert.equal(request.options.after, 'cursor');
   assert.equal('select' in request.options, false);
+});
+
+test('links with too many or repeated grouping fields explain the limit instead of showing an ungrouped total', () => {
+  const tooMany = parse({ group: `${status},${title},${points}`, calc: 'count' });
+  assert.equal(tooMany.group, `${status},${title},${points}`);
+  assert.equal(groupLink(tooMany), 'A summary can group by up to two fields. Remove a group to continue.');
+  assert.deepEqual(tableView(tooMany, definition).groupBy, []);
+  assert.deepEqual(fixedGroups(tooMany, definition), [status, title]);
+
+  const repeated = parse({ group: `${status},${status.toUpperCase()}` });
+  assert.equal(
+    groupLink(repeated),
+    'A summary can’t group by the same field twice. Remove the repeated group to continue.',
+  );
+  assert.deepEqual(tableView(repeated, definition).groupBy, []);
+  assert.deepEqual(fixedGroups(repeated, definition), [status]);
+
+  assert.equal(groupLink(parse({ group: `${status},${title}` })), null);
+  assert.equal(groupLink(parse({ calc: 'count' })), null);
 });
 
 test('malformed URL values are ignored and long filters are refused rather than truncated', () => {

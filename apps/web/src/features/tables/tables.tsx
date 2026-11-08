@@ -63,6 +63,8 @@ import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { rowLabel, rowTitle } from './definition-view';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import {
+  fixedGroups,
+  groupLink,
   narrowed,
   queryDefinition,
   sortable,
@@ -457,6 +459,7 @@ export function Records({
   };
   // Board and List always show rows; grouping applies to the Table layout only.
   const shown = layout === 'table' ? view : { ...view, groupBy: [], metrics: [] };
+  const groupProblem = layout === 'table' ? groupLink(search) : null;
   const filtered = narrowed(view);
   const summary = summarized(shown);
   // Column choice is display-only, so toggling a column never refetches rows.
@@ -560,7 +563,8 @@ export function Records({
         />
       </section>
     );
-  const firstUse = result?.mode === 'rows' && !result.records.length && !pages.after && !filtered && !summary;
+  const firstUse =
+    result?.mode === 'rows' && !result.records.length && !pages.after && !filtered && !summary && !groupProblem;
   const addRow = (size: 'sm' | 'md' = 'md') => (
     <Button size={size} disabled={locked || editing} onClick={() => select({ kind: 'create' })}>
       <Add size={size === 'sm' ? 14 : 16} aria-hidden="true" />
@@ -582,8 +586,9 @@ export function Records({
     columns.some(field => field.id === workspaceMemberFields.name) &&
     columns.some(field => field.id === workspaceMemberFields.photo);
   const gridColumns = photoInName ? columns.filter(field => field.id !== workspaceMemberFields.photo) : columns;
-  const total =
-    result?.mode === 'rows'
+  const total = groupProblem
+    ? ''
+    : result?.mode === 'rows'
       ? result.total && !pages.after && !firstUse
         ? rowTotal(result.total, filtered, systemKind === 'workspace-members' ? ['member', 'members'] : undefined)
         : ''
@@ -932,7 +937,7 @@ export function Records({
               aria-live={!summary && filtered ? 'polite' : undefined}
               className="text-sm font-medium tabular-nums"
             >
-              {summary ? 'Summary' : total || (systemKind === 'workspace-members' ? 'Members' : 'Rows')}
+              {summary || groupProblem ? 'Summary' : total || (systemKind === 'workspace-members' ? 'Members' : 'Rows')}
             </h2>
             {summary && (
               <p role={filtered ? 'status' : undefined} className="text-sm text-muted-foreground">
@@ -1016,6 +1021,20 @@ export function Records({
               changeField={chart => changeSearch({ chart })}
               filter={where => apply({ ...view, where })}
             />
+          ) : groupProblem ? (
+            <GroupLinkProblem
+              message={groupProblem}
+              groups={fixedGroups(search, queryDefinition(table.definition))}
+              definition={table.definition}
+              disabled={editing}
+              fix={groupBy =>
+                apply({
+                  ...view,
+                  groupBy,
+                  metrics: view.metrics.length || !groupBy.length ? view.metrics : [{ fn: 'count' }],
+                })
+              }
+            />
           ) : read.state.kind === 'error' && last.current ? (
             <div className="space-y-3">
               <Alert variant="destructive">
@@ -1070,6 +1089,7 @@ export function Records({
           {layout !== 'board' &&
             layout !== 'chart' &&
             !firstUse &&
+            !groupProblem &&
             (read.state.kind === 'loading' || result) &&
             // One short page has nothing to page through; the heading already states the count.
             !(
@@ -1114,6 +1134,34 @@ type RowActionProps = {
   select: (next: RowSelection) => void;
   systemKind?: TableDefinition['systemKind'];
 };
+
+function GroupLinkProblem({
+  message,
+  groups,
+  definition,
+  disabled,
+  fix,
+}: {
+  message: string;
+  groups: string[];
+  definition: TableDefinition['definition'];
+  disabled: boolean;
+  fix: (groupBy: string[]) => void;
+}) {
+  const labels = groups.map(id => definition.fields.find(field => field.id === id)?.label ?? 'field');
+  return (
+    <div className="space-y-3">
+      <Alert variant="destructive">
+        <AlertDescription>{message}</AlertDescription>
+      </Alert>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={disabled} onClick={() => fix(groups)}>
+          {labels.length ? `Group by ${labels.join(' and ')}` : 'Remove grouping'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** The row menu's items, shared by the table and list menu button and the board card menu. */
 function RowActionItems({ record, permissions, select, systemKind }: RowActionProps) {
