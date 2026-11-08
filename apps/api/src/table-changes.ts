@@ -667,58 +667,63 @@ export function registerTableChanges(
       },
     );
     const archiveBody = z.object({ expectedRevision: archivePlanSchema.shape.expectedRevision });
-    routes.put(
-      `${tableBase}/:tableId/archive/:requestId`,
-      {
-        logLevel: 'silent',
-        schema: {
-          operationId: 'archiveTableV1',
-          params: validation.json(requestParams),
-          body: validation.json(archiveBody),
-          response: response(proposalStatusSchema),
+    for (const [kind, operation] of [
+      ['archive', 'Archive'],
+      ['restore', 'Restore'],
+    ] as const) {
+      routes.put(
+        `${tableBase}/:tableId/${kind}/:requestId`,
+        {
+          logLevel: 'silent',
+          schema: {
+            operationId: `${kind}TableV1`,
+            params: validation.json(requestParams),
+            body: validation.json(archiveBody),
+            response: response(proposalStatusSchema),
+          },
         },
-      },
-      async request => {
-        const p = requestParams.parse(request.params),
-          body = archiveBody.parse(request.body);
-        const actor = await dependencies.runtime.transaction(p.workspaceId, executionCompatibility, async tx => {
-          await lockAuthorization(tx);
-          return resolveHuman(tx, user(request));
-        });
-        // The archive runs as a proposal the person approves in the same request, so it keeps the chat
-        // archive's blocker checks and storage-worker execution. Retrying with the same request id is safe.
-        const proposed = await proposals.propose(
-          p.workspaceId,
-          actor,
-          p.requestId,
-          { conversationId: null, turnId: null, sources: [] },
-          { plans: [{ kind: 'archive', tableId: p.tableId, dependsOn: [], expectedRevision: body.expectedRevision }] },
-        );
-        if (!('digest' in proposed)) throw new AccessDenied();
-        return decisions.decide(p.workspaceId, user(request), null, p.requestId, {
-          commandId: p.requestId,
-          digest: proposed.digest,
-          decision: 'approve',
-        });
-      },
-    );
-    routes.get(
-      `${tableBase}/:tableId/archive/:requestId`,
-      {
-        logLevel: 'silent',
-        schema: {
-          operationId: 'tableArchiveStatusV1',
-          params: validation.json(requestParams),
-          response: response(proposalStatusSchema),
+        async request => {
+          const p = requestParams.parse(request.params),
+            body = archiveBody.parse(request.body);
+          const actor = await dependencies.runtime.transaction(p.workspaceId, executionCompatibility, async tx => {
+            await lockAuthorization(tx);
+            return resolveHuman(tx, user(request));
+          });
+          // The change runs as a proposal the person approves in the same request, so it keeps the chat
+          // version's checks and storage-worker execution. Retrying with the same request id is safe.
+          const proposed = await proposals.propose(
+            p.workspaceId,
+            actor,
+            p.requestId,
+            { conversationId: null, turnId: null, sources: [] },
+            { plans: [{ kind, tableId: p.tableId, dependsOn: [], expectedRevision: body.expectedRevision }] },
+          );
+          if (!('digest' in proposed)) throw new AccessDenied();
+          return decisions.decide(p.workspaceId, user(request), null, p.requestId, {
+            commandId: p.requestId,
+            digest: proposed.digest,
+            decision: 'approve',
+          });
         },
-      },
-      async request => {
-        const p = requestParams.parse(request.params);
-        const status = await proposals.status(p.workspaceId, user(request), null, p.requestId);
-        if (status.plans.length !== 1 || status.plans[0]?.tableId !== p.tableId) throw new AccessDenied();
-        return status;
-      },
-    );
+      );
+      routes.get(
+        `${tableBase}/:tableId/${kind}/:requestId`,
+        {
+          logLevel: 'silent',
+          schema: {
+            operationId: `table${operation}StatusV1`,
+            params: validation.json(requestParams),
+            response: response(proposalStatusSchema),
+          },
+        },
+        async request => {
+          const p = requestParams.parse(request.params);
+          const status = await proposals.status(p.workspaceId, user(request), null, p.requestId);
+          if (status.plans.length !== 1 || status.plans[0]?.tableId !== p.tableId) throw new AccessDenied();
+          return status;
+        },
+      );
+    }
     const historyParams = recordParams.extend({ rowId: z.uuid() });
     const history = z.object({
       id: z.uuid(),

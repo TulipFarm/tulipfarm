@@ -45,7 +45,7 @@ import {
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import { RecordHistory } from './record-history';
 import { fileIdsOf, ReferenceRetry, TableValueView, useFileNames, type TableWorkspace } from './references';
-import { TableMore } from './table-more';
+import { TableMore, UnarchiveTable } from './table-more';
 import {
   tableApi,
   type TableListSort,
@@ -337,8 +337,14 @@ export function TableDetail({
               kind="empty"
               icon={Database}
               title="This table is archived"
-              description="Its fields and records are kept, but records can't be viewed or changed while the table is archived."
-            />
+              description={
+                state.canRestore
+                  ? "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Unarchive it to use it again."
+                  : "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Someone who manages its fields can unarchive it."
+              }
+            >
+              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
+            </StatePanel>
           ) : state.applied ? (
             <Records
               key={`${workspace.id}/${state.id}`}

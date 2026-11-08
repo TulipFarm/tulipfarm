@@ -2133,6 +2133,35 @@ test(
       (await db.platform.query(`SELECT archived_at FROM ${s}.tf_table_catalog WHERE id=$1`, [pageTable])).rows[0]
         .archived_at,
     );
+    await assert.rejects(pageArchive(), { code: 'proposal-stale' });
+
+    // The same page can unarchive it, keeping its definition revision.
+    const archivedRevision = (
+      await db.platform.query(`SELECT applied_revision FROM ${s}.tf_table_catalog WHERE id=$1`, [pageTable])
+    ).rows[0].applied_revision;
+    const restoreId = randomUUID();
+    const restorePlans = [{ kind: 'restore', tableId: pageTable, dependsOn: [], expectedRevision: archivedRevision }];
+    await assert.rejects(
+      proposals.propose(ws.id, actor, randomUUID(), pageOrigin, {
+        plans: [...restorePlans, { kind: 'archive', tableId: lastTable, dependsOn: [], expectedRevision: null }],
+      }),
+    );
+    const restoreProposal = await proposals.propose(ws.id, actor, restoreId, pageOrigin, { plans: restorePlans });
+    await decisions.decide(ws.id, ws.userId, null, restoreId, {
+      digest: restoreProposal.digest,
+      commandId: restoreId,
+      decision: 'approve',
+    });
+    assert.equal(await finish(restoreProposal), 'completed');
+    assert.equal((await proposals.status(ws.id, ws.userId, null, restoreId)).status, 'completed');
+    assert.deepEqual(
+      (
+        await db.platform.query(`SELECT archived_at,applied_revision FROM ${s}.tf_table_catalog WHERE id=$1`, [
+          pageTable,
+        ])
+      ).rows[0],
+      { archived_at: null, applied_revision: archivedRevision },
+    );
 
     // The requester must still be able to open the nested chat when the change runs.
     const deleted = await approve();

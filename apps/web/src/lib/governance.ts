@@ -63,7 +63,7 @@ export function governanceError(error: unknown) {
       return 'Promote another member to admin before leaving, removing, or demoting the last admin.';
     if (error.code === 'team-owns-tables') return 'Transfer this team’s tables to another team before deleting it.';
     if (error.code === 'team-owns-archived-tables')
-      return 'This team owns archived tables and cannot be deleted. Ask in chat to restore them, then change their owning team in Table access.';
+      return 'This team owns archived tables and cannot be deleted. Unarchive them from Archived tables, then change their owning team in Table access.';
     if (error.code === 'team-owns-integrations')
       return 'Transfer or delete this team’s active integrations before deleting the team.';
     if (error.code === 'team-id-conflict')

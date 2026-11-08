@@ -181,7 +181,7 @@ export function TeamConfirmation({
                     result === 'team-owns-tables'
                       ? 'This team owns tables and cannot be deleted.'
                       : result === 'team-owns-archived-tables'
-                        ? 'This team owns archived tables and cannot be deleted. Ask in chat to restore them, then change their owning team in Table access.'
+                        ? 'This team owns archived tables and cannot be deleted. Unarchive them from Archived tables, then change their owning team in Table access.'
                         : result === 'team-owns-agents'
                           ? 'This team owns active agents and cannot be deleted.'
                           : result === 'team-owns-integrations'

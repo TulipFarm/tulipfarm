@@ -68,10 +68,12 @@ type InstallationOrigin = {
   installationId: string;
   sources: readonly SourceDependency[];
 };
-/** A person archiving one table from the Tables page, with no chat or package behind it. */
+/** A person archiving or unarchiving one table from its page, with no chat or package behind it. */
 type PageOrigin = { conversationId: null; turnId: null; sources: readonly SourceDependency[] };
 // Workspaces before this common migration reject proposals without a chat or package origin.
 export const pageArchiveVersion = 45;
+// Workspaces before this common migration reject a page restore the same way.
+export const pageRestoreVersion = 46;
 export type TableProposalOptions = {
   runtime: TableRuntime;
   requireSources(tx: TableTransaction, actor: HumanActor, sources: readonly SourceDependency[]): Promise<void>;
@@ -703,8 +705,10 @@ function operations(options: TableProposalOptions) {
       );
       await lock(tx, id);
       if (!('installationId' in origin) && origin.conversationId === null) {
-        if (input.plans.length !== 1 || input.plans[0]?.kind !== 'archive' || sources.length) throw new AccessDenied();
-        if (tx.commonVersion < pageArchiveVersion) throw new TableProposalError('proposal-storage-unavailable');
+        const kind = input.plans.length === 1 ? input.plans[0]?.kind : undefined;
+        if ((kind !== 'archive' && kind !== 'restore') || sources.length) throw new AccessDenied();
+        if (tx.commonVersion < (kind === 'archive' ? pageArchiveVersion : pageRestoreVersion))
+          throw new TableProposalError('proposal-storage-unavailable');
       } else if (origin.conversationId === null) {
         if (input.plans.some(plan => !['schema', 'records'].includes(plan.kind))) throw new AccessDenied();
         if (

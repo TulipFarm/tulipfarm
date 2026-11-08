@@ -14,7 +14,7 @@ import {
   proposalManifestSchema,
   redactedManifestSchema,
 } from '@tulipfarm/tables/proposal-contracts';
-import { pageArchiveVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
+import { pageArchiveVersion, pageRestoreVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 
 const phaseSchema = z.enum(['publishing', 'copying', 'reconciling', 'completed', 'blocked']);
 export const schemaHistoryEntrySchema = z.object({
@@ -41,6 +41,7 @@ export const definitionStateSchema = z.object({
   rowPermissions: z.object({ create: z.boolean(), update: z.boolean(), delete: z.boolean() }),
   archived: z.boolean(),
   canArchive: z.boolean(),
+  canRestore: z.boolean(),
 });
 
 export function createTableSchemaHistory(options: TableProposalOptions) {
@@ -153,11 +154,10 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
             [tableId],
           )
         ).rowCount;
-        const canArchive =
+        const manages =
           applied !== null &&
           tableId !== memberTableId &&
-          tx.commonVersion >= pageArchiveVersion &&
-          !archived &&
+          tx.commonVersion >= (archived ? pageRestoreVersion : pageArchiveVersion) &&
           (await canAccessTable(tx, actor, tableId, 'table.schema.manage'));
         return {
           id: tableId,
@@ -172,7 +172,8 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
             : null,
           rowPermissions,
           archived,
-          canArchive,
+          canArchive: manages && !archived,
+          canRestore: manages && archived,
         };
       });
     },
