@@ -387,7 +387,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal(await receipt(broke.requestId), undefined);
       await db.platform.query(`UPDATE ${s}.tf_credit_account SET available=granted`);
       assert.equal(calls.length, before);
-      assert.equal((await statusOf(randomUUID())).statusCode, 404);
+      const never = await statusOf(randomUUID());
+      assert.equal(never.statusCode, 404);
+      assert.deepEqual(
+        never.json(),
+        { error: 'translation-not-found' },
+        'a search that never started is not a lost table',
+      );
       const known = (
         await db.platform.query(
           `SELECT request_id FROM ${s}.tf_table_query_translations WHERE membership_id=$1 LIMIT 1`,
@@ -398,6 +404,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         (await statusOf(known, { cookie: second.cookie, origin: 'http://localhost:5173' })).statusCode,
         404,
         'receipts are owner scoped',
+      );
+      assert.deepEqual(
+        (await statusOf(known, outsiderHeaders)).json(),
+        { error: 'table-unavailable' },
+        'people who cannot read the table still see it as unavailable',
       );
     },
   );

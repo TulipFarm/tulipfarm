@@ -329,11 +329,13 @@ export function tableApi(workspaceId: string) {
               ? 'AI search is unavailable right now. Filters and RSQL still work.'
               : code === 'request-mismatch'
                 ? 'This AI search request was reused with different text. Submit it again.'
-                : [403, 404].includes(response.status)
-                  ? 'This table is missing or your permission changed. A workspace admin can review your access.'
-                  : response.status === 400
-                    ? 'This search is not valid. Check its fields and values.'
-                    : 'The search could not be completed. Check your connection and try again.';
+                : code === 'translation-not-found'
+                  ? 'The search didn’t go through, so no AI credit was used. Build it again.'
+                  : [403, 404].includes(response.status)
+                    ? 'This table is missing or your permission changed. A workspace admin can review your access.'
+                    : response.status === 400
+                      ? 'This search is not valid. Check its fields and values.'
+                      : 'The search could not be completed. Check your connection and try again.';
     throw new TableRequestError(response.status, code, memberMessages[code] ?? message);
   }
   async function archiveRequest(
