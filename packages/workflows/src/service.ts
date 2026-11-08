@@ -29,7 +29,7 @@ import {
   commonCompatibility,
   StorageUnavailableError,
 } from '@tulipfarm/workspace-storage/runtime';
-import { trackEvent } from '@tulipfarm/observability';
+import { log, trackEvent } from '@tulipfarm/observability';
 import {
   isSecretHeader,
   activationSchema,
@@ -225,6 +225,8 @@ type SlackClient = {
     expiresAt: string;
     nextAttemptAt: string;
     sentMessageTs?: string | null | undefined;
+    /** Why a revoked send was denied, such as app-not-in-channel; absent for every other status. */
+    reason?: string | undefined;
   }>;
 };
 
@@ -799,7 +801,18 @@ export function createWorkflows(
           throw new WorkflowConflict('revision-conflict');
         return read(tx, id, actor.membershipId);
       }
-      if (previous) await requireUnarchived(tx, id);
+      if (previous) {
+        await requireUnarchived(tx, id);
+        // Saving the latest definition again keeps its revision, so the sponsor's consent and the generation stand.
+        const latest = (
+          await tx.client.query(
+            `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+            [id, previous.revision],
+          )
+        ).rows[0];
+        if (latest && canonical(definitionSchema.parse(latest.definition)) === canonical(input.definition))
+          return read(tx, id, actor.membershipId);
+      }
       requireCodeRunner(input.definition);
       requireAgentRunner(input.definition);
       const trigger = input.definition.trigger;
@@ -865,7 +878,12 @@ export function createWorkflows(
           }
           const trigger = current.definition.trigger;
           if (enabled && !['manual', 'event'].includes(trigger.kind)) {
-            const sponsor = await requireSponsor(tx, id, revision);
+            // The caller manages this workflow, so a missing sponsorship or sponsor grant is a conflict, not lost access.
+            const sponsor = await workflowSponsor(tx, id, revision).catch((error: unknown) => {
+              throw error instanceof AccessDenied ? new WorkflowConflict('sponsorship-required') : error;
+            });
+            if (!(await hasGrant(tx, sponsor.sponsor_membership_id, id, 'invoke')))
+              throw new WorkflowConflict('sponsor-access-lost');
             await requireTableStepAuthority(
               tx,
               current.definition,
@@ -2351,6 +2369,8 @@ export function createWorkflows(
             ]);
             return { kind: 'continue' };
           }
+          if (result.status === 'revoked' && result.reason && result.reason !== 'access-denied')
+            return fail(`slack-${result.reason}`);
           if (
             ['rejected', 'expired', 'stale', 'revoked', 'unknown', 'reauthorization-required'].includes(result.status)
           )
@@ -2717,6 +2737,12 @@ export function createWorkflows(
         return isProgress(next) ? next : { kind: 'continue' };
       } catch (error) {
         if (error instanceof HttpStepError) {
+          log('warn', 'activity', 'call_failed', {
+            operation: 'workflow.http.request',
+            outcome: 'error',
+            'error.code': `http-${error.code}`,
+            ...(error.reason ? { 'error.type': error.reason } : {}),
+          });
           const next = await advanceTransaction(value, undefined, undefined, { work: progress, error: error.code });
           return isProgress(next) ? next : { kind: 'continue' };
         }

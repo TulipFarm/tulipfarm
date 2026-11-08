@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { request } from 'node:https';
-import { BlockList, isIP } from 'node:net';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
 
 export const httpRequestLimit = { timeoutMilliseconds: 10_000, responseBytes: 1_048_576 } as const;
 
@@ -61,11 +61,19 @@ const privateAddress = (address: string): boolean => {
   return embedded ? blocked.check(embedded, 'ipv4') : blocked.check(address.replace(/%.*$/, ''), 'ipv6');
 };
 
+/** A Node or OpenSSL error code such as ENOTFOUND or CERT_HAS_EXPIRED; never a message, which can carry the URL. */
+const failureReason = (error: unknown) => {
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : 'unknown';
+};
+
 export class HttpStepError extends Error {
   readonly code: 'egress-denied' | 'request-timeout' | 'response-too-large' | 'request-failed';
-  constructor(code: HttpStepError['code']) {
+  readonly reason: string | undefined;
+  constructor(code: HttpStepError['code'], cause?: unknown) {
     super(code);
     this.code = code;
+    this.reason = cause === undefined ? undefined : failureReason(cause);
   }
 }
 
@@ -81,12 +89,17 @@ export async function requestHttp(input: {
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   const addresses = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) }]
-    : await lookup(hostname, { all: true, verbatim: true }).catch(() => {
-        throw new HttpStepError('request-failed');
+    : await lookup(hostname, { all: true, verbatim: true }).catch((error: unknown) => {
+        throw new HttpStepError('request-failed', error);
       });
   if (!addresses.length || addresses.some(({ address }) => privateAddress(address)))
     throw new HttpStepError('egress-denied');
   const address = addresses[0]!;
+  // Connect only to the addresses checked above. Node asks for every address when it races IPv4 and IPv6.
+  const pinned: LookupFunction = (_hostname, options, callback) => {
+    if (options.all) callback(null, addresses);
+    else callback(null, address.address, address.family);
+  };
   return new Promise<{ status: number; headers: Record<string, string>; body: string }>((resolve, reject) => {
     let settled = false;
     let timeout: NodeJS.Timeout;
@@ -101,8 +114,11 @@ export async function requestHttp(input: {
       url,
       {
         method: input.method,
-        headers: input.headers,
-        lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
+        // Some APIs, such as GitHub's, reject requests without a User-Agent; a step's own header wins.
+        headers: Object.keys(input.headers).some(name => name.toLowerCase() === 'user-agent')
+          ? input.headers
+          : { 'user-agent': 'TulipFarm-Workflows/1', ...input.headers },
+        lookup: pinned,
       },
       response => {
         const chunks: Buffer[] = [];
@@ -114,7 +130,7 @@ export async function requestHttp(input: {
             fail(new HttpStepError('response-too-large'));
           } else chunks.push(chunk);
         });
-        response.on('error', () => fail(new HttpStepError('request-failed')));
+        response.on('error', error => fail(new HttpStepError('request-failed', error)));
         response.on('end', () => {
           if (settled) return;
           settled = true;
@@ -132,7 +148,7 @@ export async function requestHttp(input: {
       req.destroy();
       fail(new HttpStepError('request-timeout'));
     }, httpRequestLimit.timeoutMilliseconds);
-    req.on('error', () => fail(new HttpStepError('request-failed')));
+    req.on('error', error => fail(new HttpStepError('request-failed', error)));
     req.end(input.body);
   });
 }

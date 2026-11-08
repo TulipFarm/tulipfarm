@@ -15,7 +15,7 @@ import { workspaceRoute } from '@/router';
 import { useWorkflowDefinition, useWorkflowRun } from './queries';
 import { NamedWorkflowViewer } from './named-viewer';
 import { workflowRunStates } from './run-projection';
-import { runNote, stepNote } from './run-notes';
+import { runErrorNote, runNote, stepNote } from './run-notes';
 
 export type WorkflowReference =
   | { kind: 'draft'; chatId: string; draftId: string }
@@ -146,39 +146,49 @@ export function WorkflowRun({
   };
   return (
     <WorkflowRead state={read.state} refresh={read.refresh}>
-      {(detail, notice) => (
-        <NamedWorkflowViewer
-          workspaceId={workspaceId}
-          surface={surface}
-          view={{
-            key: `run:${workflowId}:${runId}:${detail.run.revision}`,
-            source: 'Run',
-            definition: detail.definition,
-            revisionLabel: 'Definition used by this run',
-            labels: { actor: detail.actor ? detail.actor.name : 'an unavailable person' },
-            ...(notice || read.delayed
-              ? { notice: notice ?? 'Automatic checks stopped. Refresh to check this run again.' }
-              : {}),
-            run: {
-              label: labels[detail.run.status],
-              status: detail.run.status,
-              states: workflowRunStates(detail),
-              note:
-                runNote(detail.run) ||
-                'Only recorded progress is shown. Next eligible does not mean a step has started.',
-            },
-          }}
-          navigation={navigation}
-          onRefresh={() => void read.refresh()}
-          stepContent={id => (
-            <RunStepDetail
-              workspaceId={workspaceId}
-              agent={detail.definition.steps.some(step => step.id === id && step.kind === 'agent')}
-              receipt={detail.run.steps.find(step => step.stepId === id)}
-            />
-          )}
-        />
-      )}
+      {(detail, notice) => {
+        const states = workflowRunStates(detail);
+        return (
+          <NamedWorkflowViewer
+            workspaceId={workspaceId}
+            surface={surface}
+            view={{
+              key: `run:${workflowId}:${runId}:${detail.run.revision}`,
+              source: 'Run',
+              definition: detail.definition,
+              revisionLabel: 'Definition used by this run',
+              labels: { actor: detail.actor ? detail.actor.name : 'an unavailable person' },
+              ...(notice || read.delayed
+                ? { notice: notice ?? 'Automatic checks stopped. Refresh to check this run again.' }
+                : {}),
+              run: {
+                label: labels[detail.run.status],
+                status: detail.run.status,
+                states,
+                note:
+                  runNote(detail.run) ||
+                  'Only recorded progress is shown. Next eligible does not mean a step has started.',
+              },
+            }}
+            navigation={navigation}
+            onRefresh={() => void read.refresh()}
+            stepContent={id =>
+              id === '$trigger' ? (
+                <Disclosure title="Run input">
+                  <pre className="max-h-64 overflow-auto text-xs">{JSON.stringify(detail.run.input, null, 2)}</pre>
+                </Disclosure>
+              ) : (
+                <RunStepDetail
+                  workspaceId={workspaceId}
+                  agent={detail.definition.steps.some(step => step.id === id && step.kind === 'agent')}
+                  receipt={detail.run.steps.find(step => step.stepId === id)}
+                  error={states[id] === 'failed' ? detail.run.error : null}
+                />
+              )
+            }
+          />
+        );
+      }}
     </WorkflowRead>
   );
 }
@@ -186,17 +196,30 @@ function RunStepDetail({
   workspaceId,
   agent,
   receipt,
+  error,
 }: {
   workspaceId: string;
   agent: boolean;
   receipt: RunDetail['run']['steps'][number] | undefined;
+  error: string | null;
 }) {
-  if (!receipt) return null;
+  const failure = error && (
+    <p role="alert" className="text-destructive">
+      {runErrorNote(error) ?? `The run failed at this step: ${error}`}
+    </p>
+  );
+  if (!receipt) return failure || null;
   if (withheldOutputSchema.safeParse(receipt.output).success)
-    return <p className="text-sm">Output hidden because its source access changed.</p>;
+    return (
+      <div className="space-y-2 text-sm">
+        {failure}
+        <p>Output hidden because its source access changed.</p>
+      </div>
+    );
   const task = z.object({ taskId: z.uuid() }).safeParse(receipt.output);
   return (
     <div className="space-y-2 text-sm">
+      {failure}
       {receipt.prompt && <p>{receipt.prompt}</p>}
       {receipt.dueAt && (
         <p>Due {new Date(receipt.dueAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</p>

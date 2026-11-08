@@ -106,6 +106,14 @@ const destinationSchema = z.object({
   version: z.number(),
   enabled: z.boolean(),
 });
+const slackWorkflowDenials = [
+  'app-not-in-channel',
+  'requester-not-in-channel',
+  'destination-unavailable',
+  'account-not-linked',
+  'access-denied',
+] as const;
+export type SlackWorkflowDenial = (typeof slackWorkflowDenials)[number];
 const source = (row: Pick<Row, 'installation_id' | 'generation' | 'channel'>, action: SlackAction) => ({
   installationId: row.installation_id,
   generation: row.generation,
@@ -535,6 +543,7 @@ export function createSlackActions(options: Options) {
     callId: string,
     action: SlackAction,
     beforeDispatch?: (tx: Transaction) => Promise<void>,
+    onDenied?: (error: AccessDenied) => void,
   ) {
     await prepare(workspaceId, runId, callId, action);
     const attempt = randomUUID();
@@ -582,6 +591,7 @@ export function createSlackActions(options: Options) {
         }
         if (!(error instanceof AccessDenied) && !(error instanceof Error && error.message === 'slack-action-stale'))
           throw error;
+        if (error instanceof AccessDenied) onDenied?.(error);
         await tx.client.query(`UPDATE ${relation(tx, 'tf_slack_action_effects')} SET state=$2 WHERE action_id=$1`, [
           callId,
           error instanceof AccessDenied ? 'revoked' : 'stale',
@@ -669,8 +679,10 @@ export function createSlackActions(options: Options) {
           seconds = error.retryAfterSeconds ?? 60;
         } else if (error instanceof SlackApiError && error.code === 'provider-auth-rejected')
           state = 'reauthorization-required';
-        else if (error instanceof AccessDenied) state = 'revoked';
-        else if (error instanceof Error && error.message === 'slack-action-stale') state = 'stale';
+        else if (error instanceof AccessDenied) {
+          state = 'revoked';
+          onDenied?.(error);
+        } else if (error instanceof Error && error.message === 'slack-action-stale') state = 'stale';
       }
       if (tx.commonVersion >= 1)
         await tx.client.query(
@@ -933,14 +945,14 @@ export function createSlackActions(options: Options) {
         },
         false,
       );
-      const result =
+      let result =
         input.expectedVersion === 0
           ? await tx.client.query(
-              `INSERT INTO ${relation(tx, 'tf_slack_destinations')} (id,installation_id,generation,channel,name,enabled) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING version`,
+              `INSERT INTO ${relation(tx, 'tf_slack_destinations')} (id,installation_id,generation,channel,name,enabled) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING id,version`,
               [input.id, installation.id, installation.generation, input.channel, input.name, input.enabled],
             )
           : await tx.client.query(
-              `UPDATE ${relation(tx, 'tf_slack_destinations')} SET name=$2,enabled=$3,version=version+1 WHERE id=$1 AND version=$4 AND channel=$5 AND installation_id=$6 AND generation=$7 RETURNING version`,
+              `UPDATE ${relation(tx, 'tf_slack_destinations')} SET name=$2,enabled=$3,version=version+1 WHERE id=$1 AND version=$4 AND channel=$5 AND installation_id=$6 AND generation=$7 RETURNING id,version`,
               [
                 input.id,
                 input.name,
@@ -951,18 +963,26 @@ export function createSlackActions(options: Options) {
                 installation.generation,
               ],
             );
+      // Adding a channel that was removed turns its old destination back on, keeping its id for saved workflow steps.
+      // An active destination for the channel still conflicts.
+      if (!result.rowCount && input.expectedVersion === 0 && input.enabled)
+        result = await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_slack_destinations')} SET name=$1,enabled=true,version=version+1 WHERE installation_id=$2 AND generation=$3 AND channel=$4 AND NOT enabled RETURNING id,version`,
+          [input.name, installation.id, installation.generation, input.channel],
+        );
       if (!result.rowCount) throw new Error('slack-decision-conflict');
+      const saved = z.object({ id: z.uuid(), version: z.number() }).parse(result.rows[0]);
       await tx.client.query(
         `DELETE FROM ${relation(tx, 'tf_grants')} WHERE asset_id=$1 AND permission=ANY($2::text[])`,
-        [input.id, ['slack.message.send', 'slack.thread.reply', 'slack.reaction.add']],
+        [saved.id, ['slack.message.send', 'slack.thread.reply', 'slack.reaction.add']],
       );
       if (input.enabled)
         for (const permission of ['slack.message.send', 'slack.thread.reply', 'slack.reaction.add'])
           await tx.client.query(
             `INSERT INTO ${relation(tx, 'tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,$3)`,
-            [input.teamId, input.id, permission],
+            [input.teamId, saved.id, permission],
           );
-      return { id: input.id, version: z.number().parse(result.rows[0]?.version) };
+      return saved;
     });
   }
   async function resolve(workspaceId: string, actor: HumanActor, value: unknown) {
@@ -1288,7 +1308,56 @@ export function createSlackActions(options: Options) {
         ).rows[0],
       );
   }
+  /** Why a workflow's Slack send was denied, as far as the run's own records tell; never Slack or message content. */
+  async function deniedReason(
+    workspaceId: string,
+    runId: string,
+    stepId: string,
+    error: unknown,
+  ): Promise<SlackWorkflowDenial> {
+    if (error instanceof SlackChannelAccessError && slackWorkflowDenials.includes(error.code as SlackWorkflowDenial))
+      return error.code as SlackWorkflowDenial;
+    try {
+      return await transaction(workspaceId, async tx => {
+        const origin = await workflows.slackOrigin(tx as Transaction, runId, stepId);
+        const destination = destinationSchema
+          .optional()
+          .parse(
+            (
+              await tx.client.query(`SELECT * FROM ${relation(tx, 'tf_slack_destinations')} WHERE id=$1`, [
+                origin.action.destinationId,
+              ])
+            ).rows[0],
+          );
+        if (!destination?.enabled) return 'destination-unavailable';
+        try {
+          await provider.identity(tx, origin.actor, {
+            installationId: destination.installation_id,
+            generation: destination.generation,
+          });
+        } catch (failure) {
+          if (failure instanceof AccessDenied) return 'account-not-linked';
+          throw failure;
+        }
+        return 'access-denied';
+      });
+    } catch {
+      return 'access-denied';
+    }
+  }
   async function workflow(workspaceId: string, runId: string, stepId: string, actionId: string) {
+    let denied: unknown;
+    const explain = async <T extends { status: string }>(result: T) => {
+      if (result.status !== 'revoked') return result;
+      const reason = await deniedReason(workspaceId, runId, stepId, denied);
+      log('warn', 'activity', 'call_failed', {
+        operation: 'workflow.slack.send',
+        outcome: 'revoked',
+        'error.code': `slack-${reason}`,
+        ...(denied === undefined ? {} : { 'error.type': errorType(denied) }),
+      });
+      return { ...result, reason };
+    };
     try {
       const action = await transaction(workspaceId, async tx => {
         const existing = await workflowOrigin(tx, runId, actionId);
@@ -1306,7 +1375,11 @@ export function createSlackActions(options: Options) {
           throw new AccessDenied();
         return origin.action;
       });
-      const result = await execute(workspaceId, runId, actionId, action);
+      const result = await explain(
+        await execute(workspaceId, runId, actionId, action, undefined, error => {
+          denied = error;
+        }),
+      );
       try {
         await notify(workspaceId, actionId);
       } catch (error) {
@@ -1319,13 +1392,14 @@ export function createSlackActions(options: Options) {
       return result;
     } catch (error) {
       if (!(error instanceof AccessDenied)) throw error;
-      return {
+      denied = error;
+      return explain({
         id: actionId,
         status: 'revoked' as const,
         expiresAt: new Date().toISOString(),
         nextAttemptAt: new Date().toISOString(),
         sentMessageTs: null,
-      };
+      });
     }
   }
   return {

@@ -230,13 +230,26 @@ test('native Slack workflow: retry, expiry while retrying, revoke, disabled outb
   await service.advance(retried.work);
   assert.equal(f.effects.length, 1, 'only a known rejected rate-limit attempt is retried');
   assert.equal((await service.history(w.id, w.userId, retried.id)).runs[0].status, 'completed');
-  for (const scenario of ['expire', 'revoke', 'disabled', 'lost', 'auth']) {
+  for (const scenario of ['expire', 'revoke', 'unlinked', 'disabled', 'lost', 'auth']) {
     f.setMode(scenario === 'expire' ? 'retry' : scenario === 'lost' || scenario === 'auth' ? scenario : 'success');
     const count = f.effects.length;
     if (scenario === 'revoke')
       await f.db.databaseAdmin.query(`UPDATE ${f.table('tf_slack_destinations')} SET enabled=false WHERE id=$1`, [
         f.destinationId,
       ]);
+    const identity =
+      scenario === 'unlinked' &&
+      (
+        await f.db.databaseAdmin.query(
+          `SELECT id,credential FROM ${f.table('tf_slack_identities')} WHERE user_id=$1 AND state='authorized'`,
+          [w.userId],
+        )
+      ).rows[0];
+    if (identity)
+      await f.db.databaseAdmin.query(
+        `UPDATE ${f.table('tf_slack_identities')} SET state='revoked',credential=NULL WHERE id=$1`,
+        [identity.id],
+      );
     const runner = scenario === 'disabled' ? createWorkflows(f.runtime) : service;
     const { id, work, action } = await create(runner);
     if (scenario === 'expire') {
@@ -260,12 +273,18 @@ test('native Slack workflow: retry, expiry while retrying, revoke, disabled outb
       run.error,
       {
         expire: 'slack-action-expired',
-        revoke: 'slack-action-revoked',
+        revoke: 'slack-destination-unavailable',
+        unlinked: 'slack-account-not-linked',
         disabled: 'slack-action-unavailable',
         lost: 'slack-action-unknown',
         auth: 'slack-action-reauthorization-required',
       }[scenario],
     );
+    if (identity)
+      await f.db.databaseAdmin.query(
+        `UPDATE ${f.table('tf_slack_identities')} SET state='authorized',credential=$2 WHERE id=$1`,
+        [identity.id, identity.credential],
+      );
     if (scenario === 'revoke')
       await f.db.databaseAdmin.query(`UPDATE ${f.table('tf_slack_destinations')} SET enabled=true WHERE id=$1`, [
         f.destinationId,

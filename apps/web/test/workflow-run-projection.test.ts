@@ -65,7 +65,7 @@ test('a run status never invents active, failed or completed steps', () => {
     last: 'pending',
   });
   assert.deepEqual(workflowRunStates(detail(steps)), { $trigger: 'completed', first: 'next', last: 'pending' });
-  for (const status of ['completed', 'failed', 'blocked', 'cancelled', 'skipped'] as const) {
+  for (const status of ['completed', 'blocked', 'cancelled', 'skipped'] as const) {
     const states = workflowRunStates(detail(steps, status));
     assert.equal(states.first, 'unknown', status);
     assert.equal(states.last, 'unknown', status);
@@ -74,6 +74,33 @@ test('a run status never invents active, failed or completed steps', () => {
   const waiting = workflowRunStates(detail(steps, 'waiting', [receipt('first', {}, 'waiting')]));
   assert.equal(waiting.first, 'waiting');
   assert.equal(waiting.last, 'pending');
+});
+
+test('a failed run marks only the step it stopped at as failed', () => {
+  const steps = [plain('first'), plain('second'), plain('last')];
+  assert.deepEqual(workflowRunStates(detail(steps, 'failed', [receipt('first')])), {
+    $trigger: 'completed',
+    first: 'completed',
+    second: 'failed',
+    last: 'pending',
+  });
+  assert.deepEqual(workflowRunStates(detail(steps, 'failed', [receipt('first'), receipt('second', {}, 'waiting')])), {
+    $trigger: 'completed',
+    first: 'completed',
+    second: 'failed',
+    last: 'pending',
+  });
+  const check = condition('check', ['yes'], ['no'], false);
+  const branched = workflowRunStates(
+    detail([check, plain('yes'), plain('no')], 'failed', [receipt('check', runCondition(check, {}, new Map()))]),
+  );
+  assert.equal(branched.yes, 'skipped');
+  assert.equal(branched.no, 'failed');
+  for (const status of ['cancelled', 'blocked'] as const) {
+    const states = workflowRunStates(detail(steps, status, [receipt('first'), receipt('second', {}, 'waiting')]));
+    assert.equal(states.second, 'unknown', status);
+    assert.equal(states.last, 'unknown', status);
+  }
 });
 
 test('next eligibility follows condition receipts, including reversed arrays and inherited gates', () => {

@@ -64,6 +64,22 @@ export function runNote(run: Pick<z.infer<typeof runSchema>, 'source' | 'status'
   return `Scheduled for ${when(scheduledFor)}.`;
 }
 
+const runErrors: Record<string, string> = {
+  'slack-app-not-in-channel':
+    'Slack message not sent: the TulipFarm app is not in this Slack channel. Add the app to the channel, then run the workflow again.',
+  'slack-requester-not-in-channel':
+    'Slack message not sent: the person this workflow runs as is not in this Slack channel. They need to join it, then run the workflow again.',
+  'slack-account-not-linked':
+    'Slack message not sent: the person this workflow runs as needs to connect or reconnect their Slack account. Then run the workflow again.',
+  'slack-destination-unavailable':
+    "Slack message not sent: this channel is no longer a Slack destination. Add it again in Agents, on an agent's Execution tab under Slack destinations, then run the workflow again.",
+};
+
+/** Explains a failed run's error code when the fix is known; the code itself stays visible for support. */
+export function runErrorNote(error: string) {
+  return Object.hasOwn(runErrors, error) ? runErrors[error] : null;
+}
+
 const shortId = (id: string) => id.slice(0, 8);
 const count = (amount: number, noun: string) => `${amount.toLocaleString()} ${amount === 1 ? noun : `${noun}s`}`;
 
