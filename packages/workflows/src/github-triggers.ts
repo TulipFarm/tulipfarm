@@ -176,6 +176,8 @@ export function createGitHubWorkflowFanOut(pool: Pool, runtime: Runtime) {
               WHERE ${triggerMatches('t.value', '$6', '$7', '$8', '$9::text')}
             ) m
             WHERE w.id=$1 AND w.enabled AND w.active_revision=$2 AND m.ids IS NOT NULL
+              -- A redelivery is the same event even when a trigger switch changed which trigger would queue it.
+              AND NOT EXISTS (SELECT 1 FROM ${events} e WHERE e.workflow_id=$1 AND e.revision=$2 AND e.event_key=$3)
               AND (SELECT count(*) FROM ${events} e WHERE e.workflow_id=$1 AND e.revision=$2 AND NOT e.admitted)<$5
             ON CONFLICT DO NOTHING`,
             [

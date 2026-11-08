@@ -8,7 +8,7 @@ import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '../src/service.ts';
 import { createGitHubSubscriptions, createGitHubWorkflowFanOut } from '../src/github-triggers.ts';
-import { activate } from './commands.fixture.mjs';
+import { activate, switchTrigger } from './commands.fixture.mjs';
 
 const migration = name => readFile(new URL(`../../../apps/database/migrations/${name}`, import.meta.url), 'utf8');
 
@@ -45,6 +45,7 @@ ${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
         name: 'Stars',
         triggers: [
           { id: 'github', kind: 'github', repositories: ['42'], events: [{ event: 'star', actions: ['created'] }] },
+          { id: 'stars', kind: 'github', repositories: ['42'], events: [{ event: 'star' }] },
         ],
         steps: [{ id: 'copy', kind: 'transform', fields: { login: { kind: 'input', path: ['sender'] } } }],
       };
@@ -105,8 +106,10 @@ ${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
       await activate(service, w.id, w.userId, id, revision, true);
       assert.deepEqual(await subscriptions(), [
         { trigger_id: 'github', events: [{ event: 'star', actions: ['created'] }], repositories: ['42'] },
+        { trigger_id: 'stars', events: [{ event: 'star' }], repositories: ['42'] },
       ]);
 
+      await switchTrigger(service, w.id, w.userId, id, 'stars', false);
       await star('d-deleted', 'deleted');
       await fanOut({ event: 'watch', deliveryId: 'd-watch', body: { action: 'started', repository: { id: 42 } } });
       await fanOut({
@@ -126,6 +129,14 @@ ${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
       assert.deepEqual(
         (await service.history(w.id, w.userId, id).then(page => page.runs)).map(run => run.input.sender),
         ['octocat'],
+      );
+      await switchTrigger(service, w.id, w.userId, id, 'stars', true);
+      await switchTrigger(service, w.id, w.userId, id, 'github', false);
+      await star('d-1');
+      assert.deepEqual(
+        (await events()).map(event => event.event_key),
+        ['d-1'],
+        'a redelivery stays one event when a trigger switch changes which trigger matches it',
       );
 
       await activate(service, w.id, w.userId, id, revision, false);
