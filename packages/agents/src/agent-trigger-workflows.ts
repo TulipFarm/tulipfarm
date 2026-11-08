@@ -32,6 +32,23 @@ function cronLabel(expression: string, timezone: string) {
   return `${when} at ${hour.padStart(2, '0')}:${minute.padStart(2, '0')} (${zone})`;
 }
 
+function onceLabel(at: string, timezone = 'UTC') {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: timezone,
+    })
+      .formatToParts(new Date(at))
+      .map(part => [part.type, part.value]),
+  );
+  return `Once on ${parts.day} ${parts.month} ${parts.year} at ${parts.hour}:${parts.minute} (${timezone.replaceAll('_', ' ')})`;
+}
+
 function intervalLabel(minutes: number) {
   if (minutes % 1440 === 0) return minutes === 1440 ? 'Every day' : `Every ${minutes / 1440} days`;
   if (minutes % 60 === 0) return minutes === 60 ? 'Every hour' : `Every ${minutes / 60} hours`;
@@ -45,7 +62,7 @@ export function agentTriggerLabel(trigger: Trigger) {
     case 'interval':
       return intervalLabel(trigger.minutes);
     case 'once':
-      return `Once at ${trigger.at}`;
+      return onceLabel(trigger.at, trigger.timezone);
     case 'manual':
       return 'Run by hand';
     case 'webhook':

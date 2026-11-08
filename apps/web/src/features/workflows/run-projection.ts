@@ -19,12 +19,20 @@ export function workflowRunStates({
     $trigger: run.status === 'skipped' ? 'unknown' : run.startedAt || run.steps.length ? 'completed' : 'pending',
   };
   let next = live && run.status !== 'queued';
+  // A failed run stops at one step: the one still waiting, or the first one it would have run next.
+  const failed = run.status === 'failed';
+  let blame = failed;
   for (const step of definition.steps) {
     const receipt = receipts.get(step.id);
     if (receipt) {
       const withheld = withheldOutputSchema.safeParse(receipt.output).success;
       states[step.id] = withheld ? 'withheld' : receipt.status;
-      if (receipt.status === 'waiting') next = false;
+      if (receipt.status === 'waiting') {
+        if (blame) states[step.id] = 'failed';
+        else if (!live) states[step.id] = 'unknown';
+        next = false;
+        blame = false;
+      }
       if (step.kind === 'condition' && receipt.status === 'completed') {
         const outcome = conditionOutputSchema.safeParse(receipt.output);
         const same = (a: string[], b: string[]) => a.length === b.length && a.every(id => b.includes(id));
@@ -34,7 +42,10 @@ export function workflowRunStates({
           same(outcome.data.skipped, outcome.data.matched ? step.otherwise : step.ifMet)
         ) {
           choices.set(step.id, outcome.data.matched ? 'ifMet' : 'otherwise');
-        } else next = false;
+        } else {
+          next = false;
+          blame = false;
+        }
       }
       continue;
     }
@@ -44,8 +55,9 @@ export function workflowRunStates({
       continue;
     }
     const eligible = required.every(([id, branch]) => choices.get(id!) === branch);
-    states[step.id] = next && eligible ? 'next' : live ? 'pending' : 'unknown';
+    states[step.id] = blame && eligible ? 'failed' : next && eligible ? 'next' : live || failed ? 'pending' : 'unknown';
     next = false;
+    blame = false;
   }
   return states;
 }

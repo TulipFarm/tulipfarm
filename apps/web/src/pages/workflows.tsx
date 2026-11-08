@@ -43,7 +43,7 @@ import {
 import { WorkflowDefinition, WorkflowRun } from '@/features/workflows/workflow-detail';
 import { WorkflowSlackAction } from '@/features/workflows/slack-step';
 import { AgentStepStatus } from '@/features/workflows/agent-step-status';
-import { runNote, stepNote } from '@/features/workflows/run-notes';
+import { runErrorNote, runNote, stepNote } from '@/features/workflows/run-notes';
 import { webhookStatus } from '@/features/workflows/webhook-status';
 import { WebhookSetup, type IssuedWebhookKey } from '@/features/workflows/webhook-setup';
 import { WebhookDeliveries } from '@/features/workflows/webhook-deliveries';
@@ -572,7 +572,18 @@ function WorkflowPage({
                         variant={
                           selected.enabled && selected.activeRevision === selected.revision ? 'outline' : 'default'
                         }
-                        disabled={blocked}
+                        state={
+                          blocked
+                            ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                            : activationNeedsSponsor(selected)
+                              ? {
+                                  kind: 'blocked',
+                                  reason: selected.sponsorMembershipId
+                                    ? 'The sponsor must accept this revision before it can be activated.'
+                                    : 'Choose who it runs as in Settings, under Scheduled runs, before activating.',
+                                }
+                              : { kind: 'ready' }
+                        }
                         onClick={() =>
                           void execute({
                             path: `${base}/${selected.id}/activation`,
@@ -929,7 +940,10 @@ function WorkflowPage({
                             {runNote(run) && <p className="text-sm">{runNote(run)}</p>}
                             {run.error && run.status !== 'skipped' && (
                               <p role="alert" className="text-sm text-destructive">
-                                {run.error}
+                                {runErrorNote(run.error) ?? run.error}
+                                {runErrorNote(run.error) && (
+                                  <span className="block font-mono text-xs">{run.error}</span>
+                                )}
                               </p>
                             )}
                             {run.steps
@@ -1174,8 +1188,17 @@ function WorkflowPage({
     </PageContent>
   );
 }
+/** Whether activating would start unattended runs that no sponsor has accepted yet. */
+function activationNeedsSponsor(workflow: Workflow) {
+  const enabling = !workflow.enabled || workflow.activeRevision !== workflow.revision;
+  return enabling && !['manual', 'event'].includes(workflow.definition.trigger.kind) && !workflow.sponsorshipAccepted;
+}
 function commandError(error: RequestError) {
   const errors: Record<string, string> = {
+    'sponsorship-required':
+      'The sponsor must accept this revision before it can be activated. Once they accept, try again.',
+    'sponsor-access-lost':
+      'The sponsor can no longer run this workflow. Choose another sponsor in Settings, under Scheduled runs, or restore their access.',
     'schedule-in-past': 'The scheduled time has passed. Edit the workflow in chat before activating it.',
     'invalid-schedule': 'The schedule is invalid. Check its expression and time zone in chat.',
     'record-trigger-unavailable': 'Record date triggers are unavailable until this workspace finishes updating.',
