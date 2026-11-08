@@ -419,7 +419,7 @@ function GrantAdministration({ data, busy, stale, change }: TableAdministrationP
     ? [{ id: data.adminTeamId, name: workspaceAdminsLabel }, ...data.teams]
     : data.teams;
   const selected = recipients.find(team => team.id === teamId);
-  const names = tableLabels(data.tables, recipients);
+  const names = tableLabels(data.tables, data.teams, data.adminTeamId);
   const saved = (team: string, target: GrantInput['target']) =>
     data.grants.some(
       grant =>
