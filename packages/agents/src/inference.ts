@@ -27,7 +27,7 @@ import {
   recordChatRequestSizes,
   withChatModelRequest,
 } from '@tulipfarm/observability';
-import { chatToolCallLimit, chatTitleSchema, initialTitle } from '@tulipfarm/conversations/contracts';
+import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/conversations/contracts';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import {
   agentModelInputSchema,
@@ -2114,6 +2114,14 @@ const firstTitleLine = (text: string) =>
     .replace(/^["'“”*_]+|["'“”*_.]+$/gu, '')
     .trim();
 
+// A title is the summary itself; drop a "Title:" prefix or a "summary" label the model adds unless the request asked for one.
+const unlabeledTitle = (title: string, request: string) => {
+  const unprefixed = title.replace(/^(?:chat\s+)?(?:title|summary)\s*[:：]\s*/iu, '');
+  return /summar/iu.test(request)
+    ? unprefixed
+    : unprefixed.replace(/\s*(?:[:：\-–—]\s*summary|\(summary\))$/iu, '').replace(/\s+summary$/u, '');
+};
+
 /**
  * Titles a new chat from the requester's message alone, after its reply was delivered.
  * Returns undefined when the model gives no usable title; transport, timeout and credit failures throw.
@@ -2132,8 +2140,8 @@ export async function inferChatTitle(
       chatRequest(config, [{ role: 'user', text: request }], titleSystemPrompt),
       body => {
         const text = textResponseSchema.safeParse(body);
-        const title = text.success ? firstTitleLine(text.data) : '';
-        const parsed = title ? chatTitleSchema.safeParse(initialTitle([{ kind: 'text', text: title }])) : null;
+        const title = text.success ? unlabeledTitle(firstTitleLine(text.data), request).replace(/\s+/gu, ' ') : '';
+        const parsed = title ? chatTitleSchema.safeParse(shortenTitle(title)) : null;
         return {
           value: parsed?.success ? parsed.data : undefined,
           failed: !parsed?.success || nativeStep(config, body).kind === 'failure',

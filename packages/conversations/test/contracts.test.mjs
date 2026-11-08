@@ -6,6 +6,7 @@ import {
   displayPartSchema,
   initialTitle,
   sendMessageSchema,
+  shortenTitle,
   renameChatSchema,
 } from '../src/contracts.ts';
 import { chatDocumentReferences, chatDocumentSchema, chatDocumentText } from '../src/rich-content.ts';
@@ -191,8 +192,26 @@ test('ordered exact text stays unchanged while titles collapse whitespace and pr
   ];
   assert.deepEqual(sendMessageSchema.parse({ commandId: randomUUID(), messageId: randomUUID(), parts }).parts, parts);
   assert.equal(initialTitle(parts), 'hello 👨‍👩‍👧‍👦 e\u0301');
-  assert.equal(initialTitle([{ kind: 'text', text: 'e\u0301'.repeat(51) }]), 'e\u0301'.repeat(50));
+  assert.equal(initialTitle([{ kind: 'text', text: 'e\u0301'.repeat(50) }]), 'e\u0301'.repeat(50));
+  assert.equal(initialTitle([{ kind: 'text', text: 'e\u0301'.repeat(51) }]), `${'e\u0301'.repeat(49)}…`);
   assert.equal(initialTitle([{ kind: 'text', text: ' \n ' }]), 'New chat');
+});
+
+test('a fallback title that is too long ends at the last whole word with an ellipsis', () => {
+  const title = initialTitle([
+    { kind: 'text', text: 'Count the rows in Leads where the stage is Won. Reply only with the word done.' },
+  ]);
+  assert.equal(title, 'Count the rows in Leads where the stage is Won…');
+  assert.equal(chatTitleSchema.parse(title), title);
+  assert.equal(initialTitle([{ kind: 'text', text: `${'a'.repeat(45)} wonderful` }]), `${'a'.repeat(45)}…`);
+  assert.equal(
+    initialTitle([{ kind: 'text', text: 'Exactly fifty characters long, no cut needed here.' }]),
+    'Exactly fifty characters long, no cut needed here.',
+  );
+  const japanese = shortenTitle(
+    '四半期の売上を地域別に集計して、前年と比較した結果を表にまとめてください。それから、上位三つの地域について理由を説明してください。',
+  );
+  assert.ok(japanese.endsWith('…') && chatTitleSchema.safeParse(japanese).success);
 });
 
 test('messages without a selected model leave the choice to the server default', () => {
@@ -294,6 +313,6 @@ test('a message without text takes its title from the picked skill before attach
     initialTitle([skill, { kind: 'text', text: 'Acme Corp wants a demo.' }], 'Qualify lead'),
     'Acme Corp wants a demo.',
   );
-  assert.equal(initialTitle([skill], 'q'.repeat(120)), 'q'.repeat(50));
+  assert.equal(initialTitle([skill], 'q'.repeat(120)), `${'q'.repeat(49)}…`);
   assert.equal(initialTitle([{ kind: 'file', fileId: randomUUID() }]), 'Files');
 });
