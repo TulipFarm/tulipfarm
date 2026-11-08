@@ -452,6 +452,13 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
             },
           ],
         };
+        await assert.rejects(
+          service.propose(workspace.id, actor, randomUUID(), origin, {
+            plans: [{ ...input.plans[0], reference: { kind: 'integration', resultId: randomUUID(), contentDigest } }],
+          }),
+          error => !(error instanceof AccessDenied) && error.code === 'import-reference-unknown',
+          'An import naming no prepared source is not reported as a permission denial',
+        );
         const id = randomUUID();
         const proposal = await service.propose(workspace.id, actor, id, origin, input);
         const view = await service.read(workspace.id, actor.userId, chat, id);

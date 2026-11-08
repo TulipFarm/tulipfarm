@@ -255,7 +255,10 @@ test('chat readiness and relevant GitHub approvals', async t => {
             f.state.tools[1].status = 'blocked';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
             await activity
-              .getByText('Access denied. Ask an administrator to review your permissions.', { exact: true })
+              .getByText(
+                'Access denied. Your role doesn’t allow this step. Ask a workspace admin to give you the access it needs, or ask someone who has it to do it.',
+                { exact: true },
+              )
               .waitFor();
             f.state.tools = [
               {

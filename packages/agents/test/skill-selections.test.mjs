@@ -121,6 +121,7 @@ test('the latest table-authoring skill names no removed tools', async () => {
     'schema.context',
     'schema.inspect',
     'tables.definitions',
+    'tables.import.attachments',
     'tables.import.file',
     'tables.propose',
   ]);

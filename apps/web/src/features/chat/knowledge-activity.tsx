@@ -49,7 +49,9 @@ export function knowledgeToolActivityItem(tool: Tool, visual: ReactNode): ToolAc
   let status = tool.activityStatus ?? tool.status;
   let detail = tool.knowledge ? knowledgeOutcomeDetails[tool.knowledge.status] : undefined;
   if (status === 'cancelled') detail = 'The read was cancelled. No further search was started.';
-  else if (status === 'blocked') detail = 'Access denied. Ask an administrator to review your permissions.';
+  else if (status === 'blocked')
+    detail =
+      'Access denied. You can’t read this knowledge source. Ask whoever shares it, or a workspace admin, to give you access, then ask again.';
   else if (status === 'failed') detail = knowledgeOutcomeDetails.failed;
   else if (tool.knowledge?.status === 'failed' || tool.knowledge?.status === 'unavailable') status = 'failed';
   else if (tool.knowledge?.status === 'waiting') status = 'waiting';

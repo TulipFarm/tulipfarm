@@ -146,3 +146,29 @@ test('a server-provided activity detail explains a step that ended without its o
   assert.equal(item?.status, 'completed');
   assert.equal(item?.detail, 'Corrected and resubmitted.');
 });
+
+test('a denied step names the table permission it needs and where to ask for it', () => {
+  const [propose, update] = toolActivityItems([
+    tool({ tool: 'tables.propose', status: 'blocked' }),
+    tool({ tool: 'rows.update', status: 'blocked' }),
+  ]);
+  assert.match(String(propose?.detail), /Create rows and Update rows .* Table access/);
+  assert.match(String(update?.detail), /needs Update rows on the table/);
+  assert.doesNotMatch(String(propose?.detail), /review your permissions/);
+});
+
+test('a denied step that a later call of the same tool gets past no longer marks the reply as denied', () => {
+  const denied = tool({ tool: 'tables.propose', status: 'blocked' });
+  const other = tool({ tool: 'rows.update', status: 'blocked' });
+  const retry = tool({ tool: 'tables.propose', status: 'completed', activityStatus: 'waiting' });
+  const items = toolActivityItems([denied, other, retry]);
+  assert.deepEqual(
+    items.map(item => [item.id, item.status]),
+    [
+      [other.id, 'blocked'],
+      [retry.id, 'waiting'],
+    ],
+  );
+  assert.match(String(items[1]?.detail), /An earlier attempt was denied/);
+  assert.equal(toolActivityItems([retry, denied]).at(-1)?.status, 'blocked');
+});
