@@ -140,6 +140,11 @@ export function parseWorkingSummary(
 }
 
 const wordingLimit = 32768;
+/** Marks a request the member stopped, so a later turn answers the newest message instead of resuming this one. */
+export function stoppedRequest(text: string) {
+  return `[The member stopped this request before the reply finished. It is cancelled: do not answer, resume or repeat it, and treat any reply to it as partial. Answer only the newest message.]${text ? `\n\n${text}` : ''}`;
+}
+
 export const summaryHeading = 'Working summary of earlier conversation.';
 export function summaryBlock(summary: WorkingSummary, wording: readonly { id: string; text: string }[]): ChatMessage {
   const kept: string[] = [];

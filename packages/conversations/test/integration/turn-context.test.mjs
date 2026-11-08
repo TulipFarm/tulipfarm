@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
+import { stoppedRequest } from '../../src/compaction.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { createInternalConversations } from '../../src/internal.ts';
 import { turnRequester } from '../../src/turn-requester.ts';
@@ -61,6 +62,55 @@ test('queued B receives completed A before its own source, never later C or anot
     assert.deepEqual(
       (await executor.due(f.workspace.id)).filter(work => work.conversationId === chat.conversationId),
       [chat.work(c)],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a request stopped after a reload mid-reply is marked stopped, so the next reply answers the new message', async () => {
+  const f = await conversationFixture();
+  try {
+    const chat = await chatFixture(f),
+      w = f.workspace;
+    const calls = [];
+    const executor = createConversationExecutor(f.runtime, async ({ messages }) => {
+      calls.push(messages);
+      if (messages.at(-1).text === 'Write a poem about tulips') {
+        // A reload reads durable history while the reply is still streaming, then the member stops it.
+        const reloaded = await f.store.history(w.id, w.userId, chat.conversationId);
+        assert.deepEqual(
+          reloaded.messages.map(message => message.turn.status),
+          ['processing'],
+        );
+        await f.store.cancel(w.id, w.userId, chat.conversationId, reloaded.messages[0].turn.id, {
+          commandId: randomUUID(),
+          expectedGeneration: 0,
+        });
+        return 'Tulips sway in';
+      }
+      return `${messages.at(-1).text} answer`;
+    });
+    const stopped = await chat.send('Write a poem about tulips');
+    assert.equal(await executor.process(chat.work(stopped)), 'stale');
+    const next = await chat.send('What is 2 + 2?');
+    assert.equal(await executor.process(chat.work(next)), 'completed');
+    assert.deepEqual(calls.at(-1), [
+      { role: 'user', text: stoppedRequest('Write a poem about tulips') },
+      { role: 'user', text: 'What is 2 + 2?' },
+    ]);
+    assert.match(
+      stoppedRequest('x'),
+      /^\[The member stopped this request[^\]]*Answer only the newest message\.\]\n\nx$/,
+    );
+    const history = await f.store.history(w.id, w.userId, chat.conversationId);
+    assert.deepEqual(
+      history.messages.map(message => [message.parts[0].text, message.turn?.status]),
+      [
+        ['Write a poem about tulips', 'cancelled'],
+        ['What is 2 + 2?', 'completed'],
+        ['What is 2 + 2? answer', undefined],
+      ],
     );
   } finally {
     await f.close();
