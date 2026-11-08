@@ -363,7 +363,7 @@ function TableDetailView({
               <AlertDescription>
                 {state.canRestore
                   ? "Its rows are kept but can't be changed. Unarchive it to use it again."
-                  : "Its rows are kept but can't be changed. Someone who manages its fields can unarchive it."}
+                  : "Its rows are kept but can't be changed. Ask someone who can change its fields to unarchive it."}
               </AlertDescription>
               <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
             </Alert>
