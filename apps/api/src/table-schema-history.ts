@@ -17,6 +17,8 @@ import {
 import { pageArchiveVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 
 const phaseSchema = z.enum(['publishing', 'copying', 'reconciling', 'completed', 'blocked']);
+/** Why an entry's definition is not shown. Null when the definition is shown. */
+const definitionWithheldSchema = z.enum(['blocked-before-save', 'retention', 'source-access']);
 export const schemaHistoryEntrySchema = z.object({
   id: z.uuid(),
   revision: z.string().nullable(),
@@ -25,6 +27,7 @@ export const schemaHistoryEntrySchema = z.object({
   savedAt: z.iso.datetime().nullable(),
   appliedAt: z.iso.datetime().nullable(),
   definition: definitionSchema.nullable(),
+  definitionWithheld: definitionWithheldSchema.nullable(),
   receipt: executionReceiptSchema.nullable(),
 });
 export const schemaHistorySchema = z.object({
@@ -51,6 +54,7 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
     created_at: z.date(),
     saved_at: z.date().nullable(),
     activated_at: z.date().nullable(),
+    published_definition: definitionSchema.nullable(),
     manifest: z.union([proposalManifestSchema, redactedManifestSchema]),
     receipt: executionReceiptSchema.nullable(),
   });
@@ -81,7 +85,7 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
       (
         await tx.client.query(
           `
-      SELECT e.id,e.revision,e.phase,e.created_at,r.accepted_at AS saved_at,g.activated_at,p.manifest,
+      SELECT e.id,e.revision,e.phase,e.created_at,r.accepted_at AS saved_at,g.activated_at,g.definition AS published_definition,p.manifest,
         (SELECT receipt FROM ${s}.tf_table_proposal_receipts WHERE proposal_id=e.proposal_id AND table_id=e.table_id ORDER BY attempt DESC LIMIT 1) AS receipt
       FROM ${s}.tf_table_executions e JOIN ${s}.tf_table_proposals p ON p.id=e.proposal_id
       LEFT JOIN ${s}.tf_soul_revisions r ON r.table_execution_id=e.publication_id
@@ -96,16 +100,27 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
     );
     const result = [];
     for (const row of rows) {
-      let definition = null;
-      try {
-        if (!('redactedAt' in row.manifest)) {
-          const plan = row.manifest.plans.find(plan => plan.input.tableId === tableId);
-          await options.requireSources(tx, actor, [...row.manifest.sources, ...(plan?.importSources ?? [])]);
-          definition = plan?.after ?? null;
-        }
-      } catch (error) {
-        if (!(error instanceof AccessDenied)) throw error;
+      // A saved definition was published to the Soul, so it is table schema rather than proposal content.
+      let definition = row.published_definition;
+      const redacted = 'redactedAt' in row.manifest;
+      if (!definition && !('redactedAt' in row.manifest)) {
+        const plan = row.manifest.plans.find(plan => plan.input.tableId === tableId);
+        if (row.saved_at) definition = plan?.after ?? null;
+        else
+          try {
+            await options.requireSources(tx, actor, [...row.manifest.sources, ...(plan?.importSources ?? [])]);
+            definition = plan?.after ?? null;
+          } catch (error) {
+            if (!(error instanceof AccessDenied)) throw error;
+          }
       }
+      const definitionWithheld = definition
+        ? null
+        : !row.saved_at && row.phase === 'blocked'
+          ? 'blocked-before-save'
+          : redacted
+            ? 'retention'
+            : 'source-access';
       result.push({
         id: row.id,
         revision: row.revision,
@@ -114,6 +129,7 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
         savedAt: row.saved_at?.toISOString() ?? null,
         appliedAt: row.activated_at?.toISOString() ?? null,
         definition,
+        definitionWithheld,
         receipt: row.receipt,
       });
     }

@@ -486,6 +486,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
   const schemaHistory = await createTableSchemaHistory(options).history(w.id, w.userId, definition.id, { limit: 10 });
   assert.equal(schemaHistory.entries.length, 1);
   assert.equal(schemaHistory.entries[0].definition, null, 'Schema history accepts the redacted manifest');
+  assert.equal(schemaHistory.entries[0].definitionWithheld, 'blocked-before-save');
   const completedReview = await proposals.read(w.id, w.userId, chat, importProposal.id);
   assert.equal(completedReview.status, 'completed');
   assert.deepEqual(completedReview.plans[0].receipt, completedReceipt, 'Completion outcome survives value deletion');
