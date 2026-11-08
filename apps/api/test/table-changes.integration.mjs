@@ -112,6 +112,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       registerTableChanges(routes, {
         ...tableProposalOptions(runtime),
         auth,
+        identity: pool,
         resolveConfirmationCredential: async () => {
           credentialReads++;
           return db.login(workspace, 'confirmation');
@@ -317,6 +318,16 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
   const recordWrite = await app.inject({ method: 'POST', url: `${recordBase}/rows`, headers, payload: recordRequest });
   assert.equal(recordWrite.statusCode, 200, recordWrite.body);
   assert.equal(recordWrite.json().kind, 'available');
+  const recordHistory = await app.inject({
+    url: `${recordBase}/rows/${recordRequest.recordId}/history`,
+    headers,
+  });
+  assert.equal(recordHistory.statusCode, 200, recordHistory.body);
+  assert.deepEqual(
+    recordHistory.json().map(entry => entry.actor_name),
+    ['Requester'],
+    'Row history names people by display name',
+  );
   const rowIds = async query => {
     const response = await app.inject({ url: `${recordBase}/rows?revision=${revision}&${query}`, headers });
     assert.equal(response.statusCode, 200, response.body);

@@ -373,7 +373,7 @@ try {
       await page.getByRole('button', { name: 'Discard edits', exact: true }).click();
       await page.getByLabel('Notes', { exact: true }).waitFor({ state: 'detached' });
       await rowAction('Delete row');
-      const confirmDelete = page.getByRole('alertdialog', { name: `Delete row ${recordId.slice(0, 8)}?`, exact: true });
+      const confirmDelete = page.getByRole('alertdialog', { name: 'Delete “Northwind Traders”?', exact: true });
       await confirmDelete.getByText(/recoverable for 30 days from Deleted rows in the ⋯ menu/).waitFor();
       await confirmDelete.getByRole('button', { name: 'Keep row', exact: true }).click();
       await confirmDelete.waitFor({ state: 'detached' });
@@ -391,7 +391,7 @@ try {
       assert.equal(await rows.getByRole('button', { name: 'Add row', exact: true }).count(), 0);
       await rowAction('History');
       const history = page.getByRole('region', { name: 'Row history', exact: true });
-      await history.getByRole('heading', { name: `History for row ${recordId}`, exact: true }).waitFor();
+      await history.getByRole('heading', { name: 'History for “Northwind Traders”', exact: true }).waitFor();
       await history.getByRole('button', { name: 'Close history', exact: true }).click();
       await history.waitFor({ state: 'detached' });
       readOnly = false;

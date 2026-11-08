@@ -257,6 +257,7 @@ try {
           id: randomUUID(),
           token: randomUUID(),
           actor: { kind: 'human', userId: 'ada' },
+          actor_name: 'Ada Lovelace',
           field_ids: [subjectId],
           outcome: 'applied',
           created_at: workspace.createdAt,
@@ -637,7 +638,7 @@ try {
   assert.equal(target.values[subjectId].value, 'Printer offline');
   assert.equal(writes.length, 2);
   await rowAction(target.id, 'Delete row');
-  await dialog.getByText(`Delete row ${short}?`, { exact: true }).waitFor();
+  await dialog.getByText('Delete “Printer offline”?', { exact: true }).waitFor();
   await dialog.getByText(/Its values stay recoverable for 30 days from Deleted rows in the ⋯ menu\./).waitFor();
   await dialog.getByRole('button', { name: 'Keep row', exact: true }).click();
   await dialog.waitFor({ state: 'detached' });
@@ -652,7 +653,7 @@ try {
     await page.emulateMedia({ colorScheme: theme });
     await page.setViewportSize({ width: 390, height: 844 });
     await rowAction(target.id, 'Delete row');
-    await dialog.getByText(`Delete row ${short}?`, { exact: true }).waitFor();
+    await dialog.getByText('Delete “Printer offline”?', { exact: true }).waitFor();
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
       true,
@@ -752,7 +753,7 @@ try {
   await dialog.waitFor({ state: 'detached' });
   await page.getByRole('region', { name: 'Incoming linked rows', exact: true }).waitFor();
   await page.getByRole('heading', { name: 'Related tickets', exact: true }).waitFor();
-  await page.getByRole('link', { name: `Row ${linked.id.slice(0, 8)}`, exact: true }).waitFor();
+  await page.getByRole('link', { name: linked.values[subjectId].value, exact: true }).waitFor();
   const linkedToken = records.get(linked.id).token;
   await page.getByRole('button', { name: 'Edit row', exact: true }).click();
   const linkedEditor = page.getByRole('form', { name: 'Edit row', exact: true });
@@ -785,12 +786,17 @@ try {
   const restore = history.getByRole('button', { name: 'Restore reviewed values', exact: true });
   const reviewLive = async () => {
     await rowAction(linked.id, 'History');
+    await history
+      .getByRole('heading', { name: `History for “${records.get(linked.id).values[subjectId].value}”`, exact: true })
+      .waitFor();
+    await history.getByText('Ada Lovelace', { exact: true }).waitFor();
     await history.getByRole('button', { name: 'Review values before update', exact: true }).click();
     await history.getByRole('cell', { name: 'Older subject', exact: true }).waitFor();
   };
   const reviewDeleted = async () => {
     await openPanel('Deleted rows');
     await deletedPanel.getByRole('button', { name: `Review deleted row ${short}`, exact: true }).click();
+    await history.getByRole('heading', { name: 'History for “Deleted subject”', exact: true }).waitFor();
     await history.getByRole('button', { name: 'Review values before delete', exact: true }).click();
     await history.getByRole('cell', { name: 'Deleted subject', exact: true }).waitFor();
   };

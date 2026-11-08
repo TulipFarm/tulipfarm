@@ -58,6 +58,20 @@ export function rowLabel(definition: TableDefinition, values: TableValues, syste
   );
 }
 
+/** The V4 title rule: the first text field, otherwise the first field, otherwise `Row` and the short row ID. */
+export function rowTitle(
+  definition: TableDefinition,
+  record: { id: string; values: TableValues },
+  systemKind?: 'workspace-members',
+): string {
+  if (systemKind === 'workspace-members') return workspaceMemberLabel(record.values);
+  const field = definition.fields.find(item => item.kind === 'text') ?? definition.fields[0];
+  const value = field && record.values[field.id];
+  const title =
+    field && value && labelKinds.has(value.kind) ? formatTableValue(value, definition, field.id).trim() : '';
+  return title || `Row ${record.id.slice(0, 8)}`;
+}
+
 function FieldDetails({ field }: { field: TableField }) {
   switch (field.kind) {
     case 'text':
