@@ -31,6 +31,8 @@ import { formatTableValue, rowLabel } from '@/features/tables/definition-view';
 import { useOptionalCanvas, useResultAttention } from './canvas-state';
 import { schemaCanvasItem } from './schema-canvas';
 import { useApprovalDockEntry } from './approval-dock';
+import { conversationKeys } from './queries';
+import { useFeatureChanges } from '@/lib/query/use-feature-read';
 import type {
   ImportProgress,
   ProposalCommand,
@@ -360,6 +362,16 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
       )
       .join('\n'),
   });
+  // The reply's activity shows this proposal's status, so read the chat again whenever that status changes.
+  const { change } = useFeatureChanges();
+  const proposalStatus = loaded?.status;
+  const seenStatus = useRef(proposalStatus);
+  useEffect(() => {
+    const previous = seenStatus.current;
+    seenStatus.current = proposalStatus;
+    if (previous && proposalStatus && previous !== proposalStatus)
+      void change({ keys: [conversationKeys.histories(chatId)] });
+  }, [proposalStatus, chatId, change]);
   // A newer proposal in this chat may replace this one, so recheck its status when it stops being the latest.
   const refresh = read.refresh;
   const pending = loaded?.status === 'pending';

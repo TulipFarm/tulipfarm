@@ -548,7 +548,9 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         assert.deepEqual(await detail({ result: first, sources: [] }), {
           status: 'completed',
           detail: 'Replaced by a revision.',
+          proposal: true,
         });
+        assert.deepEqual(await detail({ result: second, sources: [] }), { status: 'waiting', proposal: true });
         assert.deepEqual(await detail({ error: 'invalid-arguments', issues: [] }), {
           status: 'completed',
           detail: 'Corrected and resubmitted.',

@@ -130,6 +130,7 @@ const messageSchema = z.object({
         importId: z.uuid().optional(),
         followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
+        tableProposal: z.literal(true).optional(),
         integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
         rowView: rowViewSchema.optional(),

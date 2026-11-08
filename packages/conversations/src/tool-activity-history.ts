@@ -166,7 +166,8 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
 }
 
 type StoredToolRow = { id: string; tool: string; status: string; output?: unknown };
-export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string };
+/** `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed. */
+export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string; proposal?: true };
 
 /** The step's current status, and a note when its saved result alone would mislead. */
 export async function storedToolActivity(
@@ -181,7 +182,7 @@ export async function storedToolActivity(
       return { status: 'completed', detail: 'Corrected and resubmitted.' };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
-    if (activity) return activity;
+    if (activity) return { ...activity, proposal: true };
   }
   return { status: await savedToolStatus(tx, row) };
 }

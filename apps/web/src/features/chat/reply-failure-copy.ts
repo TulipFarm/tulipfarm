@@ -55,6 +55,16 @@ export function replyFailure(code: string | null | undefined): string | null {
   return (code && stopReasons[code]) || unknownStop;
 }
 
+/**
+ * A failed reply that already saved a table change proposal lost only its text: the proposal card is valid and can
+ * be approved, so the reply doesn't read as failed.
+ */
+export function proposalKeptNote(tools: readonly { tableProposal?: true | undefined }[]): string | null {
+  return tools.some(tool => tool.tableProposal)
+    ? 'Reply text missing. The table change proposal from this reply is still valid.'
+    : null;
+}
+
 /** A failed reply with completed tool calls continues from them; otherwise it is retried from the start. */
 export function retryLabel(code: string | null | undefined, resumes: boolean, compacts: boolean): string {
   if (compacts) return 'Compact and retry';
