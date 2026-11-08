@@ -401,6 +401,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
               END,E'\n' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id),'') AS text,
             (t.status='cancelled' AND t.source_message_id=m.id) AS stopped
             FROM ${table(tx, 'tf_conversation_messages')} m JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id=m.id OR t.response_message_id=m.id
+              OR t.id=(SELECT r.turn_id FROM ${table(tx, 'tf_conversation_results')} r WHERE r.message_id=m.id AND r.conversation_id=m.conversation_id)
               OR t.id=(SELECT r.turn_id FROM ${table(tx, 'tf_conversation_parts')} p
                 LEFT JOIN ${table(tx, 'tf_conversation_responses')} a ON a.id=p.response_id
                 JOIN ${table(tx, 'tf_conversation_requests')} r ON r.id=COALESCE(p.request_id,a.request_id) WHERE p.message_id=m.id LIMIT 1)

@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
 import { stoppedRequest } from '../../src/compaction.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
+import { createReplyTextPublisher } from '../../src/event-publisher.ts';
 import { createInternalConversations } from '../../src/internal.ts';
 import { turnRequester } from '../../src/turn-requester.ts';
 import { conversationFixture } from '../fixture.mjs';
@@ -110,6 +111,69 @@ test('a request stopped after a reload mid-reply is marked stopped, so the next 
         ['Write a poem about tulips', 'cancelled'],
         ['What is 2 + 2?', 'completed'],
         ['What is 2 + 2? answer', undefined],
+      ],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a stopped reply keeps the text it streamed, marked stopped, and later replies see it as partial', async () => {
+  const f = await conversationFixture();
+  try {
+    const chat = await chatFixture(f),
+      w = f.workspace;
+    const calls = [];
+    const stop = async () => {
+      const [message] = (await f.store.history(w.id, w.userId, chat.conversationId)).messages.slice(-1);
+      await f.store.cancel(w.id, w.userId, chat.conversationId, message.turn.id, {
+        commandId: randomUUID(),
+        expectedGeneration: 0,
+      });
+    };
+    const executor = createConversationExecutor(f.runtime, async ({ messages, fence }) => {
+      calls.push(messages);
+      const request = messages.at(-1).text;
+      if (request === 'Write a poem about tulips') {
+        const publisher = createReplyTextPublisher(f.runtime, fence, 0);
+        publisher.update(0, 'Tulips sway in');
+        await publisher.close();
+        await stop();
+        return 'Tulips sway in the spring wind';
+      }
+      if (request === 'Stop before any text') {
+        await stop();
+        return 'Never shown';
+      }
+      return `${request} answer`;
+    });
+    const stopped = await chat.send('Write a poem about tulips');
+    assert.equal(await executor.process(chat.work(stopped)), 'stale');
+    const silent = await chat.send('Stop before any text');
+    assert.equal(await executor.process(chat.work(silent)), 'stale');
+    const next = await chat.send('What is 2 + 2?');
+    assert.equal(await executor.process(chat.work(next)), 'completed');
+    assert.deepEqual(calls.at(-1), [
+      { role: 'user', text: stoppedRequest('Write a poem about tulips') },
+      { role: 'assistant', text: 'Tulips sway in' },
+      { role: 'user', text: stoppedRequest('Stop before any text') },
+      { role: 'user', text: 'What is 2 + 2?' },
+    ]);
+    // A reload reads the partial reply from durable history.
+    const history = await f.store.history(w.id, w.userId, chat.conversationId);
+    assert.deepEqual(
+      history.messages.map(message => [
+        message.author,
+        message.parts[0].text,
+        message.turn?.status,
+        message.stoppedTurnId,
+      ]),
+      [
+        ['human', 'Write a poem about tulips', 'cancelled', undefined],
+        ['assistant', 'Tulips sway in', undefined, stopped.turnId],
+        ['human', 'Stop before any text', 'cancelled', undefined],
+        ['human', 'What is 2 + 2?', 'completed', undefined],
+        ['assistant', 'What is 2 + 2? answer', undefined, undefined],
       ],
     );
   } finally {

@@ -436,8 +436,28 @@ try {
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   assert.equal(writes.at(-1).body.expectedGeneration, 0);
   await page.getByRole('button', { name: 'Stop reply' }).click();
-  await page.getByText('Reply cancelled', { exact: true }).waitFor();
+  await page.getByText('You stopped this reply', { exact: true }).waitFor();
   assert.equal(writes.at(-1).body.expectedGeneration, 1);
+  // Text streamed before the stop stays as a partial reply, which then carries the stopped note.
+  history.push({
+    id: randomUUID(),
+    sequence: history.length + 1,
+    author: 'assistant',
+    createdAt: new Date().toISOString(),
+    parts: [{ kind: 'text', text: 'Partial answer' }],
+    turn: null,
+    stoppedTurnId: history[1].turn.id,
+  });
+  await notifyChange(page, workspace.id, userId, 'detail', chatId);
+  await page.getByText('Partial answer', { exact: true }).waitFor();
+  assert.equal(await page.getByText('You stopped this reply', { exact: true }).count(), 1);
+  assert.deepEqual(await messageList.getByText(/^(Partial answer|You stopped this reply)$/).allTextContents(), [
+    'Partial answer',
+    'You stopped this reply',
+  ]);
+  history.pop();
+  await notifyChange(page, workspace.id, userId, 'detail', chatId);
+  await page.getByText('Partial answer', { exact: true }).waitFor({ state: 'detached' });
   await chatAction('Edit title');
   await page.getByLabel('Chat title', { exact: true }).fill('Saved conversation');
   await page.getByRole('button', { name: 'Save title' }).click();

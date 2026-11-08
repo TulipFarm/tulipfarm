@@ -359,6 +359,8 @@ export const messageSchema = z.object({
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
   /** Set on a message that a scheduled follow-up sent for its requester, not one they typed then. */
   followUp: z.object({ id: uuidSchema, instruction: z.string(), requestedAt: z.string() }).nullable().optional(),
+  /** The stopped turn whose streamed text this partial assistant reply keeps. */
+  stoppedTurnId: uuidSchema.optional(),
 });
 export const historySchema = z.object({
   messages: z.array(messageSchema),

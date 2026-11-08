@@ -120,7 +120,7 @@ try {
   assert.equal(retries[0].expectedGeneration, 5);
   assert.equal(await page.getByText(error, { exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Stop reply', exact: true }).click();
-  await page.getByText('Reply cancelled', { exact: true }).waitFor();
+  await page.getByText('You stopped this reply', { exact: true }).waitFor();
   await page.getByLabel('Message', { exact: true }).fill('Use the newly selected model.');
   await Promise.all([
     page.waitForResponse(

@@ -633,7 +633,8 @@ export async function readConversationMessage(
     CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, m.sequence,
     COALESCE((SELECT string_agg(p.text, '' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id AND p.kind IN ('text','layout')), '') AS text,
     (SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r WHERE r.message_id=m.id) AS sources,
-    EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.response_message_id=m.id OR t.source_message_id=m.id) AS "turnResponse"
+    EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.response_message_id=m.id OR t.source_message_id=m.id
+      OR t.id=(SELECT r.turn_id FROM ${table(tx, 'tf_conversation_results')} r WHERE r.message_id=m.id)) AS "turnResponse"
     FROM ${table(tx, 'tf_conversation_messages')} m WHERE m.conversation_id=$1 AND m.id=$2`,
           [conversationId, messageId],
         )

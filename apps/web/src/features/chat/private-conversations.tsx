@@ -1185,6 +1185,14 @@ function ConversationDetail({
                                 pickGitHub={pickGitHub}
                                 correct={() => composerInput.current?.focus()}
                               />
+                              {message.turn?.status === 'cancelled' &&
+                                !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
+                                  <Message align="start">
+                                    <MessageContent>
+                                      <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
+                                    </MessageContent>
+                                  </Message>
+                                )}
                             </li>
                           ),
                         ),
@@ -1572,7 +1580,7 @@ const turnLabels = {
   reconciling: 'Reply checking an earlier action',
   failed: 'Reply failed',
   completed: 'Reply completed',
-  cancelled: 'Reply cancelled',
+  cancelled: 'You stopped this reply',
   blocked: 'Reply blocked',
 };
 function GooglePrivateOnly({
@@ -1724,7 +1732,8 @@ function ConversationEntry({
   const retrying = message.turn ? replyRetrying(message.turn.status, message.turn.errorCode) : null;
   const answeredBy = message.turn ? fallbackNote(message.turn.status, message.turn.errorCode) : null;
   const quiet =
-    !message.turn || (['queued', 'processing', 'completed'].includes(message.turn.status) && !retrying && !answeredBy);
+    !message.turn ||
+    (['queued', 'processing', 'completed', 'cancelled'].includes(message.turn.status) && !retrying && !answeredBy);
   const entry = useRef<HTMLDivElement>(null);
   return (
     <div className="space-y-3">
@@ -1844,6 +1853,7 @@ function ConversationEntry({
           {message.turn?.mode === 'plan' && (
             <p className="text-xs text-muted-foreground">Plan only · no setup actions</p>
           )}
+          {message.stoppedTurnId && <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>}
           {text && (
             <EntryActions
               text={text}
