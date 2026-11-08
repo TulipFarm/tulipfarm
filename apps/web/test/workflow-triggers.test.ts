@@ -5,6 +5,7 @@ import {
   knownTriggers,
   liveTriggers,
   runTriggerName,
+  triggerLine,
   triggersLine,
   triggerState,
 } from '../src/features/workflows/triggers.ts';
@@ -33,6 +34,18 @@ const workflow = (saved: Trigger[], active: Trigger[] | null, enabled = true, of
       webhook: null,
     })),
   });
+
+test('a once trigger is named with its time zone in the shared format', () => {
+  assert.equal(
+    triggerLine({ kind: 'once', at: '2026-11-08T09:46:00Z', timezone: 'Asia/Kolkata' }),
+    'Once on 8 Nov 2026 at 15:16 (Asia/Kolkata)',
+  );
+  assert.equal(
+    triggerLine({ kind: 'once', at: '2026-11-08T09:46:00Z', timezone: 'America/New_York' }),
+    'Once on 8 Nov 2026 at 04:46 (America/New York)',
+  );
+  assert.equal(triggerLine({ kind: 'once', at: '2026-11-08T09:46:00Z' }), 'Once on 8 Nov 2026 at 09:46 (UTC)');
+});
 
 test('a trigger list summary names each trigger by label or settings', () => {
   assert.equal(triggersLine([]), 'Started by hand');

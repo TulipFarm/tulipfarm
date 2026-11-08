@@ -600,7 +600,8 @@ export type RunTrigger = { id: string | null; kind: TriggerKind | 'manual' };
 export const manualRunTrigger: RunTrigger = { id: null, kind: 'manual' };
 /** Run values hold the starting trigger under a key no step ID can take. */
 export const runTriggerKey = '$trigger';
-function onceSummary(at: string, timezone = 'UTC') {
+/** A once trigger's name, such as "Once on 6 Nov 2026 at 21:00 (Asia/Kolkata)"; without a time zone it is UTC. */
+export function onceTriggerName(at: string, timezone = 'UTC') {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-GB', {
       day: 'numeric',
@@ -620,7 +621,7 @@ function onceSummary(at: string, timezone = 'UTC') {
 export function triggerSummary(trigger: Trigger): string {
   switch (trigger.kind) {
     case 'once':
-      return onceSummary(trigger.at, trigger.timezone);
+      return onceTriggerName(trigger.at, trigger.timezone);
     case 'interval':
       return trigger.minutes === 1 ? 'Every minute' : `Every ${trigger.minutes} minutes`;
     case 'cron':
