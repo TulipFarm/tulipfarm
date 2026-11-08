@@ -724,7 +724,7 @@ function WorkspaceShellContent() {
             )}
             <header
               aria-label="Workspace header"
-              className={`@container flex h-(--sprout-bar-height) shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
+              className={`group/header @container flex h-(--sprout-bar-height) shrink-0 items-center gap-2 border-b px-3 ${onCalendar ? 'pointer-coarse:h-14' : ''}`}
             >
               <SidebarTrigger>
                 <SidebarLeft size={16} aria-hidden="true" />
@@ -739,11 +739,11 @@ function WorkspaceShellContent() {
                   workspaceSlug={workspace.slug}
                 />
               )}
-              {/* Under 20rem the page title needs the room; the navigation sheet still names the workspace. */}
+              {/* Under 20rem, or beside page actions on a phone, the page title needs the room; the navigation sheet still names the workspace. */}
               {!onCalendar && (
                 <span
                   title={workspace.name}
-                  className="max-w-24 truncate text-xs text-muted-foreground md:hidden @max-xs:hidden"
+                  className="max-w-24 truncate text-xs text-muted-foreground md:hidden @max-xs:hidden max-sm:group-has-data-[slot=page-actions]/header:hidden"
                 >
                   {workspace.name}
                 </span>

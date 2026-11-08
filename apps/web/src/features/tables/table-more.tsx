@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -29,18 +29,37 @@ import type { TableWorkspace } from './references';
 
 type Panel = 'deleted' | 'schema';
 
+const wideHeaderQuery = '(min-width: 640px)';
+const subscribeWideHeader = (changed: () => void) => {
+  const media = window.matchMedia(wideHeaderQuery);
+  media.addEventListener('change', changed);
+  return () => media.removeEventListener('change', changed);
+};
+/** Below 640px the workspace header is too narrow for text buttons beside the table name. */
+export function useWideTableHeader() {
+  return useSyncExternalStore(
+    subscribeWideHeader,
+    () => window.matchMedia(wideHeaderQuery).matches,
+    () => true,
+  );
+}
+
 /** Table maintenance lives behind one menu so the page stays about rows. */
 export function TableMore({
   state,
   api,
   workspace,
   disabled,
+  changeFields = false,
 }: {
   state: DefinitionState;
   api: TableApi;
   workspace: TableWorkspace;
   disabled: boolean;
+  /** Offers "Change fields in chat" here when the header has no room for its button. */
+  changeFields?: boolean;
 }) {
+  const navigate = useNavigate();
   const [panel, setPanel] = useState<Panel | null>(null);
   const [archiving, setArchiving] = useState<ArchiveKind | null>(null);
   const applied = state.applied;
@@ -51,6 +70,24 @@ export function TableMore({
           <MoreH size={16} aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {changeFields && (
+            <>
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  onClick={() =>
+                    void navigate({
+                      to: '/$workspaceSlug',
+                      params: { workspaceSlug: workspace.slug },
+                      search: { intent: 'edit-table', tableId: state.id },
+                    })
+                  }
+                >
+                  Change fields in chat
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuGroup>
             {applied && <DropdownMenuItem onClick={() => setPanel('deleted')}>Deleted rows</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => setPanel('schema')}>Schema history</DropdownMenuItem>
