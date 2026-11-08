@@ -130,7 +130,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Uses a table',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [{ id: 'table', kind: 'transform', fields: { table: { kind: 'literal', value: tableId } } }],
         },
       });

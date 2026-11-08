@@ -538,7 +538,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           definition: {
             version: 1,
             name,
-            trigger: { kind: 'manual' },
+            triggers: [],
             steps: [{ id: 'table', kind: 'transform', fields: { table: { kind: 'literal', value } } }],
           },
         });
