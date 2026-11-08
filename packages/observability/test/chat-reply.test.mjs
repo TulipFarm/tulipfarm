@@ -17,6 +17,7 @@ import {
   noteChatReplyFinal,
   observeChatDetail,
   observeChatTool,
+  observeInference,
   telemetryIdentity,
   trace,
   withChatMeasurements,
@@ -113,6 +114,7 @@ test('a greeting reply records each segment once, counting nested database time 
     assert.deepEqual(Object.keys(point.attributes).sort(), [
       'application',
       'environment',
+      ...(point.attributes.segment === 'first_text' ? ['gen_ai.request.model'] : []),
       'outcome',
       'segment',
       'service',
@@ -123,6 +125,7 @@ test('a greeting reply records each segment once, counting nested database time 
     assert.equal(point.attributes.tools, 'no');
   }
   const segments = bySegment(points);
+  assert.equal(segments.first_text.attributes['gen_ai.request.model'], 'unknown');
   close(segments.total.value.sum, 5);
   close(segments.first_text.value.sum, 3.5);
   close(segments.queue.value.sum, 1.2);
@@ -348,4 +351,30 @@ test('send measurements record the request wait and save phases without a reply 
   const { points, summaries } = await collect();
   assert.deepEqual(points, []);
   assert.deepEqual(summaries, []);
+});
+
+test('first_text is labelled with the reply model that streamed first, not a title or compaction model', async t => {
+  const { spend, collect } = harness(t);
+  const streamed = (model, purpose, tokens = true) =>
+    withChatModelRequest(purpose, () =>
+      observeInference({ provider: 'azure', model, operation: 'chat' }, async report => {
+        if (tokens) report.firstToken();
+        report.usage(10, 5);
+        await spend(500)();
+      }),
+    );
+  await withChatMeasurements(async () => {
+    await streamed('title-model', 'title');
+    await streamed('silent-model', 'reply', false);
+    await streamed('grok-4.3', 'reply');
+    await streamed('fallback-model', 'reply');
+    noteChatReplyFinal(chatReplyFinal(timing({ firstTextSeconds: 1.4 })));
+  }, 'turn-model');
+  const { points, summaries } = await collect();
+  const segments = bySegment(points);
+  assert.equal(segments.first_text.attributes['gen_ai.request.model'], 'grok-4.3');
+  close(segments.first_text.value.sum, 1.4);
+  for (const segment of ['total', 'queue', 'model', 'tools', 'db', 'overhead'])
+    assert.equal(segments[segment].attributes['gen_ai.request.model'], undefined);
+  assert.equal(summaries[0]['gen_ai.request.model'], 'grok-4.3');
 });

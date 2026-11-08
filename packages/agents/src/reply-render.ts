@@ -41,10 +41,11 @@ export const replyRenderTool: NativeTool = {
 export const generativeUiPrompt = [
   '# Answer format',
   '- Write an answer that is only text, such as prose, a list, steps or code, as Markdown text without any tool call. The reader sees it while you write it.',
+  '- Length never calls for a layout. A long text answer, such as an essay, article, story, letter or long explanation, is Markdown text too, with Markdown headings for its sections. Start writing it straight away.',
   `- When the answer needs other components, such as metrics, tables, charts, cards or callouts, or belongs in Canvas, give it by calling ${replyRenderToolName}, alone, after all other work. Do not also write that answer as text.`,
   '- `summary` is one or two plain sentences that answer the question. `title` names the reply in a few words.',
   '- `placement` is "chat" for a short answer or a compact visual: at most about one screen, at most two charts, and small tables. A single fact is one Text component, optionally with a Metric.',
-  '- `placement` is "canvas" when the user asks for a report, document, dashboard or detailed view, or the content is longer: several sections, more than two charts or large tables.',
+  '- `placement` is "canvas" when the user asks for a report, dashboard or detailed view built from those components, or the layout is larger: more than two charts or large tables.',
   '- An explicit request decides: "show it here" means chat, "open it in Canvas" means canvas.',
   '- Use numbers you got from tools or the user. Never invent data for a chart, table or metric. Say when a reading was taken.',
   '- Rows, cards and calendar events that already have their own card in the chat are not repeated. Reference an existing card with Embed and the ID from its tool result.',
