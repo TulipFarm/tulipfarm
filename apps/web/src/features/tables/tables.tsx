@@ -360,7 +360,12 @@ function TableDetailView({
           {state.archived && (
             <Alert>
               <AlertTitle>This table is archived</AlertTitle>
-              <AlertDescription>Its rows are kept but can't be changed. To restore it, ask in chat.</AlertDescription>
+              <AlertDescription>
+                {state.canRestore
+                  ? "Its rows are kept but can't be changed. Unarchive it to use it again."
+                  : "Its rows are kept but can't be changed. Someone who manages its fields can unarchive it."}
+              </AlertDescription>
+              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
             </Alert>
           )}
           {state.saved && state.applied && state.saved.revision !== state.applied.revision && (
@@ -371,20 +376,7 @@ function TableDetailView({
               </AlertDescription>
             </Alert>
           )}
-          {state.archived ? (
-            <StatePanel
-              kind="empty"
-              icon={Database}
-              title="This table is archived"
-              description={
-                state.canRestore
-                  ? "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Unarchive it to use it again."
-                  : "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Someone who manages its fields can unarchive it."
-              }
-            >
-              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
-            </StatePanel>
-          ) : state.applied ? (
+          {state.applied ? (
             <Records
               key={`${workspace.id}/${state.id}`}
               workspace={workspace}
