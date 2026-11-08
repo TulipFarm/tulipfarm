@@ -1814,6 +1814,41 @@ test(
       );
       assert.equal(await finish(await schema(renameField(tickets, 'Replacement after revocation'))), 'completed');
     });
+    await t.test('a chat proposal that cites the requester’s own memory applies', async () => {
+      const contacts = {
+        formatVersion: 2,
+        id: randomUUID(),
+        owningTeamId: team,
+        label: 'Remembered contacts',
+        fields: [text('Name')],
+        uniqueKeys: [],
+      };
+      // Chat adds the requester's personal memory to every call's sources.
+      const proposal = await proposals.propose(
+        ws.id,
+        actor,
+        randomUUID(),
+        { conversationId: chat, turnId: turn, sources: [{ kind: 'personal-memory', membershipId: ws.membershipId }] },
+        {
+          plans: [
+            {
+              kind: 'schema',
+              tableId: contacts.id,
+              dependsOn: [],
+              expectedRevision: null,
+              target: contacts,
+              transforms: { outputs: [] },
+            },
+          ],
+        },
+      );
+      await decisions.decide(ws.id, ws.userId, chat, proposal.id, {
+        digest: proposal.digest,
+        commandId: randomUUID(),
+        decision: 'approve',
+      });
+      assert.equal(await finish(proposal), 'completed');
+    });
     await t.test(
       'cleanup retains active, resumable and held generations and removes expired physical artifacts',
       async () => {

@@ -182,7 +182,7 @@ const proposalPlans = z.object({
 });
 
 /** Names the permissions a denied `tables.propose` call needed, from the kinds of change it asked for. */
-function deniedProposalDetail(call: unknown) {
+export function deniedProposalDetail(call: unknown) {
   const input = z.object({ input: z.string() }).safeParse(call);
   if (!input.success) return undefined;
   let value: unknown;
@@ -220,9 +220,12 @@ export async function storedToolActivity(
     const result = z.object({ result: z.unknown() }).safeParse(row.output);
     const output = result.success ? result.data.result : row.output;
     const outcome = z.object({ error: z.string() }).safeParse(output);
-    const detail = outcome.success ? proposalOutcomes.get(outcome.data.error) : undefined;
-    if (detail && (outcome.data?.error !== 'invalid-arguments' || (await resubmitted(tx, row.id))))
-      return { status: 'completed', detail };
+    const error = outcome.success ? outcome.data.error : undefined;
+    const detail =
+      error === 'invalid-arguments' && !(await resubmitted(tx, row.id))
+        ? 'No review prepared: the request wasn’t valid.'
+        : error && proposalOutcomes.get(error);
+    if (detail) return { status: 'completed', detail };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
     if (activity) return { ...activity, proposal: true };

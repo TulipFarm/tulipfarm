@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
+import { deniedProposalDetail } from '../src/tool-activity-history.ts';
 import { apiCallProblem, apiCallReceipt, toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
@@ -101,4 +102,18 @@ test('API call receipts keep only the HTTP status or error code, and every failu
   assert.equal(apiCallProblem('secret-reflected'), 'The response repeated the secret, so it was hidden.');
   assert.equal(apiCallProblem(undefined), 'The API call failed.');
   assert.equal(apiCallProblem('toString'), 'The API call failed.');
+});
+
+test('a denied table proposal names the permissions for the kind of change it asked for', () => {
+  const denied = plans => deniedProposalDetail({ tool: 'tables.propose', input: JSON.stringify({ plans }) });
+  assert.match(String(denied([{ kind: 'schema', expectedRevision: null }])), /needs Create tables for its owning team/);
+  for (const plans of [[{ kind: 'schema', expectedRevision: 'r1' }], [{ kind: 'archive' }, { kind: 'restore' }]])
+    assert.match(String(denied(plans)), /needs Read rows and Manage schema on the table/);
+  for (const plans of [[{ kind: 'records' }], [{ kind: 'import' }, { kind: 'records' }]])
+    assert.match(String(denied(plans)), /needs Read rows plus Create rows, Update rows or Delete rows/);
+  // Mixed or unreadable requests fall back to the general text the web app shows.
+  assert.equal(denied([{ kind: 'schema', expectedRevision: null }, { kind: 'records' }]), undefined);
+  assert.equal(denied([]), undefined);
+  assert.equal(deniedProposalDetail({ tool: 'tables.propose', input: 'not json' }), undefined);
+  assert.equal(deniedProposalDetail(undefined), undefined);
 });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { AccessDenied } from '@tulipfarm/access';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
 
@@ -114,6 +115,64 @@ test('tools that succeeded in a follow-up turn keep their outcome in history', a
     assert.equal(own[1].web.query, 'competitor pricing');
     assert.equal(own[2].web.status, 'success');
     assert.deepEqual(own[2].web.urls, ['https://example.com/report']);
+  } finally {
+    await f.close();
+  }
+});
+
+test('expected table proposal answers show their reason, and only real errors show as failed', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Archive the table, then add another one' }],
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      const propose = (run, input = '{}') =>
+        executeTool('tables.propose', false, run, [], { tool: 'tables.propose', input }).catch(() => undefined);
+      const answer = result => propose(async () => ({ result: { ...result, instruction: 'x' }, sources: [] }));
+      await answer({ error: 'workflow-active', workflows: [{ id: randomUUID(), name: 'Daily sync' }] });
+      await answer({ error: 'table-linked' });
+      await answer({ error: 'invalid-transform' });
+      await answer({ error: 'import-not-prepared' });
+      await propose(async () => {
+        throw new Error('storage unavailable');
+      });
+      await answer({ error: 'invalid-arguments' });
+      await propose(
+        async () => {
+          throw new AccessDenied();
+        },
+        JSON.stringify({ plans: [{ kind: 'schema', expectedRevision: null }] }),
+      );
+      await answer({ error: 'invalid-arguments' });
+      return 'The workflow Daily sync uses this table.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    const tools = (await f.store.history(w.id, w.userId, chatId)).messages[0].tools;
+    assert.deepEqual(
+      tools.map(tool => [tool.activityStatus, tool.activityDetail ?? null]),
+      [
+        ['completed', 'Not archived: an active workflow uses this table.'],
+        ['completed', 'Not archived: another table links to this table.'],
+        ['completed', 'No review prepared: some row values don’t fit the changed fields.'],
+        ['completed', 'No review prepared: the file wasn’t read first.'],
+        ['failed', null],
+        ['completed', 'Corrected and resubmitted.'],
+        [
+          'blocked',
+          'Access denied. Adding this table needs Create tables for its owning team. Ask a workspace admin to grant it to you or your team in Table access, then ask again.',
+        ],
+        ['completed', 'No review prepared: the request wasn’t valid.'],
+      ],
+    );
   } finally {
     await f.close();
   }
