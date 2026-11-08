@@ -16,6 +16,13 @@ does not append duplicate receipts. Resume rechecks current eligibility and does
 not replay completed import batches. Status and permitted review content remain
 readable so the owner can inspect or cancel the proposal.
 
+A resume is consumed even when it ends blocked: a fault that persists saves a
+new failed receipt, and resume cleanup that times out eight times saves an
+`execution-timeout` receipt. The proposal then waits for the next resume.
+Execution returns `wait` when other work holds it back, such as another
+proposal's live execution on the same table or a lock held past the lock
+timeout; the workflow then retries after 250 ms, doubling up to one minute.
+
 See [member proposal integration](test/integration/member-proposals.test.mjs).
 These disposable PostgreSQL cases are not production delivery evidence.
 

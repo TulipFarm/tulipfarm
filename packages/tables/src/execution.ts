@@ -206,6 +206,26 @@ async function selected(tx: TableTransaction, manifest: ProposalManifest) {
   return null;
 }
 
+/**
+ * The latest control when it is a resume that this blocked execution has not consumed yet. The dispatch
+ * sweep restarts a proposal for as long as such a resume exists, so every attempt that ends blocked must
+ * consume it.
+ */
+async function pendingResume(tx: TableTransaction, proposalId: string, resumedSequence: number) {
+  const control = z
+    .object({ sequence: z.int(), operation: z.string() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT sequence,operation FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$1 ORDER BY sequence DESC LIMIT 1`,
+          [proposalId],
+        )
+      ).rows[0],
+    );
+  return control?.operation === 'resume' && control.sequence > resumedSequence ? control : undefined;
+}
+
 async function execution(tx: TableTransaction, manifest: ProposalManifest, plan: ReviewedPlan) {
   await tx.client.query(
     `INSERT INTO ${table(tx, 'tf_table_executions')}(proposal_id,table_id,id,publication_id) VALUES($1,$2,$3,$4) ON CONFLICT(proposal_id,table_id) DO NOTHING`,
@@ -511,7 +531,10 @@ export function createTableExecution(
     .min(0)
     .max(100)
     .parse(options.cutoverRows ?? 16);
-  return async (workspaceId: string, proposalId: string): Promise<'more' | 'publish' | 'completed' | 'blocked'> => {
+  const attempt = async (
+    workspaceId: string,
+    proposalId: string,
+  ): Promise<'more' | 'wait' | 'publish' | 'completed' | 'blocked'> => {
     let recovery: { xid: string; job: Execution } | undefined;
     try {
       return await withMaintenanceTransaction({
@@ -561,19 +584,8 @@ export function createTableExecution(
           const job = await execution(tx, manifest, plan);
           const limit = Math.min(batchRows, job.batch_limit);
           if (job.phase === 'blocked') {
-            const control = z
-              .object({ sequence: z.int(), operation: z.string() })
-              .optional()
-              .parse(
-                (
-                  await tx.client.query(
-                    `SELECT sequence,operation FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$1 ORDER BY sequence DESC LIMIT 1`,
-                    [proposalId],
-                  )
-                ).rows[0],
-              );
-            if (!control || control.operation !== 'resume' || control.sequence <= job.resumed_sequence)
-              return 'blocked';
+            const control = await pendingResume(tx, proposalId, job.resumed_sequence);
+            if (!control) return 'blocked';
             if (job.target_generation) {
               const target = store.generationSchema.parse(
                 (
@@ -592,7 +604,7 @@ export function createTableExecution(
               ]) {
                 const deleted = await tx.client.query(
                   `DELETE FROM ${table(tx, name)} WHERE ctid IN (SELECT ctid FROM ${table(tx, name)} WHERE generation_id=$1 LIMIT $2)`,
-                  [target.id, batchRows],
+                  [target.id, limit],
                 );
                 if (deleted.rowCount) return 'more';
               }
@@ -601,7 +613,7 @@ export function createTableExecution(
               (
                 await tx.client.query(
                   `DELETE FROM ${table(tx, 'tf_table_execution_checks')} WHERE ctid IN (SELECT ctid FROM ${table(tx, 'tf_table_execution_checks')} WHERE execution_id=$1 LIMIT $2)`,
-                  [job.id, batchRows],
+                  [job.id, limit],
                 )
               ).rowCount
             )
@@ -610,7 +622,7 @@ export function createTableExecution(
               (
                 await tx.client.query(
                   `DELETE FROM ${table(tx, 'tf_table_execution_files')} WHERE ctid IN (SELECT ctid FROM ${table(tx, 'tf_table_execution_files')} WHERE execution_id=$1 LIMIT $2)`,
-                  [job.id, batchRows],
+                  [job.id, limit],
                 )
               ).rowCount
             )
@@ -1009,11 +1021,15 @@ export function createTableExecution(
             // A new integration holds the same execution fence. An aborted xid proves
             // all record writes rolled back; the checkpoint proves no successor ran.
             if (status !== 'aborted' || canonicalJson(current) !== canonicalJson(failed.job)) throw error;
-            if (current.phase === 'blocked') return 'blocked';
+            // A blocked execution only does work while clearing state for a resume. Its timeouts count
+            // like any other phase, so a resume that keeps timing out is consumed instead of re-dispatched.
+            // Blocking resets the count so that each resume gets the full timeout budget.
+            if (current.phase === 'blocked' && !(await pendingResume(tx, proposalId, current.resumed_sequence)))
+              return 'blocked';
             const failures = current.timeout_failures + 1;
             const blocked = failures >= 8;
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_table_executions')} SET batch_limit=$2,timeout_failures=$3,phase=CASE WHEN $4 THEN 'blocked' ELSE phase END,error_code=CASE WHEN $4 THEN 'execution-timeout' ELSE error_code END,resumed_sequence=CASE WHEN $4 THEN COALESCE((SELECT max(sequence) FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$5),-1) ELSE resumed_sequence END WHERE id=$1`,
+              `UPDATE ${table(tx, 'tf_table_executions')} SET batch_limit=$2,timeout_failures=CASE WHEN $4 THEN 0 ELSE $3 END,phase=CASE WHEN $4 THEN 'blocked' ELSE phase END,error_code=CASE WHEN $4 THEN 'execution-timeout' ELSE error_code END,resumed_sequence=CASE WHEN $4 THEN COALESCE((SELECT max(sequence) FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$5),-1) ELSE resumed_sequence END WHERE id=$1`,
               [
                 current.id,
                 Math.max(1, Math.floor(Math.min(batchRows, current.batch_limit) / 2)),
@@ -1043,8 +1059,8 @@ export function createTableExecution(
         'constraint' in error &&
         error.constraint === 'tf_table_execution_live'
       )
-        return 'more';
-      if (error instanceof store.GenerationError && error.code === 'stale-record') return 'more';
+        return 'wait';
+      if (error instanceof store.GenerationError && error.code === 'stale-record') return 'wait';
       const constraintFailure =
         typeof error === 'object' &&
         error !== null &&
@@ -1087,7 +1103,11 @@ export function createTableExecution(
                 [proposalId, plan.input.tableId],
               )
             ).rows[0];
-            if (existing?.phase === 'blocked') return;
+            if (
+              existing?.phase === 'blocked' &&
+              !(await pendingResume(tx, proposalId, executionSchema.parse(existing).resumed_sequence))
+            )
+              return;
             if (!existing)
               existing = (
                 await tx.client.query(
@@ -1107,7 +1127,7 @@ export function createTableExecution(
                     ? 'storage-fault'
                     : 'invalid-transform';
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_table_executions')} SET phase='blocked',error_code=$2,resumed_sequence=COALESCE((SELECT max(sequence) FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$3),-1) WHERE id=$1`,
+              `UPDATE ${table(tx, 'tf_table_executions')} SET phase='blocked',error_code=$2,timeout_failures=0,resumed_sequence=COALESCE((SELECT max(sequence) FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$3),-1) WHERE id=$1`,
               [job.id, code, proposalId],
             );
             await tx.client.query(
@@ -1118,6 +1138,17 @@ export function createTableExecution(
         });
         return 'blocked';
       }
+      throw error;
+    }
+  };
+  // 'wait' means this attempt made no progress because of other work, such as another proposal's live
+  // execution on the same table or a lock held past lock_timeout; callers must back off rather than retry
+  // at once. Every attempt holds the workspace authorization lock, so quick retries delay people's requests.
+  return async (workspaceId: string, proposalId: string) => {
+    try {
+      return await attempt(workspaceId, proposalId);
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === '55P03') return 'wait';
       throw error;
     }
   };

@@ -1,10 +1,16 @@
 import { continueAsNew, proxyActivities, sleep } from '@temporalio/workflow';
 import type { createTableExecution, createTablePublication } from '@tulipfarm/tables/execution';
 
+/** Delay after `waits` consecutive attempts that made no progress: 250 ms, doubling to 1 minute. */
+function tableProposalWaitMs(waits: number) {
+  return Math.min(250 * 2 ** Math.max(0, waits - 1), 60_000);
+}
+
 export async function executeTableProposal(
   workspaceId: string,
   proposalId: string,
   storageQueue: string,
+  waits = 0,
 ): Promise<void> {
   const { publishTableProposal } = proxyActivities<{ publishTableProposal: ReturnType<typeof createTablePublication> }>(
     {
@@ -21,7 +27,8 @@ export async function executeTableProposal(
     const status = await advanceTableProposal(workspaceId, proposalId);
     if (status === 'completed' || status === 'blocked') return;
     if (status === 'publish') await publishTableProposal(workspaceId, proposalId);
-    await sleep('100 milliseconds');
+    waits = status === 'wait' ? waits + 1 : 0;
+    await sleep(waits ? tableProposalWaitMs(waits) : 100);
   }
-  await continueAsNew<typeof executeTableProposal>(workspaceId, proposalId, storageQueue);
+  await continueAsNew<typeof executeTableProposal>(workspaceId, proposalId, storageQueue, waits);
 }
